@@ -70,7 +70,7 @@ index f6eed34b2fd72ab74cc9dc4b99ca184d512c0a66..9cec107eae394eef14fab1177bdccb14
                          throw new SignedMessageChain.DecodeException(SignedMessageChain.DecodeException.OUT_OF_ORDER_CHAT, org.bukkit.event.player.PlayerKickEvent.Cause.OUT_OF_ORDER_CHAT); // Paper - kick event causes
                      } else {
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index f63a5567a2e845de904c2dacfbb875049e3e0c65..f59d0a7f75ac159de4e224b4cd0199d24a27fe34 100644
+index d8a49508e43e6ce9d80afb8765a9258d67f080f4..3e80be129bc628b9ddf90631c95d769f109e114f 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -481,6 +481,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -266,7 +266,7 @@ index 488fc6088d69148f60a913b42ffb964c48eb0324..efe96d04bb5886dc0966c00ef029052e
              }
          }
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index c0ed4e023b35a076b554fa387e9a2324166b2fae..562e978fb188a4ddc36084d8e160427f74e8bf4e 100644
+index 38b8d01a5e1198f9fcf454e0114e1e5b159fa265..5b0ab83e8393f833da9ccb9cfd69c14aba97a96f 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
 @@ -820,6 +820,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
@@ -377,7 +377,7 @@ index b4a996ac6c570e988b38237a32f90ec5042cbc17..261d493a401b0b31e1baa8815e4ad0ed
      }
  
 diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-index ef7d44ea1c1582bbf1d544819825778c414fe40d..332fd4ad3ab52e10bcea08c6ac5eeb6629a87cf5 100644
+index b7ae2341d01c368a679696a909e765378e3e2f06..d5de159557816717d06adefee2a50ce80f683957 100644
 --- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 @@ -365,6 +365,7 @@ public class ServerGamePacketListenerImpl
@@ -548,7 +548,7 @@ index 8e6f097b4d17aaaf8eccc16e11ce2bd01ad63322..9e4b92e8c06b36d8bfc384724d7dfc06
  
      boolean isEmpty();
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 4444ac8967d60e518b30214aac4adc781259a565..65635c24785162a14a220e0897aa222557e85989 100644
+index bb19a678c5c27b2dee85fc175416c3c489660832..e82aab777ed427af4b4e17dda3eb736605d28a2b 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -255,7 +255,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
@@ -570,7 +570,7 @@ index 4444ac8967d60e518b30214aac4adc781259a565..65635c24785162a14a220e0897aa2225
      public Entity(EntityType<?> type, Level level) {
          this.type = type;
          this.level = level;
-@@ -4717,7 +4720,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4719,7 +4722,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
  
      // Paper start - optimise collisions
      public boolean updateFluidHeightAndDoFluidPushing(final TagKey<Fluid> fluid, final double flowScale) {
@@ -579,7 +579,7 @@ index 4444ac8967d60e518b30214aac4adc781259a565..65635c24785162a14a220e0897aa2225
              return false;
          }
  
-@@ -4761,7 +4764,13 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4763,7 +4766,13 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          // init chunks
          for (int currChunkZ = minChunkZ; currChunkZ <= maxChunkZ; ++currChunkZ) {
              for (int currChunkX = minChunkX; currChunkX <= maxChunkX; ++currChunkX) {
@@ -1182,7 +1182,7 @@ index 05ec512839898f96d9769bb0d00f6ba11dda0c4b..f37ac37344d2b30662306aff59c610d1
                              dragonFight.tryRespawn(aboveBlockPos); // Paper - Perf: Do crystal-portal proximity check before entity lookup
                          }
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index d225267b1b07854b76c88ce461d7817a86d023a0..213a36af6fd1218b67b7b25b5f7bb646e4f44891 100644
+index 67a8adcd0537b9b00d16fbfc209c88f0d6071620..5f5c24630a1406bddd80d7970c64de8a093a8752 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
 @@ -1432,12 +1432,12 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
