@@ -5,10 +5,10 @@ Subject: [PATCH] Setup paperweight fork changes
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 944a8e37dc098dae735bdf4d041021878e52ea26..965c3f1970862c9d434488c108cb7e49868187fe 100644
+index 5be93c40d4803476fb8b484180212ebe7c4eb289..b98a9404d42d3865780c14209322e0ab3edf0d9a 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
-@@ -23,6 +23,25 @@ paperweight {
+@@ -22,6 +22,25 @@ paperweight {
      minecraftVersion = providers.gradleProperty("mcVersion")
      gitFilePatches = false
  
@@ -33,7 +33,7 @@ index 944a8e37dc098dae735bdf4d041021878e52ea26..965c3f1970862c9d434488c108cb7e49
 +
      spigot {
          enabled = true
-         buildDataRef = "42d18d4c4653ffc549778dbe223f6994a031d69e"
+         buildDataRef = "17f77cee7117ab9d6175f088ae8962bfd04e61a9"
 @@ -109,12 +128,30 @@ sourceSets {
      main {
          java {
@@ -72,10 +72,10 @@ index 944a8e37dc098dae735bdf4d041021878e52ea26..965c3f1970862c9d434488c108cb7e49
  dependencies {
 -    implementation(project(":paper-api"))
 +    implementation(projects.cloudplaneApi) // CloudPlane - update to own api
-     implementation("ca.spottedleaf:concurrentutil:0.0.7")
+     implementation("ca.spottedleaf:concurrentutil:0.0.8")
      implementation("org.jline:jline-terminal-ffm:3.27.1") // use ffm on java 22+
      implementation("org.jline:jline-terminal-jni:3.27.1") // fall back to jni on java 21
-@@ -282,7 +319,7 @@ tasks.test {
+@@ -283,7 +320,7 @@ tasks.test {
      jvmArgumentProviders.add(provider)
  }
  
@@ -84,7 +84,7 @@ index 944a8e37dc098dae735bdf4d041021878e52ea26..965c3f1970862c9d434488c108cb7e49
  idea {
      module {
          generatedSourceDirs.add(generatedDir.toFile())
-@@ -390,3 +427,12 @@ fill {
+@@ -391,3 +428,12 @@ fill {
          }
      }
  }

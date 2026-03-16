@@ -5,7 +5,7 @@ Subject: [PATCH] Changed branding
 
 
 diff --git a/src/main/java/com/destroystokyo/paper/Metrics.java b/src/main/java/com/destroystokyo/paper/Metrics.java
-index 6abc57669e87f7f98f3b76af3c0e50825fea6eb1..c58db15bb8304677a6a24b1c94155e393ddd42f3 100644
+index 9f4d73fd321f6f0cd19fdd1b63068d2ea6c0816b..96917a0a72ec3d17c930e8023ee0d62b4bcf661a 100644
 --- a/src/main/java/com/destroystokyo/paper/Metrics.java
 +++ b/src/main/java/com/destroystokyo/paper/Metrics.java
 @@ -593,7 +593,7 @@ public class Metrics {
@@ -32,27 +32,32 @@ index 6abc57669e87f7f98f3b76af3c0e50825fea6eb1..c58db15bb8304677a6a24b1c94155e39
                  metrics.addCustomChart(new Metrics.DrilldownPie("java_version", () -> {
                      Map<String, Map<String, Integer>> map = new HashMap<>();
 diff --git a/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java b/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
-index d0554ed6631535815e5932930911e3fe1dee8710..5d0c2d2dcbf959f12d143e1786364b24fa4343c0 100644
+index 602d3ce2cd16405f35453ce12a207b70312a4a8a..efd31090fec2e594d61d9618cf61357ec977baa2 100644
 --- a/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
 +++ b/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
-@@ -35,7 +35,7 @@ public class PaperVersionFetcher implements VersionFetcher {
-     private static final Logger LOGGER = LogUtils.getClassLogger();
+@@ -40,10 +40,10 @@ public class PaperVersionFetcher implements VersionFetcher {
+     private static final ComponentLogger COMPONENT_LOGGER = ComponentLogger.logger(LogManager.getRootLogger().getName());
      private static final int DISTANCE_ERROR = -1;
      private static final int DISTANCE_UNKNOWN = -2;
 -    private static final String DOWNLOAD_PAGE = "https://papermc.io/downloads/paper";
+-    private static final String REPOSITORY = "PaperMC/Paper";
 +    private static final String DOWNLOAD_PAGE = "https://dl.cloudcraftmc.de/cloudplane"; // CloudPlane - branding
++    private static final String REPOSITORY = "CloudCraftProjects/CloudPlane"; // CloudPlane - branding
+     private static final ServerBuildInfo BUILD_INFO = ServerBuildInfo.buildInfo();
+-    private static final String USER_AGENT = BUILD_INFO.brandName() + "/" + BUILD_INFO.asString(VERSION_SIMPLE) + " (https://papermc.io)";
++    private static final String USER_AGENT = BUILD_INFO.brandName() + "/" + BUILD_INFO.asString(VERSION_SIMPLE) + " (https://cloudcraftmc.de/)"; // CloudPlane - branding
+     private static final Gson GSON = new Gson();
  
      @Override
-     public long getCacheTime() {
-@@ -49,7 +49,7 @@ public class PaperVersionFetcher implements VersionFetcher {
-         if (build.buildNumber().isEmpty() && build.gitCommit().isEmpty()) {
-             updateMessage = text("You are running a development version without access to version information", color(0xFF5300));
+@@ -72,7 +72,7 @@ public class PaperVersionFetcher implements VersionFetcher {
+             COMPONENT_LOGGER.warn(text("*** You are running a development version without access to version information ***"));
          } else {
--            updateMessage = getUpdateStatusMessage("PaperMC/Paper", build);
-+            updateMessage = getUpdateStatusMessage("CloudCraftProjects/CloudPlane", build); // CloudPlane - branding
-         }
-         final @Nullable Component history = this.getHistory();
- 
+             final Optional<MinecraftVersionFetcher> apiResult = fetchMinecraftVersionList();
+-            if (buildNumber.isPresent()) {
++            if (false && buildNumber.isPresent()) { // CloudPlane - use github for version fetching
+                 distance = fetchDistanceFromSiteApi(buildNumber.getAsInt());
+             } else {
+                 final Optional<String> gitBranch = BUILD_INFO.gitBranch();
 diff --git a/src/main/java/com/destroystokyo/paper/console/PaperConsole.java b/src/main/java/com/destroystokyo/paper/console/PaperConsole.java
 index 6ee39b534b8d992655bc0cef3c299d12cbae0034..291d45623d7e55f12dddb17e2c665562d0eb0567 100644
 --- a/src/main/java/com/destroystokyo/paper/console/PaperConsole.java
@@ -98,29 +103,3 @@ index 74ffdc823e66fc5ec027c4b7c462382bcbfe2be2..347f20a5107eb3644b4e42adfccbd7cc
          return brandId.equals(this.brandId);
      }
  
-diff --git a/src/main/java/org/bukkit/craftbukkit/Main.java b/src/main/java/org/bukkit/craftbukkit/Main.java
-index 7675acdca2162e403f4ff523bcdd6efe0cb42d49..4b97c4b1e378e1ccef1fa0dfb77fb1ac1ddec68c 100644
---- a/src/main/java/org/bukkit/craftbukkit/Main.java
-+++ b/src/main/java/org/bukkit/craftbukkit/Main.java
-@@ -231,7 +231,7 @@ public class Main {
-                     if (buildDate.before(deadline.getTime())) {
-                         // Paper start - This is some stupid bullshit
-                         System.err.println("*** Warning, you've not updated in a while! ***");
--                        System.err.println("*** Please download a new build from https://papermc.io/downloads/paper ***");
-+                        System.err.println("*** Please download a new build from https://dl.cloudcraftmc.de/cloudplane ***"); // CloudPlane - branding
-                         // Paper end
-                     }
-                 }
-diff --git a/src/main/java/org/bukkit/craftbukkit/util/Versioning.java b/src/main/java/org/bukkit/craftbukkit/util/Versioning.java
-index 774556a62eb240da42e84db4502e2ed43495be17..a2d3961b0027327327c248a2c11f5e285030964c 100644
---- a/src/main/java/org/bukkit/craftbukkit/util/Versioning.java
-+++ b/src/main/java/org/bukkit/craftbukkit/util/Versioning.java
-@@ -11,7 +11,7 @@ public final class Versioning {
-     public static String getBukkitVersion() {
-         String result = "Unknown-Version";
- 
--        InputStream stream = Bukkit.class.getClassLoader().getResourceAsStream("META-INF/maven/io.papermc.paper/paper-api/pom.properties");
-+        InputStream stream = Bukkit.class.getClassLoader().getResourceAsStream("META-INF/maven/dev.booky.cloudplane/cloudplane-api/pom.properties"); // CloudPlane - branding
-         Properties properties = new Properties();
- 
-         if (stream != null) {
