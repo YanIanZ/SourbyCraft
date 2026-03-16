@@ -5,10 +5,10 @@ Subject: [PATCH] Pufferfish API Buildscript Patches
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 1606e63a1492a93e29bc9c540b5557db2d5da2aa..7891077ce12718a5585201b9a2a3475bae4b329b 100644
+index 49b24787796658987f2b04c433d0316e7a23bb67..b7b9a2d4667d62fc186c4efb3041f1f9c496f305 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
-@@ -87,6 +87,8 @@ dependencies {
+@@ -89,6 +89,8 @@ dependencies {
      testImplementation("org.ow2.asm:asm-tree:9.8")
      mockitoAgent("org.mockito:mockito-core:5.14.1") { isTransitive = false } // configure mockito agent that is needed in newer java versions
      testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -17,7 +17,7 @@ index 1606e63a1492a93e29bc9c540b5557db2d5da2aa..7891077ce12718a5585201b9a2a3475b
  }
  
  val generatedDir: java.nio.file.Path = layout.projectDirectory.dir("src/generated/java").asFile.toPath()
-@@ -99,6 +101,7 @@ sourceSets {
+@@ -101,6 +103,7 @@ sourceSets {
      main {
          java {
              srcDir(generatedDir)
@@ -25,8 +25,8 @@ index 1606e63a1492a93e29bc9c540b5557db2d5da2aa..7891077ce12718a5585201b9a2a3475b
          }
      }
  }
-@@ -146,6 +149,12 @@ val generateApiVersioningFile by tasks.registering {
-     }
+@@ -166,6 +169,12 @@ val generateApiVersioningFile = tasks.register<GenerateApiVersioningFile>("gener
+     apiVersion.set(rootProject.providers.gradleProperty("apiVersion"))
  }
  
 +// Pufferfish start
@@ -36,9 +36,9 @@ index 1606e63a1492a93e29bc9c540b5557db2d5da2aa..7891077ce12718a5585201b9a2a3475b
 +// Pufferfish end
 +
  tasks.jar {
-     from(generateApiVersioningFile.map { it.outputs.files.singleFile }) {
-         into("META-INF/maven/${project.group}/${project.name}")
-@@ -165,6 +174,7 @@ val services = objects.newInstance<Services>()
+     from(generateApiVersioningFile.flatMap { it.outputFile })
+     manifest {
+@@ -183,6 +192,7 @@ val services = objects.newInstance<Services>()
  
  tasks.withType<Javadoc>().configureEach {
      val options = options as StandardJavadocDocletOptions

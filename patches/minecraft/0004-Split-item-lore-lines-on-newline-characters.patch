@@ -7,11 +7,11 @@ The client doesn't respect newlines, so
 this has to be done at the network level
 
 diff --git a/net/minecraft/core/component/DataComponents.java b/net/minecraft/core/component/DataComponents.java
-index 4be9e73b1939e4470b2e27665ebe984cf71420af..bb224d1c127f1914bd9b19f2ed9e8243e60a651f 100644
+index 5bad20ea7b07e4d0d21140466a7f563e7bdc20da..50f6800bb72ac4751dab20cb5b14c87c0343d784 100644
 --- a/net/minecraft/core/component/DataComponents.java
 +++ b/net/minecraft/core/component/DataComponents.java
-@@ -117,7 +117,7 @@ public class DataComponents {
-         "item_model", builder -> builder.persistent(ResourceLocation.CODEC).networkSynchronized(ResourceLocation.STREAM_CODEC).cacheEncoding()
+@@ -135,7 +135,7 @@ public class DataComponents {
+         "item_model", builder -> builder.persistent(Identifier.CODEC).networkSynchronized(Identifier.STREAM_CODEC).cacheEncoding()
      );
      public static final DataComponentType<ItemLore> LORE = register(
 -        "lore", builder -> builder.persistent(ItemLore.CODEC).networkSynchronized(ItemLore.STREAM_CODEC).cacheEncoding()
@@ -20,7 +20,7 @@ index 4be9e73b1939e4470b2e27665ebe984cf71420af..bb224d1c127f1914bd9b19f2ed9e8243
      public static final DataComponentType<Rarity> RARITY = register(
          "rarity", builder -> builder.persistent(Rarity.CODEC).networkSynchronized(Rarity.STREAM_CODEC)
 diff --git a/net/minecraft/world/item/component/ItemLore.java b/net/minecraft/world/item/component/ItemLore.java
-index 750f2f5171a8f744bafdd86da2511a3333624df0..a26a2902b900b58e2ec861dfec9745a1dbc7a6be 100644
+index 3419ed5c4e99d57bec68a54b82a942827be67f96..a279e04868ed6df1aeda07e5fef8460458ec24af 100644
 --- a/net/minecraft/world/item/component/ItemLore.java
 +++ b/net/minecraft/world/item/component/ItemLore.java
 @@ -26,6 +26,25 @@ public record ItemLore(List<Component> lines, List<Component> styledLines) imple
@@ -47,5 +47,5 @@ index 750f2f5171a8f744bafdd86da2511a3333624df0..a26a2902b900b58e2ec861dfec9745a1
 +    // CloudPlane end - split lore lines
 +
      public ItemLore(List<Component> lines) {
-         this(lines, Lists.transform(lines, component -> ComponentUtils.mergeStyles(component.copy(), LORE_STYLE)));
+         this(lines, Lists.transform(lines, component -> ComponentUtils.mergeStyles(component, LORE_STYLE)));
      }

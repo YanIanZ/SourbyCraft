@@ -5,10 +5,10 @@ Subject: [PATCH] Add start argument for changing pufferfish config location
 
 
 diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
-index f710a6ade234949f30df83cd76510ecf22a0d06b..e8fe258ead8c8ed0c592f9461c0993c168237aed 100644
+index 8dc9cf41daa38f8647fce9ba2d70a445c08945b8..1c93e5091c17442c59870c2b90dfd84e233bf86f 100644
 --- a/net/minecraft/server/dedicated/DedicatedServer.java
 +++ b/net/minecraft/server/dedicated/DedicatedServer.java
-@@ -277,7 +277,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+@@ -274,7 +274,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
          this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
          com.destroystokyo.paper.Metrics.PaperMetrics.startMetrics(); // Paper - start metrics
          com.destroystokyo.paper.VersionHistoryManager.INSTANCE.getClass(); // Paper - load version history now

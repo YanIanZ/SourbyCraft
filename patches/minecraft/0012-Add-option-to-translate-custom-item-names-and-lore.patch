@@ -5,10 +5,10 @@ Subject: [PATCH] Add option to translate custom item names and lore
 
 
 diff --git a/net/minecraft/world/item/ItemStack.java b/net/minecraft/world/item/ItemStack.java
-index 46c975cb8cd64a22d80aafef738c9e96bf0d9546..339846aa525313ed999746f9d5256c90f6d57738 100644
+index fb2cd5fe354ad8f024e3f0d7a1f28eda4b2331f6..7dd40c809843bf34df6f4fb8b1bfdd06825a2856 100644
 --- a/net/minecraft/world/item/ItemStack.java
 +++ b/net/minecraft/world/item/ItemStack.java
-@@ -191,7 +191,13 @@ public final class ItemStack implements DataComponentHolder {
+@@ -196,7 +196,13 @@ public final class ItemStack implements DataComponentHolder {
                  } else {
                      Holder<Item> holder = Item.STREAM_CODEC.decode(buffer);
                      DataComponentPatch dataComponentPatch = codec.decode(buffer);
@@ -23,7 +23,7 @@ index 46c975cb8cd64a22d80aafef738c9e96bf0d9546..339846aa525313ed999746f9d5256c90
                  }
              }
  
-@@ -202,15 +208,23 @@ public final class ItemStack implements DataComponentHolder {
+@@ -207,15 +213,23 @@ public final class ItemStack implements DataComponentHolder {
                  } else {
                      buffer.writeVarInt(io.papermc.paper.util.sanitizer.ItemComponentSanitizer.sanitizeCount(io.papermc.paper.util.sanitizer.ItemObfuscationSession.currentSession(), value, value.getCount())); // Paper - potentially sanitize count
                      Item.STREAM_CODEC.encode(buffer, value.getItemHolder());
@@ -50,7 +50,7 @@ index 46c975cb8cd64a22d80aafef738c9e96bf0d9546..339846aa525313ed999746f9d5256c90
              }
          };
 diff --git a/net/minecraft/world/item/component/ItemLore.java b/net/minecraft/world/item/component/ItemLore.java
-index a26a2902b900b58e2ec861dfec9745a1dbc7a6be..23bcc7f96bc7a7f41eee5abd99678d8522d13484 100644
+index a279e04868ed6df1aeda07e5fef8460458ec24af..bf954b0372737cf51ed72220ad1e727a08e04fe1 100644
 --- a/net/minecraft/world/item/component/ItemLore.java
 +++ b/net/minecraft/world/item/component/ItemLore.java
 @@ -42,6 +42,36 @@ public record ItemLore(List<Component> lines, List<Component> styledLines) imple

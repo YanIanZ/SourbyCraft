@@ -5,7 +5,7 @@ Subject: [PATCH] Pufferfish Server Buildscript Patches
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 6449d21421346fc077dc10cbbf246fbc926825df..64ecba84aef540c9d9b1f3ed9aa5106520dfc3c8 100644
+index 4b842350add16e42980444a5d436b8892273a981..5be93c40d4803476fb8b484180212ebe7c4eb289 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
 @@ -104,6 +104,16 @@ if (project.providers.gradleProperty("publishDevBundle").isPresent) {
@@ -32,9 +32,9 @@ index 6449d21421346fc077dc10cbbf246fbc926825df..64ecba84aef540c9d9b1f3ed9aa51065
 +    implementation("com.github.technove:Flare:34637f3f87") // Pufferfish - flare
 +
      testImplementation("io.github.classgraph:classgraph:4.8.179") // For mob goal test
+     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
      testImplementation("org.junit.jupiter:junit-jupiter:5.12.2")
-     testImplementation("org.junit.platform:junit-platform-suite-engine:1.12.2")
-@@ -185,6 +197,13 @@ dependencies {
+@@ -186,6 +198,13 @@ dependencies {
      implementation("me.lucko:spark-paper:1.10.152")
  }
  

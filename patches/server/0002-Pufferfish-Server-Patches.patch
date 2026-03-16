@@ -73,7 +73,7 @@ index bb5b9c9cb0c73edce1dbe3758ee2db0fcc8f4e40..e3f45dee9e2f3eca0d7b5d5a0a30a455
  
      public static long getChunkKey(final SectionPos pos) {
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index 34d74014fd042f6eeafafadb6237a838b1ddd47c..14be6fa9cf2116ef3d86b72f161df44eaac8074c 100644
+index da49c8005592a154946750591ce082796f24dd3b..5c11bb0a019bb329f360b844c91058e4b4c28b4e 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 @@ -1085,7 +1085,7 @@ public final class CraftServer implements Server {
@@ -86,10 +86,10 @@ index 34d74014fd042f6eeafafadb6237a838b1ddd47c..14be6fa9cf2116ef3d86b72f161df44e
      }
      // Paper end - Wait for Async Tasks during shutdown
 diff --git a/src/main/java/org/bukkit/craftbukkit/util/ServerShutdownThread.java b/src/main/java/org/bukkit/craftbukkit/util/ServerShutdownThread.java
-index 54f0703f00caed6b8f10f55fe746e5a41242b48b..dda8051c987a8db237f6312c4ebcf41e028d466f 100644
+index 6050180e65d2a664e96318029cf5031d1bc1f504..e4c075d273ad637669d7a5b61c67dbc5354798fd 100644
 --- a/src/main/java/org/bukkit/craftbukkit/util/ServerShutdownThread.java
 +++ b/src/main/java/org/bukkit/craftbukkit/util/ServerShutdownThread.java
-@@ -11,6 +11,7 @@ public class ServerShutdownThread extends Thread {
+@@ -12,6 +12,7 @@ public class ServerShutdownThread extends Thread {
  
      @Override
      public void run() {

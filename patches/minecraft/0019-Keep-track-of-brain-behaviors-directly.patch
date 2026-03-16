@@ -6,17 +6,17 @@ Subject: [PATCH] Keep track of brain behaviors directly
 Replaces the cost of iterating over nested hash sets by iterating over linear lists which need to be sorted upon update
 
 diff --git a/net/minecraft/world/entity/ai/Brain.java b/net/minecraft/world/entity/ai/Brain.java
-index ebdd6f4f493ca52104a0c7094d1c474a951bde81..569c828e501ca930506591619a244d5ac428de9a 100644
+index a8b076d95ca7bbdbdb6f32bd464cf77d9894dcba..37683859f6f97ef0d6d361645ece339230916d45 100644
 --- a/net/minecraft/world/entity/ai/Brain.java
 +++ b/net/minecraft/world/entity/ai/Brain.java
-@@ -47,14 +47,22 @@ public class Brain<E extends LivingEntity> {
+@@ -49,14 +49,22 @@ public class Brain<E extends LivingEntity> {
      private static final int SCHEDULE_UPDATE_DELAY = 20;
      private final Map<MemoryModuleType<?>, Optional<? extends ExpirableValue<?>>> memories = Maps.newHashMap();
      private final Map<SensorType<? extends Sensor<? super E>>, Sensor<? super E>> sensors = Maps.newLinkedHashMap();
 -    private final Map<Integer, Map<Activity, Set<BehaviorControl<? super E>>>> availableBehaviorsByPriority = Maps.newTreeMap();
 +    private final Map<Activity, List<BehaviorControl<? super E>>> activityBehaviorMap = Maps.newHashMap(); // CloudPlane - keep track of behaviors directly
 +    private final List<BehaviorControl<? super E>> allBehaviors = new java.util.concurrent.CopyOnWriteArrayList<>(); // CloudPlane - keep track of behaviors directly
-     private Schedule schedule = Schedule.EMPTY;
+     private @Nullable EnvironmentAttribute<Activity> schedule;
      private final Map<Activity, Set<Pair<MemoryModuleType<?>, MemoryStatus>>> activityRequirements = Maps.newHashMap();
      private final Map<Activity, Set<MemoryModuleType<?>>> activityMemoriesToEraseWhenStopped = Maps.newHashMap();
 -    private Set<Activity> coreActivities = Sets.newHashSet();
@@ -34,7 +34,7 @@ index ebdd6f4f493ca52104a0c7094d1c474a951bde81..569c828e501ca930506591619a244d5a
  
      public static <E extends LivingEntity> Brain.Provider<E> provider(
          Collection<? extends MemoryModuleType<?>> memoryTypes, Collection<? extends SensorType<? extends Sensor<? super E>>> sensorTypes
-@@ -240,6 +248,13 @@ public class Brain<E extends LivingEntity> {
+@@ -237,6 +245,13 @@ public class Brain<E extends LivingEntity> {
  
      public void setCoreActivities(Set<Activity> newActivities) {
          this.coreActivities = newActivities;
@@ -48,7 +48,7 @@ index ebdd6f4f493ca52104a0c7094d1c474a951bde81..569c828e501ca930506591619a244d5a
      }
  
      @Deprecated
-@@ -253,15 +268,15 @@ public class Brain<E extends LivingEntity> {
+@@ -250,15 +265,15 @@ public class Brain<E extends LivingEntity> {
      public List<BehaviorControl<? super E>> getRunningBehaviors() {
          List<BehaviorControl<? super E>> list = new ObjectArrayList<>();
  
@@ -69,7 +69,7 @@ index ebdd6f4f493ca52104a0c7094d1c474a951bde81..569c828e501ca930506591619a244d5a
  
          return list;
      }
-@@ -294,9 +309,24 @@ public class Brain<E extends LivingEntity> {
+@@ -291,9 +306,24 @@ public class Brain<E extends LivingEntity> {
              this.activeActivities.clear();
              this.activeActivities.addAll(this.coreActivities);
              this.activeActivities.add(activity);
@@ -94,7 +94,7 @@ index ebdd6f4f493ca52104a0c7094d1c474a951bde81..569c828e501ca930506591619a244d5a
      private void eraseMemoriesForOtherActivitesThan(Activity activity) {
          for (Activity activity1 : this.activeActivities) {
              if (activity1 != activity) {
-@@ -377,17 +407,48 @@ public class Brain<E extends LivingEntity> {
+@@ -374,17 +404,48 @@ public class Brain<E extends LivingEntity> {
              this.activityMemoriesToEraseWhenStopped.put(activity, memoryTypes);
          }
  
@@ -148,7 +148,7 @@ index ebdd6f4f493ca52104a0c7094d1c474a951bde81..569c828e501ca930506591619a244d5a
      }
  
      public boolean isActive(Activity activity) {
-@@ -444,26 +505,25 @@ public class Brain<E extends LivingEntity> {
+@@ -441,26 +502,25 @@ public class Brain<E extends LivingEntity> {
      private void startEachNonRunningBehavior(ServerLevel level, E entity) {
          long gameTime = level.getGameTime();
  
@@ -183,7 +183,7 @@ index ebdd6f4f493ca52104a0c7094d1c474a951bde81..569c828e501ca930506591619a244d5a
      }
  
      private boolean activityRequirementsAreMet(Activity activity) {
-@@ -500,7 +560,7 @@ public class Brain<E extends LivingEntity> {
+@@ -497,7 +557,7 @@ public class Brain<E extends LivingEntity> {
      }
  
      public boolean isBrainDead() {
