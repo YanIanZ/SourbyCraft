@@ -1,4 +1,4 @@
-package dev.booky.cloudplane.testplugin;
+package dev.iyanz.sourbycraft.testplugin;
 
 import org.bukkit.Bukkit;
 import org.bukkit.event.Listener;

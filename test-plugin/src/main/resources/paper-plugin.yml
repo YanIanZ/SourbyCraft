@@ -1,12 +1,12 @@
-name: CloudPlane-Test-Plugin
+name: SourbyCraft-Test-Plugin
 version: ${version}
-main: dev.booky.cloudplane.testplugin.TestPlugin
-description: CloudPlane Test Plugin
-author: booky10
+main: dev.iyanz.sourbycraft.testplugin.TestPlugin
+description: SourbyCraft Test Plugin
+author: iYanZ
 api-version: '${api_version}'
 load: STARTUP
-bootstrapper: dev.booky.cloudplane.testplugin.TestBootstrap
-loader: dev.booky.cloudplane.testplugin.TestLoader
+bootstrapper: dev.iyanz.sourbycraft.testplugin.TestBootstrap
+loader: dev.iyanz.sourbycraft.testplugin.TestLoader
 defaultPerm: FALSE
 permissions:
 dependencies:
