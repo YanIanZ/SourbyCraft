@@ -23,7 +23,7 @@ Netty broke this LazyRunnable system in some version - this now uses
 the internal safeExecute method for lazy-scheduling the packet-sending
 runnables on the event loop.
 
-Co-authored-by: booky10 <boooky10@gmail.com>
+Co-authored-by: iyanz <boooky10@gmail.com>
 
 diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
 index 19ec939529eb638bdc4d7fd9260f161fae118314..f6dec363af8834340356b3be936fc35862933b4e 100644

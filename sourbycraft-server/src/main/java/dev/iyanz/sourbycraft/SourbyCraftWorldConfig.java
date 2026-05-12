@@ -7,7 +7,7 @@ import org.bukkit.configuration.ConfigurationSection;
 
 import java.util.List;
 
-import static ddev.iyanz.sourby.SourbyCraftConfig.log;
+import static dev.iyanz.sourbycraft.SourbyCraftConfig.log;
 
 public class SourbyCraftWorldConfig {
 

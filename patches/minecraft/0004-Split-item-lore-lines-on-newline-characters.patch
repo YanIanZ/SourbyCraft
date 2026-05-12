@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 22 Aug 2021 20:30:16 +0200
 Subject: [PATCH] Split item lore lines on newline characters
 
@@ -15,7 +15,7 @@ index 5bad20ea7b07e4d0d21140466a7f563e7bdc20da..50f6800bb72ac4751dab20cb5b14c87c
      );
      public static final DataComponentType<ItemLore> LORE = register(
 -        "lore", builder -> builder.persistent(ItemLore.CODEC).networkSynchronized(ItemLore.STREAM_CODEC).cacheEncoding()
-+        "lore", builder -> builder.persistent(ItemLore.CODEC).networkSynchronized(ItemLore.SPLITTING_STREAM_CODEC).cacheEncoding() // CloudPlane - split lore lines
++        "lore", builder -> builder.persistent(ItemLore.CODEC).networkSynchronized(ItemLore.SPLITTING_STREAM_CODEC).cacheEncoding() // SourbyCraft - split lore lines
      );
      public static final DataComponentType<Rarity> RARITY = register(
          "rarity", builder -> builder.persistent(Rarity.CODEC).networkSynchronized(Rarity.STREAM_CODEC)
@@ -27,7 +27,7 @@ index 3419ed5c4e99d57bec68a54b82a942827be67f96..a279e04868ed6df1aeda07e5fef84604
          .apply(ByteBufCodecs.list(256))
          .map(ItemLore::new, ItemLore::lines);
  
-+    // CloudPlane start - split lore lines
++    // SourbyCraft start - split lore lines
 +    public static final StreamCodec<RegistryFriendlyByteBuf, ItemLore> SPLITTING_STREAM_CODEC = ComponentSerialization.STREAM_CODEC
 +            .apply(ByteBufCodecs.list(256))
 +            .map(java.util.function.Function.identity(), lines -> {
@@ -37,14 +37,14 @@ index 3419ed5c4e99d57bec68a54b82a942827be67f96..a279e04868ed6df1aeda07e5fef84604
 +                List<Component> realLines = new java.util.ArrayList<>(lines.size() * 2);
 +                for (Component line : lines) {
 +                    net.kyori.adventure.text.Component advLine = io.papermc.paper.adventure.PaperAdventure.asAdventure(line);
-+                    for (net.kyori.adventure.text.Component realLine : dev.booky.cloudplane.ItemUtil.getLines(advLine)) {
++                    for (net.kyori.adventure.text.Component realLine : dev.iyanz.sourbycraft.ItemUtil.getLines(advLine)) {
 +                        realLines.add(io.papermc.paper.adventure.PaperAdventure.asVanilla(realLine));
 +                    }
 +                }
 +                return realLines;
 +            })
 +            .map(ItemLore::new, ItemLore::lines);
-+    // CloudPlane end - split lore lines
++    // SourbyCraft end - split lore lines
 +
      public ItemLore(List<Component> lines) {
          this(lines, Lists.transform(lines, component -> ComponentUtils.mergeStyles(component, LORE_STYLE)));

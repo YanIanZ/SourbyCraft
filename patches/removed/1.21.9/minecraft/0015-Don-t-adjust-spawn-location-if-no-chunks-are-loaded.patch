@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Tue, 13 Aug 2024 05:30:10 +0200
 Subject: [PATCH] Don't adjust spawn location if no chunks are loaded
 
@@ -12,7 +12,7 @@ index b6f5e57e09cea0fdb7ce76f7b0c13d46adf61291..3f79c2cb52821874a603495dbc6cc352
              blockPos = pos;
          }
  
-+        if (level.hasChunkAt(blockPos)) { // CloudPlane - don't adjust spawn location if no chunks are loaded
++        if (level.hasChunkAt(blockPos)) { // SourbyCraft - don't adjust spawn location if no chunks are loaded
          while (!this.noCollisionNoLiquid(level, aabb.move(blockPos.getBottomCenter())) && blockPos.getY() < level.getMaxY()) {
              blockPos = blockPos.above();
          }
@@ -20,7 +20,7 @@ index b6f5e57e09cea0fdb7ce76f7b0c13d46adf61291..3f79c2cb52821874a603495dbc6cc352
          while (this.noCollisionNoLiquid(level, aabb.move(blockPos.below().getBottomCenter())) && blockPos.getY() > level.getMinY() + 1) {
              blockPos = blockPos.below();
          }
-+        } // CloudPlane - don't adjust spawn location if no chunks are loaded
++        } // SourbyCraft - don't adjust spawn location if no chunks are loaded
  
          return blockPos;
      }

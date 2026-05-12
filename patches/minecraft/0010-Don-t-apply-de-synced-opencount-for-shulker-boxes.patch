@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Tue, 21 Mar 2023 15:24:33 +0100
 Subject: [PATCH] Don't apply de-synced opencount for shulker boxes
 
@@ -17,7 +17,7 @@ index 61b99c895c0e248f0e7c4c634644dcff54a964d9..72ba79eb04a1f3d125045df942b64222
      public boolean triggerEvent(int id, int type) {
          if (id == 1) {
 -            this.openCount = type;
-+            // this.openCount = type; // CloudPlane - will desync if multiple opens triggered in same tick because of how block events work
++            // this.openCount = type; // SourbyCraft - will desync if multiple opens triggered in same tick because of how block events work
              if (type == 0) {
                  this.animationStatus = ShulkerBoxBlockEntity.AnimationStatus.CLOSING;
              }

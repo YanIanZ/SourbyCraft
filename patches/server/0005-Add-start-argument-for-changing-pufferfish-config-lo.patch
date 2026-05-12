@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 12 Sep 2021 12:50:09 +0200
 Subject: [PATCH] Add start argument for changing pufferfish config location
 
@@ -9,17 +9,17 @@ index f17c3256b26d7973e6dae163c9406e9092d85915..d8000bf1d4221ad99c77974a534b82b5
 --- a/src/main/java/org/bukkit/craftbukkit/Main.java
 +++ b/src/main/java/org/bukkit/craftbukkit/Main.java
 @@ -152,6 +152,14 @@ public class Main {
-                         .defaultsTo(new File("cloudplane.yml"))
+                         .defaultsTo(new File("sourbycraft.yml"))
                          .describedAs("Yml file");
-                 // CloudPlane end - config
+                 // SourbyCraft end - config
 +
-+                // CloudPlane start - customizable pufferfish config location
++                // SourbyCraft start - customizable pufferfish config location
 +                acceptsAll(asList("pufferfish", "pufferfish-settings"), "File for pufferfish settings")
 +                        .withRequiredArg()
 +                        .ofType(File.class)
 +                        .defaultsTo(new File("pufferfish.yml"))
 +                        .describedAs("Yml file");
-+                // CloudPlane end - customizable pufferfish config location
++                // SourbyCraft end - customizable pufferfish config location
              }
          };
  

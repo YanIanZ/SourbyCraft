@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Tue, 5 Apr 2022 17:05:14 +0200
 Subject: [PATCH] Prevent healing amplifier from overflowing
 
@@ -13,7 +13,7 @@ index 9c564abfaefe7ead9abde4338a6722d5d703f9e2..c8cd411e365eb802d9a214ca2cf2d977
              entity.heal(Math.max(4 << amplifier, 0), org.bukkit.event.entity.EntityRegainHealthEvent.RegainReason.MAGIC); // CraftBukkit
          } else {
 -            entity.hurtServer(level, entity.damageSources().magic(), 6 << amplifier);
-+            entity.hurtServer(level, entity.damageSources().magic(), Math.max(6 << amplifier, 0)); // CloudPlane - prevent negative healing/harming
++            entity.hurtServer(level, entity.damageSources().magic(), Math.max(6 << amplifier, 0)); // SourbyCraft - prevent negative healing/harming
          }
  
          return true;
@@ -22,15 +22,15 @@ index 9c564abfaefe7ead9abde4338a6722d5d703f9e2..c8cd411e365eb802d9a214ca2cf2d977
          if (this.isHarm == entity.isInvertedHealAndHarm()) {
              int i = (int)(health * (4 << amplifier) + 0.5);
 -            entity.heal(i, org.bukkit.event.entity.EntityRegainHealthEvent.RegainReason.MAGIC); // CraftBukkit
-+            entity.heal(Math.max(i, 0), org.bukkit.event.entity.EntityRegainHealthEvent.RegainReason.MAGIC); // CraftBukkit // CloudPlane - prevent negative healing/harming
++            entity.heal(Math.max(i, 0), org.bukkit.event.entity.EntityRegainHealthEvent.RegainReason.MAGIC); // CraftBukkit // SourbyCraft - prevent negative healing/harming
          } else {
              int i = (int)(health * (6 << amplifier) + 0.5);
              if (source == null) {
 -                entity.hurtServer(level, entity.damageSources().magic(), i);
-+                entity.hurtServer(level, entity.damageSources().magic(), Math.max(i, 0)); // CloudPlane - prevent negative healing/harming
++                entity.hurtServer(level, entity.damageSources().magic(), Math.max(i, 0)); // SourbyCraft - prevent negative healing/harming
              } else {
 -                entity.hurtServer(level, entity.damageSources().indirectMagic(source, indirectSource), i);
-+                entity.hurtServer(level, entity.damageSources().indirectMagic(source, indirectSource), Math.max(i, 0)); // CloudPlane - prevent negative healing/harming
++                entity.hurtServer(level, entity.damageSources().indirectMagic(source, indirectSource), Math.max(i, 0)); // SourbyCraft - prevent negative healing/harming
              }
          }
      }

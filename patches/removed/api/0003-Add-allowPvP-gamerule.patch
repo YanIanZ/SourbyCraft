@@ -1,9 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Fri, 9 Jul 2021 13:02:30 +0200
 Subject: [PATCH] Add allowPvP gamerule
 
-Dropped as this is now implemented as a plugin in https://github.com/CloudCraftProjects/CloudUtilities
+Dropped as this is now implemented as a plugin in https://github.com/SourbyCraftProjects/CloudUtilities
 
 diff --git a/src/main/java/org/bukkit/GameRule.java b/src/main/java/org/bukkit/GameRule.java
 index be827e7fef0acb17bd41aeff9dc3dc4da3718e5e..2ce2d4845acc2d52dad27abf858621f26bebc2f7 100644
@@ -13,12 +13,12 @@ index be827e7fef0acb17bd41aeff9dc3dc4da3718e5e..2ce2d4845acc2d52dad27abf858621f2
       */
      public static final GameRule<Boolean> ENDER_PEARLS_VANISH_ON_DEATH = new GameRule<>("enderPearlsVanishOnDeath", Boolean.class);
  
-+    // CloudPlane start - added allowPvP gamerule
++    // SourbyCraft start - added allowPvP gamerule
 +    /**
 +     * Enables or disables player damage by other players in the world.
 +     */
 +    public static final GameRule<Boolean> ALLOW_PVP = new GameRule<>("allowPvP", Boolean.class);
-+    // CloudPlane end
++    // SourbyCraft end
 +
      // Numerical rules
      /**

@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sat, 31 Aug 2024 18:57:57 +0200
 Subject: [PATCH] Fix elastic leash behaviour on unleash cancel
 
@@ -14,7 +14,7 @@ index 54c7af09f5f64021895074ea5a1578513aa67bf2..8122e21cb32e5ba5b2e14dfc6a628220
                  entity.whenLeashedTo(leashHolder);
 -                if (d > entity.leashSnapDistanceOrConfig()) { // Paper - Configurable max leash distance
 -                    entity.leashTooFarBehaviour();
-+                if (d > entity.leashSnapDistanceOrConfig() && entity.leashTooFarBehaviour0()) { // Paper - Configurable max leash distance // CloudPlane - fix elastic leash behavior on event cancel
++                if (d > entity.leashSnapDistanceOrConfig() && entity.leashTooFarBehaviour0()) { // Paper - Configurable max leash distance // SourbyCraft - fix elastic leash behavior on event cancel
                  } else if (d > entity.leashElasticDistance() - leashHolder.getBbWidth() - entity.getBbWidth()
                      && entity.checkElasticInteractions(leashHolder, leashData)) {
                      entity.onElasticLeashPull();
@@ -22,7 +22,7 @@ index 54c7af09f5f64021895074ea5a1578513aa67bf2..8122e21cb32e5ba5b2e14dfc6a628220
          entity.notifyLeashHolder(this);
      }
  
-+    // CloudPlane start - fix elastic leash behaviour on unleash cancel
++    // SourbyCraft start - fix elastic leash behaviour on unleash cancel
 +    @io.papermc.paper.annotation.DoNotUse
 +    @Deprecated
      default void leashTooFarBehaviour() {
@@ -30,14 +30,14 @@ index 54c7af09f5f64021895074ea5a1578513aa67bf2..8122e21cb32e5ba5b2e14dfc6a628220
 +    }
 +
 +    default boolean leashTooFarBehaviour0() {
-+        // CloudPlane end - fix elastic leash behaviour on unleash cancel
++        // SourbyCraft end - fix elastic leash behaviour on unleash cancel
          // CraftBukkit start
          boolean dropLeash = true; // Paper
          if (this instanceof Entity entity) {
              // Paper start - Expand EntityUnleashEvent
              final org.bukkit.event.entity.EntityUnleashEvent event = new org.bukkit.event.entity.EntityUnleashEvent(entity.getBukkitEntity(), org.bukkit.event.entity.EntityUnleashEvent.UnleashReason.DISTANCE, true);
 -            if (!event.callEvent()) return;
-+            if (!event.callEvent()) return false; // CloudPlane - fix elastic leash behaviour on unleash cancel
++            if (!event.callEvent()) return false; // SourbyCraft - fix elastic leash behaviour on unleash cancel
  
              Entity leashHolder = this.getLeashHolder();
              Level level = leashHolder.level();
@@ -45,7 +45,7 @@ index 54c7af09f5f64021895074ea5a1578513aa67bf2..8122e21cb32e5ba5b2e14dfc6a628220
              this.removeLeash();
          }
          // Paper end - Expand EntityUnleashEvent
-+        return true; // CloudPlane - fix elastic leash behaviour on unleash cancel
++        return true; // SourbyCraft - fix elastic leash behaviour on unleash cancel
      }
  
      default void closeRangeLeashBehaviour(Entity entity) {
@@ -57,7 +57,7 @@ index 60e3c2d6d0e5abbc48c88e416f3adeae0e2f9806..6f7fcc90d9204a7738240c36a13e27ef
          }
      }
  
-+    // CloudPlane start - fix elastic leash behaviour on unleash cancel
++    // SourbyCraft start - fix elastic leash behaviour on unleash cancel
      @Override
 -    public void leashTooFarBehaviour() {
 -        Leashable.super.leashTooFarBehaviour();
@@ -66,7 +66,7 @@ index 60e3c2d6d0e5abbc48c88e416f3adeae0e2f9806..6f7fcc90d9204a7738240c36a13e27ef
 +        if (ret)
          this.goalSelector.disableControlFlag(Goal.Flag.MOVE);
 +        return ret;
-+        // CloudPlane end - fix elastic leash behaviour on unleash cancel
++        // SourbyCraft end - fix elastic leash behaviour on unleash cancel
      }
  
      @Override

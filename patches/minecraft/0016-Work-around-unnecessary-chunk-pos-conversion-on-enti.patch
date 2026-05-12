@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Fri, 20 Sep 2024 00:56:09 +0200
 Subject: [PATCH] Work around unnecessary chunk pos conversion on entity
  tracker visibility check
@@ -13,7 +13,7 @@ index 7129c5e1920008ac54f3a8ac83f5589396f4e4e9..a692729183194a36c9a042ccf625e859
          return sendViewDistance;
      }
  
-+    // CloudPlane start - work around unnecessary chunk pos conversion
++    // SourbyCraft start - work around unnecessary chunk pos conversion
 +    @Deprecated
 +    @io.papermc.paper.annotation.DoNotUse
      public boolean isChunkSent(final ServerPlayer player, final int chunkX, final int chunkZ, final boolean borderOnly) {
@@ -33,7 +33,7 @@ index 7129c5e1920008ac54f3a8ac83f5589396f4e4e9..a692729183194a36c9a042ccf625e859
 -        return loader.sentChunks.contains(CoordinateUtils.getChunkKey(chunkX, chunkZ));
 +        return loader.sentChunks.contains(chunkKey);
      }
-+    // CloudPlane end - work around unnecessary chunk pos conversion
++    // SourbyCraft end - work around unnecessary chunk pos conversion
  
      public boolean isChunkSentBorderOnly(final ServerPlayer player, final int chunkX, final int chunkZ) {
          final PlayerChunkLoaderData loader = ((ChunkSystemServerPlayer)player).moonrise$getChunkLoader();
@@ -46,7 +46,7 @@ index 22123d8b0fd8741c6df4efaec56f3c694e0529a3..66ccb5eb9784b7502abfba4fdbbeeb85
          for (int i = 0, len = this.playersSentChunkTo.size(); i < len; ++i) {
              final ServerPlayer player = raw[i];
 -            if (onlyOnWatchDistanceEdge && !((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.getChunkMap().level).moonrise$getPlayerChunkLoader().isChunkSent(player, this.pos.x, this.pos.z, onlyOnWatchDistanceEdge)) {
-+            if (onlyOnWatchDistanceEdge && !((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.getChunkMap().level).moonrise$getPlayerChunkLoader().isChunkSentBorderOnly(player, this.pos.x, this.pos.z)) { // CloudPlane - work around unnecessary chunk pos conversion
++            if (onlyOnWatchDistanceEdge && !((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.getChunkMap().level).moonrise$getPlayerChunkLoader().isChunkSentBorderOnly(player, this.pos.x, this.pos.z)) { // SourbyCraft - work around unnecessary chunk pos conversion
                  continue;
              }
              ret.add(player);
@@ -59,7 +59,7 @@ index ab8893163ac85971a470e4a4d6fa76bd174e2bae..fe8d8d0bba4bd66a3cc203f1d1cad559
  
      private boolean isChunkOnTrackedBorder(ServerPlayer player, int x, int z) {
 -        return ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getPlayerChunkLoader().isChunkSent(player, x, z, true); // Paper - rewrite chunk system
-+        return ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getPlayerChunkLoader().isChunkSentBorderOnly(player, x, z); // Paper - rewrite chunk system // CloudPlane - work around unnecessary chunk pos conversion
++        return ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getPlayerChunkLoader().isChunkSentBorderOnly(player, x, z); // Paper - rewrite chunk system // SourbyCraft - work around unnecessary chunk pos conversion
      }
  
      protected ThreadedLevelLightEngine getLightEngine() {

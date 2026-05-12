@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Fri, 20 Sep 2024 00:59:44 +0200
 Subject: [PATCH] Improve Player#canSee performance
 
@@ -13,7 +13,7 @@ index fe8d8d0bba4bd66a3cc203f1d1cad559cdd701d5..1268061d2749004d195de27633497851
                  // Paper end - Configurable entity tracking range by Y
                  // CraftBukkit start - respect vanish API
 -                if (flag && !player.getBukkitEntity().canSee(this.entity.getBukkitEntity())) { // Paper - only consider hits
-+                if (flag && !player.getBukkitEntity().canSee(this.entity)) { // Paper - only consider hits // CloudPlane - improve Player#canSee performance
++                if (flag && !player.getBukkitEntity().canSee(this.entity)) { // Paper - only consider hits // SourbyCraft - improve Player#canSee performance
                      flag = false;
                  }
                  // CraftBukkit end

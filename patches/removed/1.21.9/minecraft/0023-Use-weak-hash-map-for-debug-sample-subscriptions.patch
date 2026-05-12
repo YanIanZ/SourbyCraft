@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Thu, 16 Jan 2025 23:25:03 +0100
 Subject: [PATCH] Use weak hash map for debug sample subscriptions
 
@@ -14,7 +14,7 @@ index a18240418a19a95147341a634527d774f3d5bb92..27c17d8d4ae65346e4c4a2fef51e84b0
      public DebugSampleSubscriptionTracker(PlayerList playerList) {
          this.playerList = playerList;
 -        this.subscriptions = Util.makeEnumMap(RemoteDebugSampleType.class, remoteDebugSampleType -> Maps.newHashMap());
-+        this.subscriptions = Util.makeEnumMap(RemoteDebugSampleType.class, remoteDebugSampleType -> new java.util.WeakHashMap<>()); // CloudPlane - prevent player memory leaks on debug sample subscription
++        this.subscriptions = Util.makeEnumMap(RemoteDebugSampleType.class, remoteDebugSampleType -> new java.util.WeakHashMap<>()); // SourbyCraft - prevent player memory leaks on debug sample subscription
      }
  
      public boolean shouldLogSamples(RemoteDebugSampleType sampleType) {

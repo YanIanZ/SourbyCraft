@@ -34,6 +34,6 @@ jobs:
       - name: Upload mojang-mapped paperclip jar
         uses: actions/upload-artifact@v4
         with:
-          name: CloudPlane-Artifacts
-          path: cloudplane-server/build/libs/cloudplane-paperclip-*
+          name: SourbyCraft-Artifacts
+          path: sourbycraft-server/build/libs/sourbycraft-paperclip-*
           if-no-files-found: error

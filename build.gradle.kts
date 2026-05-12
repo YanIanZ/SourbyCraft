@@ -39,6 +39,7 @@ subprojects {
         // compiling stalls indefinitely on my PC
         options.encoding = Charsets.UTF_8.name()
         options.release = 21
+        options.compilerArgs.add("--enable-preview")
         options.isIncremental = true
     }
     tasks.withType<Javadoc> {

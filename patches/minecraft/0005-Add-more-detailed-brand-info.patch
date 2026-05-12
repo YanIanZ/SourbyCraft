@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Tue, 24 Aug 2021 20:43:57 +0200
 Subject: [PATCH] Add more detailed brand info
 
@@ -14,11 +14,11 @@ index a3645322be006d5501fa7fb8944509a9c6b58e32..be6ece9040de523d94b94ff82dd342b9
      public void startConfiguration() {
          new io.papermc.paper.event.connection.configuration.PlayerConnectionInitialConfigureEvent(this.paperConnection).callEvent(); // Paper
 -        this.send(new ClientboundCustomPayloadPacket(new BrandPayload(this.server.getServerModName())));
-+        // CloudPlane start - detailed brand info
-+        String serverBrand = !dev.booky.cloudplane.CloudPlaneConfig.detailedBrand ? this.server.getServerModName() :
++        // SourbyCraft start - detailed brand info
++        String serverBrand = !dev.iyanz.sourbycraft.SourbyCraftConfig.detailedBrand ? this.server.getServerModName() :
 +                this.server.getServerModName() + ' ' + io.papermc.paper.ServerBuildInfo.buildInfo().asString(io.papermc.paper.ServerBuildInfo.StringRepresentation.VERSION_SIMPLE);
 +        this.send(new ClientboundCustomPayloadPacket(new BrandPayload(serverBrand)));
-+        // CloudPlane end - detailed brand info
++        // SourbyCraft end - detailed brand info
          ServerLinks serverLinks = this.server.serverLinks();
          if (!serverLinks.isEmpty()) {
              // Paper start

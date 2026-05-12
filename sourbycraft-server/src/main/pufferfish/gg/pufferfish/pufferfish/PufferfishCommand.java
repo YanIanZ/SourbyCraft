@@ -50,7 +50,7 @@ public class PufferfishCommand extends Command {
         if (args[0].equalsIgnoreCase("reload")) {
             MinecraftServer console = MinecraftServer.getServer();
             try {
-                PufferfishConfig.load((java.io.File) console.options.valueOf("pufferfish-settings")); // CloudPlane - configurable pufferfish config location
+                PufferfishConfig.load((java.io.File) console.options.valueOf("pufferfish-settings"));
             } catch (IOException e) {
                 sender.sendMessage(Component.text("Failed to reload.", NamedTextColor.RED));
                 e.printStackTrace();

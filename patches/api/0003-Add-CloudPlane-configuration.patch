@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 27 Jun 2021 20:30:37 +0200
-Subject: [PATCH] Add CloudPlane configuration
+Subject: [PATCH] Add SourbyCraft configuration
 
 
 diff --git a/src/main/java/org/bukkit/Server.java b/src/main/java/org/bukkit/Server.java
@@ -12,12 +12,12 @@ index 718861fccd0f7a0ceb550c96d4e9691eb1bb6804..46420d68351632caa7ba6c4a060cba09
          }
          // Paper end
  
-+        // CloudPlane start
++        // SourbyCraft start
 +        @NotNull
-+        public org.bukkit.configuration.file.YamlConfiguration getCloudPlaneConfig() {
++        public org.bukkit.configuration.file.YamlConfiguration getSourbyCraftConfig() {
 +            throw new UnsupportedOperationException("Not supported yet.");
 +        }
-+        // CloudPlane end
++        // SourbyCraft end
 +
          /**
           * Sends the component to the player

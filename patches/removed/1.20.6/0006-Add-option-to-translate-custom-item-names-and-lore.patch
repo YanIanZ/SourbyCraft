@@ -1,15 +1,15 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 22 Aug 2021 20:30:16 +0200
 Subject: [PATCH] Add option to translate custom item names and lore
 
 This patch was completely rewritten with the 1.20.5/1.20.6 update
 
-diff --git a/src/main/java/dev/booky/cloudplane/CloudPlaneConfig.java b/src/main/java/dev/booky/cloudplane/CloudPlaneConfig.java
+diff --git a/src/main/java/dev/booky/sourbycraft/SourbyCraftConfig.java b/src/main/java/dev/booky/sourbycraft/SourbyCraftConfig.java
 index 26e393051d2c5fe84b8ae6a33b376efab6198816..b21f7a41581ddf36d61e206366c6398738a47813 100644
---- a/src/main/java/dev/booky/cloudplane/CloudPlaneConfig.java
-+++ b/src/main/java/dev/booky/cloudplane/CloudPlaneConfig.java
-@@ -107,4 +107,20 @@ public class CloudPlaneConfig {
+--- a/src/main/java/dev/booky/sourbycraft/SourbyCraftConfig.java
++++ b/src/main/java/dev/booky/sourbycraft/SourbyCraftConfig.java
+@@ -107,4 +107,20 @@ public class SourbyCraftConfig {
      private static Component getComponent(String path, Component def) {
          return MiniMessage.miniMessage().deserialize(getString(path, MiniMessage.miniMessage().serialize(def)));
      }
@@ -30,13 +30,13 @@ index 26e393051d2c5fe84b8ae6a33b376efab6198816..b21f7a41581ddf36d61e206366c63987
 +        localizeItems = getBoolean("settings.translate-items", localizeItems);
 +    }
  }
-diff --git a/src/main/java/dev/booky/cloudplane/ComponentUtil.java b/src/main/java/dev/booky/cloudplane/ComponentUtil.java
+diff --git a/src/main/java/dev/booky/sourbycraft/ComponentUtil.java b/src/main/java/dev/booky/sourbycraft/ComponentUtil.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..a9a0117234026f119a64c2ae6c51473015ae2eab
 --- /dev/null
-+++ b/src/main/java/dev/booky/cloudplane/ComponentUtil.java
++++ b/src/main/java/dev/booky/sourbycraft/ComponentUtil.java
 @@ -0,0 +1,70 @@
-+package dev.booky.cloudplane;
++package dev.iyanz.sourbycraft;
 +
 +import net.kyori.adventure.text.Component;
 +import net.kyori.adventure.text.TextComponent;
@@ -115,7 +115,7 @@ index cf5a4c142ed6d9ab4850373a9041bdc6af5a2a71..d9cba5921b3917cc024381abdde7b568
      }
  
 -    private static Component translated(final Component component, final Locale locale) {
-+    public static Component translated(final Component component, final Locale locale) { // CloudPlane - private -> public
++    public static Component translated(final Component component, final Locale locale) { // SourbyCraft - private -> public
          //noinspection ConstantValue
          return GlobalTranslator.render(
              component,
@@ -128,8 +128,8 @@ index b863249ff7e13cf4939c8961601f0564c62fd661..4ee4c481d45db484d82e434fa95eeb9a
                  // Spigot end
                  nbttagcompound = stack.getTag();
 +
-+                // CloudPlane start
-+                if (nbttagcompound != null && dev.booky.cloudplane.CloudPlaneConfig.localizeItems
++                // SourbyCraft start
++                if (nbttagcompound != null && dev.iyanz.sourbycraft.SourbyCraftConfig.localizeItems
 +                        && nbttagcompound.contains(ItemStack.TAG_DISPLAY, Tag.TAG_COMPOUND)
 +                        && this.adventure$locale != null) {
 +                    final CompoundTag display = nbttagcompound.getCompound(ItemStack.TAG_DISPLAY);
@@ -159,7 +159,7 @@ index b863249ff7e13cf4939c8961601f0564c62fd661..4ee4c481d45db484d82e434fa95eeb9a
 +                                try {
 +                                    final net.kyori.adventure.text.Component loreComponent = net.kyori.adventure.text.serializer.gson.GsonComponentSerializer.gson().deserialize(lorePart);
 +                                    final net.kyori.adventure.text.Component translatedLoreComponent = io.papermc.paper.adventure.PaperAdventure.translated(loreComponent, this.adventure$locale);
-+                                    for (final net.kyori.adventure.text.Component line : dev.booky.cloudplane.ComponentUtil.getLines(translatedLoreComponent)) {
++                                    for (final net.kyori.adventure.text.Component line : dev.iyanz.sourbycraft.ComponentUtil.getLines(translatedLoreComponent)) {
 +                                        newLore.add(net.minecraft.nbt.StringTag.valueOf(net.kyori.adventure.text.serializer.gson.GsonComponentSerializer.gson().serialize(line)));
 +                                    }
 +                                } catch (com.google.gson.JsonSyntaxException exception) {
@@ -176,7 +176,7 @@ index b863249ff7e13cf4939c8961601f0564c62fd661..4ee4c481d45db484d82e434fa95eeb9a
 +                        }
 +                    }
 +                }
-+                // CloudPlane end
++                // SourbyCraft end
              }
  
              this.writeNbt(nbttagcompound);
@@ -185,7 +185,7 @@ index b863249ff7e13cf4939c8961601f0564c62fd661..4ee4c481d45db484d82e434fa95eeb9a
              ItemStack itemstack = new ItemStack(item, b0);
  
 -            itemstack.setTag(this.readNbt());
-+            // CloudPlane start
++            // SourbyCraft start
 +            CompoundTag nbt = this.readNbt();
 +            if (nbt != null && nbt.contains(ItemStack.TAG_DISPLAY, Tag.TAG_COMPOUND)) {
 +                CompoundTag display = nbt.getCompound(ItemStack.TAG_DISPLAY);
@@ -199,7 +199,7 @@ index b863249ff7e13cf4939c8961601f0564c62fd661..4ee4c481d45db484d82e434fa95eeb9a
 +                }
 +            }
 +            itemstack.setTag(nbt);
-+            // CloudPlane end
++            // SourbyCraft end
 +
              // CraftBukkit start
              if (false && itemstack.getTag() != null) { // Paper - This is no longer needed with raw NBT being handled in metadata

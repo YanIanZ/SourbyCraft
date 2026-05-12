@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 5 Jan 2025 20:48:30 +0100
 Subject: [PATCH] Convert spawn category limits and ticks to array
 
@@ -13,10 +13,10 @@ index 9e4b6e3192c6ca7314edcaca82b293a60c0e3d03..d7db854467717abd1fcf60c3b06b7f51
              }
              // Paper end - PlayerNaturallySpawnCreaturesEvent
 -            boolean flag1 = this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) != 0L && this.level.getGameTime() % this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) == 0L; // CraftBukkit
-+            // CloudPlane start - convert spawn category ticks to array
++            // SourbyCraft start - convert spawn category ticks to array
 +            final long ticks = this.level.ticksPerSpawnCategory[org.bukkit.entity.SpawnCategory.ANIMAL.ordinal()];
 +            boolean flag1 = ticks != 0L && this.level.getGameTime() % ticks == 0L; // CraftBukkit
-+            // CloudPlane end - convert spawn category ticks to array
++            // SourbyCraft end - convert spawn category ticks to array
              filteredSpawningCategories = NaturalSpawner.getFilteredSpawningCategories(spawnState, this.spawnFriendlies, this.spawnEnemies, flag1, this.level); // CraftBukkit
          } else {
              filteredSpawningCategories = List.of();
@@ -29,7 +29,7 @@ index dae5852d29b6f3b2515178cf259acd31c8e5a58a..dd4fb9f1a81ac20b168644ed5c956539
      @Nullable
      public List<net.minecraft.world.entity.item.ItemEntity> captureDrops;
 -    public final it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<SpawnCategory> ticksPerSpawnCategory = new it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<>();
-+    public final long[] ticksPerSpawnCategory = new long[SpawnCategory.values().length]; // CloudPlane - convert spawn category ticks to array
++    public final long[] ticksPerSpawnCategory = new long[SpawnCategory.values().length]; // SourbyCraft - convert spawn category ticks to array
      // Paper start - EAR 2
      public int wakeupInactiveRemainingAnimals;
      public int wakeupInactiveRemainingFlying;
@@ -38,7 +38,7 @@ index dae5852d29b6f3b2515178cf259acd31c8e5a58a..dd4fb9f1a81ac20b168644ed5c956539
          for (SpawnCategory spawnCategory : SpawnCategory.values()) {
              if (org.bukkit.craftbukkit.util.CraftSpawnCategory.isValidForLimits(spawnCategory)) {
 -                this.ticksPerSpawnCategory.put(spawnCategory, this.getTicksPerSpawn(spawnCategory));
-+                this.ticksPerSpawnCategory[spawnCategory.ordinal()] = this.getTicksPerSpawn(spawnCategory); // CloudPlane - convert spawn category ticks to array
++                this.ticksPerSpawnCategory[spawnCategory.ordinal()] = this.getTicksPerSpawn(spawnCategory); // SourbyCraft - convert spawn category ticks to array
              }
          }
          // CraftBukkit end
@@ -52,11 +52,11 @@ index e156e498d26de45f73f49127f66a3180b57bc3dc..adfe19732e2c2f8be5f66f8acf9e92f4
              if (org.bukkit.craftbukkit.util.CraftSpawnCategory.isValidForLimits(spawnCategory)) {
 -                spawnThisTick = level.ticksPerSpawnCategory.getLong(spawnCategory) != 0 && worlddata.getGameTime() % level.ticksPerSpawnCategory.getLong(spawnCategory) == 0;
 -                limit = level.getWorld().getSpawnLimit(spawnCategory);
-+                // CloudPlane start - convert spawn category ticks to array
++                // SourbyCraft start - convert spawn category ticks to array
 +                final long ticks = level.ticksPerSpawnCategory[spawnCategory.ordinal()];
 +                spawnThisTick = ticks != 0 && worlddata.getGameTime() % ticks == 0;
-+                // CloudPlane end - convert spawn category ticks to array
-+                limit = level.getWorld().getSpawnLimitUnsafe(spawnCategory); // CloudPlane - convert spawn category limits to array; use internal getter
++                // SourbyCraft end - convert spawn category ticks to array
++                limit = level.getWorld().getSpawnLimitUnsafe(spawnCategory); // SourbyCraft - convert spawn category limits to array; use internal getter
              }
  
              if (!spawnThisTick || limit == 0) {
@@ -65,7 +65,7 @@ index e156e498d26de45f73f49127f66a3180b57bc3dc..adfe19732e2c2f8be5f66f8acf9e92f4
                  org.bukkit.entity.SpawnCategory spawnCategory = org.bukkit.craftbukkit.util.CraftSpawnCategory.toBukkit(mobCategory);
                  if (org.bukkit.craftbukkit.util.CraftSpawnCategory.isValidForLimits(spawnCategory)) {
 -                    limit = level.getWorld().getSpawnLimit(spawnCategory);
-+                    limit = level.getWorld().getSpawnLimitUnsafe(spawnCategory); // CloudPlane - convert spawn category limits to array; use internal getter
++                    limit = level.getWorld().getSpawnLimitUnsafe(spawnCategory); // SourbyCraft - convert spawn category limits to array; use internal getter
                  }
  
                  // Apply per-player limit
