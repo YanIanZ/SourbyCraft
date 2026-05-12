@@ -1,4 +1,4 @@
-package dev.booky.cloudplane;
+package dev.iyanz.sourbycraft;
 
 import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.Codec;
@@ -37,7 +37,7 @@ public final class ItemUtil {
     private static final List<Pair<String, DataComponentType<?>>> SAVEABLE_COMPONENT_TYPES = SAVEABLE_COMPONENT_TYPE_SET.stream()
             .<Pair<String, DataComponentType<?>>>map(type -> Pair.of(BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type).toString(), type))
             .toList();
-    private static final String SAVEABLE_COMPONENT_TAG_NAME = "CloudPlane$SavedData";
+    private static final String SAVEABLE_COMPONENT_TAG_NAME = "SourbyCraft$SavedData";
 
     private ItemUtil() {
     }

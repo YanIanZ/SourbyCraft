@@ -1,4 +1,4 @@
-package dev.booky.cloudplane;
+package dev.iyanz.sourbycraft;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -15,7 +15,7 @@ import java.lang.reflect.Modifier;
 import java.util.List;
 import java.util.logging.Level;
 
-public class CloudPlaneConfig {
+public class SourbyCraftConfig {
 
     private static File CONFIG_FILE;
     public static YamlConfiguration config;
@@ -41,7 +41,7 @@ public class CloudPlaneConfig {
         version = getInt("config-version", currentVersion);
         set("config-version", currentVersion);
 
-        readConfig(CloudPlaneConfig.class, null);
+        readConfig(SourbyCraftConfig.class, null);
     }
 
     protected static void log(String string) {
