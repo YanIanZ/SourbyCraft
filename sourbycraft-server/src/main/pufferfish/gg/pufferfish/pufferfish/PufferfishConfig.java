@@ -68,12 +68,12 @@ public class PufferfishConfig {
         // Attempt to detect vectorization
         try {
             SIMDDetection.isEnabled = SIMDDetection.canEnable(PufferfishLogger.LOGGER);
-            SIMDDetection.versionLimited = SIMDDetection.getJavaVersion() != 17 && SIMDDetection.getJavaVersion() != 21;
+            SIMDDetection.versionLimited = SIMDDetection.getJavaVersion() < 17;
         } catch (NoClassDefFoundError | Exception ignored) {}
 
         if (!SIMDDetection.isEnabled) {
             if (SIMDDetection.versionLimited) {
-                PufferfishLogger.LOGGER.warning("Will not enable SIMD! These optimizations are only safely supported on Java 17 and Java 21.");
+                PufferfishLogger.LOGGER.warning("Will not enable SIMD! These optimizations are only safely supported on Java 17 and newer.");
             } else {
                 PufferfishLogger.LOGGER.warning("SIMD operations are available for your server, but are not configured!");
                 PufferfishLogger.LOGGER.warning("To enable additional optimizations, add \"--add-modules=jdk.incubator.vector\" to your startup flags, BEFORE the \"-jar\".");
