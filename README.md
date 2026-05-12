@@ -25,7 +25,7 @@
 > Building on Windows is not supported. Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install).
 
 ```bash
-git clone <your-remote-url>
+git clone https://github.com/YanIanZ/SourbyCraft.git
 cd SourbyCraft
 ./gradlew applyAllPatches
 ./gradlew createMojmapPaperclipJar
