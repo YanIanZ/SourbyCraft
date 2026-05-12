@@ -1,0 +1,17 @@
+--- a/net/minecraft/world/entity/ai/Brain.java
++++ b/net/minecraft/world/entity/ai/Brain.java
+@@ -407,6 +_,14 @@
+     public void tick(ServerLevel level, E entity) {
+         this.forgetOutdatedMemories();
+         this.tickSensors(level, entity);
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.asyncPathfinding
++                && !(entity instanceof net.minecraft.server.level.ServerPlayer)) {
++            gg.pufferfish.pufferfish.util.AsyncExecutor.submitToPool(() -> {
++                this.startEachNonRunningBehavior(level, entity);
++                this.tickEachRunningBehavior(level, entity);
++            });
++            return;
++        }
+         this.startEachNonRunningBehavior(level, entity);
+         this.tickEachRunningBehavior(level, entity);
+     }
