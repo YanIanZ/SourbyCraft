@@ -1,5 +1,6 @@
 package dev.iyanz.sourbycraft;
 
+import gg.pufferfish.pufferfish.util.AsyncExecutor;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.minecraft.world.entity.ai.gossip.GossipType;
@@ -23,6 +24,10 @@ public class SourbyCraftConfig {
     static int version, currentVersion = 4;
     static boolean verbose;
 
+    public static boolean asyncChunkLoad = false;
+    public static boolean asyncPathfinding = false;
+    public static int asyncThreads = 4;
+
     public static void init(File configFile) {
         CONFIG_FILE = configFile;
         config = new YamlConfiguration();
@@ -42,6 +47,11 @@ public class SourbyCraftConfig {
         set("config-version", currentVersion);
 
         readConfig(SourbyCraftConfig.class, null);
+
+        asyncChunkLoad = getBoolean("performance.async-chunk-load", asyncChunkLoad);
+        asyncPathfinding = getBoolean("performance.async-pathfinding", asyncPathfinding);
+        asyncThreads = getInt("performance.async-threads", asyncThreads);
+        AsyncExecutor.initPool(asyncThreads);
     }
 
     protected static void log(String string) {
