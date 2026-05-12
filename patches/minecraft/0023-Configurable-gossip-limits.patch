@@ -5,10 +5,10 @@ Subject: [PATCH] Configurable gossip limits
 
 
 diff --git a/net/minecraft/world/entity/ai/gossip/GossipType.java b/net/minecraft/world/entity/ai/gossip/GossipType.java
-index 32548e375202452c5f5ec89fec8a82d62252e823..d3dd82f0a12ea51be23fe3eacf3b645899341c91 100644
+index 32548e375202452c5f5ec89fec8a82d62252e823..e2785fc6c3b616e4df025b5e64dc44d751483f1a 100644
 --- a/net/minecraft/world/entity/ai/gossip/GossipType.java
 +++ b/net/minecraft/world/entity/ai/gossip/GossipType.java
-@@ -4,11 +4,11 @@
+@@ -4,28 +4,38 @@
  import net.minecraft.util.StringRepresentable;
  
  public enum GossipType implements StringRepresentable {
@@ -25,10 +25,15 @@ index 32548e375202452c5f5ec89fec8a82d62252e823..d3dd82f0a12ea51be23fe3eacf3b6458
  
      public static final int REPUTATION_CHANGE_PER_EVENT = 25;
      public static final int REPUTATION_CHANGE_PER_EVERLASTING_MEMORY = 20;
-@@ -18,14 +18,24 @@
-     public final int max;
-     public final int decayPerDay;
-     public final int decayPerTransfer;
+     public static final int REPUTATION_CHANGE_PER_TRADE = 2;
+     public final String id;
+     public final int weight;
+-    public final int max;
+-    public final int decayPerDay;
+-    public final int decayPerTransfer;
++    public int max;
++    public int decayPerDay;
++    public int decayPerTransfer;
 +    // SourbyCraft start - configurable gossip limits
 +    public final int defaultMax;
 +    public final int defaultDecayPerDay;
