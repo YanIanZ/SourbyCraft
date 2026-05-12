@@ -39,6 +39,36 @@ public class AsyncExecutor implements Runnable {
         }
     }
 
+    private static final java.util.List<AsyncExecutor> POOL = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public static int getPoolSize() {
+        return POOL.size();
+    }
+
+    public static void initPool(int threadCount) {
+        shutdownPool();
+        for (int i = 0; i < threadCount; i++) {
+            AsyncExecutor exec = new AsyncExecutor("SourbyCraft Async Worker #" + i);
+            exec.start();
+            POOL.add(exec);
+        }
+    }
+
+    public static void shutdownPool() {
+        for (AsyncExecutor exec : POOL) {
+            exec.kill();
+        }
+        POOL.clear();
+    }
+
+    public static void submitToPool(Runnable task) {
+        if (POOL.isEmpty()) {
+            task.run();
+            return;
+        }
+        POOL.get((int) (Math.random() * POOL.size())).submit(task);
+    }
+
     @Override
     public void run() {
         while (!killswitch) {
