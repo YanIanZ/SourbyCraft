@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 8 Dec 2024 03:12:18 +0100
 Subject: [PATCH] Populate despawn time for existing entities on reload
 
@@ -13,12 +13,12 @@ index d34e627f8b6711d443553af74113d096b783b36d..c1be52267f89bd547550112ab697cbd9
                      range.soft().preComputed(category.getNoDespawnDistance(), category.getSerializedName());
                  }
 +
-+                // CloudPlane start - populate despawn time for existing entities on reload
++                // SourbyCraft start - populate despawn time for existing entities on reload
 +                net.minecraft.server.MinecraftServer.getServer().getAllLevels().forEach(level ->
 +                        level.getAllEntities().forEach(entity ->
 +                                entity.despawnTime = entity.getType() == EntityType.PLAYER ? -1 :
 +                                        this.despawnTime.getOrDefault(entity.getType(), IntOr.Disabled.DISABLED).or(-1)));
-+                // CloudPlane end - populate despawn time for existing entities on reload
++                // SourbyCraft end - populate despawn time for existing entities on reload
              }
  
              public WaterAnimalSpawnHeight wateranimalSpawnHeight;

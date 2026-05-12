@@ -1,34 +1,58 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Fri, 11 Jul 2025 04:59:58 +0200
 Subject: [PATCH] Configurable gossip limits
 
 
 diff --git a/net/minecraft/world/entity/ai/gossip/GossipType.java b/net/minecraft/world/entity/ai/gossip/GossipType.java
-index 4ead4b33983a908b4f71206fb4f7495adeeecda6..5933d182c6696a2f29d2b8e089b18a9fa39443c1 100644
+index 32548e375202452c5f5ec89fec8a82d62252e823..d3dd82f0a12ea51be23fe3eacf3b645899341c91 100644
 --- a/net/minecraft/world/entity/ai/gossip/GossipType.java
 +++ b/net/minecraft/world/entity/ai/gossip/GossipType.java
-@@ -18,6 +18,11 @@ public enum GossipType implements StringRepresentable {
-     public int max;
-     public int decayPerDay;
-     public int decayPerTransfer;
-+    // CloudPlane start - configurable gossip limits
+@@ -4,11 +4,11 @@
+ import net.minecraft.util.StringRepresentable;
+ 
+ public enum GossipType implements StringRepresentable {
+-    MAJOR_NEGATIVE("major_negative", -5, 100, 10, 10),
+-    MINOR_NEGATIVE("minor_negative", -1, 200, 20, 20),
+-    MINOR_POSITIVE("minor_positive", 1, 25, 1, 5),
+-    MAJOR_POSITIVE("major_positive", 5, 20, 0, 20),
+-    TRADING("trading", 1, 25, 2, 20);
++    MAJOR_NEGATIVE("major_negative", -5, 100, 10, 10, 100, 10, 10),
++    MINOR_NEGATIVE("minor_negative", -1, 200, 20, 20, 200, 20, 20),
++    MINOR_POSITIVE("minor_positive", 1, 25, 1, 5, 25, 1, 5),
++    MAJOR_POSITIVE("major_positive", 5, 20, 0, 20, 20, 0, 20),
++    TRADING("trading", 1, 25, 2, 20, 25, 2, 20);
+ 
+     public static final int REPUTATION_CHANGE_PER_EVENT = 25;
+     public static final int REPUTATION_CHANGE_PER_EVERLASTING_MEMORY = 20;
+@@ -18,14 +18,24 @@
+     public final int max;
+     public final int decayPerDay;
+     public final int decayPerTransfer;
++    // SourbyCraft start - configurable gossip limits
 +    public final int defaultMax;
 +    public final int defaultDecayPerDay;
 +    public final int defaultDecayPerTransfer;
-+    // CloudPlane end - configurable gossip limits
++    // SourbyCraft end - configurable gossip limits
      public static final Codec<GossipType> CODEC = StringRepresentable.fromEnum(GossipType::values);
  
-     private GossipType(final String id, final int weight, final int max, final int decayPerDay, final int decayPerTransfer) {
-@@ -26,6 +31,11 @@ public enum GossipType implements StringRepresentable {
+-    private GossipType(final String id, final int weight, final int max, final int decayPerDay, final int decayPerTransfer) {
++    private GossipType(final String id, final int weight, final int max, final int decayPerDay, final int decayPerTransfer, final int defaultMax, final int defaultDecayPerDay, final int defaultDecayPerTransfer) {
+         this.id = id;
+         this.weight = weight;
          this.max = max;
          this.decayPerDay = decayPerDay;
          this.decayPerTransfer = decayPerTransfer;
-+        // CloudPlane start - configurable gossip limits
-+        this.defaultMax = max;
-+        this.defaultDecayPerDay = decayPerDay;
-+        this.defaultDecayPerTransfer = decayPerTransfer;
-+        // CloudPlane end - configurable gossip limits
++        // SourbyCraft start - configurable gossip limits
++        this.defaultMax = defaultMax;
++        this.defaultDecayPerDay = defaultDecayPerDay;
++        this.defaultDecayPerTransfer = defaultDecayPerTransfer;
++        // SourbyCraft end - configurable gossip limits
      }
  
      @Override
+@@ -33,3 +43,4 @@
+         return this.id;
+     }
+ }
++

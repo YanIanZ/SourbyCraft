@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 5 Jan 2025 21:28:12 +0100
 Subject: [PATCH] Convert chunk heightmaps to array
 
@@ -13,7 +13,7 @@ index 09baa8c13a56e0f503815a436042b7b79b1698e4..7fabb54c965615af2de56d77a7ec40ff
          if (includeMaxBlockY) {
              heightmap = new Heightmap(chunk, Heightmap.Types.MOTION_BLOCKING);
 -            heightmap.setRawData(chunk, Heightmap.Types.MOTION_BLOCKING, chunk.heightmaps.get(Heightmap.Types.MOTION_BLOCKING).getRawData());
-+            heightmap.setRawData(chunk, Heightmap.Types.MOTION_BLOCKING, chunk.heightmaps[Heightmap.Types.MOTION_BLOCKING.ordinal()].getRawData()); // CloudPlane - convert heightmaps to array
++            heightmap.setRawData(chunk, Heightmap.Types.MOTION_BLOCKING, chunk.heightmaps[Heightmap.Types.MOTION_BLOCKING.ordinal()].getRawData()); // SourbyCraft - convert heightmaps to array
          }
  
          World world = this.getWorld();

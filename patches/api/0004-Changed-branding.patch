@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Fri, 25 Jun 2021 20:37:53 +0200
 Subject: [PATCH] Changed branding
 
@@ -12,12 +12,12 @@ index 652ff54e7c50412503725d628bfe72ed03059790..0e2ec18d15d9766c5146ed1fb343614d
       * The brand id for Paper.
       */
      Key BRAND_PAPER_ID = Key.key("papermc", "paper");
-+    // CloudPlane start - branding
++    // SourbyCraft start - branding
 +    /**
-+     * The brand id for CloudPlane.
++     * The brand id for SourbyCraft.
 +     */
-+    Key BRAND_CLOUDPLANE_ID = Key.key("cloudcraft", "cloudplane");
-+    // CloudPlane end - branding
++    Key BRAND_SOURBYCRAFT_ID = Key.key("sourbycraft", "sourbycraft");
++    // SourbyCraft end - branding
  
      /**
       * Gets the {@code ServerBuildInfo}.

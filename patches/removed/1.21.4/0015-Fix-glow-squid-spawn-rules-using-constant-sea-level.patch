@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Fri, 19 Jul 2024 05:47:47 +0200
 Subject: [PATCH] Fix glow squid spawn rules using constant sea level
 
@@ -16,6 +16,6 @@ index 09fdea983772612ef3fff6b2da3cf469a34e4ec0..18b1cb5c547fd37288bfb5cf52ab0eef
          EntityType<? extends LivingEntity> type, ServerLevelAccessor world, MobSpawnType reason, BlockPos pos, RandomSource random
      ) {
 -        return pos.getY() <= world.getSeaLevel() - 33 && world.getRawBrightness(pos, 0) == 0 && world.getBlockState(pos).is(Blocks.WATER);
-+        return pos.getY() <= world.getLevel().chunkSource.getGenerator().getSeaLevel() - 33 && world.getRawBrightness(pos, 0) == 0 && world.getBlockState(pos).is(Blocks.WATER); // CloudPlane - fix sea level usage
++        return pos.getY() <= world.getLevel().chunkSource.getGenerator().getSeaLevel() - 33 && world.getRawBrightness(pos, 0) == 0 && world.getBlockState(pos).is(Blocks.WATER); // SourbyCraft - fix sea level usage
      }
  }

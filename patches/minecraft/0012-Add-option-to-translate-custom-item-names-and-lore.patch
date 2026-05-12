@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Mon, 27 May 2024 03:13:37 +0200
 Subject: [PATCH] Add option to translate custom item names and lore
 
@@ -13,13 +13,13 @@ index fb2cd5fe354ad8f024e3f0d7a1f28eda4b2331f6..7dd40c809843bf34df6f4fb8b1bfdd06
                      Holder<Item> holder = Item.STREAM_CODEC.decode(buffer);
                      DataComponentPatch dataComponentPatch = codec.decode(buffer);
 -                    return new ItemStack(holder, varInt, dataComponentPatch);
-+                    // CloudPlane start - item localization
++                    // SourbyCraft start - item localization
 +                    ItemStack stack = new ItemStack(holder, varInt, dataComponentPatch);
-+                    if (dev.booky.cloudplane.CloudPlaneConfig.localizeItems) {
-+                        dev.booky.cloudplane.ItemUtil.unpackPatchSaves(stack);
++                    if (dev.iyanz.sourbycraft.SourbyCraftConfig.localizeItems) {
++                        dev.iyanz.sourbycraft.ItemUtil.unpackPatchSaves(stack);
 +                    }
 +                    return stack;
-+                    // CloudPlane end - item localization
++                    // SourbyCraft end - item localization
                  }
              }
  
@@ -27,25 +27,25 @@ index fb2cd5fe354ad8f024e3f0d7a1f28eda4b2331f6..7dd40c809843bf34df6f4fb8b1bfdd06
                  } else {
                      buffer.writeVarInt(io.papermc.paper.util.sanitizer.ItemComponentSanitizer.sanitizeCount(io.papermc.paper.util.sanitizer.ItemObfuscationSession.currentSession(), value, value.getCount())); // Paper - potentially sanitize count
                      Item.STREAM_CODEC.encode(buffer, value.getItemHolder());
-+                    // CloudPlane start - item localization
-+                    if (dev.booky.cloudplane.CloudPlaneConfig.localizeItems && buffer.adventure$locale != null) {
++                    // SourbyCraft start - item localization
++                    if (dev.iyanz.sourbycraft.SourbyCraftConfig.localizeItems && buffer.adventure$locale != null) {
 +                        try (final io.papermc.paper.util.SafeAutoClosable ignored = io.papermc.paper.util.sanitizer.ItemObfuscationSession.withContext(c -> c.itemStack(value))) { // pass the itemstack as context to the obfuscation session
-+                            codec.encode(buffer, dev.booky.cloudplane.ItemUtil.packPatchSaves(value));
++                            codec.encode(buffer, dev.iyanz.sourbycraft.ItemUtil.packPatchSaves(value));
 +                        }
 +                    } else {
-+                        // CloudPlane end - item localization
++                        // SourbyCraft end - item localization
                      // Paper start - adventure; conditionally render translatable components
                      boolean prev = net.minecraft.network.chat.ComponentSerialization.DONT_RENDER_TRANSLATABLES.get();
 -                    try (final io.papermc.paper.util.SafeAutoClosable ignored = io.papermc.paper.util.sanitizer.ItemObfuscationSession.withContext(c -> c.itemStack(value))) { // pass the itemstack as context to the obfuscation session
-+                    try (final io.papermc.paper.util.SafeAutoClosable ignored = io.papermc.paper.util.sanitizer.ItemObfuscationSession.withContext(c -> c.itemStack(value))) { // pass the itemstack as context to the obfuscation session // CloudPlane - item localization; diff on change
++                    try (final io.papermc.paper.util.SafeAutoClosable ignored = io.papermc.paper.util.sanitizer.ItemObfuscationSession.withContext(c -> c.itemStack(value))) { // pass the itemstack as context to the obfuscation session // SourbyCraft - item localization; diff on change
                          net.minecraft.network.chat.ComponentSerialization.DONT_RENDER_TRANSLATABLES.set(true);
 -                    codec.encode(buffer, value.components.asPatch());
-+                    codec.encode(buffer, value.components.asPatch()); // CloudPlane - item localization; diff on change
++                    codec.encode(buffer, value.components.asPatch()); // SourbyCraft - item localization; diff on change
                      } finally {
                          net.minecraft.network.chat.ComponentSerialization.DONT_RENDER_TRANSLATABLES.set(prev);
                      }
                      // Paper end - adventure; conditionally render translatable components
-+                    } // CloudPlane - item localization
++                    } // SourbyCraft - item localization
                  }
              }
          };
@@ -57,7 +57,7 @@ index a279e04868ed6df1aeda07e5fef8460458ec24af..bf954b0372737cf51ed72220ad1e727a
                  }
                  return realLines;
              })
-+            // CloudPlane start - item localization; line splitting support
++            // SourbyCraft start - item localization; line splitting support
 +            .<List<Component>>apply(codec -> new StreamCodec<>() {
 +                @Override
 +                public List<Component> decode(RegistryFriendlyByteBuf buf) {
@@ -66,7 +66,7 @@ index a279e04868ed6df1aeda07e5fef8460458ec24af..bf954b0372737cf51ed72220ad1e727a
 +
 +                @Override
 +                public void encode(RegistryFriendlyByteBuf buf, List<Component> value) {
-+                    if (dev.booky.cloudplane.CloudPlaneConfig.localizeItems && buf.adventure$locale != null) {
++                    if (dev.iyanz.sourbycraft.SourbyCraftConfig.localizeItems && buf.adventure$locale != null) {
 +                        // pre-render translations here to work around line splitting not working anymore
 +                        boolean prevNoRender = ComponentSerialization.DONT_RENDER_TRANSLATABLES.get();
 +                        try {
@@ -86,9 +86,9 @@ index a279e04868ed6df1aeda07e5fef8460458ec24af..bf954b0372737cf51ed72220ad1e727a
 +                    }
 +                }
 +            })
-+            // CloudPlane end - item localization; line splitting support
++            // SourbyCraft end - item localization; line splitting support
              .map(ItemLore::new, ItemLore::lines);
-     // CloudPlane end - split lore lines
+     // SourbyCraft end - split lore lines
  
 diff --git a/net/minecraft/world/item/trading/ItemCost.java b/net/minecraft/world/item/trading/ItemCost.java
 index 02cc7a23a0fb6a9e4ed88578606c40d5d2301ae1..fe41f833d72cdfd9de7329c72a7497b22d9b5db2 100644
@@ -99,7 +99,7 @@ index 02cc7a23a0fb6a9e4ed88578606c40d5d2301ae1..fe41f833d72cdfd9de7329c72a7497b2
          ItemCost::components,
          ItemCost::new
 -    );
-+    ).map(dev.booky.cloudplane.ItemUtil::unpackPatchSaves, dev.booky.cloudplane.ItemUtil::packPatchSaves); // CloudPlane - item translations; fix merchant offers de-sync
++    ).map(dev.iyanz.sourbycraft.ItemUtil::unpackPatchSaves, dev.iyanz.sourbycraft.ItemUtil::packPatchSaves); // SourbyCraft - item translations; fix merchant offers de-sync
      public static final StreamCodec<RegistryFriendlyByteBuf, Optional<ItemCost>> OPTIONAL_STREAM_CODEC = STREAM_CODEC.apply(ByteBufCodecs::optional);
  
      public ItemCost(ItemLike item) {

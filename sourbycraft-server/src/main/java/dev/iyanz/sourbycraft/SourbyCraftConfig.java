@@ -9,6 +9,7 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -142,13 +143,28 @@ public class SourbyCraftConfig {
     }
 
     private static void villagerGossip() {
-        for (GossipType gossipType : GossipType.values()) {
-            gossipType.max = gossipType.defaultMax;
-            gossipType.decayPerDay = gossipType.defaultDecayPerDay;
-            gossipType.decayPerTransfer = gossipType.defaultDecayPerTransfer;
-            gossipType.max = getInt("settings.villager-gossip." + gossipType.id + ".limit", gossipType.max);
-            gossipType.decayPerDay = getInt("settings.villager-gossip." + gossipType.id + ".decay-per-day", gossipType.decayPerDay);
-            gossipType.decayPerTransfer = getInt("settings.villager-gossip." + gossipType.id + ".decay-per-transfer", gossipType.decayPerTransfer);
+        try {
+            Field maxField = GossipType.class.getDeclaredField("max");
+            Field decayPerDayField = GossipType.class.getDeclaredField("decayPerDay");
+            Field decayPerTransferField = GossipType.class.getDeclaredField("decayPerTransfer");
+            maxField.setAccessible(true);
+            decayPerDayField.setAccessible(true);
+            decayPerTransferField.setAccessible(true);
+            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            modifiersField.setAccessible(true);
+            for (GossipType gossipType : GossipType.values()) {
+                modifiersField.setInt(maxField, maxField.getModifiers() & ~Modifier.FINAL);
+                modifiersField.setInt(decayPerDayField, decayPerDayField.getModifiers() & ~Modifier.FINAL);
+                modifiersField.setInt(decayPerTransferField, decayPerTransferField.getModifiers() & ~Modifier.FINAL);
+                maxField.set(gossipType, gossipType.defaultMax);
+                decayPerDayField.set(gossipType, gossipType.defaultDecayPerDay);
+                decayPerTransferField.set(gossipType, gossipType.defaultDecayPerTransfer);
+                maxField.set(gossipType, getInt("settings.villager-gossip." + gossipType.id + ".limit", (int) maxField.get(gossipType)));
+                decayPerDayField.set(gossipType, getInt("settings.villager-gossip." + gossipType.id + ".decay-per-day", (int) decayPerDayField.get(gossipType)));
+                decayPerTransferField.set(gossipType, getInt("settings.villager-gossip." + gossipType.id + ".decay-per-transfer", (int) decayPerTransferField.get(gossipType)));
+            }
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException("Failed to configure villager gossip limits", e);
         }
     }
 }

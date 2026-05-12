@@ -32,8 +32,7 @@ public class PufferfishConfig {
         return updates;
     }
 
-    public static void load(File configFile) throws IOException { // CloudPlane - configurable pufferfish config location
-        // File configFile = new File("pufferfish.yml"); // CloudPlane - configurable pufferfish config location
+    public static void load(File configFile) throws IOException {
 
         if (configFile.exists()) {
             try {

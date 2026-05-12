@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 5 Jan 2025 20:48:30 +0100
 Subject: [PATCH] Convert spawn category limits and ticks to array
 
@@ -13,7 +13,7 @@ index 151f383d538e76fd0078cfaf532c7df0bfd68485..b5aee70c3c383b0b4dfa1c014fda7aaa
      private final PlayerMetadataStore playerMetadata = new PlayerMetadataStore();
      private final WorldMetadataStore worldMetadata = new WorldMetadataStore();
 -    private final Object2IntOpenHashMap<SpawnCategory> spawnCategoryLimit = new Object2IntOpenHashMap<>();
-+    private final int[] spawnCategoryLimit = new int[SpawnCategory.values().length]; // CloudPlane - convert spawn category limits to array
++    private final int[] spawnCategoryLimit = new int[SpawnCategory.values().length]; // SourbyCraft - convert spawn category limits to array
      private File container;
      private WarningState warningState = WarningState.DEFAULT;
      public ApiVersion minimumAPI;
@@ -21,7 +21,7 @@ index 151f383d538e76fd0078cfaf532c7df0bfd68485..b5aee70c3c383b0b4dfa1c014fda7aaa
          this.saveCommandsConfig();
          this.overrideAllCommandBlockCommands = this.commandsConfiguration.getStringList("command-block-overrides").contains("*");
          this.ignoreVanillaPermissions = this.commandsConfiguration.getBoolean("ignore-vanilla-permissions");
-+        java.util.Arrays.fill(this.spawnCategoryLimit, -1); // CloudPlane - convert spawn category limits to array
++        java.util.Arrays.fill(this.spawnCategoryLimit, -1); // SourbyCraft - convert spawn category limits to array
          this.overrideSpawnLimits();
          console.autosavePeriod = this.configuration.getInt("ticks-per.autosave");
          this.warningState = WarningState.value(this.configuration.getString("settings.deprecated-verbose"));
@@ -30,7 +30,7 @@ index 151f383d538e76fd0078cfaf532c7df0bfd68485..b5aee70c3c383b0b4dfa1c014fda7aaa
          for (SpawnCategory spawnCategory : SpawnCategory.values()) {
              if (CraftSpawnCategory.isValidForLimits(spawnCategory)) {
 -                this.spawnCategoryLimit.put(spawnCategory, this.configuration.getInt(CraftSpawnCategory.getConfigNameSpawnLimit(spawnCategory)));
-+                this.spawnCategoryLimit[spawnCategory.ordinal()] = this.configuration.getInt(CraftSpawnCategory.getConfigNameSpawnLimit(spawnCategory)); // CloudPlane - convert spawn category limits to array
++                this.spawnCategoryLimit[spawnCategory.ordinal()] = this.configuration.getInt(CraftSpawnCategory.getConfigNameSpawnLimit(spawnCategory)); // SourbyCraft - convert spawn category limits to array
              }
          }
      }
@@ -39,10 +39,10 @@ index 151f383d538e76fd0078cfaf532c7df0bfd68485..b5aee70c3c383b0b4dfa1c014fda7aaa
                      long ticksPerCategorySpawn = this.getTicksPerSpawns(spawnCategory);
                      if (ticksPerCategorySpawn < 0) {
 -                        world.ticksPerSpawnCategory.put(spawnCategory, CraftSpawnCategory.getDefaultTicksPerSpawn(spawnCategory));
-+                        world.ticksPerSpawnCategory[spawnCategory.ordinal()] = CraftSpawnCategory.getDefaultTicksPerSpawn(spawnCategory); // CloudPlane - convert spawn category ticks to array
++                        world.ticksPerSpawnCategory[spawnCategory.ordinal()] = CraftSpawnCategory.getDefaultTicksPerSpawn(spawnCategory); // SourbyCraft - convert spawn category ticks to array
                      } else {
 -                        world.ticksPerSpawnCategory.put(spawnCategory, ticksPerCategorySpawn);
-+                        world.ticksPerSpawnCategory[spawnCategory.ordinal()] = ticksPerCategorySpawn; // CloudPlane - convert spawn category ticks to array
++                        world.ticksPerSpawnCategory[spawnCategory.ordinal()] = ticksPerCategorySpawn; // SourbyCraft - convert spawn category ticks to array
                      }
                  }
              }
@@ -52,8 +52,8 @@ index 151f383d538e76fd0078cfaf532c7df0bfd68485..b5aee70c3c383b0b4dfa1c014fda7aaa
  
 -    public int getSpawnLimitUnsafe(final SpawnCategory spawnCategory) {
 -        return this.spawnCategoryLimit.getOrDefault(spawnCategory, -1);
-+    public final int getSpawnLimitUnsafe(final SpawnCategory spawnCategory) { // CloudPlane - public -> public-f; convert spawn category limits to array
-+        return this.spawnCategoryLimit[spawnCategory.ordinal()]; // CloudPlane - convert spawn category limits to array
++    public final int getSpawnLimitUnsafe(final SpawnCategory spawnCategory) { // SourbyCraft - public -> public-f; convert spawn category limits to array
++        return this.spawnCategoryLimit[spawnCategory.ordinal()]; // SourbyCraft - convert spawn category limits to array
      }
  
      @Override
@@ -66,7 +66,7 @@ index ebc65e3338c646815416a47bf9af96fe45978caf..c46851faf77f8589f4cc66296e67ddd0
      private final List<BlockPopulator> populators = new ArrayList<>();
      private final BlockMetadataStore blockMetadata = new BlockMetadataStore(this);
 -    private final Object2IntOpenHashMap<SpawnCategory> spawnCategoryLimit = new Object2IntOpenHashMap<>();
-+    private final int[] spawnCategoryLimit = new int[SpawnCategory.values().length]; // CloudPlane - convert spawn category limits to array
++    private final int[] spawnCategoryLimit = new int[SpawnCategory.values().length]; // SourbyCraft - convert spawn category limits to array
      private final CraftPersistentDataContainer persistentDataContainer = new CraftPersistentDataContainer(CraftWorld.DATA_TYPE_REGISTRY);
      // Paper start - void damage configuration
      private boolean voidDamageEnabled;
@@ -74,7 +74,7 @@ index ebc65e3338c646815416a47bf9af96fe45978caf..c46851faf77f8589f4cc66296e67ddd0
          this.biomeProvider = biomeProvider;
  
          this.environment = environment;
-+        java.util.Arrays.fill(this.spawnCategoryLimit, -1); // CloudPlane - convert spawn category limits to array
++        java.util.Arrays.fill(this.spawnCategoryLimit, -1); // SourbyCraft - convert spawn category limits to array
          // Paper start - per world spawn limits
          for (SpawnCategory spawnCategory : SpawnCategory.values()) {
              if (CraftSpawnCategory.isValidForLimits(spawnCategory)) {
@@ -83,7 +83,7 @@ index ebc65e3338c646815416a47bf9af96fe45978caf..c46851faf77f8589f4cc66296e67ddd0
          Preconditions.checkArgument(CraftSpawnCategory.isValidForLimits(spawnCategory), "SpawnCategory.%s are not supported", spawnCategory);
  
 -        this.world.ticksPerSpawnCategory.put(spawnCategory, ticksPerCategorySpawn);
-+        this.world.ticksPerSpawnCategory[spawnCategory.ordinal()] = ticksPerCategorySpawn; // CloudPlane - convert spawn category ticks to array
++        this.world.ticksPerSpawnCategory[spawnCategory.ordinal()] = ticksPerCategorySpawn; // SourbyCraft - convert spawn category ticks to array
      }
  
      @Override
@@ -92,7 +92,7 @@ index ebc65e3338c646815416a47bf9af96fe45978caf..c46851faf77f8589f4cc66296e67ddd0
          Preconditions.checkArgument(CraftSpawnCategory.isValidForLimits(spawnCategory), "SpawnCategory.%s are not supported", spawnCategory);
  
 -        return this.world.ticksPerSpawnCategory.getLong(spawnCategory);
-+        return this.world.ticksPerSpawnCategory[spawnCategory.ordinal()]; // CloudPlane - convert spawn category ticks to array
++        return this.world.ticksPerSpawnCategory[spawnCategory.ordinal()]; // SourbyCraft - convert spawn category ticks to array
      }
  
      @Override
@@ -101,7 +101,7 @@ index ebc65e3338c646815416a47bf9af96fe45978caf..c46851faf77f8589f4cc66296e67ddd0
  
      public final int getSpawnLimitUnsafe(final SpawnCategory spawnCategory) {
 -        int limit = this.spawnCategoryLimit.getOrDefault(spawnCategory, -1);
-+        int limit = this.spawnCategoryLimit[spawnCategory.ordinal()]; // CloudPlane - convert spawn category limits to array
++        int limit = this.spawnCategoryLimit[spawnCategory.ordinal()]; // SourbyCraft - convert spawn category limits to array
          if (limit < 0) {
              limit = this.server.getSpawnLimitUnsafe(spawnCategory);
          }
@@ -110,7 +110,7 @@ index ebc65e3338c646815416a47bf9af96fe45978caf..c46851faf77f8589f4cc66296e67ddd0
          Preconditions.checkArgument(CraftSpawnCategory.isValidForLimits(spawnCategory), "SpawnCategory.%s are not supported", spawnCategory);
  
 -        this.spawnCategoryLimit.put(spawnCategory, limit);
-+        this.spawnCategoryLimit[spawnCategory.ordinal()] = limit; // CloudPlane - convert spawn category limits to array
++        this.spawnCategoryLimit[spawnCategory.ordinal()] = limit; // SourbyCraft - convert spawn category limits to array
      }
  
      @Override

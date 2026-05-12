@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sat, 1 Mar 2025 01:45:59 +0100
 Subject: [PATCH] Setup paperweight fork changes
 
@@ -13,7 +13,7 @@ index b7b9a2d4667d62fc186c4efb3041f1f9c496f305..c4d0978a1fb85f9e3757709b6fc76667
  }
  
 -val generatedDir: java.nio.file.Path = layout.projectDirectory.dir("src/generated/java").asFile.toPath()
-+val generatedDir: java.nio.file.Path = layout.projectDirectory.dir("../paper-api/src/generated/java").asFile.toPath() // CloudPlane - setup paperweight fork
++val generatedDir: java.nio.file.Path = layout.projectDirectory.dir("../paper-api/src/generated/java").asFile.toPath() // SourbyCraft - setup paperweight fork
  idea {
      module {
          generatedSourceDirs.add(generatedDir.toFile())
@@ -21,7 +21,7 @@ index b7b9a2d4667d62fc186c4efb3041f1f9c496f305..c4d0978a1fb85f9e3757709b6fc76667
          java {
              srcDir(generatedDir)
              srcDir("src/main/pufferfish") // Pufferfish
-+            // CloudPlane start - setup paperweight fork
++            // SourbyCraft start - setup paperweight fork
 +            srcDir("../paper-api/src/main/java")
 +        }
 +        resources {
@@ -36,7 +36,7 @@ index b7b9a2d4667d62fc186c4efb3041f1f9c496f305..c4d0978a1fb85f9e3757709b6fc76667
 +            srcDir("../paper-api/src/test/resources")
          }
      }
-+    // CloudPlane end - setup paperweight fork
++    // SourbyCraft end - setup paperweight fork
  }
  
  val outgoingVariants = arrayOf("runtimeElements", "apiElements", "sourcesElements", "javadocElements")
@@ -45,7 +45,7 @@ index b7b9a2d4667d62fc186c4efb3041f1f9c496f305..c4d0978a1fb85f9e3757709b6fc76667
      val options = options as StandardJavadocDocletOptions
      options.addStringOption("-add-modules", "jdk.incubator.vector") // Pufferfish
 -    options.overview = "src/main/javadoc/overview.html"
-+    options.overview = "../paper-api/src/main/javadoc/overview.html" // CloudPlane - setup paperweight fork
++    options.overview = "../paper-api/src/main/javadoc/overview.html" // SourbyCraft - setup paperweight fork
      options.use()
      options.isDocFilesSubDirs = true
      options.links(
@@ -54,12 +54,12 @@ index b7b9a2d4667d62fc186c4efb3041f1f9c496f305..c4d0978a1fb85f9e3757709b6fc76667
  
      // workaround for https://github.com/gradle/gradle/issues/4046
 -    inputs.dir("src/main/javadoc").withPropertyName("javadoc-sourceset")
-+    inputs.dir("../paper-api/src/main/javadoc").withPropertyName("javadoc-sourceset") // CloudPlane - setup paperweight fork
++    inputs.dir("../paper-api/src/main/javadoc").withPropertyName("javadoc-sourceset") // SourbyCraft - setup paperweight fork
      val fsOps = services.fileSystemOperations
      doLast {
          fsOps.copy {
 -            from("src/main/javadoc") {
-+            from("../paper-api/src/main/javadoc") { // CloudPlane - setup paperweight fork
++            from("../paper-api/src/main/javadoc") { // SourbyCraft - setup paperweight fork
                  include("**/doc-files/**")
              }
              into("build/docs/javadoc")

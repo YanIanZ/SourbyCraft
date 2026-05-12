@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 2 Feb 2025 06:08:38 +0100
 Subject: [PATCH] Fix children copying when filling missing command redirects
 
@@ -14,12 +14,12 @@ index 668eb52d71d77f75c24d4840be9a6c49d96dfc34..8ac6e6bb4e093daca27e62808f506be7
      }
  
      private static <S> void fillUsableCommands(java.util.Collection<CommandNode<S>> children, CommandNode<S> current, S source, Map<CommandNode<S>, CommandNode<S>> output) { // Paper - Perf: Async command map building; pass copy of children
-+        // CloudPlane start - support filling builders
++        // SourbyCraft start - support filling builders
 +        fillUsableCommands(children, current::addChild, source, output);
 +    }
 +
 +    private static <S> void fillUsableCommands(java.util.Collection<CommandNode<S>> children, Consumer<CommandNode<S>> current, S source, Map<CommandNode<S>, CommandNode<S>> output) { // Paper - Perf: Async command map building; pass copy of children
-+        // CloudPlane end - support filling builders
++        // SourbyCraft end - support filling builders
          for (CommandNode<S> commandNode : children) {  // Paper - Perf: Async command map building; pass copy of children
              // Paper start - Brigadier API
              if (commandNode.clientNode != null) {
@@ -31,10 +31,10 @@ index 668eb52d71d77f75c24d4840be9a6c49d96dfc34..8ac6e6bb4e093daca27e62808f506be7
 -                    for (final CommandNode<S> child : redirect.getChildren()) {
 -                        builder.then(child);
 -                    }
-+                    // CloudPlane start - don't blindly copy children over
++                    // SourbyCraft start - don't blindly copy children over
 +                    fillUsableCommands(commandNode.getRedirect().getChildren(),
 +                            builder::then, source, output);
-+                    // CloudPlane end - don't blindly copy children over
++                    // SourbyCraft end - don't blindly copy children over
  
                      argumentBuilder = builder;
                  }
@@ -43,7 +43,7 @@ index 668eb52d71d77f75c24d4840be9a6c49d96dfc34..8ac6e6bb4e093daca27e62808f506be7
                  CommandNode<S> commandNode1 = argumentBuilder.build();
                  output.put(commandNode, commandNode1);
 -                current.addChild(commandNode1);
-+                current.accept(commandNode1); // CloudPlane - support filling builders
++                current.accept(commandNode1); // SourbyCraft - support filling builders
                  if (!commandNode.getChildren().isEmpty()) {
                      fillUsableCommands(commandNode.getChildren(), commandNode1, source, output); // Paper - Perf: Async command map building; pass copy of children
                  }

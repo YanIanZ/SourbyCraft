@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 16 Jul 2023 20:32:10 +0200
 Subject: [PATCH] Fix non-adventure components not being translated
 
@@ -15,11 +15,11 @@ index f2f4575e6ec4f5a90b8f48306b0edfef2e5527f5..5ec4339fde101cbf1380dc7104f6d789
      // Component
  
      public static Component asAdventure(final net.minecraft.network.chat.Component component) {
-+        // CloudPlane start
++        // SourbyCraft start
 +        if (component instanceof AdventureComponent) {
 +            return ((AdventureComponent) component).adventure;
 +        }
-+        // CloudPlane end
++        // SourbyCraft end
 +
          return component == null ? Component.empty() : GsonComponentSerializer.gson().serializer().fromJson(net.minecraft.network.chat.Component.Serializer.toJsonTree(component), Component.class);
      }
@@ -28,11 +28,11 @@ index f2f4575e6ec4f5a90b8f48306b0edfef2e5527f5..5ec4339fde101cbf1380dc7104f6d789
      }
  
      public static String asJsonString(final net.minecraft.network.chat.Component component, final Locale locale) {
-+        // CloudPlane start
++        // SourbyCraft start
 +        if (true) {
 +            return asJsonString(asAdventure(component), locale);
 +        }
-+        // CloudPlane end
++        // SourbyCraft end
 +
          if (component instanceof AdventureComponent) {
              return asJsonString(((AdventureComponent) component).adventure, locale);
@@ -46,7 +46,7 @@ index 5c7a633070016d7b1536b007558cc7288b2d2557..7ed95c2a77fb73aff06051438c69f209
  
                          try {
 -                            this.setCustomName(Component.Serializer.fromJson(s));
-+                            this.setCustomName(io.papermc.paper.adventure.PaperAdventure.asVanilla(net.kyori.adventure.text.serializer.gson.GsonComponentSerializer.gson().deserialize(s))); // CloudPlane
++                            this.setCustomName(io.papermc.paper.adventure.PaperAdventure.asVanilla(net.kyori.adventure.text.serializer.gson.GsonComponentSerializer.gson().deserialize(s))); // SourbyCraft
                          } catch (Exception exception) {
                              Entity.LOGGER.warn("Failed to parse entity custom name {}", s, exception);
                          }

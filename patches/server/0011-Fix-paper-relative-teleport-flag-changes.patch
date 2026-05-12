@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Mon, 27 Jan 2025 21:48:37 +0100
 Subject: [PATCH] Fix paper relative teleport flag changes
 
@@ -13,14 +13,14 @@ index 2a572ef0ba7405ecafaf6def2a2134bd71b60453..9770c4f9ad1ff6168cb525122341507d
          for (final TeleportFlag flag : flags) {
              if (flag instanceof TeleportFlag.Relative relativeFlag) {
 -                relativeFlags.add(deltaRelativeToNMS(relativeFlag));
-+                deltaRelativeToNMS(relativeFlag, relativeFlags); // CloudPlane - fix paper relative teleport flag changes
++                deltaRelativeToNMS(relativeFlag, relativeFlags); // SourbyCraft - fix paper relative teleport flag changes
              }
          }
  
          return this.entity.teleport(new TeleportTransition(
              ((CraftWorld) location.getWorld()).getHandle(),
 -            CraftLocation.toVec3(location),
-+            // CloudPlane start - fix paper relative teleport flag changes
++            // SourbyCraft start - fix paper relative teleport flag changes
 +            new Vec3(
 +                    relativeFlags.contains(net.minecraft.world.entity.Relative.X) ? location.getX() - entity.getX() : location.getX(),
 +                    relativeFlags.contains(net.minecraft.world.entity.Relative.Y) ? location.getY() - entity.getY() : location.getY(),
@@ -31,14 +31,14 @@ index 2a572ef0ba7405ecafaf6def2a2134bd71b60453..9770c4f9ad1ff6168cb525122341507d
 -            location.getPitch(),
 +            relativeFlags.contains(net.minecraft.world.entity.Relative.Y_ROT) ? location.getYaw() - entity.getYRot() : location.getYaw(),
 +            relativeFlags.contains(net.minecraft.world.entity.Relative.X_ROT) ? location.getPitch() - entity.getXRot() : location.getPitch(),
-+            // CloudPlane end - fix paper relative teleport flag changes
++            // SourbyCraft end - fix paper relative teleport flag changes
              relativeFlags,
              TeleportTransition.DO_NOTHING,
              cause
          )) != null;
      }
  
-+    // CloudPlane start - fix paper relative teleport flag changes
++    // SourbyCraft start - fix paper relative teleport flag changes
 +    public static void deltaRelativeToNMS(io.papermc.paper.entity.TeleportFlag.Relative apiFlag, Set<net.minecraft.world.entity.Relative> nmsFlags) {
 +        switch (apiFlag) {
 +            case VELOCITY_X -> {
@@ -63,7 +63,7 @@ index 2a572ef0ba7405ecafaf6def2a2134bd71b60453..9770c4f9ad1ff6168cb525122341507d
 +
 +    @io.papermc.paper.annotation.DoNotUse
 +    @Deprecated
-+    // CloudPlane end - fix paper relative teleport flag changes
++    // SourbyCraft end - fix paper relative teleport flag changes
      public static net.minecraft.world.entity.Relative deltaRelativeToNMS(TeleportFlag.Relative apiFlag) {
          return switch (apiFlag) {
              case VELOCITY_X -> net.minecraft.world.entity.Relative.DELTA_X;
@@ -76,12 +76,12 @@ index 2a572ef0ba7405ecafaf6def2a2134bd71b60453..9770c4f9ad1ff6168cb525122341507d
 -            case DELTA_Z -> TeleportFlag.Relative.VELOCITY_Z;
 -            case ROTATE_DELTA -> TeleportFlag.Relative.VELOCITY_ROTATION;
 -            case X, Y, Z, Y_ROT, X_ROT -> null;
-+            // CloudPlane start - fix paper relative teleport flag changes
++            // SourbyCraft start - fix paper relative teleport flag changes
 +            case X, DELTA_X -> io.papermc.paper.entity.TeleportFlag.Relative.VELOCITY_X;
 +            case Y, DELTA_Y -> io.papermc.paper.entity.TeleportFlag.Relative.VELOCITY_Y;
 +            case Z, DELTA_Z -> io.papermc.paper.entity.TeleportFlag.Relative.VELOCITY_Z;
 +            case Y_ROT, X_ROT, ROTATE_DELTA -> io.papermc.paper.entity.TeleportFlag.Relative.VELOCITY_ROTATION;
-+            // CloudPlane end - fix paper relative teleport flag changes
++            // SourbyCraft end - fix paper relative teleport flag changes
          };
      }
  

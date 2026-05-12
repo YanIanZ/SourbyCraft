@@ -1,23 +1,45 @@
-# CloudPlane
+<p align="center">
+  <img src="https://img.shields.io/badge/minecraft-1.21.11-brightgreen?style=flat-square" alt="Minecraft 1.21.11">
+  <img src="https://img.shields.io/badge/java-21%2B-blue?style=flat-square" alt="Java 21+">
+  <img src="https://img.shields.io/badge/build-paperweight-orange?style=flat-square" alt="Paperweight">
+</p>
 
-A 1.21.11 Minecraft server fork of [Paper](https://github.com/PaperMC/Paper) and
-[Pufferfish](https://github.com/pufferfish-gg/Pufferfish) with some more patches.
+<h1 align="center">🍞 SourbyCraft</h1>
+
+<p align="center"><em>A high-performance Minecraft server fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a> with additional patches.</em></p>
+
+---
 
 ## Features
 
-- Split item lore on newlines on protocol level
-- Items support adventure's translatable components
-- Instantly refresh various things on player locale change
-- Add version info to brand in F3 screen
-- Add option for changing Pufferfish config location
-- Configurable villager gossip limitations
-- Various other fixes and minor performance increases
+- **Adventure translatable components** — items support Adventure's translatable component system
+- **Lore newline splitting** — split item lore on newlines at the protocol level
+- **Configurable gossip limits** — fine-tune villager gossip per type
+- **Instant locale refresh** — refresh various data immediately on player locale change
+- **Detailed brand info** — version info in F3 debug screen
+- **Configurable Pufferfish config** — custom config location via startup args
+- **Performance & fixes** — various optimizations and bug fixes
 
 ## Building
 
-_Building on Windows is untested and not recommended! Please use WSL instead._
+> Building on Windows is not supported. Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install).
 
-Clone this repository using git, _don't_ download the ZIP. After cloning,
-apply the patches using `./gradlew applyAllPatches`. This will take some time.
+```bash
+git clone <your-remote-url>
+cd SourbyCraft
+./gradlew applyAllPatches
+./gradlew createMojmapPaperclipJar
+```
 
-The runnable paperclip jar can be compiled using `./gradlew createMojmapPaperclipJar`.
+The paperclip jar will be at `sourbycraft-server/build/libs/sourbycraft-paperclip-*-mojmap.jar`.
+
+## Running
+
+```bash
+java -jar sourbycraft-paperclip-*.jar --nogui
+```
+
+## License
+
+SourbyCraft patches are licensed under [MIT](LICENCE.txt).  
+Paper and Pufferfish upstreams retain their respective licenses.

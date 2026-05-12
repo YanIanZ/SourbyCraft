@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: booky10 <boooky10@gmail.com>
+From: iyanz <boooky10@gmail.com>
 Date: Sun, 5 Jun 2022 17:07:27 +0200
 Subject: [PATCH] Log exceptions caused by packet sending
 
@@ -13,7 +13,7 @@ index f6dec363af8834340356b3be936fc35862933b4e..2a6c58fb012acc3cf3f553ff10d8f646
                      if (player != null) player.quitReason = org.bukkit.event.player.PlayerQuitEvent.QuitReason.ERRONEOUS_STATE; // Paper - Add API for quit reason
                      if (flag) {
 -                        LOGGER.debug("Failed to sent packet", exception);
-+                        LOGGER.error("Failed to sent packet", exception); // CloudPlane - always log errors
++                        LOGGER.error("Failed to sent packet", exception); // SourbyCraft - always log errors
                          boolean doesDisconnectExist = this.packetListener.protocol() != ConnectionProtocol.STATUS && this.packetListener.protocol() != ConnectionProtocol.HANDSHAKING; // Paper
                          if (this.getSending() == PacketFlow.CLIENTBOUND && doesDisconnectExist) { // Paper
                              Packet<?> packet = (Packet<?>)(this.sendLoginDisconnect
@@ -22,7 +22,7 @@ index f6dec363af8834340356b3be936fc35862933b4e..2a6c58fb012acc3cf3f553ff10d8f646
                          this.setReadOnly();
                      } else {
 -                        LOGGER.debug("Double fault", exception);
-+                        LOGGER.error("Double fault", exception); // CloudPlane - always log errors
++                        LOGGER.error("Double fault", exception); // SourbyCraft - always log errors
                          this.disconnect(disconnectionDetails);
                      }
                  }
