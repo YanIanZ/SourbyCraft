@@ -76,7 +76,7 @@ configure<PaperweightPatcherExtension> {
                 upstreamPath = "paper-$part"
                 patchesDir = file("patches/buildscript/$part")
                 featurePatchDir = patchesDir.dir(".")
-                outputDir = file("cloudplane-$part/buildscript")
+                outputDir = file("sourbycraft-$part/buildscript")
                 // the relevant part is just the buildscript
                 excludes = setOf("src", "patches")
             }

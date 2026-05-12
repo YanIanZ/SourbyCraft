@@ -1,4 +1,4 @@
-package dev.booky.cloudplane.testplugin;
+package dev.iyanz.sourbycraft.testplugin;
 
 import io.papermc.paper.plugin.loader.PluginClasspathBuilder;
 import io.papermc.paper.plugin.loader.PluginLoader;

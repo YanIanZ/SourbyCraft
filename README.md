@@ -2,7 +2,6 @@
 
 A 1.21.11 Minecraft server fork of [Paper](https://github.com/PaperMC/Paper) and
 [Pufferfish](https://github.com/pufferfish-gg/Pufferfish) with some more patches.
-This fork is mainly designed to fit the CloudCraft Minecraft network.
 
 ## Features
 
@@ -13,10 +12,6 @@ This fork is mainly designed to fit the CloudCraft Minecraft network.
 - Add option for changing Pufferfish config location
 - Configurable villager gossip limitations
 - Various other fixes and minor performance increases
-
-## Download
-
-https://dl.cloudcraftmc.de/cloudplane
 
 ## Building
 

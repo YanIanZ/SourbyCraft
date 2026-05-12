@@ -5,7 +5,7 @@ repositories {
 }
 
 dependencies {
-    findProject(":cloudplane-api")?.also { implementation(it) }
+    findProject(":sourbycraft-api")?.also { implementation(it) }
 }
 
 tasks.processResources {
