@@ -5,10 +5,10 @@ Subject: [PATCH] Configurable gossip limits
 
 
 diff --git a/net/minecraft/world/entity/ai/gossip/GossipType.java b/net/minecraft/world/entity/ai/gossip/GossipType.java
-index 32548e375202452c5f5ec89fec8a82d62252e823..e2785fc6c3b616e4df025b5e64dc44d751483f1a 100644
+index 32548e375202452c5f5ec89fec8a82d62252e823..6083e9bd8c2fd0c71455fce0aea5649a39a4281e 100644
 --- a/net/minecraft/world/entity/ai/gossip/GossipType.java
 +++ b/net/minecraft/world/entity/ai/gossip/GossipType.java
-@@ -4,28 +4,38 @@
+@@ -4,28 +4,38 @@ import com.mojang.serialization.Codec;
  import net.minecraft.util.StringRepresentable;
  
  public enum GossipType implements StringRepresentable {
@@ -56,7 +56,7 @@ index 32548e375202452c5f5ec89fec8a82d62252e823..e2785fc6c3b616e4df025b5e64dc44d7
      }
  
      @Override
-@@ -33,3 +43,4 @@
+@@ -33,3 +43,4 @@ public enum GossipType implements StringRepresentable {
          return this.id;
      }
  }
