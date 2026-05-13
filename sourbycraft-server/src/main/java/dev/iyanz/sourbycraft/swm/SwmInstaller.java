@@ -10,7 +10,7 @@ import java.util.logging.Logger;
 
 public final class SwmInstaller {
     private static final Logger LOGGER = Logger.getLogger("SourbyCraft-SWM");
-    private static final String SWM_URL = "https://github.com/Paul19988/Advanced-Slime-World-Manager/releases/download/%s/Advanced-SlimeWorldManager-%s.jar";
+    private static final String SWM_URL = "https://github.com/InfernalSuite/AdvancedSlimeWorldManager/releases/download/%s/AdvancedSlimeWorldManager-%s.jar";
 
     public static void install(String pluginsDir) {
         if (!SourbyCraftConfig.swmEnabled || !SourbyCraftConfig.swmAutoInstall) return;
