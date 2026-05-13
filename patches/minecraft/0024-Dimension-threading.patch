@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <dev@sourbycraft.iyanz.dev>
+Date: Wed, 13 May 2026 14:47:00 +0700
+Subject: [PATCH] Dimension threading dispatch in tick cycle
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -409,6 +409,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             this, this.executor, this.storageSource, serverLevelData, Level.OVERWORLD, levelStem, isDebugWorld, l, list, true, null
+         );
+         this.levels.put(Level.OVERWORLD, serverLevel);
++        // SourbyCraft start - Dimension threading
++        dev.iyanz.sourbycraft.async.DimensionThreadManager.startDimension(serverLevel);
++        // SourbyCraft end
+         DimensionDataStorage dataStorage = serverLevel.getDataStorage();
+         this.scoreboard.load(dataStorage.computeIfAbsent(ScoreboardSaveData.TYPE).getData());
+         this.commandStorage = new CommandStorage(dataStorage);
+@@ -463,6 +466,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                     randomSequences
+                 );
+                 this.levels.put(resourceKey1, serverLevel1);
++                // SourbyCraft start - Dimension threading
++                dev.iyanz.sourbycraft.async.DimensionThreadManager.startDimension(serverLevel1);
++                // SourbyCraft end
+             } else {
+                 serverLevel1 = serverLevel;
+             }
+@@ -670,6 +676,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+         LOGGER.info("Saving worlds");
+ 
++        // SourbyCraft start - Dimension threading
++        dev.iyanz.sourbycraft.async.DimensionThreadManager.stopAll();
++        // SourbyCraft end
++
+         for (ServerLevel serverLevel : this.getAllLevels()) {
+             if (serverLevel != null) {
+                 serverLevel.noSave = false;
+@@ -1137,7 +1147,17 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             profilerFiller.push("tick");
+ 
+             try {
+-                serverLevel.tick(hasTimeLeft);
++                // SourbyCraft start - Dimension threading
++                if (dev.iyanz.sourbycraft.SourbyCraftConfig.multithreadingEnabled
++                        && dev.iyanz.sourbycraft.SourbyCraftConfig.dimensionThreads
++                        && serverLevel.dimension() != Level.OVERWORLD) {
++                    dev.iyanz.sourbycraft.async.DimensionThreadManager.tickDimension(serverLevel, () -> {
++                        serverLevel.tick(hasTimeLeft);
++                    });
++                } else {
++                    serverLevel.tick(hasTimeLeft);
++                }
++                // SourbyCraft end
+             } catch (Throwable var7) {
+                 CrashReport crashReport = CrashReport.forThrowable(var7, "Exception ticking world");
+                 serverLevel.fillReportDetails(crashReport);
