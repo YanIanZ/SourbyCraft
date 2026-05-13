@@ -10,7 +10,8 @@ import java.util.logging.Logger;
 
 public final class SwmInstaller {
     private static final Logger LOGGER = Logger.getLogger("SourbyCraft-SWM");
-    private static final String SWM_URL = "https://github.com/InfernalSuite/AdvancedSlimeWorldManager/releases/download/%s/AdvancedSlimeWorldManager-%s.jar";
+    private static final String SWM_URL = "https://github.com/InfernalSuite/AdvancedSlimeWorldManager/releases/download/v%s/AdvancedSlimeWorldManager-%s.jar";
+    private static final String SWM_URL_ALT = "https://github.com/InfernalSuite/AdvancedSlimeWorldManager/releases/download/%s/AdvancedSlimeWorldManager-%s.jar";
 
     public static void install(String pluginsDir) {
         if (!SourbyCraftConfig.swmEnabled || !SourbyCraftConfig.swmAutoInstall) return;
@@ -22,24 +23,31 @@ public final class SwmInstaller {
         }
 
         String version = SourbyCraftConfig.swmVersion;
-        String url = String.format(SWM_URL, version, version);
+        String[] urls = {
+            String.format(SWM_URL, version, version),
+            String.format(SWM_URL_ALT, version, version)
+        };
         LOGGER.log(Level.INFO, "Downloading SlimeWorldManager v" + version + "...");
 
-        try {
-            Files.createDirectories(Path.of(pluginsDir));
-            HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
-            conn.setConnectTimeout(30000);
-            conn.setReadTimeout(60000);
-            conn.setRequestProperty("User-Agent", "SourbyCraft-SWM-Installer");
+        for (String url : urls) {
+            try {
+                Files.createDirectories(Path.of(pluginsDir));
+                HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+                conn.setConnectTimeout(30000);
+                conn.setReadTimeout(60000);
+                conn.setRequestProperty("User-Agent", "SourbyCraft-SWM-Installer");
 
-            try (InputStream in = conn.getInputStream()) {
-                Files.copy(in, jarPath, StandardCopyOption.REPLACE_EXISTING);
+                try (InputStream in = conn.getInputStream()) {
+                    Files.copy(in, jarPath, StandardCopyOption.REPLACE_EXISTING);
+                }
+
+                LOGGER.log(Level.INFO, "SlimeWorldManager installed. Restart server to load.");
+                return;
+            } catch (IOException e) {
+                LOGGER.log(Level.FINE, "Tried " + url + ": " + e.getMessage());
             }
-
-            LOGGER.log(Level.INFO, "SlimeWorldManager installed. Restart server to load.");
-        } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to download SWM: " + e.getMessage());
         }
+        LOGGER.log(Level.WARNING, "Failed to download SWM from all URLs");
     }
 
     public static boolean isInstalled() {
