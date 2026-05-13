@@ -39,6 +39,15 @@ public class SourbyCraftConfig {
     public static String swmVersion = "2.2.1";
     public static boolean swmAutoInstall = true;
 
+    public static boolean autoThrottleView = true;
+    public static int minViewDistance = 4;
+    public static int compressionLevel = 4;
+    public static boolean entityTickRateLimit = true;
+    public static int entityTickRate = 20;
+    public static boolean hopperBatch = true;
+    public static boolean redstoneOptimize = true;
+    public static boolean asyncSaveBatch = true;
+
     public static void init(File configFile) {
         CONFIG_FILE = configFile;
         config = new YamlConfiguration();
@@ -75,6 +84,15 @@ public class SourbyCraftConfig {
         swmEnabled = getBoolean("swm.enabled", swmEnabled);
         swmVersion = getString("swm.version", swmVersion);
         swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
+
+        autoThrottleView = getBoolean("network.auto-throttle-view", autoThrottleView);
+        minViewDistance = getInt("network.min-view-distance", minViewDistance);
+        compressionLevel = getInt("network.compression-level", compressionLevel);
+        entityTickRateLimit = getBoolean("entity.tick-rate-limit", entityTickRateLimit);
+        entityTickRate = getInt("entity.tick-rate", entityTickRate);
+        hopperBatch = getBoolean("entity.hopper-batch", hopperBatch);
+        redstoneOptimize = getBoolean("entity.redstone-optimize", redstoneOptimize);
+        asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
 
         if (swmEnabled && swmAutoInstall) {
             dev.iyanz.sourbycraft.swm.SwmInstaller.install("plugins/");
