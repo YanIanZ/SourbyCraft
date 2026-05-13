@@ -1,5 +1,17 @@
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
+@@ -640,6 +_,11 @@
+         io.papermc.paper.command.brigadier.PaperCommands.INSTANCE.setValid(); // Paper - reset invalid state for event fire below
+         io.papermc.paper.plugin.lifecycle.event.LifecycleEventRunner.INSTANCE.callReloadableRegistrarEvent(io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, io.papermc.paper.command.brigadier.PaperCommands.INSTANCE, org.bukkit.plugin.Plugin.class, io.papermc.paper.plugin.lifecycle.event.registrar.ReloadableRegistrarEvent.Cause.INITIAL); // Paper - call commands event for regular plugins
+         this.server.getCommandMap().registerServerAliases(); // Paper - relocate initial CommandMap#registerServerAliases() call
++        this.server.getCommandMap().register("", new dev.iyanz.sourbycraft.command.PingCommand("ping")); // SourbyCraft
++        this.server.getCommandMap().register("", new dev.iyanz.sourbycraft.command.SysCommand("sys")); // SourbyCraft
++        this.server.getCommandMap().register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins")); // SourbyCraft
++        this.server.getCommandMap().register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar")); // SourbyCraft
++        this.server.getCommandMap().register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest")); // SourbyCraft
+         ((org.bukkit.craftbukkit.help.SimpleHelpMap) this.server.getHelpMap()).initializeCommands();
+         this.server.getPluginManager().callEvent(new org.bukkit.event.server.ServerLoadEvent(org.bukkit.event.server.ServerLoadEvent.LoadType.STARTUP));
+         this.connection.acceptConnections();
 @@ -1013,6 +_,7 @@
          }
  
