@@ -1,0 +1,208 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 13 May 2026 18:06:41 +0700
+Subject: [PATCH] feat: add /sys /ping /plugins /speedtest commands
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..7202e25744dd0ec0e332cf0c9dbb613707545576
+--- /dev/null
++++ b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+@@ -0,0 +1,44 @@
++package dev.iyanz.sourbycraft.command;
++
++import dev.iyanz.sourbycraft.SourbyCraftColors;
++import dev.iyanz.sourbycraft.util.BarUtil;
++import net.kyori.adventure.text.format.TextColor;
++import org.bukkit.Bukkit;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import org.bukkit.entity.Player;
++import static net.kyori.adventure.text.Component.text;
++
++public class PingCommand extends Command {
++    public PingCommand(String name) {
++        super(name);
++        this.description = "Shows player connection latency";
++        this.usageMessage = "/ping [player]";
++        this.setPermission("sourbycraft.command.ping");
++    }
++
++    @Override
++    public boolean execute(CommandSender sender, String alias, String[] args) {
++        if (!this.testPermission(sender)) return true;
++        Player target;
++        if (args.length > 0) {
++            target = Bukkit.getPlayer(args[0]);
++            if (target == null) { sender.sendMessage(text("Player not found: " + args[0], SourbyCraftColors.DANGER)); return true; }
++        } else if (sender instanceof Player p) target = p;
++        else { sender.sendMessage(text("Usage: /ping <player>", SourbyCraftColors.DIM)); return true; }
++
++        int ping = target.getPing();
++        TextColor pc = ping < 50 ? SourbyCraftColors.SUCCESS : ping < 100 ? SourbyCraftColors.PRIMARY : ping < 200 ? SourbyCraftColors.WARNING : SourbyCraftColors.DANGER;
++        sender.sendMessage(text().append(text("Ping: ", SourbyCraftColors.LABEL))
++            .append(BarUtil.coloredBar(Math.min((200-ping)/2.0, 100), 20))
++            .append(text(" " + ping + "ms", pc)));
++
++        String brand = target.getClientBrandName() != null ? target.getClientBrandName() : "vanilla";
++        sender.sendMessage(text().append(text("Client: ", SourbyCraftColors.LABEL)).append(text(brand + " | protocol " + target.getProtocolVersion(), SourbyCraftColors.VALUE)));
++        if (target.getLocation().getWorld() != null) {
++            var loc = target.getLocation();
++            sender.sendMessage(text().append(text("Location: ", SourbyCraftColors.LABEL)).append(text(loc.getWorld().getName() + " | " + loc.getBlockX() + ", " + loc.getBlockY() + ", " + loc.getBlockZ(), SourbyCraftColors.VALUE)));
++        }
++        return true;
++    }
++}
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..925f09f4f0d65a35019b4c8d67ba83a78246434b
+--- /dev/null
++++ b/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java
+@@ -0,0 +1,25 @@
++package dev.iyanz.sourbycraft.command;
++
++import dev.iyanz.sourbycraft.SourbyCraftColors;
++import org.bukkit.Bukkit;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import java.util.Arrays;
++import static net.kyori.adventure.text.Component.text;
++
++public class PluginsCommand extends Command {
++    public PluginsCommand(String name) {
++        super(name);
++        this.description = "Lists all active plugins";
++        this.usageMessage = "/plugins";
++        this.setPermission("sourbycraft.command.plugins");
++    }
++    @Override
++    public boolean execute(CommandSender sender, String alias, String[] args) {
++        if (!this.testPermission(sender)) return true;
++        var plugins = Bukkit.getPluginManager().getPlugins();
++        String list = Arrays.stream(plugins).map(p -> p.getName() + " v" + p.getDescription().getVersion()).reduce((a,b)->a+", "+b).orElse("none");
++        sender.sendMessage(text().append(text("Plugins (" + plugins.length + "): ", SourbyCraftColors.HEADER)).append(text(list, SourbyCraftColors.VALUE)));
++        return true;
++    }
++}
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..18237d3af9737f3035c4b9f819b007c9b2e8cf48
+--- /dev/null
++++ b/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java
+@@ -0,0 +1,46 @@
++package dev.iyanz.sourbycraft.command;
++
++import dev.iyanz.sourbycraft.SourbyCraftColors;
++import dev.iyanz.sourbycraft.util.BarUtil;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import java.io.*;
++import java.nio.file.*;
++import static net.kyori.adventure.text.Component.text;
++
++public class SpeedtestCommand extends Command {
++    private static final Path BIN = Paths.get("plugins/sourbycraft/speedtest");
++    public SpeedtestCommand(String name) {
++        super(name);
++        this.description = "Runs network speed test via Ookla";
++        this.usageMessage = "/speedtest";
++        this.setPermission("sourbycraft.command.speedtest");
++    }
++    @Override
++    public boolean execute(CommandSender sender, String alias, String[] args) {
++        if (!this.testPermission(sender)) return true;
++        if (!Files.exists(BIN)) {
++            try {
++                Files.createDirectories(BIN.getParent());
++                try (InputStream in = getClass().getClassLoader().getResourceAsStream("speedtest")) {
++                    if (in == null) { sender.sendMessage(text("Place speedtest binary at plugins/sourbycraft/speedtest", SourbyCraftColors.DANGER)); return true; }
++                    Files.copy(in, BIN); BIN.toFile().setExecutable(true);
++                }
++            } catch (IOException e) { sender.sendMessage(text(e.getMessage(), SourbyCraftColors.DANGER)); return true; }
++        }
++        sender.sendMessage(text("Running speedtest...", SourbyCraftColors.LABEL));
++        try {
++            Process proc = new ProcessBuilder(BIN.toString(), "--format=json", "--accept-license", "--accept-gdpr").redirectErrorStream(true).start();
++            String out = new String(proc.getInputStream().readAllBytes()); proc.waitFor();
++            var gson = new com.google.gson.Gson(); var r = gson.fromJson(out, java.util.Map.class);
++            var dl = (java.util.Map)r.get("download"); var ul = (java.util.Map)r.get("upload");
++            var ping = (java.util.Map)r.get("ping"); var server = (java.util.Map)r.get("server");
++            double dm = ((Number)dl.get("bandwidth")).doubleValue()*8/1000000, um = ((Number)ul.get("bandwidth")).doubleValue()*8/1000000;
++            double pm = ((Number)ping.get("latency")).doubleValue();
++            sender.sendMessage(text().append(text("Download: ",SourbyCraftColors.LABEL)).append(BarUtil.coloredBar(Math.min(dm/5,100),20)).append(text(" "+String.format("%.1f Mbps",dm),SourbyCraftColors.SUCCESS)));
++            sender.sendMessage(text().append(text("Upload:   ",SourbyCraftColors.LABEL)).append(BarUtil.coloredBar(Math.min(um/3,100),20)).append(text(" "+String.format("%.1f Mbps",um),SourbyCraftColors.SUCCESS)));
++            sender.sendMessage(text().append(text("Ping:     ",SourbyCraftColors.LABEL)).append(text(String.format("%.0fms",pm),pm<30?SourbyCraftColors.SUCCESS:SourbyCraftColors.PRIMARY)).append(text(" | "+server.get("name")+", "+server.get("location"),SourbyCraftColors.DIM)));
++        } catch (Exception e) { sender.sendMessage(text("Speedtest failed: "+e.getMessage(), SourbyCraftColors.DANGER)); }
++        return true;
++    }
++}
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/SysCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/SysCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..c02794e9d9d0aad2998c76eb0b971665ceaee0cd
+--- /dev/null
++++ b/src/main/java/dev/iyanz/sourbycraft/command/SysCommand.java
+@@ -0,0 +1,46 @@
++package dev.iyanz.sourbycraft.command;
++
++import dev.iyanz.sourbycraft.SourbyCraftColors;
++import dev.iyanz.sourbycraft.util.BarUtil;
++import org.bukkit.Bukkit;
++import org.bukkit.World;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import java.lang.management.ManagementFactory;
++import java.text.DecimalFormat;
++import java.util.Arrays;
++import static net.kyori.adventure.text.Component.text;
++
++public class SysCommand extends Command {
++    private static final DecimalFormat FMT = new DecimalFormat("########0.0");
++    public SysCommand(String name) {
++        super(name);
++        this.description = "Displays full server specifications";
++        this.usageMessage = "/sys";
++        this.setPermission("sourbycraft.command.sys");
++    }
++    @Override
++    public boolean execute(CommandSender sender, String alias, String[] args) {
++        if (!this.testPermission(sender)) return true;
++        long uptime = ManagementFactory.getRuntimeMXBean().getUptime();
++        long d=uptime/86400000, h=(uptime%86400000)/3600000, m=(uptime%3600000)/60000;
++        sender.sendMessage(text().append(text("Uptime: ", SourbyCraftColors.LABEL)).append(text(d+"d "+h+"h "+m+"m", SourbyCraftColors.VALUE)));
++        try {
++            oshi.SystemInfo si = new oshi.SystemInfo();
++            var cpu = si.getHardware().getProcessor();
++            sender.sendMessage(text().append(text("CPU: ", SourbyCraftColors.LABEL)).append(text(cpu.getProcessorIdentifier().getName().trim()+" | "+cpu.getPhysicalProcessorCount()+"c/"+cpu.getLogicalProcessorCount()+"t | "+FMT.format(cpu.getSystemCpuLoad(1000)*100)+"%", SourbyCraftColors.VALUE)));
++        } catch (NoClassDefFoundError e) {}
++        Runtime rt = Runtime.getRuntime();
++        long max=rt.maxMemory(), used=rt.totalMemory()-rt.freeMemory();
++        double pct = max==Long.MAX_VALUE ? (double)used/rt.totalMemory()*100 : (double)used/max*100;
++        String label = max==Long.MAX_VALUE ? BarUtil.INFINITY : (max/1048576)+" MB";
++        sender.sendMessage(text().append(text("RAM: ", SourbyCraftColors.LABEL)).append(BarUtil.coloredBar(pct,20)).append(text(" "+FMT.format(pct)+"% "+(used/1048576)+"/"+label, SourbyCraftColors.VALUE)));
++        sender.sendMessage(text().append(text("Java: ", SourbyCraftColors.LABEL)).append(text(System.getProperty("java.version")+" ("+System.getProperty("java.vm.name")+")", SourbyCraftColors.VALUE)));
++        int rec = Math.max(3, (Runtime.getRuntime().availableProcessors()*3)/Math.max(1,Bukkit.getWorlds().size()));
++        sender.sendMessage(text("Worlds ("+Bukkit.getWorlds().size()+"):", SourbyCraftColors.HEADER));
++        for (World w : Bukkit.getWorlds()) sender.sendMessage(text().append(text("  "+w.getName()+": ",SourbyCraftColors.LABEL)).append(text(w.getLoadedChunks().length+" chunks · "+w.getEntities().size()+" entities",SourbyCraftColors.DIM)).append(text(" · ~"+rec+" players",SourbyCraftColors.SUCCESS)));
++        var plugins = Bukkit.getPluginManager().getPlugins();
++        sender.sendMessage(text().append(text("Plugins ("+plugins.length+"): ",SourbyCraftColors.HEADER)).append(text(Arrays.stream(plugins).map(p->p.getName()).reduce((a,b)->a+", "+b).orElse("none"),SourbyCraftColors.VALUE)));
++        return true;
++    }
++}
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 18e7cd39b080828a741ac047ceebb607c3111825..08729d5dac323a8bd7d0146c4aa031d123adeb2a 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1026,6 +1026,12 @@ public final class CraftServer implements Server {
+         org.spigotmc.SpigotConfig.registerCommands(); // Spigot
+         io.papermc.paper.command.PaperCommands.registerCommands(this.console); // Paper
+         this.spark.registerCommandBeforePlugins(this); // Paper - spark
++        // SourbyCraft start - register custom commands
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
++        // SourbyCraft end
+         this.overrideAllCommandBlockCommands = this.commandsConfiguration.getStringList("command-block-overrides").contains("*");
+         this.ignoreVanillaPermissions = this.commandsConfiguration.getBoolean("ignore-vanilla-permissions");
+ 

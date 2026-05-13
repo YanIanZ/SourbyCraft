@@ -17,8 +17,8 @@ public final class BarUtil {
     }
 
     public static Component coloredBar(double percent, int width) {
-        TextColor color = percent > 80 ? SourbyCraftColors.SUCCESS
-            : percent > 50 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
+        TextColor color = percent > 80 ? SourbyCraftColors.DANGER
+            : percent > 50 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.SUCCESS;
         return text(bar(percent, width), color);
     }
 
