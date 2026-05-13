@@ -64,12 +64,12 @@ Player connection diagnostics:
 All features gated in `sourbycraft.yml`:
 
 ```yaml
-# Memory optimization (defaults ON)
+# Memory optimization (experimental, defaults OFF)
 memory:
   skip-empty-sections: true
   pool-entity-data: true
-  pre-size-packets: true
-  chunk-compression-cache: true
+  pre-size-packets: false
+  chunk-compression-cache: false
 
 # Multithreading (defaults OFF)
 multithreading:
