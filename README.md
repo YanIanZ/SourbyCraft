@@ -1,91 +1,72 @@
 <p align="center">
   <img src="https://img.shields.io/badge/minecraft-1.21.11-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-21--25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/version-v1--DEV-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/version-v1.1.1--DEV-orange?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
 <h1 align="center">🍞 SourbyCraft</h1>
 
-<p align="center"><em>A high-performance Minecraft server fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a> with additional optimizations.</em></p>
+<p align="center"><em>A high-performance Minecraft server fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a></em></p>
 
 ---
 
 ## Features
 
 ### Performance
-
-| Feature | Description |
-|---------|-------------|
-| **Chunk air dedup** | Skip palette allocation for 100% air sections — reduces chunk memory by 15-30% |
-| **Entity data pooling** | Thread-local `DataValue` pool — 50% fewer allocations per entity tick |
-| **Packet pre-sizing** | Chunk packet buffers pre-sized to 8192 bytes — avoids 3-4 resizes per send |
-| **Compression LRU cache** | 256-entry cache for compressed chunk data — 40% less compression CPU |
-| **String deduplication** | JVM-level `-XX:+UseStringDeduplication` — 15% smaller string heap |
-| **SIMD acceleration** | Vectorized map palette on Java 17-25 with AVX2+ |
-| **Spawn & heightmap arrays** | Primitive arrays for O(1) access — no map lookups |
-| **Brain behavior tracking** | Direct behavior list for fast iteration |
-| **Pufferfish engine** | Async mob spawning, entity activation range, DAB |
+- **G1GC optimized** — tuned garbage collection for <2GB survival servers
+- **SIMD acceleration** — vectorized map palette on Java 17-25 with AVX2+
+- **Spawn & heightmap arrays** — primitive arrays for O(1) access
+- **Brain behavior tracking** — direct behavior list for fast iteration
+- **Pufferfish engine** — async mob spawning, entity activation range, DAB
+- **ForkJoinPool async** — work-stealing thread pool for pathfinding/chunk I/O
 
 ### Gameplay
+- **Adventure components** — translatable item names and lore
+- **Lore newline splitting** — protocol-level lore formatting
+- **Configurable gossip limits** — per-type villager gossip tuning
+- **Instant locale refresh** — data refresh on player locale change
+- **Detailed brand info** — version + build in F3 debug screen
 
-| Feature | Description |
+### Commands (hex-colored with visual bars)
+
+| Command | Description |
 |---------|-------------|
-| **Adventure components** | Items support Adventure's translatable component system |
-| **Lore newline splitting** | Split lore at protocol level |
-| **Gossip limits** | Per-type villager gossip tuning |
-| **Locale refresh** | Refresh data instantly on player locale change |
-| **Brand info** | Version + build in F3 debug screen |
+| `/tps` | TPS bars + MSPT + RAM + CPU + GC |
+| `/tpsbar` | BossBar: TPS + MSPT + RAM visual bars |
+| `/rambar` | BossBar: RAM usage visual bar |
+| `/sys` | Full server specs: uptime, CPU, RAM, Java, worlds, SWM |
+| `/ping [player]` | Latency bar + client info + world location |
+| `/plugins` | Active plugin list with versions |
+| `/speedtest` | Built-in Ookla network speed test |
+| `/ver` | Version info: SourbyCraft + Minecraft + API + uptime |
+| `/swm <list\|load\|status>` | SlimeWorldManager control |
+| `/mods` | Mods folder scanner (Forge/Fabric/Bukkit) |
 
----
+### SlimeWorldManager
+- Auto-installs SWM plugin on first run
+- `/swm list` — shows `.slime` worlds with load status
+- `/swm load <world>` — loads a slime world
 
-## Commands
-
-### `/tps`
-Real-time server performance with hex colors:
-- **TPS** (1m, 5m, 15m) — color-coded health
-- **MSPT** — milliseconds per tick
-- **CPU** — model, cores, load % (oshi)
-- **GC** — collector, collections, total time
-- **Players** — online count
-
-Add `mem` for memory usage: `/tps mem`
-
-### `/ping [player]`
-Player connection diagnostics:
-- Latency in ms with colored visual bar
-- Client brand + protocol version
-- World + coordinates
+### Mod Support (Phase 1)
+- `ModScanner` — reads metadata from `mods/` jars
+- `/mods` — lists NeoForge, Forge, Fabric, and Bukkit mods
 
 ---
 
 ## Configuration
 
-All features gated in `sourbycraft.yml`:
-
 ```yaml
-# Memory optimization (experimental, defaults OFF)
-memory:
-  skip-empty-sections: true
-  pool-entity-data: true
-  pre-size-packets: false
-  chunk-compression-cache: false
-
-# Multithreading (defaults OFF)
+# sourbycraft.yml
 multithreading:
-  enabled: false
-  dimension-threads: true
-  async-threads: 4
+  enabled: false              # per-dimension threads (experimental)
 
-# Async features (defaults OFF)
 performance:
-  async-threads: 4
-  async-chunk-load: false
-  async-pathfinding: false
+  async-threads: 2            # ForkJoinPool workers
+  async-pathfinding: false    # async entity AI (experimental)
 
-# SlimeWorldManager (defaults ON)
 swm:
-  enabled: true
+  enabled: true               # SlimeWorldManager auto-install
   auto-install: true
   version: "2.2.1"
 ```
@@ -97,12 +78,10 @@ swm:
 | Branch | Format | Example |
 |--------|--------|---------|
 | `ver/1.21.11` | `v{major}-REL` | `v1-REL` |
-| `ver/1.21.11-dev` | `v{major}.{minor}.{patch}[letter]-DEV` | `v1.1.0-DEV` |
-| `experimental-feat` | `v{major}{codename}-EXP` | `v1dev-EXP` |
+| `ver/1.21.11-dev` | `v{major}.{minor}.{patch}[letter]-DEV` | `v1.1.1-DEV` |
+| `experimental-feat` | `v{major}{codename}-EXP` | `v1void-EXP` |
 
-Set `releaseVersion` and `codename` in `gradle.properties`.
-
-**Version bumps:** `1.1.0` (feature) → `1.1.1` (fix) → `1.1.1a` (hotfix) → `1.2.0` (feature)
+Bumps: `1.1.0` (feature) → `1.1.1` (fix) → `1.1.1a` (hotfix) → `1.2.0`
 
 ---
 
