@@ -30,6 +30,11 @@ public class SourbyCraftConfig {
     public static boolean multithreadingEnabled = false;
     public static boolean dimensionThreads = false;
 
+    public static boolean skipEmptySections = true;
+    public static boolean poolEntityData = true;
+    public static boolean preSizePackets = true;
+    public static boolean chunkCompressionCache = true;
+
     public static void init(File configFile) {
         CONFIG_FILE = configFile;
         config = new YamlConfiguration();
@@ -57,6 +62,11 @@ public class SourbyCraftConfig {
         multithreadingEnabled = getBoolean("multithreading.enabled", multithreadingEnabled);
         dimensionThreads = getBoolean("multithreading.dimension-threads", dimensionThreads);
         asyncThreads = getInt("multithreading.async-threads", asyncThreads);
+
+        skipEmptySections = getBoolean("memory.skip-empty-sections", skipEmptySections);
+        poolEntityData = getBoolean("memory.pool-entity-data", poolEntityData);
+        preSizePackets = getBoolean("memory.pre-size-packets", preSizePackets);
+        chunkCompressionCache = getBoolean("memory.chunk-compression-cache", chunkCompressionCache);
 
         AsyncExecutor.initPool(asyncThreads);
     }
