@@ -7,7 +7,7 @@
 
 <h1 align="center">🍞 SourbyCraft</h1>
 
-<p align="center"><em>A high-performance Minecraft server fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a></em></p>
+<p align="center"><em>Optimized for speed and efficiency — keeps your server running smoothly with high player counts. Fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a>.</em></p>
 
 ---
 
@@ -96,6 +96,21 @@ git checkout ver/1.21.11-dev
 ```
 
 Jar: `sourbycraft-server/build/libs/sourbycraft-paperclip-*-mojmap.jar`
+
+---
+
+## API
+
+Use SourbyCraft API in your plugins via JitPack:
+
+```kotlin
+repositories {
+    maven("https://jitpack.io")
+}
+dependencies {
+    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:ver/1.21.11-SNAPSHOT")
+}
+```
 
 ---
 
