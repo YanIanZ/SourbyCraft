@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 13 May 2026 18:43:02 +0700
+Subject: [PATCH] fix: escape dot in split regex
+
+
+diff --git a/build.gradle.kts b/build.gradle.kts
+index 2946f93bede93e5b4a08846abbbdb57516e73e2e..6f6575ec9ccb96834a9471446a473b29edae10ee 100644
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -251,7 +251,7 @@ tasks.jar {
+         val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
+         val build = System.getenv("BUILD_NUMBER") ?: null
+         val releaseVersionFull = rootProject.providers.gradleProperty("releaseVersion").get()
+-        val releaseMajor = releaseVersionFull.split(".")[0]
++        val releaseMajor = releaseVersionFull.split("\\.")[0]
+         val codename = rootProject.providers.gradleProperty("codename").getOrElse("dev")
+         val now = ZonedDateTime.now(ZoneId.of("Asia/Jakarta"))
+         val buildTimeIso = now.toInstant().toString()
