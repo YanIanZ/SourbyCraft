@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 13 May 2026 23:59:29 +0700
+Subject: [PATCH] feat: SWM status in /sys
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/SysCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/SysCommand.java
+index c02794e9d9d0aad2998c76eb0b971665ceaee0cd..4cb69170f75392bb073ac6d7da07bcf2d7726db9 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/SysCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/SysCommand.java
+@@ -41,6 +41,9 @@ public class SysCommand extends Command {
+         for (World w : Bukkit.getWorlds()) sender.sendMessage(text().append(text("  "+w.getName()+": ",SourbyCraftColors.LABEL)).append(text(w.getLoadedChunks().length+" chunks · "+w.getEntities().size()+" entities",SourbyCraftColors.DIM)).append(text(" · ~"+rec+" players",SourbyCraftColors.SUCCESS)));
+         var plugins = Bukkit.getPluginManager().getPlugins();
+         sender.sendMessage(text().append(text("Plugins ("+plugins.length+"): ",SourbyCraftColors.HEADER)).append(text(Arrays.stream(plugins).map(p->p.getName()).reduce((a,b)->a+", "+b).orElse("none"),SourbyCraftColors.VALUE)));
++        // SWM status
++        String swmStatus = dev.iyanz.sourbycraft.swm.SwmInstaller.isInstalled() ? "Installed" : "Not installed";
++        sender.sendMessage(text().append(text("SWM: ", SourbyCraftColors.LABEL)).append(text(swmStatus + " | v" + dev.iyanz.sourbycraft.SourbyCraftConfig.swmVersion, SourbyCraftColors.VALUE)));
+         return true;
+     }
+ }

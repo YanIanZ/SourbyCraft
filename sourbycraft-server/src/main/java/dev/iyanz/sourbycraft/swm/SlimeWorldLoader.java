@@ -50,7 +50,7 @@ public final class SlimeWorldLoader {
                 new DataInputStream(new ByteArrayInputStream(extraData))
             );
 
-            return new SlimeWorldInfo(file.getFileName().toString().replace("."),
+            return new SlimeWorldInfo(file.getFileName().toString().replaceAll("\\.slime$", ""),
                 root, minX, minZ, width, depth, version);
         } catch (IOException e) {
             return null;

@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Thu, 14 May 2026 00:39:13 +0700
+Subject: [PATCH] feat: add /swm command
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/SwmCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/SwmCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..77d1996342ff58d35f2e5559d74c69afeab78a63
+--- /dev/null
++++ b/src/main/java/dev/iyanz/sourbycraft/command/SwmCommand.java
+@@ -0,0 +1,53 @@
++package dev.iyanz.sourbycraft.command;
++
++import dev.iyanz.sourbycraft.SourbyCraftColors;
++import dev.iyanz.sourbycraft.swm.SlimeWorldLoader;
++import dev.iyanz.sourbycraft.swm.SwmInstaller;
++import dev.iyanz.sourbycraft.util.BarUtil;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++
++import static net.kyori.adventure.text.Component.text;
++
++public class SwmCommand extends Command {
++    public SwmCommand(String name) {
++        super(name);
++        this.description = "SlimeWorldManager commands";
++        this.usageMessage = "/swm <list|info|status>";
++        this.setPermission("sourbycraft.command.swm");
++    }
++
++    @Override
++    public boolean execute(CommandSender sender, String alias, String[] args) {
++        if (!this.testPermission(sender)) return true;
++        String sub = args.length > 0 ? args[0].toLowerCase() : "status";
++
++        switch (sub) {
++            case "list" -> {
++                var worlds = SlimeWorldLoader.discoverWorlds();
++                if (worlds.isEmpty()) {
++                    sender.sendMessage(text("No slime worlds found in slime_worlds/", SourbyCraftColors.DIM));
++                } else {
++                    sender.sendMessage(text("Slime Worlds (" + worlds.size() + "):", SourbyCraftColors.HEADER));
++                    for (var w : worlds) {
++                        sender.sendMessage(text()
++                            .append(text("  " + w.worldName(), SourbyCraftColors.VALUE))
++                            .append(text(" v" + w.version(), SourbyCraftColors.DIM)));
++                    }
++                }
++            }
++            case "status" -> {
++                boolean installed = SwmInstaller.isInstalled();
++                sender.sendMessage(text()
++                    .append(text("SWM Status: ", SourbyCraftColors.LABEL))
++                    .append(text(installed ? "Installed" : "Not installed", installed ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DANGER)));
++                var worlds = SlimeWorldLoader.discoverWorlds();
++                sender.sendMessage(text()
++                    .append(text("Slime worlds: ", SourbyCraftColors.LABEL))
++                    .append(text(String.valueOf(worlds.size()), SourbyCraftColors.VALUE)));
++            }
++            default -> sender.sendMessage(text("Usage: /swm <list|status>", SourbyCraftColors.DIM));
++        }
++        return true;
++    }
++}
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index e28ab218861c596c1b4cf55819fbc12ff3b83c2e..eb8a052ad7539e10a21746e0faa8f9e7ac1b8ee9 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1032,6 +1032,7 @@ public final class CraftServer implements Server {
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
++        this.commandMap.register("", new dev.iyanz.sourbycraft.command.SwmCommand("swm")); // SourbyCraft
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.RamBarCommand("rambar")); // SourbyCraft
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.VerCommand("ver")); // SourbyCraft
+         // SourbyCraft end
