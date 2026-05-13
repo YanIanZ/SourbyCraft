@@ -54,6 +54,17 @@
      }
  
      public BlockState setBlockState(int x, int y, int z, BlockState state) {
+@@ -129,6 +_,10 @@
+     // Paper end - block counting
+ 
+     public BlockState setBlockState(int x, int y, int z, BlockState state, boolean useLocks) {
++        if (this.states == null) {
++            if (state.isAir()) return Blocks.AIR.defaultBlockState();
++            this.reinitStates();
++        }
+         BlockState blockState;
+         if (useLocks) {
+             blockState = this.states.getAndSet(x, y, z, state);
 @@ -169,6 +_,10 @@
          return this.nonEmptyBlockCount == 0;
      }
@@ -73,6 +84,16 @@
          // Paper start - block counting
          // reset, then recalculate
          this.nonEmptyBlockCount = (short)0;
+@@ -267,6 +_,9 @@
+         // force has special colliding blocks to be true
+         this.specialCollidingBlocks = this.nonEmptyBlockCount != (short)0 && this.maybeHas(ca.spottedleaf.moonrise.patches.collisions.CollisionUtil::isSpecialCollidingBlock) ? CLIENT_FORCED_SPECIAL_COLLIDING_BLOCKS : (short)0;
+         // Paper end - block counting
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.skipEmptySections && this.nonEmptyBlockCount == 0) {
++            this.states = null;
++        }
+     }
+ 
+     public void readBiomes(FriendlyByteBuf buffer) {
 @@ -282,16 +_,21 @@
      }
      public void write(FriendlyByteBuf buffer, io.papermc.paper.antixray.ChunkPacketInfo<BlockState> chunkPacketInfo, int chunkSectionIndex) {
