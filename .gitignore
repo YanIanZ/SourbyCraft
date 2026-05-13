@@ -417,3 +417,4 @@ run/
 paper-api-generator/
 docs/superpowers/
 graphify-out/
+sourbycraft-server/src/main/resources/GeoLite2-City.mmdb
