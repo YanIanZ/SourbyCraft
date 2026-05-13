@@ -36,7 +36,7 @@ public class SourbyCraftConfig {
     public static boolean chunkCompressionCache = false;
 
     public static boolean swmEnabled = true;
-    public static String swmVersion = "2.2.1";
+    public static String swmVersion = "2.2.2";
     public static boolean swmAutoInstall = true;
 
     public static boolean autoThrottleView = true;
