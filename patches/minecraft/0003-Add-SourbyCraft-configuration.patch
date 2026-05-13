@@ -5,7 +5,7 @@ Subject: [PATCH] Add SourbyCraft configuration
 
 
 diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
-index 2596601f9c5a3e726dd5c5777ad0c470f48eae07..8dc9cf41daa38f8647fce9ba2d70a445c08945b8 100644
+index 2596601f9c5a3e726dd5c5777ad0c470f48eae07..451ba61980f058b30b457a8eee8fab8ca793fbe0 100644
 --- a/net/minecraft/server/dedicated/DedicatedServer.java
 +++ b/net/minecraft/server/dedicated/DedicatedServer.java
 @@ -276,6 +276,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
@@ -17,7 +17,7 @@ index 2596601f9c5a3e726dd5c5777ad0c470f48eae07..8dc9cf41daa38f8647fce9ba2d70a445
          // this.worldData.setGameType(properties.gameMode.get()); // CraftBukkit - moved to world loading
          LOGGER.info("Default game type: {}", properties.gameMode.get());
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index 703576ce396cb2ab8d36a58032ea1b07e2a7c922..dae5852d29b6f3b2515178cf259acd31c8e5a58a 100644
+index 703576ce396cb2ab8d36a58032ea1b07e2a7c922..d2e7e82d880d139a65862710223c49001bcb3b19 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
 @@ -818,6 +818,8 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
