@@ -41,11 +41,11 @@ index 602d3ce2cd16405f35453ce12a207b70312a4a8a..efd31090fec2e594d61d9618cf61357e
      private static final int DISTANCE_UNKNOWN = -2;
 -    private static final String DOWNLOAD_PAGE = "https://papermc.io/downloads/paper";
 -    private static final String REPOSITORY = "PaperMC/Paper";
-+    private static final String DOWNLOAD_PAGE = "https://dl.sourbycraftmc.de/sourbycraft"; // SourbyCraft - branding
++    private static final String DOWNLOAD_PAGE = "https://github.com/YanIanZ/SourbyCraft/releases"; // SourbyCraft - branding
 +    private static final String REPOSITORY = "YanIanZ/SourbyCraft"; // SourbyCraft - branding
      private static final ServerBuildInfo BUILD_INFO = ServerBuildInfo.buildInfo();
 -    private static final String USER_AGENT = BUILD_INFO.brandName() + "/" + BUILD_INFO.asString(VERSION_SIMPLE) + " (https://papermc.io)";
-+    private static final String USER_AGENT = BUILD_INFO.brandName() + "/" + BUILD_INFO.asString(VERSION_SIMPLE) + " (https://sourbycraftmc.de/)"; // SourbyCraft - branding
++    private static final String USER_AGENT = BUILD_INFO.brandName() + "/" + BUILD_INFO.asString(VERSION_SIMPLE) + " (https://github.com/YanIanZ/SourbyCraft)"; // SourbyCraft - branding
      private static final Gson GSON = new Gson();
  
      @Override
