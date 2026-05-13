@@ -30,5 +30,17 @@ public final class BarUtil {
         return String.format("%.1f GB", bytes / 1073741824.0);
     }
 
+
+    public static Component tpsBar(double tps, int width) {
+        TextColor color = tps > 18 ? SourbyCraftColors.SUCCESS
+            : tps > 15 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
+        return text(bar(tps * 5, width), color);
+    }
+
+    public static Component ramBar(double percent, int width) {
+        TextColor color = percent < 50 ? SourbyCraftColors.SUCCESS
+            : percent < 80 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
+        return text(bar(percent, width), color);
+    }
     private BarUtil() {}
 }
