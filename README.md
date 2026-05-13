@@ -99,6 +99,21 @@ Jar: `sourbycraft-server/build/libs/sourbycraft-paperclip-*-mojmap.jar`
 
 ---
 
+## API
+
+Use SourbyCraft API in your plugins via JitPack:
+
+```kotlin
+repositories {
+    maven("https://jitpack.io")
+}
+dependencies {
+    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:ver/1.21.11-SNAPSHOT")
+}
+```
+
+---
+
 ## License
 
 MIT — see [LICENCE.txt](LICENCE.txt)
