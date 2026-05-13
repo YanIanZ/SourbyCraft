@@ -27,6 +27,8 @@ public class SourbyCraftConfig {
     public static boolean asyncChunkLoad = false;
     public static boolean asyncPathfinding = false;
     public static int asyncThreads = 4;
+    public static boolean multithreadingEnabled = false;
+    public static boolean dimensionThreads = false;
 
     public static void init(File configFile) {
         CONFIG_FILE = configFile;
@@ -51,6 +53,11 @@ public class SourbyCraftConfig {
         asyncChunkLoad = getBoolean("performance.async-chunk-load", asyncChunkLoad);
         asyncPathfinding = getBoolean("performance.async-pathfinding", asyncPathfinding);
         asyncThreads = getInt("performance.async-threads", asyncThreads);
+
+        multithreadingEnabled = getBoolean("multithreading.enabled", multithreadingEnabled);
+        dimensionThreads = getBoolean("multithreading.dimension-threads", dimensionThreads);
+        asyncThreads = getInt("multithreading.async-threads", asyncThreads);
+
         AsyncExecutor.initPool(asyncThreads);
     }
 
