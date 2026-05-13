@@ -1,0 +1,10 @@
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -657,6 +_,7 @@
+         ChunkHolder visibleChunkIfPresent = this.getVisibleChunkIfPresent(ChunkPos.asLong(sectionPosX, sectionPosZ));
+         if (visibleChunkIfPresent != null && visibleChunkIfPresent.blockChanged(pos)) {
+             this.chunkHoldersToBroadcast.add(visibleChunkIfPresent);
++            this.chunkMap.invalidateCompressionCache(new ChunkPos(sectionPosX, sectionPosZ)); // SourbyCraft - chunk compression cache
+         }
+     }
+ 
