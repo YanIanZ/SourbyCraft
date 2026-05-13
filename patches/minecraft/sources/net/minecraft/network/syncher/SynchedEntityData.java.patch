@@ -1,0 +1,53 @@
+--- a/net/minecraft/network/syncher/SynchedEntityData.java
++++ b/net/minecraft/network/syncher/SynchedEntityData.java
+@@ -114,7 +_,7 @@
+ 
+     public void assignValues(List<SynchedEntityData.DataValue<?>> entries) {
+         for (SynchedEntityData.DataValue<?> dataValue : entries) {
+-            SynchedEntityData.DataItem<?> dataItem = this.itemsById[dataValue.id];
++            SynchedEntityData.DataItem<?> dataItem = this.itemsById[dataValue.id()];
+             this.assignValue(dataItem, dataValue);
+             this.entity.onSyncedDataUpdated(dataItem.getAccessor());
+         }
+@@ -229,10 +_,30 @@
+         }
+     }
+ 
+-    public record DataValue<T>(int id, EntityDataSerializer<T> serializer, T value) {
++    public static final class DataValue<T> {
++        private int id;
++        private EntityDataSerializer<T> serializer;
++        private T value;
++
++        public DataValue(int id, EntityDataSerializer<T> serializer, T value) {
++            this.id = id;
++            this.serializer = serializer;
++            this.value = value;
++        }
++
++        public int id() { return this.id; }
++        public EntityDataSerializer<T> serializer() { return this.serializer; }
++        public T value() { return this.value; }
++
++        void set(int id, EntityDataSerializer<T> serializer, T value) {
++            this.id = id;
++            this.serializer = serializer;
++            this.value = value;
++        }
++
+         public static <T> SynchedEntityData.DataValue<T> create(EntityDataAccessor<T> dataAccessor, T value) {
+             EntityDataSerializer<T> entityDataSerializer = dataAccessor.serializer();
+-            return new SynchedEntityData.DataValue<>(dataAccessor.id(), entityDataSerializer, entityDataSerializer.copy(value));
++            return borrowValue(dataAccessor.id(), entityDataSerializer, entityDataSerializer.copy(value));
+         }
+ 
+         public void write(RegistryFriendlyByteBuf buffer) {
+@@ -257,7 +_,7 @@
+         }
+ 
+         private static <T> SynchedEntityData.DataValue<T> read(RegistryFriendlyByteBuf buffer, int id, EntityDataSerializer<T> serializer) {
+-            return new SynchedEntityData.DataValue<>(id, serializer, serializer.codec().decode(buffer));
++            return borrowValue(id, serializer, serializer.codec().decode(buffer));
+         }
+     }
+ }
