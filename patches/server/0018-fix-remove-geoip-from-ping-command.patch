@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 13 May 2026 22:33:03 +0700
+Subject: [PATCH] fix: remove geoip from ping command
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+index 14a95aff00f9e30572a19cef47e67e8c854eeea2..143f358fbbc366b856ccf59c920e7026964a74eb 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+@@ -7,22 +7,15 @@ import org.bukkit.Bukkit;
+ import org.bukkit.command.Command;
+ import org.bukkit.command.CommandSender;
+ import org.bukkit.entity.Player;
+-
+-import java.io.InputStream;
+-import java.net.InetSocketAddress;
+-
+ import static net.kyori.adventure.text.Component.text;
+ 
+ public class PingCommand extends Command {
+-    private static com.maxmind.geoip2.DatabaseReader geoReader;
+-
+     public PingCommand(String name) {
+         super(name);
+-        this.description = "Shows player connection latency and geolocation";
++        this.description = "Shows player connection latency";
+         this.usageMessage = "/ping [player]";
+         this.setPermission("sourbycraft.command.ping");
+     }
+-
+     @Override
+     public boolean execute(CommandSender sender, String alias, String[] args) {
+         if (!this.testPermission(sender)) return true;
+@@ -43,30 +36,9 @@ public class PingCommand extends Command {
+         sender.sendMessage(text().append(text("Client: ", SourbyCraftColors.LABEL))
+             .append(text(brand + " | protocol " + target.getProtocolVersion(), SourbyCraftColors.VALUE)));
+ 
+-        // GeoIP location
+-        try {
+-            if (geoReader == null) {
+-                InputStream db = getClass().getClassLoader().getResourceAsStream("GeoLite2-City.mmdb");
+-                if (db != null) geoReader = new com.maxmind.geoip2.DatabaseReader.Builder(db).build();
+-            }
+-            if (geoReader != null && target.getAddress() instanceof InetSocketAddress addr) {
+-                var response = geoReader.city(addr.getAddress());
+-                String city = response.getCity().getName();
+-                String country = response.getCountry().getName();
+-                String isp = response.getTraits().getIsp();
+-                if (city != null || country != null) {
+-                    String loc = (city != null ? city + ", " : "") + (country != null ? country : "");
+-                    sender.sendMessage(text().append(text("Location: ", SourbyCraftColors.LABEL))
+-                        .append(text(loc, SourbyCraftColors.VALUE))
+-                        .append(text(isp != null ? " | " + isp : "", SourbyCraftColors.DIM)));
+-                }
+-            }
+-        } catch (Exception ignored) {}
+-
+-        // In-game location
+         if (target.getLocation().getWorld() != null) {
+             var loc = target.getLocation();
+-            sender.sendMessage(text().append(text("World: ", SourbyCraftColors.LABEL))
++            sender.sendMessage(text().append(text("Location: ", SourbyCraftColors.LABEL))
+                 .append(text(loc.getWorld().getName() + " | " + loc.getBlockX() + ", " + loc.getBlockY() + ", " + loc.getBlockZ(), SourbyCraftColors.VALUE)));
+         }
+         return true;
