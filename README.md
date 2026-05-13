@@ -27,8 +27,37 @@
 - **Instant locale refresh** — refresh data on player locale change
 - **Detailed brand info** — version in F3 debug screen
 
-### Commands
-- **`/tps`** — TPS, MSPT, CPU name/cores, GC info
+## Commands
+
+### `/tps`
+Shows real-time server performance with hex colors:
+- TPS (1m, 5m, 15m) with color-coded health
+- MSPT (milliseconds per tick)
+- CPU model, cores, load percentage (requires oshi)
+- GC collector name, total collections, total time
+- Player count
+
+Add `mem` argument for memory usage: `/tps mem`
+
+### `/ping [player]`
+Shows player connection diagnostics:
+- Latency in ms with colored visual bar
+- Client brand + protocol version
+- Player world + coordinates
+
+## Multithreading
+
+Semi-multithreading (per-dimension) via `sourbycraft.yml`:
+
+```yaml
+multithreading:
+  enabled: false              # master switch
+  dimension-threads: true     # one thread per dimension
+  async-threads: 4            # I/O worker pool size
+```
+
+When enabled, Overworld, Nether, and End each tick on their own thread.
+Defaults OFF — safe to leave disabled.
 
 ## Versioning
 
