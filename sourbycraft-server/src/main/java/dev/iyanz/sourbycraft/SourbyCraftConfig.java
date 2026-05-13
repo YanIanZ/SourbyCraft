@@ -32,7 +32,7 @@ public class SourbyCraftConfig {
 
     public static boolean skipEmptySections = true;
     public static boolean poolEntityData = true;
-    public static boolean preSizePackets = true;
+    public static boolean preSizePackets = false;
     public static boolean chunkCompressionCache = true;
 
     public static void init(File configFile) {
