@@ -26,7 +26,7 @@ public class SourbyCraftConfig {
 
     public static boolean asyncChunkLoad = false;
     public static boolean asyncPathfinding = false;
-    public static int asyncThreads = 4;
+    public static int asyncThreads = 2;
     public static boolean multithreadingEnabled = false;
     public static boolean dimensionThreads = false;
 

@@ -1,103 +1,54 @@
 package gg.pufferfish.pufferfish.util;
 
-import com.google.common.collect.Queues;
 import gg.pufferfish.pufferfish.PufferfishLogger;
-import java.util.Queue;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
-public class AsyncExecutor implements Runnable {
+public class AsyncExecutor {
 
-    private final Queue<Runnable> jobs = Queues.newArrayDeque();
-    private final Lock mutex = new ReentrantLock();
-    private final Condition cond = mutex.newCondition();
-    private final Thread thread;
-    private volatile boolean killswitch = false;
+    private static volatile ForkJoinPool POOL;
+    private static final int DEFAULT_THREADS = 2;
 
-    public AsyncExecutor(String threadName) {
-        this.thread = new Thread(this, threadName);
-    }
+    @Deprecated
+    public AsyncExecutor(String threadName) {}
 
-    public void start() {
-        thread.start();
-    }
-
-    public void kill() {
-        killswitch = true;
-        cond.signalAll();
-    }
-
-    public void submit(Runnable runnable) {
-        mutex.lock();
-        try {
-            jobs.offer(runnable);
-            cond.signalAll();
-        } finally {
-            mutex.unlock();
-        }
-    }
-
-    private static final java.util.List<AsyncExecutor> POOL = new java.util.concurrent.CopyOnWriteArrayList<>();
-
-    public static int getPoolSize() {
-        return POOL.size();
-    }
+    @Deprecated public void start() {}
+    @Deprecated public void kill() {}
+    @Deprecated public void submit(Runnable r) { submitToPool(r); }
 
     public static void initPool(int threadCount) {
         shutdownPool();
-        for (int i = 0; i < threadCount; i++) {
-            AsyncExecutor exec = new AsyncExecutor("SourbyCraft Async Worker #" + i);
-            exec.start();
-            POOL.add(exec);
-        }
+        if (threadCount <= 0) threadCount = DEFAULT_THREADS;
+        POOL = new ForkJoinPool(threadCount);
+        PufferfishLogger.LOGGER.log(Level.INFO, "Started async pool with " + threadCount + " threads (ForkJoinPool)");
     }
 
     public static void shutdownPool() {
-        for (AsyncExecutor exec : POOL) {
-            exec.kill();
+        if (POOL != null) {
+            POOL.shutdown();
+            try {
+                if (!POOL.awaitTermination(5, TimeUnit.SECONDS)) {
+                    POOL.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                POOL.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+            POOL = null;
         }
-        POOL.clear();
+    }
+
+    public static boolean isActive() {
+        return POOL != null && !POOL.isShutdown();
     }
 
     public static void submitToPool(Runnable task) {
-        if (POOL.isEmpty()) {
+        ForkJoinPool pool = POOL;
+        if (pool == null || pool.isShutdown()) {
             task.run();
             return;
         }
-        POOL.get((int) (Math.random() * POOL.size())).submit(task);
+        pool.execute(task);
     }
-
-    @Override
-    public void run() {
-        while (!killswitch) {
-            try {
-                Runnable runnable = takeRunnable();
-                if (runnable != null) {
-                    runnable.run();
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } catch (Exception e) {
-                PufferfishLogger.LOGGER.log(Level.SEVERE, e, () -> "Failed to execute async job for thread " + thread.getName());
-            }
-        }
-    }
-
-    private Runnable takeRunnable() throws InterruptedException {
-        mutex.lock();
-        try {
-            while (jobs.isEmpty() && !killswitch) {
-                cond.await();
-            }
-
-            if (jobs.isEmpty()) return null; // We've set killswitch
-
-            return jobs.remove();
-        } finally {
-            mutex.unlock();
-        }
-    }
-
 }
