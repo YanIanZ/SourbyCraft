@@ -91,10 +91,12 @@ performance:
 | Branch | Format | Example |
 |--------|--------|---------|
 | `ver/1.21.11` | `v{major}-REL` | `v1-REL` |
-| `ver/1.21.11-dev` | `v{major}.{minor}.{patch}-DEV` | `v1.0.0-DEV` |
+| `ver/1.21.11-dev` | `v{major}.{minor}.{patch}[letter]-DEV` | `v1.1.0-DEV` |
 | `experimental-feat` | `v{major}{codename}-EXP` | `v1dev-EXP` |
 
 Set `releaseVersion` and `codename` in `gradle.properties`.
+
+**Version bumps:** `1.1.0` (feature) → `1.1.1` (fix) → `1.1.1a` (hotfix) → `1.2.0` (feature)
 
 ---
 
