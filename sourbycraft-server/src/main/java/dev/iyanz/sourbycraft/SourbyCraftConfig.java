@@ -33,7 +33,7 @@ public class SourbyCraftConfig {
     public static boolean skipEmptySections = true;
     public static boolean poolEntityData = true;
     public static boolean preSizePackets = false;
-    public static boolean chunkCompressionCache = true;
+    public static boolean chunkCompressionCache = false;
 
     public static boolean swmEnabled = true;
     public static String swmVersion = "2.2.1";
