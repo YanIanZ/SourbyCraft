@@ -94,8 +94,12 @@ public class SourbyCraftConfig {
         redstoneOptimize = getBoolean("entity.redstone-optimize", redstoneOptimize);
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
 
-        if (swmEnabled && swmAutoInstall) {
-            dev.iyanz.sourbycraft.swm.SwmInstaller.install("plugins/");
+        if (swmEnabled) {
+            if (swmAutoInstall) {
+                dev.iyanz.sourbycraft.swm.SwmInstaller.install("plugins/");
+            }
+            dev.iyanz.sourbycraft.swm.SlimeWorldLoader.autoExtractWorlds();
+            dev.iyanz.sourbycraft.swm.SlimeWorldLoader.scheduleAutoLoad();
         }
 
         AsyncExecutor.initPool(asyncThreads);

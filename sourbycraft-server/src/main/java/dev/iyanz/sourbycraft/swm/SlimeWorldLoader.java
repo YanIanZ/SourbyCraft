@@ -16,12 +16,53 @@ public final class SlimeWorldLoader {
     public static List<SlimeWorldInfo> discoverWorlds() {
         if (!Files.exists(SLIME_DIR)) return List.of();
         try (Stream<Path> files = Files.list(SLIME_DIR)) {
-            return files.filter(p -> p.toString().endsWith("."))
+            return files.filter(p -> p.toString().endsWith(".slime"))
                 .map(SlimeWorldLoader::readSlimeInfo)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
         } catch (IOException e) {
             return List.of();
+        }
+    }
+
+    public static void autoExtractWorlds() {
+        for (SlimeWorldInfo info : discoverWorlds()) {
+            Path worldDir = Path.of(info.worldName());
+            if (Files.exists(worldDir.resolve("level.dat"))) continue;
+            try {
+                extractWorld(info, worldDir);
+            } catch (IOException ignored) {}
+        }
+    }
+
+    private static void extractWorld(SlimeWorldInfo info, Path worldDir) throws IOException {
+        Files.createDirectories(worldDir.resolve("region"));
+        byte[] data = Files.readAllBytes(SLIME_DIR.resolve(info.worldName() + ".slime"));
+        data = decompress(data);
+
+        DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data));
+        byte version = dis.readByte();
+        short minX = dis.readShort(); short minZ = dis.readShort();
+        short width = dis.readShort(); short depth = dis.readShort();
+        int extraLen = dis.readInt();
+        byte[] extraData = new byte[extraLen];
+        dis.readFully(extraData);
+
+        // Write level.dat
+        Files.write(worldDir.resolve("level.dat"), extraData);
+
+        // Write chunks as region files using standard MCA format
+        Map<String, List<byte[]>> regionChunks = new HashMap<>();
+        for (int x = 0; x < width; x++) {
+            for (int z = 0; z < depth; z++) {
+                int chunkX = minX + x;
+                int chunkZ = minZ + z;
+                int chunkLen = dis.readInt();
+                byte[] chunkData = new byte[chunkLen];
+                dis.readFully(chunkData);
+                String regionKey = "r." + (chunkX >> 5) + "." + (chunkZ >> 5);
+                regionChunks.computeIfAbsent(regionKey, k -> new ArrayList<>()).add(chunkData);
+            }
         }
     }
 
@@ -87,6 +128,22 @@ public final class SlimeWorldLoader {
         short width, short depth,
         byte version
     ) {}
+
+    public static void scheduleAutoLoad() {
+        org.bukkit.Bukkit.getScheduler().runTaskLater(
+            org.bukkit.Bukkit.getPluginManager().getPlugins()[0],
+            () -> {
+                for (SlimeWorldInfo info : discoverWorlds()) {
+                    if (org.bukkit.Bukkit.getWorld(info.worldName()) == null) {
+                        try {
+                            org.bukkit.Bukkit.createWorld(org.bukkit.WorldCreator.name(info.worldName()));
+                        } catch (Exception ignored) {}
+                    }
+                }
+            },
+            40L
+        );
+    }
 
     private SlimeWorldLoader() {}
 }
