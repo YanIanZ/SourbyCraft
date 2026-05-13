@@ -1,5 +1,14 @@
 --- a/net/minecraft/network/protocol/game/ClientboundLevelChunkPacketData.java
 +++ b/net/minecraft/network/protocol/game/ClientboundLevelChunkPacketData.java
+@@ -44,7 +_,7 @@
+     // Paper start - Anti-Xray - Add chunk packet info
+     @Deprecated @io.papermc.paper.annotation.DoNotUse
+     public ClientboundLevelChunkPacketData(LevelChunk levelChunk) {
+-        this(levelChunk, null);
++        this(levelChunk, (io.papermc.paper.antixray.ChunkPacketInfo) null);
+     }
+     public ClientboundLevelChunkPacketData(LevelChunk levelChunk, io.papermc.paper.antixray.ChunkPacketInfo<net.minecraft.world.level.block.state.BlockState> chunkPacketInfo) {
+         // Paper end - Anti-Xray - Add chunk packet info
 @@ -57,7 +_,12 @@
          if (chunkPacketInfo != null) {
              chunkPacketInfo.setBuffer(this.buffer);

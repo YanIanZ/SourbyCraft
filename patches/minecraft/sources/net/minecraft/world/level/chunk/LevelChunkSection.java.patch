@@ -11,6 +11,15 @@
  
  public class LevelChunkSection implements ca.spottedleaf.moonrise.patches.block_counting.BlockCountingChunkSection { // Paper - block counting
      public static final int SECTION_WIDTH = 16;
+@@ -17,7 +_,7 @@
+     short nonEmptyBlockCount; // Paper - package private
+     private short tickingBlockCount;
+     private short tickingFluidCount;
+-    public final PalettedContainer<BlockState> states;
++    public PalettedContainer<BlockState> states;
+     private PalettedContainer<Holder<Biome>> biomes; // CraftBukkit - read/write
+ 
+     // Paper start - block counting
 @@ -48,7 +_,7 @@
          this.nonEmptyBlockCount = section.nonEmptyBlockCount;
          this.tickingBlockCount = section.tickingBlockCount;
