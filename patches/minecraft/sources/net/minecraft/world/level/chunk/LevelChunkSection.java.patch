@@ -54,6 +54,17 @@
      }
  
      public BlockState setBlockState(int x, int y, int z, BlockState state) {
+@@ -169,6 +_,10 @@
+         return this.nonEmptyBlockCount == 0;
+     }
+ 
++    private void reinitStates() {
++        this.states = new PalettedContainer<>(Blocks.AIR.defaultBlockState(), Strategy.createForBlockStates(net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY));
++    }
++
+     public boolean isRandomlyTicking() {
+         return this.isRandomlyTickingBlocks() || this.isRandomlyTickingFluids();
+     }
 @@ -182,6 +_,7 @@
      }
  
@@ -62,7 +73,23 @@
          // Paper start - block counting
          // reset, then recalculate
          this.nonEmptyBlockCount = (short)0;
-@@ -292,6 +_,7 @@
+@@ -282,16 +_,21 @@
+     }
+     public void write(FriendlyByteBuf buffer, io.papermc.paper.antixray.ChunkPacketInfo<BlockState> chunkPacketInfo, int chunkSectionIndex) {
+         buffer.writeShort(this.nonEmptyBlockCount);
+-        this.states.write(buffer, chunkPacketInfo, chunkSectionIndex);
++        if (this.states == null) {
++            new PalettedContainer<>(Blocks.AIR.defaultBlockState(), Strategy.createForBlockStates(net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY)).write(buffer, null, chunkSectionIndex);
++        } else {
++            this.states.write(buffer, chunkPacketInfo, chunkSectionIndex);
++        }
+         this.biomes.write(buffer, null, chunkSectionIndex);
+     // Paper end - Anti-Xray - Add chunk packet info
+     }
+ 
+     public int getSerializedSize() {
+-        return 2 + this.states.getSerializedSize() + this.biomes.getSerializedSize();
++        return 2 + (this.states != null ? this.states.getSerializedSize() : new PalettedContainer<>(Blocks.AIR.defaultBlockState(), Strategy.createForBlockStates(net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY)).getSerializedSize()) + this.biomes.getSerializedSize();
      }
  
      public boolean maybeHas(Predicate<BlockState> predicate) {

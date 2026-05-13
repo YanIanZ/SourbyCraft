@@ -1,6 +1,35 @@
 --- a/net/minecraft/network/syncher/SynchedEntityData.java
 +++ b/net/minecraft/network/syncher/SynchedEntityData.java
-@@ -114,7 +_,7 @@
+@@ -21,6 +_,28 @@
+     private final SynchedEntityData.DataItem<?>[] itemsById;
+     private boolean isDirty;
+ 
++    private static final ThreadLocal<java.util.ArrayDeque<DataValue<?>>> VALUE_POOL =
++        ThreadLocal.withInitial(java.util.ArrayDeque::new);
++
++    @SuppressWarnings("unchecked")
++    static <T> DataValue<T> borrowValue(int id, EntityDataSerializer<T> serializer, T value) {
++        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.poolEntityData) {
++            return new DataValue<>(id, serializer, value);
++        }
++        DataValue<?> dv = VALUE_POOL.get().pollLast();
++        if (dv != null) {
++            dv.set(id, serializer, value);
++            return (DataValue<T>) dv;
++        }
++        return new DataValue<>(id, serializer, value);
++    }
++
++    static void returnValue(DataValue<?> value) {
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.poolEntityData && value != null) {
++            VALUE_POOL.get().addLast(value);
++        }
++    }
++
+     SynchedEntityData(SyncedDataHolder entity, SynchedEntityData.DataItem<?>[] itemsById) {
+         this.entity = entity;
+         this.itemsById = itemsById;
+@@ -114,9 +_,10 @@
  
      public void assignValues(List<SynchedEntityData.DataValue<?>> entries) {
          for (SynchedEntityData.DataValue<?> dataValue : entries) {
@@ -8,7 +37,10 @@
 +            SynchedEntityData.DataItem<?> dataItem = this.itemsById[dataValue.id()];
              this.assignValue(dataItem, dataValue);
              this.entity.onSyncedDataUpdated(dataItem.getAccessor());
++            returnValue(dataValue);
          }
+ 
+         this.entity.onSyncedDataUpdated(entries);
 @@ -229,10 +_,30 @@
          }
      }
