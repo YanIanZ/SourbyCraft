@@ -1,0 +1,45 @@
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -145,6 +_,42 @@
+     public int serverViewDistance;
+     public final WorldGenContext worldGenContext; // Paper - public
+ 
++    // SourbyCraft start - chunk compression cache
++    private static final int COMPRESSION_CACHE_SIZE = 256;
++    private final java.util.LinkedHashMap<Long, byte[]> compressionCache = new java.util.LinkedHashMap<>(COMPRESSION_CACHE_SIZE, 0.75f, true) {
++        @Override
++        protected boolean removeEldestEntry(java.util.Map.Entry<Long, byte[]> eldest) {
++            return size() > COMPRESSION_CACHE_SIZE;
++        }
++    };
++
++    public byte[] getCompressedChunkData(net.minecraft.world.level.chunk.LevelChunk chunk) {
++        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.chunkCompressionCache) {
++            return compressChunkSections(chunk);
++        }
++        long key = chunk.getPos().toLong();
++        byte[] cached = this.compressionCache.get(key);
++        if (cached != null) return cached;
++        byte[] compressed = compressChunkSections(chunk);
++        this.compressionCache.put(key, compressed);
++        return compressed;
++    }
++
++    private byte[] compressChunkSections(net.minecraft.world.level.chunk.LevelChunk chunk) {
++        int size = net.minecraft.network.protocol.game.ClientboundLevelChunkPacketData.calculateChunkSize(chunk);
++        byte[] buffer = new byte[size];
++        net.minecraft.network.FriendlyByteBuf writeBuf = net.minecraft.network.FriendlyByteBuf.createChunkBuffer();
++        net.minecraft.network.protocol.game.ClientboundLevelChunkPacketData.extractChunkData(writeBuf, chunk, null, size);
++        writeBuf.readBytes(buffer);
++        writeBuf.release();
++        return buffer;
++    }
++
++    public void invalidateCompressionCache(net.minecraft.world.level.ChunkPos chunkPos) {
++        this.compressionCache.remove(chunkPos.toLong());
++    }
++    // SourbyCraft end - chunk compression cache
++
+     // CraftBukkit start - recursion-safe executor for Chunk loadCallback() and unloadCallback()
+     public final CallbackExecutor callbackExecutor = new CallbackExecutor();
+     public static final class CallbackExecutor implements java.util.concurrent.Executor, Runnable {

@@ -14,6 +14,56 @@
          this.blockEntitiesData = Lists.newArrayList();
          int totalTileEntities = 0; // Paper - Handle oversized block entities in chunks
  
+@@ -75,6 +_,40 @@
+         }
+     }
+ 
++    // SourbyCraft start - chunk compression cache
++    public static ClientboundLevelChunkPacketData createFromCache(LevelChunk levelChunk, byte[] preSerializedBuffer) {
++        return new ClientboundLevelChunkPacketData(levelChunk, preSerializedBuffer);
++    }
++
++    private ClientboundLevelChunkPacketData(LevelChunk levelChunk, byte[] preSerializedBuffer) {
++        this.heightmaps = new long[HEIGHTMAP_TYPES_LEN][];
++        int heightmapsCount = 0;
++        for (int i = 0; i < SENDABLE_HEIGHTMAP_TYPES_LEN; ++i) {
++            int typeId = SENDABLE_HEIGHTMAP_TYPE_IDS[i];
++            Heightmap heightmap = levelChunk.heightmaps[typeId];
++            if (heightmap != null) {
++                this.heightmaps[typeId] = heightmap.getRawData();
++                heightmapsCount++;
++            }
++        }
++        this.heightmapsCount = heightmapsCount;
++        this.buffer = preSerializedBuffer;
++        this.blockEntitiesData = Lists.newArrayList();
++        int totalTileEntities = 0;
++
++        for (java.util.Map.Entry<BlockPos, BlockEntity> entry : levelChunk.getBlockEntities().entrySet()) {
++            if (++totalTileEntities > BLOCK_ENTITY_LIMIT) {
++                net.minecraft.network.protocol.Packet<ClientGamePacketListener> packet = entry.getValue().getUpdatePacket();
++                if (packet != null) {
++                    this.extraPackets.add(packet);
++                    continue;
++                }
++            }
++            this.blockEntitiesData.add(BlockEntityInfo.create(entry.getValue()));
++        }
++    }
++    // SourbyCraft end - chunk compression cache
++
+     public ClientboundLevelChunkPacketData(RegistryFriendlyByteBuf buffer, int x, int z) {
+         this.heightmaps = HEIGHTMAPS_STREAM_CODEC.decode(buffer);
+         int varInt = buffer.readVarInt();
+@@ -94,7 +_,7 @@
+         ClientboundLevelChunkPacketData.BlockEntityInfo.LIST_STREAM_CODEC.encode(buffer, this.blockEntitiesData);
+     }
+ 
+-    private static int calculateChunkSize(LevelChunk chunk) {
++    public static int calculateChunkSize(LevelChunk chunk) {
+         int i = 0;
+ 
+         for (LevelChunkSection levelChunkSection : chunk.getSections()) {
 @@ -113,9 +_,14 @@
      // Paper start - Anti-Xray - Add chunk packet info
      @Deprecated @io.papermc.paper.annotation.DoNotUse

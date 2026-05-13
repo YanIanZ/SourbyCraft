@@ -1,0 +1,25 @@
+--- a/net/minecraft/network/protocol/game/ClientboundLevelChunkWithLightPacket.java
++++ b/net/minecraft/network/protocol/game/ClientboundLevelChunkWithLightPacket.java
+@@ -45,6 +_,22 @@
+         chunk.getLevel().chunkPacketBlockController.modifyBlocks(this, chunkPacketInfo); // Paper - Anti-Xray - Modify blocks
+     }
+ 
++    // SourbyCraft start - chunk compression cache
++    public static ClientboundLevelChunkWithLightPacket createFromCache(LevelChunk chunk, LevelLightEngine lightEngine, byte[] preSerializedBuffer) {
++        ChunkPos pos = chunk.getPos();
++        return new ClientboundLevelChunkWithLightPacket(chunk, lightEngine, preSerializedBuffer);
++    }
++
++    private ClientboundLevelChunkWithLightPacket(LevelChunk chunk, LevelLightEngine lightEngine, byte[] preSerializedBuffer) {
++        ChunkPos pos = chunk.getPos();
++        this.x = pos.x;
++        this.z = pos.z;
++        this.chunkData = ClientboundLevelChunkPacketData.createFromCache(chunk, preSerializedBuffer);
++        this.lightData = new ClientboundLightUpdatePacketData(pos, lightEngine, null, null);
++        this.ready = true;
++    }
++    // SourbyCraft end - chunk compression cache
++
+     private ClientboundLevelChunkWithLightPacket(RegistryFriendlyByteBuf buffer) {
+         this.x = buffer.readInt();
+         this.z = buffer.readInt();
