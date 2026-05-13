@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 13 May 2026 21:52:23 +0700
+Subject: [PATCH] feat: add /rambar and /ver commands
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..02cf5c996e529d2eea3b08b2aba0065c7c4d8347
+--- /dev/null
++++ b/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java
+@@ -0,0 +1,32 @@
++package dev.iyanz.sourbycraft.command;
++
++import dev.iyanz.sourbycraft.SourbyCraftColors;
++import dev.iyanz.sourbycraft.util.BarUtil;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import static net.kyori.adventure.text.Component.text;
++
++public class RamBarCommand extends Command {
++    public RamBarCommand(String name) {
++        super(name);
++        this.description = "Shows RAM usage visual bar";
++        this.usageMessage = "/rambar";
++        this.setPermission("sourbycraft.command.rambar");
++    }
++    @Override
++    public boolean execute(CommandSender sender, String alias, String[] args) {
++        if (!this.testPermission(sender)) return true;
++        Runtime rt = Runtime.getRuntime();
++        long max = rt.maxMemory(), total = rt.totalMemory(), used = total - rt.freeMemory();
++        double pct = max == Long.MAX_VALUE ? (double) used / total * 100 : (double) used / max * 100;
++        String label = max == Long.MAX_VALUE ? BarUtil.INFINITY : (max / 1048576) + "MB";
++        sender.sendMessage(text()
++            .append(text("RAM:  ", SourbyCraftColors.LABEL))
++            .append(BarUtil.coloredBar(pct, 30))
++            .append(text(" " + (used / 1048576) + "/" + label + " (" + (int) pct + "%)", SourbyCraftColors.VALUE)));
++        sender.sendMessage(text()
++            .append(text("Heap: ", SourbyCraftColors.DIM))
++            .append(text("Max " + (max == Long.MAX_VALUE ? BarUtil.INFINITY : (max / 1048576) + "MB") + " | Allocated " + (total / 1048576) + "MB", SourbyCraftColors.DIM)));
++        return true;
++    }
++}
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/VerCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/VerCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..1788f179891c39a1373f341f8926e473f06b9315
+--- /dev/null
++++ b/src/main/java/dev/iyanz/sourbycraft/command/VerCommand.java
+@@ -0,0 +1,46 @@
++package dev.iyanz.sourbycraft.command;
++
++import dev.iyanz.sourbycraft.SourbyCraftColors;
++import dev.iyanz.sourbycraft.util.BarUtil;
++import io.papermc.paper.ServerBuildInfo;
++import org.bukkit.Bukkit;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import java.lang.management.ManagementFactory;
++import java.time.Instant;
++import java.time.ZoneId;
++import java.time.format.DateTimeFormatter;
++import static net.kyori.adventure.text.Component.text;
++
++public class VerCommand extends Command {
++    public VerCommand(String name) {
++        super(name);
++        this.description = "Shows SourbyCraft version information";
++        this.usageMessage = "/ver";
++        this.setPermission("sourbycraft.command.ver");
++        this.setAliases(java.util.List.of("version", "about"));
++    }
++    @Override
++    public boolean execute(CommandSender sender, String alias, String[] args) {
++        if (!this.testPermission(sender)) return true;
++        ServerBuildInfo bi = ServerBuildInfo.buildInfo();
++        sender.sendMessage(text()
++            .append(text("SourbyCraft ", SourbyCraftColors.HEADER))
++            .append(text(bi.asString(ServerBuildInfo.StringRepresentation.VERSION_FULL), SourbyCraftColors.VALUE)));
++        sender.sendMessage(text()
++            .append(text("Minecraft: ", SourbyCraftColors.LABEL))
++            .append(text(bi.minecraftVersionId() + " (" + bi.minecraftVersionName() + ")", SourbyCraftColors.VALUE)));
++        sender.sendMessage(text()
++            .append(text("API: ", SourbyCraftColors.LABEL))
++            .append(text(Bukkit.getBukkitVersion(), SourbyCraftColors.VALUE)));
++        long uptime = ManagementFactory.getRuntimeMXBean().getUptime();
++        long d = uptime/86400000, h = (uptime%86400000)/3600000, m = (uptime%3600000)/60000;
++        sender.sendMessage(text()
++            .append(text("Uptime: ", SourbyCraftColors.LABEL))
++            .append(text(d + "d " + h + "h " + m + "m", SourbyCraftColors.VALUE)));
++        sender.sendMessage(text()
++            .append(text("Git: ", SourbyCraftColors.LABEL))
++            .append(text(bi.gitBranch().orElse("?") + "@" + bi.gitCommit().orElse("?"), SourbyCraftColors.DIM)));
++        return true;
++    }
++}
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 96ee575f44f0a54be8e7257e4866affaf2ea92b9..e28ab218861c596c1b4cf55819fbc12ff3b83c2e 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1032,6 +1032,8 @@ public final class CraftServer implements Server {
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
++        this.commandMap.register("", new dev.iyanz.sourbycraft.command.RamBarCommand("rambar")); // SourbyCraft
++        this.commandMap.register("", new dev.iyanz.sourbycraft.command.VerCommand("ver")); // SourbyCraft
+         // SourbyCraft end
+         this.overrideAllCommandBlockCommands = this.commandsConfiguration.getStringList("command-block-overrides").contains("*");
+         this.ignoreVanillaPermissions = this.commandsConfiguration.getBoolean("ignore-vanilla-permissions");
