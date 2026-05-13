@@ -8,31 +8,6 @@
          Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing
          // CraftBukkit start
          if (this.server != null) {
-@@ -1816,7 +_,23 @@
-             profilerFiller.push("tick");
- 
-             try {
--                serverLevel.tick(hasTimeLeft);
-+                // SourbyCraft start - dimension threading
-+                if (dev.iyanz.sourbycraft.SourbyCraftConfig.multithreadingEnabled
-+                        && dev.iyanz.sourbycraft.SourbyCraftConfig.dimensionThreads
-+                        && serverLevel != this.overworld()) {
-+                    final ServerLevel levelRef = serverLevel;
-+                    final BooleanSupplier timeRef = hasTimeLeft;
-+                    dev.iyanz.sourbycraft.async.DimensionThreadManager.tickDimension(levelRef, () -> {
-+                        try {
-+                            levelRef.tick(timeRef);
-+                        } catch (Throwable t) {
-+                            throw new RuntimeException("Exception ticking dimension " + levelRef.dimension().identifier(), t);
-+                        }
-+                    });
-+                } else {
-+                    serverLevel.tick(hasTimeLeft);
-+                }
-+                // SourbyCraft end - dimension threading
-             } catch (Throwable var7) {
-                 CrashReport crashReport = CrashReport.forThrowable(var7, "Exception ticking world");
-                 serverLevel.fillReportDetails(crashReport);
 @@ -1918,6 +_,7 @@
          Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
          newLevels.put(level.dimension(), level);
