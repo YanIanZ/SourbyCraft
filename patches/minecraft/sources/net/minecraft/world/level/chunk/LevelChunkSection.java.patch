@@ -29,16 +29,6 @@
          this.biomes = section.biomes.copy();
      }
  
-@@ -56,6 +_,9 @@
-         this.states = states;
-         this.biomes = biomes;
-         this.recalcBlockCounts();
-+        if (dev.iyanz.sourbycraft.SourbyCraftConfig.skipEmptySections && this.nonEmptyBlockCount == 0) {
-+            this.states = null;
-+        }
-     }
- 
-     // Paper start - Anti-Xray - Add parameters
 @@ -70,19 +_,21 @@
      }
  
@@ -93,16 +83,6 @@
          // Paper start - block counting
          // reset, then recalculate
          this.nonEmptyBlockCount = (short)0;
-@@ -267,6 +_,9 @@
-         // force has special colliding blocks to be true
-         this.specialCollidingBlocks = this.nonEmptyBlockCount != (short)0 && this.maybeHas(ca.spottedleaf.moonrise.patches.collisions.CollisionUtil::isSpecialCollidingBlock) ? CLIENT_FORCED_SPECIAL_COLLIDING_BLOCKS : (short)0;
-         // Paper end - block counting
-+        if (dev.iyanz.sourbycraft.SourbyCraftConfig.skipEmptySections && this.nonEmptyBlockCount == 0) {
-+            this.states = null;
-+        }
-     }
- 
-     public void readBiomes(FriendlyByteBuf buffer) {
 @@ -282,16 +_,21 @@
      }
      public void write(FriendlyByteBuf buffer, io.papermc.paper.antixray.ChunkPacketInfo<BlockState> chunkPacketInfo, int chunkSectionIndex) {
