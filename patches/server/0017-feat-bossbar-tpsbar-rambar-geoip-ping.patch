@@ -1,0 +1,199 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 13 May 2026 22:03:10 +0700
+Subject: [PATCH] feat: bossbar tpsbar/rambar, geoip ping
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+index 7202e25744dd0ec0e332cf0c9dbb613707545576..14a95aff00f9e30572a19cef47e67e8c854eeea2 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+@@ -7,12 +7,18 @@ import org.bukkit.Bukkit;
+ import org.bukkit.command.Command;
+ import org.bukkit.command.CommandSender;
+ import org.bukkit.entity.Player;
++
++import java.io.InputStream;
++import java.net.InetSocketAddress;
++
+ import static net.kyori.adventure.text.Component.text;
+ 
+ public class PingCommand extends Command {
++    private static com.maxmind.geoip2.DatabaseReader geoReader;
++
+     public PingCommand(String name) {
+         super(name);
+-        this.description = "Shows player connection latency";
++        this.description = "Shows player connection latency and geolocation";
+         this.usageMessage = "/ping [player]";
+         this.setPermission("sourbycraft.command.ping");
+     }
+@@ -34,10 +40,34 @@ public class PingCommand extends Command {
+             .append(text(" " + ping + "ms", pc)));
+ 
+         String brand = target.getClientBrandName() != null ? target.getClientBrandName() : "vanilla";
+-        sender.sendMessage(text().append(text("Client: ", SourbyCraftColors.LABEL)).append(text(brand + " | protocol " + target.getProtocolVersion(), SourbyCraftColors.VALUE)));
++        sender.sendMessage(text().append(text("Client: ", SourbyCraftColors.LABEL))
++            .append(text(brand + " | protocol " + target.getProtocolVersion(), SourbyCraftColors.VALUE)));
++
++        // GeoIP location
++        try {
++            if (geoReader == null) {
++                InputStream db = getClass().getClassLoader().getResourceAsStream("GeoLite2-City.mmdb");
++                if (db != null) geoReader = new com.maxmind.geoip2.DatabaseReader.Builder(db).build();
++            }
++            if (geoReader != null && target.getAddress() instanceof InetSocketAddress addr) {
++                var response = geoReader.city(addr.getAddress());
++                String city = response.getCity().getName();
++                String country = response.getCountry().getName();
++                String isp = response.getTraits().getIsp();
++                if (city != null || country != null) {
++                    String loc = (city != null ? city + ", " : "") + (country != null ? country : "");
++                    sender.sendMessage(text().append(text("Location: ", SourbyCraftColors.LABEL))
++                        .append(text(loc, SourbyCraftColors.VALUE))
++                        .append(text(isp != null ? " | " + isp : "", SourbyCraftColors.DIM)));
++                }
++            }
++        } catch (Exception ignored) {}
++
++        // In-game location
+         if (target.getLocation().getWorld() != null) {
+             var loc = target.getLocation();
+-            sender.sendMessage(text().append(text("Location: ", SourbyCraftColors.LABEL)).append(text(loc.getWorld().getName() + " | " + loc.getBlockX() + ", " + loc.getBlockY() + ", " + loc.getBlockZ(), SourbyCraftColors.VALUE)));
++            sender.sendMessage(text().append(text("World: ", SourbyCraftColors.LABEL))
++                .append(text(loc.getWorld().getName() + " | " + loc.getBlockX() + ", " + loc.getBlockY() + ", " + loc.getBlockZ(), SourbyCraftColors.VALUE)));
+         }
+         return true;
+     }
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java
+index 02cf5c996e529d2eea3b08b2aba0065c7c4d8347..a24699db0cf0fa89be4885071e179fb2f596f4bc 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java
+@@ -2,31 +2,47 @@ package dev.iyanz.sourbycraft.command;
+ 
+ import dev.iyanz.sourbycraft.SourbyCraftColors;
+ import dev.iyanz.sourbycraft.util.BarUtil;
++import net.kyori.adventure.bossbar.BossBar;
++import net.kyori.adventure.text.Component;
++import org.bukkit.Bukkit;
+ import org.bukkit.command.Command;
+ import org.bukkit.command.CommandSender;
++import org.bukkit.entity.Player;
+ import static net.kyori.adventure.text.Component.text;
+ 
+ public class RamBarCommand extends Command {
++    private static BossBar ramBar;
++
+     public RamBarCommand(String name) {
+         super(name);
+-        this.description = "Shows RAM usage visual bar";
++        this.description = "Shows RAM usage as bossbar";
+         this.usageMessage = "/rambar";
+         this.setPermission("sourbycraft.command.rambar");
+     }
++
+     @Override
+     public boolean execute(CommandSender sender, String alias, String[] args) {
++        if (!(sender instanceof Player player)) {
++            sender.sendMessage("This command can only be used by players.");
++            return true;
++        }
+         if (!this.testPermission(sender)) return true;
++
++        if (ramBar == null) {
++            ramBar = BossBar.bossBar(text("RAM", SourbyCraftColors.HEADER), 1.0f, BossBar.Color.GREEN, BossBar.Overlay.PROGRESS);
++        }
++
+         Runtime rt = Runtime.getRuntime();
+         long max = rt.maxMemory(), total = rt.totalMemory(), used = total - rt.freeMemory();
+-        double pct = max == Long.MAX_VALUE ? (double) used / total * 100 : (double) used / max * 100;
++        double pct = max == Long.MAX_VALUE ? (double) used / total : (double) used / max;
+         String label = max == Long.MAX_VALUE ? BarUtil.INFINITY : (max / 1048576) + "MB";
+-        sender.sendMessage(text()
+-            .append(text("RAM:  ", SourbyCraftColors.LABEL))
+-            .append(BarUtil.coloredBar(pct, 30))
+-            .append(text(" " + (used / 1048576) + "/" + label + " (" + (int) pct + "%)", SourbyCraftColors.VALUE)));
+-        sender.sendMessage(text()
+-            .append(text("Heap: ", SourbyCraftColors.DIM))
+-            .append(text("Max " + (max == Long.MAX_VALUE ? BarUtil.INFINITY : (max / 1048576) + "MB") + " | Allocated " + (total / 1048576) + "MB", SourbyCraftColors.DIM)));
++
++        ramBar.progress((float) pct);
++        ramBar.color(pct < 0.5 ? BossBar.Color.GREEN : pct < 0.8 ? BossBar.Color.YELLOW : BossBar.Color.RED);
++        ramBar.name(text("RAM: " + BarUtil.bar(pct * 100, 30) + " " + (used / 1048576) + "/" + label + " (" + (int)(pct * 100) + "%)", SourbyCraftColors.VALUE));
++
++        player.showBossBar(ramBar);
++        Bukkit.getScheduler().runTaskLater(Bukkit.getPluginManager().getPlugins()[0], () -> player.hideBossBar(ramBar), 100L);
+         return true;
+     }
+ }
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java
+index ee8aaf433da0e53036c5d3155d04d6663c63a47a..c808f82f03ff1f7ca205ccc2b0e1f6586c445d47 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java
+@@ -2,42 +2,49 @@ package dev.iyanz.sourbycraft.command;
+ 
+ import dev.iyanz.sourbycraft.SourbyCraftColors;
+ import dev.iyanz.sourbycraft.util.BarUtil;
++import net.kyori.adventure.bossbar.BossBar;
++import net.kyori.adventure.text.Component;
++import org.bukkit.Bukkit;
+ import org.bukkit.command.Command;
+ import org.bukkit.command.CommandSender;
++import org.bukkit.entity.Player;
+ import static net.kyori.adventure.text.Component.text;
+ 
+ public class TpsBarCommand extends Command {
++    private static BossBar tpsBar;
++
+     public TpsBarCommand(String name) {
+         super(name);
+-        this.description = "Shows TPS and RAM visual bars";
++        this.description = "Shows TPS, MSPT, RAM as bossbar";
+         this.usageMessage = "/tpsbar";
+         this.setPermission("sourbycraft.command.tpsbar");
+     }
+ 
+     @Override
+     public boolean execute(CommandSender sender, String alias, String[] args) {
++        if (!(sender instanceof Player player)) {
++            sender.sendMessage("This command can only be used by players.");
++            return true;
++        }
+         if (!this.testPermission(sender)) return true;
+ 
+-        double[] tps = org.bukkit.Bukkit.getTPS();
+-        sender.sendMessage(text()
+-            .append(text("TPS:  ", SourbyCraftColors.LABEL))
+-            .append(BarUtil.coloredBar(Math.min(tps[0] * 5, 100), 20))
+-            .append(text(" " + tps[0], tps[0] > 18 ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DANGER)));
+-
+-        double mspt = org.bukkit.Bukkit.getAverageTickTime();
+-        sender.sendMessage(text()
+-            .append(text("MSPT: ", SourbyCraftColors.LABEL))
+-            .append(BarUtil.coloredBar(Math.max(0, 100 - mspt * 2), 20))
+-            .append(text(" " + mspt + "ms", mspt < 40 ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DANGER)));
++        if (tpsBar == null) {
++            tpsBar = BossBar.bossBar(text("TPS", SourbyCraftColors.HEADER), 1.0f, BossBar.Color.GREEN, BossBar.Overlay.PROGRESS);
++        }
+ 
++        double[] tps = Bukkit.getTPS();
++        double mspt = Bukkit.getAverageTickTime();
+         Runtime rt = Runtime.getRuntime();
+         long max = rt.maxMemory(), used = rt.totalMemory() - rt.freeMemory();
+-        double pct = max == Long.MAX_VALUE ? (double) used / rt.totalMemory() * 100 : (double) used / max * 100;
+-        sender.sendMessage(text()
+-            .append(text("RAM:  ", SourbyCraftColors.LABEL))
+-            .append(BarUtil.coloredBar(pct, 20))
+-            .append(text(" " + (used / 1048576) + "/" + (max == Long.MAX_VALUE ? BarUtil.INFINITY : (max / 1048576) + "MB"), SourbyCraftColors.VALUE)));
++        double memPct = max == Long.MAX_VALUE ? (double) used / rt.totalMemory() * 100 : (double) used / max * 100;
++
++        float progress = (float) Math.clamp(tps[0] / 20.0, 0.0, 1.0);
++        tpsBar.progress(progress);
++        tpsBar.color(tps[0] > 18 ? BossBar.Color.GREEN : tps[0] > 15 ? BossBar.Color.YELLOW : BossBar.Color.RED);
++        tpsBar.name(text("TPS: " + BarUtil.bar(tps[0] * 5, 20) + " " + tps[0] + " | MSPT: " + mspt + "ms | RAM: " + BarUtil.bar(memPct, 20) + " " + (int) memPct + "%", SourbyCraftColors.VALUE));
+ 
++        player.showBossBar(tpsBar);
++        Bukkit.getScheduler().runTaskLater(Bukkit.getPluginManager().getPlugins()[0], () -> player.hideBossBar(tpsBar), 100L);
+         return true;
+     }
+ }
