@@ -88,13 +88,13 @@ performance:
 
 ## Versioning
 
-| Branch | Suffix | Purpose |
+| Branch | Format | Example |
 |--------|--------|---------|
-| `ver/1.21.11` | `vN-REL` | Stable release |
-| `ver/1.21.11-dev` | `vN-DEV` | Active development |
-| `experimental-feat` | `vN-EXP` | Experimental features |
+| `ver/1.21.11` | `v{major}-REL` | `v1-REL` |
+| `ver/1.21.11-dev` | `v{major}.{minor}.{patch}-DEV` | `v1.0.0-DEV` |
+| `experimental-feat` | `v{major}{codename}-EXP` | `v1dev-EXP` |
 
-Bump `releaseVersion` in `gradle.properties` (v1 → v2 → v3...).
+Set `releaseVersion` and `codename` in `gradle.properties`.
 
 ---
 
