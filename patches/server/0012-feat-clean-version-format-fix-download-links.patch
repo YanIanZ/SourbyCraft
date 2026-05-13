@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 13 May 2026 13:43:20 +0700
+Subject: [PATCH] feat: clean version format, fix download links
+
+
+diff --git a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
+index 7d75c09b14a28e1b671df4aa9573199f95689132..04a7be1c55aadf8f56ecfab333ff06640c04b7f4 100644
+--- a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
++++ b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
+@@ -68,35 +68,17 @@ public record ServerBuildInfoImpl(
+ 
+     @Override
+     public @NotNull String asString(final @NotNull StringRepresentation representation) {
+-        final StringBuilder sb = new StringBuilder();
+-        sb.append(this.minecraftVersionId);
+-        sb.append('-');
+-        if (this.buildNumber.isPresent()) {
+-            sb.append(this.buildNumber.getAsInt());
+-        } else {
+-            sb.append(BUILD_DEV);
+-        }
+-        final boolean hasGitBranch = this.gitBranch.isPresent();
+-        final boolean hasGitCommit = this.gitCommit.isPresent();
+-        if (hasGitBranch || hasGitCommit) {
+-            sb.append('-');
+-        }
+-        if (hasGitBranch && representation == StringRepresentation.VERSION_FULL) {
+-            sb.append(this.gitBranch.get());
+-            if (hasGitCommit) {
+-                sb.append('@');
+-            }
+-        }
+-        if (hasGitCommit) {
+-            sb.append(this.gitCommit.get());
+-        }
++        final String specVersion = io.papermc.paper.util.JarManifests.manifest(org.bukkit.craftbukkit.CraftServer.class) != null
++            ? io.papermc.paper.util.JarManifests.manifest(org.bukkit.craftbukkit.CraftServer.class).getMainAttributes().getValue("Specification-Version")
++            : null;
++        final String version = specVersion != null && !specVersion.isEmpty() ? specVersion : BUILD_DEV;
+         if (representation == StringRepresentation.VERSION_FULL) {
+-            sb.append(' ');
+-            sb.append('(');
+-            sb.append(this.buildTime.truncatedTo(ChronoUnit.SECONDS));
+-            sb.append(')');
++            final java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter
++                .ofPattern("EEEE, d MMMM yyyy")
++                .withZone(java.time.ZoneId.of("Asia/Jakarta"));
++            return version + " " + fmt.format(this.buildTime);
+         }
+-        return sb.toString();
++        return version;
+     }
+ 
+     private static Optional<String> getManifestAttribute(final Manifest manifest, final String name) {
