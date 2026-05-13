@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 13 May 2026 14:16:40 +0700
+Subject: [PATCH] feat: add /ping command with latency, client, location
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..720e808f8e2d44bdc70de3bfaa51425c5c519029
+--- /dev/null
++++ b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+@@ -0,0 +1,68 @@
++package dev.iyanz.sourbycraft.command;
++
++import dev.iyanz.sourbycraft.SourbyCraftColors;
++import net.kyori.adventure.text.Component;
++import net.kyori.adventure.text.format.TextColor;
++import org.bukkit.Bukkit;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import org.bukkit.entity.Player;
++
++import static net.kyori.adventure.text.Component.text;
++
++public class PingCommand extends Command {
++
++    public PingCommand(String name) {
++        super(name);
++        this.description = "Shows your or another player's connection latency";
++        this.usageMessage = "/ping [player]";
++        this.setPermission("sourbycraft.command.ping");
++    }
++
++    @Override
++    public boolean execute(CommandSender sender, String alias, String[] args) {
++        if (!this.testPermission(sender)) return true;
++
++        Player target;
++        if (args.length > 0) {
++            target = Bukkit.getPlayer(args[0]);
++            if (target == null) {
++                sender.sendMessage(text("Player not found: " + args[0], SourbyCraftColors.DANGER));
++                return true;
++            }
++        } else if (sender instanceof Player player) {
++            target = player;
++        } else {
++            sender.sendMessage(text("Usage: /ping <player>", SourbyCraftColors.DIM));
++            return true;
++        }
++
++        int ping = target.getPing();
++        TextColor pingColor = ping < 50 ? SourbyCraftColors.SUCCESS : ping < 100 ? SourbyCraftColors.PRIMARY : ping < 200 ? SourbyCraftColors.WARNING : SourbyCraftColors.DANGER;
++
++        int barLen = Math.min(20, Math.max(1, (200 - ping) / 10));
++        String bar = "\u2588".repeat(barLen) + "\u2591".repeat(20 - barLen);
++
++        sender.sendMessage(text()
++            .append(text("Ping: ", SourbyCraftColors.LABEL))
++            .append(text(ping + "ms ", pingColor))
++            .append(text(bar, SourbyCraftColors.DIM)));
++
++        String clientBrand = target.getClientBrandName() != null ? target.getClientBrandName() : "vanilla";
++        sender.sendMessage(text()
++            .append(text("Client: ", SourbyCraftColors.LABEL))
++            .append(text(clientBrand + " | protocol " + target.getProtocolVersion(), SourbyCraftColors.VALUE)));
++
++        if (target.getLocation().getWorld() != null) {
++            String world = target.getLocation().getWorld().getName();
++            int x = target.getLocation().getBlockX();
++            int y = target.getLocation().getBlockY();
++            int z = target.getLocation().getBlockZ();
++            sender.sendMessage(text()
++                .append(text("Location: ", SourbyCraftColors.LABEL))
++                .append(text(world + " | " + x + ", " + y + ", " + z, SourbyCraftColors.VALUE)));
++        }
++
++        return true;
++    }
++}
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 18e7cd39b080828a741ac047ceebb607c3111825..5c28084728b028f3129ea3fd730f21fe179335a9 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1026,6 +1026,7 @@ public final class CraftServer implements Server {
+         org.spigotmc.SpigotConfig.registerCommands(); // Spigot
+         io.papermc.paper.command.PaperCommands.registerCommands(this.console); // Paper
+         this.spark.registerCommandBeforePlugins(this); // Paper - spark
++        this.commandMap.register("ping", "SourbyCraft", new dev.iyanz.sourbycraft.command.PingCommand("ping")); // SourbyCraft - ping command
+         this.overrideAllCommandBlockCommands = this.commandsConfiguration.getStringList("command-block-overrides").contains("*");
+         this.ignoreVanillaPermissions = this.commandsConfiguration.getBoolean("ignore-vanilla-permissions");
+ 
