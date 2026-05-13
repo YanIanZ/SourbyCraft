@@ -82,6 +82,12 @@ performance:
   async-threads: 4
   async-chunk-load: false
   async-pathfinding: false
+
+# SlimeWorldManager (defaults ON)
+swm:
+  enabled: true
+  auto-install: true
+  version: "2.2.1"
 ```
 
 ---

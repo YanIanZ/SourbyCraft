@@ -35,6 +35,10 @@ public class SourbyCraftConfig {
     public static boolean preSizePackets = false;
     public static boolean chunkCompressionCache = true;
 
+    public static boolean swmEnabled = true;
+    public static String swmVersion = "2.2.1";
+    public static boolean swmAutoInstall = true;
+
     public static void init(File configFile) {
         CONFIG_FILE = configFile;
         config = new YamlConfiguration();
@@ -67,6 +71,14 @@ public class SourbyCraftConfig {
         poolEntityData = getBoolean("memory.pool-entity-data", poolEntityData);
         preSizePackets = getBoolean("memory.pre-size-packets", preSizePackets);
         chunkCompressionCache = getBoolean("memory.chunk-compression-cache", chunkCompressionCache);
+
+        swmEnabled = getBoolean("swm.enabled", swmEnabled);
+        swmVersion = getString("swm.version", swmVersion);
+        swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
+
+        if (swmEnabled && swmAutoInstall) {
+            dev.iyanz.sourbycraft.swm.SwmInstaller.install("plugins/");
+        }
 
         AsyncExecutor.initPool(asyncThreads);
     }
