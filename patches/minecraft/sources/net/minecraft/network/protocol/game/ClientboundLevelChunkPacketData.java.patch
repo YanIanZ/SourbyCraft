@@ -1,0 +1,47 @@
+--- a/net/minecraft/network/protocol/game/ClientboundLevelChunkPacketData.java
++++ b/net/minecraft/network/protocol/game/ClientboundLevelChunkPacketData.java
+@@ -57,7 +_,12 @@
+         if (chunkPacketInfo != null) {
+             chunkPacketInfo.setBuffer(this.buffer);
+         }
+-        extractChunkData(new FriendlyByteBuf(this.getWriteBuffer()), levelChunk, chunkPacketInfo);
++        // SourbyCraft start - pre-size chunk packet buffers
++        FriendlyByteBuf writeBuf = FriendlyByteBuf.createChunkBuffer();
++        extractChunkData(writeBuf, levelChunk, chunkPacketInfo, this.buffer.length);
++        writeBuf.readBytes(this.buffer);
++        writeBuf.release();
++        // SourbyCraft end - pre-size chunk packet buffers
+         this.blockEntitiesData = Lists.newArrayList();
+         int totalTileEntities = 0; // Paper - Handle oversized block entities in chunks
+ 
+@@ -113,9 +_,14 @@
+     // Paper start - Anti-Xray - Add chunk packet info
+     @Deprecated @io.papermc.paper.annotation.DoNotUse
+     public static void extractChunkData(FriendlyByteBuf buffer, LevelChunk chunk) {
+-        ClientboundLevelChunkPacketData.extractChunkData(buffer, chunk, null);
++        ClientboundLevelChunkPacketData.extractChunkData(buffer, chunk, null, 0);
+     }
+     public static void extractChunkData(FriendlyByteBuf buffer, LevelChunk chunk, io.papermc.paper.antixray.ChunkPacketInfo<net.minecraft.world.level.block.state.BlockState> chunkPacketInfo) {
++        ClientboundLevelChunkPacketData.extractChunkData(buffer, chunk, chunkPacketInfo, 0);
++    }
++    // SourbyCraft start - pre-size chunk packet buffers
++    public static void extractChunkData(FriendlyByteBuf buffer, LevelChunk chunk, io.papermc.paper.antixray.ChunkPacketInfo<net.minecraft.world.level.block.state.BlockState> chunkPacketInfo, int expectedSize) {
++        // SourbyCraft end - pre-size chunk packet buffers
+         int chunkSectionIndex = 0;
+         for (LevelChunkSection levelChunkSection : chunk.getSections()) {
+             levelChunkSection.write(buffer, chunkPacketInfo, chunkSectionIndex);
+@@ -123,9 +_,12 @@
+             // Paper end  - Anti-Xray - Add chunk packet info
+         }
+ 
+-        if (buffer.writerIndex() != buffer.capacity()) {
+-            throw new IllegalStateException("Didn't fill chunk buffer: expected " + buffer.capacity() + " bytes, got " + buffer.writerIndex());
++        // SourbyCraft start - pre-size chunk packet buffers - check against expected size
++        int checkSize = expectedSize > 0 ? expectedSize : buffer.capacity();
++        if (buffer.writerIndex() != checkSize) {
++            throw new IllegalStateException("Didn't fill chunk buffer: expected " + checkSize + " bytes, got " + buffer.writerIndex());
+         }
++        // SourbyCraft end - pre-size chunk packet buffers
+     }
+ 
+     public Consumer<ClientboundLevelChunkPacketData.BlockEntityTagOutput> getBlockEntitiesTagsConsumer(int chunkX, int chunkZ) {

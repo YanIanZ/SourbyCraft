@@ -1,0 +1,72 @@
+--- a/net/minecraft/world/level/chunk/LevelChunkSection.java
++++ b/net/minecraft/world/level/chunk/LevelChunkSection.java
+@@ -6,8 +_,10 @@
+ import net.minecraft.world.level.biome.Biome;
+ import net.minecraft.world.level.biome.BiomeResolver;
+ import net.minecraft.world.level.biome.Climate;
++import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.material.FluidState;
++import net.minecraft.world.level.material.Fluids;
+ 
+ public class LevelChunkSection implements ca.spottedleaf.moonrise.patches.block_counting.BlockCountingChunkSection { // Paper - block counting
+     public static final int SECTION_WIDTH = 16;
+@@ -48,7 +_,7 @@
+         this.nonEmptyBlockCount = section.nonEmptyBlockCount;
+         this.tickingBlockCount = section.tickingBlockCount;
+         this.tickingFluidCount = section.tickingFluidCount;
+-        this.states = section.states.copy();
++        this.states = section.states != null ? section.states.copy() : null;
+         this.biomes = section.biomes.copy();
+     }
+ 
+@@ -56,6 +_,9 @@
+         this.states = states;
+         this.biomes = biomes;
+         this.recalcBlockCounts();
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.skipEmptySections && this.nonEmptyBlockCount == 0) {
++            this.states = null;
++        }
+     }
+ 
+     // Paper start - Anti-Xray - Add parameters
+@@ -70,19 +_,21 @@
+     }
+ 
+     public BlockState getBlockState(int x, int y, int z) {
++        if (this.states == null) return Blocks.AIR.defaultBlockState();
+         return this.states.get(x, y, z);
+     }
+ 
+     public FluidState getFluidState(int x, int y, int z) {
++        if (this.states == null) return Fluids.EMPTY.defaultFluidState();
+         return this.states.get(x, y, z).getFluidState(); // Paper - Perf: Optimise LevelChunk#getFluidState; diff on change - we expect this to be effectively just get(x, y, z).getFluidState(). If this changes we need to check other patches that use BlockBehaviour#getFluidState.
+     }
+ 
+     public void acquire() {
+-        this.states.acquire();
++        if (this.states != null) this.states.acquire();
+     }
+ 
+     public void release() {
+-        this.states.release();
++        if (this.states != null) this.states.release();
+     }
+ 
+     public BlockState setBlockState(int x, int y, int z, BlockState state) {
+@@ -182,6 +_,7 @@
+     }
+ 
+     public void recalcBlockCounts() {
++        if (this.states == null) return;
+         // Paper start - block counting
+         // reset, then recalculate
+         this.nonEmptyBlockCount = (short)0;
+@@ -292,6 +_,7 @@
+     }
+ 
+     public boolean maybeHas(Predicate<BlockState> predicate) {
++        if (this.states == null) return false;
+         return this.states.maybeHas(predicate);
+     }
+ 
