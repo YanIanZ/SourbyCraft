@@ -14,7 +14,7 @@
 +        }
 +        DataValue<?> dv = VALUE_POOL.get().pollLast();
 +        if (dv != null) {
-+            dv.set(id, serializer, value);
++            ((DataValue) dv).set(id, serializer, value);
 +            return (DataValue<T>) dv;
 +        }
 +        return new DataValue<>(id, serializer, value);
