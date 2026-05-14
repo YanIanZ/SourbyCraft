@@ -7,7 +7,6 @@ plugins {
 }
 
 include("test-plugin")
-include("swm-plugin")
 
 listOf("api", "server").forEach {
     // only include subprojects if buildscript can be resolved
