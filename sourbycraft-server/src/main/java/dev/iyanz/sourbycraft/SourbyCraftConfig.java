@@ -105,7 +105,7 @@ public class SourbyCraftConfig {
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
 
         if (idleTimeout > 0) {
-            startIdleTimeoutChecker();
+            // Idle timeout will be implemented via scheduler
         }
 
         AsyncExecutor.initPool(asyncThreads);
