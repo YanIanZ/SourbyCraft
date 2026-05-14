@@ -85,6 +85,16 @@ public final class SlimeWorldLoader {
         return out.toByteArray();
     }
 
+    public static void loadAll(net.minecraft.server.MinecraftServer server) {
+        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.swmEnabled) return;
+        for (SlimeWorldInfo info : discoverWorlds()) {
+            try {
+                loadWorld(info.worldName());
+                org.bukkit.Bukkit.createWorld(org.bukkit.WorldCreator.name(info.worldName()));
+            } catch (Exception ignored) {}
+        }
+    }
+
     public static void scheduleAutoLoad() {
         org.bukkit.Bukkit.getScheduler().runTaskLater(
             org.bukkit.Bukkit.getPluginManager().getPlugins()[0],
