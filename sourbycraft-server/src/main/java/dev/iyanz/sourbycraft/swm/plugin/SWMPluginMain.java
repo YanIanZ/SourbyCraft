@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.swm.plugin;
 
 import dev.iyanz.sourbycraft.swm.SlimeWorldLoader;
+import dev.iyanz.sourbycraft.swm.plugin.loader.*;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -12,7 +13,8 @@ public class SWMPluginMain extends JavaPlugin {
     @Override
     public void onEnable() {
         instance = this;
-        getLogger().info("SourbyCraft SWM enabled");
+        LoaderManager.init();
+        getLogger().info("SourbyCraft SWM enabled with " + LoaderManager.all().size() + " loader(s)");
         loadAllWorlds();
     }
 
@@ -25,21 +27,25 @@ public class SWMPluginMain extends JavaPlugin {
     public static SWMPluginMain get() { return instance; }
 
     public void loadAllWorlds() {
-        for (var info : SlimeWorldLoader.discoverWorlds()) {
-            if (getServer().getWorld(info.name()) != null) continue;
-            try {
-                SlimeWorldLoader.extract(info.name());
-                World w = getServer().createWorld(WorldCreator.name(info.name()));
-                if (w != null) getLogger().info("Loaded: " + info.name());
-            } catch (Exception e) {
-                getLogger().warning("Failed: " + info.name());
+        SlimeLoader loader = LoaderManager.getDefault();
+        if (loader == null) return;
+        try {
+            for (String name : loader.listWorlds()) {
+                if (getServer().getWorld(name) != null) continue;
+                try {
+                    SlimeWorldLoader.extract(name);
+                    World w = getServer().createWorld(WorldCreator.name(name));
+                    if (w != null) getLogger().info("Loaded: " + name);
+                } catch (Exception e) {
+                    getLogger().warning("Failed: " + name + " - " + e.getMessage());
+                }
             }
+        } catch (IOException e) {
+            getLogger().severe("Loader error: " + e.getMessage());
         }
     }
 
     public void saveAllWorlds() {
-        for (World w : getServer().getWorlds()) {
-            w.save();
-        }
+        for (World w : getServer().getWorlds()) w.save();
     }
 }
