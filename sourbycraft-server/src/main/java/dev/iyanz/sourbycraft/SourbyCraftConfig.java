@@ -98,7 +98,6 @@ public class SourbyCraftConfig {
             if (swmAutoInstall) {
                 dev.iyanz.sourbycraft.swm.SwmInstaller.install("plugins/");
             }
-            dev.iyanz.sourbycraft.swm.SlimeWorldLoader.autoExtractWorlds();
             dev.iyanz.sourbycraft.swm.SlimeWorldLoader.scheduleAutoLoad();
         }
 
