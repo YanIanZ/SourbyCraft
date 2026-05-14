@@ -1,0 +1,6 @@
+name: SourbyCraftSWM
+version: "1.0.0"
+main: dev.iyanz.sourbycraft.swm.SWMPlugin
+api-version: "1.21"
+description: Built-in SlimeWorldManager for SourbyCraft
+author: SourbyCraft
