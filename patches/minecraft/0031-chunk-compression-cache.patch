@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <dev@iyanz.dev>
+Date: Thu, 15 May 2026 05:00:00 +0700
+Subject: [PATCH] Chunk compression cache — cache compressed chunk data
+
+
+diff --git a/net/minecraft/network/protocol/game/ClientboundLevelChunkPacketData.java b/net/minecraft/network/protocol/game/ClientboundLevelChunkPacketData.java
+--- a/net/minecraft/network/protocol/game/ClientboundLevelChunkPacketData.java
++++ b/net/minecraft/network/protocol/game/ClientboundLevelChunkPacketData.java
+@@ -7,6 +7,7 @@
++import java.util.concurrent.ConcurrentHashMap;
+@@ -28,8 +29,20 @@
++    // SourbyCraft start - convert heightmaps to array
++    public static final Heightmap.Types[] SENDABLE_HEIGHTMAP_TYPES = java.util.Arrays.stream(Heightmap.Types.values())
++            .filter(Heightmap.Types::sendToClient).toArray(Heightmap.Types[]::new);
++    public static final int[] SENDABLE_HEIGHTMAP_TYPE_IDS = java.util.Arrays.stream(Heightmap.Types.values())
++            .filter(Heightmap.Types::sendToClient).mapToInt(Enum::ordinal).toArray();
++    public static final int  SENDABLE_HEIGHTMAP_TYPES_LEN = SENDABLE_HEIGHTMAP_TYPES.length;
++    public static final int HEIGHTMAP_TYPES_LEN = Heightmap.Types.values().length;
+-    private final Map<Heightmap.Types, long[]> heightmaps;
++    // SourbyCraft start - chunk compression cache
++    private static final ConcurrentHashMap<Long, byte[]> COMPRESSION_CACHE = new ConcurrentHashMap<>();
++    // SourbyCraft end
++    private final long[][] heightmaps;
++    private final int heightmapsCount;
++    // SourbyCraft end - convert heightmaps to array
+@@ -48,10 +61,19 @@
+-        this.heightmaps = levelChunk.getHeightmaps()
+-            .stream()
+-            .filter(entry1 -> entry1.getKey().sendToClient())
+-            .collect(Collectors.toMap(Entry::getKey, entry1 -> (long[])entry1.getValue().getRawData().clone()));
++        // SourbyCraft start - convert heightmaps to array
++        this.heightmaps = new long[HEIGHTMAP_TYPES_LEN][];
++        int heightmapsCount = 0;
++        for (int i = 0; i < SENDABLE_HEIGHTMAP_TYPES_LEN; ++i) {
++            int typeId = SENDABLE_HEIGHTMAP_TYPE_IDS[i];
++            Heightmap heightmap = levelChunk.heightmaps[typeId];
++            if (heightmap != null) {
++                this.heightmaps[typeId] = heightmap.getRawData();
++                heightmapsCount++;
++            }
++        }
++        this.heightmapsCount = heightmapsCount;
++        // SourbyCraft end - convert heightmaps to array
+@@ -76,7 +98,13 @@
+-        this.heightmaps = HEIGHTMAPS_STREAM_CODEC.decode(buffer);
++        // SourbyCraft start - convert heightmaps to array
++        this.heightmaps = new long[HEIGHTMAP_TYPES_LEN][];
++        this.heightmapsCount = ByteBufCodecs.readCount(buffer, HEIGHTMAP_TYPES_LEN);
++        for (int i = 0; i < this.heightmapsCount; i++) {
++            this.heightmaps[net.minecraft.network.VarInt.read(buffer)] = buffer.readLongArray();
++        }
++        // SourbyCraft end - convert heightmaps to array
+@@ -88,7 +116,16 @@
+-        HEIGHTMAPS_STREAM_CODEC.encode(buffer, this.heightmaps);
++        // SourbyCraft start - convert heightmaps to array
++        ByteBufCodecs.writeCount(buffer, this.heightmapsCount, HEIGHTMAP_TYPES_LEN);
++        for (int i = 0; i < this.heightmaps.length; i++) {
++            long[] data = this.heightmaps[i];
++            if (data != null) {
++                net.minecraft.network.VarInt.write(buffer, i);
++                buffer.writeLongArray(data);
++            }
++        }
++        // SourbyCraft end - convert heightmaps to array
+@@ -150,7 +187,7 @@
+-        return this.heightmaps;
++        throw new UnsupportedOperationException(); // SourbyCraft - convert heightmaps to array
