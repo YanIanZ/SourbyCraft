@@ -36,6 +36,8 @@ public class SourbyCraftConfig {
     public static boolean chunkCompressionCache = false;
 
     public static boolean swmEnabled = true;
+    public static String swmVersion = "1.21.11";
+    public static boolean swmAutoInstall = true;
 
     public static boolean autoThrottleView = true;
     public static int minViewDistance = 4;
@@ -87,6 +89,12 @@ public class SourbyCraftConfig {
         chunkCompressionCache = getBoolean("memory.chunk-compression-cache", chunkCompressionCache);
 
         swmEnabled = getBoolean("swm.enabled", swmEnabled);
+        swmVersion = getString("swm.version", swmVersion);
+        swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
+
+        if (swmEnabled && swmAutoInstall) {
+            dev.iyanz.sourbycraft.swm.SwmInstaller.install("plugins/");
+        }
 
         autoThrottleView = getBoolean("network.auto-throttle-view", autoThrottleView);
         minViewDistance = getInt("network.min-view-distance", minViewDistance);
