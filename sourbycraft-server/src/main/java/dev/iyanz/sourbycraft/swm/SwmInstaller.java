@@ -5,45 +5,33 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.file.*;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.util.logging.*;
 
 public final class SwmInstaller {
     private static final Logger LOGGER = Logger.getLogger("SourbyCraft-SWM");
-    private static final String SWM_URL = "https://github.com/InfernalSuite/AdvancedSlimeWorldManager/releases/download/%s/AdvancedSlimeWorldManager-%s.jar";
+    private static final String ASW_URL = "https://github.com/InfernalSuite/AdvancedSlimePaper/releases/download/%s/aspaper-%s.jar";
 
     public static void install(String pluginsDir) {
         if (!SourbyCraftConfig.swmEnabled || !SourbyCraftConfig.swmAutoInstall) return;
+        Path jarPath = Path.of(pluginsDir, "aspaper.jar");
+        if (Files.exists(jarPath)) return;
 
-        Path jarPath = Path.of(pluginsDir, "SlimeWorldManager.jar");
-        if (Files.exists(jarPath)) {
-            LOGGER.log(Level.INFO, "SWM jar already installed");
-            return;
-        }
-
-        String version = SourbyCraftConfig.swmVersion;
-        String url = String.format(SWM_URL, version, version);
-        LOGGER.log(Level.INFO, "Downloading SlimeWorldManager v" + version + "...");
-
+        String ver = SourbyCraftConfig.swmVersion;
         try {
             Files.createDirectories(Path.of(pluginsDir));
-            HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
-            conn.setConnectTimeout(30000);
-            conn.setReadTimeout(60000);
-            conn.setRequestProperty("User-Agent", "SourbyCraft-SWM-Installer");
-
-            try (InputStream in = conn.getInputStream()) {
+            HttpURLConnection c = (HttpURLConnection) URI.create(String.format(ASW_URL, ver, ver)).toURL().openConnection();
+            c.setConnectTimeout(30000); c.setReadTimeout(60000);
+            try (InputStream in = c.getInputStream()) {
                 Files.copy(in, jarPath, StandardCopyOption.REPLACE_EXISTING);
             }
-
-            LOGGER.log(Level.INFO, "SlimeWorldManager installed. Restart server to load.");
+            LOGGER.info("ASPaper SWM installed. Restart to load.");
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to download SWM: " + e.getMessage());
+            LOGGER.warning("SWM download failed: " + e.getMessage());
         }
     }
 
     public static boolean isInstalled() {
-        return Files.exists(Path.of("plugins/SlimeWorldManager.jar"));
+        return Files.exists(Path.of("plugins/aspaper.jar"));
     }
 
     private SwmInstaller() {}

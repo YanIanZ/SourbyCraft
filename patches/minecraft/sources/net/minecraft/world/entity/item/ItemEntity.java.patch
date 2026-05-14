@@ -1,0 +1,33 @@
+--- a/net/minecraft/world/entity/item/ItemEntity.java
++++ b/net/minecraft/world/entity/item/ItemEntity.java
+@@ -197,7 +_,11 @@
+                 || Mth.floor(this.zo) != Mth.floor(this.getZ());
+             int i = flag ? 2 : 40;
+             if (this.tickCount % i == 0 && !this.level().isClientSide() && this.isMergable()) {
+-                this.mergeWithNeighbours();
++                if (dev.iyanz.sourbycraft.SourbyCraftConfig.itemMergeOptimize) {
++                    this.mergeWithNeighboursOptimized();
++                } else {
++                    this.mergeWithNeighbours();
++                }
+             }
+ 
+             if (this.age != -32768) {
+@@ -243,6 +_,17 @@
+     }
+ 
+     private void mergeWithNeighbours() {
++        // SourbyCraft - optimized merge
++        final double radius = 0.5;
++        this.mergeWithRadius(radius);
++    }
++
++    private void mergeWithNeighboursOptimized() {
++        final double radius = 1.5; // wider merge radius
++        this.mergeWithRadius(radius);
++    }
++
++    private void mergeWithRadius(double radius) {
+         if (this.isMergable()) {
+             double radius = this.level().spigotConfig.itemMerge; // Spigot
+             for (ItemEntity itemEntity : this.level()

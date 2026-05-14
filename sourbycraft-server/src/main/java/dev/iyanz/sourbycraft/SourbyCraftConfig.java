@@ -36,7 +36,7 @@ public class SourbyCraftConfig {
     public static boolean chunkCompressionCache = false;
 
     public static boolean swmEnabled = true;
-    public static String swmVersion = "2.2.2";
+    public static String swmVersion = "1.21.11";
     public static boolean swmAutoInstall = true;
 
     public static boolean autoThrottleView = true;
@@ -46,6 +46,13 @@ public class SourbyCraftConfig {
     public static int entityTickRate = 20;
     public static boolean hopperBatch = true;
     public static boolean redstoneOptimize = true;
+    public static int maxEntityPerChunk = 10;
+    public static int idleTimeout = 0;
+    public static boolean itemMergeOptimize = true;
+    public static int itemDespawnRate = 6000;
+    public static int itemMergeRadius = 3;
+    public static int mobTickDistance = 32;
+    public static int mobPathfindInterval = 20;
     public static boolean asyncSaveBatch = true;
 
     public static void init(File configFile) {
@@ -85,6 +92,10 @@ public class SourbyCraftConfig {
         swmVersion = getString("swm.version", swmVersion);
         swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
 
+        if (swmEnabled && swmAutoInstall) {
+            dev.iyanz.sourbycraft.swm.SwmInstaller.install("plugins/");
+        }
+
         autoThrottleView = getBoolean("network.auto-throttle-view", autoThrottleView);
         minViewDistance = getInt("network.min-view-distance", minViewDistance);
         compressionLevel = getInt("network.compression-level", compressionLevel);
@@ -92,10 +103,17 @@ public class SourbyCraftConfig {
         entityTickRate = getInt("entity.tick-rate", entityTickRate);
         hopperBatch = getBoolean("entity.hopper-batch", hopperBatch);
         redstoneOptimize = getBoolean("entity.redstone-optimize", redstoneOptimize);
+        maxEntityPerChunk = getInt("entity.max-per-chunk", maxEntityPerChunk);
+        idleTimeout = getInt("server.idle-timeout", idleTimeout);
+        itemMergeOptimize = getBoolean("entity.item-merge-optimize", itemMergeOptimize);
+        itemDespawnRate = getInt("entity.item-despawn-rate", itemDespawnRate);
+        itemMergeRadius = getInt("entity.item-merge-radius", itemMergeRadius);
+        mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
+        mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
 
-        if (swmEnabled && swmAutoInstall) {
-            dev.iyanz.sourbycraft.swm.SwmInstaller.install("plugins/");
+        if (idleTimeout > 0) {
+            // Idle timeout will be implemented via scheduler
         }
 
         AsyncExecutor.initPool(asyncThreads);
