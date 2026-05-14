@@ -25,10 +25,10 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..dc0a65d50ec50b5424aa1b99e9ef37102001548e
 --- /dev/null
 +++ b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,27 @@
 +package dev.iyanz.sourbycraft.command;
 +import dev.iyanz.sourbycraft.SourbyCraftColors;
-+import dev.iyanz.sourbycraft.util.BarUtil;
++import dev.iyanz.sourbycraft.util.GeoUtil;
 +import net.kyori.adventure.text.format.TextColor;
 +import org.bukkit.Bukkit;
 +import org.bukkit.command.Command;
@@ -43,10 +43,13 @@ index 0000000000000000000000000000000000000000..dc0a65d50ec50b5424aa1b99e9ef3710
 +        if(t==null) { s.sendMessage(text("Player not found",SourbyCraftColors.DANGER)); return true; }
 +        int ping = t.getPing();
 +        TextColor pc = ping<50?SourbyCraftColors.SUCCESS:ping<100?SourbyCraftColors.PRIMARY:ping<200?SourbyCraftColors.WARNING:SourbyCraftColors.DANGER;
-+        s.sendMessage(text().append(text("Ping: ",SourbyCraftColors.LABEL)).append(BarUtil.coloredBar(Math.min((200-ping)/2.0,100),20)).append(text(" "+ping+"ms",pc)));
++        s.sendMessage(text().append(text("Ping: ",SourbyCraftColors.LABEL)).append(text(ping+"ms",pc)));
 +        String brand = t.getClientBrandName()!=null?t.getClientBrandName():"vanilla";
 +        s.sendMessage(text().append(text("Client: ",SourbyCraftColors.LABEL)).append(text(brand+" | p"+t.getProtocolVersion(),SourbyCraftColors.VALUE)));
-+        if(t.getLocation().getWorld()!=null){var l=t.getLocation();s.sendMessage(text().append(text("Location: ",SourbyCraftColors.LABEL)).append(text(l.getWorld().getName()+" | "+l.getBlockX()+", "+l.getBlockY()+", "+l.getBlockZ(),SourbyCraftColors.VALUE)));}
++        Bukkit.getScheduler().runTaskAsynchronously(Bukkit.getPluginManager().getPlugins()[0],()->{
++            String geo=GeoUtil.lookup(t);
++            if(geo!=null)s.sendMessage(text().append(text("Location: ",SourbyCraftColors.LABEL)).append(text(geo,SourbyCraftColors.VALUE)));
++        });
 +        return true;
 +    }
 +}
@@ -88,11 +91,11 @@ index 0000000000000000000000000000000000000000..7d552af72984ea43cfa31c815bc1627f
 +    public boolean execute(CommandSender s,String a,String[] args){
 +        if(!(s instanceof Player p)){s.sendMessage("Players only");return true;}
 +        if(!testPermission(s))return true;
-+        if(bar==null)bar=BossBar.bossBar(text("RAM",SourbyCraftColors.HEADER),1f,BossBar.Color.GREEN,BossBar.Overlay.PROGRESS);
++        if(bar==null)bar=BossBar.bossBar(text("RAM",SourbyCraftColors.HEADER),0f,BossBar.Color.GREEN,BossBar.Overlay.PROGRESS);
 +        Runtime rt=Runtime.getRuntime();long max=rt.maxMemory(),total=rt.totalMemory(),used=total-rt.freeMemory();double pct=max==Long.MAX_VALUE?(double)used/total:(double)used/max;String lbl=max==Long.MAX_VALUE?BarUtil.INFINITY:(max/1048576)+"MB";
-+        bar.progress((float)pct);bar.color(pct<0.5?BossBar.Color.GREEN:pct<0.8?BossBar.Color.YELLOW:BossBar.Color.RED);
-+        bar.name(text("RAM:"+BarUtil.bar(pct*100,30)+" "+(used/1048576)+"/"+lbl+" ("+(int)(pct*100)+"%)",SourbyCraftColors.VALUE));
-+        p.showBossBar(bar);Bukkit.getScheduler().runTaskLater(Bukkit.getPluginManager().getPlugins()[0],()->p.hideBossBar(bar),100L);
++        bar.progress((float)Math.min(pct,1.0));bar.color(pct<0.5?BossBar.Color.GREEN:pct<0.8?BossBar.Color.YELLOW:BossBar.Color.RED);
++        bar.name(text(String.format("RAM: %d/%s (%.0f%%)",used/1048576,lbl,pct*100),SourbyCraftColors.VALUE));
++        p.showBossBar(bar);Bukkit.getScheduler().runTaskLater(Bukkit.getPluginManager().getPlugins()[0],()->p.hideBossBar(bar),200L);
 +        return true;
 +    }
 +}
@@ -195,10 +198,9 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..53ec249dedff0ab567e229920c35c38d32d7d442
 --- /dev/null
 +++ b/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,22 @@
 +package dev.iyanz.sourbycraft.command;
 +import dev.iyanz.sourbycraft.SourbyCraftColors;
-+import dev.iyanz.sourbycraft.util.BarUtil;
 +import net.kyori.adventure.bossbar.BossBar;
 +import org.bukkit.Bukkit;
 +import org.bukkit.command.Command;
@@ -212,10 +214,10 @@ index 0000000000000000000000000000000000000000..53ec249dedff0ab567e229920c35c38d
 +        if(!(s instanceof Player p)){s.sendMessage("Players only");return true;}
 +        if(!testPermission(s))return true;
 +        if(bar==null)bar=BossBar.bossBar(text("TPS",SourbyCraftColors.HEADER),1f,BossBar.Color.GREEN,BossBar.Overlay.PROGRESS);
-+        double[]tps=Bukkit.getTPS();double mspt=Bukkit.getAverageTickTime();Runtime rt=Runtime.getRuntime();long max=rt.maxMemory(),used=rt.totalMemory()-rt.freeMemory();double mem=max==Long.MAX_VALUE?(double)used/rt.totalMemory():(double)used/max;
++        double[]tps=Bukkit.getTPS();double mspt=Bukkit.getAverageTickTime();
 +        bar.progress((float)(tps[0]/20.0));bar.color(tps[0]>18?BossBar.Color.GREEN:tps[0]>15?BossBar.Color.YELLOW:BossBar.Color.RED);
-+        bar.name(text("TPS:"+BarUtil.bar(tps[0]*5,20)+" "+tps[0]+" MSPT:"+mspt+"ms RAM:"+BarUtil.bar(mem*100,20)+" "+(int)(mem*100)+"%",SourbyCraftColors.VALUE));
-+        p.showBossBar(bar);Bukkit.getScheduler().runTaskLater(Bukkit.getPluginManager().getPlugins()[0],()->p.hideBossBar(bar),100L);
++        bar.name(text(String.format("TPS: %.1f  MSPT: %.1fms",tps[0],mspt),SourbyCraftColors.VALUE));
++        p.showBossBar(bar);Bukkit.getScheduler().runTaskLater(Bukkit.getPluginManager().getPlugins()[0],()->p.hideBossBar(bar),200L);
 +        return true;
 +    }
 +}
