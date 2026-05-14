@@ -1,0 +1,15 @@
+crash-prevention:
+  nbt:
+    max-bytes: 2097152
+    max-depth: 64
+    max-string-length: 4096
+    max-list-size: 65536
+  sign:
+    max-line-length: 256
+    max-total-chars: 1024
+  anvil:
+    max-item-name-length: 128
+  recipe-book:
+    max-packet-size: 20480
+  creative-item:
+    max-nbt-size: 2048
