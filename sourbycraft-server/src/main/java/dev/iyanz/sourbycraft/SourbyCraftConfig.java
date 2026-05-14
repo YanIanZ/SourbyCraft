@@ -49,6 +49,12 @@ public class SourbyCraftConfig {
     public static boolean hopperBatch = true;
     public static boolean redstoneOptimize = true;
     public static int maxEntityPerChunk = 10;
+    // SourbyCraft start - lag prevention
+    public static int maxRedstoneUpdatesPerTick = 2000;
+    public static int maxSpecialsPerChunk = 15;
+    public static int maxFallingBlockPerChunk = 20;
+    public static int maxArrowsPerWorld = 5000;
+    // SourbyCraft end
     public static int idleTimeout = 0;
     public static boolean itemMergeOptimize = true;
     public static int itemDespawnRate = 6000;
@@ -107,6 +113,11 @@ public class SourbyCraftConfig {
         hopperBatch = getBoolean("entity.hopper-batch", hopperBatch);
         redstoneOptimize = getBoolean("entity.redstone-optimize", redstoneOptimize);
         maxEntityPerChunk = getInt("entity.max-per-chunk", maxEntityPerChunk);
+        // SourbyCraft start - lag prevention
+        maxSpecialsPerChunk = getInt("entity.max-specials-per-chunk", maxSpecialsPerChunk);
+        maxFallingBlockPerChunk = getInt("entity.max-falling-block-per-chunk", maxFallingBlockPerChunk);
+        maxArrowsPerWorld = getInt("entity.max-arrows-per-world", maxArrowsPerWorld);
+        // SourbyCraft end
         idleTimeout = getInt("server.idle-timeout", idleTimeout);
         itemMergeOptimize = getBoolean("entity.item-merge-optimize", itemMergeOptimize);
         itemDespawnRate = getInt("entity.item-despawn-rate", itemDespawnRate);
