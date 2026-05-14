@@ -38,6 +38,8 @@ public class SourbyCraftConfig {
     public static boolean swmEnabled = true;
     public static String swmVersion = "1.21.11";
     public static boolean swmAutoInstall = true;
+    public static String swmLoader = "file";
+    public static String swmFileDir = "slime_worlds";
 
     public static boolean autoThrottleView = true;
     public static int minViewDistance = 4;
@@ -92,8 +94,9 @@ public class SourbyCraftConfig {
         swmVersion = getString("swm.version", swmVersion);
         swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
 
+        // Auto-install SWM plugin from GitHub releases
         if (swmEnabled && swmAutoInstall) {
-            dev.iyanz.sourbycraft.swm.SwmInstaller.install("plugins/");
+            dev.iyanz.sourbycraft.swm.installer.PluginInstaller.install("plugins/");
         }
 
         autoThrottleView = getBoolean("network.auto-throttle-view", autoThrottleView);

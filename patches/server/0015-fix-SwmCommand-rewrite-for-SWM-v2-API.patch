@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Fri, 15 May 2026 01:25:11 +0700
+Subject: [PATCH] fix: SwmCommand rewrite for SWM v2 API
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/SwmCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/SwmCommand.java
+index d3e3f54cedf869e1c1b1adbc2f144a94c0ad1798..c0e0d9f66d1907d03a6cecfbd03adf6f0c23c43a 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/SwmCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/SwmCommand.java
+@@ -1,20 +1,21 @@
+ package dev.iyanz.sourbycraft.command;
+ import dev.iyanz.sourbycraft.SourbyCraftColors;
+-
+-
+-import org.bukkit.Bukkit;
+-import org.bukkit.WorldCreator;
++import dev.iyanz.sourbycraft.swm.api.AdvancedSlimePaperAPI;
++import dev.iyanz.sourbycraft.swm.loader.FileLoader;
+ import org.bukkit.command.Command;
+ import org.bukkit.command.CommandSender;
+ import static net.kyori.adventure.text.Component.text;
+ public class SwmCommand extends Command {
+-    public SwmCommand(String n){super(n);this.description="SWM control";this.usageMessage="/swm <list|load|status>";this.setPermission("sourbycraft.command.swm");}
++    public SwmCommand(String n){super(n);this.description="SWM control";this.usageMessage="/swm <list|load|info>";this.setPermission("sourbycraft.command.swm");}
+     public boolean execute(CommandSender s,String a,String[] args){
+-        if(!testPermission(s))return true;String sub=args.length>0?args[0].toLowerCase():"status";
+-        switch(sub){
+-            case "list":var w=new dev.iyanz.sourbycraft.swm.loader.FileLoader("slime_worlds").listWorlds();if(w.isEmpty()){s.sendMessage(text("No slime worlds",SourbyCraftColors.DIM));return true;}s.sendMessage(text("Slime Worlds ("+w.size()+"):",SourbyCraftColors.HEADER));for(var x:w)s.sendMessage(text().append(text("  "+x,Bukkit.getWorld(x.worldName())!=null?SourbyCraftColors.SUCCESS:SourbyCraftColors.VALUE)).append(text(" v"+0,SourbyCraftColors.DIM)).append(text(Bukkit.getWorld(x.worldName())!=null?" [LOADED]":"",SourbyCraftColors.SUCCESS)));break;
+-            case "load":if(args.length<2){s.sendMessage(text("/swm load <world>",SourbyCraftColors.DIM));return true;}String nm=args[1];if(Bukkit.getWorld(nm)!=null){s.sendMessage(text("Already loaded",SourbyCraftColors.WARNING));return true;}s.sendMessage(text("Loading "+nm+"...",SourbyCraftColors.LABEL));Bukkit.getScheduler().runTask(Bukkit.getPluginManager().getPlugins()[0],()->{Bukkit.createWorld(WorldCreator.name(nm));s.sendMessage(text(nm+" loaded",SourbyCraftColors.SUCCESS));});break;
+-            default:boolean in=false;s.sendMessage(text().append(text("SWM: ",SourbyCraftColors.LABEL)).append(text(in?"Installed":"Not installed",in?SourbyCraftColors.SUCCESS:SourbyCraftColors.DANGER)).append(text(" v"+dev.iyanz.sourbycraft.SourbyCraftConfig.swmVersion,SourbyCraftColors.DIM)));s.sendMessage(text().append(text("Worlds: ",SourbyCraftColors.LABEL)).append(text(new dev.iyanz.sourbycraft.swm.loader.FileLoader("slime_worlds").listWorlds().size()+" found",SourbyCraftColors.VALUE)));
+-        }return true;
++        if(!testPermission(s))return true;String sub=args.length>0?args[0].toLowerCase():"list";
++        try{
++            switch(sub){
++                case "list":var w=new FileLoader("slime_worlds").listWorlds();if(w.isEmpty()){s.sendMessage(text("No slime worlds",SourbyCraftColors.DIM));return true;}s.sendMessage(text("Slime Worlds ("+w.size()+"):",SourbyCraftColors.HEADER));for(var x:w){boolean loaded=AdvancedSlimePaperAPI.instance().getLoadedWorld(x)!=null;s.sendMessage(text().append(text("  "+x,loaded?SourbyCraftColors.SUCCESS:SourbyCraftColors.VALUE)).append(text(loaded?" [LOADED]":"",SourbyCraftColors.SUCCESS)));}break;
++                case "load":if(args.length<2){s.sendMessage(text("/swm load <world>",SourbyCraftColors.DIM));return true;}String nm=args[1];if(AdvancedSlimePaperAPI.instance().getLoadedWorld(nm)!=null){s.sendMessage(text("Already loaded",SourbyCraftColors.WARNING));return true;}s.sendMessage(text("Loading "+nm+"...",SourbyCraftColors.LABEL));var world=AdvancedSlimePaperAPI.instance().readWorld(new FileLoader("slime_worlds"),nm,false,new dev.iyanz.sourbycraft.swm.api.SlimePropertyMap());AdvancedSlimePaperAPI.instance().loadWorld(world,true);s.sendMessage(text(nm+" loaded",SourbyCraftColors.SUCCESS));break;
++                default:s.sendMessage(text("/swm <list|load|info>",SourbyCraftColors.DIM));
++            }
++        }catch(Exception e){s.sendMessage(text("Error: "+e.getMessage(),SourbyCraftColors.DANGER));}
++        return true;
+     }
+ }

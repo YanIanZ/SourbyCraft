@@ -1,0 +1,18 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Fri, 15 May 2026 01:30:00 +0700
+Subject: [PATCH] feat: version suffix from codename
+
+
+diff --git a/build.gradle.kts b/build.gradle.kts
+index 6f6575ec9ccb96834a9471446a473b29edae10ee..a29f5a138cecac318dc2b69ccc869f4bbf4cfe51 100644
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -258,6 +258,7 @@ tasks.jar {
+         val suffix = when {
+             gitBranch.contains("experimental") || gitBranch.contains("feat") -> "EXP"
+             gitBranch.contains("-dev") || gitBranch.contains("develop") -> "DEV"
++            codename == "dev" -> "DEV"
+             else -> "REL"
+         }
+         val implementationVersion = when {
