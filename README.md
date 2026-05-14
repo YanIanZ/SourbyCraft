@@ -160,15 +160,67 @@ dependencies {
 }
 ```
 
-Then in your plugin:
+The SWM API lets external plugins create isolated worlds without touching the main server folder — perfect for minigames, skyblock, or any per-island/per-arena world.
+
+#### Practical examples
+
+**SuperiorSkyblock-style islands (one .slime per island):**
 ```java
 import dev.iyanz.sourbycraft.swm.api.*;
 import dev.iyanz.sourbycraft.swm.loader.FileLoader;
 
-AdvancedSlimePaperAPI swm = AdvancedSlimePaperAPI.instance();
-SlimeWorld world = swm.readWorld(new FileLoader("slime_worlds"), "myworld", false, new SlimePropertyMap());
-swm.loadWorld(world, true);
-swm.saveWorld(world);
+FileLoader loader = new FileLoader("plugins/MyPlugin/islands");
+
+// Create a blank island world
+SlimeWorld blank = swm.createEmptyWorld("island_template", false,
+    new SlimePropertyMap(), loader);
+swm.loadWorld(blank, true); // activate for players
+
+// Later — clone for each player
+SlimeWorld playerIsland = swm.readWorld(loader, "island_player1", false,
+    new SlimePropertyMap());
+swm.loadWorld(playerIsland, true);
+Bukkit.getPlayer("player1").teleport(playerIsland.getBukkitWorld().getSpawnLocation());
+```
+
+**BedWars-style arenas (load/save per match):**
+```java
+FileLoader loader = new FileLoader("plugins/BedWars/arenas");
+
+// Load arena from .slime on game start
+SlimeWorld arena = swm.readWorld(loader, "arena_lobby", true, new SlimePropertyMap());
+swm.loadWorld(arena, true);
+
+// Save modified arena after game
+SlimeWorldInstance inst = swm.getLoadedWorld("arena_lobby");
+swm.saveWorld(inst); // writes back to arena_lobby.slime
+```
+
+**Per-player mining worlds (isolated, auto-deleted):**
+```java
+FileLoader loader = new FileLoader("plugins/MiningWorlds");
+
+// Create a temporary world per player (no loader = in-memory only)
+SlimeWorld mining = swm.createEmptyWorld("mine_" + player.getName(), false,
+    new SlimePropertyMap(), null);
+swm.loadWorld(mining, true);
+player.teleport(mining.getBukkitWorld().getSpawnLocation());
+
+// When done — discard (no loader means no .slime saved)
+```
+
+**Multiple worlds in a single plugin:**
+```properties
+plugins/MyPlugin/
+├── islands/
+│   ├── player1.slime
+│   ├── player2.slime
+│   └── template.slime
+├── arenas/
+│   ├── lobby.slime
+│   └── arena1.slime
+└── mining/
+    └── (in-memory only, no .slime files)
 ```
 
 ---
