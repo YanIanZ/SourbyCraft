@@ -1,0 +1,10 @@
+name: SourbyCraftSWM
+version: "2.0.0"
+main: dev.iyanz.sourbycraft.swm.plugin.SWPlugin
+api-version: "1.21"
+description: Built-in SlimeWorldManager for SourbyCraft — SRF v13, in-memory worlds, async saves
+author: SourbyCraft
+dependencies:
+  - name: SourbyCraft
+    required: true
+    bootstrap: true
