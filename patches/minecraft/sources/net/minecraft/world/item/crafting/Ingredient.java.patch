@@ -1,0 +1,14 @@
+--- a/net/minecraft/world/item/crafting/Ingredient.java
++++ b/net/minecraft/world/item/crafting/Ingredient.java
+@@ -95,9 +_,9 @@
+     @Override
+     public boolean acceptsItem(final io.papermc.paper.inventory.recipe.ItemOrExact itemOrExact) {
+         return switch (itemOrExact) {
+-            case io.papermc.paper.inventory.recipe.ItemOrExact.Item(final Holder<Item> item) ->
++            case io.papermc.paper.inventory.recipe.ItemOrExact.Item(Holder<Item> item) ->
+                 !this.isExact() && this.values.contains(item);
+-            case io.papermc.paper.inventory.recipe.ItemOrExact.Exact(final ItemStack exact) ->
++            case io.papermc.paper.inventory.recipe.ItemOrExact.Exact(ItemStack exact) ->
+                 this.isExact() && this.itemStacks.contains(exact);
+         };
+         // Paper end - Improve exact choice recipe ingredients

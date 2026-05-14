@@ -35,12 +35,12 @@ subprojects {
         isReproducibleFileOrder = true
     }
     tasks.withType<JavaCompile> {
-        // if I activate forking (like done in paper + paperweight example),
-        // compiling stalls indefinitely on my PC
         options.encoding = Charsets.UTF_8.name()
         options.release = 21
         options.compilerArgs.add("--enable-preview")
         options.isIncremental = true
+        options.isFork = true
+        options.forkOptions.memoryMaximumSize = "512M"
     }
     tasks.withType<Javadoc> {
         options.encoding = Charsets.UTF_8.name()

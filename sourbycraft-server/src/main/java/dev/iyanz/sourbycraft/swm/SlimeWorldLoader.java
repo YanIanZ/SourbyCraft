@@ -1,92 +1,74 @@
 package dev.iyanz.sourbycraft.swm;
 
-import net.minecraft.world.level.chunk.storage.RegionFile;
+import net.minecraft.server.MinecraftServer;
+import org.bukkit.Bukkit;
+import org.bukkit.WorldCreator;
+
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.*;
-import java.util.zip.GZIPInputStream;
-import java.util.zip.InflaterInputStream;
+import java.util.zip.*;
 
 public final class SlimeWorldLoader {
 
     private static final Path SLIME_DIR = Path.of("slime_worlds");
-    private static final byte[] SLIME_HEADER = new byte[]{0x0B, 0x10, 0x00, 0x00};
+    private static final byte[] MAGIC = {0x0B, 0x10, 0x00, 0x00};
+
+    public record SlimeWorldInfo(String name, byte version) {}
 
     public static List<SlimeWorldInfo> discoverWorlds() {
         if (!Files.exists(SLIME_DIR)) return List.of();
-        try (Stream<Path> files = Files.list(SLIME_DIR)) {
-            return files.filter(p -> p.toString().endsWith("."))
-                .map(SlimeWorldLoader::readSlimeInfo)
-                .filter(Objects::nonNull)
+        try (Stream<Path> f = Files.list(SLIME_DIR)) {
+            return f.filter(p -> p.toString().endsWith(".slime"))
+                .map(p -> new SlimeWorldInfo(p.getFileName().toString().replace(".slime", ""), (byte) 0))
                 .collect(Collectors.toList());
-        } catch (IOException e) {
-            return List.of();
+        } catch (IOException e) { return List.of(); }
+    }
+
+    public static void loadAll(MinecraftServer server) {
+        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.swmEnabled) return;
+        for (SlimeWorldInfo info : discoverWorlds()) {
+            try {
+                extract(info.name());
+                Bukkit.createWorld(WorldCreator.name(info.name()));
+            } catch (IOException ignored) {}
         }
     }
 
-    private static SlimeWorldInfo readSlimeInfo(Path file) {
-        try {
-            byte[] data = Files.readAllBytes(file);
-            data = decompress(data);
+    public static void extract(String name) throws IOException {
+        Path file = SLIME_DIR.resolve(name + ".slime");
+        Path worldDir = Path.of(name);
+        if (Files.exists(worldDir.resolve("level.dat"))) return;
 
-            // Read version (byte)
-            byte version = data[0];
+        byte[] raw = Files.readAllBytes(file);
+        DataInputStream in = decompress(raw);
+        in.readByte();
+        in.readShort(); in.readShort(); in.readShort(); in.readShort();
+        int elen = in.readInt();
+        byte[] extra = new byte[elen];
+        in.readFully(extra);
 
-            // Read world name and properties
-            DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data, 1, data.length - 1));
-
-            // Read chunk count
-            short minX = dis.readShort();
-            short minZ = dis.readShort();
-            short width = dis.readShort();
-            short depth = dis.readShort();
-
-            byte[] extraData = new byte[dis.readInt()];
-            dis.readFully(extraData);
-
-            // Parse NBT from extraData
-            net.minecraft.nbt.CompoundTag root = net.minecraft.nbt.NbtIo.read(
-                new DataInputStream(new ByteArrayInputStream(extraData))
-            );
-
-            return new SlimeWorldInfo(file.getFileName().toString().replaceAll("\\.slime$", ""),
-                root, minX, minZ, width, depth, version);
-        } catch (IOException e) {
-            return null;
-        }
+        Files.createDirectories(worldDir);
+        Files.write(worldDir.resolve("level.dat"), extra);
     }
 
-    private static byte[] decompress(byte[] data) throws IOException {
-        if (data.length < 5) return data;
-        if (java.util.Arrays.equals(Arrays.copyOf(data, 4), SLIME_HEADER)) {
-            // Slime format
-            DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data));
-            dis.readInt(); // skip magic
-            byte version = dis.readByte();
-            int length = dis.readInt();
-            byte[] compressed = new byte[data.length - 9];
-            System.arraycopy(data, 9, compressed, 0, compressed.length);
+    private static DataInputStream decompress(byte[] raw) throws IOException {
+        if (raw.length < 9) return new DataInputStream(new ByteArrayInputStream(raw));
+        DataInputStream h = new DataInputStream(new ByteArrayInputStream(raw));
+        h.readFully(new byte[4]);
+        byte ver = h.readByte();
+        h.readInt();
+        byte[] body = new byte[raw.length - 9];
+        System.arraycopy(raw, 9, body, 0, body.length);
 
-            if (version == 1) {
-                return new InflaterInputStream(new ByteArrayInputStream(compressed)).readAllBytes();
-            } else if (version == 2) {
-                return new GZIPInputStream(new ByteArrayInputStream(compressed)).readAllBytes();
-            } else if (version == 3) {
-                // Raw uncompressed
-                return compressed;
-            }
-        }
-        return data;
+        InputStream dec = switch (ver) {
+            case 1 -> new InflaterInputStream(new ByteArrayInputStream(body));
+            case 2 -> new GZIPInputStream(new ByteArrayInputStream(body));
+            default -> new ByteArrayInputStream(body);
+        };
+        return new DataInputStream(new BufferedInputStream(dec));
     }
-
-    public record SlimeWorldInfo(
-        String worldName,
-        net.minecraft.nbt.CompoundTag extraData,
-        short minX, short minZ,
-        short width, short depth,
-        byte version
-    ) {}
 
     private SlimeWorldLoader() {}
 }
