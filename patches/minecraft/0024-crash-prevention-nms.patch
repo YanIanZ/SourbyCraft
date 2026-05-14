@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <dev@iyanz.dev>
+Date: Thu, 15 May 2026 02:00:00 +0700
+Subject: [PATCH] Crash prevention — configurable NbtAccounter depth/string/byte limits, sign text length, anvil rename length, DedicatedServer hook
+
+
+diff --git a/net/minecraft/nbt/NbtAccounter.java b/net/minecraft/nbt/NbtAccounter.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/nbt/NbtAccounter.java
++++ b/net/minecraft/nbt/NbtAccounter.java
+@@ -1,6 +1,7 @@
++import dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig;
+@@ -10,10 +11,18 @@
++    // SourbyCraft start - crash prevention (string length tracking)
++    private final int maxStringLength;
++    private int currentStringLength;
++    // SourbyCraft end
+-        this.maxDepth = maxDepth;
++        // SourbyCraft start - crash prevention
++        this.maxDepth = SourbyCraftSecurityConfig.isLoaded() ? SourbyCraftSecurityConfig.nbtMaxDepth : maxDepth;
++        this.maxStringLength = SourbyCraftSecurityConfig.isLoaded() ? SourbyCraftSecurityConfig.nbtMaxStringLength : Integer.MAX_VALUE;
++        this.currentStringLength = 0;
++        // SourbyCraft end
+@@ -21,7 +30,9 @@
+-        return new NbtAccounter(DEFAULT_NBT_QUOTA, MAX_STACK_DEPTH);
++        // SourbyCraft start - crash prevention
++        return new NbtAccounter(SourbyCraftSecurityConfig.isLoaded() ? SourbyCraftSecurityConfig.nbtMaxBytes : DEFAULT_NBT_QUOTA, MAX_STACK_DEPTH);
++        // SourbyCraft end
+@@ -29,7 +40,9 @@
++        // SourbyCraft start - crash prevention (still unlimited but with depth/size checks from config)
++        // SourbyCraft end
+@@ -73,4 +86,16 @@
++
++    // SourbyCraft start - crash prevention (string length tracking)
++    public void accountString(int len) {
++        if (len < 0) {
++            throw new IllegalArgumentException("Tried to account NBT string with negative length: " + len);
++        } else if (this.currentStringLength + len > this.maxStringLength) {
++            throw new NbtAccounterException("Tried to read NBT tag with too long a string");
++        } else {
++            this.currentStringLength += len;
++        }
++    }
++    // SourbyCraft end
+
+diff --git a/net/minecraft/nbt/StringTag.java b/net/minecraft/nbt/StringTag.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/nbt/StringTag.java
++++ b/net/minecraft/nbt/StringTag.java
+@@ -22,6 +22,9 @@
++            // SourbyCraft start - crash prevention
++            nbtAccounter.accountString(utf.length());
++            // SourbyCraft end
+
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -1294,6 +1294,13 @@
++        // Pufferfish start - disable books
++        if (!gg.pufferfish.pufferfish.PufferfishConfig.enableBooks
++                && !this.player.getBukkitEntity().hasPermission("pufferfish.usebooks")) {
++            return;
++        }
++        // Pufferfish end - disable books
++
+@@ -3494,13 +3501,22 @@
+-                // This handles multibyte characters as 1
+-                    lines[i] = lines[i].substring(0, offset); // this will break any filtering, but filtering is NYI as of 1.17
++                    lines[i] = lines[i].substring(0, offset);
++        }
++        // SourbyCraft start - crash prevention (total char limit)
++        int totalChars = 0;
++        for (int i = 0; i < lines.length; ++i) {
++            totalChars += lines[i].length();
++        }
++        if (dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.signMaxTotalChars > 0
++            && totalChars > dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.signMaxTotalChars) {
++            return;
++        // SourbyCraft end
+
+diff --git a/net/minecraft/world/inventory/AnvilMenu.java b/net/minecraft/world/inventory/AnvilMenu.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/world/inventory/AnvilMenu.java
++++ b/net/minecraft/world/inventory/AnvilMenu.java
+@@ -299,6 +299,13 @@
++        // SourbyCraft start - crash prevention (anvil rename length)
++        if (itemName != null
++            && dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.anvilMaxItemNameLength > 0
++            && itemName.length() > dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.anvilMaxItemNameLength) {
++            itemName = itemName.substring(0, dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.anvilMaxItemNameLength);
++        }
++        // SourbyCraft end
+
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -274,6 +274,10 @@
++        gg.pufferfish.pufferfish.PufferfishConfig.load((java.io.File) options.valueOf("pufferfish-settings")); // Pufferfish // SourbyCraft - configurable pufferfish config location
++        gg.pufferfish.pufferfish.PufferfishCommand.init(); // Pufferfish
++        dev.iyanz.sourbycraft.SourbyCraftConfig.init((java.io.File) this.options.valueOf("sourbycraft-settings")); // SourbyCraft - config
++        dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.init(new java.io.File("sourbycraft-security.yml")); // SourbyCraft - crash prevention
+@@ -391,6 +395,11 @@
++            // Pufferfish start - async mob spawning
++            if (gg.pufferfish.pufferfish.PufferfishConfig.enableAsyncMobSpawning) {
++                this.mobSpawnExecutor.start();
++            }
++            // Pufferfish end
