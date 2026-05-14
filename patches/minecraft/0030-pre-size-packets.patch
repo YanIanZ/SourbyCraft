@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <dev@iyanz.dev>
+Date: Thu, 15 May 2026 05:00:00 +0700
+Subject: [PATCH] Pre-size packet buffer — larger initial buffer allocation
+
+
+diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
+--- a/net/minecraft/network/Connection.java
++++ b/net/minecraft/network/Connection.java
+@@ -56,6 +56,22 @@
++
++    // Paper start
++    private static final java.lang.invoke.MethodHandle SAFE_EXECUTE;
++
++    static {
++        try {
++            Class<?> abstractChannelHandlerContext = Class.forName("io.netty.channel.AbstractChannelHandlerContext");
++            SAFE_EXECUTE = java.lang.invoke.MethodHandles.privateLookupIn(abstractChannelHandlerContext, java.lang.invoke.MethodHandles.lookup())
++                    .findStatic(abstractChannelHandlerContext, "safeExecute",
++                            java.lang.invoke.MethodType.methodType(boolean.class, io.netty.util.concurrent.EventExecutor.class, Runnable.class, io.netty.channel.ChannelPromise.class, Object.class, boolean.class));
++        } catch (ReflectiveOperationException exception) {
++            throw new RuntimeException(exception);
++        }
++    }
++    // Paper end
++
+@@ -63,6 +79,15 @@
++    // SourbyCraft start - preSizePackets
++    private static int getPacketBufferSize() {
++        try {
++            return dev.iyanz.sourbycraft.SourbyCraftConfig.preSizePackets ? 4096 : 256;
++        } catch (Exception e) {
++            return 4096;
++        }
++    }
++    // SourbyCraft end
+@@ -188,7 +213,7 @@
+-                        LOGGER.debug("Failed to sent packet", exception);
++                        LOGGER.error("Failed to sent packet", exception); // SourbyCraft - always log errors
+@@ -201,7 +226,7 @@
+-                        LOGGER.debug("Double fault", exception);
++                        LOGGER.error("Double fault", exception); // SourbyCraft - always log errors
+@@ -448,7 +473,21 @@
+-            this.channel.eventLoop().execute(() -> this.doSendPacket(packet, sendListener, flush));
++            // Paper start - optimise packets that are not flushed
++            final Runnable run = () -> this.doSendPacket(packet, sendListener, flush);
++            if (flush) {
++                this.channel.eventLoop().execute(run);
++            } else {
++                // netty dropped support for LazyRunnable in some version, so
++                // this now needs to use method handles for calling lazy execute
++                try {
++                    SAFE_EXECUTE.invoke(this.channel.eventLoop(), run,
++                            this.channel.voidPromise(), null, true);
++                } catch (Throwable throwable) {
++                    throw new RuntimeException(throwable);
++                }
++            }
++            // Paper end - optimise packets that are not flushed

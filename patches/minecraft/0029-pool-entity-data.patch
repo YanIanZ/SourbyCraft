@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <dev@iyanz.dev>
+Date: Thu, 15 May 2026 05:00:00 +0700
+Subject: [PATCH] Entity data object pooling — reuse DataItem arrays to reduce GC pressure
+
+
+diff --git a/net/minecraft/network/syncher/SynchedEntityData.java b/net/minecraft/network/syncher/SynchedEntityData.java
+--- a/net/minecraft/network/syncher/SynchedEntityData.java
++++ b/net/minecraft/network/syncher/SynchedEntityData.java
+@@ -4,19 +4,27 @@
++import java.util.ArrayDeque;
++import java.util.Deque;
++import java.util.Map;
++import java.util.concurrent.ConcurrentHashMap;
+-public class SynchedEntityData {
+-    private static final Logger LOGGER = LogUtils.getLogger();
+-    private static final int MAX_ID_VALUE = 254;
+-    static final ClassTreeIdRegistry ID_REGISTRY = new ClassTreeIdRegistry();
++	public class SynchedEntityData {
++	    private static final Logger LOGGER = LogUtils.getLogger();
++	    private static final int MAX_ID_VALUE = 254;
++	    static final ClassTreeIdRegistry ID_REGISTRY = new ClassTreeIdRegistry();
++	    // SourbyCraft start - entity data pooling
++	    private static final Map<Class<?>, Deque<DataItem<?>[]>> DATA_POOL = new ConcurrentHashMap<>();
++	    private static final int MAX_POOL_SIZE = 64;
++	    // SourbyCraft end
+@@ -76,7 +84,17 @@
++    }
++
++    // SourbyCraft start - entity data pooling
++    public void recycleToPool() {
++        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.poolEntityData) return;
++        Deque<DataItem<?>[]> pool = DATA_POOL.computeIfAbsent(this.entity.getClass(), k -> new ArrayDeque<>());
++        if (pool.size() < MAX_POOL_SIZE) {
++            pool.offerLast(this.itemsById);
++        }
++    // SourbyCraft end
+@@ -143,11 +161,21 @@
+-        private final SynchedEntityData.@Nullable DataItem<?>[] itemsById;
++        private SynchedEntityData.@Nullable DataItem<?>[] itemsById;
+-            this.itemsById = new SynchedEntityData.DataItem[SynchedEntityData.ID_REGISTRY.getCount(entity.getClass())];
++            // SourbyCraft start - entity data pooling
++            if (dev.iyanz.sourbycraft.SourbyCraftConfig.poolEntityData) {
++                Deque<DataItem<?>[]> pool = DATA_POOL.computeIfAbsent(entity.getClass(), k -> new ArrayDeque<>());
++                this.itemsById = pool.pollFirst();
++                if (this.itemsById == null) {
++                    this.itemsById = new SynchedEntityData.DataItem[SynchedEntityData.ID_REGISTRY.getCount(entity.getClass())];
++                }
++            } else {
++                this.itemsById = new SynchedEntityData.DataItem[SynchedEntityData.ID_REGISTRY.getCount(entity.getClass())];
++            }
++            // SourbyCraft end
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -257,7 +257,7 @@
+-    private BlockPos blockPosition;
++    public BlockPos blockPosition; // Pufferfish - private -> public
+@@ -302,7 +302,7 @@
+-    private static final EntityDataAccessor<Optional<Component>> DATA_CUSTOM_NAME = SynchedEntityData.defineId(
++    public static final EntityDataAccessor<Optional<Component>> DATA_CUSTOM_NAME = SynchedEntityData.defineId(
+@@ -318,6 +318,15 @@
++    // SourbyCraft start - further improve Player#canSee performance;
++    // combine UUID to single value to allow for easier hashmap lookups
++    // and allow using fastutil number sets
++    // this is less "secure" than using a full UUID, but should still not cause
++    // any collisions on this non-distributed system
++    // there may be a slight chance for collision, but this chance
++    // is way too small to actually account for
++    public long longUUID = this.uuid.getMostSignificantBits() ^ this.uuid.getLeastSignificantBits();
++    // SourbyCraft end - further improve Player#canSee performance
+@@ -365,7 +374,7 @@
+-    private final int despawnTime; // Paper - entity despawn time limit
++    public int despawnTime; // Paper - entity despawn time limit
+@@ -535,6 +544,9 @@
++    public boolean activatedPriorityReset = false; // Pufferfish - DAB
++    public int activatedPriority = gg.pufferfish.pufferfish.PufferfishConfig.maximumActivationPrio; // Pufferfish - DAB: golf score
++
+@@ -542,6 +554,7 @@
++        this.setUUID(this.uuid); // SourbyCraft - further improve Player#canSee performance; call common setter
+@@ -715,6 +728,11 @@
++        // SourbyCraft start - entity data pooling
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.poolEntityData) {
++            this.entityData.recycleToPool();
++        }
++        // SourbyCraft end
+@@ -2688,8 +2706,7 @@
+-                this.uuid = uuid;
+-                this.stringUUID = this.uuid.toString();
++                this.setUUID(uuid); // SourbyCraft - further improve Player#canSee performance; call common setter
+@@ -4275,6 +4292,9 @@
++        // SourbyCraft start - further improve Player#canSee performance
++        this.longUUID = this.uuid.getMostSignificantBits() ^ this.uuid.getLeastSignificantBits();
++        // SourbyCraft end - further improve Player#canSee performance
+@@ -4284,7 +4304,13 @@
++    }
++
++    // SourbyCraft start - further improve Player#canSee performance
++    public final long getLongUUID() {
++        return this.longUUID;
++    // SourbyCraft end - further improve Player#canSee performance
+@@ -4741,7 +4767,7 @@
+-        if (this.touchingUnloadedChunk()) {
++        if (false && this.touchingUnloadedChunk()) { // Pufferfish - lookup happens below anyway
+@@ -4785,7 +4811,13 @@
+-                sections[currChunkX + chunkLenX*currChunkZ + chunkOffset] = chunkSource.getChunk(currChunkX, currChunkZ, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false).getSections();
++                // Pufferfish start - move down unloaded chunk check
++                final net.minecraft.world.level.chunk.ChunkAccess chunk = chunkSource.getChunk(currChunkX, currChunkZ, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false);
++                if (chunk == null) {
++                    return false;
++                }
++                sections[currChunkX + chunkLenX*currChunkZ + chunkOffset] = chunk.getSections();
++                // Pufferfish end - move down unloaded chunk check
