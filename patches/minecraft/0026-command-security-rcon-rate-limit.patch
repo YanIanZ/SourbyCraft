@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <dev@iyanz.dev>
+Date: Thu, 15 May 2026 03:30:00 +0700
+Subject: [PATCH] Command security — RCON accept rate limiting
+
+
+diff --git a/net/minecraft/server/rcon/thread/RconThread.java b/net/minecraft/server/rcon/thread/RconThread.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/server/rcon/thread/RconThread.java
++++ b/net/minecraft/server/rcon/thread/RconThread.java
+@@ -19,6 +19,10 @@
++    // SourbyCraft start - RCON rate limiting
++    private long lastAcceptTime = 0;
++    private int acceptCount = 0;
++    // SourbyCraft end
+@@ -37,6 +41,17 @@
++                    // SourbyCraft start - RCON rate limiting (max 20 connects/sec)
++                    long now = System.currentTimeMillis();
++                    if (now - this.lastAcceptTime > 1000L) {
++                        this.lastAcceptTime = now;
++                        this.acceptCount = 0;
++                    }
++                    if (++this.acceptCount > 20) {
++                        socket.close();
++                        continue;
++                    }
++                    // SourbyCraft end
