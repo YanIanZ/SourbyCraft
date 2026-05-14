@@ -49,6 +49,10 @@ public class SourbyCraftConfig {
     public static int maxEntityPerChunk = 10;
     public static int idleTimeout = 0;
     public static boolean itemMergeOptimize = true;
+    public static int itemDespawnRate = 6000;
+    public static int itemMergeRadius = 3;
+    public static int mobTickDistance = 32;
+    public static int mobPathfindInterval = 20;
     public static boolean asyncSaveBatch = true;
 
     public static void init(File configFile) {
@@ -98,6 +102,10 @@ public class SourbyCraftConfig {
         maxEntityPerChunk = getInt("entity.max-per-chunk", maxEntityPerChunk);
         idleTimeout = getInt("server.idle-timeout", idleTimeout);
         itemMergeOptimize = getBoolean("entity.item-merge-optimize", itemMergeOptimize);
+        itemDespawnRate = getInt("entity.item-despawn-rate", itemDespawnRate);
+        itemMergeRadius = getInt("entity.item-merge-radius", itemMergeRadius);
+        mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
+        mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
 
         if (swmEnabled && swmAutoInstall) {
