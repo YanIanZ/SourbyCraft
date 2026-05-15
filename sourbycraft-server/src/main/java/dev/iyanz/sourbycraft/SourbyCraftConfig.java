@@ -59,6 +59,11 @@ public class SourbyCraftConfig {
     public static boolean itemMergeOptimize = true;
     public static int itemDespawnRate = 6000;
     public static int itemMergeRadius = 3;
+    public static int itemMaxStackSize = 99;
+    public static boolean unlimitedDropStack = true;
+    public static int dropStackCap = Integer.MAX_VALUE;
+    public static boolean ownerProtectionEnabled = true;
+    public static int ownerProtectionTime = 10;
     public static int mobTickDistance = 32;
     public static int mobPathfindInterval = 20;
     public static boolean asyncSaveBatch = true;
@@ -122,6 +127,12 @@ public class SourbyCraftConfig {
         itemMergeOptimize = getBoolean("entity.item-merge-optimize", itemMergeOptimize);
         itemDespawnRate = getInt("entity.item-despawn-rate", itemDespawnRate);
         itemMergeRadius = getInt("entity.item-merge-radius", itemMergeRadius);
+        itemMaxStackSize = getInt("item.max-stack-size", itemMaxStackSize);
+        unlimitedDropStack = getBoolean("item.unlimited-drop-stack", unlimitedDropStack);
+        dropStackCap = getInt("item.drop-stack-cap", dropStackCap);
+        ownerProtectionEnabled = getBoolean("item.owner-protection-enabled", ownerProtectionEnabled);
+        ownerProtectionTime = getInt("item.owner-protection-time", ownerProtectionTime);
+        net.minecraft.world.item.Item.sourbycraftMaxStackSize = itemMaxStackSize;
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
         mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
