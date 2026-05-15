@@ -113,11 +113,17 @@ public class SourbyCraftConfig {
 
         // Auto-install SWM plugin from GitHub releases
         if (swmEnabled && swmAutoInstall) {
-            // SourbyCraft start - auto-create slime worlds directory
-            try { java.nio.file.Files.createDirectories(java.nio.file.Path.of(swmFileDir)); } catch (java.io.IOException ignored) {}
-            // SourbyCraft end
+        // SourbyCraft start - auto-create required folders
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of(swmFileDir)); } catch (java.io.IOException ignored) {}
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException ignored) {}
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins")); } catch (java.io.IOException ignored) {}
+        // SourbyCraft end
             dev.iyanz.sourbycraft.swm.installer.PluginInstaller.install("plugins/");
         }
+
+        // SourbyCraft start - auto-create mods folder
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException ignored) {}
+        // SourbyCraft end
 
         if (version <= 4) {
             // SourbyCraft start - v4→v5 migration: update SWM version tag
