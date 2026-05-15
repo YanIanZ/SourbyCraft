@@ -37,7 +37,7 @@ public class SourbyCraftConfig {
 
     public static boolean swmEnabled = true;
     public static String swmVersion = "v4-REL";
-    public static boolean swmAutoInstall = true;
+    public static boolean swmAutoInstall = false;
     public static String swmLoader = "file";
     public static String swmFileDir = "slime_worlds";
 
