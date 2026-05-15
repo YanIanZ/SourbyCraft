@@ -1,116 +1,134 @@
 <p align="center">
   <img src="https://img.shields.io/badge/minecraft-1.21.11-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/java-21--25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/version-v3--REL-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/version-v4--REL-orange?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
 <h1 align="center">🍞 SourbyCraft</h1>
 
-<p align="center"><em>Optimized for speed and efficiency — keeps your server running smoothly with high player counts. Fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a>.</em></p>
+<p align="center"><em>High-performance Paper fork with built-in security, anti-xray, dynamic scaling, SWM, and NeoForge mod support. Fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a>.</em></p>
 
 ---
 
 ## Features
 
-### Performance
-- **G1GC optimized** — tuned garbage collection for <2GB survival servers
-- **SIMD acceleration** — vectorized map palette on Java 17-25 with AVX2+
-- **Spawn & heightmap arrays** — primitive arrays for O(1) access
-- **Brain behavior tracking** — direct behavior list for fast iteration
-- **Pufferfish engine** — async mob spawning, entity activation range, DAB
-- **ForkJoinPool async** — work-stealing thread pool for pathfinding/chunk I/O
+### 🔒 Security (NMS-level)
+- **Crash Prevention** — NbtAccounter limits (books, skulls, bundles), sign/anvil length limits
+- **Lag Prevention** — per-chunk entity caps (special, falling block, arrow)
+- **AntiXray** — fluid obscures (water/lava as solids), all-blocks mode, entity obfuscation
+- **Command Security** — RCON rate limiting (20/sec), RCON brute-force protection
+- **Packet/Dupe Protection** — covered by Paper 1.21.11 engine
 
-### Gameplay
-- **Adventure components** — translatable item names and lore
-- **Lore newline splitting** — protocol-level lore formatting
-- **Configurable gossip limits** — per-type villager gossip tuning
-- **Instant locale refresh** — data refresh on player locale change
-- **Detailed brand info** — version + build in F3 debug screen
+### ⚡ Performance NMS
+- **Dynamic Performance Scaler** — auto-adjusts entity tick rate based on TPS
+- **Entity Tick Rate Limiter** — skips entity ticks at configurable intervals
+- **Mob AI Distance Cutoff** — skips AI/pathfinding beyond configured range
+- **Entity Data Pooling** — reuses SynchedEntityData arrays to reduce GC pressure
+- **Packet Buffer Pre-size** — larger initial allocations to reduce buffer reallocation
+- **Chunk Compression Cache** — caches compressed chunk data
+- **Pufferfish engine** — DAB (Dynamic Activation of Brains), async mob spawning, SIMD
+- **Moonrise chunk system** — optimized chunk loading/saving/ticking
 
-### Commands (hex-colored with visual bars)
-
+### 🛠 Commands (hex-colored with visual bars)
 | Command | Description |
 |---------|-------------|
-| `/tps` | TPS bars + MSPT + RAM + CPU + GC |
-| `/tpsbar` | BossBar: TPS + MSPT + RAM visual bars |
-| `/rambar` | BossBar: RAM usage visual bar |
+| `/tps` | Custom TPS bars (1m/5m/15m) + MSPT + RAM + CPU + per-world stats |
+| `/perf` | Live performance monitor + `scale on/off` + `rate <1-20>` |
+| `/perf scale on` | Enable dynamic performance auto-scaling |
+| `/perf scale off` | Disable auto-scaling |
 | `/sys` | Full server specs: uptime, CPU, RAM, Java, worlds, SWM |
-| `/ping [player]` | Latency bar + client info + world location |
+| `/ping [player]` | Latency bar + client info + GeoIP location |
 | `/plugins` | Active plugin list with versions |
 | `/speedtest` | Built-in Ookla network speed test |
+| `/tpsbar` / `/rambar` | BossBar visual monitors |
 | `/ver` | Version info: SourbyCraft + Minecraft + API + uptime |
-| `/swm <list\|load\|save\|info>` | SlimeWorldManager control |
-| `/mods` | Mods folder scanner (Forge/Fabric/Bukkit) |
+| `/swm <load/save/list/info>` | SlimeWorldManager control |
+| `/mods` | Mods folder scanner (NeoForge/Forge/Fabric/Bukkit) |
 
-### SlimeWorldManager (SWM v2)
-SourbyCraft has a **built-in** SlimeWorldManager (no plugin needed). Worlds are stored in SRF (Slime Region Format) v13 using Zstd compression, loaded into memory on demand.
+### 🧩 NeoForge Mod Support (Foundation)
+- **ModScanner** — reads `mods.toml` / `fabric.mod.json` from JARs in `mods/` folder
+- **FmlBootstrap** — auto-detects NeoForge FML on classpath at startup
+- **NeoForge 21.1.230** dependency on server classpath
+- **/mods** command — lists discovered mods with name/version/type
 
-- `/swm list` — shows `.slime` worlds in `slime_worlds/` with load status
+### 🌍 SlimeWorldManager (SWM v2)
+Built-in SlimeWorldManager — no plugin needed. SRF v13 binary format with Zstd compression.
+
+- `/swm list` — shows `.slime` worlds with load status
 - `/swm load <world>` — loads a slime world at runtime
-- `/swm save <world>` — saves a loaded world back to `.slime`
-- `/swm info` — shows loaded/found world counts
+- `/swm save <world>` — serializes and persists a loaded world
+- `/swm info` — loaded/found world counts
 
-### Mod Support (Phase 1)
-- `ModScanner` — reads metadata from `mods/` jars
-- `/mods` — lists NeoForge, Forge, Fabric, and Bukkit mods
-
----
-
-## Getting Started with SWM
-
-1. Drop `.slime` world files into `slime_worlds/` folder (created automatically)
-2. Run `/swm list` to see available worlds
-3. Run `/swm load <worldname>` to load a world, or configure auto-load below
-4. Explore the world — chunks load on demand
-
-### Converting an existing world to .slime
-
-Use the [`AdvancedSlimePaper`](https://github.com/InfernalSuite/AdvancedSlimePaper) converter tool or write a plugin using the SWM API.
-
-### Using SWM as a plugin developer
-
-```java
-AdvancedSlimePaperAPI swm = AdvancedSlimePaperAPI.instance();
-
-// Read a slime world from disk
-SlimeWorld world = swm.readWorld(new FileLoader("slime_worlds"), "myworld", false, new SlimePropertyMap());
-
-// Activate it on the server
-swm.loadWorld(world, true);
-
-// Save changes
-swm.saveWorld(world);
-```
+### ⚙️ Infrastructure
+- **JDK 25 target** — compiled for Java 25, runs on JDK 25+
+- **ZGC** — generational Z Garbage Collector (sub-ms pauses)
+- **NUMA + Virtual Threads + CDS** — max hardware utilization
+- **GC Auto-Tuner** — `scripts/gc-tuner.sh` selects optimal GC + generates config
+- **MemoryOptimizer** — object pool + soft-reference cache
+- **Startup Optimizer** — prints hardware summary and tuning hints at boot
+- **paperclip.conf** — full JVM flags via `@file` format
 
 ---
 
 ## Configuration
 
 ```yaml
-# sourbycraft.yml
-multithreading:
-  enabled: false              # per-dimension threads (experimental)
-
+# sourbycraft.yml — main config
 performance:
-  async-threads: 2            # ForkJoinPool workers
-  async-pathfinding: false    # async entity AI (experimental)
+  async-threads: 2              # ForkJoinPool workers
+
+entity:
+  tick-rate: 1                  # 1/N ticks (1=every tick, 8=every 8th)
+  mob-tick-distance: 32         # skip AI > N blocks from player
+  max-per-chunk: 10             # hard entity per-chunk limit
+  max-specials-per-chunk: 15    # armor stand, frame, painting
+  max-falling-block-per-chunk: 20
+  max-arrows-per-world: 5000
+
+multithreading:
+  enabled: false                # per-dimension threads (experimental)
+
+antixray:
+  fluid-obscures: true          # water+lava as solid blockers
+  all-blocks: false             # mark all blocks as target
+  entity-obfuscation: true      # hide entities behind walls
+  entity-obfuscation-range: 64  # range for entity hiding
 
 swm:
-  enabled: true               # enable SWM at startup
-  auto-install: true          # auto-download SWM plugin from GitHub releases
-  version: "v3-REL"           # release tag for auto-install
-  file-dir: slime_worlds      # directory to scan for .slime files
+  enabled: true
+  auto-install: true
+  version: "v4-REL"
+  file-dir: slime_worlds
+
+# sourbycraft-security.yml — crash prevention
+crash-prevention:
+  nbt:
+    max-bytes: 2097152          # 2MB
+    max-depth: 64
+    max-string-length: 4096
+    max-list-size: 65536
+  sign:
+    max-line-length: 256
+    max-total-chars: 1024
+  anvil:
+    max-item-name-length: 128
 ```
 
 ---
 
-## Versioning
+## Startup
 
-| Branch | Format | Example |
-|--------|--------|---------|
-| `ver/1.21.11` (main) | `v{major}-REL` | `v3-REL` |
-| `experimental-feat` | `v{major}{codename}-EXP` | `v1void-EXP` |
+```bash
+# Default (auto RAM)
+java @paperclip.conf -jar sourbycraft-paperclip-v4-REL-mojmap.jar --nogui
+
+# Custom RAM
+java -Xms4G -Xmx10G @paperclip.conf -jar sourbycraft-paperclip-v4-REL-mojmap.jar --nogui
+
+# Auto-tune GC + start (interactive)
+./scripts/gc-tuner.sh paperclip.conf --start
+```
 
 ---
 
@@ -124,103 +142,25 @@ git checkout ver/1.21.11
 ./gradlew createMojmapPaperclipJar
 ```
 
-Jar: `sourbycraft-server/build/libs/sourbycraft-paperclip-v*-REL-mojmap.jar`
-
-### Building the SWM plugin (standalone)
-
-```bash
-cd swm-plugin
-./gradlew build
-```
-
-Jar: `swm-plugin/build/libs/SourbyCraftSWM-*.jar`
+Jar: `sourbycraft-server/build/libs/sourbycraft-paperclip-v4-REL-mojmap.jar`
 
 ---
 
 ## API
 
-Use SourbyCraft API in your plugins via JitPack:
-
 ```kotlin
-repositories {
-    maven("https://jitpack.io")
-}
+repositories { maven("https://jitpack.io") }
 dependencies {
-    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:v3-REL")
+    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:v4-REL")
 }
 ```
 
-### SWM API for plugins
+### SWM API
 
-```kotlin
-dependencies {
-    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-server:v3-REL") {
-        isTransitive = false
-    }
-}
-```
-
-The SWM API lets external plugins create isolated worlds without touching the main server folder — perfect for minigames, skyblock, or any per-island/per-arena world.
-
-#### Practical examples
-
-**SuperiorSkyblock-style islands (one .slime per island):**
 ```java
-import dev.iyanz.sourbycraft.swm.api.*;
-import dev.iyanz.sourbycraft.swm.loader.FileLoader;
-
-FileLoader loader = new FileLoader("plugins/MyPlugin/islands");
-
-// Create a blank island world
-SlimeWorld blank = swm.createEmptyWorld("island_template", false,
-    new SlimePropertyMap(), loader);
-swm.loadWorld(blank, true); // activate for players
-
-// Later — clone for each player
-SlimeWorld playerIsland = swm.readWorld(loader, "island_player1", false,
-    new SlimePropertyMap());
-swm.loadWorld(playerIsland, true);
-Bukkit.getPlayer("player1").teleport(playerIsland.getBukkitWorld().getSpawnLocation());
-```
-
-**BedWars-style arenas (load/save per match):**
-```java
-FileLoader loader = new FileLoader("plugins/BedWars/arenas");
-
-// Load arena from .slime on game start
-SlimeWorld arena = swm.readWorld(loader, "arena_lobby", true, new SlimePropertyMap());
-swm.loadWorld(arena, true);
-
-// Save modified arena after game
-SlimeWorldInstance inst = swm.getLoadedWorld("arena_lobby");
-swm.saveWorld(inst); // writes back to arena_lobby.slime
-```
-
-**Per-player mining worlds (isolated, auto-deleted):**
-```java
-FileLoader loader = new FileLoader("plugins/MiningWorlds");
-
-// Create a temporary world per player (no loader = in-memory only)
-SlimeWorld mining = swm.createEmptyWorld("mine_" + player.getName(), false,
-    new SlimePropertyMap(), null);
-swm.loadWorld(mining, true);
-player.teleport(mining.getBukkitWorld().getSpawnLocation());
-
-// When done — discard (no loader means no .slime saved)
-```
-
-**Multiple worlds in a single plugin:**
-```properties
-plugins/MyPlugin/
-├── islands/
-│   ├── player1.slime
-│   ├── player2.slime
-│   └── template.slime
-├── arenas/
-│   ├── lobby.slime
-│   └── arena1.slime
-└── mining/
-    └── (in-memory only, no .slime files)
+AdvancedSlimePaperAPI swm = AdvancedSlimePaperAPI.instance();
+SlimeWorld world = swm.readWorld(new FileLoader("slime_worlds"), "myworld", false, new SlimePropertyMap());
+swm.loadWorld(world, true);
 ```
 
 ---
