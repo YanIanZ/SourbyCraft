@@ -111,7 +111,9 @@ diff --git a/net/minecraft/world/entity/item/ItemEntity.java b/net/minecraft/wor
 +                if (!entity.getUUID().equals(this.ownerUUID)) {
 +                    return; // block non-owner during protection
 +                }
-+                this.pickupDelay = 0; // owner bypass — allow immediate pickup
++                if (this.age >= 20) { // owner bypass after 1s — give time to merge
++                    this.pickupDelay = 0;
++                }
 +            }
 +            // SourbyCraft end
 +
