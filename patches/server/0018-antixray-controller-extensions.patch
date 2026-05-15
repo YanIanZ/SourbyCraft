@@ -1,31 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: SourbyCraft <dev@iyanz.dev>
 Date: Thu, 15 May 2026 00:00:00 +0700
-Subject: [PATCH] Antixray: fluid obscures, all-blocks mode, entity obfuscation
+Subject: [PATCH] Antixray controller: fluid obscures, all-blocks mode, entity visibility
 
 
-diff --git a/net/minecraft/server/level/ServerEntity.java b/net/minecraft/server/level/ServerEntity.java
---- a/net/minecraft/server/level/ServerEntity.java
-+++ b/net/minecraft/server/level/ServerEntity.java
-@@ -97,6 +97,13 @@
-     public void sendChanges() {
-+        // SourbyCraft start - entity obfuscation filter
-+        if (this.level.chunkPacketBlockController instanceof io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray controller) {
-+            this.trackedPlayers.removeIf(conn ->
-+                !controller.isEntityVisibleTo(this.entity, conn.getPlayer())
-+            );
-+        }
-+        // SourbyCraft end
-         // Paper start - optimise collisions
-         if (((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)this.entity).moonrise$isHardColliding()) {
-             this.teleportDelay = 9999;
-diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
---- a/net/minecraft/world/level/Level.java
-+++ b/net/minecraft/world/level/Level.java
-@@ -872,7 +872,8 @@
--        this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray
-+        dev.iyanz.sourbycraft.SourbyCraftWorldConfig scWorldConfig = new dev.iyanz.sourbycraft.SourbyCraftWorldConfig(this.getWorld().getName(), this.getWorld().getEnvironment());
-+        this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor, scWorldConfig) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray - SourbyCraft
 diff --git a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
 --- a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
 +++ b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
@@ -36,19 +14,15 @@ diff --git a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerA
 -    public ChunkPacketBlockControllerAntiXray(Level level, Executor executor) {
 +    public ChunkPacketBlockControllerAntiXray(Level level, Executor executor, dev.iyanz.sourbycraft.SourbyCraftWorldConfig sourbycraftWorldConfig) {
          this.executor = executor;
+         this.sourbycraftWorldConfig = sourbycraftWorldConfig;
          WorldConfiguration.Anticheat.AntiXray paperWorldConfig = level.paperConfig().anticheat.antiXray;
          engineMode = paperWorldConfig.engineMode;
          maxBlockHeight = paperWorldConfig.maxBlockHeight >> 4 << 4;
          updateRadius = paperWorldConfig.updateRadius;
-         usePermission = paperWorldConfig.usePermission;
-+        this.sourbycraftWorldConfig = sourbycraftWorldConfig;
-         List<Block> toObfuscate;
- 
-         if (engineMode == EngineMode.HIDE) {
 @@ -126,6 +127,15 @@
-                 }
              }
          }
+ 
 +        // SourbyCraft start - all-blocks mode
 +        if (sourbycraftWorldConfig.allBlocks) {
 +            for (int i = 0; i < obfuscateGlobal.length; i++) {
@@ -59,10 +33,11 @@ diff --git a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerA
 +            }
 +        }
 +        // SourbyCraft end
- 
++
          EmptyLevelChunk emptyChunk = new EmptyLevelChunk(level, new ChunkPos(0, 0), MinecraftServer.getServer().registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS));
          BlockPos zeroPos = new BlockPos(0, 0, 0);
-@@ -141,11 +151,41 @@
+ 
+@@ -141,11 +151,17 @@
              }
          }
  
