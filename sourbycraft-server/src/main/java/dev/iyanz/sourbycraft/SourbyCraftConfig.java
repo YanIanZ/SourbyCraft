@@ -55,6 +55,9 @@ public class SourbyCraftConfig {
     public static int maxFallingBlockPerChunk = 20;
     public static int maxArrowsPerWorld = 5000;
     // SourbyCraft end
+    // SourbyCraft start - antixray
+    public static boolean fluidObscures = true;
+    // SourbyCraft end
     public static int idleTimeout = 0;
     public static boolean itemMergeOptimize = true;
     public static int itemDespawnRate = 6000;
@@ -122,6 +125,9 @@ public class SourbyCraftConfig {
         maxSpecialsPerChunk = getInt("entity.max-specials-per-chunk", maxSpecialsPerChunk);
         maxFallingBlockPerChunk = getInt("entity.max-falling-block-per-chunk", maxFallingBlockPerChunk);
         maxArrowsPerWorld = getInt("entity.max-arrows-per-world", maxArrowsPerWorld);
+        // SourbyCraft end
+        // SourbyCraft start - antixray
+        fluidObscures = getBoolean("antixray.fluid-obscures", fluidObscures);
         // SourbyCraft end
         idleTimeout = getInt("server.idle-timeout", idleTimeout);
         itemMergeOptimize = getBoolean("entity.item-merge-optimize", itemMergeOptimize);
