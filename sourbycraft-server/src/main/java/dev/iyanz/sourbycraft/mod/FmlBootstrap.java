@@ -4,44 +4,54 @@ import java.util.List;
 
 /**
  * NeoForge FML bootstrap loader.
- *
- * Currently placeholder — loaded after server starts.
- * Will initialize FML classloader, scan mods/ folder,
- * and fire dual event bus (Bukkit + NeoForge).
- *
- * Dependencies needed (commented in build.gradle.kts):
- *   net.neoforged:neoforge:21.1.0:server
- *   cpw.mods:modlauncher:11.0.0
+ * Scans mods/ folder via ModScanner. Attempts FML integration
+ * if NeoForge 21.1.230+ is on the classpath.
  */
 public final class FmlBootstrap {
 
     private static boolean initialized = false;
-    private static boolean modsLoaded = false;
+    private static boolean modsScanned = false;
+    private static List<ModScanner.ModInfo> discoveredMods = List.of();
 
     public static void init() {
         if (initialized) return;
 
-        List<ModScanner.ModInfo> mods = ModScanner.scan();
-        System.out.println("[SourbyCraft] Found " + mods.size() + " mods in mods/ folder");
-        for (ModScanner.ModInfo mod : mods) {
-            System.out.println("  - " + mod.name() + " v" + mod.version() + " (" + mod.fileName() + ")");
+        discoveredMods = ModScanner.scan();
+        modsScanned = true;
+
+        System.out.println("[SourbyCraft] Found " + discoveredMods.size() + " mods in mods/ folder");
+        for (ModScanner.ModInfo mod : discoveredMods) {
+            System.out.println("  - " + mod.name() + " v" + mod.version() + " [" + mod.id() + "]");
         }
 
-        // TODO: Initialize FML classloader
-        // TODO: Load mod classes
-        // TODO: Fire FML pre-init events
-        // TODO: Initialize mod instances
-        // TODO: Fire FML post-init events
+        if (!discoveredMods.isEmpty()) {
+            tryInitFml();
+        }
 
         initialized = true;
-        System.out.println("[SourbyCraft] FML bootstrap initialized (mods loaded: " + mods.size() + ")");
+    }
+
+    private static void tryInitFml() {
+        try {
+            Class<?> modListClass = Class.forName("net.neoforged.fml.ModList");
+            System.out.println("[SourbyCraft] NeoForge FML detected on classpath");
+            // FML mod loading requires FMLCommonLaunchHandler bootstrap
+            // which needs server-side-only initialization
+            System.out.println("[SourbyCraft] " + discoveredMods.size() + " mods detected, full FML integration pending");
+        } catch (ClassNotFoundException e) {
+            System.out.println("[SourbyCraft] NeoForge FML not found — scanning only");
+        }
     }
 
     public static boolean isInitialized() {
         return initialized;
     }
 
-    public static boolean modsLoaded() {
-        return modsLoaded;
+    public static boolean modsScanned() {
+        return modsScanned;
+    }
+
+    public static List<ModScanner.ModInfo> getDiscoveredMods() {
+        return discoveredMods;
     }
 }
