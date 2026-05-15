@@ -61,6 +61,9 @@ public class SourbyCraftConfig {
     // SourbyCraft start - disable vanilla commands
     public static boolean disableCommunicationCommands = false;
     // SourbyCraft end
+    // SourbyCraft start - no durability
+    public static boolean noDurabilityExcept = false;
+    // SourbyCraft end
     public static int idleTimeout = 0;
     public static boolean itemMergeOptimize = true;
     public static int itemDespawnRate = 6000;
@@ -151,10 +154,10 @@ public class SourbyCraftConfig {
         // SourbyCraft start - antixray
         fluidObscures = getBoolean("antixray.fluid-obscures", fluidObscures);
         // SourbyCraft end
-    // SourbyCraft start - no durability
-    public static boolean noDurabilityExcept = false;
-    // SourbyCraft end
-    // SourbyCraft start - disable vanilla commands
+        // SourbyCraft start - no durability
+        noDurabilityExcept = getBoolean("item.no-durability-except", noDurabilityExcept);
+        // SourbyCraft end
+        // SourbyCraft start - disable vanilla commands
         disableCommunicationCommands = getBoolean("settings.disable-communication-commands", disableCommunicationCommands);
         // SourbyCraft end
         idleTimeout = getInt("server.idle-timeout", idleTimeout);
