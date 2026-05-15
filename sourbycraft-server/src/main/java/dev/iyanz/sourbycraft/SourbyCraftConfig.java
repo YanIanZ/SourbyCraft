@@ -117,6 +117,7 @@ public class SourbyCraftConfig {
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of(swmFileDir)); } catch (java.io.IOException ignored) {}
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException ignored) {}
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins")); } catch (java.io.IOException ignored) {}
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins/SourbyCraft/speedtest")); } catch (java.io.IOException ignored) {}
         // SourbyCraft end
             dev.iyanz.sourbycraft.swm.installer.PluginInstaller.install("plugins/");
         }
