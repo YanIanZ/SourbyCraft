@@ -127,11 +127,11 @@ public class SourbyCraftConfig {
         itemMergeOptimize = getBoolean("entity.item-merge-optimize", itemMergeOptimize);
         itemDespawnRate = getInt("entity.item-despawn-rate", itemDespawnRate);
         itemMergeRadius = getInt("entity.item-merge-radius", itemMergeRadius);
-        itemMaxStackSize = getInt("item.max-stack-size", itemMaxStackSize);
+        itemMaxStackSize = Math.min(getInt("item.max-stack-size", itemMaxStackSize), 99);
         unlimitedDropStack = getBoolean("item.unlimited-drop-stack", unlimitedDropStack);
         dropStackCap = getInt("item.drop-stack-cap", dropStackCap);
         ownerProtectionEnabled = getBoolean("item.owner-protection-enabled", ownerProtectionEnabled);
-        ownerProtectionTime = getInt("item.owner-protection-time", ownerProtectionTime);
+        ownerProtectionTime = Math.min(getInt("item.owner-protection-time", ownerProtectionTime), 1638);
         net.minecraft.world.item.Item.sourbycraftMaxStackSize = itemMaxStackSize;
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
         mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
