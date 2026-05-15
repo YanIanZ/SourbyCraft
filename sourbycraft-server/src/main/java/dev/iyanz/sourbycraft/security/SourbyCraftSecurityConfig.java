@@ -89,7 +89,27 @@ public class SourbyCraftSecurityConfig {
     }
 
     private static void saveDefault() {
-        // Config file will be created by Task 8
+        try {
+            if (CONFIG_FILE == null) return;
+            CONFIG_FILE.getParentFile().mkdirs();
+            java.io.PrintWriter w = new java.io.PrintWriter(CONFIG_FILE);
+            w.println("crash-prevention:");
+            w.println("  nbt:");
+            w.println("    max-bytes: " + nbtMaxBytes);
+            w.println("    max-depth: " + nbtMaxDepth);
+            w.println("    max-string-length: " + nbtMaxStringLength);
+            w.println("    max-list-size: " + nbtMaxListSize);
+            w.println("  sign:");
+            w.println("    max-line-length: " + signMaxLineLength);
+            w.println("    max-total-chars: " + signMaxTotalChars);
+            w.println("  anvil:");
+            w.println("    max-item-name-length: " + anvilMaxItemNameLength);
+            w.println("  recipe-book:");
+            w.println("    max-packet-size: " + recipeBookMaxPacketSize);
+            w.println("  creative-item:");
+            w.println("    max-nbt-size: " + creativeMaxItemNbtSize);
+            w.close();
+        } catch (Exception ignored) {}
     }
 
     private static int getInt(Map<String, Object> map, String key, int def) {
