@@ -73,7 +73,7 @@ public class PufferfishConfig {
 
         if (!SIMDDetection.isEnabled) {
             if (SIMDDetection.versionLimited) {
-                PufferfishLogger.LOGGER.warning("Will not enable SIMD! These optimizations are only safely supported on Java 17 and newer.");
+                PufferfishLogger.LOGGER.warning("Will not enable SIMD! These optimizations are only safely supported on Java 17+.");
             } else {
                 PufferfishLogger.LOGGER.warning("SIMD operations are available for your server, but are not configured!");
                 PufferfishLogger.LOGGER.warning("To enable additional optimizations, add \"--add-modules=jdk.incubator.vector\" to your startup flags, BEFORE the \"-jar\".");
@@ -81,6 +81,12 @@ public class PufferfishConfig {
                 PufferfishLogger.LOGGER.warning("Debug: Java: " + System.getProperty("java.version") + ", test run: " + SIMDDetection.testRun);
             }
         }
+
+        // SourbyCraft start - Pufferfish JDK 25 tuning
+        if (!SIMDDetection.versionLimited && SIMDDetection.getJavaVersion() >= 25) {
+            PufferfishLogger.LOGGER.info("Running on Java 25+ — vector API and virtual threads available");
+        }
+        // SourbyCraft end
     }
 
     private static void setComment(String key, String... comment) {
