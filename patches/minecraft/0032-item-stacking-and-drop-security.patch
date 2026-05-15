@@ -1,0 +1,142 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <dev@iyanz.dev>
+Date: Thu, 15 May 2026 03:00:00 +0700
+Subject: [PATCH] Item stacking 99, unlimited drop merge, anti-snatch
+
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -2707,7 +2707,13 @@
+     @Override
+     public ItemEntity drop(ItemStack droppedItem, boolean dropAround, boolean traceItem, boolean callEvent, java.util.function.@Nullable Consumer<org.bukkit.entity.Item> entityOperation) { // Paper - Extend dropItem API
+         ItemEntity itemEntity = super.drop(droppedItem, dropAround, traceItem, callEvent, entityOperation); // Paper - Extend dropItem API
++        // SourbyCraft start - anti-snatch
++        if (itemEntity != null && dev.iyanz.sourbycraft.SourbyCraftConfig.ownerProtectionEnabled) {
++            itemEntity.ownerUUID = this.getUUID();
++            itemEntity.pickupDelay = dev.iyanz.sourbycraft.SourbyCraftConfig.ownerProtectionTime * 20;
++        }
++        // SourbyCraft end
+         ItemStack itemStack = itemEntity != null ? itemEntity.getItem() : ItemStack.EMPTY; // Paper - move up
+         if (traceItem) {
+             if (!itemStack.isEmpty()) {
+diff --git a/net/minecraft/world/entity/item/ItemEntity.java b/net/minecraft/world/entity/item/ItemEntity.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/world/entity/item/ItemEntity.java
++++ b/net/minecraft/world/entity/item/ItemEntity.java
+@@ -47,6 +47,8 @@
+     private static final short DEFAULT_PICKUP_DELAY = 0;
+     public int age = 0;
++    @Nullable
++    public UUID ownerUUID = null; // SourbyCraft - anti-snatch
+     public int pickupDelay = 0;
+     public int health = 5;
+     public @Nullable EntityReference<Entity> thrower;
+@@ -281,8 +283,8 @@
+ 
+     private boolean isMergable() {
+         ItemStack item = this.getItem();
+-        return this.isAlive() && this.pickupDelay != 32767 && this.age != -32768 && this.age < this.despawnRate && item.getCount() < item.getMaxStackSize(); // Paper - Alternative item-despawn-rate
++        return this.isAlive() && this.pickupDelay != 32767 && this.age != -32768 && this.age < this.despawnRate; // Paper - Alternative item-despawn-rate // SourbyCraft - unlimited drop stack
+     }
+ 
+     private void tryToMerge(ItemEntity itemEntity) {
+@@ -298,7 +300,12 @@
+ 
+     public static boolean areMergable(ItemStack destinationStack, ItemStack originStack) {
+-        return originStack.getCount() + destinationStack.getCount() <= originStack.getMaxStackSize()
+-            && ItemStack.isSameItemSameComponents(destinationStack, originStack);
++        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.unlimitedDropStack) {
++            if (originStack.getCount() + destinationStack.getCount() > originStack.getMaxStackSize()) return false;
++        } else if (dev.iyanz.sourbycraft.SourbyCraftConfig.dropStackCap != Integer.MAX_VALUE) {
++            if (originStack.getCount() + destinationStack.getCount() > dev.iyanz.sourbycraft.SourbyCraftConfig.dropStackCap) return false;
++        }
++        return ItemStack.isSameItemSameComponents(destinationStack, originStack);
+     }
+ 
+     public static ItemStack merge(ItemStack destinationStack, ItemStack originStack, int amount) {
+@@ -310,8 +317,9 @@
+ 
+     private static void merge(ItemEntity destinationEntity, ItemStack destinationStack, ItemStack originStack) {
+-        ItemStack itemStack = merge(destinationStack, originStack, 64);
++        int cap = dev.iyanz.sourbycraft.SourbyCraftConfig.unlimitedDropStack ? dev.iyanz.sourbycraft.SourbyCraftConfig.dropStackCap : originStack.getMaxStackSize();
++        ItemStack itemStack = merge(destinationStack, originStack, cap);
+         destinationEntity.setItem(itemStack);
+     }
+ 
+@@ -323,8 +331,19 @@
+         merge(destinationEntity, destinationStack, originStack);
+         destinationEntity.pickupDelay = Math.max(destinationEntity.pickupDelay, originEntity.pickupDelay);
+         destinationEntity.age = Math.min(destinationEntity.age, originEntity.age);
++        // SourbyCraft start - anti-snatch owner merge
++        if (destinationEntity.ownerUUID == null) {
++            destinationEntity.ownerUUID = originEntity.ownerUUID;
++            destinationEntity.pickupDelay = Math.max(destinationEntity.pickupDelay, originEntity.pickupDelay);
++        } else if (originEntity.ownerUUID != null && !originEntity.ownerUUID.equals(destinationEntity.ownerUUID)) {
++            if (originStack.getCount() > destinationStack.getCount()) {
++                destinationEntity.ownerUUID = originEntity.ownerUUID;
++                destinationEntity.pickupDelay = Math.max(destinationEntity.pickupDelay, originEntity.pickupDelay);
++            }
++        }
++        // SourbyCraft end
+         if (originStack.isEmpty()) {
+             originEntity.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.MERGE); // CraftBukkit - add Bukkit remove cause
+         }
+@@ -379,8 +395,9 @@
+     protected void addAdditionalSaveData(ValueOutput output) {
+         output.putShort("Health", (short)this.health);
+         output.putShort("Age", (short)this.age);
+         output.putShort("PickupDelay", (short)this.pickupDelay);
++        output.storeNullable("SourbycraftOwner", UUIDUtil.CODEC, this.ownerUUID);
+         EntityReference.store(this.thrower, output, "Thrower");
+         output.storeNullable("Owner", UUIDUtil.CODEC, this.target);
+         if (!this.getItem().isEmpty()) {
+@@ -396,8 +412,9 @@
+     protected void readAdditionalSaveData(ValueInput input) {
+         this.health = input.getShortOr("Health", (short)5);
+         this.age = input.getShortOr("Age", (short)0);
+         this.pickupDelay = input.getShortOr("PickupDelay", (short)0);
++        this.ownerUUID = input.read("SourbycraftOwner", UUIDUtil.CODEC).orElse(null);
+         this.target = input.read("Owner", UUIDUtil.CODEC).orElse(null);
+         this.thrower = EntityReference.read(input, "Thrower");
+         this.setItem(input.read("Item", ItemStack.CODEC).orElse(ItemStack.EMPTY));
+@@ -425,9 +450,18 @@
+             boolean flyAtPlayer = false; // Paper
+ 
++            // SourbyCraft start - anti-snatch owner protection
++            if (dev.iyanz.sourbycraft.SourbyCraftConfig.ownerProtectionEnabled && this.ownerUUID != null && this.pickupDelay > 0) {
++                if (!entity.getUUID().equals(this.ownerUUID)) {
++                    return; // block non-owner during protection
++                }
++                this.pickupDelay = 0; // owner bypass — allow immediate pickup
++            }
++            // SourbyCraft end
++
+             // Paper start - PlayerAttemptPickupItemEvent
+             if (this.pickupDelay <= 0) {
+                 org.bukkit.event.player.PlayerAttemptPickupItemEvent attemptEvent = new org.bukkit.event.player.PlayerAttemptPickupItemEvent((org.bukkit.entity.Player) entity.getBukkitEntity(), (org.bukkit.entity.Item) this.getBukkitEntity(), remaining);
+diff --git a/net/minecraft/world/item/Item.java b/net/minecraft/world/item/Item.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/world/item/Item.java
++++ b/net/minecraft/world/item/Item.java
+@@ -108,6 +108,7 @@
+     public static final Identifier BASE_ATTACK_SPEED_ID = Identifier.withDefaultNamespace("base_attack_speed");
+     public static final int DEFAULT_MAX_STACK_SIZE = 64;
+     public static final int ABSOLUTE_MAX_STACK_SIZE = 99;
++    public static int sourbycraftMaxStackSize = 99; // SourbyCraft - dynamic max stack
+     public static final int MAX_BAR_WIDTH = 13;
+     protected static final int APPROXIMATELY_INFINITE_USE_DURATION = 72000;
+     private final Holder.Reference<Item> builtInRegistryHolder = BuiltInRegistries.ITEM.createIntrusiveHolder(this);
+@@ -152,7 +153,12 @@
+ 
+     public int getDefaultMaxStackSize() {
+-        return this.components.getOrDefault(DataComponents.MAX_STACK_SIZE, 1);
++        int max = this.components.getOrDefault(DataComponents.MAX_STACK_SIZE, 1);
++        if (max == DEFAULT_MAX_STACK_SIZE && sourbycraftMaxStackSize != DEFAULT_MAX_STACK_SIZE) {
++            return sourbycraftMaxStackSize;
++        }
++        return max;
+     }
+ 
+     public void onUseTick(Level level, LivingEntity livingEntity, ItemStack stack, int remainingUseDuration) {
