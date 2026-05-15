@@ -76,4 +76,18 @@ public class SourbyCraftWorldConfig {
         return MiniMessage.miniMessage().deserialize(getString(path,
                 MiniMessage.miniMessage().serialize(def)));
     }
+
+    // SourbyCraft start - antixray config
+    public boolean fluidObscures = true;
+    public boolean allBlocks = false;
+    public boolean entityObfuscation = true;
+    public int entityObfuscationRange = 64;
+
+    private void antixray() {
+        fluidObscures = getBoolean("anticheat.anti-xray.fluid-obscures", fluidObscures);
+        allBlocks = getBoolean("anticheat.anti-xray.all-blocks", allBlocks);
+        entityObfuscation = getBoolean("anticheat.anti-xray.entity-obfuscation", entityObfuscation);
+        entityObfuscationRange = getInt("anticheat.anti-xray.entity-obfuscation-range", entityObfuscationRange);
+    }
+    // SourbyCraft end
 }
