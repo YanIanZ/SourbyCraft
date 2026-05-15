@@ -1,5 +1,6 @@
 package dev.iyanz.sourbycraft.security;
 
+import dev.iyanz.sourbycraft.util.SourbyLogger;
 import org.yaml.snakeyaml.Yaml;
 import java.io.File;
 import java.io.FileInputStream;
@@ -80,7 +81,7 @@ public class SourbyCraftSecurityConfig {
             }
 
         } catch (Exception e) {
-            System.err.println("[SourbyCraft] Failed to load security config: " + e.getMessage());
+            SourbyLogger.error("Failed to load security config: " + e.getMessage());
         }
     }
 
