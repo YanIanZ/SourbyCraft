@@ -23,7 +23,6 @@ diff --git a/net/minecraft/server/level/ServerEntity.java b/net/minecraft/server
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
-@@ -872,7 +872,8 @@
+@@ -872,7 +872,7 @@
 -        this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray
-+        dev.iyanz.sourbycraft.SourbyCraftWorldConfig scWorldConfig = new dev.iyanz.sourbycraft.SourbyCraftWorldConfig(this.getWorld().getName(), this.getWorld().getEnvironment());
-+        this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor, scWorldConfig) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray - SourbyCraft
++        this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor, this.sourbycraftConfig) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray - SourbyCraft
