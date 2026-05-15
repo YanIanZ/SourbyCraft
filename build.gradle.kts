@@ -60,6 +60,7 @@ subprojects {
         mavenCentral()
         maven("https://repo.papermc.io/repository/maven-public/")
         maven("https://jitpack.io/")
+        maven("https://maven.neoforged.net/releases/") // SourbyCraft - NeoForge
     }
 }
 
