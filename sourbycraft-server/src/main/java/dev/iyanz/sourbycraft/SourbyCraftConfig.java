@@ -151,7 +151,10 @@ public class SourbyCraftConfig {
         // SourbyCraft start - antixray
         fluidObscures = getBoolean("antixray.fluid-obscures", fluidObscures);
         // SourbyCraft end
-        // SourbyCraft start - disable vanilla commands
+    // SourbyCraft start - no durability
+    public static boolean noDurabilityExcept = false;
+    // SourbyCraft end
+    // SourbyCraft start - disable vanilla commands
         disableCommunicationCommands = getBoolean("settings.disable-communication-commands", disableCommunicationCommands);
         // SourbyCraft end
         idleTimeout = getInt("server.idle-timeout", idleTimeout);
@@ -163,6 +166,7 @@ public class SourbyCraftConfig {
         dropStackCap = getInt("item.drop-stack-cap", dropStackCap);
         ownerProtectionEnabled = getBoolean("item.owner-protection-enabled", ownerProtectionEnabled);
         ownerProtectionTime = Math.min(getInt("item.owner-protection-time", ownerProtectionTime), 1638);
+        noDurabilityExcept = getBoolean("item.no-durability-except", noDurabilityExcept);
         net.minecraft.world.item.Item.sourbycraftMaxStackSize = itemMaxStackSize;
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
         mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
