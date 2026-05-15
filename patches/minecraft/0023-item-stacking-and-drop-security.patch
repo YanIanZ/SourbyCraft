@@ -149,6 +149,23 @@ diff --git a/net/minecraft/world/item/Item.java b/net/minecraft/world/item/Item.
      }
  
      public void onUseTick(Level level, LivingEntity livingEntity, ItemStack stack, int remainingUseDuration) {
+diff --git a/net/minecraft/server/level/ServerPlayerGameMode.java b/net/minecraft/server/level/ServerPlayerGameMode.java
+--- a/net/minecraft/server/level/ServerPlayerGameMode.java
++++ b/net/minecraft/server/level/ServerPlayerGameMode.java
+@@ -414,6 +414,14 @@
+                 java.util.List<net.minecraft.world.entity.item.ItemEntity> itemsToDrop = this.level.captureDrops; // Paper - capture all item additions to the world
+                 this.level.captureDrops = null; // Paper - capture all item additions to the world; Remove this earlier so that we can actually drop stuff
++                // SourbyCraft start - anti-snatch for block break drops
++                if (dev.iyanz.sourbycraft.SourbyCraftConfig.ownerProtectionEnabled) {
++                    for (net.minecraft.world.entity.item.ItemEntity item : itemsToDrop) {
++                        item.ownerUUID = this.player.getUUID();
++                        item.pickupDelay = Math.min(dev.iyanz.sourbycraft.SourbyCraftConfig.ownerProtectionTime, 1638) * 20;
++                    }
++                }
++                // SourbyCraft end
+                 if (event.isDropItems()) {
+                     org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockDropItemEvent(bblock, state, this.player, itemsToDrop); // Paper - capture all item additions to the world
+                 }
 diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
