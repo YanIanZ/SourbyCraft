@@ -15,11 +15,11 @@ subprojects {
     configure<JavaPluginExtension> {
         withSourcesJar()
 
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
+        sourceCompatibility = JavaVersion.VERSION_25
+        targetCompatibility = JavaVersion.VERSION_25
 
         toolchain {
-            languageVersion = JavaLanguageVersion.of(21)
+            languageVersion = JavaLanguageVersion.of(25)
             vendor = JvmVendorSpec.ADOPTIUM
         }
     }
@@ -36,8 +36,7 @@ subprojects {
     }
     tasks.withType<JavaCompile> {
         options.encoding = Charsets.UTF_8.name()
-        options.release = 21
-        options.compilerArgs.add("--enable-preview")
+        options.release = 25
         options.isIncremental = true
         options.isFork = true
         options.forkOptions.memoryMaximumSize = "512M"
