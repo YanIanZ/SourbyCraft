@@ -132,7 +132,7 @@ public class SourbyCraftConfig {
         dropStackCap = getInt("item.drop-stack-cap", dropStackCap);
         ownerProtectionEnabled = getBoolean("item.owner-protection-enabled", ownerProtectionEnabled);
         ownerProtectionTime = Math.min(getInt("item.owner-protection-time", ownerProtectionTime), 1638);
-        // net.minecraft.world.item.Item.sourbycraftMaxStackSize = itemMaxStackSize; // SourbyCraft - needs item stacking patch
+        net.minecraft.world.item.Item.sourbycraftMaxStackSize = itemMaxStackSize;
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
         mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
