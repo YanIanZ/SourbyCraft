@@ -1,14 +1,13 @@
 package dev.iyanz.sourbycraft.swm.installer;
 
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
+import dev.iyanz.sourbycraft.util.SourbyLogger;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.file.*;
-import java.util.logging.Logger;
 
 public final class PluginInstaller {
-    private static final Logger LOGGER = Logger.getLogger("SourbyCraft-SWM");
     private static final String RELEASES_URL = "https://github.com/YanIanZ/SourbyCraft/releases/download/%s/SourbyCraftSWM-%s.jar";
     private static final String SWM_PLUGIN_VERSION = "3.0.0";
 
@@ -27,9 +26,9 @@ public final class PluginInstaller {
             try (InputStream in = c.getInputStream()) {
                 Files.copy(in, jarPath, StandardCopyOption.REPLACE_EXISTING);
             }
-            LOGGER.info("SourbyCraftSWM plugin v" + SWM_PLUGIN_VERSION + " installed (" + tag + "). Restart server to load.");
+            SourbyLogger.info("SourbyCraftSWM plugin v" + SWM_PLUGIN_VERSION + " installed (" + tag + "). Restart server to load.");
         } catch (IOException e) {
-            LOGGER.warning("SWM plugin download failed: " + e.getMessage());
+            SourbyLogger.warn("SWM plugin download failed: " + e.getMessage());
         }
     }
 
