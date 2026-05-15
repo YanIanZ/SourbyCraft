@@ -21,7 +21,7 @@ public class SourbyCraftConfig {
     private static File CONFIG_FILE;
     public static YamlConfiguration config;
 
-    static int version, currentVersion = 4;
+    static int version, currentVersion = 5;
     static boolean verbose;
 
     public static boolean asyncChunkLoad = false;
@@ -113,7 +113,19 @@ public class SourbyCraftConfig {
 
         // Auto-install SWM plugin from GitHub releases
         if (swmEnabled && swmAutoInstall) {
+            // SourbyCraft start - auto-create slime worlds directory
+            try { java.nio.file.Files.createDirectories(java.nio.file.Path.of(swmFileDir)); } catch (java.io.IOException ignored) {}
+            // SourbyCraft end
             dev.iyanz.sourbycraft.swm.installer.PluginInstaller.install("plugins/");
+        }
+
+        if (version <= 4) {
+            // SourbyCraft start - v4→v5 migration: update SWM version tag
+            if ("1.21.11".equals(swmVersion)) {
+                swmVersion = "v4-REL";
+                set("swm.version", swmVersion);
+            }
+            // SourbyCraft end
         }
 
         autoThrottleView = getBoolean("network.auto-throttle-view", autoThrottleView);
