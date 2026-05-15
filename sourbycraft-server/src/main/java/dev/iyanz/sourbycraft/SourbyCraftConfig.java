@@ -132,7 +132,7 @@ public class SourbyCraftConfig {
         dropStackCap = getInt("item.drop-stack-cap", dropStackCap);
         ownerProtectionEnabled = getBoolean("item.owner-protection-enabled", ownerProtectionEnabled);
         ownerProtectionTime = Math.min(getInt("item.owner-protection-time", ownerProtectionTime), 1638);
-        net.minecraft.world.item.Item.sourbycraftMaxStackSize = itemMaxStackSize;
+        // net.minecraft.world.item.Item.sourbycraftMaxStackSize = itemMaxStackSize; // SourbyCraft - needs item stacking patch
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
         mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
@@ -242,13 +242,6 @@ public class SourbyCraftConfig {
     }
 
     private static void villagerGossip() {
-        for (GossipType gossipType : GossipType.values()) {
-            gossipType.max = gossipType.defaultMax;
-            gossipType.decayPerDay = gossipType.defaultDecayPerDay;
-            gossipType.decayPerTransfer = gossipType.defaultDecayPerTransfer;
-            gossipType.max = getInt("settings.villager-gossip." + gossipType.id + ".limit", gossipType.max);
-            gossipType.decayPerDay = getInt("settings.villager-gossip." + gossipType.id + ".decay-per-day", gossipType.decayPerDay);
-            gossipType.decayPerTransfer = getInt("settings.villager-gossip." + gossipType.id + ".decay-per-transfer", gossipType.decayPerTransfer);
-        }
+        // GossipType fields are now final in Paper 1.21.11 — config skipped
     }
 }
