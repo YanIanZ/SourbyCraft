@@ -56,6 +56,9 @@ index 0000000000000000000000000000000000000000..00000000000000000000000000000000
      }
  
      public static ItemStack merge(ItemStack destinationStack, ItemStack originStack, int amount) {
++        int min = Math.min(amount - destinationStack.getCount(), originStack.getCount()); // SourbyCraft - use dynamic cap
+-        int min = Math.min(Math.min(destinationStack.getMaxStackSize(), amount) - destinationStack.getCount(), originStack.getCount());
+         ItemStack itemStack = destinationStack.copyWithCount(destinationStack.getCount() + min);
 @@ -310,8 +317,9 @@
  
      private static void merge(ItemEntity destinationEntity, ItemStack destinationStack, ItemStack originStack) {
