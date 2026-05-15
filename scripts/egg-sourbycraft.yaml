@@ -1,0 +1,136 @@
+_comment: 'SourbyCraft v4-REL — High-performance Paper fork with security, anti-xray, dynamic scaling, SWM'
+meta:
+  version: PLCN_v3
+  update_url: 'https://raw.githubusercontent.com/YanIanZ/SourbyCraft/refs/heads/main/scripts/egg-sourbycraft.yaml'
+exported_at: '2026-05-15T00:00:00+07:00'
+name: SourbyCraft
+author: support@iyanz.dev
+uuid: 6eb83f8a-69da-4270-90b7-f783e2831724
+description: 'High-performance Paper fork (1.21.11) with built-in security, anti-xray, dynamic scaling, SWM. Java 25.'
+image: ''
+tags:
+  - minecraft
+  - paper
+  - sourbycraft
+features:
+  - eula
+  - java_version
+docker_images:
+  'Java 25': 'ghcr.io/pelican-eggs/yolks:java_25'
+  'Java 21': 'ghcr.io/pelican-eggs/yolks:java_21'
+file_denylist: {}
+startup_commands:
+  Default: 'java -Xms128M --add-modules=jdk.incubator.vector -XX:+UseZGC -XX:+ZGenerational -XX:SoftMaxHeapSize=10G -XX:ConcGCThreads=2 -XX:ParallelGCThreads=4 -XX:ZCollectionInterval=5 -XX:ZUncommitDelay=300 -XX:ZAllocationSpikeTolerance=3 -XX:+AlwaysPreTouch -XX:+UseStringDeduplication -XX:+UseContainerSupport -XX:CICompilerCount=2 -XX:TieredStopAtLevel=1 -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}} --nogui'
+config:
+  files:
+    server.properties:
+      parser: properties
+      find:
+        server-ip: ''
+        server-port: '{{server.allocations.default.port}}'
+        query.port: '{{server.allocations.default.port}}'
+        motd: 'SourbyCraft v4-REL — Paper 1.21.11'
+        enable-rcon: false
+    sourbycraft.yml:
+      parser: yaml
+      find:
+        entity.tick-rate: 1
+        entity.mob-tick-distance: 32
+        entity.max-per-chunk: 10
+        antixray.fluid-obscures: true
+        settings.disable-communication-commands: false
+    sourbycraft-security.yml:
+      parser: yaml
+      find:
+        crash-prevention.nbt.max-bytes: 2097152
+        crash-prevention.nbt.max-depth: 64
+  startup:
+    done: ')! For help, type '
+  logs:
+    custom: false
+    location: logs/latest.log
+  stop: stop
+scripts:
+  installation:
+    script: |-
+      #!/bin/ash
+      # SourbyCraft Installation Script
+      #
+      # Server Files: /mnt/server
+      
+      REPO="YanIanZ/SourbyCraft"
+      
+      if [ -n "${DL_PATH}" ]; then
+        echo "Using supplied download url: ${DL_PATH}"
+        DOWNLOAD_URL=$(eval echo $(echo ${DL_PATH} | sed -e 's/{{/${/g' -e 's/}}/}/g'))
+      else
+        echo "Fetching SourbyCraft release ${RELEASE_TAG}..."
+        ASSET_NAME="sourbycraft-paperclip-${RELEASE_TAG}-mojmap.jar"
+        DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ASSET_NAME}"
+        
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -L "${DOWNLOAD_URL}")
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "Release ${RELEASE_TAG} not found! Trying latest..."
+          LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | jq -r '.tag_name')
+          ASSET_NAME="sourbycraft-paperclip-${LATEST_TAG}-mojmap.jar"
+          DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST_TAG}/${ASSET_NAME}"
+          echo "Using latest: ${LATEST_TAG}"
+        fi
+      fi
+      
+      cd /mnt/server
+      
+      echo "Downloading ${DOWNLOAD_URL}"
+      
+      if [ -f "${SERVER_JARFILE}" ]; then
+        mv "${SERVER_JARFILE}" "${SERVER_JARFILE}.old"
+      fi
+      
+      curl -L -o "${SERVER_JARFILE}" "${DOWNLOAD_URL}"
+      
+      if [ ! -f server.properties ]; then
+        echo "Creating default server.properties"
+        echo -e "server-ip=\nserver-port=25565\nmotd=SourbyCraft v4-REL\nenable-rcon=false" > server.properties
+      fi
+      
+      if [ ! -f eula.txt ]; then
+        echo "eula=true" > eula.txt
+      fi
+      
+      echo "SourbyCraft installation complete"
+    container: 'ghcr.io/pelican-eggs/installers:alpine'
+    entrypoint: ash
+variables:
+  - name: 'Release Tag'
+    description: "SourbyCraft release tag.\r\nDefault: v4-REL"
+    env_variable: RELEASE_TAG
+    default_value: 'v4-REL'
+    user_viewable: true
+    user_editable: true
+    rules:
+      - required
+      - string
+      - 'max:20'
+    sort: 1
+  - name: 'Server Jar File'
+    description: 'The name of the server jarfile to run the server with.'
+    env_variable: SERVER_JARFILE
+    default_value: server.jar
+    user_viewable: true
+    user_editable: true
+    rules:
+      - required
+      - 'regex:/^([\w\d._-]+)(\.jar)$/'
+    sort: 2
+  - name: 'Download Path'
+    description: |-
+      A URL to use to download a server.jar rather than the ones in the install script.
+      This is not user viewable.
+    env_variable: DL_PATH
+    default_value: ''
+    user_viewable: false
+    user_editable: false
+    rules:
+      - nullable
+      - string
+    sort: 3
