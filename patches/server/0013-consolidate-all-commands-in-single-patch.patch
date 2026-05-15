@@ -36,9 +36,13 @@ index 0000000000000000000000000000000000000000..dc0a65d50ec50b5424aa1b99e9ef3710
 +import org.bukkit.entity.Player;
 +import static net.kyori.adventure.text.Component.text;
 +public class PingCommand extends Command {
-+    public PingCommand(String name) { super(name); this.description="Player latency"; this.usageMessage="/ping [player]"; this.setPermission("sourbycraft.command.ping.other"); }
++    public PingCommand(String name) { super(name); this.description="Player latency"; this.usageMessage="/ping [player]"; }
 +    public boolean execute(CommandSender s, String a, String[] args) {
-+        if(args.length>0 && !testPermission(s)) return true;
++        boolean other = args.length > 0 && !args[0].equals(s.getName());
++        if(other && !s.hasPermission("sourbycraft.command.ping.other")) {
++            s.sendMessage(text("No permission",SourbyCraftColors.DANGER));
++            return true;
++        }
 +        Player t = args.length>0 ? Bukkit.getPlayer(args[0]) : (s instanceof Player p ? p : null);
 +        if(t==null) { s.sendMessage(text("Player not found",SourbyCraftColors.DANGER)); return true; }
 +        int ping = t.getPing();
