@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <dev@iyanz.dev>
+Date: Thu, 15 May 2026 00:00:00 +0700
+Subject: [PATCH] Antixray: fluid obscures, all-blocks mode, entity obfuscation
+
+
+diff --git a/net/minecraft/server/level/ServerEntity.java b/net/minecraft/server/level/ServerEntity.java
+--- a/net/minecraft/server/level/ServerEntity.java
++++ b/net/minecraft/server/level/ServerEntity.java
+@@ -97,6 +97,13 @@
+     public void sendChanges() {
++        // SourbyCraft start - entity obfuscation filter
++        if (this.level.chunkPacketBlockController instanceof io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray controller) {
++            this.trackedPlayers.removeIf(conn ->
++                !controller.isEntityVisibleTo(this.entity, conn.getPlayer())
++            );
++        }
++        // SourbyCraft end
+         // Paper start - optimise collisions
+         if (((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)this.entity).moonrise$isHardColliding()) {
+             this.teleportDelay = 9999;
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -872,7 +872,8 @@
+-        this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray
++        dev.iyanz.sourbycraft.SourbyCraftWorldConfig scWorldConfig = new dev.iyanz.sourbycraft.SourbyCraftWorldConfig(this.getWorld().getName(), this.getWorld().getEnvironment());
++        this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor, scWorldConfig) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray - SourbyCraft
+diff --git a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+--- a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
++++ b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+@@ -60,11 +60,12 @@
+     private final LevelChunkSection[] emptyNearbyChunkSections = {EMPTY_SECTION, EMPTY_SECTION, EMPTY_SECTION, EMPTY_SECTION};
+     private final int maxBlockHeightUpdatePosition;
+ 
+-    public ChunkPacketBlockControllerAntiXray(Level level, Executor executor) {
++    public ChunkPacketBlockControllerAntiXray(Level level, Executor executor, dev.iyanz.sourbycraft.SourbyCraftWorldConfig sourbycraftWorldConfig) {
+         this.executor = executor;
+         WorldConfiguration.Anticheat.AntiXray paperWorldConfig = level.paperConfig().anticheat.antiXray;
+         engineMode = paperWorldConfig.engineMode;
+         maxBlockHeight = paperWorldConfig.maxBlockHeight >> 4 << 4;
+         updateRadius = paperWorldConfig.updateRadius;
+         usePermission = paperWorldConfig.usePermission;
++        this.sourbycraftWorldConfig = sourbycraftWorldConfig;
+         List<Block> toObfuscate;
+ 
+         if (engineMode == EngineMode.HIDE) {
+@@ -126,6 +127,15 @@
+                 }
+             }
+         }
++        // SourbyCraft start - all-blocks mode
++        if (sourbycraftWorldConfig.allBlocks) {
++            for (int i = 0; i < obfuscateGlobal.length; i++) {
++                BlockState bs = GLOBAL_BLOCKSTATE_PALETTE.valueFor(i);
++                if (bs != null && !bs.isAir()) {
++                    obfuscateGlobal[i] = true;
++                }
++            }
++        }
++        // SourbyCraft end
+ 
+         EmptyLevelChunk emptyChunk = new EmptyLevelChunk(level, new ChunkPos(0, 0), MinecraftServer.getServer().registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS));
+         BlockPos zeroPos = new BlockPos(0, 0, 0);
+@@ -141,11 +151,41 @@
+             }
+         }
+ 
++        // SourbyCraft start - fluid obscures
++        if (sourbycraftWorldConfig.fluidObscures) {
++            solidGlobal[GLOBAL_BLOCKSTATE_PALETTE.idFor(Blocks.WATER.defaultBlockState(), PaletteResize.noResizeExpected())] = true;
++            solidGlobal[GLOBAL_BLOCKSTATE_PALETTE.idFor(Blocks.LAVA.defaultBlockState(), PaletteResize.noResizeExpected())] = true;
++        }
++        // SourbyCraft end
++
+         maxBlockHeightUpdatePosition = maxBlockHeight + updateRadius - 1;
+     }
+ 
+     private int getPresetBlockStatesFullLength() {
+         return engineMode == EngineMode.HIDE ? 1 : presetBlockStatesFull.length;
+     }
++
++    // SourbyCraft start - entity obfuscation
++    private final dev.iyanz.sourbycraft.SourbyCraftWorldConfig sourbycraftWorldConfig;
++
++    public boolean isEntityVisibleTo(net.minecraft.world.entity.Entity entity, net.minecraft.server.level.ServerPlayer player) {
++        if (!sourbycraftWorldConfig.entityObfuscation) return true;
++        if (player.isSpectator()) return true;
++        if (player.getBukkitEntity().hasPermission("paper.antixray.bypass")) return true;
++        if (entity instanceof net.minecraft.world.entity.TamableAnimal tamable && player.getUUID().equals(tamable.getOwnerUUID())) return true;
++        double distSq = player.distanceToSqr(entity);
++        long range = sourbycraftWorldConfig.entityObfuscationRange;
++        if (distSq > range * range) return true;
++
++        net.minecraft.world.level.ClipContext ctx = new net.minecraft.world.level.ClipContext(
++            player.getEyePosition(),
++            entity.getEyePosition(),
++            net.minecraft.world.level.ClipContext.Block.COLLIDER,
++            net.minecraft.world.level.ClipContext.Fluid.NONE,
++            player
++        );
++        net.minecraft.world.phys.BlockHitResult hit = player.level().clip(ctx);
++        return hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK;
++    }
++    // SourbyCraft end
