@@ -149,3 +149,31 @@ diff --git a/net/minecraft/world/item/Item.java b/net/minecraft/world/item/Item.
      }
  
      public void onUseTick(Level level, LivingEntity livingEntity, ItemStack stack, int remainingUseDuration) {
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -4132,6 +4132,9 @@
+             } else {
+                 float f = 0.3F;
+                 float cos = Mth.cos(this.getXRot() * (float) (Math.PI / 180.0));
++                // SourbyCraft start - ensure minimum forward throw
++                if (Math.abs(cos) < 0.15F) cos = cos >= 0 ? 0.15F : -0.15F;
++                // SourbyCraft end
+                 float sin = Mth.sin(this.getYRot() * (float) (Math.PI / 180.0));
+                 float cos1 = Mth.cos(this.getYRot() * (float) (Math.PI / 180.0));
+                 float f2 = this.random.nextFloat() * (float) (Math.PI * 2);
+diff --git a/net/minecraft/world/item/ItemStack.java b/net/minecraft/world/item/ItemStack.java
+--- a/net/minecraft/world/item/ItemStack.java
++++ b/net/minecraft/world/item/ItemStack.java
+@@ -598,7 +598,12 @@
+ 
+     public int getMaxStackSize() {
+-        return this.getOrDefault(DataComponents.MAX_STACK_SIZE, 1);
++        int max = this.getOrDefault(DataComponents.MAX_STACK_SIZE, 1);
++        // SourbyCraft start - dynamic max stack
++        if (max == Item.DEFAULT_MAX_STACK_SIZE && Item.sourbycraftMaxStackSize != Item.DEFAULT_MAX_STACK_SIZE) {
++            return Item.sourbycraftMaxStackSize;
++        }
++        // SourbyCraft end
++        return max;
+     }
