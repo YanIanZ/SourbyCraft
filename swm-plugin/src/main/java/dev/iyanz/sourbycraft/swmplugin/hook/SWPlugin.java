@@ -1,4 +1,4 @@
-package dev.iyanz.sourbycraft.swm.plugin;
+package dev.iyanz.sourbycraft.swmplugin.hook;
 
 import dev.iyanz.sourbycraft.swm.api.AdvancedSlimePaperAPI;
 import dev.iyanz.sourbycraft.swm.api.SlimeWorld;
@@ -6,7 +6,6 @@ import dev.iyanz.sourbycraft.swm.api.SlimeWorldInstance;
 import dev.iyanz.sourbycraft.swm.api.SlimePropertyMap;
 import dev.iyanz.sourbycraft.swm.api.SlimeNMSBridge;
 import dev.iyanz.sourbycraft.swm.loader.FileLoader;
-import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 import java.util.LinkedHashMap;
 import java.util.Map;
