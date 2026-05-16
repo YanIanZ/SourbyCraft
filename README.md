@@ -14,7 +14,7 @@
 ## Features
 
 ### 🔒 Security (NMS-level)
-- **Crash Prevention** — NbtAccounter limits (books, skulls, bundles), sign/anvil length limits
+- **Crash Prevention** — NbtAccounter limits (books, skulls, bundles), sign/anvil length limits, recipe book packet size, creative NBT size
 - **Lag Prevention** — per-chunk entity caps (special, falling block, arrow)
 - **AntiXray** — fluid obscures (water/lava as solids), all-blocks mode, entity obfuscation
 - **Command Security** — RCON rate limiting (20/sec), RCON brute-force protection
@@ -30,20 +30,20 @@
 - **Pufferfish engine** — DAB (Dynamic Activation of Brains), async mob spawning, SIMD
 - **Moonrise chunk system** — optimized chunk loading/saving/ticking
 
-### 🛠 Commands (hex-colored with visual bars)
+### 🛠 Commands (hex-colored)
 | Command | Description |
 |---------|-------------|
-| `/tps` | Custom TPS bars (1m/5m/15m) + MSPT + RAM + CPU + per-world stats |
+| `/tps` | SourbyCraft-colored TPS readout (1m/5m/15m) + optional `/tps mem` |
 | `/perf` | Live performance monitor + `scale on/off` + `rate <1-20>` |
 | `/perf scale on` | Enable dynamic performance auto-scaling |
 | `/perf scale off` | Disable auto-scaling |
-| `/sys` | Full server specs: uptime, CPU, RAM, Java, worlds, SWM |
-| `/ping [player]` | Latency bar + client info + GeoIP location |
+| `/sys` | Server specs: uptime, CPU, RAM, Java, worlds, SWM hint |
+| `/ping [player]` | Latency + client brand + GeoIP location |
 | `/plugins` | Active plugin list with versions |
 | `/speedtest` | Built-in Ookla network speed test |
 | `/tpsbar` / `/rambar` | BossBar visual monitors |
-| `/ver` | Version info: SourbyCraft + Minecraft + API + uptime |
-| `/swm <load/save/list/info>` | SlimeWorldManager control |
+| `/ver` | Version info: SourbyCraft + Minecraft + API + uptime (aliases: `version`, `about`) |
+| `/swm <list/load/save/info>` | SlimeWorldManager control (save/info require SWM plugin) |
 | `/mods` | Mods folder scanner (NeoForge/Forge/Fabric/Bukkit) |
 
 ### 🧩 NeoForge Mod Support (Foundation)
@@ -62,7 +62,7 @@ Built-in SlimeWorldManager for `.slime` world format. SRF v13 binary format with
 | **Built-in** | Server-internal `SWPlugin` auto-starts with `swm.enabled: true` | Default — worlds load from `slime_worlds/` at startup |
 | **External plugin** | Standalone `SourbyCraftSWM.jar` plugin for external plugins | When third-party plugins need SWM API access |
 
-**Commands:**
+**Commands** (save/info require SWM plugin active):
 - `/swm list` — shows `.slime` worlds with `[LOADED]` status
 - `/swm load <world>` — loads a slime world at runtime
 - `/swm save <world>` — serializes and persists a loaded world
@@ -72,10 +72,10 @@ Built-in SlimeWorldManager for `.slime` world format. SRF v13 binary format with
 ```yaml
 swm:
   enabled: true           # Enable built-in SWM bootstrap at startup
-  auto-install: true      # Auto-download external plugin JAR
+  auto-install: false      # Auto-download external plugin JAR
   version: "v4-REL"       # Plugin version to download
-  file-dir: slime_worlds  # Directory for .slime world files
 ```
+Note: `swm.file-dir` is hardcoded to `slime_worlds`. World files go in `slime_worlds/` directory.
 
 **API usage** (for plugin developers):
 ```java
@@ -88,7 +88,7 @@ swm.loadWorld(world, true);
 - **JDK 25 target** — compiled for Java 25, runs on JDK 25+
 - **ZGC** — generational Z Garbage Collector (sub-ms pauses)
 - **NUMA + Virtual Threads + CDS** — max hardware utilization
-- **GC Auto-Tuner** — `scripts/gc-tuner.sh` selects optimal GC + generates config
+- **GC Auto-Tuner** — `scripts/gc-tuner.sh` selects optimal GC + generates flags
 - **MemoryOptimizer** — object pool + soft-reference cache
 - **Startup Optimizer** — prints hardware summary and tuning hints at boot
 
@@ -100,30 +100,75 @@ swm.loadWorld(world, true);
 # sourbycraft.yml — main config
 performance:
   async-threads: 2              # ForkJoinPool workers
+  async-chunk-load: false      # Async chunk loading
+  async-pathfinding: false     # Async pathfinding
 
 entity:
-  tick-rate: 1                  # 1/N ticks (1=every tick, 8=every 8th)
-  mob-tick-distance: 32         # skip AI > N blocks from player
-  max-per-chunk: 10             # hard entity per-chunk limit
-  max-specials-per-chunk: 15    # armor stand, frame, painting
+  tick-rate: 20                # 1/N ticks (1=every tick, 20=every 20th)
+  tick-rate-limit: true        # Enable tick rate limiting
+  mob-tick-distance: 32        # skip AI > N blocks from player
+  mob-pathfind-interval: 20    # pathfind every N ticks
+  max-per-chunk: 10            # hard entity per-chunk limit
+  max-specials-per-chunk: 15   # armor stand, frame, painting
   max-falling-block-per-chunk: 20
   max-arrows-per-world: 5000
+  max-redstone-updates-per-tick: 2000
+  redstone-optimize: true
+  hopper-batch: true
+  item-merge-optimize: true
+  item-despawn-rate: 6000      # ticks before item despawn
+  item-merge-radius: 3
+
+item:
+  max-stack-size: 99           # max stack size (overrides vanilla 64)
+  unlimited-drop-stack: true   # bypass stack cap on drops
+  drop-stack-cap: 2147483647   # cap when unlimited (Integer.MAX_VALUE)
+  owner-protection-enabled: true  # anti-snatch: items return to dropper
+  owner-protection-time: 10    # protection ticks (seconds × 20)
+  no-durability-except: false  # skip durability for all except elytra/trident
 
 multithreading:
   enabled: false                # per-dimension threads (experimental)
+  dimension-threads: false
 
-antixray:
-  fluid-obscures: true          # water+lava as solid blockers
-  all-blocks: false             # mark all blocks as target
-  entity-obfuscation: true      # hide entities behind walls
-  entity-obfuscation-range: 64  # range for entity hiding
+memory:
+  skip-empty-sections: true
+  pool-entity-data: true
+  pre-size-packets: false
+  chunk-compression-cache: false
+
+network:
+  auto-throttle-view: true
+  min-view-distance: 4
+  compression-level: 4
+
+chunk:
+  async-save-batch: true
+
+settings:
+  detailed-brand-info: true
+  translate-items: true
+  disable-communication-commands: false
+  allow-surface-rules-for-default-fluids: false
+
+server:
+  idle-timeout: 0
+
+# per-world config (sourbycraft-world.yml)
+anticheat:
+  anti-xray:
+    fluid-obscures: true        # water+lava as solid blockers
+    all-blocks: false           # mark all blocks as target
+    entity-obfuscation: true    # hide entities behind walls
+    entity-obfuscation-range: 64  # range for entity hiding
 
 swm:
   enabled: true
-  auto-install: true
+  auto-install: false
   version: "v4-REL"
-  file-dir: slime_worlds
+```
 
+```yaml
 # sourbycraft-security.yml — crash prevention
 crash-prevention:
   nbt:
@@ -136,6 +181,10 @@ crash-prevention:
     max-total-chars: 1024
   anvil:
     max-item-name-length: 128
+  recipe-book:
+    max-packet-size: 20480
+  creative-item:
+    max-nbt-size: 2048
 ```
 
 ---
@@ -144,13 +193,16 @@ crash-prevention:
 
 ```bash
 # Auto-tune GC and start (recommended)
-./scripts/gc-tuner.sh --start
-
-# Or manually with custom JAR name
-./scripts/gc-tuner.sh --start --jar my-server.jar
+./scripts/gc-tuner.sh --apply
 
 # Generate flags only (no start)
-./scripts/gc-tuner.sh > start.flags
+./scripts/gc-tuner.sh --flags-only
+
+# Start with custom JAR name
+./scripts/gc-tuner.sh --apply --jar my-server.jar
+
+# Manual start with generated flags
+./scripts/gc-tuner.sh --flags-only
 java @start.flags -jar sourbycraft-paperclip-v4-REL-mojmap.jar --nogui
 ```
 
