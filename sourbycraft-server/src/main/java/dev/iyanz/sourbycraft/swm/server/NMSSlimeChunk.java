@@ -55,31 +55,25 @@ public class NMSSlimeChunk implements SlimeChunk {
         List<SlimeChunkSection> result = new ArrayList<>();
         LevelLightEngine lightEngine = chunk.level.getChunkSource().getLightEngine();
 
-        try {
-            java.lang.reflect.Field f = ChunkAccess.class.getDeclaredField("sections");
-            f.setAccessible(true);
-            LevelChunkSection[] arr = (LevelChunkSection[]) f.get(chunk);
-            if (arr == null) return result;
+        LevelChunkSection[] arr = chunk.sections;
+        if (arr == null) return result;
 
-            for (int i = 0; i < arr.length; i++) {
-                LevelChunkSection section = arr[i];
-                if (section == null) continue;
+        for (int i = 0; i < arr.length; i++) {
+            LevelChunkSection section = arr[i];
+            if (section == null) continue;
 
-                byte[] blockLight = null;
-                DataLayer blockLayer = lightEngine.getLayerListener(LightLayer.BLOCK).getDataLayerData(SectionPos.of(chunk.getPos(), i));
-                if (blockLayer != null) blockLight = blockLayer.getData().clone();
+            byte[] blockLight = null;
+            DataLayer blockLayer = lightEngine.getLayerListener(LightLayer.BLOCK).getDataLayerData(SectionPos.of(chunk.getPos(), i));
+            if (blockLayer != null) blockLight = blockLayer.getData().clone();
 
-                byte[] skyLight = null;
-                DataLayer skyLayer = lightEngine.getLayerListener(LightLayer.SKY).getDataLayerData(SectionPos.of(chunk.getPos(), i));
-                if (skyLayer != null) skyLight = skyLayer.getData().clone();
+            byte[] skyLight = null;
+            DataLayer skyLayer = lightEngine.getLayerListener(LightLayer.SKY).getDataLayerData(SectionPos.of(chunk.getPos(), i));
+            if (skyLayer != null) skyLight = skyLayer.getData().clone();
 
-                result.add(SlimeChunkConverter.convertChunkSection(
-                        chunk.level.palettedContainerFactory().biomeContainerCodec(),
-                        chunk.level.palettedContainerFactory().blockStatesContainerCodec(),
-                        section, blockLight, skyLight));
-            }
-        } catch (Exception e) {
-            LOGGER.error("Failed to get sections from chunk", e);
+            result.add(SlimeChunkConverter.convertChunkSection(
+                    chunk.level.palettedContainerFactory().biomeContainerCodec(),
+                    chunk.level.palettedContainerFactory().blockStatesContainerCodec(),
+                    section, blockLight, skyLight));
         }
 
         return result;
