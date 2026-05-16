@@ -17,7 +17,7 @@ public class SWPlugin extends JavaPlugin {
     @Override
     public void onLoad() {
         instance = this;
-        getLogger().info("SourbyCraft SWM v3 loading...");
+        getLogger().info("SourbyCraft SWM " + getPluginMeta().getVersion() + " loading...");
 
         String fileDir = getConfig().getString("swm.file-dir", "slime_worlds");
         FileLoader fileLoader = new FileLoader(fileDir);
@@ -60,7 +60,7 @@ public class SWPlugin extends JavaPlugin {
         getCommand("swm").setExecutor(new SwmCommand());
 
         saveDefaultConfig();
-        getLogger().info("SourbyCraft SWM v3 enabled");
+        getLogger().info("SourbyCraft SWM " + getPluginMeta().getVersion() + " enabled");
     }
 
     @Override
