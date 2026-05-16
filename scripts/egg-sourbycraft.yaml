@@ -1,4 +1,4 @@
-_comment: 'SourbyCraft v4-REL — High-performance Paper fork with security, anti-xray, dynamic scaling, SWM'
+_comment: 'SourbyCraft v5-REL — High-performance Paper fork with security, anti-xray, dynamic scaling, SWM'
 meta:
   version: PLCN_v3
   update_url: 'https://raw.githubusercontent.com/YanIanZ/SourbyCraft/refs/heads/main/scripts/egg-sourbycraft.yaml'
@@ -29,7 +29,7 @@ config:
         server-ip: ''
         server-port: '{{server.allocations.default.port}}'
         query.port: '{{server.allocations.default.port}}'
-        motd: 'SourbyCraft v4-REL — Paper 1.21.11'
+        motd: 'SourbyCraft v5-REL — Paper 1.21.11'
         enable-rcon: false
     sourbycraft.yml:
       parser: yaml
@@ -90,7 +90,7 @@ scripts:
       
       if [ ! -f server.properties ]; then
         echo "Creating default server.properties"
-        echo -e "server-ip=\nserver-port=25565\nmotd=SourbyCraft v4-REL\nenable-rcon=false" > server.properties
+        echo -e "server-ip=\nserver-port=25565\nmotd=SourbyCraft v5-REL\nenable-rcon=false" > server.properties
       fi
       
       if [ ! -f eula.txt ]; then
@@ -108,9 +108,9 @@ scripts:
     entrypoint: ash
 variables:
   - name: 'Release Tag'
-    description: "SourbyCraft release tag.\r\nDefault: v4-REL"
+    description: "SourbyCraft release tag.\r\nDefault: v5-REL"
     env_variable: RELEASE_TAG
-    default_value: 'v4-REL'
+    default_value: 'v5-REL'
     user_viewable: true
     user_editable: true
     rules:
