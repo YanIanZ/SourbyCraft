@@ -1,4 +1,4 @@
-package dev.iyanz.sourbycraft.swm.plugin;
+package dev.iyanz.sourbycraft.swmplugin.hook;
 
 import dev.iyanz.sourbycraft.swm.api.SlimeLoader;
 import dev.iyanz.sourbycraft.swm.loader.FileLoader;

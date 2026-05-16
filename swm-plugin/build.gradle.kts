@@ -13,7 +13,7 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.3-R0.1-SNAPSHOT")
-    compileOnly(files("../sourbycraft-server/build/libs/sourbycraft-server-v3-REL.jar"))
+    compileOnly(fileTree("../sourbycraft-server/build/libs") { include("*-server-*-REL.jar") })
 }
 
 java {
