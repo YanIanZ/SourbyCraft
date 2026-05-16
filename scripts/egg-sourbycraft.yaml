@@ -20,7 +20,7 @@ docker_images:
   'Java 21': 'ghcr.io/pelican-eggs/yolks:java_21'
 file_denylist: {}
 startup_commands:
-  Default: 'java -Xms128M --add-modules=jdk.incubator.vector -XX:+UseZGC -XX:+ZGenerational -XX:SoftMaxHeapSize=10G -XX:ConcGCThreads=2 -XX:ParallelGCThreads=4 -XX:ZCollectionInterval=5 -XX:ZUncommitDelay=300 -XX:ZAllocationSpikeTolerance=3 -XX:+AlwaysPreTouch -XX:+UseStringDeduplication -XX:+UseContainerSupport -XX:CICompilerCount=2 -XX:TieredStopAtLevel=1 -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}} --nogui'
+  Default: './gc-tuner.sh --start'
 config:
   files:
     server.properties:
@@ -98,6 +98,12 @@ scripts:
       fi
       
       echo "SourbyCraft installation complete"
+      
+      # Download gc-tuner.sh for GC auto-tuning
+      if [ ! -f gc-tuner.sh ]; then
+        curl -sL "https://raw.githubusercontent.com/${REPO}/main/scripts/gc-tuner.sh" -o gc-tuner.sh
+        chmod +x gc-tuner.sh
+      fi
     container: 'ghcr.io/pelican-eggs/installers:alpine'
     entrypoint: ash
 variables:
