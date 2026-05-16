@@ -73,7 +73,7 @@ Built-in SlimeWorldManager for `.slime` world format. SRF v13 binary format with
 swm:
   enabled: true           # Enable built-in SWM bootstrap at startup
   auto-install: false      # Auto-download external plugin JAR
-  version: "v4-REL"       # Plugin version to download
+  version: "v5-REL"       # Plugin version to download
 ```
 Note: `swm.file-dir` is hardcoded to `slime_worlds`. World files go in `slime_worlds/` directory.
 
@@ -165,7 +165,7 @@ anticheat:
 swm:
   enabled: true
   auto-install: false
-  version: "v4-REL"
+  version: "v5-REL"
 ```
 
 ```yaml
@@ -203,7 +203,7 @@ crash-prevention:
 
 # Manual start with generated flags
 ./scripts/gc-tuner.sh --flags-only
-java @start.flags -jar sourbycraft-paperclip-v4-REL-mojmap.jar --nogui
+java @start.flags -jar sourbycraft-paperclip-v5-REL-mojmap.jar --nogui
 ```
 
 The `gc-tuner.sh` script auto-detects system specs (CPU cores, RAM) and selects the optimal GC strategy (ZGC, Shenandoah, or G1) with tuned flags.
@@ -220,7 +220,7 @@ git checkout ver/1.21.11
 ./gradlew createMojmapPaperclipJar
 ```
 
-Jar: `sourbycraft-server/build/libs/sourbycraft-paperclip-v4-REL-mojmap.jar`
+Jar: `sourbycraft-server/build/libs/sourbycraft-paperclip-v5-REL-mojmap.jar`
 
 ---
 
@@ -229,7 +229,7 @@ Jar: `sourbycraft-server/build/libs/sourbycraft-paperclip-v4-REL-mojmap.jar`
 ```kotlin
 repositories { maven("https://jitpack.io") }
 dependencies {
-    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:v4-REL")
+    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:v5-REL")
 }
 ```
 

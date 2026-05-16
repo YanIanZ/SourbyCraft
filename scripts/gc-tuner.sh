@@ -4,14 +4,14 @@
 # Usage: ./gc-tuner.sh [OPTIONS]
 #   --apply          Write flags to start.flags and start server
 #   --flags-only     Write flags to start.flags (no start)
-#   --jar <file>     Specify server JAR (default: sourbycraft-paperclip-v4-REL-mojmap.jar)
+#   --jar <file>     Specify server JAR (default: sourbycraft-paperclip-v5-REL-mojmap.jar)
 
 set -e
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 # Defaults
-JAR_FILE="sourbycraft-paperclip-v4-REL-mojmap.jar"
+JAR_FILE="sourbycraft-paperclip-v5-REL-mojmap.jar"
 START=false
 FLAGS_ONLY=false
 
