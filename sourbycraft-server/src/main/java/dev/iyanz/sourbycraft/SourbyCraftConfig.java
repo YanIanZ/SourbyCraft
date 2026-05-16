@@ -36,7 +36,7 @@ public class SourbyCraftConfig {
     public static boolean chunkCompressionCache = false;
 
     public static boolean swmEnabled = true;
-    public static String swmVersion = "v4-REL";
+    public static String swmVersion = "v5-REL";
     public static boolean swmAutoInstall = false;
     public static String swmLoader = "file";
     public static String swmFileDir = "slime_worlds";
@@ -129,10 +129,11 @@ public class SourbyCraftConfig {
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException ignored) {}
         // SourbyCraft end
 
-        if (version <= 4) {
-            // SourbyCraft start - v4→v5 migration: update SWM version tag
-            if ("1.21.11".equals(swmVersion)) {
-                swmVersion = "v4-REL";
+        if (version < currentVersion) {
+            // SourbyCraft start - migration: update SWM version tag
+            String oldSwmVer = swmVersion;
+            if ("v4-REL".equals(swmVersion) || "1.21.11".equals(swmVersion)) {
+                swmVersion = "v5-REL";
                 set("swm.version", swmVersion);
             }
             // SourbyCraft end
