@@ -53,12 +53,36 @@
 - **/mods** command — lists discovered mods with name/version/type
 
 ### 🌍 SlimeWorldManager (SWM v2)
-Built-in SlimeWorldManager — no plugin needed. SRF v13 binary format with Zstd compression.
+Built-in SlimeWorldManager for `.slime` world format. SRF v13 binary format with Zstd compression.
 
-- `/swm list` — shows `.slime` worlds with load status
+**Two deployment modes:**
+
+| Mode | Description | When to use |
+|------|-------------|------------|
+| **Built-in** | Server-internal `SWPlugin` auto-starts with `swm.enabled: true` | Default — worlds load from `slime_worlds/` at startup |
+| **External plugin** | Standalone `SourbyCraftSWM.jar` plugin for external plugins | When third-party plugins need SWM API access |
+
+**Commands:**
+- `/swm list` — shows `.slime` worlds with `[LOADED]` status
 - `/swm load <world>` — loads a slime world at runtime
 - `/swm save <world>` — serializes and persists a loaded world
 - `/swm info` — loaded/found world counts
+
+**Configuration** (`sourbycraft.yml`):
+```yaml
+swm:
+  enabled: true           # Enable built-in SWM bootstrap at startup
+  auto-install: true      # Auto-download external plugin JAR
+  version: "v4-REL"       # Plugin version to download
+  file-dir: slime_worlds  # Directory for .slime world files
+```
+
+**API usage** (for plugin developers):
+```java
+AdvancedSlimePaperAPI swm = AdvancedSlimePaperAPI.instance();
+SlimeWorld world = swm.readWorld(new FileLoader("slime_worlds"), "myworld", false, new SlimePropertyMap());
+swm.loadWorld(world, true);
+```
 
 ### ⚙️ Infrastructure
 - **JDK 25 target** — compiled for Java 25, runs on JDK 25+
@@ -67,7 +91,6 @@ Built-in SlimeWorldManager — no plugin needed. SRF v13 binary format with Zstd
 - **GC Auto-Tuner** — `scripts/gc-tuner.sh` selects optimal GC + generates config
 - **MemoryOptimizer** — object pool + soft-reference cache
 - **Startup Optimizer** — prints hardware summary and tuning hints at boot
-- **paperclip.conf** — full JVM flags via `@file` format
 
 ---
 
@@ -120,15 +143,18 @@ crash-prevention:
 ## Startup
 
 ```bash
-# Default (auto RAM)
-java @paperclip.conf -jar sourbycraft-paperclip-v4-REL-mojmap.jar --nogui
+# Auto-tune GC and start (recommended)
+./scripts/gc-tuner.sh --start
 
-# Custom RAM
-java -Xms4G -Xmx10G @paperclip.conf -jar sourbycraft-paperclip-v4-REL-mojmap.jar --nogui
+# Or manually with custom JAR name
+./scripts/gc-tuner.sh --start --jar my-server.jar
 
-# Auto-tune GC + start (interactive)
-./scripts/gc-tuner.sh paperclip.conf --start
+# Generate flags only (no start)
+./scripts/gc-tuner.sh > start.flags
+java @start.flags -jar sourbycraft-paperclip-v4-REL-mojmap.jar --nogui
 ```
+
+The `gc-tuner.sh` script auto-detects system specs (CPU cores, RAM) and selects the optimal GC strategy (ZGC, Shenandoah, or G1) with tuned flags.
 
 ---
 
