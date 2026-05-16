@@ -22,7 +22,7 @@ index 0000000000000000000000000000000000000000..f30ff2bdbd1252672423345fd92dbd96
 +}
 diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..dc0a65d50ec50b5424aa1b99e9ef37102001548e
+index 0000000000000000000000000000000000000000..d0aa80e40dbcccb4876b43d2ee89959dfec88226
 --- /dev/null
 +++ b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
 @@ -0,0 +1,27 @@
@@ -53,10 +53,6 @@ index 0000000000000000000000000000000000000000..dc0a65d50ec50b5424aa1b99e9ef3710
 +        Bukkit.getScheduler().runTaskAsynchronously(Bukkit.getPluginManager().getPlugins()[0],()->{
 +            String geo=GeoUtil.lookup(t);
 +            if(geo!=null)s.sendMessage(text().append(text("Location: ",SourbyCraftColors.LABEL)).append(text(geo,SourbyCraftColors.VALUE)));
-+        });
-+        return true;
-+    }
-+}
 diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..b72f104b1317b988d11f90aa731719bacdcbc61d
@@ -76,7 +72,7 @@ index 0000000000000000000000000000000000000000..b72f104b1317b988d11f90aa731719ba
 +}
 diff --git a/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..7d552af72984ea43cfa31c815bc1627f08490377
+index 0000000000000000000000000000000000000000..4e53242ab369cd6c27eade62184390157630558a
 --- /dev/null
 +++ b/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java
 @@ -0,0 +1,23 @@
@@ -199,7 +195,7 @@ index 0000000000000000000000000000000000000000..dffe689f526701490720938f6ce75d4a
 +}
 diff --git a/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..53ec249dedff0ab567e229920c35c38d32d7d442
+index 0000000000000000000000000000000000000000..6b10087a4d80272263a195db235e15fcf23943e6
 --- /dev/null
 +++ b/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java
 @@ -0,0 +1,22 @@

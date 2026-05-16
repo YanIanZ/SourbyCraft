@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 16 May 2026 22:32:03 +0700
+Subject: [PATCH] fix: PingCommand truncation + getOwnerUUID ->
+ getOwner.getUUID
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+index d0aa80e40dbcccb4876b43d2ee89959dfec88226..f953beabb49b622d2ed975e0471e65a16fa1704a 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+@@ -25,3 +25,7 @@ public class PingCommand extends Command {
+         Bukkit.getScheduler().runTaskAsynchronously(Bukkit.getPluginManager().getPlugins()[0],()->{
+             String geo=GeoUtil.lookup(t);
+             if(geo!=null)s.sendMessage(text().append(text("Location: ",SourbyCraftColors.LABEL)).append(text(geo,SourbyCraftColors.VALUE)));
++        });
++        return true;
++    }
++}
+diff --git a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+index 62a87682f7f1e9466dcb16a77e294ad252f349bb..b0f41d10ecb3fdf4eeb8f92d7e8be39cf3f7bdca 100644
+--- a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
++++ b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+@@ -174,7 +174,7 @@ public final class ChunkPacketBlockControllerAntiXray extends ChunkPacketBlockCo
+         if (!sourbycraftWorldConfig.entityObfuscation) return true;
+         if (player.isSpectator()) return true;
+         if (player.getBukkitEntity().hasPermission("paper.antixray.bypass")) return true;
+-        if (entity instanceof net.minecraft.world.entity.TamableAnimal tamable && player.getUUID().equals(tamable.getOwnerUUID())) return true;
++        if (entity instanceof net.minecraft.world.entity.TamableAnimal tamable && tamable.getOwner() != null && player.getUUID().equals(tamable.getOwner().getUUID())) return true;
+         double distSq = player.distanceToSqr(entity);
+         long range = sourbycraftWorldConfig.entityObfuscationRange;
+         if (distSq > range * range) return true;
