@@ -83,7 +83,8 @@ public class SlimeInMemoryWorld implements SlimeWorld, SlimeWorldInstance {
 
     @Override
     public Map<Long, ? extends SlimeChunk> getChunks() {
-        return Map.copyOf(this.chunkStorage);
+        // SourbyCraft - live unmodifiable view; iterate on the main thread only
+        return java.util.Collections.unmodifiableMap(this.chunkStorage);
     }
 
     @Override
