@@ -29,9 +29,11 @@ public final class SlimeSerializer {
         out.writeByte(flags);
 
         byte[] chunkData = serializeChunks(world.getChunks(), flags);
-        var exec = dev.iyanz.sourbycraft.swm.plugin.SWPlugin.ioExecutor();
+        // Compress chunk blob on the common pool. The SwmIoExecutor pool is tiny
+        // (2-4 threads) and saveWorld()'s write task already runs on it; submitting
+        // a sub-task back to the same pool and blocking on .get() would deadlock.
         java.util.concurrent.Future<byte[]> chunkFuture =
-                exec != null ? exec.pool().submit(() -> compress(chunkData)) : null;
+                java.util.concurrent.ForkJoinPool.commonPool().submit(() -> compress(chunkData));
 
         CompoundTag extraCompound;
         if (world.getExtraData() != null && !world.getExtraData().isEmpty()) {
@@ -54,14 +56,10 @@ public final class SlimeSerializer {
         byte[] compressedExtra = compress(extraRaw);
 
         byte[] compressedChunks;
-        if (chunkFuture != null) {
-            try {
-                compressedChunks = chunkFuture.get();
-            } catch (Exception e) {
-                throw new IOException("SWM chunk compression failed", e);
-            }
-        } else {
-            compressedChunks = compress(chunkData);
+        try {
+            compressedChunks = chunkFuture.get();
+        } catch (Exception e) {
+            throw new IOException("SWM chunk compression failed", e);
         }
         out.writeInt(compressedChunks.length);
         out.writeInt(chunkData.length);

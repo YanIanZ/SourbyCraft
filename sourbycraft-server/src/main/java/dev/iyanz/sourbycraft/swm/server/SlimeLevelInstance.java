@@ -51,6 +51,11 @@ public class SlimeLevelInstance extends ServerLevel {
 
     public final SlimeInMemoryWorld slimeInstance;
 
+    // Per-instance write chain: serializes saveWorld() writes for this world so an
+    // older snapshot's write can never finish after a newer one's (stale persist).
+    private java.util.concurrent.CompletableFuture<?> lastWrite =
+            java.util.concurrent.CompletableFuture.completedFuture(null);
+
     public SlimeLevelInstance(
             SlimeBootstrap slimeBootstrap,
             PrimaryLevelData primaryLevelData,
@@ -155,7 +160,11 @@ public class SlimeLevelInstance extends ServerLevel {
             }
         };
         if (exec != null) {
-            return CompletableFuture.runAsync(writeTask, exec.pool());
+            // Chain on the per-instance future so writes for this world run strictly
+            // in order. handle((r,t)->null) drops a prior failure so it can't poison
+            // the chain. Writes across different worlds still run in parallel.
+            this.lastWrite = this.lastWrite.handle((r, t) -> null).thenRunAsync(writeTask, exec.pool());
+            return this.lastWrite;
         }
         // Fallback: run inline (e.g. during shutdown after executor stopped).
         try {
