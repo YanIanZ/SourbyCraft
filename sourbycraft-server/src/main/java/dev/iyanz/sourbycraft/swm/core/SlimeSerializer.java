@@ -34,7 +34,12 @@ public final class SlimeSerializer {
         out.writeInt(chunkData.length);
         out.write(compressedChunks);
 
-        CompoundTag extraCompound = new CompoundTag();
+        CompoundTag extraCompound;
+        if (world.getExtraData() != null && !world.getExtraData().isEmpty()) {
+            extraCompound = world.getExtraData().copy();
+        } else {
+            extraCompound = new CompoundTag();
+        }
         if (props != null) {
             CompoundTag propsTag = new CompoundTag();
             propsTag.putString("defaultBiome", props.getDefaultBiome());
@@ -43,18 +48,6 @@ public final class SlimeSerializer {
             propsTag.putBoolean("saveBlockTicks", props.saveBlockTicks());
             propsTag.putBoolean("saveFluidTicks", props.saveFluidTicks());
             extraCompound.put("properties", propsTag);
-        }
-        if (world.getExtraData() != null && !world.getExtraData().isEmpty()) {
-            extraCompound = world.getExtraData().copy();
-            if (props != null) {
-                CompoundTag propsTag = new CompoundTag();
-                propsTag.putString("defaultBiome", props.getDefaultBiome());
-                propsTag.putInt("seaLevel", props.getSeaLevel());
-                propsTag.putBoolean("savePoi", props.savePoi());
-                propsTag.putBoolean("saveBlockTicks", props.saveBlockTicks());
-                propsTag.putBoolean("saveFluidTicks", props.saveFluidTicks());
-                extraCompound.put("properties", propsTag);
-            }
         }
         ByteArrayOutputStream extraBaos = new ByteArrayOutputStream();
         NbtIo.writeCompressed(extraCompound, extraBaos);
