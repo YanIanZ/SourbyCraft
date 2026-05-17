@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 17 May 2026 12:48:41 +0700
+Subject: [PATCH] Replace vanilla PerfCommand with custom SourbyCraft
+ PerfCommand
+
+
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index 5bb75ca346379e3467d19500aece58cbf5bec9e9..41dd0b0913180412d0ab9c7fed12c65fb85c6514 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -289,7 +289,8 @@ public class Commands {
+             OpCommand.register(this.dispatcher);
+             PardonCommand.register(this.dispatcher);
+             PardonIpCommand.register(this.dispatcher);
+-            PerfCommand.register(this.dispatcher);
++            //PerfCommand.register(this.dispatcher); // SourbyCraft - replaced by custom perf command
++            dev.iyanz.sourbycraft.perf.PerfCommand.register(this.dispatcher); // SourbyCraft - custom perf command
+             SaveAllCommand.register(this.dispatcher);
+             SaveOffCommand.register(this.dispatcher);
+             SaveOnCommand.register(this.dispatcher);

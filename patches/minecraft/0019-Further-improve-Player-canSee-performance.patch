@@ -5,7 +5,7 @@ Subject: [PATCH] Further improve Player#canSee performance
 
 
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index c8053ed626f693117eb32d1466ea880312c79836..bcba75a258d5a9d33d87557a6bce1afecfcfa286 100644
+index c8053ed626f693117eb32d1466ea880312c79836..81fd093ae64564652a855862c49118ad3aee1a0e 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -318,6 +318,15 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name

@@ -5,7 +5,7 @@ Subject: [PATCH] Prevent healing amplifier from overflowing
 
 
 diff --git a/net/minecraft/world/effect/HealOrHarmMobEffect.java b/net/minecraft/world/effect/HealOrHarmMobEffect.java
-index 9c564abfaefe7ead9abde4338a6722d5d703f9e2..c8cd411e365eb802d9a214ca2cf2d97787afa83e 100644
+index a97e9d142306ebe6c80e449a86cdc85b38c7e387..11b21a8eccd790f7cf60b60200ec32934d9d17df 100644
 --- a/net/minecraft/world/effect/HealOrHarmMobEffect.java
 +++ b/net/minecraft/world/effect/HealOrHarmMobEffect.java
 @@ -18,7 +18,7 @@ class HealOrHarmMobEffect extends InstantenousMobEffect {

@@ -5,7 +5,7 @@ Subject: [PATCH] Log exceptions caused by packet sending
 
 
 diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
-index f6dec363af8834340356b3be936fc35862933b4e..2a6c58fb012acc3cf3f553ff10d8f646cca97de6 100644
+index f6dec363af8834340356b3be936fc35862933b4e..e8a9bd177c4c8133d6ffbedd0cda8796ceb87276 100644
 --- a/net/minecraft/network/Connection.java
 +++ b/net/minecraft/network/Connection.java
 @@ -204,7 +204,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {

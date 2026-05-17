@@ -17,6 +17,7 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.storage.TagValueOutput;
 import org.slf4j.Logger;
@@ -82,10 +83,11 @@ public class NMSSlimeChunk implements SlimeChunk {
     @Override
     public CompoundTag getHeightMaps() {
         CompoundTag heightMaps = new CompoundTag();
-        for (var entry : this.chunk.getHeightmaps()) {
-            var type = entry.getKey();
-            if (type.keepAfterWorldgen()) {
-                heightMaps.putLongArray(type.getSerializedName(), entry.getValue().getRawData());
+        for (Heightmap.Types type : Heightmap.Types.values()) {
+            if (!type.keepAfterWorldgen()) continue;
+            Heightmap heightmap = this.chunk.heightmaps[type.ordinal()];
+            if (heightmap != null) {
+                heightMaps.putLongArray(type.getSerializedName(), heightmap.getRawData());
             }
         }
         return heightMaps;

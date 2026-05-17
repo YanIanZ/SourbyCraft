@@ -6,7 +6,7 @@ Subject: [PATCH] Add more detailed brand info
 Sends version info to player in brand packet
 
 diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
-index a3645322be006d5501fa7fb8944509a9c6b58e32..be6ece9040de523d94b94ff82dd342b9f5a2902c 100644
+index a3645322be006d5501fa7fb8944509a9c6b58e32..b62afb93465aa963e83c3c89c721958ec03d03c0 100644
 --- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
 @@ -101,7 +101,11 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis

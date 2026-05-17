@@ -5,7 +5,7 @@ Subject: [PATCH] Fix redstone ore lit state desync on interact cancel
 
 
 diff --git a/net/minecraft/world/level/block/RedStoneOreBlock.java b/net/minecraft/world/level/block/RedStoneOreBlock.java
-index 334cdfc4ec0fa2bc44c437f263a38ecb45cf602d..fc00dc7d56a853754eeb66b298bea42c10bb82a4 100644
+index 8ef666854fa5342261626ad0bb12d72d1cb0cee2..9faac29dc51f0bf13d74233d0eb6a0aefa859459 100644
 --- a/net/minecraft/world/level/block/RedStoneOreBlock.java
 +++ b/net/minecraft/world/level/block/RedStoneOreBlock.java
 @@ -49,6 +49,8 @@ public class RedStoneOreBlock extends Block {

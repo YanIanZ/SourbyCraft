@@ -5,7 +5,7 @@ Subject: [PATCH] Fire PlayerPickupArrowEvent for creative players
 
 
 diff --git a/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java b/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
-index 51d3560c5d8cba89469c07fe6b13f0016adc6db7..aa40c7b701aba30cb933a2ba12a7f834a1b56277 100644
+index 51d3560c5d8cba89469c07fe6b13f0016adc6db7..ebdb68dfbe25c87def2701c9d6a55e765c7b9f18 100644
 --- a/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
 +++ b/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
 @@ -679,7 +679,7 @@ public abstract class AbstractArrow extends Projectile {

@@ -5,7 +5,7 @@ Subject: [PATCH] Convert spawn category limits and ticks to array
 
 
 diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
-index 9e4b6e3192c6ca7314edcaca82b293a60c0e3d03..d7db854467717abd1fcf60c3b06b7f5107448a60 100644
+index 9e4b6e3192c6ca7314edcaca82b293a60c0e3d03..751e39840aac6affdf5310c1aa2d42a6a1feab09 100644
 --- a/net/minecraft/server/level/ServerChunkCache.java
 +++ b/net/minecraft/server/level/ServerChunkCache.java
 @@ -574,7 +574,10 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
@@ -21,7 +21,7 @@ index 9e4b6e3192c6ca7314edcaca82b293a60c0e3d03..d7db854467717abd1fcf60c3b06b7f51
          } else {
              filteredSpawningCategories = List.of();
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index dae5852d29b6f3b2515178cf259acd31c8e5a58a..dd4fb9f1a81ac20b168644ed5c95653901f1ecaa 100644
+index d2e7e82d880d139a65862710223c49001bcb3b19..de9c3d1a5724ee06e1461d8cdb6955945b4a09cc 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
 @@ -149,7 +149,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
@@ -43,7 +43,7 @@ index dae5852d29b6f3b2515178cf259acd31c8e5a58a..dd4fb9f1a81ac20b168644ed5c956539
          }
          // CraftBukkit end
 diff --git a/net/minecraft/world/level/NaturalSpawner.java b/net/minecraft/world/level/NaturalSpawner.java
-index e156e498d26de45f73f49127f66a3180b57bc3dc..adfe19732e2c2f8be5f66f8acf9e92f4e3fc4443 100644
+index e156e498d26de45f73f49127f66a3180b57bc3dc..fd482b6d4ca3ab72dee10dbef536216f3958e1ff 100644
 --- a/net/minecraft/world/level/NaturalSpawner.java
 +++ b/net/minecraft/world/level/NaturalSpawner.java
 @@ -134,8 +134,11 @@ public final class NaturalSpawner {

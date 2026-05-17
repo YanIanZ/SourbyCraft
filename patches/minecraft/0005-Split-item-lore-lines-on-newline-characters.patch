@@ -7,7 +7,7 @@ The client doesn't respect newlines, so
 this has to be done at the network level
 
 diff --git a/net/minecraft/core/component/DataComponents.java b/net/minecraft/core/component/DataComponents.java
-index 5bad20ea7b07e4d0d21140466a7f563e7bdc20da..50f6800bb72ac4751dab20cb5b14c87c0343d784 100644
+index 5bad20ea7b07e4d0d21140466a7f563e7bdc20da..50c93a6397c9f309b27879c40b832080ef7a4712 100644
 --- a/net/minecraft/core/component/DataComponents.java
 +++ b/net/minecraft/core/component/DataComponents.java
 @@ -135,7 +135,7 @@ public class DataComponents {
@@ -20,7 +20,7 @@ index 5bad20ea7b07e4d0d21140466a7f563e7bdc20da..50f6800bb72ac4751dab20cb5b14c87c
      public static final DataComponentType<Rarity> RARITY = register(
          "rarity", builder -> builder.persistent(Rarity.CODEC).networkSynchronized(Rarity.STREAM_CODEC)
 diff --git a/net/minecraft/world/item/component/ItemLore.java b/net/minecraft/world/item/component/ItemLore.java
-index 3419ed5c4e99d57bec68a54b82a942827be67f96..a279e04868ed6df1aeda07e5fef8460458ec24af 100644
+index 3419ed5c4e99d57bec68a54b82a942827be67f96..a1bc874c801f2a2f25ff50661a671b9d76285928 100644
 --- a/net/minecraft/world/item/component/ItemLore.java
 +++ b/net/minecraft/world/item/component/ItemLore.java
 @@ -26,6 +26,25 @@ public record ItemLore(List<Component> lines, List<Component> styledLines) imple
