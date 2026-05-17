@@ -8,6 +8,7 @@ import dev.iyanz.sourbycraft.swm.api.exceptions.NewerFormatException;
 import dev.iyanz.sourbycraft.swm.api.exceptions.UnknownWorldException;
 import dev.iyanz.sourbycraft.swm.api.SlimeLoader;
 import dev.iyanz.sourbycraft.swm.api.SlimePropertyMap;
+import dev.iyanz.sourbycraft.swm.server.SwmIoExecutor;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -25,12 +26,20 @@ public class SWPlugin extends JavaPlugin {
     private final Map<String, SlimeWorld> worldsToLoad = new HashMap<>();
     private LoaderManager loaderManager;
 
+    private static SwmIoExecutor ioExecutor;
+
+    public static SwmIoExecutor ioExecutor() {
+        return ioExecutor;
+    }
+
     public LoaderManager getLoaderManager() {
         return loaderManager;
     }
 
     @Override
     public void onLoad() {
+        ioExecutor = new SwmIoExecutor();
+
         this.loaderManager = new LoaderManager();
 
         List<String> erroredWorlds = loadWorlds();
@@ -94,6 +103,11 @@ public class SWPlugin extends JavaPlugin {
                 }
             }
             Bukkit.unloadWorld(world.getName(), false);
+        }
+
+        if (ioExecutor != null) {
+            ioExecutor.shutdown();
+            ioExecutor = null;
         }
     }
 
