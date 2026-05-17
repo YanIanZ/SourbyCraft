@@ -287,4 +287,37 @@ public class PufferfishConfig {
             "6 is a good speed/size balance; 9 is slowest for ~2% size gain.")));
         setComment("swm", "Settings for SWM world serialization (Sourby World Manager)");
     }
+
+    public static boolean fluidReuseSpreadMap = true;
+    public static double fluidTickDelayMultiplier = 1.0;
+    public static int fluidSlopeFindDistance = -1;
+    public static boolean fluidAntiFloodEnabled = false;
+    public static int fluidAntiFloodMaxPerChunk = 64;
+    public static boolean fluidDistanceCutoffEnabled = false;
+    public static int fluidDistanceCutoffRange = 96;
+    public static int fluidDistanceCutoffDelay = 100;
+
+    private static void fluidSettings() {
+        fluidReuseSpreadMap = getBoolean("fluids.reuse-spread-map", true,
+            "Reuse the fluid spread map instead of allocating one per call.",
+            "Invisible optimization, safe to leave enabled.");
+        fluidTickDelayMultiplier = Math.max(1.0, getDouble("fluids.tick-delay-multiplier", 1.0,
+            "Multiplier on fluid tick delay. 1.0 = vanilla. Higher = slower flow."));
+        fluidSlopeFindDistance = getInt("fluids.slope-find-distance", -1,
+            "Cap on fluid slope-find distance. -1 = vanilla. Lower = cheaper.");
+        if (fluidSlopeFindDistance != -1) {
+            fluidSlopeFindDistance = Math.max(1, Math.min(8, fluidSlopeFindDistance));
+        }
+        fluidAntiFloodEnabled = getBoolean("fluids.anti-flood.enabled", false,
+            "Cap fluid spreads per chunk per tick to throttle flood machines.");
+        fluidAntiFloodMaxPerChunk = Math.max(1, getInt("fluids.anti-flood.max-spreads-per-chunk-per-tick", 64,
+            "Max fluid spreads per chunk per tick when anti-flood is enabled."));
+        fluidDistanceCutoffEnabled = getBoolean("fluids.distance-cutoff.enabled", false,
+            "Defer fluid ticks when no player is nearby.");
+        fluidDistanceCutoffRange = Math.max(16, getInt("fluids.distance-cutoff.range-blocks", 96,
+            "Player range in blocks for fluid distance cutoff."));
+        fluidDistanceCutoffDelay = Math.max(1, getInt("fluids.distance-cutoff.deferred-delay-ticks", 100,
+            "Reschedule delay in ticks for deferred fluid ticks."));
+        setComment("fluids", "Settings for water and lava flow optimization");
+    }
 }
