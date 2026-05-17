@@ -127,19 +127,43 @@ public class SlimeLevelInstance extends ServerLevel {
     }
 
     public Future<?> saveWorld() {
+        if (this.slimeInstance.isReadOnly() || this.slimeInstance.getLoader() == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        final SlimeWorld world;
         try {
-            if (!this.slimeInstance.isReadOnly() && this.slimeInstance.getLoader() != null) {
-                SlimeWorld world = this.slimeInstance.getSerializableCopy();
-                if (world != null) {
-                    byte[] serializedWorld = dev.iyanz.sourbycraft.swm.core.SlimeSerializer.serialize(world);
-                    this.slimeInstance.getLoader().saveWorld(this.slimeInstance.getName(), serializedWorld);
-                }
-            }
+            // Main thread: PDC / Bukkit access happens here.
+            world = this.slimeInstance.getSerializableCopy();
         } catch (Exception e) {
-            LOGGER.error("There was a problem saving the SlimeLevelInstance {}", serverLevelData.getLevelName(), e);
+            LOGGER.error("There was a problem snapshotting the SlimeLevelInstance {}",
+                    serverLevelData.getLevelName(), e);
             return CompletableFuture.failedFuture(e);
         }
-        return CompletableFuture.completedFuture(null);
+        if (world == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        var exec = dev.iyanz.sourbycraft.swm.plugin.SWPlugin.ioExecutor();
+        Runnable writeTask = () -> {
+            try {
+                byte[] serializedWorld =
+                        dev.iyanz.sourbycraft.swm.core.SlimeSerializer.serialize(world);
+                this.slimeInstance.getLoader().saveWorld(this.slimeInstance.getName(), serializedWorld);
+            } catch (Exception e) {
+                LOGGER.error("There was a problem saving the SlimeLevelInstance {}",
+                        serverLevelData.getLevelName(), e);
+                throw new java.util.concurrent.CompletionException(e);
+            }
+        };
+        if (exec != null) {
+            return CompletableFuture.runAsync(writeTask, exec.pool());
+        }
+        // Fallback: run inline (e.g. during shutdown after executor stopped).
+        try {
+            writeTask.run();
+            return CompletableFuture.completedFuture(null);
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(e);
+        }
     }
 
     public SlimeWorldInstance getSlimeInstance() {
