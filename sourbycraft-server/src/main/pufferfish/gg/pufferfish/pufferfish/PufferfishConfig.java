@@ -285,5 +285,6 @@ public class PufferfishConfig {
         swmCompressionLevel = Math.max(0, Math.min(9, getInt("swm.compression-level", 6,
             "Deflate compression level for SWM world serialization (0-9).",
             "6 is a good speed/size balance; 9 is slowest for ~2% size gain.")));
+        setComment("swm", "Settings for SWM world serialization (Sourby World Manager)");
     }
 }
