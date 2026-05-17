@@ -6,7 +6,7 @@ Subject: [PATCH] Keep track of brain behaviors directly
 Replaces the cost of iterating over nested hash sets by iterating over linear lists which need to be sorted upon update
 
 diff --git a/net/minecraft/world/entity/ai/Brain.java b/net/minecraft/world/entity/ai/Brain.java
-index a8b076d95ca7bbdbdb6f32bd464cf77d9894dcba..37683859f6f97ef0d6d361645ece339230916d45 100644
+index a8b076d95ca7bbdbdb6f32bd464cf77d9894dcba..b44dd97c9d444b8a85cf6b82f54c273875f4bd58 100644
 --- a/net/minecraft/world/entity/ai/Brain.java
 +++ b/net/minecraft/world/entity/ai/Brain.java
 @@ -49,14 +49,22 @@ public class Brain<E extends LivingEntity> {

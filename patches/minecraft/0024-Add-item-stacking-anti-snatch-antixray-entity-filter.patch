@@ -59,19 +59,29 @@ index 84d19d79e77cec6a5d64f59fbcce703e467b2407..9a196072ba7aa9dff6efc7a8d91e6e2c
                      org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockDropItemEvent(bblock, state, this.player, itemsToDrop); // Paper - capture all item additions to the world
                  }
 diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
-index 810104c881534931253b086be22a4c72752e4060..8f64128dc324d7f7cf41c939f13822b1fc3b2d20 100644
+index 810104c881534931253b086be22a4c72752e4060..f5052386153a9ebdd350bba33ca28edf7279fb8d 100644
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
-@@ -4133,6 +4133,9 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
-                 float f = 0.3F;
-                 float f1 = Mth.sin(this.getXRot() * (float) (Math.PI / 180.0));
-                 float cos = Mth.cos(this.getXRot() * (float) (Math.PI / 180.0));
-+                // SourbyCraft start - ensure minimum forward throw
-+                if (Math.abs(cos) < 0.15F) cos = cos >= 0 ? 0.15F : -0.15F;
-+                // SourbyCraft end
-                 float sin = Mth.sin(this.getYRot() * (float) (Math.PI / 180.0));
-                 float cos1 = Mth.cos(this.getYRot() * (float) (Math.PI / 180.0));
-                 float f2 = this.random.nextFloat() * (float) (Math.PI * 2);
+@@ -4144,6 +4144,19 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                 );
+             }
+ 
++            // SourbyCraft start - anti-clip: push items out of blocks
++            if (itemEntity != null && !this.level().isClientSide()) {
++                try {
++                    net.minecraft.world.level.block.state.BlockState blockState = this.level().getBlockState(
++                        net.minecraft.core.BlockPos.containing(itemEntity.getX(), itemEntity.getY(), itemEntity.getZ())
++                    );
++                    if (!blockState.isAir() && !blockState.canBeReplaced()) {
++                        itemEntity.setPos(itemEntity.getX(), Math.ceil(itemEntity.getY()) + 0.5, itemEntity.getZ());
++                    }
++                } catch (Exception ignored) {}
++            }
++            // SourbyCraft end
++
+             return itemEntity;
+         }
+     }
 diff --git a/net/minecraft/world/entity/item/ItemEntity.java b/net/minecraft/world/entity/item/ItemEntity.java
 index e82bb8f2d2b0e771dc371fd7e709116e1f5f204f..853bbd2dd0e7d7dda5eb8a845b746942b5aa157e 100644
 --- a/net/minecraft/world/entity/item/ItemEntity.java

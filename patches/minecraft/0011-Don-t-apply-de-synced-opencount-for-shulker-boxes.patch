@@ -9,7 +9,7 @@ The issue is caused by how block events in minecraft work. Just commenting this 
 the wrong data from being set - there isn't a reason to do this on the server anyway.
 
 diff --git a/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java b/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
-index 61b99c895c0e248f0e7c4c634644dcff54a964d9..72ba79eb04a1f3d125045df942b6422294a68fd0 100644
+index 61b99c895c0e248f0e7c4c634644dcff54a964d9..6f2d644a758de14e741d161e0edba18cd82c0902 100644
 --- a/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
 +++ b/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
 @@ -175,7 +175,7 @@ public class ShulkerBoxBlockEntity extends RandomizableContainerBlockEntity impl

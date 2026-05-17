@@ -6,7 +6,7 @@ Subject: [PATCH] Work around unnecessary chunk pos conversion on entity
 
 
 diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java b/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
-index 7129c5e1920008ac54f3a8ac83f5589396f4e4e9..a692729183194a36c9a042ccf625e8591ca331f1 100644
+index 7129c5e1920008ac54f3a8ac83f5589396f4e4e9..3c9c1fea4b4f24863bd37ab316e24134acc0df40 100644
 --- a/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
 +++ b/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
 @@ -273,18 +273,26 @@ public final class RegionizedPlayerChunkLoader {
@@ -38,7 +38,7 @@ index 7129c5e1920008ac54f3a8ac83f5589396f4e4e9..a692729183194a36c9a042ccf625e859
      public boolean isChunkSentBorderOnly(final ServerPlayer player, final int chunkX, final int chunkZ) {
          final PlayerChunkLoaderData loader = ((ChunkSystemServerPlayer)player).moonrise$getChunkLoader();
 diff --git a/net/minecraft/server/level/ChunkHolder.java b/net/minecraft/server/level/ChunkHolder.java
-index 22123d8b0fd8741c6df4efaec56f3c694e0529a3..66ccb5eb9784b7502abfba4fdbbeeb859f1e52cd 100644
+index 22123d8b0fd8741c6df4efaec56f3c694e0529a3..ef1aba370ef7b7f99ca5e831381fe63995f09791 100644
 --- a/net/minecraft/server/level/ChunkHolder.java
 +++ b/net/minecraft/server/level/ChunkHolder.java
 @@ -93,7 +93,7 @@ public class ChunkHolder extends GenerationChunkHolder implements ca.spottedleaf
@@ -51,7 +51,7 @@ index 22123d8b0fd8741c6df4efaec56f3c694e0529a3..66ccb5eb9784b7502abfba4fdbbeeb85
              }
              ret.add(player);
 diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
-index ab8893163ac85971a470e4a4d6fa76bd174e2bae..fe8d8d0bba4bd66a3cc203f1d1cad559cdd701d5 100644
+index ab8893163ac85971a470e4a4d6fa76bd174e2bae..8db4b57c3ce9a5c36f519a5d16849ad49dcccac8 100644
 --- a/net/minecraft/server/level/ChunkMap.java
 +++ b/net/minecraft/server/level/ChunkMap.java
 @@ -305,7 +305,7 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP

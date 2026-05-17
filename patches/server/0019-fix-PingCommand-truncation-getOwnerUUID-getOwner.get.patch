@@ -17,6 +17,23 @@ index d0aa80e40dbcccb4876b43d2ee89959dfec88226..f953beabb49b622d2ed975e0471e65a1
 +        return true;
 +    }
 +}
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java
+deleted file mode 100644
+index b72f104b1317b988d11f90aa731719bacdcbc61d..0000000000000000000000000000000000000000
+--- a/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java
++++ /dev/null
+@@ -1,11 +0,0 @@
+-package dev.iyanz.sourbycraft.command;
+-import dev.iyanz.sourbycraft.SourbyCraftColors;
+-import org.bukkit.Bukkit;
+-import org.bukkit.command.Command;
+-import org.bukkit.command.CommandSender;
+-import java.util.Arrays;
+-import static net.kyori.adventure.text.Component.text;
+-public class PluginsCommand extends Command {
+-    public PluginsCommand(String n){super(n);this.description="Plugin list";this.usageMessage="/plugins";this.setPermission("sourbycraft.command.plugins");}
+-    public boolean execute(CommandSender s,String a,String[] args){if(!testPermission(s))return true;var pl=Bukkit.getPluginManager().getPlugins();s.sendMessage(text().append(text("Plugins ("+pl.length+"): ",SourbyCraftColors.HEADER)).append(text(Arrays.stream(pl).map(p->p.getName()+" v"+p.getDescription().getVersion()).reduce((x,y)->x+", "+y).orElse("none"),SourbyCraftColors.VALUE)));return true;}
+-}
 diff --git a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
 index 62a87682f7f1e9466dcb16a77e294ad252f349bb..b0f41d10ecb3fdf4eeb8f92d7e8be39cf3f7bdca 100644
 --- a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
@@ -30,3 +47,23 @@ index 62a87682f7f1e9466dcb16a77e294ad252f349bb..b0f41d10ecb3fdf4eeb8f92d7e8be39c
          double distSq = player.distanceToSqr(entity);
          long range = sourbycraftWorldConfig.entityObfuscationRange;
          if (distSq > range * range) return true;
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index a7f346d0fefe960862d68303e4ddd5b34fa8d43b..89fcd1763856552dadfed48a70664d78dd9f0d7e 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -421,7 +421,6 @@ public final class CraftServer implements Server {
+         // SourbyCraft start - register custom commands
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));
+@@ -1041,7 +1040,6 @@ public final class CraftServer implements Server {
+         // SourbyCraft start - register commands
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));

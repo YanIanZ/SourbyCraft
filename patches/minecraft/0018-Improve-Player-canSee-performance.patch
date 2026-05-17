@@ -5,7 +5,7 @@ Subject: [PATCH] Improve Player#canSee performance
 
 
 diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
-index fe8d8d0bba4bd66a3cc203f1d1cad559cdd701d5..1268061d2749004d195de276334978513e82d049 100644
+index 8db4b57c3ce9a5c36f519a5d16849ad49dcccac8..6a95b09bf82e46009eb9f040e74c6eb50dd46ccc 100644
 --- a/net/minecraft/server/level/ChunkMap.java
 +++ b/net/minecraft/server/level/ChunkMap.java
 @@ -1378,7 +1378,7 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP

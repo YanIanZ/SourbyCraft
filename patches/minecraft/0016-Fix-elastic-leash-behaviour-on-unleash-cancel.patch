@@ -5,7 +5,7 @@ Subject: [PATCH] Fix elastic leash behaviour on unleash cancel
 
 
 diff --git a/net/minecraft/world/entity/Leashable.java b/net/minecraft/world/entity/Leashable.java
-index 54c7af09f5f64021895074ea5a1578513aa67bf2..8122e21cb32e5ba5b2e14dfc6a6282206cd6804b 100644
+index 54c7af09f5f64021895074ea5a1578513aa67bf2..c89e1f247e073a9afd5c0a6ad66361359416b575 100644
 --- a/net/minecraft/world/entity/Leashable.java
 +++ b/net/minecraft/world/entity/Leashable.java
 @@ -170,8 +170,7 @@ public interface Leashable {
@@ -50,7 +50,7 @@ index 54c7af09f5f64021895074ea5a1578513aa67bf2..8122e21cb32e5ba5b2e14dfc6a628220
  
      default void closeRangeLeashBehaviour(Entity entity) {
 diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
-index 60e3c2d6d0e5abbc48c88e416f3adeae0e2f9806..6f7fcc90d9204a7738240c36a13e27efbe05fcc4 100644
+index 60e3c2d6d0e5abbc48c88e416f3adeae0e2f9806..087ddf2a285dff40384bbc6eb735fc065e5d4262 100644
 --- a/net/minecraft/world/entity/Mob.java
 +++ b/net/minecraft/world/entity/Mob.java
 @@ -1488,10 +1488,14 @@ public abstract class Mob extends LivingEntity implements EquipmentUser, Leashab

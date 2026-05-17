@@ -5,7 +5,7 @@ Subject: [PATCH] Add start argument for changing pufferfish config location
 
 
 diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
-index 8dc9cf41daa38f8647fce9ba2d70a445c08945b8..1c93e5091c17442c59870c2b90dfd84e233bf86f 100644
+index 451ba61980f058b30b457a8eee8fab8ca793fbe0..65f9b3031c58122e12424b7afd78433ceb769a92 100644
 --- a/net/minecraft/server/dedicated/DedicatedServer.java
 +++ b/net/minecraft/server/dedicated/DedicatedServer.java
 @@ -274,7 +274,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
