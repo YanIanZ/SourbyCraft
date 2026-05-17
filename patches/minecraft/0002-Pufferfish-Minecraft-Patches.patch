@@ -266,10 +266,10 @@ index af67b07722bb0125acd081dab767d7e7b360623b..9e4b6e3192c6ca7314edcaca82b293a6
              }
          }
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index dc65503a2d785d64d37b76b0303f51cf66d9769a..ad128afbd6f3b1a3dec43866261b35b6232d1f76 100644
+index 4d9cc8818178f005b1e497c18bd319e2f1e44f89..b3643986245e272cc8965d44083d32a5cbfea989 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -835,6 +835,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -838,6 +838,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
              this.entityTickList
                  .forEach(
                      entity -> {
@@ -277,7 +277,7 @@ index dc65503a2d785d64d37b76b0303f51cf66d9769a..ad128afbd6f3b1a3dec43866261b35b6
                          if (!entity.isRemoved()) {
                              if (!tickRateManager.isEntityFrozen(entity)) {
                                  profilerFiller.push("checkDespawn");
-@@ -851,7 +852,19 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -854,7 +855,19 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
                                      }
  
                                      profilerFiller.push("tick");
@@ -298,7 +298,7 @@ index dc65503a2d785d64d37b76b0303f51cf66d9769a..ad128afbd6f3b1a3dec43866261b35b6
                                      profilerFiller.pop();
                                  }
                              }
-@@ -920,7 +933,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -923,7 +936,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      }
  
      // Paper start - optimise random ticking
@@ -307,7 +307,7 @@ index dc65503a2d785d64d37b76b0303f51cf66d9769a..ad128afbd6f3b1a3dec43866261b35b6
  
      private void optimiseRandomTick(final LevelChunk chunk, final int tickSpeed) {
          final LevelChunkSection[] sections = chunk.getSections();
-@@ -971,6 +984,14 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -974,6 +987,14 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      }
      // Paper end - optimise random ticking
  
@@ -322,7 +322,7 @@ index dc65503a2d785d64d37b76b0303f51cf66d9769a..ad128afbd6f3b1a3dec43866261b35b6
      public void tickChunk(LevelChunk chunk, int randomTickSpeed) {
          final ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom simpleRandom = this.simpleRandom; // Paper - optimise random ticking
          ChunkPos pos = chunk.getPos();
-@@ -981,7 +1002,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -984,7 +1005,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
  
          if (!this.paperConfig().environment.disableIceAndSnow) { // Paper - Option to disable ice and snow
          for (int i = 0; i < randomTickSpeed; i++) {
@@ -331,7 +331,7 @@ index dc65503a2d785d64d37b76b0303f51cf66d9769a..ad128afbd6f3b1a3dec43866261b35b6
                  this.tickPrecipitation(this.getBlockRandomPos(minBlockX, 0, minBlockZ, 15));
              }
          }
-@@ -1002,7 +1023,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -1005,7 +1026,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
          int minBlockZ = pos.getMinBlockZ();
          ProfilerFiller profilerFiller = Profiler.get();
          profilerFiller.push("thunder");
