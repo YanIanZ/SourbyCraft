@@ -98,6 +98,9 @@ public final class ChunkDataLoadTask implements CommonLoadTask {
     }
 
     public boolean schedule(boolean schedule) {
+        if (!schedule) {
+            return false;
+        }
         this.scheduler.scheduleChunkTask(chunkX, chunkZ, this.task::execute);
         return true;
     }

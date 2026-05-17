@@ -33,6 +33,7 @@ public class MysqlLoader extends UpdatableLoader {
     private static final String CREATE_WORLDS_TABLE_QUERY = "CREATE TABLE IF NOT EXISTS `worlds` (`id` INT NOT NULL AUTO_INCREMENT, " +
             "`name` VARCHAR(255) UNIQUE, `locked` BIGINT, `world` MEDIUMBLOB, PRIMARY KEY(id));";
     private static final String SELECT_WORLD_QUERY = "SELECT `world` FROM `worlds` WHERE `name` = ?;";
+    private static final String WORLD_EXISTS_QUERY = "SELECT `name` FROM `worlds` WHERE `name` = ?;";
     private static final String UPDATE_WORLD_QUERY = "INSERT INTO `worlds` (`name`, `world`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `world` = ?;";
     private static final String DELETE_WORLD_QUERY = "DELETE FROM `worlds` WHERE `name` = ?;";
     private static final String LIST_WORLDS_QUERY = "SELECT `name` FROM `worlds`;";
@@ -136,7 +137,7 @@ public class MysqlLoader extends UpdatableLoader {
     @Override
     public boolean worldExists(String worldName) throws IOException {
         try (Connection con = source.getConnection();
-             PreparedStatement statement = con.prepareStatement(SELECT_WORLD_QUERY)) {
+             PreparedStatement statement = con.prepareStatement(WORLD_EXISTS_QUERY)) {
             statement.setString(1, worldName);
             ResultSet set = statement.executeQuery();
 
