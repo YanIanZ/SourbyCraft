@@ -16,12 +16,12 @@ public class RedisLoader implements SlimeLoader {
     private static final String WORLD_LIST_PREFIX = "aswm:world:list";
 
     private final RedisCommands<String, byte[]> connection;
+    private final io.lettuce.core.api.async.RedisAsyncCommands<String, byte[]> asyncConn;
 
     public RedisLoader(String uri) {
-        this.connection = RedisClient
-            .create(uri)
-            .connect(StringByteCodec.INSTANCE)
-            .sync();
+        var conn = RedisClient.create(uri).connect(StringByteCodec.INSTANCE);
+        this.connection = conn.sync();
+        this.asyncConn = conn.async();
     }
 
     @Override
@@ -48,10 +48,19 @@ public class RedisLoader implements SlimeLoader {
 
     @Override
     public void saveWorld(String worldName, byte[] bytes) throws IOException {
-        connection.set(WORLD_DATA_PREFIX + worldName, bytes);
-
-        // Also add to the world list set. We can't do this in one atomic operation (mset) because it's a set add
-        connection.sadd(WORLD_LIST_PREFIX, worldName.getBytes(StandardCharsets.UTF_8));
+        asyncConn.setAutoFlushCommands(false);
+        try {
+            var setFuture = asyncConn.set(WORLD_DATA_PREFIX + worldName, bytes);
+            var saddFuture = asyncConn.sadd(WORLD_LIST_PREFIX,
+                    worldName.getBytes(StandardCharsets.UTF_8));
+            asyncConn.flushCommands();
+            io.lettuce.core.LettuceFutures.awaitAll(
+                    java.time.Duration.ofSeconds(10), setFuture, saddFuture);
+        } catch (Exception e) {
+            throw new IOException("Redis saveWorld failed for " + worldName, e);
+        } finally {
+            asyncConn.setAutoFlushCommands(true);
+        }
     }
 
     @Override
