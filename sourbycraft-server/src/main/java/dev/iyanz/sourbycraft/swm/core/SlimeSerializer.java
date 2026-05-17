@@ -11,7 +11,6 @@ import java.util.zip.Deflater;
 public final class SlimeSerializer {
     private static final byte[] MAGIC = new byte[]{(byte)0xB1, (byte)0x0B};
     private static final byte VERSION = 0x0D;
-    private static final int COMPRESSION_LEVEL = 9;
 
     public static byte[] serialize(SlimeWorld world) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -165,7 +164,7 @@ public final class SlimeSerializer {
     }
 
     private static byte[] compress(byte[] data) throws IOException {
-        Deflater deflater = new Deflater(COMPRESSION_LEVEL);
+        Deflater deflater = new Deflater(gg.pufferfish.pufferfish.PufferfishConfig.swmCompressionLevel);
         deflater.setInput(data);
         deflater.finish();
         ByteArrayOutputStream baos = new ByteArrayOutputStream(data.length);
