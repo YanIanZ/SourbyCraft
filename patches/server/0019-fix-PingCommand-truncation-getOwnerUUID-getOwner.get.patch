@@ -58,11 +58,11 @@ index a7f346d0fefe960862d68303e4ddd5b34fa8d43b..89fcd1763856552dadfed48a70664d78
 -        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
          this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
          this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
-@@ -1041,7 +1040,6 @@ public final class CraftServer implements Server {
-         // SourbyCraft start - register commands
-         this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
-         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
+@@ -1041,7 +1040,5 @@ public final class CraftServer implements Server {
+          // SourbyCraft start - register commands
+          this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
+          this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
 -        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
-         this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
-         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
-         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));
+          this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
+          this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));
