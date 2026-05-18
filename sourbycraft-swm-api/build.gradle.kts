@@ -36,8 +36,8 @@ tasks.jar {
     enabled = false
 }
 
-artifacts {
-    add("archives", extractApi)
+tasks.assemble {
+    dependsOn(extractApi)
 }
 
 publishing {
