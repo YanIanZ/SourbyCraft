@@ -21,14 +21,15 @@ public class SourbyCraftConfig {
     private static File CONFIG_FILE;
     public static YamlConfiguration config;
 
-    static int version, currentVersion = 5;
+    static int version, currentVersion = 6;
     static boolean verbose;
 
     public static boolean asyncChunkLoad = false;
     public static boolean asyncPathfinding = false;
-    public static int asyncThreads = 2;
     public static boolean multithreadingEnabled = false;
-    public static boolean dimensionThreads = false;
+    public static boolean virtualThreads = true;
+    public static boolean structuredConcurrency = true;
+    public static int maxPlatformThreads = 4;
 
     public static boolean skipEmptySections = true;
     public static boolean poolEntityData = true;
@@ -36,7 +37,7 @@ public class SourbyCraftConfig {
     public static boolean chunkCompressionCache = false;
 
     public static boolean swmEnabled = true;
-    public static String swmVersion = "v5-REL";
+    public static String swmVersion = "v6-REL";
     public static boolean swmAutoInstall = false;
     public static String swmLoader = "file";
     public static String swmFileDir = "slime_worlds";
@@ -99,11 +100,11 @@ public class SourbyCraftConfig {
 
         asyncChunkLoad = getBoolean("performance.async-chunk-load", asyncChunkLoad);
         asyncPathfinding = getBoolean("performance.async-pathfinding", asyncPathfinding);
-        asyncThreads = getInt("performance.async-threads", asyncThreads);
 
         multithreadingEnabled = getBoolean("multithreading.enabled", multithreadingEnabled);
-        dimensionThreads = getBoolean("multithreading.dimension-threads", dimensionThreads);
-        asyncThreads = getInt("multithreading.async-threads", asyncThreads);
+        virtualThreads = getBoolean("performance.virtual-threads", virtualThreads);
+        structuredConcurrency = getBoolean("performance.structured-concurrency", structuredConcurrency);
+        maxPlatformThreads = getInt("performance.max-platform-threads", maxPlatformThreads);
 
         skipEmptySections = getBoolean("memory.skip-empty-sections", skipEmptySections);
         poolEntityData = getBoolean("memory.pool-entity-data", poolEntityData);
@@ -133,8 +134,8 @@ public class SourbyCraftConfig {
         if (version < currentVersion) {
             // SourbyCraft start - migration: update SWM version tag
             String oldSwmVer = swmVersion;
-            if ("v4-REL".equals(swmVersion) || "1.21.11".equals(swmVersion)) {
-                swmVersion = "v5-REL";
+            if ("v4-REL".equals(swmVersion) || "v5-REL".equals(swmVersion) || "1.21.11".equals(swmVersion)) {
+                swmVersion = "v6-REL";
                 set("swm.version", swmVersion);
             }
             // SourbyCraft end
@@ -181,7 +182,7 @@ public class SourbyCraftConfig {
             // Idle timeout will be implemented via scheduler
         }
 
-        AsyncExecutor.initPool(asyncThreads);
+        dev.iyanz.sourbycraft.util.VirtualExecutor.init();
     }
 
     protected static void log(String string) {
