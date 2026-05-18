@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/minecraft-1.21.11-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/version-v4--REL-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/version-v6--REL-orange?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
