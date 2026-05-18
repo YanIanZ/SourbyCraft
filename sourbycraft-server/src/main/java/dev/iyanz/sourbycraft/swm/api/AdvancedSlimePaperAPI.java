@@ -33,6 +33,20 @@ public interface AdvancedSlimePaperAPI {
 
     SlimeSerializationAdapter getSerializer();
 
+    java.util.concurrent.CompletableFuture<SlimeWorld> readWorldAsync(SlimeLoader loader, String worldName,
+            boolean readOnly, SlimePropertyMap propertyMap);
+
+    java.util.concurrent.CompletableFuture<SlimeWorldInstance> loadWorldAsync(SlimeWorld world,
+            boolean callWorldLoadEvent);
+
+    java.util.concurrent.CompletableFuture<Void> saveWorldAsync(SlimeWorld world);
+
+    java.util.concurrent.CompletableFuture<SlimeWorld> readVanillaWorldAsync(java.io.File worldDir,
+            String worldName, @Nullable SlimeLoader loader);
+
+    java.util.concurrent.CompletableFuture<Void> migrateWorldAsync(String worldName,
+            SlimeLoader currentLoader, SlimeLoader newLoader);
+
     static AdvancedSlimePaperAPI instance() {
         return Holder.INSTANCE;
     }

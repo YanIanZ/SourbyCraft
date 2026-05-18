@@ -43,8 +43,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
+
+import dev.iyanz.sourbycraft.util.VirtualExecutor;
 
 public class AdvancedSlimePaperImpl implements AdvancedSlimePaperAPI {
 
@@ -300,6 +303,86 @@ public class AdvancedSlimePaperImpl implements AdvancedSlimePaperAPI {
 
     private void registerWorld(SlimeWorldInstance world) {
         this.loadedWorlds.put(world.getName(), world);
+    }
+
+    @Override
+    public CompletableFuture<SlimeWorld> readWorldAsync(SlimeLoader loader, String worldName,
+                                                        boolean readOnly, SlimePropertyMap propertyMap) {
+        Objects.requireNonNull(loader);
+        Objects.requireNonNull(worldName);
+        Objects.requireNonNull(propertyMap);
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return readWorld(loader, worldName, readOnly, propertyMap);
+            } catch (UnknownWorldException | CorruptedWorldException | NewerFormatException | IOException e) {
+                throw new CompletionException(e);
+            }
+        }, VirtualExecutor.executor());
+    }
+
+    @Override
+    public CompletableFuture<SlimeWorldInstance> loadWorldAsync(SlimeWorld world, boolean callWorldLoadEvent) {
+        Objects.requireNonNull(world);
+        return CompletableFuture.supplyAsync(() -> {
+            // NMS load must happen on main thread — bridge via server.execute
+            CompletableFuture<SlimeWorldInstance> bridge = new CompletableFuture<>();
+            MinecraftServer.getServer().execute(() -> {
+                try {
+                    bridge.complete(loadWorld(world, callWorldLoadEvent));
+                } catch (Throwable t) {
+                    bridge.completeExceptionally(t);
+                }
+            });
+            try {
+                return bridge.join();
+            } catch (CompletionException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new CompletionException(e);
+            }
+        }, VirtualExecutor.executor());
+    }
+
+    @Override
+    public CompletableFuture<Void> saveWorldAsync(SlimeWorld world) {
+        Objects.requireNonNull(world);
+        return CompletableFuture.runAsync(() -> {
+            try {
+                saveWorld(world);
+            } catch (IOException e) {
+                throw new CompletionException(e);
+            }
+        }, VirtualExecutor.executor());
+    }
+
+    @Override
+    public CompletableFuture<SlimeWorld> readVanillaWorldAsync(File worldDir, String worldName,
+                                                               SlimeLoader loader) {
+        Objects.requireNonNull(worldDir);
+        Objects.requireNonNull(worldName);
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return readVanillaWorld(worldDir, worldName, loader);
+            } catch (InvalidWorldException | WorldLoadedException | WorldTooBigException |
+                     WorldAlreadyExistsException | IOException e) {
+                throw new CompletionException(e);
+            }
+        }, VirtualExecutor.executor());
+    }
+
+    @Override
+    public CompletableFuture<Void> migrateWorldAsync(String worldName, SlimeLoader currentLoader,
+                                                     SlimeLoader newLoader) {
+        Objects.requireNonNull(worldName);
+        Objects.requireNonNull(currentLoader);
+        Objects.requireNonNull(newLoader);
+        return CompletableFuture.runAsync(() -> {
+            try {
+                migrateWorld(worldName, currentLoader, newLoader);
+            } catch (WorldAlreadyExistsException | UnknownWorldException | IOException e) {
+                throw new CompletionException(e);
+            }
+        }, VirtualExecutor.executor());
     }
 
     public void onWorldUnload(String name) {
