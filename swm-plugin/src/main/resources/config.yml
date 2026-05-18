@@ -1,0 +1,4 @@
+swm:
+  enabled: true
+  file-dir: slime_worlds
+  load-worlds: []
