@@ -12,7 +12,11 @@ public final class LoaderManager {
     private SlimeLoader defaultLoader;
 
     public LoaderManager() {
-        register("file", new FileLoader("slime_worlds"));
+        this("slime_worlds");
+    }
+
+    public LoaderManager(String fileDir) {
+        register("file", new FileLoader(fileDir));
     }
 
     public void register(String key, SlimeLoader loader) {

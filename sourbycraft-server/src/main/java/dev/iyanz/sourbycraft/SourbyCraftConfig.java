@@ -113,6 +113,7 @@ public class SourbyCraftConfig {
         swmEnabled = getBoolean("swm.enabled", swmEnabled);
         swmVersion = getString("swm.version", swmVersion);
         swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
+        swmFileDir = getString("swm.file-dir", swmFileDir);
 
         // Auto-install SWM plugin from GitHub releases
         if (swmEnabled && swmAutoInstall) {
