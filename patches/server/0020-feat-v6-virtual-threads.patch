@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <dev@iyanz.dev>
+Date: Tue, 19 May 2026 00:00:00 +0700
+Subject: [PATCH] feat(v6): enable virtual threads for Minecraft server thread pools
+
+When SourbyCraftConfig.virtualThreads is true, all server internal
+thread pools (BACKGROUND_EXECUTOR, IO_POOL, DIMENSION_DATA_IO_POOL,
+DOWNLOAD_POOL) use Executors.newVirtualThreadPerTaskExecutor() instead
+of ForkJoinPool / CachedThreadPool / FixedThreadPool.
+
+Virtual threads are lightweight (~1KB stack) and enable unbounded
+concurrency without platform thread overhead.
+
+diff --git a/src/main/java/net/minecraft/util/Util.java b/src/main/java/net/minecraft/util/Util.java
+index 1e77bcc..b590a29 100644
+--- a/src/main/java/net/minecraft/util/Util.java
++++ b/src/main/java/net/minecraft/util/Util.java
+@@ -83,6 +83,7 @@ import net.minecraft.SharedConstants;
+ import net.minecraft.SuppressForbidden;
+ import net.minecraft.TracingExecutor;
+ import net.minecraft.core.Registry;
++import dev.iyanz.sourbycraft.SourbyCraftConfig; // SourbyCraft - v6 virtual threads
+ import net.minecraft.resources.Identifier;
+ import net.minecraft.server.Bootstrap;
+ import net.minecraft.util.datafix.DataFixers;
+@@ -99,20 +100,26 @@ public class Util {
+     private static final TracingExecutor IO_POOL = makeIoExecutor("IO-Worker-", false);
+     public static final TracingExecutor DIMENSION_DATA_IO_POOL = makeExtraIoExecutor("Dimension-Data-IO-Worker-"); // Paper - Separate dimension data IO pool
+     // Paper start - Limit download pool size
+-    private static final TracingExecutor DOWNLOAD_POOL = new TracingExecutor(Executors.newFixedThreadPool(4, new java.util.concurrent.ThreadFactory() {
+-        private final AtomicInteger count = new AtomicInteger();
++    // SourbyCraft start - v6 virtual threads
++    private static final TracingExecutor DOWNLOAD_POOL = new TracingExecutor(
++        dev.iyanz.sourbycraft.SourbyCraftConfig.virtualThreads
++            ? Executors.newVirtualThreadPerTaskExecutor()
++            : Executors.newFixedThreadPool(4, new java.util.concurrent.ThreadFactory() {
++                private final AtomicInteger count = new AtomicInteger();
+ 
+-        @Override
+-        public Thread newThread(Runnable run) {
+-            Thread ret = new Thread(run);
+-            ret.setDaemon(true);
+-            ret.setName("Download-" + this.count.getAndIncrement());
+-            ret.setUncaughtExceptionHandler((Thread thread, Throwable throwable) -> {
+-                LOGGER.error("Uncaught exception in thread " + thread.getName(), throwable);
+-            });
+-            return ret;
+-        }
+-    }));
++                @Override
++                public Thread newThread(Runnable run) {
++                    Thread ret = new Thread(run);
++                    ret.setDaemon(true);
++                    ret.setName("Download-" + this.count.getAndIncrement());
++                    ret.setUncaughtExceptionHandler((Thread thread, Throwable throwable) -> {
++                        LOGGER.error("Uncaught exception in thread " + thread.getName(), throwable);
++                    });
++                    return ret;
++                }
++            })
++    );
++    // SourbyCraft end - v6 virtual threads
+     // Paper end - Limit download pool size
+     private static final DateTimeFormatter FILENAME_DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss", Locale.ROOT);
+     public static final int LINEAR_LOOKUP_THRESHOLD = 8;
+@@ -167,6 +174,11 @@ public class Util {
+     }
+ 
+     private static TracingExecutor makeExecutor(String name, final int priorityModifier) { // Paper - Perf: add priority
++        // SourbyCraft start - v6 virtual threads
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.virtualThreads) {
++            return new TracingExecutor(Executors.newVirtualThreadPerTaskExecutor());
++        }
++        // SourbyCraft end - v6 virtual threads
+         int i = maxAllowedExecutorThreads();
+         // Paper start - Perf: use simpler thread pool that allows 1 thread and reduce worldgen thread worker count for low core count CPUs
+         final ExecutorService directExecutorService;
+@@ -256,6 +268,11 @@ public class Util {
+     }
+ 
+     private static TracingExecutor makeIoExecutor(String name, boolean daemon) {
++        // SourbyCraft start - v6 virtual threads
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.virtualThreads) {
++            return new TracingExecutor(Executors.newVirtualThreadPerTaskExecutor());
++        }
++        // SourbyCraft end - v6 virtual threads
+         AtomicInteger atomicInteger = new AtomicInteger(1);
+         return new TracingExecutor(Executors.newCachedThreadPool(task -> {
+             Thread thread = new Thread(task);
+@@ -270,6 +287,11 @@ public class Util {
+ 
+     // Paper start - Separate dimension data IO pool
+     private static TracingExecutor makeExtraIoExecutor(String namePrefix) {
++        // SourbyCraft start - v6 virtual threads
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.virtualThreads) {
++            return new TracingExecutor(Executors.newVirtualThreadPerTaskExecutor());
++        }
++        // SourbyCraft end - v6 virtual threads
+         AtomicInteger atomicInteger = new AtomicInteger(1);
+         return new TracingExecutor(Executors.newFixedThreadPool(4, runnable -> {
+             Thread thread = new Thread(runnable);

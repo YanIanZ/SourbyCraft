@@ -48,21 +48,22 @@ index 62a87682f7f1e9466dcb16a77e294ad252f349bb..b0f41d10ecb3fdf4eeb8f92d7e8be39c
          long range = sourbycraftWorldConfig.entityObfuscationRange;
          if (distSq > range * range) return true;
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index a7f346d0fefe960862d68303e4ddd5b34fa8d43b..89fcd1763856552dadfed48a70664d78dd9f0d7e 100644
+index 78125d92fc15095e74b71fbbd361d56e771584b5..eef88d4c3dd0bcd11615e7c4399e070de34aa37f 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -421,6 +421,5 @@ public final class CraftServer implements Server {
+@@ -421,7 +421,6 @@ public final class CraftServer implements Server {
          // SourbyCraft start - register custom commands
          this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
          this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
 -        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
          this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
          this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
-@@ -1041,7 +1040,5 @@ public final class CraftServer implements Server {
-          // SourbyCraft start - register commands
-          this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
-          this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.ModsCommand("mods"));
+@@ -1040,7 +1039,6 @@ public final class CraftServer implements Server {
+         // SourbyCraft start - register commands
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
 -        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
-          this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
-          this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
--        this.commandMap.register("", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));
