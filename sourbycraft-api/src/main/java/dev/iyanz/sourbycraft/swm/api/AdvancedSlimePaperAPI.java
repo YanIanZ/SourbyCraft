@@ -1,7 +1,6 @@
 package dev.iyanz.sourbycraft.swm.api;
 
 import dev.iyanz.sourbycraft.swm.api.exceptions.*;
-import dev.iyanz.sourbycraft.swm.api.SlimeLoader;
 import net.kyori.adventure.util.Services;
 import org.jetbrains.annotations.Nullable;
 import java.io.File;
