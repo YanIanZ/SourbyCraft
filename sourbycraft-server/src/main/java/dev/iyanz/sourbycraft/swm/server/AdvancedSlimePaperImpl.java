@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.swm.server;
 
 import dev.iyanz.sourbycraft.swm.api.AdvancedSlimePaperAPI;
+import dev.iyanz.sourbycraft.swm.api.SlimeChunk;
 import dev.iyanz.sourbycraft.swm.api.SlimeLoader;
 import dev.iyanz.sourbycraft.swm.api.SlimeNMSBridge;
 import dev.iyanz.sourbycraft.swm.api.SlimeSerializationAdapter;
@@ -14,10 +15,17 @@ import dev.iyanz.sourbycraft.swm.core.SkeletonSlimeWorld;
 import dev.iyanz.sourbycraft.swm.core.SlimeSerializer;
 import dev.iyanz.sourbycraft.swm.core.reader.SlimeWorldReaderRegistry;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import net.minecraft.SharedConstants;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtAccounter;
+import net.minecraft.nbt.NbtIo;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.storage.RegionFile;
+import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.craftbukkit.CraftWorld;
@@ -27,7 +35,10 @@ import org.slf4j.LoggerFactory;
 import org.spigotmc.AsyncCatcher;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -159,7 +170,95 @@ public class AdvancedSlimePaperImpl implements AdvancedSlimePaperAPI {
     @Override
     public SlimeWorld readVanillaWorld(File worldDir, String worldName, SlimeLoader loader)
             throws InvalidWorldException, WorldLoadedException, WorldTooBigException, IOException, WorldAlreadyExistsException {
-        throw new UnsupportedOperationException("Vanilla world reading is not yet implemented");
+        Objects.requireNonNull(worldDir, "World directory cannot be null");
+        Objects.requireNonNull(worldName, "World name cannot be null");
+
+        if (loader != null && loader.worldExists(worldName)) {
+            throw new WorldAlreadyExistsException(worldName);
+        }
+        if (getLoadedWorld(worldName) != null) {
+            throw new WorldLoadedException(worldName);
+        }
+        if (!worldDir.exists() || !worldDir.isDirectory()) {
+            throw new InvalidWorldException(worldName, new FileNotFoundException("World directory not found: " + worldDir.getAbsolutePath()));
+        }
+
+        File levelFile = new File(worldDir, "level.dat");
+        if (!levelFile.exists()) {
+            throw new InvalidWorldException(worldName, new FileNotFoundException("level.dat not found in " + worldDir.getAbsolutePath()));
+        }
+
+        CompoundTag dataTag;
+        int dataVersion = SharedConstants.getCurrentVersion().dataVersion().version();
+        try (FileInputStream fis = new FileInputStream(levelFile)) {
+            CompoundTag levelRoot = NbtIo.readCompressed(fis, NbtAccounter.unlimitedHeap());
+            dataTag = levelRoot.getCompound("Data").orElse(null);
+            if (dataTag != null) {
+                dataVersion = dataTag.getIntOr("DataVersion", dataVersion);
+            }
+        }
+
+        SlimePropertyMap propertyMap = new SlimePropertyMap();
+        if (dataTag != null) {
+            int spawnX = dataTag.getIntOr("SpawnX", 0);
+            int spawnY = dataTag.getIntOr("SpawnY", 64);
+            int spawnZ = dataTag.getIntOr("SpawnZ", 0);
+            propertyMap.setSpawnX(spawnX);
+            propertyMap.setSpawnY(spawnY);
+            propertyMap.setSpawnZ(spawnZ);
+        }
+
+        Long2ObjectOpenHashMap<SlimeChunk> chunksMap = new Long2ObjectOpenHashMap<>();
+        File regionDir = new File(worldDir, "region");
+        if (regionDir.exists() && regionDir.isDirectory()) {
+            Path regionPath = regionDir.toPath();
+            File[] regionFiles = regionDir.listFiles((dir, name) -> name.endsWith(".mca"));
+            if (regionFiles != null) {
+                for (File regionFile : regionFiles) {
+                    String[] parts = regionFile.getName().split("\\.");
+                    if (parts.length < 4) continue;
+                    int regionX = Integer.parseInt(parts[1]);
+                    int regionZ = Integer.parseInt(parts[2]);
+
+                    RegionStorageInfo storageInfo = new RegionStorageInfo(worldName, Level.OVERWORLD, "region");
+                    RegionFile region = new RegionFile(storageInfo, regionFile.toPath(), regionPath, true);
+                    try {
+                        for (int cx = 0; cx < 32; cx++) {
+                            for (int cz = 0; cz < 32; cz++) {
+                                int chunkX = regionX * 32 + cx;
+                                int chunkZ = regionZ * 32 + cz;
+                                ChunkPos chunkPos = new ChunkPos(chunkX, chunkZ);
+
+                                if (!region.doesChunkExist(chunkPos)) continue;
+
+                                CompoundTag chunkNbt = SlimeChunkConverter.readChunkNbt(region, chunkPos);
+                                if (chunkNbt == null) continue;
+
+                                try {
+                                    SlimeChunk slimeChunk = SlimeChunkConverter.fromVanilla(chunkNbt);
+                                    chunksMap.put(((long) slimeChunk.getX() << 32) | (slimeChunk.getZ() & 0xFFFFFFFFL), slimeChunk);
+                                } catch (Exception e) {
+                                    LOGGER.warn("Failed to convert chunk ({}, {}) in region file {}.{}.mca",
+                                            chunkX, chunkZ, regionX, regionZ, e);
+                                }
+                            }
+                        }
+                    } finally {
+                        region.close();
+                    }
+                }
+            }
+        }
+
+        CompoundTag extraData = new CompoundTag();
+        SkeletonSlimeWorld slimeWorld = new SkeletonSlimeWorld(worldName, loader, chunksMap,
+                extraData, propertyMap, dataVersion, false);
+
+        if (loader != null) {
+            loader.saveWorld(worldName, SlimeSerializer.serialize(slimeWorld));
+        }
+
+        return slimeWorld;
     }
 
     @Override

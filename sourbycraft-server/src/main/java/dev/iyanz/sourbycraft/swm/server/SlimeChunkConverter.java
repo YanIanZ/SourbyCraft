@@ -36,10 +36,16 @@ import net.minecraft.world.ticks.LevelChunkTicks;
 import net.minecraft.world.ticks.SavedTick;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.DataInputStream;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+
+import dev.iyanz.sourbycraft.swm.core.SlimeChunkSkeleton;
+import net.minecraft.world.level.chunk.storage.RegionFile;
 
 public class SlimeChunkConverter {
 
@@ -240,6 +246,92 @@ public class SlimeChunkConverter {
     public static CompoundTag getSlimeSectionsFromPoiCompound(CompoundTag save) {
         if (save == null) return null;
         return save.getCompound("Sections").orElse(null);
+    }
+
+    public static SlimeChunk fromVanilla(CompoundTag chunkNbt) {
+        int x = chunkNbt.getIntOr("xPos", 0);
+        int z = chunkNbt.getIntOr("zPos", 0);
+
+        ListTag sectionsTag = chunkNbt.getList("sections").orElse(new ListTag());
+        int minSectionY = Integer.MAX_VALUE;
+        int maxSectionY = Integer.MIN_VALUE;
+        Map<Integer, CompoundTag> sectionByY = new HashMap<>();
+
+        for (int i = 0; i < sectionsTag.size(); i++) {
+            CompoundTag secTag = sectionsTag.getCompound(i).orElse(null);
+            if (secTag != null) {
+                int y = secTag.getByteOr("Y", (byte) 0);
+                sectionByY.put(y, secTag);
+                minSectionY = Math.min(minSectionY, y);
+                maxSectionY = Math.max(maxSectionY, y);
+            }
+        }
+
+        int sectionCount = minSectionY <= maxSectionY ? maxSectionY - minSectionY + 1 : 0;
+        List<SlimeChunkSection> sections = new ArrayList<>(sectionCount);
+        for (int i = 0; i < sectionCount; i++) {
+            sections.add(null);
+        }
+
+        for (Map.Entry<Integer, CompoundTag> entry : sectionByY.entrySet()) {
+            int y = entry.getKey();
+            CompoundTag secTag = entry.getValue();
+            CompoundTag blockStatesTag = secTag.getCompound("block_states").orElse(null);
+            CompoundTag biomeTag = secTag.getCompound("biomes").orElse(null);
+            byte[] blockLight = secTag.getByteArray("BlockLight").orElse(null);
+            byte[] skyLight = secTag.getByteArray("SkyLight").orElse(null);
+            sections.set(y - minSectionY,
+                    new SlimeChunkSectionSkeleton(blockStatesTag, biomeTag, blockLight, skyLight));
+        }
+
+        CompoundTag heightMaps = chunkNbt.getCompound("Heightmaps").orElse(new CompoundTag());
+
+        CompoundTag tileEntities = new CompoundTag();
+        ListTag blockEntities = chunkNbt.getList("block_entities").orElse(new ListTag());
+        if (!blockEntities.isEmpty()) {
+            tileEntities.put("tileEntities", blockEntities);
+        }
+
+        ListTag entities = new ListTag();
+        CompoundTag upgradeData = chunkNbt.getCompound("UpgradeData").orElse(null);
+        CompoundTag blockTicks = extractWrappedTicks(chunkNbt, "block_ticks");
+        CompoundTag fluidTicks = extractWrappedTicks(chunkNbt, "fluid_ticks");
+
+        CompoundTag extraData = null;
+        CompoundTag chunkBukkitValues = chunkNbt.getCompound("ChunkBukkitValues").orElse(null);
+        if (chunkBukkitValues != null) {
+            extraData = new CompoundTag();
+            extraData.put("ChunkBukkitValues", chunkBukkitValues);
+        }
+
+        return new SlimeChunkSkeleton(x, z, sections, heightMaps, tileEntities, entities,
+                extraData, upgradeData, blockTicks, fluidTicks, null);
+    }
+
+    public static CompoundTag readChunkNbt(RegionFile region, net.minecraft.world.level.ChunkPos pos) throws java.io.IOException {
+        DataInputStream stream = region.getChunkDataInputStream(pos);
+        if (stream == null) return null;
+        try {
+            return net.minecraft.nbt.NbtIo.read(stream);
+        } finally {
+            stream.close();
+        }
+    }
+
+    private static CompoundTag extractWrappedTicks(CompoundTag chunkNbt, String key) {
+        Optional<CompoundTag> direct = chunkNbt.getCompound(key);
+        if (direct.isPresent()) {
+            CompoundTag wrapper = new CompoundTag();
+            wrapper.put(key, direct.get());
+            return wrapper;
+        }
+        Optional<ListTag> asList = chunkNbt.getList(key);
+        if (asList.isPresent() && !asList.get().isEmpty()) {
+            CompoundTag wrapper = new CompoundTag();
+            wrapper.put(key, asList.get());
+            return wrapper;
+        }
+        return null;
     }
 
     private static List<CompoundTag> extractTileEntities(@Nullable CompoundTag tileEntitiesTag) {
