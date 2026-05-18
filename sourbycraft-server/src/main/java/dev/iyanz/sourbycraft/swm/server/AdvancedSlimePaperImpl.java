@@ -209,6 +209,8 @@ public class AdvancedSlimePaperImpl implements AdvancedSlimePaperAPI {
         }
 
         Long2ObjectOpenHashMap<SlimeChunk> chunksMap = new Long2ObjectOpenHashMap<>();
+        final int MAX_CHUNKS = 100_000;
+        int totalChunks = 0;
         File regionDir = new File(worldDir, "region");
         if (regionDir.exists() && regionDir.isDirectory()) {
             Path regionPath = regionDir.toPath();
@@ -217,8 +219,15 @@ public class AdvancedSlimePaperImpl implements AdvancedSlimePaperAPI {
                 for (File regionFile : regionFiles) {
                     String[] parts = regionFile.getName().split("\\.");
                     if (parts.length < 4) continue;
-                    int regionX = Integer.parseInt(parts[1]);
-                    int regionZ = Integer.parseInt(parts[2]);
+                    int regionX;
+                    int regionZ;
+                    try {
+                        regionX = Integer.parseInt(parts[1]);
+                        regionZ = Integer.parseInt(parts[2]);
+                    } catch (NumberFormatException e) {
+                        LOGGER.warn("Skipping region file with malformed name: {}", regionFile.getName());
+                        continue;
+                    }
 
                     RegionStorageInfo storageInfo = new RegionStorageInfo(worldName, Level.OVERWORLD, "region");
                     RegionFile region = new RegionFile(storageInfo, regionFile.toPath(), regionPath, true);
@@ -237,6 +246,12 @@ public class AdvancedSlimePaperImpl implements AdvancedSlimePaperAPI {
 
                                     SlimeChunk slimeChunk = SlimeChunkConverter.fromVanilla(chunkNbt);
                                     chunksMap.put(((long) slimeChunk.getX() << 32) | (slimeChunk.getZ() & 0xFFFFFFFFL), slimeChunk);
+                                    totalChunks++;
+                                    if (totalChunks > MAX_CHUNKS) {
+                                        throw new WorldTooBigException("World exceeds " + MAX_CHUNKS + " chunks");
+                                    }
+                                } catch (WorldTooBigException e) {
+                                    throw e;
                                 } catch (Exception e) {
                                     LOGGER.warn("Failed to convert chunk ({}, {}) in region file {}.{}.mca",
                                             chunkX, chunkZ, regionX, regionZ, e);
