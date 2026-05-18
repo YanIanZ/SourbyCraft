@@ -29,7 +29,7 @@ includeBuild("../Plugin-Dev/star") {
         substitute(module("dev.yanianz:star-skins")).using(project(":star-skins"))
         substitute(module("dev.yanianz:star-items")).using(project(":star-items"))
         substitute(module("dev.yanianz:star-inventories")).using(project(":star-inventories"))
-        substitute(module("dev.yanianz:star-protection")).using(project(":star-protection"))
+        // substitute(module("dev.yanianz:star-protection")).using(project(":star-protection")) // disabled in star build
         substitute(module("dev.yanianz:star-recipes")).using(project(":star-recipes"))
         substitute(module("dev.yanianz:star-updater")).using(project(":star-updater"))
         substitute(module("dev.yanianz:star-scheduling")).using(project(":star-scheduling"))
