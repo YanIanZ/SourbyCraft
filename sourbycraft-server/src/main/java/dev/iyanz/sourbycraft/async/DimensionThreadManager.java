@@ -16,7 +16,7 @@ public class DimensionThreadManager {
 
     public static void startDimension(ServerLevel level) {
         if (!dev.iyanz.sourbycraft.SourbyCraftConfig.multithreadingEnabled) return;
-        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.dimensionThreads) return;
+        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.virtualThreads) return;
 
         String name = "Dimension-Worker-" + level.dimension().identifier().getPath();
         ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
