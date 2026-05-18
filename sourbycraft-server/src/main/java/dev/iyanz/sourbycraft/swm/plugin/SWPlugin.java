@@ -19,6 +19,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 public class SWPlugin extends JavaPlugin {
 
@@ -95,15 +96,25 @@ public class SWPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        List<CompletableFuture<Void>> saves = new ArrayList<>();
         for (SlimeWorld world : ASP.getLoadedWorlds()) {
             if (!world.isReadOnly()) {
-                try {
-                    ASP.saveWorld(world);
-                } catch (Exception ex) {
-                    getLogger().severe("Failed to save world " + world.getName() + ": " + ex.getMessage());
-                }
+                saves.add(ASP.saveWorldAsync(world));
             }
-            Bukkit.unloadWorld(world.getName(), false);
+        }
+        // Wait for all saves to complete
+        for (CompletableFuture<Void> save : saves) {
+            try {
+                save.join();
+            } catch (Exception ex) {
+                getLogger().severe("Failed to save world: " + ex.getMessage());
+            }
+        }
+        // Unload all worlds
+        for (SlimeWorld world : ASP.getLoadedWorlds()) {
+            try {
+                Bukkit.unloadWorld(world.getName(), false);
+            } catch (Exception ignored) {}
         }
 
         if (ioExecutor != null) {
