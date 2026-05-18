@@ -231,10 +231,10 @@ public class AdvancedSlimePaperImpl implements AdvancedSlimePaperAPI {
 
                                 if (!region.doesChunkExist(chunkPos)) continue;
 
-                                CompoundTag chunkNbt = SlimeChunkConverter.readChunkNbt(region, chunkPos);
-                                if (chunkNbt == null) continue;
-
                                 try {
+                                    CompoundTag chunkNbt = SlimeChunkConverter.readChunkNbt(region, chunkPos);
+                                    if (chunkNbt == null) continue;
+
                                     SlimeChunk slimeChunk = SlimeChunkConverter.fromVanilla(chunkNbt);
                                     chunksMap.put(((long) slimeChunk.getX() << 32) | (slimeChunk.getZ() & 0xFFFFFFFFL), slimeChunk);
                                 } catch (Exception e) {
