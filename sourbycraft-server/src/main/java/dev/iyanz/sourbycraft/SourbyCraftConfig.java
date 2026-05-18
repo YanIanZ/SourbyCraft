@@ -46,7 +46,7 @@ public class SourbyCraftConfig {
     public static int minViewDistance = 4;
     public static int compressionLevel = 4;
     public static boolean entityTickRateLimit = true;
-    public static int entityTickRate = 20;
+    public static volatile int entityTickRate = 20;
     public static boolean hopperBatch = true;
     public static boolean redstoneOptimize = true;
     public static int maxEntityPerChunk = 10;
@@ -84,7 +84,8 @@ public class SourbyCraftConfig {
 
         try {
             config.load(CONFIG_FILE);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            Bukkit.getLogger().warning("Could not load " + configFile.getName() + ", starting with defaults: " + e.getMessage());
         } catch (InvalidConfigurationException exception) {
             Bukkit.getLogger().log(Level.SEVERE, "Could not load " + configFile.getName() + ", please correct your syntax errors", exception);
             throw new RuntimeException(exception);
@@ -119,16 +120,16 @@ public class SourbyCraftConfig {
         // Auto-install SWM plugin from GitHub releases
         if (swmEnabled && swmAutoInstall) {
         // SourbyCraft start - auto-create required folders
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of(swmFileDir)); } catch (java.io.IOException ignored) {}
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException ignored) {}
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins")); } catch (java.io.IOException ignored) {}
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins/SourbyCraft/speedtest")); } catch (java.io.IOException ignored) {}
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of(swmFileDir)); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create " + swmFileDir + ": " + e.getMessage()); }
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create mods directory: " + e.getMessage()); }
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create plugins directory: " + e.getMessage()); }
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins/SourbyCraft/speedtest")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create speedtest directory: " + e.getMessage()); }
         // SourbyCraft end
             dev.iyanz.sourbycraft.swm.installer.PluginInstaller.install("plugins/");
         }
 
         // SourbyCraft start - auto-create mods folder
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException ignored) {}
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create mods directory: " + e.getMessage()); }
         // SourbyCraft end
 
         if (version < currentVersion) {

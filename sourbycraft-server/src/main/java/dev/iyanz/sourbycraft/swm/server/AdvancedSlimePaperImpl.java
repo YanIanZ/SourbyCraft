@@ -119,7 +119,9 @@ public class AdvancedSlimePaperImpl implements AdvancedSlimePaperAPI {
                     Future<?> future = CompletableFuture.completedFuture(null);
                     try {
                         future.get();
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        LOGGER.warn("Failed to complete save task future", e);
+                    }
                 };
                 if (Bukkit.isPrimaryThread()) {
                     saveTask.run();

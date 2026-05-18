@@ -110,7 +110,9 @@ public class SourbyCraftSecurityConfig {
             w.println("  creative-item:");
             w.println("    max-nbt-size: " + creativeMaxItemNbtSize);
             w.close();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            SourbyLogger.warn("Failed to save default security config: " + e.getMessage());
+        }
     }
 
     private static int getInt(Map<String, Object> map, String key, int def) {

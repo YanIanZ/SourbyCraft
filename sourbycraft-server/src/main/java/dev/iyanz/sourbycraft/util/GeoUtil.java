@@ -39,7 +39,9 @@ public final class GeoUtil {
                 cache.put(ip, loc);
                 return loc;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            SourbyLogger.warn("Geo lookup failed: " + e.getMessage());
+        }
         return null;
     }
 

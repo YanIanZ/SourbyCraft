@@ -155,7 +155,9 @@ public class SwmCommand implements CommandExecutor, TabCompleter {
                             .filter(s -> s.startsWith(args[1]))
                             .collect(Collectors.toList());
                 }
-            } catch (IOException ignored) {}
+            } catch (IOException e) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("SWM tab-complete: failed to list worlds: " + e.getMessage());
+            }
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("save")) {

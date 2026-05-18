@@ -91,6 +91,9 @@ public class PerfCommand {
         try {
             return ((com.sun.management.OperatingSystemMXBean)
                 java.lang.management.ManagementFactory.getOperatingSystemMXBean()).getProcessCpuLoad() * 100;
-        } catch (Exception e) { return 0; }
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger("SourbyCraft:PerfCommand").warn("Failed to get CPU load", e);
+            return 0;
+        }
     }
 }
