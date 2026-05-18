@@ -8,6 +8,7 @@ import dev.iyanz.sourbycraft.swm.api.exceptions.NewerFormatException;
 import dev.iyanz.sourbycraft.swm.api.exceptions.UnknownWorldException;
 import dev.iyanz.sourbycraft.swm.api.SlimeLoader;
 import dev.iyanz.sourbycraft.swm.api.SlimePropertyMap;
+import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.swm.server.SwmIoExecutor;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -40,7 +41,7 @@ public class SWPlugin extends JavaPlugin {
     public void onLoad() {
         ioExecutor = new SwmIoExecutor();
 
-        this.loaderManager = new LoaderManager();
+        this.loaderManager = new LoaderManager(SourbyCraftConfig.swmFileDir);
 
         List<String> erroredWorlds = loadWorlds();
 
