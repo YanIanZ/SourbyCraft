@@ -37,3 +37,10 @@ includeBuild("../Plugin-Dev/star") {
         substitute(module("dev.yanianz:star-api")).using(project(":star-api"))
     }
 }
+
+// Include SoulBy as composite build (eco rebrand)
+includeBuild("../Plugin-Dev/eco/.worktrees/soulby-rebrand") {
+    dependencySubstitution {
+        substitute(module("dev.yanianz:soulby")).using(project(":soulby-api"))
+    }
+}
