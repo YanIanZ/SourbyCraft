@@ -74,6 +74,11 @@ public class SourbyCraftConfig {
     public static int dropStackCap = Integer.MAX_VALUE;
     public static boolean ownerProtectionEnabled = true;
     public static int ownerProtectionTime = 10;
+    public static boolean itemPoolEnabled = true;
+    public static int itemPoolSize = 256;
+    public static int itemPoolMaxGrowth = 1024;
+    public static float itemPoolShrinkThreshold = 0.5f;
+    public static int itemMaxPerChunk = 64;
     public static int mobTickDistance = 32;
     public static int mobPathfindInterval = 20;
     public static boolean asyncSaveBatch = true;
@@ -173,6 +178,11 @@ public class SourbyCraftConfig {
         dropStackCap = getInt("item.drop-stack-cap", dropStackCap);
         ownerProtectionEnabled = getBoolean("item.owner-protection-enabled", ownerProtectionEnabled);
         ownerProtectionTime = Math.min(getInt("item.owner-protection-time", ownerProtectionTime), 1638);
+        itemPoolEnabled = getBoolean("item.pool-enabled", itemPoolEnabled);
+        itemPoolSize = getInt("item.pool-size", itemPoolSize);
+        itemPoolMaxGrowth = getInt("item.pool-max-growth", itemPoolMaxGrowth);
+        itemPoolShrinkThreshold = (float) getDouble("item.pool-shrink-threshold", itemPoolShrinkThreshold);
+        itemMaxPerChunk = getInt("item.max-per-chunk", itemMaxPerChunk);
         noDurabilityExcept = getBoolean("item.no-durability-except", noDurabilityExcept);
         net.minecraft.world.item.Item.sourbycraftMaxStackSize = itemMaxStackSize;
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
