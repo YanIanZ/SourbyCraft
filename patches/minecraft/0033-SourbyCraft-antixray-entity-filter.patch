@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 20 May 2026 00:00:00 +0700
+Subject: [PATCH] SourbyCraft antixray entity filter
+
+
+diff --git a/net/minecraft/server/level/ServerEntity.java b/net/minecraft/server/level/ServerEntity.java
+index 3a817c92147bb78c60238f3ddc1644b721aed7a2..db5342b179a3d8fd98b65276baea7487307aa53c 100644
+--- a/net/minecraft/server/level/ServerEntity.java
++++ b/net/minecraft/server/level/ServerEntity.java
+@@ -95,6 +95,13 @@ public class ServerEntity {
+     // Paper end - fix desync when a player is added to the tracker
+ 
+     public void sendChanges() {
++        // SourbyCraft start - entity obfuscation filter
++        if (this.level.chunkPacketBlockController instanceof io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray controller) {
++            this.trackedPlayers.removeIf(conn ->
++                !controller.isEntityVisibleTo(this.entity, conn.getPlayer())
++            );
++        }
++        // SourbyCraft end
+         // Paper start - optimise collisions
+         if (((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)this.entity).moonrise$isHardColliding()) {
+             this.teleportDelay = 9999;
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index de9c3d1a5724ee06e1461d8cdb6955945b4a09cc..2d67248efe3a7b08cf1ec58a7a898244aedd5e74 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -869,7 +869,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         this.palettedContainerFactory = PalettedContainerFactory.create(registryAccess);
+         this.damageSources = new DamageSources(registryAccess);
+         this.entityLookup = new ca.spottedleaf.moonrise.patches.chunk_system.level.entity.dfl.DefaultEntityLookup(this); // Paper - rewrite chunk system
+-        this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray
++        this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor, this.sourbycraftConfig) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray
+     }
+ 
+     // Paper start - Cancel hit for vanished players

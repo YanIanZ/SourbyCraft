@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 20 May 2026 10:00:00 +0700
+Subject: [PATCH] Antixray particle filter in CraftPlayer.spawnParticle
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -2672,6 +2672,14 @@
+ 
+     @Override
+     public <T> void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
++        // SourbyCraft start - antixray particle filter
++        net.minecraft.world.level.Level level = this.getHandle().level();
++        if (level.chunkPacketBlockController instanceof io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray controller) {
++            if (!controller.isPositionVisibleTo(new net.minecraft.world.phys.Vec3(x, y, z), this.getHandle())) {
++                return;
++            }
++        }
++        // SourbyCraft end
+         ClientboundLevelParticlesPacket packet = new ClientboundLevelParticlesPacket(CraftParticle.createParticleParam(particle, data), force, false, x, y, z, (float) offsetX, (float) offsetY, (float) offsetZ, (float) extra, count); // Paper - fix x/y/z precision loss
+         this.getHandle().connection.send(packet);
+     }

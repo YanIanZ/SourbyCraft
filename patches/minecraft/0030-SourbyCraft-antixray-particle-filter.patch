@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 20 May 2026 10:00:00 +0700
+Subject: [PATCH] Antixray particle filter
+
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index dc65503a2d785d64d37b76b0303f51cf66d9769a..4d9cc8818178f005b1e497c18bd319e2f1e44f89 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -2132,6 +2132,13 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         } else {
+             BlockPos blockPos = player.blockPosition();
+             if (blockPos.closerToCenterThan(new Vec3(x, y, z), overrideLimiter ? 512.0 : 32.0)) {
++                // SourbyCraft start - antixray particle filter
++                if (this.chunkPacketBlockController instanceof io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray controller) {
++                    if (!controller.isPositionVisibleTo(new Vec3(x, y, z), player)) {
++                        return false;
++                    }
++                }
++                // SourbyCraft end
+                 player.connection.send(packet);
+                 return true;
+             } else {
