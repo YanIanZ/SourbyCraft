@@ -88,9 +88,9 @@ index b03b2d098c20ce53403de7b0aeb0cf67a61bf7b4..62a87682f7f1e9466dcb16a77e294ad2
 +        for (int xi = 0; xi <= mx; xi++) {
 +            for (int yi = 0; yi <= my; yi++) {
 +                for (int zi = 0; zi <= mz; zi++) {
-+                    double dx = xi == 0 ? bb.minX + precision : (xi == 2 ? bb.maxX - precision : (bb.minX + bb.maxX) * 0.5);
-+                    double dy = yi == 0 ? bb.minY + precision : (yi == 2 ? bb.maxY - precision : (bb.minY + bb.maxY) * 0.5);
-+                    double dz = zi == 0 ? bb.minZ + precision : (zi == 2 ? bb.maxZ - precision : (bb.minZ + bb.maxZ) * 0.5);
++                    double dx = (mx == 0) ? (bb.minX + bb.maxX) * 0.5 : xi == 0 ? bb.minX + precision : (xi == 2 ? bb.maxX - precision : (bb.minX + bb.maxX) * 0.5);
++                    double dy = (my == 1) ? (yi == 0 ? bb.minY + precision : bb.maxY - precision) : yi == 0 ? bb.minY + precision : (yi == 2 ? bb.maxY - precision : (bb.minY + bb.maxY) * 0.5);
++                    double dz = (mz == 0) ? (bb.minZ + bb.maxZ) * 0.5 : zi == 0 ? bb.minZ + precision : (zi == 2 ? bb.maxZ - precision : (bb.minZ + bb.maxZ) * 0.5);
 +                    net.minecraft.world.phys.Vec3 target = new net.minecraft.world.phys.Vec3(dx, dy, dz);
 +                    if (!isBlocked(eyePos, target, player)) return true;
 +                }
