@@ -56,9 +56,9 @@ public final class ItemEntityPool {
         LOGGER.debug("Pre-allocated {} ItemEntity for {}", count, key);
     }
 
-    public ItemEntity acquire(ServerLevel level, Vec3 pos, ItemStack stack, @Nullable UUID owner) {
+    public ItemEntity acquire(ServerLevel level, Vec3 pos, ItemStack stack, @Nullable UUID owner, @Nullable Vec3 velocity) {
         if (!SourbyCraftConfig.itemPoolEnabled) {
-            return createNew(level, pos, stack);
+            return createNew(level, pos, stack, velocity);
         }
 
         ResourceKey<Level> key = level.dimension();
@@ -68,12 +68,12 @@ public final class ItemEntityPool {
         if (free != null && !free.isEmpty()) {
             entity = free.poll();
             if (entity == null) {
-                entity = createNew(level, pos, stack);
+                entity = createNew(level, pos, stack, velocity);
             } else {
-                configureEntity(entity, level, pos, stack, owner);
+                configureEntity(entity, level, pos, stack, owner, velocity);
             }
         } else {
-            entity = createNew(level, pos, stack);
+            entity = createNew(level, pos, stack, velocity);
         }
 
         AtomicInteger count = activeCounts.computeIfAbsent(key, k -> new AtomicInteger());
@@ -147,22 +147,28 @@ public final class ItemEntityPool {
         }
     }
 
-    private ItemEntity createNew(ServerLevel level, Vec3 pos, ItemStack stack) {
-        return new ItemEntity(level, pos.x, pos.y, pos.z, stack);
+    private ItemEntity createNew(ServerLevel level, Vec3 pos, ItemStack stack, @Nullable Vec3 velocity) {
+        ItemEntity entity = new ItemEntity(level, pos.x, pos.y, pos.z, stack);
+        if (velocity != null) {
+            entity.setDeltaMovement(velocity);
+        }
+        return entity;
     }
 
-    private void configureEntity(ItemEntity entity, ServerLevel level, Vec3 pos, ItemStack stack, UUID owner) {
+    private void configureEntity(ItemEntity entity, ServerLevel level, Vec3 pos, ItemStack stack, UUID owner, @Nullable Vec3 velocity) {
         entity.setLevel(level);
         entity.setPos(pos);
         entity.setItem(stack);
-        entity.setDeltaMovement(Vec3.ZERO);
+        if (velocity != null) {
+            entity.setDeltaMovement(velocity);
+        }
         entity.age = 0;
         entity.tickCount = 0;
         entity.setRemoved(null);
         entity.unsetRemoved();
         entity.setSharedFlag(0, false);
-        // Owner UUID set by existing anti-snatch system (patch 0024)
         if (owner != null && SourbyCraftConfig.ownerProtectionEnabled) {
+            entity.ownerUUID = owner;
             entity.pickupDelay = SourbyCraftConfig.ownerProtectionTime * 20;
         }
         level.addFreshEntity(entity);
