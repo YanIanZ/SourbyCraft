@@ -21,7 +21,7 @@ public class SourbyCraftConfig {
     private static File CONFIG_FILE;
     public static YamlConfiguration config;
 
-    static int version, currentVersion = 6;
+    static int version, currentVersion = 7;
     static boolean verbose;
 
     public static boolean asyncChunkLoad = false;
@@ -37,7 +37,7 @@ public class SourbyCraftConfig {
     public static boolean chunkCompressionCache = false;
 
     public static boolean swmEnabled = true;
-    public static String swmVersion = "v6-REL";
+    public static String swmVersion = "v7-REL";
     public static boolean swmAutoInstall = false;
     public static String swmLoader = "file";
     public static String swmFileDir = "slime_worlds";
@@ -82,6 +82,9 @@ public class SourbyCraftConfig {
     public static int mobTickDistance = 32;
     public static int mobPathfindInterval = 20;
     public static boolean asyncSaveBatch = true;
+
+    // DAB entity overrides: key = "minecraft:zombie", value = [maxTickFreq, activationDistMod]
+    public static final java.util.Map<String, int[]> dabEntityOverrides = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static void init(File configFile) {
         CONFIG_FILE = configFile;
@@ -145,6 +148,10 @@ public class SourbyCraftConfig {
                 set("swm.version", swmVersion);
             }
             // SourbyCraft end
+            if ("v6-REL".equals(swmVersion)) {
+                swmVersion = "v7-REL";
+                set("swm.version", swmVersion);
+            }
         }
 
         autoThrottleView = getBoolean("network.auto-throttle-view", autoThrottleView);
@@ -188,6 +195,16 @@ public class SourbyCraftConfig {
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
         mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
+
+        // DAB entity overrides
+        org.bukkit.configuration.ConfigurationSection dabSec = config.getConfigurationSection("dab.entity-overrides");
+        if (dabSec != null) {
+            for (String key : dabSec.getKeys(false)) {
+                int freq = dabSec.getInt(key + ".max-tick-freq", 20);
+                int mod = dabSec.getInt(key + ".activation-dist-mod", 8);
+                dabEntityOverrides.put(key, new int[]{freq, mod});
+            }
+        }
 
         if (idleTimeout > 0) {
             // Idle timeout will be implemented via scheduler

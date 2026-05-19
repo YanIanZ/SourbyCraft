@@ -27,7 +27,7 @@ val extractApi by tasks.registering(Jar::class) {
     dependsOn(":sourbycraft-server:jar")
     archiveFileName.set("sourbycraft-swm-api-${project.version}.jar")
 
-    from(zipTree(file("../sourbycraft-server/build/libs/sourbycraft-server-v6-REL.jar"))) {
+    from(zipTree(file("../sourbycraft-server/build/libs/sourbycraft-server-v7-REL.jar"))) {
         include("dev/iyanz/sourbycraft/swm/api/**")
     }
 }
