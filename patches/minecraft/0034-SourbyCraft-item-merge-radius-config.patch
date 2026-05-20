@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 20 May 2026 11:00:00 +0700
+Subject: [PATCH] SourbyCraft item merge radius config
+
+
+diff --git a/net/minecraft/world/entity/item/ItemEntity.java b/net/minecraft/world/entity/item/ItemEntity.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/world/entity/item/ItemEntity.java
++++ b/net/minecraft/world/entity/item/ItemEntity.java
+@@ -246,7 +246,7 @@
+ 
+     private void mergeWithNeighbours() {
+         if (this.isMergable()) {
+-            double radius = this.level().spigotConfig.itemMerge; // Spigot
++            double radius = Math.min(this.level().spigotConfig.itemMerge, dev.iyanz.sourbycraft.SourbyCraftConfig.itemMergeRadius); // Spigot // SourbyCraft - use configurable radius
+             for (ItemEntity itemEntity : this.level()
+                 .getEntitiesOfClass(ItemEntity.class, this.getBoundingBox().inflate(radius, this.level().paperConfig().entities.behavior.onlyMergeItemsHorizontally ? 0 : radius - 0.5D, radius), neighbour -> neighbour != this && neighbour.isMergable())) { // Spigot // Paper - configuration to only merge items horizontally
+                 if (itemEntity.isMergable()) {
