@@ -68,7 +68,7 @@ public class SourbyCraftConfig {
     public static int idleTimeout = 0;
     public static boolean itemMergeOptimize = true;
     public static int itemDespawnRate = 6000;
-    public static int itemMergeRadius = 3;
+    public static int itemMergeRadius = 1;
     public static int itemMaxStackSize = 99;
     public static boolean unlimitedDropStack = true;
     public static int dropStackCap = Integer.MAX_VALUE;
