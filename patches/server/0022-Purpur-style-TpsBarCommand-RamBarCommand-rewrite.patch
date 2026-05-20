@@ -1,0 +1,212 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 20 May 2026 11:00:00 +0700
+Subject: [PATCH] Purpur-style TpsBarCommand + RamBarCommand rewrite
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/TpsBarCommand.java
+@@ -1,22 +1,88 @@
+ package dev.iyanz.sourbycraft.command;
+ import dev.iyanz.sourbycraft.SourbyCraftColors;
+ import net.kyori.adventure.bossbar.BossBar;
+ import org.bukkit.Bukkit;
+ import org.bukkit.command.Command;
+ import org.bukkit.command.CommandSender;
+ import org.bukkit.entity.Player;
++
++import java.util.Map;
++import java.util.UUID;
++import java.util.concurrent.ConcurrentHashMap;
++
+ import static net.kyori.adventure.text.Component.text;
++
+ public class TpsBarCommand extends Command {
+-    private static BossBar bar;
+-    public TpsBarCommand(String n){super(n);this.description="BossBar TPS";this.usageMessage="/tpsbar";this.setPermission("sourbycraft.command.tpsbar");}
+-    public boolean execute(CommandSender s,String a,String[] args){
+-        if(!(s instanceof Player p)){s.sendMessage("Players only");return true;}
+-        if(!testPermission(s))return true;
+-        if(bar==null)bar=BossBar.bossBar(text("TPS",SourbyCraftColors.HEADER),1f,BossBar.Color.GREEN,BossBar.Overlay.PROGRESS);
+-        double[]tps=Bukkit.getTPS();double mspt=Bukkit.getAverageTickTime();
+-        bar.progress((float)(tps[0]/20.0));bar.color(tps[0]>18?BossBar.Color.GREEN:tps[0]>15?BossBar.Color.YELLOW:BossBar.Color.RED);
+-        bar.name(text(String.format("TPS: %.1f  MSPT: %.1fms",tps[0],mspt),SourbyCraftColors.VALUE));
+-        p.showBossBar(bar);Bukkit.getScheduler().runTaskLater(Bukkit.getPluginManager().getPlugins()[0],()->p.hideBossBar(bar),200L);
++
++    private static final Map<UUID, BossBar> bars = new ConcurrentHashMap<>();
++    private static final Map<UUID, Integer> tasks = new ConcurrentHashMap<>();
++
++    public TpsBarCommand(String n) {
++        super(n);
++        this.description = "Toggle TPS BossBar";
++        this.usageMessage = "/tpsbar [player]";
++        this.setPermission("sourbycraft.command.tpsbar");
++    }
++
++    @Override
++    public boolean execute(CommandSender sender, String label, String[] args) {
++        if (!testPermission(sender)) return true;
++        Player target;
++        if (args.length > 0) {
++            if (!sender.hasPermission("sourbycraft.command.tpsbar.others")) {
++                sender.sendMessage("No permission to toggle tpsbar for others");
++                return true;
++            }
++            target = Bukkit.getPlayer(args[0]);
++            if (target == null) {
++                sender.sendMessage("Player not found: " + args[0]);
++                return true;
++            }
++        } else if (sender instanceof Player p) {
++            target = p;
++        } else {
++            sender.sendMessage("Usage: /tpsbar <player>");
++            return true;
++        }
++
++        UUID uuid = target.getUniqueId();
++        BossBar oldBar = bars.remove(uuid);
++        Integer taskId = tasks.remove(uuid);
++
++        if (oldBar != null) {
++            target.hideBossBar(oldBar);
++            if (taskId != null) Bukkit.getScheduler().cancelTask(taskId);
++            target.sendMessage(text("TPS Bar hidden", SourbyCraftColors.VALUE));
++            return true;
++        }
++
++        final BossBar bar = BossBar.bossBar(text("TPS", SourbyCraftColors.HEADER), 1f, BossBar.Color.GREEN, BossBar.Overlay.PROGRESS);
++        bars.put(uuid, bar);
++
++        int task = Bukkit.getScheduler().scheduleSyncRepeatingTask(Bukkit.getPluginManager().getPlugins()[0], () -> {
++            if (!target.isOnline()) {
++                BossBar b = bars.remove(uuid);
++                Integer tid = tasks.remove(uuid);
++                if (b != null) target.hideBossBar(b);
++                if (tid != null) Bukkit.getScheduler().cancelTask(tid);
++                return;
++            }
++            try {
++                double[] tps = Bukkit.getTPS();
++                double mspt = Bukkit.getAverageTickTime();
++                double progress = Math.min(tps[0] / 20.0, 1.0);
++                bar.progress((float) progress);
++                bar.color(tps[0] > 18 ? BossBar.Color.GREEN : tps[0] > 15 ? BossBar.Color.YELLOW : BossBar.Color.RED);
++                bar.name(text(String.format("TPS: %.1f  MSPT: %.1fms", tps[0], mspt), SourbyCraftColors.VALUE));
++            } catch (Exception ignored) {}
++        }, 0L, 20L);
++        tasks.put(uuid, task);
++
++        target.showBossBar(bar);
++        target.sendMessage(text("TPS Bar shown", SourbyCraftColors.VALUE));
+         return true;
+     }
+ }
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/RamBarCommand.java
+@@ -1,23 +1,93 @@
+ package dev.iyanz.sourbycraft.command;
+ import dev.iyanz.sourbycraft.SourbyCraftColors;
+-import dev.iyanz.sourbycraft.util.BarUtil;
+ import net.kyori.adventure.bossbar.BossBar;
+ import org.bukkit.Bukkit;
+ import org.bukkit.command.Command;
+ import org.bukkit.command.CommandSender;
+ import org.bukkit.entity.Player;
++
++import java.util.Map;
++import java.util.UUID;
++import java.util.concurrent.ConcurrentHashMap;
++
+ import static net.kyori.adventure.text.Component.text;
++
+ public class RamBarCommand extends Command {
+-    private static BossBar bar;
+-    public RamBarCommand(String n){super(n);this.description="BossBar RAM";this.usageMessage="/rambar";this.setPermission("sourbycraft.command.rambar");}
+-    public boolean execute(CommandSender s,String a,String[] args){
+-        if(!(s instanceof Player p)){s.sendMessage("Players only");return true;}
+-        if(!testPermission(s))return true;
+-        if(bar==null)bar=BossBar.bossBar(text("RAM",SourbyCraftColors.HEADER),0f,BossBar.Color.GREEN,BossBar.Overlay.PROGRESS);
+-        Runtime rt=Runtime.getRuntime();long max=rt.maxMemory(),total=rt.totalMemory(),used=total-rt.freeMemory();double pct=max==Long.MAX_VALUE?(double)used/total:(double)used/max;String lbl=max==Long.MAX_VALUE?BarUtil.INFINITY:(max/1048576)+"MB";
+-        bar.progress((float)Math.min(pct,1.0));bar.color(pct<0.5?BossBar.Color.GREEN:pct<0.8?BossBar.Color.YELLOW:BossBar.Color.RED);
+-        bar.name(text(String.format("RAM: %d/%s (%.0f%%)",used/1048576,lbl,pct*100),SourbyCraftColors.VALUE));
+-        p.showBossBar(bar);Bukkit.getScheduler().runTaskLater(Bukkit.getPluginManager().getPlugins()[0],()->p.hideBossBar(bar),200L);
++
++    private static final Map<UUID, BossBar> bars = new ConcurrentHashMap<>();
++    private static final Map<UUID, Integer> tasks = new ConcurrentHashMap<>();
++    private static final String INFINITY = "∞";
++
++    public RamBarCommand(String n) {
++        super(n);
++        this.description = "Toggle RAM BossBar";
++        this.usageMessage = "/rambar [player]";
++        this.setPermission("sourbycraft.command.rambar");
++    }
++
++    @Override
++    public boolean execute(CommandSender sender, String label, String[] args) {
++        if (!testPermission(sender)) return true;
++        Player target;
++        if (args.length > 0) {
++            if (!sender.hasPermission("sourbycraft.command.rambar.others")) {
++                sender.sendMessage("No permission to toggle rambar for others");
++                return true;
++            }
++            target = Bukkit.getPlayer(args[0]);
++            if (target == null) {
++                sender.sendMessage("Player not found: " + args[0]);
++                return true;
++            }
++        } else if (sender instanceof Player p) {
++            target = p;
++        } else {
++            sender.sendMessage("Usage: /rambar <player>");
++            return true;
++        }
++
++        UUID uuid = target.getUniqueId();
++        BossBar oldBar = bars.remove(uuid);
++        Integer taskId = tasks.remove(uuid);
++
++        if (oldBar != null) {
++            target.hideBossBar(oldBar);
++            if (taskId != null) Bukkit.getScheduler().cancelTask(taskId);
++            target.sendMessage(text("RAM Bar hidden", SourbyCraftColors.VALUE));
++            return true;
++        }
++
++        final BossBar bar = BossBar.bossBar(text("RAM", SourbyCraftColors.HEADER), 0f, BossBar.Color.GREEN, BossBar.Overlay.PROGRESS);
++        bars.put(uuid, bar);
++
++        int task = Bukkit.getScheduler().scheduleSyncRepeatingTask(Bukkit.getPluginManager().getPlugins()[0], () -> {
++            if (!target.isOnline()) {
++                BossBar b = bars.remove(uuid);
++                Integer tid = tasks.remove(uuid);
++                if (b != null) target.hideBossBar(b);
++                if (tid != null) Bukkit.getScheduler().cancelTask(tid);
++                return;
++            }
++            try {
++                Runtime rt = Runtime.getRuntime();
++                long max = rt.maxMemory();
++                long total = rt.totalMemory();
++                long used = total - rt.freeMemory();
++                double pct = max == Long.MAX_VALUE ? (double) used / total : (double) used / max;
++                double progress = Math.min(pct, 1.0);
++                String maxLabel = max == Long.MAX_VALUE ? INFINITY : (max / 1048576) + "MB";
++                bar.progress((float) progress);
++                bar.color(pct < 0.5 ? BossBar.Color.GREEN : pct < 0.8 ? BossBar.Color.YELLOW : BossBar.Color.RED);
++                bar.name(text(String.format("RAM: %d/%s (%.0f%%)", used / 1048576, maxLabel, pct * 100), SourbyCraftColors.VALUE));
++            } catch (Exception ignored) {}
++        }, 0L, 20L);
++        tasks.put(uuid, task);
++
++        target.showBossBar(bar);
++        target.sendMessage(text("RAM Bar shown", SourbyCraftColors.VALUE));
+         return true;
+     }
+ }
