@@ -69,7 +69,6 @@ public class SourbyCraftConfig {
     public static boolean itemMergeOptimize = true;
     public static int itemDespawnRate = 6000;
     public static int itemMergeRadius = 1;
-    public static int itemMaxStackSize = 99;
     public static boolean unlimitedDropStack = true;
     public static int dropStackCap = Integer.MAX_VALUE;
     public static boolean ownerProtectionEnabled = true;
@@ -131,6 +130,7 @@ public class SourbyCraftConfig {
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of(swmFileDir)); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create " + swmFileDir + ": " + e.getMessage()); }
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create mods directory: " + e.getMessage()); }
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create plugins directory: " + e.getMessage()); }
+        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins/SourbyCraft")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create plugins/SourbyCraft directory: " + e.getMessage()); }
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins/SourbyCraft/speedtest")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create speedtest directory: " + e.getMessage()); }
         // SourbyCraft end
             dev.iyanz.sourbycraft.swm.installer.PluginInstaller.install("plugins/");
@@ -180,7 +180,15 @@ public class SourbyCraftConfig {
         itemMergeOptimize = getBoolean("entity.item-merge-optimize", itemMergeOptimize);
         itemDespawnRate = getInt("entity.item-despawn-rate", itemDespawnRate);
         itemMergeRadius = getInt("entity.item-merge-radius", itemMergeRadius);
-        itemMaxStackSize = Math.min(getInt("item.max-stack-size", itemMaxStackSize), 99);
+        // SourbyCraft v9 - dynamic-max-stack-size removed (NBT codec mismatch, see spec §13b).
+        // Will be re-delivered as wildstacker custom-NBT count in a follow-up sub-spec.
+        if (config.contains("dynamic-max-stack-size") || config.contains("item.max-stack-size")) {
+            Bukkit.getLogger().warning(
+                "[SourbyCraft] dynamic-max-stack-size (item.max-stack-size) is deprecated and ignored as of v9. " +
+                "It caused ItemEntity NBT serialization failures (count > 99). " +
+                "Wildstacker-style stacking will return via a separate patch in a future release."
+            );
+        }
         unlimitedDropStack = getBoolean("item.unlimited-drop-stack", unlimitedDropStack);
         dropStackCap = getInt("item.drop-stack-cap", dropStackCap);
         ownerProtectionEnabled = getBoolean("item.owner-protection-enabled", ownerProtectionEnabled);
@@ -191,7 +199,6 @@ public class SourbyCraftConfig {
         itemPoolShrinkThreshold = (float) getDouble("item.pool-shrink-threshold", itemPoolShrinkThreshold);
         itemMaxPerChunk = getInt("item.max-per-chunk", itemMaxPerChunk);
         noDurabilityExcept = getBoolean("item.no-durability-except", noDurabilityExcept);
-        net.minecraft.world.item.Item.sourbycraftMaxStackSize = itemMaxStackSize;
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
         mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
