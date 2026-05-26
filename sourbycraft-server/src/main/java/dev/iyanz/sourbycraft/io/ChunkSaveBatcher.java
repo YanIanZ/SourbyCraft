@@ -71,7 +71,7 @@ public final class ChunkSaveBatcher {
             it.remove();
             if (entries == null || entries.isEmpty()) continue;
             ChunkSaveSnapshot snap = new ChunkSaveSnapshot(k.world, k.rx, k.rz, entries);
-            pool.submit(snap); // backpressure: drop on floor when full (TODO: inline fallback in T7)
+            pool.submit(snap); // backpressure: drop on floor when full (T7 deferred inline fallback)
         }
     }
 
