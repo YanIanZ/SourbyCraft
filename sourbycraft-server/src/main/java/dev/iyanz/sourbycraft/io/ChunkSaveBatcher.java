@@ -12,6 +12,12 @@ import java.util.function.Function;
  */
 public final class ChunkSaveBatcher {
 
+    /** Lazily set to the first instance created (server-wide singleton). */
+    private static volatile ChunkSaveBatcher INSTANCE;
+
+    /** Returns the existing instance without forcing initialisation, or null. */
+    public static ChunkSaveBatcher peek() { return INSTANCE; }
+
     private static final class Key {
         final String world; final int rx; final int rz;
         Key(String world, int rx, int rz) { this.world = world; this.rx = rx; this.rz = rz; }
@@ -49,6 +55,7 @@ public final class ChunkSaveBatcher {
         });
         this.flusher.scheduleAtFixedRate(this::flushExpired,
             batchWindowMs, Math.max(10, batchWindowMs / 4), TimeUnit.MILLISECONDS);
+        if (INSTANCE == null) INSTANCE = this;
     }
 
     /** Enqueue a single chunk write. Coalesced into the next batch window. */
