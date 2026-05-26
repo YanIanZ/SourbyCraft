@@ -17,6 +17,9 @@ public class PerfCommand {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("perf")
             .executes(ctx -> status(ctx.getSource()))
+            .then(Commands.literal("v9")
+                .executes(ctx -> { PerfV9Subcommand.status(ctx.getSource()); return 1; })
+            )
             .then(Commands.literal("scale")
                 .then(Commands.literal("on").executes(ctx -> toggle(ctx.getSource(), true)))
                 .then(Commands.literal("off").executes(ctx -> toggle(ctx.getSource(), false)))
