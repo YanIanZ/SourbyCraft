@@ -51,14 +51,15 @@ class AsyncWorkerPoolTest {
         ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor();
         // multiplier 5, but avg starts at 0 => floor 100ms.
         // submit tasks that sleep 2 seconds => 3 timeouts => breaker trips.
+        // 30s cooldown so breaker stays tripped during the assertion window
         AsyncWorkerPool<Integer, Integer> pool = new AsyncWorkerPool<>(
-            "test", exec, 16, 3, 200, 5.0,
+            "test", exec, 16, 3, 30_000, 5.0,
             n -> { try { Thread.sleep(2000); } catch (InterruptedException ignored) {} return n; });
         try {
             pool.submit(1);
             pool.submit(2);
             pool.submit(3);
-            // Wait for watchdog cycles (deadline=100ms => ~5 cycles)
+            // Wait for watchdog cycles (deadline=100ms => ~5 cycles + idle poll 50ms)
             Thread.sleep(1000);
             assertTrue(pool.breakerTripped(), "Breaker should be tripped after 3 timeouts");
             assertFalse(pool.submit(99), "Submit must be rejected once breaker is tripped");
