@@ -19,7 +19,6 @@ public final class AsyncWorkerPool<S, D> {
 
     private final String name;
     private final ExecutorService executor;
-    private final long circuitCooldownMs;
     private final Function<S, D> compute;
 
     private final BlockingQueue<S> queue;
@@ -41,7 +40,6 @@ public final class AsyncWorkerPool<S, D> {
     ) {
         this.name = name;
         this.executor = executor;
-        this.circuitCooldownMs = circuitCooldownMs;
         this.compute = compute;
         this.queue = new ArrayBlockingQueue<>(queueCap);
         this.diffs = new LinkedBlockingQueue<>();
@@ -57,6 +55,7 @@ public final class AsyncWorkerPool<S, D> {
                 try { snap = queue.poll(50, TimeUnit.MILLISECONDS); }
                 catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
                 if (snap == null) {
+                    if (breaker.tripped()) breaker.tryReset();
                     continue;
                 }
                 runOne(snap);
@@ -85,9 +84,11 @@ public final class AsyncWorkerPool<S, D> {
         }
     }
 
-    /** Submit a snapshot. Returns false if queue full or breaker tripped. */
+    /** Submit a snapshot. Returns false if queue full or breaker tripped (auto-resets after cooldown). */
     public boolean submit(S snap) {
-        if (breaker.tripped()) return false;
+        if (breaker.tripped()) {
+            if (!breaker.tryReset()) return false;
+        }
         boolean accepted = queue.offer(snap);
         if (accepted) {
             metrics.recordSubmit();
