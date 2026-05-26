@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 27 May 2026 02:18:13 +0700
+Subject: [PATCH] fix: add compileOnly deps for MongoDB and HikariCP SWM
+ loaders
+
+MongoLoader and MysqlLoader reference com.mongodb and com.zaxxer.hikari
+but those were not on the sourbycraft-server compile classpath, causing
+~80 errors. Added compileOnly deps so the loaders compile correctly;
+runtime deps are provided by swm-plugin or the running server classpath.
+
+diff --git a/build.gradle.kts b/build.gradle.kts
+index e32616ec21895e9deb1e45bbb8ac6b3d411441ea..8aa099bc43c2abb74469864ef06a818240b6791d 100644
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -236,6 +236,11 @@ dependencies {
+     // Spark
+     implementation("me.lucko:spark-api:0.1-20240720.200737-2")
+     implementation("me.lucko:spark-paper:1.10.152")
++
++    // SourbyCraft start - SWM loader deps (compile-only; runtime provided by swm-plugin or server classpath)
++    compileOnly("org.mongodb:mongodb-driver-sync:4.11.0")
++    compileOnly("com.zaxxer:HikariCP:5.1.0")
++    // SourbyCraft end
+ }
+ 
+ // Pufferfish start
