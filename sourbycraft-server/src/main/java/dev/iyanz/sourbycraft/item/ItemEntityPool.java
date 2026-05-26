@@ -70,7 +70,7 @@ public final class ItemEntityPool {
             if (entity == null) {
                 entity = createNew(level, pos, stack, velocity);
             } else {
-                configureEntity(entity, level, pos, stack, owner, velocity);
+                configureEntity(entity, level, pos, stack, velocity);
             }
         } else {
             entity = createNew(level, pos, stack, velocity);
@@ -155,7 +155,8 @@ public final class ItemEntityPool {
         return entity;
     }
 
-    private void configureEntity(ItemEntity entity, ServerLevel level, Vec3 pos, ItemStack stack, UUID owner, @Nullable Vec3 velocity) {
+    // SourbyCraft v9: ownerUUID anti-snatch removed (patch 0028-0034 series dropped pre-v9).
+    private void configureEntity(ItemEntity entity, ServerLevel level, Vec3 pos, ItemStack stack, @Nullable Vec3 velocity) {
         entity.setLevel(level);
         entity.setPos(pos);
         entity.setItem(stack);
@@ -167,10 +168,6 @@ public final class ItemEntityPool {
         entity.setRemoved(null);
         entity.unsetRemoved();
         entity.setSharedFlag(0, false);
-        if (owner != null && SourbyCraftConfig.ownerProtectionEnabled) {
-            entity.ownerUUID = owner;
-            entity.pickupDelay = SourbyCraftConfig.ownerProtectionTime * 20;
-        }
         level.addFreshEntity(entity);
     }
 }
