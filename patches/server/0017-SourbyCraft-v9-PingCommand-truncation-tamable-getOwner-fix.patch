@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 27 May 2026 01:57:53 +0700
+Subject: [PATCH] =?UTF-8?q?fix:=20PingCommand=20truncation=20=E2=80=94=20a?=
+ =?UTF-8?q?dd=20missing=20closing=20braces?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PingCommand.java was missing the lambda closing brace for
+runTaskAsynchronously, the return statement, and the closing braces
+for execute() and the class itself. This caused a compile error:
+'reached end of file while parsing'.
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+index d0aa80e40dbcccb4876b43d2ee89959dfec88226..f953beabb49b622d2ed975e0471e65a16fa1704a 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/PingCommand.java
+@@ -25,3 +25,7 @@ public class PingCommand extends Command {
+         Bukkit.getScheduler().runTaskAsynchronously(Bukkit.getPluginManager().getPlugins()[0],()->{
+             String geo=GeoUtil.lookup(t);
+             if(geo!=null)s.sendMessage(text().append(text("Location: ",SourbyCraftColors.LABEL)).append(text(geo,SourbyCraftColors.VALUE)));
++        });
++        return true;
++    }
++}
