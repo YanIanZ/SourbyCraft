@@ -1,7 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: SourbyCraft <dev@iyanz.dev>
 Date: Tue, 19 May 2026 00:00:00 +0700
-Subject: [PATCH] feat(v6): enable virtual threads for Minecraft server thread pools
+Subject: [PATCH] feat(v6): enable virtual threads for Minecraft server thread
+ pools
 
 When SourbyCraftConfig.virtualThreads is true, all server internal
 thread pools (BACKGROUND_EXECUTOR, IO_POOL, DIMENSION_DATA_IO_POOL,
@@ -12,7 +13,7 @@ Virtual threads are lightweight (~1KB stack) and enable unbounded
 concurrency without platform thread overhead.
 
 diff --git a/net/minecraft/util/Util.java b/net/minecraft/util/Util.java
-index 1e77bccf81321030d451ed8b6ff766c400d4f81..b590a293071fba9530b021a4e25594ebf2f3a092 100644
+index 1e77bcc0f81321030d451ed8b6ff766c400d4f81..b590a293071fba9530b021a4e25594ebf2f3a092 100644
 --- a/net/minecraft/util/Util.java
 +++ b/net/minecraft/util/Util.java
 @@ -83,6 +83,7 @@ import net.minecraft.SharedConstants;
