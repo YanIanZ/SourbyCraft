@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 27 May 2026 22:55:11 +0700
+Subject: [PATCH] SourbyCraft: wildstacker verbose diagnostics + /wildstack
+ command
+
+Adds INFO log entries on every wildstacker lifecycle event:
+- start() logs each phase
+- onItemSpawn logs every spawn with type/count/location
+- tryMergeNearby logs candidate count, LOS rejects, merge results
+
+Adds /wildstack command (perm: sourbycraft.command.wildstack) that
+dumps: started, enabled, hologram, los, radius, PDC key, hologram
+count, per-world item count.
+
+Registers WildstackerDebugCommand in both CraftServer command blocks.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 215e561b79452a36acd62b24af92884601a9d295..4f33130632c90a9b442f1f834271c7b75f5fd762 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -428,6 +428,7 @@ public final class CraftServer implements Server {
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.ModsCommand("mods"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.RamBarCommand("rambar"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.VerCommand("ver"));
++        this.commandMap.register("", new dev.iyanz.sourbycraft.command.WildstackerDebugCommand("wildstack"));
+         // SourbyCraft end
+ 
+         CraftRegistry.setMinecraftRegistry(console.registryAccess());
+@@ -1049,6 +1050,7 @@ public final class CraftServer implements Server {
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.ModsCommand("mods"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.RamBarCommand("rambar"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.VerCommand("ver"));
++        this.commandMap.register("", new dev.iyanz.sourbycraft.command.WildstackerDebugCommand("wildstack"));
+         // SourbyCraft end
+         this.overrideAllCommandBlockCommands = this.commandsConfiguration.getStringList("command-block-overrides").contains("*");
+         this.ignoreVanillaPermissions = this.commandsConfiguration.getBoolean("ignore-vanilla-permissions");
