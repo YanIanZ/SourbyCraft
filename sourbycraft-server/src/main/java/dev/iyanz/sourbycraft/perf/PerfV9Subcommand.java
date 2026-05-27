@@ -3,6 +3,8 @@ package dev.iyanz.sourbycraft.perf;
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.async.PoolMetrics;
 import dev.iyanz.sourbycraft.io.ChunkSaveBatcher;
+import dev.iyanz.sourbycraft.tick.BatchPhysicsTicker;
+import dev.iyanz.sourbycraft.tick.BatchPhysicsTickers;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
@@ -71,6 +73,17 @@ public final class PerfV9Subcommand {
                 "  chunk-save: submitted=%d completed=%d timeouts=%d queueHigh=%d avgMs=%.2f tripped=%b",
                 s.submitted, s.completed, s.timedOut, s.queueDepthHigh, s.avgLatencyMs,
                 batcher.pool().breakerTripped()
+            )).withStyle(ChatFormatting.GRAY));
+        }
+        BatchPhysicsTicker bpt = BatchPhysicsTickers.peek();
+        if (bpt == null) {
+            src.sendSystemMessage(Component.literal("  parallel-tick: not started").withStyle(ChatFormatting.GRAY));
+        } else {
+            PoolMetrics.Snapshot s = bpt.pool().metrics().snapshot();
+            src.sendSystemMessage(Component.literal(String.format(
+                "  parallel-tick: submitted=%d completed=%d timeouts=%d queueHigh=%d avgMs=%.2f tripped=%b",
+                s.submitted, s.completed, s.timedOut, s.queueDepthHigh, s.avgLatencyMs,
+                bpt.pool().breakerTripped()
             )).withStyle(ChatFormatting.GRAY));
         }
     }
