@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yan <Yan>
-Date: Wed, 27 May 2026 16:20:33 +0700
+Date: Wed, 27 May 2026 17:26:12 +0700
 Subject: [PATCH] SourbyCraft v9.5 wildstacker virtual stack count
 
 Items of the same type merge past the 64 cap via a virtual count stored in
@@ -13,8 +13,12 @@ entity sticks around until it reaches zero.
 
 NBT key: SacStackCount. Config: performance.wildstacker.enabled.
 
+v9.9 fixes:
+- Velocity averaging on merge (prevents items flying/floating)
+- ItemStack CUSTOM_NAME data component set for hover/inventory tooltip visibility
+
 diff --git a/net/minecraft/world/entity/item/ItemEntity.java b/net/minecraft/world/entity/item/ItemEntity.java
-index e82bb8f2d2b0e771dc371fd7e709116e1f5f204f..583d0d847283453274e2d17862e7b2d5c9389ef4 100644
+index e82bb8f2d2b0e771dc371fd7e709116e1f5f204f..54882b4e89f3e75f0255495c298c87d9bb57c4dc 100644
 --- a/net/minecraft/world/entity/item/ItemEntity.java
 +++ b/net/minecraft/world/entity/item/ItemEntity.java
 @@ -53,6 +53,10 @@ public class ItemEntity extends Entity implements TraceableEntity {
@@ -28,7 +32,7 @@ index e82bb8f2d2b0e771dc371fd7e709116e1f5f204f..583d0d847283453274e2d17862e7b2d5
      public net.kyori.adventure.util.TriState frictionState = net.kyori.adventure.util.TriState.NOT_SET; // Paper - Friction API
  
      public ItemEntity(EntityType<? extends ItemEntity> type, Level level) {
-@@ -267,10 +271,33 @@ public class ItemEntity extends Entity implements TraceableEntity {
+@@ -267,10 +271,38 @@ public class ItemEntity extends Entity implements TraceableEntity {
  
      private boolean isMergable() {
          ItemStack item = this.getItem();
@@ -54,6 +58,11 @@ index e82bb8f2d2b0e771dc371fd7e709116e1f5f204f..583d0d847283453274e2d17862e7b2d5
 +            this.sourbycraftStackCount = combined;
 +            this.pickupDelay = Math.max(this.pickupDelay, itemEntity.pickupDelay);
 +            this.age = Math.min(this.age, itemEntity.age);
++            // SourbyCraft start - v9.5 wildstacker fix flying: average velocity so merged item doesn't inherit raw throw velocity
++            net.minecraft.world.phys.Vec3 myVel = this.getDeltaMovement();
++            net.minecraft.world.phys.Vec3 theirVel = itemEntity.getDeltaMovement();
++            this.setDeltaMovement(myVel.add(theirVel).scale(0.5));
++            // SourbyCraft end - v9.5 wildstacker fix flying
 +            this.sourbycraft$updateDisplayName();
 +            itemEntity.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.MERGE);
 +            return;
@@ -62,7 +71,7 @@ index e82bb8f2d2b0e771dc371fd7e709116e1f5f204f..583d0d847283453274e2d17862e7b2d5
          ItemStack item = this.getItem();
          ItemStack item1 = itemEntity.getItem();
          if (Objects.equals(this.target, itemEntity.target) && areMergable(item, item1)) {
-@@ -369,6 +396,11 @@ public class ItemEntity extends Entity implements TraceableEntity {
+@@ -369,6 +401,11 @@ public class ItemEntity extends Entity implements TraceableEntity {
          if (!this.getItem().isEmpty()) {
              output.store("Item", ItemStack.CODEC, this.getItem());
          }
@@ -74,7 +83,7 @@ index e82bb8f2d2b0e771dc371fd7e709116e1f5f204f..583d0d847283453274e2d17862e7b2d5
          // Paper start - Friction API
          if (this.frictionState != net.kyori.adventure.util.TriState.NOT_SET) {
              output.putString("Paper.FrictionState", this.frictionState.toString());
-@@ -384,6 +416,12 @@ public class ItemEntity extends Entity implements TraceableEntity {
+@@ -384,6 +421,12 @@ public class ItemEntity extends Entity implements TraceableEntity {
          this.target = input.read("Owner", UUIDUtil.CODEC).orElse(null);
          this.thrower = EntityReference.read(input, "Thrower");
          this.setItem(input.read("Item", ItemStack.CODEC).orElse(ItemStack.EMPTY));
@@ -87,7 +96,7 @@ index e82bb8f2d2b0e771dc371fd7e709116e1f5f204f..583d0d847283453274e2d17862e7b2d5
          // Paper start - Friction API
          input.getString("Paper.FrictionState").ifPresent(frictionState -> {
              try {
-@@ -466,6 +504,36 @@ public class ItemEntity extends Entity implements TraceableEntity {
+@@ -466,6 +509,36 @@ public class ItemEntity extends Entity implements TraceableEntity {
              }
              // CraftBukkit end
              // Paper end - PlayerAttemptPickupItemEvent
@@ -124,7 +133,7 @@ index e82bb8f2d2b0e771dc371fd7e709116e1f5f204f..583d0d847283453274e2d17862e7b2d5
              if (this.pickupDelay == 0 && (this.target == null || this.target.equals(entity.getUUID())) && entity.getInventory().add(item)) {
                  if (flyAtPlayer) // Paper - PlayerPickupItemEvent
                  entity.take(this, count);
-@@ -480,6 +548,33 @@ public class ItemEntity extends Entity implements TraceableEntity {
+@@ -480,6 +553,36 @@ public class ItemEntity extends Entity implements TraceableEntity {
          }
      }
  
@@ -151,6 +160,9 @@ index e82bb8f2d2b0e771dc371fd7e709116e1f5f204f..583d0d847283453274e2d17862e7b2d5
 +                .append(net.minecraft.network.chat.Component.literal(" ×" + n));
 +            this.setCustomName(displayName);
 +            this.setCustomNameVisible(true);
++            // SourbyCraft start - v9.5 wildstacker hologram: also set ItemStack CUSTOM_NAME so count shows in hover/inventory tooltip
++            this.getItem().set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, displayName);
++            // SourbyCraft end - v9.5 wildstacker hologram
 +        }
 +    }
 +    // SourbyCraft end - v9.5 wildstacker helpers
