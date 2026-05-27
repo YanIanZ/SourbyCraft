@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.perf;
 
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
+import dev.iyanz.sourbycraft.wildstacker.WildstackerManager;
 import dev.iyanz.sourbycraft.async.PoolMetrics;
 import dev.iyanz.sourbycraft.io.ChunkSaveBatcher;
 import dev.iyanz.sourbycraft.tick.BatchPhysicsTicker;
@@ -8,6 +9,7 @@ import dev.iyanz.sourbycraft.tick.BatchPhysicsTickers;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
+import org.bukkit.Bukkit;
 
 /**
  * Renders the runtime state of {@code performance.v9.*} flags.
@@ -86,6 +88,23 @@ public final class PerfV9Subcommand {
                 bpt.pool().breakerTripped()
             )).withStyle(ChatFormatting.GRAY));
         }
+        wildstackerMetrics(src);
+    }
+
+    /** Wildstacker counters appended at the end of metrics output. SourbyCraft v9.18 */
+    public static void wildstackerMetrics(CommandSourceStack src) {
+        int totalItems = 0;
+        for (org.bukkit.World w : Bukkit.getWorlds()) {
+            totalItems += w.getEntitiesByClass(org.bukkit.entity.Item.class).size();
+        }
+        int holograms = 0;
+        try {
+            holograms = WildstackerManager.hologramCount();
+        } catch (Throwable ignored) {}
+        src.sendSystemMessage(Component.literal(String.format(
+            "  wildstacker: items=%d holograms=%d enabled=%b",
+            totalItems, holograms, SourbyCraftConfig.wildstackerEnabled
+        )).withStyle(ChatFormatting.GRAY));
     }
 
     private static void line(CommandSourceStack src, String key, boolean on) {
