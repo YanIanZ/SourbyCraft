@@ -53,26 +53,57 @@ public final class WildstackerManager implements Listener {
     private WildstackerManager() {}
 
     // =====================================================================
+    //  Plugin owner helper
+    // =====================================================================
+
+    /**
+     * Returns an enabled plugin for scheduler/listener registration.
+     * Tries legacy SimplePluginManager first, then PaperPluginManagerImpl, then any.
+     * Returns null only if literally no plugins are loaded.
+     *
+     * Paper 1.21+ separates PaperPluginManagerImpl from the legacy SimplePluginManager,
+     * so getPlugins() can return an empty array even when plugins are loaded. This bridge
+     * method ensures we always find an owner plugin regardless of which manager holds them.
+     *
+     * SourbyCraft v9.18
+     */
+    public static Plugin ownerPlugin() {
+        Plugin[] legacy = Bukkit.getPluginManager().getPlugins();
+        for (Plugin p : legacy) {
+            if (p != null && p.isEnabled()) return p;
+        }
+        try {
+            // PaperPluginManagerImpl may have plugins legacy doesn't see
+            Plugin[] paper =
+                io.papermc.paper.plugin.manager.PaperPluginManagerImpl.getInstance().getPlugins();
+            for (Plugin p : paper) {
+                if (p != null && p.isEnabled()) return p;
+            }
+        } catch (Throwable ignored) {}
+        // Fallback: any plugin even if disabled
+        if (legacy.length > 0 && legacy[0] != null) return legacy[0];
+        return null;
+    }
+
+    // =====================================================================
     //  Lifecycle
     // =====================================================================
 
     /**
-     * Start the manager. Uses the first loaded plugin as the owner for
-     * listener registration and task scheduling — same pattern used by
-     * existing SourbyCraft commands (RamBarCommand, PingCommand, etc.).
+     * Start the manager. Uses ownerPlugin() for listener registration and task
+     * scheduling, bridging Paper's legacy and modern plugin managers.
      *
      * Safe to call multiple times (idempotent).
      */
     public static void start() {
         Bukkit.getLogger().info("[SourbyCraft:Wildstacker] start() invoked, started=" + started);
         if (started) return;
-        Plugin[] plugins = Bukkit.getPluginManager().getPlugins();
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] plugin count = " + plugins.length);
-        if (plugins.length == 0) {
-            Bukkit.getLogger().warning("[SourbyCraft:Wildstacker] No plugins loaded; deferred.");
+        Plugin plugin = ownerPlugin();
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] plugin count (legacy) = " + Bukkit.getPluginManager().getPlugins().length);
+        if (plugin == null) {
+            Bukkit.getLogger().warning("[SourbyCraft:Wildstacker] No plugin available; deferred.");
             return;
         }
-        Plugin plugin = plugins[0];
         Bukkit.getLogger().info("[SourbyCraft:Wildstacker] owner plugin = " + plugin.getName());
         KEY_STACK_COUNT = new NamespacedKey(plugin, "stack_count");
         Bukkit.getPluginManager().registerEvents(new WildstackerManager(), plugin);
@@ -107,6 +138,11 @@ public final class WildstackerManager implements Listener {
             sb.append("  ").append(w.getName()).append(": ").append(items).append(" items\n");
         }
         return sb.toString();
+    }
+
+    /** Returns the number of active hologram TextDisplay entities. SourbyCraft v9.18 */
+    public static int hologramCount() {
+        return ITEM_TO_HOLOGRAM.size();
     }
 
     public static void shutdown() {
@@ -332,15 +368,17 @@ public final class WildstackerManager implements Listener {
         Item item = event.getEntity();
         long initialCount = item.getItemStack().getAmount();
         item.getPersistentDataContainer().set(KEY_STACK_COUNT, PersistentDataType.LONG, initialCount);
-        // SourbyCraft v9.13 — schedule an immediate merge attempt 2 ticks after spawn so
-        // multiple items dropped at once merge without waiting for the 20-tick periodic scan.
-        Plugin plugin = Bukkit.getPluginManager().getPlugins()[0];
+        // SourbyCraft v9.18: use ownerPlugin() bridge — legacy getPlugins()[0] can be empty
+        // under Paper's modern PaperPluginManagerImpl.
         // SourbyCraft v9.14: multi-attempt merge — immediate + 2 ticks + 5 ticks
         // Catches: items dropped simultaneously (immediate), items still falling (+2),
         // items that landed apart and need a periodic catchup (+5)
         tryMergeNearby(item);
-        Bukkit.getScheduler().runTaskLater(plugin, () -> tryMergeNearby(item), 2L);
-        Bukkit.getScheduler().runTaskLater(plugin, () -> tryMergeNearby(item), 5L);
+        Plugin plugin = ownerPlugin();
+        if (plugin != null) {
+            Bukkit.getScheduler().runTaskLater(plugin, () -> tryMergeNearby(item), 2L);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> tryMergeNearby(item), 5L);
+        }
     }
 
     /**
