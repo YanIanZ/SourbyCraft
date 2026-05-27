@@ -189,7 +189,10 @@ public final class WildstackerManager implements Listener {
             }
         }
 
-        // Merge pass — bucket by (item type + meta hash, chunk x, chunk z)
+        // Merge pass — bucket by item type + meta only (no chunk constraint).
+        // SourbyCraft v9.13: removed regionX/regionZ from key so items straddling chunk
+        // boundaries can merge. O(n²) per bucket, but with 20-tick interval and radius 3 this
+        // is fine for normal item counts (<500 ground items per world).
         Map<String, ArrayList<Item>> buckets = new HashMap<>();
         for (Item item : items) {
             if (!item.isValid() || item.isDead()) continue;
@@ -200,9 +203,7 @@ public final class WildstackerManager implements Listener {
             String metaKey = stack.hasItemMeta()
                 ? Integer.toHexString(stack.getItemMeta().hashCode())
                 : "nm";
-            int rx = item.getLocation().getBlockX() >> 4;
-            int rz = item.getLocation().getBlockZ() >> 4;
-            String bucketKey = typeKey + ":" + metaKey + ":" + rx + ":" + rz;
+            String bucketKey = typeKey + ":" + metaKey;
             buckets.computeIfAbsent(bucketKey, k -> new ArrayList<>()).add(item);
         }
         for (ArrayList<Item> bucket : buckets.values()) {
@@ -238,10 +239,16 @@ public final class WildstackerManager implements Listener {
     /**
      * Raytrace LOS check between two item entities.
      * Returns true if nothing blocks them (merge allowed).
+     *
+     * SourbyCraft v9.13: raised Y offset from 0.1 to 0.5 (item-centre, well above the floor
+     * block). With offset 0.1 the scan origin lands inside the floor block (items sit ~0.13
+     * above ground, floor(item.y) = ground level), causing the floor to falsely block the ray.
+     * The manual scan also now skips blocks at the floor Y of either item for the same reason.
      */
     private static boolean hasLineOfSight(Item a, Item b) {
-        Location from = a.getLocation().add(0, 0.1, 0);
-        Location to   = b.getLocation().add(0, 0.1, 0);
+        // SourbyCraft v9.13 — 0.5 offset puts sample point at item-centre, above floor block
+        Location from = a.getLocation().add(0, 0.5, 0);
+        Location to   = b.getLocation().add(0, 0.5, 0);
         Vector dir = to.toVector().subtract(from.toVector());
         double dist = dir.length();
         if (dist < 0.01) return true;
@@ -253,14 +260,20 @@ public final class WildstackerManager implements Listener {
             return false;
         }
         // Secondary linear scan to catch non-solid shapes (carpet, snow layer, tripwire string)
+        // Skip blocks at the floor Y of either item so the floor block never voids the merge.
+        int aFloorY = (int) Math.floor(a.getLocation().getY());
+        int bFloorY = (int) Math.floor(b.getLocation().getY());
         int steps = (int) Math.ceil(dist);
         for (int i = 1; i < steps; i++) {
             double t = (double) i / steps;
             double bx = from.getX() + (to.getX() - from.getX()) * t;
             double by = from.getY() + (to.getY() - from.getY()) * t;
             double bz = from.getZ() + (to.getZ() - from.getZ()) * t;
+            int byInt = (int) Math.floor(by);
+            // SourbyCraft v9.13 — floor blocks are under the items, not between them
+            if (byInt == aFloorY || byInt == bFloorY) continue;
             org.bukkit.block.Block block = a.getWorld().getBlockAt(
-                (int) Math.floor(bx), (int) Math.floor(by), (int) Math.floor(bz));
+                (int) Math.floor(bx), byInt, (int) Math.floor(bz));
             if (!block.getType().isAir()) return false;
         }
         return true;
@@ -277,6 +290,35 @@ public final class WildstackerManager implements Listener {
         Item item = event.getEntity();
         long initialCount = item.getItemStack().getAmount();
         item.getPersistentDataContainer().set(KEY_STACK_COUNT, PersistentDataType.LONG, initialCount);
+        // SourbyCraft v9.13 — schedule an immediate merge attempt 2 ticks after spawn so
+        // multiple items dropped at once merge without waiting for the 20-tick periodic scan.
+        Plugin plugin = Bukkit.getPluginManager().getPlugins()[0];
+        Bukkit.getScheduler().runTaskLater(plugin, () -> tryMergeNearby(item), 2L);
+    }
+
+    /**
+     * Merge {@code item} against all nearby items of the same type within merge radius.
+     * Called 2 ticks after spawn so freshly-dropped stacks consolidate immediately.
+     *
+     * SourbyCraft v9.13
+     */
+    private static void tryMergeNearby(Item item) {
+        if (!SourbyCraftConfig.wildstackerEnabled) return;
+        if (!item.isValid() || item.isDead()) return;
+        double radius = SourbyCraftConfig.itemMergeRadius;
+        for (Entity e : item.getNearbyEntities(radius, radius, radius)) {
+            if (!(e instanceof Item other)) continue;
+            if (!other.isValid() || other.isDead()) continue;
+            if (!item.getItemStack().isSimilar(other.getItemStack())) continue;
+            if (SourbyCraftConfig.wildstackerLosCheck && !hasLineOfSight(item, other)) continue;
+            long combined = getVirtualCount(item) + getVirtualCount(other);
+            Vector avgVel = item.getVelocity().add(other.getVelocity()).multiply(0.5);
+            item.setVelocity(avgVel);
+            item.setPickupDelay(Math.max(item.getPickupDelay(), other.getPickupDelay()));
+            removeHologram(other);
+            other.remove();
+            setVirtualCount(item, combined);
+        }
     }
 
     /**
