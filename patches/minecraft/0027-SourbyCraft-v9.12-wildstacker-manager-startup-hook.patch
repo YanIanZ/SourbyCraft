@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 27 May 2026 18:58:59 +0700
+Subject: [PATCH] SourbyCraft v9.12 wildstacker manager startup hook
+
+Start WildstackerManager after POSTWORLD plugin enable so that
+at least one plugin is loaded for scheduler/listener registration.
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index ec46bc25b485a70148d70f2869e98d2a4e5451be..22ecc0ff28e96f5b893d4f0134899b77dfedcfb2 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -636,6 +636,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         }
+         // Paper end - Configurable player collision; Handle collideRule team for player collision toggle
+         this.server.enablePlugins(org.bukkit.plugin.PluginLoadOrder.POSTWORLD);
++        // SourbyCraft start - v9.12 wildstacker manager (pure Bukkit, no NMS)
++        try { dev.iyanz.sourbycraft.wildstacker.WildstackerManager.start(); }
++        catch (Throwable t) { LOGGER.warn("[SourbyCraft] WildstackerManager start failed: {}", t.toString()); }
++        // SourbyCraft end - v9.12 wildstacker manager
+         this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
+         this.server.spark.enableAfterPlugins(this.server); // Paper - spark
+         if (io.papermc.paper.plugin.PluginInitializerManager.instance().pluginRemapper != null) io.papermc.paper.plugin.PluginInitializerManager.instance().pluginRemapper.pluginsEnabled(); // Paper - Remap plugins
