@@ -81,7 +81,7 @@ public final class WildstackerManager implements Listener {
                     tickWorld(world);
                 }
             }
-        }.runTaskTimer(plugin, 20L, 20L);
+        }.runTaskTimer(plugin, 4L, 4L); // SourbyCraft v9.14: 4 ticks (5×/sec) so items merge before visual pile-up
         started = true;
         plugin.getLogger().info("[SourbyCraft] WildstackerManager started (PDC key: " + KEY_STACK_COUNT + ").");
     }
@@ -293,7 +293,12 @@ public final class WildstackerManager implements Listener {
         // SourbyCraft v9.13 — schedule an immediate merge attempt 2 ticks after spawn so
         // multiple items dropped at once merge without waiting for the 20-tick periodic scan.
         Plugin plugin = Bukkit.getPluginManager().getPlugins()[0];
+        // SourbyCraft v9.14: multi-attempt merge — immediate + 2 ticks + 5 ticks
+        // Catches: items dropped simultaneously (immediate), items still falling (+2),
+        // items that landed apart and need a periodic catchup (+5)
+        tryMergeNearby(item);
         Bukkit.getScheduler().runTaskLater(plugin, () -> tryMergeNearby(item), 2L);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> tryMergeNearby(item), 5L);
     }
 
     /**
