@@ -64,15 +64,19 @@ public final class WildstackerManager implements Listener {
      * Safe to call multiple times (idempotent).
      */
     public static void start() {
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] start() invoked, started=" + started);
         if (started) return;
         Plugin[] plugins = Bukkit.getPluginManager().getPlugins();
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] plugin count = " + plugins.length);
         if (plugins.length == 0) {
-            Bukkit.getLogger().warning("[SourbyCraft] WildstackerManager.start() called before any plugin is loaded — deferred.");
+            Bukkit.getLogger().warning("[SourbyCraft:Wildstacker] No plugins loaded; deferred.");
             return;
         }
         Plugin plugin = plugins[0];
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] owner plugin = " + plugin.getName());
         KEY_STACK_COUNT = new NamespacedKey(plugin, "stack_count");
         Bukkit.getPluginManager().registerEvents(new WildstackerManager(), plugin);
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] events registered");
         new BukkitRunnable() {
             @Override
             public void run() {
@@ -82,8 +86,27 @@ public final class WildstackerManager implements Listener {
                 }
             }
         }.runTaskTimer(plugin, 4L, 4L); // SourbyCraft v9.14: 4 ticks (5×/sec) so items merge before visual pile-up
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] scan task scheduled (4-tick interval)");
         started = true;
-        plugin.getLogger().info("[SourbyCraft] WildstackerManager started (PDC key: " + KEY_STACK_COUNT + ").");
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] STARTED (PDC key: " + KEY_STACK_COUNT + ")");
+    }
+
+    public static String status() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Wildstacker started=").append(started)
+          .append(" enabled=").append(SourbyCraftConfig.wildstackerEnabled)
+          .append(" hologram=").append(SourbyCraftConfig.wildstackerHologram)
+          .append(" los=").append(SourbyCraftConfig.wildstackerLosCheck)
+          .append(" radius=").append(SourbyCraftConfig.itemMergeRadius)
+          .append("\n");
+        if (KEY_STACK_COUNT != null) sb.append("PDC key: ").append(KEY_STACK_COUNT).append("\n");
+        sb.append("Tracked holograms: ").append(ITEM_TO_HOLOGRAM.size()).append("\n");
+        sb.append("Worlds:\n");
+        for (World w : Bukkit.getWorlds()) {
+            int items = w.getEntitiesByClass(Item.class).size();
+            sb.append("  ").append(w.getName()).append(": ").append(items).append(" items\n");
+        }
+        return sb.toString();
     }
 
     public static void shutdown() {
@@ -286,6 +309,10 @@ public final class WildstackerManager implements Listener {
     /** Initialize virtual count when an item entity first spawns. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onItemSpawn(ItemSpawnEvent event) {
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] ItemSpawnEvent fired for "
+            + event.getEntity().getItemStack().getType()
+            + " count=" + event.getEntity().getItemStack().getAmount()
+            + " at " + event.getLocation().toVector());
         if (!SourbyCraftConfig.wildstackerEnabled) return;
         Item item = event.getEntity();
         long initialCount = item.getItemStack().getAmount();
@@ -311,11 +338,18 @@ public final class WildstackerManager implements Listener {
         if (!SourbyCraftConfig.wildstackerEnabled) return;
         if (!item.isValid() || item.isDead()) return;
         double radius = SourbyCraftConfig.itemMergeRadius;
-        for (Entity e : item.getNearbyEntities(radius, radius, radius)) {
+        var nearby = item.getNearbyEntities(radius, radius, radius);
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] tryMergeNearby item="
+            + item.getItemStack().getType() + " nearby=" + nearby.size());
+        int merged = 0;
+        for (Entity e : nearby) {
             if (!(e instanceof Item other)) continue;
             if (!other.isValid() || other.isDead()) continue;
             if (!item.getItemStack().isSimilar(other.getItemStack())) continue;
-            if (SourbyCraftConfig.wildstackerLosCheck && !hasLineOfSight(item, other)) continue;
+            if (SourbyCraftConfig.wildstackerLosCheck && !hasLineOfSight(item, other)) {
+                Bukkit.getLogger().info("[SourbyCraft:Wildstacker] LOS blocked merge");
+                continue;
+            }
             long combined = getVirtualCount(item) + getVirtualCount(other);
             Vector avgVel = item.getVelocity().add(other.getVelocity()).multiply(0.5);
             item.setVelocity(avgVel);
@@ -323,6 +357,11 @@ public final class WildstackerManager implements Listener {
             removeHologram(other);
             other.remove();
             setVirtualCount(item, combined);
+            merged++;
+        }
+        if (merged > 0) {
+            Bukkit.getLogger().info("[SourbyCraft:Wildstacker] merged " + merged
+                + " entities into one (combined count = " + getVirtualCount(item) + ")");
         }
     }
 
