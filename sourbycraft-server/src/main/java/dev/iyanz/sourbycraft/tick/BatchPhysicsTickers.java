@@ -8,8 +8,8 @@ import java.util.function.Predicate;
 public final class BatchPhysicsTickers {
 
     private static volatile BatchPhysicsTicker INSTANCE;
-    /** Pluggable physics phase. Default = noop (returns true ⇒ interact on main). */
-    public static volatile Predicate<Entity> PHYSICS_PHASE = e -> true;
+    /** Pluggable physics phase. Default = ItemEntityPhysics (noop returning true). */
+    public static volatile Predicate<Entity> PHYSICS_PHASE = ItemEntityPhysics::apply;
 
     private BatchPhysicsTickers() {}
 
