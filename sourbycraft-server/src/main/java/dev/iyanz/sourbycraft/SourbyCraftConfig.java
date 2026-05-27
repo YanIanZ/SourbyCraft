@@ -61,9 +61,11 @@ public class SourbyCraftConfig {
     public static boolean v9AsyncLighting = true;
     public static boolean v9AsyncPathfind = true;
     public static boolean v9AsyncChunkSave = true;
-    public static boolean v9ParallelMobAi = true;
-    public static boolean v9ParallelItemTick = true;
-    public static boolean v9ParallelOrbArrowTick = true;
+    // SourbyCraft v9.10 - parallel-tick defaults FALSE; physics phase is currently noop and
+    // deferred end-of-tick drain caused floating items (no real perf benefit until v10+ real physics split).
+    public static boolean v9ParallelMobAi = false;
+    public static boolean v9ParallelItemTick = false;
+    public static boolean v9ParallelOrbArrowTick = false;
     public static boolean v9RegionIoPool = true;
     public static boolean v9ObjectPools = true;
     public static int v9PoolSizeLighting = 2;
