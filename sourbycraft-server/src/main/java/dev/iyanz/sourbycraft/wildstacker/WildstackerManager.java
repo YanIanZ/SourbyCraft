@@ -133,6 +133,21 @@ public final class WildstackerManager implements Listener {
      * Set virtual count. If count drops to zero the item is removed.
      * Also refreshes the hologram text.
      */
+    /**
+     * Called from NMS ItemEntity.tryToMerge (via the static merge overload) after a successful
+     * vanilla merge. Updates PDC virtual count to match the new physical count and refreshes
+     * the floating hologram when count > maxStackSize.
+     *
+     * SourbyCraft v9.17
+     */
+    public static void onMerged(org.bukkit.entity.Item item) {
+        if (!SourbyCraftConfig.wildstackerEnabled) return;
+        if (!started || KEY_STACK_COUNT == null) return;
+        long phys = item.getItemStack().getAmount();
+        item.getPersistentDataContainer().set(KEY_STACK_COUNT, PersistentDataType.LONG, phys);
+        refreshHologram(item, phys);
+    }
+
     public static void setVirtualCount(Item item, long count) {
         if (count <= 0) {
             removeHologram(item);
