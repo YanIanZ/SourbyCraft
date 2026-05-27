@@ -13,18 +13,13 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.TextDisplay;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityPickupItemEvent;
-import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.plugin.Plugin;
-import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
+
+import org.bukkit.plugin.Plugin;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,13 +29,14 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Pure-Bukkit wildstacker (v9.12):
+ * NMS-only wildstacker (v9.19):
  *   - Virtual stack count stored in Item PersistentDataContainer (key sourbycraft:stack_count, LONG).
  *   - TextDisplay hologram follows item via per-tick teleport.
- *   - Periodic 20-tick merge scan, chunk-bucketed, with optional LOS check.
- *   - No NMS patches; no paperweight involvement.
+ *   - Periodic tick driven by MinecraftServer NMS hook (no Bukkit scheduler/plugin needed).
+ *   - Pickup handled via ItemEntity.playerTouch NMS patch (no Bukkit listener needed).
+ *   - Works with zero plugins loaded.
  */
-public final class WildstackerManager implements Listener {
+public final class WildstackerManager {
 
     // PDC key: sourbycraft:stack_count
     public static NamespacedKey KEY_STACK_COUNT;
@@ -53,11 +49,11 @@ public final class WildstackerManager implements Listener {
     private WildstackerManager() {}
 
     // =====================================================================
-    //  Plugin owner helper
+    //  Plugin owner helper (used by TpsBarCommand / RamBarCommand for scheduler)
     // =====================================================================
 
     /**
-     * Returns an enabled plugin for scheduler/listener registration.
+     * Returns an enabled plugin for scheduler registration.
      * Tries legacy SimplePluginManager first, then PaperPluginManagerImpl, then any.
      * Returns null only if literally no plugins are loaded.
      *
@@ -65,7 +61,8 @@ public final class WildstackerManager implements Listener {
      * so getPlugins() can return an empty array even when plugins are loaded. This bridge
      * method ensures we always find an owner plugin regardless of which manager holds them.
      *
-     * SourbyCraft v9.18
+     * SourbyCraft v9.18 — kept for TpsBarCommand/RamBarCommand scheduler use after v9.19
+     * wildstacker NMS-only refactor.
      */
     public static Plugin ownerPlugin() {
         Plugin[] legacy = Bukkit.getPluginManager().getPlugins();
@@ -73,14 +70,12 @@ public final class WildstackerManager implements Listener {
             if (p != null && p.isEnabled()) return p;
         }
         try {
-            // PaperPluginManagerImpl may have plugins legacy doesn't see
             Plugin[] paper =
                 io.papermc.paper.plugin.manager.PaperPluginManagerImpl.getInstance().getPlugins();
             for (Plugin p : paper) {
                 if (p != null && p.isEnabled()) return p;
             }
         } catch (Throwable ignored) {}
-        // Fallback: any plugin even if disabled
         if (legacy.length > 0 && legacy[0] != null) return legacy[0];
         return null;
     }
@@ -90,36 +85,33 @@ public final class WildstackerManager implements Listener {
     // =====================================================================
 
     /**
-     * Start the manager. Uses ownerPlugin() for listener registration and task
-     * scheduling, bridging Paper's legacy and modern plugin managers.
+     * Start the manager in NMS-only mode. No Bukkit plugin, scheduler, or listener
+     * is required. Periodic ticking is driven by MinecraftServer.tickChildren hook,
+     * and pickup handling by ItemEntity.playerTouch patch.
      *
      * Safe to call multiple times (idempotent).
+     *
+     * SourbyCraft v9.19
      */
     public static void start() {
         Bukkit.getLogger().info("[SourbyCraft:Wildstacker] start() invoked, started=" + started);
         if (started) return;
-        Plugin plugin = ownerPlugin();
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] plugin count (legacy) = " + Bukkit.getPluginManager().getPlugins().length);
-        if (plugin == null) {
-            Bukkit.getLogger().warning("[SourbyCraft:Wildstacker] No plugin available; deferred.");
-            return;
-        }
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] owner plugin = " + plugin.getName());
-        KEY_STACK_COUNT = new NamespacedKey(plugin, "stack_count");
-        Bukkit.getPluginManager().registerEvents(new WildstackerManager(), plugin);
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] events registered");
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (!SourbyCraftConfig.wildstackerEnabled) return;
-                for (World world : Bukkit.getWorlds()) {
-                    tickWorld(world);
-                }
-            }
-        }.runTaskTimer(plugin, 4L, 4L); // SourbyCraft v9.14: 4 ticks (5×/sec) so items merge before visual pile-up
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] scan task scheduled (4-tick interval)");
+        KEY_STACK_COUNT = NamespacedKey.fromString("sourbycraft:stack_count");
         started = true;
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] STARTED (PDC key: " + KEY_STACK_COUNT + ")");
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] STARTED (NMS-only mode, PDC key: " + KEY_STACK_COUNT + ")");
+    }
+
+    /**
+     * Called every 4 ticks from MinecraftServer.tickChildren NMS hook.
+     * Handles hologram sync and merge scan across all worlds.
+     *
+     * SourbyCraft v9.19
+     */
+    public static void tickAll() {
+        if (!started || !SourbyCraftConfig.wildstackerEnabled) return;
+        for (World world : Bukkit.getWorlds()) {
+            tickWorld(world);
+        }
     }
 
     public static String status() {
@@ -353,94 +345,36 @@ public final class WildstackerManager implements Listener {
         return true;
     }
 
-    // =====================================================================
-    //  Event listeners
-    // =====================================================================
-
-    /** Initialize virtual count when an item entity first spawns. */
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onItemSpawn(ItemSpawnEvent event) {
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] ItemSpawnEvent fired for "
-            + event.getEntity().getItemStack().getType()
-            + " count=" + event.getEntity().getItemStack().getAmount()
-            + " at " + event.getLocation().toVector());
-        if (!SourbyCraftConfig.wildstackerEnabled) return;
-        Item item = event.getEntity();
-        long initialCount = item.getItemStack().getAmount();
-        item.getPersistentDataContainer().set(KEY_STACK_COUNT, PersistentDataType.LONG, initialCount);
-        // SourbyCraft v9.18: use ownerPlugin() bridge — legacy getPlugins()[0] can be empty
-        // under Paper's modern PaperPluginManagerImpl.
-        // SourbyCraft v9.14: multi-attempt merge — immediate + 2 ticks + 5 ticks
-        // Catches: items dropped simultaneously (immediate), items still falling (+2),
-        // items that landed apart and need a periodic catchup (+5)
-        tryMergeNearby(item);
-        Plugin plugin = ownerPlugin();
-        if (plugin != null) {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> tryMergeNearby(item), 2L);
-            Bukkit.getScheduler().runTaskLater(plugin, () -> tryMergeNearby(item), 5L);
-        }
-    }
-
     /**
-     * Merge {@code item} against all nearby items of the same type within merge radius.
-     * Called 2 ticks after spawn so freshly-dropped stacks consolidate immediately.
+     * Called from ItemEntity.playerTouch NMS patch before vanilla pickup logic.
+     * Returns true if wildstacker handled the pickup (caller should return immediately),
+     * false to let vanilla proceed.
      *
-     * SourbyCraft v9.13
+     * Intercepts when the item has a virtual surplus: gives the player one physical
+     * stack, decrements the virtual count, and keeps the item entity in-world until
+     * virtual count reaches zero.
+     *
+     * SourbyCraft v9.19
      */
-    private static void tryMergeNearby(Item item) {
-        if (!SourbyCraftConfig.wildstackerEnabled) return;
-        if (!item.isValid() || item.isDead()) return;
-        double radius = SourbyCraftConfig.itemMergeRadius;
-        var nearby = item.getNearbyEntities(radius, radius, radius);
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] tryMergeNearby item="
-            + item.getItemStack().getType() + " nearby=" + nearby.size());
-        int merged = 0;
-        for (Entity e : nearby) {
-            if (!(e instanceof Item other)) continue;
-            if (!other.isValid() || other.isDead()) continue;
-            if (!item.getItemStack().isSimilar(other.getItemStack())) continue;
-            if (SourbyCraftConfig.wildstackerLosCheck && !hasLineOfSight(item, other)) {
-                Bukkit.getLogger().info("[SourbyCraft:Wildstacker] LOS blocked merge");
-                continue;
-            }
-            long combined = getVirtualCount(item) + getVirtualCount(other);
-            Vector avgVel = item.getVelocity().add(other.getVelocity()).multiply(0.5);
-            item.setVelocity(avgVel);
-            item.setPickupDelay(Math.max(item.getPickupDelay(), other.getPickupDelay()));
-            removeHologram(other);
-            other.remove();
-            setVirtualCount(item, combined);
-            merged++;
-        }
-        if (merged > 0) {
-            Bukkit.getLogger().info("[SourbyCraft:Wildstacker] merged " + merged
-                + " entities into one (combined count = " + getVirtualCount(item) + ")");
-        }
-    }
-
-    /**
-     * Intercept pickup when the item has a virtual surplus.
-     * Give the player one physical stack and decrement the virtual count.
-     * The item entity remains in-world until virtual count reaches zero.
-     */
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    public void onPickup(EntityPickupItemEvent event) {
-        if (!SourbyCraftConfig.wildstackerEnabled) return;
-        Item item = event.getItem();
+    public static boolean onPlayerPickup(
+        net.minecraft.world.entity.item.ItemEntity nmsItem,
+        net.minecraft.world.entity.player.Player nmsPlayer
+    ) {
+        if (!started || !SourbyCraftConfig.wildstackerEnabled) return false;
+        if (KEY_STACK_COUNT == null) return false;
+        Item item = (Item) nmsItem.getBukkitEntity();
         long virtual = getVirtualCount(item);
         int physical = item.getItemStack().getAmount();
-        if (virtual <= physical) return; // vanilla is correct — let it proceed
+        if (virtual <= physical) return false; // vanilla path handles it correctly
 
-        // Cancel default pickup; give one physical stack manually
-        event.setCancelled(true);
-        if (!(event.getEntity() instanceof HumanEntity human)) return;
+        if (!(nmsPlayer.getBukkitEntity() instanceof HumanEntity human)) return false;
 
         ItemStack give = item.getItemStack().clone();
         give.setAmount(physical);
         Map<Integer, ItemStack> leftovers = human.getInventory().addItem(give);
         int leftoverCount = leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
         int given = physical - leftoverCount;
-        if (given <= 0) return; // inventory full
+        if (given <= 0) return true; // inventory full — we handled it, don't let vanilla double-give
 
         long remaining = virtual - given;
         if (remaining <= 0) {
@@ -453,5 +387,6 @@ public final class WildstackerManager implements Listener {
             item.setItemStack(newStack);
             setVirtualCount(item, remaining);
         }
+        return true;
     }
 }
