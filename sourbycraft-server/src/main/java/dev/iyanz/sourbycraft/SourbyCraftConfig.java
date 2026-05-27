@@ -75,6 +75,8 @@ public class SourbyCraftConfig {
     public static double v9WatchdogTaskTimeoutMultiplier = 5.0;
     public static int v9WatchdogCircuitBreakSeconds = 30;
     public static int v9BackpressureQueueDepthCap = 256;
+    // SourbyCraft v9.5 — wildstacker ground item merge (virtual stack count)
+    public static boolean wildstackerEnabled = true;
     // SourbyCraft start - antixray
     public static boolean fluidObscures = true;
     // SourbyCraft end
@@ -196,6 +198,7 @@ public class SourbyCraftConfig {
         v9WatchdogTaskTimeoutMultiplier = getDouble("performance.v9.watchdog.task-timeout-multiplier", v9WatchdogTaskTimeoutMultiplier);
         v9WatchdogCircuitBreakSeconds = clamp(getInt("performance.v9.watchdog.circuit-break-seconds", v9WatchdogCircuitBreakSeconds), 1, 3600);
         v9BackpressureQueueDepthCap = clamp(getInt("performance.v9.backpressure.queue-depth-cap", v9BackpressureQueueDepthCap), 16, 65536);
+        wildstackerEnabled = getBoolean("performance.wildstacker.enabled", wildstackerEnabled);
         hopperBatch = getBoolean("entity.hopper-batch", hopperBatch);
         redstoneOptimize = getBoolean("entity.redstone-optimize", redstoneOptimize);
         maxEntityPerChunk = getInt("entity.max-per-chunk", maxEntityPerChunk);
