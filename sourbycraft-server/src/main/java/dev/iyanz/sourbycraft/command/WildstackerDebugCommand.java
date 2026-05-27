@@ -7,9 +7,9 @@ import org.bukkit.command.CommandSender;
 public class WildstackerDebugCommand extends Command {
     public WildstackerDebugCommand(String n) {
         super(n);
-        this.description = "Wildstacker debug status";
-        this.usageMessage = "/wildstack";
-        this.setPermission("sourbycraft.command.wildstack");
+        this.description = "Ground item stack status";
+        this.usageMessage = "/stack";
+        this.setPermission("sourbycraft.command.stack");
     }
 
     @Override
