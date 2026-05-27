@@ -45,7 +45,10 @@ public class SourbyCraftConfig {
     public static boolean autoThrottleView = true;
     public static int minViewDistance = 4;
     public static int compressionLevel = 4;
-    public static boolean entityTickRateLimit = true;
+    // SourbyCraft v9.13 — default FALSE; DynamicPerformanceScaler adjusts this value but no
+    // code in paper-server actually reads it to gate item-entity ticks. Leaving it true caused
+    // confusion (false sense of throttling). Disable until a real tick-gate consumer is wired.
+    public static boolean entityTickRateLimit = false;
     public static volatile int entityTickRate = 20;
     public static boolean hopperBatch = true;
     public static boolean redstoneOptimize = true;
@@ -93,12 +96,17 @@ public class SourbyCraftConfig {
     public static int idleTimeout = 0;
     public static boolean itemMergeOptimize = true;
     public static int itemDespawnRate = 6000;
-    public static int itemMergeRadius = 1;
+    // SourbyCraft v9.13 — was 1; raised to 3 so a player dropping a full inventory of dirt
+    // (items scattered ~1-2 blocks apart) reliably merges into one entity.
+    public static int itemMergeRadius = 3;
     public static boolean unlimitedDropStack = true;
     public static int dropStackCap = Integer.MAX_VALUE;
     public static boolean ownerProtectionEnabled = true;
     public static int ownerProtectionTime = 10;
-    public static boolean itemPoolEnabled = true;
+    // SourbyCraft v9.13 — was true; ItemEntityPool recycles entity instances and can return
+    // stale objects with noGravity=true or a frozen velocity vector, causing items to levitate.
+    // Disabled until pool correctly resets all entity state on recycle.
+    public static boolean itemPoolEnabled = false;
     public static int itemPoolSize = 256;
     public static int itemPoolMaxGrowth = 1024;
     public static float itemPoolShrinkThreshold = 0.5f;
