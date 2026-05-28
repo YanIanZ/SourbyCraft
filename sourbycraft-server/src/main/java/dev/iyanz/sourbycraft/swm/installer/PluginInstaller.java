@@ -30,7 +30,15 @@ public final class PluginInstaller {
     private static final String JAR_NAME = "SourbyCraftSWM.jar";
 
     public static void install(String pluginsDir) {
-        if (!SourbyCraftConfig.swmEnabled || !SourbyCraftConfig.swmAutoInstall) return;
+        // SourbyCraft v9.24 — always log entry for diagnosis
+        SourbyLogger.info("PluginInstaller.install() called: swmEnabled=" + SourbyCraftConfig.swmEnabled
+            + " swmAutoInstall=" + SourbyCraftConfig.swmAutoInstall
+            + " swmAutoUpdate=" + SourbyCraftConfig.swmAutoUpdate);
+        if (!SourbyCraftConfig.swmEnabled || !SourbyCraftConfig.swmAutoInstall) {
+            SourbyLogger.info("PluginInstaller skipped (enabled=" + SourbyCraftConfig.swmEnabled
+                + " autoInstall=" + SourbyCraftConfig.swmAutoInstall + ")");
+            return;
+        }
         Path jarPath = Path.of(pluginsDir, JAR_NAME);
 
         try {
