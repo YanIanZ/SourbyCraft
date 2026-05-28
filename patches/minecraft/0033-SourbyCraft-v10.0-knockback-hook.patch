@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Thu, 28 May 2026 12:46:09 +0700
+Subject: [PATCH] SourbyCraft v10.0 knockback hook
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- LivingEntity.knockback: scale strength via KnockbackManager.scale()
+  - global off → strength = 0 → return early (no knockback)
+  - player victim → strength × per-player multiplier (default 1.0)
+- MinecraftServer: start KnockbackManager after POSTWORLD
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 08bf4d10e75ca39e3f9e0b6b45445bfb55e8a000..d46f6d2149ac60aa593f787419131041503c4929 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -640,6 +640,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         try { dev.iyanz.sourbycraft.wildstacker.WildstackerManager.start(); }
+         catch (Throwable t) { LOGGER.warn("[SourbyCraft] WildstackerManager start failed: {}", t.toString()); }
+         // SourbyCraft end - v9.12 wildstacker manager
++        // SourbyCraft start - v10.0 knockback manager
++        try { dev.iyanz.sourbycraft.combat.KnockbackManager.start(); }
++        catch (Throwable t) { LOGGER.warn("[SourbyCraft] KnockbackManager start failed: {}", t.toString()); }
++        // SourbyCraft end - v10.0 knockback manager
+         this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
+         this.server.spark.enableAfterPlugins(this.server); // Paper - spark
+         if (io.papermc.paper.plugin.PluginInitializerManager.instance().pluginRemapper != null) io.papermc.paper.plugin.PluginInitializerManager.instance().pluginRemapper.pluginsEnabled(); // Paper - Remap plugins
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 810104c881534931253b086be22a4c72752e4060..1bc104389f1f527ea575aab80e36391199b940e6 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -2092,6 +2092,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     }
+ 
+     public void knockback(double strength, double x, double z) {
++        // SourbyCraft start - v10.0 knockback scaling
++        strength = dev.iyanz.sourbycraft.combat.KnockbackManager.scale(this, strength);
++        if (strength <= 0.0) return;
++        // SourbyCraft end
+         // CraftBukkit start - EntityKnockbackEvent
+         this.knockback(strength, x, z, null, io.papermc.paper.event.entity.EntityKnockbackEvent.Cause.UNKNOWN); // Paper - knockback events
+     }

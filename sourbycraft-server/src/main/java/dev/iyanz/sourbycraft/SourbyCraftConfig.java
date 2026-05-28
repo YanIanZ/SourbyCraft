@@ -85,6 +85,9 @@ public class SourbyCraftConfig {
     public static boolean wildstackerEnabled = true;
     public static boolean wildstackerHologram = true;        // SourbyCraft v9.11
     public static boolean wildstackerLosCheck = true;        // SourbyCraft v9.11 — anti-fraud
+    // SourbyCraft v10.0 — knockback manipulation
+    public static boolean knockbackGlobalEnabled = true;
+    // SourbyCraft end knockback
     // SourbyCraft start - antixray
     public static boolean fluidObscures = true;
     // SourbyCraft end
@@ -215,6 +218,9 @@ public class SourbyCraftConfig {
         wildstackerEnabled = getBoolean("performance.wildstacker.enabled", wildstackerEnabled);
         wildstackerHologram = getBoolean("performance.wildstacker.hologram", wildstackerHologram);
         wildstackerLosCheck = getBoolean("performance.wildstacker.los-check", wildstackerLosCheck);
+        // SourbyCraft v10.0 — knockback manipulation
+        knockbackGlobalEnabled = getBoolean("combat.knockback.global-enabled", knockbackGlobalEnabled);
+        // SourbyCraft end knockback
         hopperBatch = getBoolean("entity.hopper-batch", hopperBatch);
         redstoneOptimize = getBoolean("entity.redstone-optimize", redstoneOptimize);
         maxEntityPerChunk = getInt("entity.max-per-chunk", maxEntityPerChunk);
