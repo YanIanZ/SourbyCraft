@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Thu, 28 May 2026 11:06:13 +0700
+Subject: [PATCH] SourbyCraft v9.23 BossBar ticker NMS hook
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Hook BossBarTicker.tick() into MinecraftServer.tickChildren every
+server tick. BossBarTicker internally only fires updates every 20t.
+Replaces Bukkit scheduleSyncRepeatingTask — no plugin instance needed.
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index cdd31f48a4e55e6eaad74aaebf51b413906e6e39..121826d55fd8c423a8ff657ac42a5bf1e9401fa9 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1766,6 +1766,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             catch (Throwable t) { /* ignore — manager not started or world iteration failed */ }
+         }
+         // SourbyCraft end - v9.19 wildstacker periodic tick
++        // SourbyCraft start - v9.23 BossBar ticker (NMS-driven, no Bukkit scheduler / plugin required)
++        try { dev.iyanz.sourbycraft.command.BossBarTicker.tick(); }
++        catch (Throwable t) { /* ignore */ }
++        // SourbyCraft end - v9.23 BossBar ticker
+         // Paper start - optimise Folia entity scheduler
+         ((io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler)org.bukkit.Bukkit.getGlobalRegionScheduler()).tick();
+         for (io.papermc.paper.threadedregions.EntityScheduler scheduler : this.entitySchedulerTickList.getAllSchedulers()) {
