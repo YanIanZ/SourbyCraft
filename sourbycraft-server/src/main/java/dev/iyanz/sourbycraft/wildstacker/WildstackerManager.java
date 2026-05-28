@@ -206,13 +206,22 @@ public final class WildstackerManager {
             removeHologram(item);
             return;
         }
-        String itemName = item.getItemStack().getType().getKey().getKey()
-            .replace('_', ' ');
-        // SourbyCraft v9.25 — hex color hologram label via Adventure API + SourbyCraftColors
+        // SourbyCraft v9.26 — bracket-wrapped format: [Dirt 7x]
+        String raw = item.getItemStack().getType().getKey().getKey();
+        StringBuilder titled = new StringBuilder();
+        boolean upper = true;
+        for (char ch : raw.toCharArray()) {
+            if (ch == '_') { titled.append(' '); upper = true; }
+            else if (upper) { titled.append(Character.toUpperCase(ch)); upper = false; }
+            else titled.append(ch);
+        }
+        String itemName = titled.toString();
         Component label = Component.text()
+            .append(Component.text("[", dev.iyanz.sourbycraft.SourbyCraftColors.DIM))
             .append(Component.text(itemName, dev.iyanz.sourbycraft.SourbyCraftColors.HEADER))
-            .append(Component.text(" ×", dev.iyanz.sourbycraft.SourbyCraftColors.DIM))
-            .append(Component.text(String.valueOf(count), dev.iyanz.sourbycraft.SourbyCraftColors.VALUE))
+            .append(Component.text(" ", dev.iyanz.sourbycraft.SourbyCraftColors.DIM))
+            .append(Component.text(count + "x", dev.iyanz.sourbycraft.SourbyCraftColors.VALUE))
+            .append(Component.text("]", dev.iyanz.sourbycraft.SourbyCraftColors.DIM))
             .build();
         UUID existingId = ITEM_TO_HOLOGRAM.get(item.getUniqueId());
         TextDisplay display = null;
