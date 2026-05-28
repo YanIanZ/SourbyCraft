@@ -208,7 +208,12 @@ public final class WildstackerManager {
         }
         String itemName = item.getItemStack().getType().getKey().getKey()
             .replace('_', ' ');
-        String label = itemName + " ×" + count; // ×
+        // SourbyCraft v9.25 — hex color hologram label via Adventure API + SourbyCraftColors
+        Component label = Component.text()
+            .append(Component.text(itemName, dev.iyanz.sourbycraft.SourbyCraftColors.HEADER))
+            .append(Component.text(" ×", dev.iyanz.sourbycraft.SourbyCraftColors.DIM))
+            .append(Component.text(String.valueOf(count), dev.iyanz.sourbycraft.SourbyCraftColors.VALUE))
+            .build();
         UUID existingId = ITEM_TO_HOLOGRAM.get(item.getUniqueId());
         TextDisplay display = null;
         if (existingId != null) {
@@ -236,7 +241,7 @@ public final class WildstackerManager {
                 return;
             }
         }
-        display.text(Component.text(label));
+        display.text(label);
     }
 
     private static void removeHologram(Item item) {
@@ -251,6 +256,18 @@ public final class WildstackerManager {
     // =====================================================================
 
     private static void tickWorld(World world) {
+        // SourbyCraft v9.25 — cleanup pass: remove holograms whose Item entity is gone (pickup, despawn, force-remove, world unload)
+        java.util.Iterator<java.util.Map.Entry<UUID, UUID>> cleanupIt = ITEM_TO_HOLOGRAM.entrySet().iterator();
+        while (cleanupIt.hasNext()) {
+            java.util.Map.Entry<UUID, UUID> entry = cleanupIt.next();
+            Entity bukkitItem = Bukkit.getEntity(entry.getKey());
+            if (bukkitItem == null || !bukkitItem.isValid() || bukkitItem.isDead()) {
+                Entity hologram = Bukkit.getEntity(entry.getValue());
+                if (hologram != null) hologram.remove();
+                cleanupIt.remove();
+            }
+        }
+
         List<Item> items = new ArrayList<>(world.getEntitiesByClass(Item.class));
 
         // Sync hologram positions to follow moving items
