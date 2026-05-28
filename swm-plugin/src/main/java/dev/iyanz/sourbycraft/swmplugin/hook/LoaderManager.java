@@ -4,7 +4,6 @@ import dev.iyanz.sourbycraft.swm.api.SlimeLoader;
 import dev.iyanz.sourbycraft.swm.loader.FileLoader;
 import dev.iyanz.sourbycraft.swm.loader.MysqlLoader;
 import dev.iyanz.sourbycraft.swm.loader.MongoLoader;
-import dev.iyanz.sourbycraft.swm.loader.RedisLoader;
 import org.bukkit.configuration.ConfigurationSection;
 
 import java.util.Collections;
@@ -28,7 +27,6 @@ public class LoaderManager {
         registerFileLoader(config);
         registerMysqlLoader(config);
         registerMongoLoader(config);
-        registerRedisLoader(config);
 
         logger.info("Loaded " + loaders.size() + " SWM loader(s), default: " + defaultLoaderType);
     }
@@ -37,7 +35,7 @@ public class LoaderManager {
         try {
             String path = config.getString("swm.loader.file.path", "slime_worlds");
             loaders.put("file", new FileLoader(path));
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.log(Level.WARNING, "Failed to initialize FileLoader: " + e.getMessage());
         }
     }
@@ -57,7 +55,7 @@ public class LoaderManager {
                 loaders.put("mysql", new MysqlLoader(url, host, port, database, useSsl, username, password));
                 logger.info("MySQL loader registered");
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.log(Level.WARNING, "Failed to initialize MysqlLoader: " + e.getMessage());
         }
     }
@@ -77,20 +75,8 @@ public class LoaderManager {
                         authSource, host, port, null));
                 logger.info("MongoDB loader registered");
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.log(Level.WARNING, "Failed to initialize MongoLoader: " + e.getMessage());
-        }
-    }
-
-    private void registerRedisLoader(ConfigurationSection config) {
-        try {
-            String uri = config.getString("swm.loader.redis.uri", "");
-            if (!uri.isEmpty()) {
-                loaders.put("redis", new RedisLoader(uri));
-                logger.info("Redis loader registered");
-            }
-        } catch (Exception e) {
-            logger.log(Level.WARNING, "Failed to initialize RedisLoader: " + e.getMessage());
         }
     }
 
