@@ -41,6 +41,12 @@ public class LoaderManager {
     }
 
     private void registerMysqlLoader(ConfigurationSection config) {
+        // SourbyCraft v10.3 — skip silently if MySQL driver / HikariCP not on classpath
+        try {
+            Class.forName("com.zaxxer.hikari.HikariDataSource");
+        } catch (ClassNotFoundException e) {
+            return;
+        }
         try {
             String host = config.getString("swm.loader.mysql.host", "127.0.0.1");
             int port = config.getInt("swm.loader.mysql.port", 3306);
@@ -61,6 +67,12 @@ public class LoaderManager {
     }
 
     private void registerMongoLoader(ConfigurationSection config) {
+        // SourbyCraft v10.3 — skip silently if MongoDB driver not on classpath
+        try {
+            Class.forName("com.mongodb.MongoException");
+        } catch (ClassNotFoundException e) {
+            return;
+        }
         try {
             String host = config.getString("swm.loader.mongo.host", "127.0.0.1");
             int port = config.getInt("swm.loader.mongo.port", 27017);
