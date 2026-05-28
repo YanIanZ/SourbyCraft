@@ -48,7 +48,9 @@ public class SWPlugin extends JavaPlugin {
 
         try {
             Properties props = new Properties();
-            props.load(new FileInputStream("server.properties"));
+            try (FileInputStream fis = new FileInputStream("server.properties")) {
+                props.load(fis);
+            }
             String defaultWorldName = props.getProperty("level-name");
 
             if (erroredWorlds.contains(defaultWorldName)) {
@@ -114,7 +116,9 @@ public class SWPlugin extends JavaPlugin {
         for (SlimeWorld world : ASP.getLoadedWorlds()) {
             try {
                 Bukkit.unloadWorld(world.getName(), false);
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                getSLF4JLogger().warn("Failed to unload world {}: {}", world.getName(), e.getMessage());
+            }
         }
 
         if (ioExecutor != null) {

@@ -95,7 +95,8 @@ public class MysqlLoader extends UpdatableLoader {
 
                 try {
                     Thread.sleep(10000L);
-                } catch (InterruptedException ignored) {
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                     LOGGER.info("Update process aborted.");
                     return;
                 }
