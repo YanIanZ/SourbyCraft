@@ -7,8 +7,12 @@ java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(25))
 }
 
+// SourbyCraft v10.3 - guard against missing sourbycraft-api project during CI fresh-clone
+// (buildscript dir doesn't exist until applyAllPatches runs)
 dependencies {
-    api(projects.sourbycraftApi)
+    if (rootProject.findProject(":sourbycraft-api") != null) {
+        api(project(":sourbycraft-api"))
+    }
 }
 
 // No compilation — SWM API classes extracted from built server JAR.
