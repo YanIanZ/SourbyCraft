@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.perf;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import dev.iyanz.sourbycraft.SourbyCraftColors;
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.util.BarUtil;
@@ -17,6 +18,17 @@ public class PerfCommand {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("perf")
             .executes(ctx -> status(ctx.getSource()))
+            .then(Commands.literal("v9")
+                .executes(ctx -> { PerfV9Subcommand.status(ctx.getSource()); return 1; })
+                .then(Commands.literal("toggle")
+                    .then(Commands.argument("feature", StringArgumentType.word())
+                        .executes(ctx -> {
+                            PerfV9Subcommand.toggle(ctx.getSource(), StringArgumentType.getString(ctx, "feature"));
+                            return 1;
+                        })))
+                .then(Commands.literal("metrics")
+                    .executes(ctx -> { PerfV9Subcommand.metrics(ctx.getSource()); return 1; }))
+            )
             .then(Commands.literal("scale")
                 .then(Commands.literal("on").executes(ctx -> toggle(ctx.getSource(), true)))
                 .then(Commands.literal("off").executes(ctx -> toggle(ctx.getSource(), false)))
@@ -91,6 +103,9 @@ public class PerfCommand {
         try {
             return ((com.sun.management.OperatingSystemMXBean)
                 java.lang.management.ManagementFactory.getOperatingSystemMXBean()).getProcessCpuLoad() * 100;
-        } catch (Exception e) { return 0; }
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger("SourbyCraft:PerfCommand").warn("Failed to get CPU load", e);
+            return 0;
+        }
     }
 }

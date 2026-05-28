@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "dev.iyanz.sourbycraft"
-version = "4.0.0"
+version = "5.0.0"
 description = "SourbyCraft SlimeWorldManager Plugin"
 
 repositories {
@@ -13,7 +13,8 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
-    compileOnly(fileTree("../sourbycraft-server/build/libs") { include("*-server-*-REL.jar") })
+    compileOnly(fileTree("../sourbycraft-server/build/libs") { include("*-server-*.jar"); exclude("*-paperclip-*", "*-bundler-*") })
+    compileOnly("org.mongodb:mongodb-driver-sync:4.11.0")
 }
 
 java {

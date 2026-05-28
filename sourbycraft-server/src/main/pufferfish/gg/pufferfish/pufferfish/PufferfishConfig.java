@@ -82,9 +82,10 @@ public class PufferfishConfig {
             }
         }
 
-        // SourbyCraft start - Pufferfish JDK 25 tuning
-        if (!SIMDDetection.versionLimited && SIMDDetection.getJavaVersion() >= 25) {
-            PufferfishLogger.LOGGER.info("Running on Java 25+ — vector API and virtual threads available");
+        // SourbyCraft start - dual Java 21/25 support
+        if (!SIMDDetection.versionLimited && SIMDDetection.getJavaVersion() >= 21) {
+            int jv = SIMDDetection.getJavaVersion();
+            PufferfishLogger.LOGGER.info("Running on Java " + jv + " — vector API and virtual threads available");
         }
         // SourbyCraft end
     }

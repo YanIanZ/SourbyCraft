@@ -5,7 +5,7 @@ Subject: [PATCH] chore: SWM v2 fixes
 
 
 diff --git a/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java
-index 21f830043d3ac899d30696d81b649fd12209ba9e..330bf9cd037d984b6d9bc8b1bee8085ebe41a021 100644
+index 21f830043d3ac899d30696d81b649fd12209ba9e..7cb624600a025ce8044906da732eea27b3ff88fb 100644
 --- a/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java
 +++ b/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java
 @@ -3,6 +3,7 @@ import dev.iyanz.sourbycraft.SourbyCraftColors;
@@ -16,9 +16,16 @@ index 21f830043d3ac899d30696d81b649fd12209ba9e..330bf9cd037d984b6d9bc8b1bee8085e
  import java.io.*;
  import java.nio.file.*;
  import static net.kyori.adventure.text.Component.text;
-@@ -11,16 +12,33 @@ public class SpeedtestCommand extends Command {
+@@ -10,17 +11,43 @@ public class SpeedtestCommand extends Command {
+     private static final Path BIN=Paths.get("plugins/sourbycraft/speedtest-cli");
      public SpeedtestCommand(String n){super(n);this.description="Ookla speedtest";this.usageMessage="/speedtest";this.setPermission("sourbycraft.command.speedtest");}
      public boolean execute(CommandSender s,String a,String[] args){
++        final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("SourbyCraft:Speedtest");
++        LOG.info("Speedtest invoked. OS={} arch={} binPath={} binExists={}",
++            System.getProperty("os.name"),
++            System.getProperty("os.arch"),
++            BIN.toAbsolutePath(),
++            Files.exists(BIN));
          if(!testPermission(s))return true;
 -        if(!Files.exists(BIN)){try{Files.createDirectories(BIN.getParent());try(InputStream in=getClass().getClassLoader().getResourceAsStream("speedtest")){if(in!=null){Files.copy(in,BIN,StandardCopyOption.REPLACE_EXISTING);BIN.toFile().setExecutable(true);}}}catch(IOException e){}}
 -        if(!Files.exists(BIN)){s.sendMessage(text("Speedtest unavailable",SourbyCraftColors.DANGER));return true;}
@@ -34,7 +41,10 @@ index 21f830043d3ac899d30696d81b649fd12209ba9e..330bf9cd037d984b6d9bc8b1bee8085e
 +        Bukkit.getScheduler().runTaskAsynchronously(plugin,()->{
 +            try{
 +                if(!Files.exists(BIN)){
-+                    try{var p=BIN.getParent();Files.createDirectories(p);try(InputStream in=getClass().getClassLoader().getResourceAsStream("speedtest")){if(in!=null){Files.copy(in,BIN,StandardCopyOption.REPLACE_EXISTING);BIN.toFile().setExecutable(true);}}}catch(IOException e2){}
++                    try{var p=BIN.getParent();Files.createDirectories(p);try(InputStream in=getClass().getClassLoader().getResourceAsStream("speedtest")){if(in!=null){Files.copy(in,BIN,StandardCopyOption.REPLACE_EXISTING);BIN.toFile().setExecutable(true);}}}catch(IOException ioe){
++                        org.slf4j.LoggerFactory.getLogger("SourbyCraft:Speedtest").error(
++                            "Failed to extract speedtest binary to {}: {}", BIN, ioe.toString());
++                    }
 +                }
 +                if(!Files.exists(BIN)){s.sendMessage(text("Speedtest unavailable",SourbyCraftColors.DANGER));return;}
 +                Process proc=new ProcessBuilder(BIN.toString(),"--format=json","--accept-license","--accept-gdpr").redirectErrorStream(true).start();

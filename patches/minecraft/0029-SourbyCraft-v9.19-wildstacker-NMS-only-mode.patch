@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Thu, 28 May 2026 01:24:03 +0700
+Subject: [PATCH] SourbyCraft v9.19 wildstacker NMS-only mode
+
+- MinecraftServer.tickChildren: call WildstackerManager.tickAll() every 4 ticks
+- ItemEntity.playerTouch: call WildstackerManager.onPlayerPickup() before vanilla
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 22ecc0ff28e96f5b893d4f0134899b77dfedcfb2..cdd31f48a4e55e6eaad74aaebf51b413906e6e39 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1760,6 +1760,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         ProfilerFiller profilerFiller = Profiler.get();
+         this.getPlayerList().getPlayers().forEach(serverPlayer1 -> serverPlayer1.connection.suspendFlushing());
+         this.server.getScheduler().mainThreadHeartbeat(); // CraftBukkit
++        // SourbyCraft start - v9.19 wildstacker periodic tick (NMS-only mode, no Bukkit scheduler)
++        if (this.tickCount % 4 == 0) {
++            try { dev.iyanz.sourbycraft.wildstacker.WildstackerManager.tickAll(); }
++            catch (Throwable t) { /* ignore — manager not started or world iteration failed */ }
++        }
++        // SourbyCraft end - v9.19 wildstacker periodic tick
+         // Paper start - optimise Folia entity scheduler
+         ((io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler)org.bukkit.Bukkit.getGlobalRegionScheduler()).tick();
+         for (io.papermc.paper.threadedregions.EntityScheduler scheduler : this.entitySchedulerTickList.getAllSchedulers()) {
+diff --git a/net/minecraft/world/entity/item/ItemEntity.java b/net/minecraft/world/entity/item/ItemEntity.java
+index ad466b9ae5a95b0aecc6d0c4c0d0372c2f2d4885..098615dec40e2f560b80009b99ba922d23c9ec6e 100644
+--- a/net/minecraft/world/entity/item/ItemEntity.java
++++ b/net/minecraft/world/entity/item/ItemEntity.java
+@@ -417,6 +417,9 @@ public class ItemEntity extends Entity implements TraceableEntity {
+ 
+     @Override
+     public void playerTouch(Player entity) {
++        // SourbyCraft start - v9.19 wildstacker pickup handler (NMS-only, no Bukkit event)
++        if (dev.iyanz.sourbycraft.wildstacker.WildstackerManager.onPlayerPickup(this, entity)) return;
++        // SourbyCraft end - v9.19 wildstacker pickup handler
+         if (!this.level().isClientSide()) {
+             ItemStack item = this.getItem();
+             Item item1 = item.getItem();

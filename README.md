@@ -46,6 +46,24 @@
 | `/swm <list/load/save/info>` | SlimeWorldManager control (save/info require SWM plugin) |
 | `/mods` | Mods folder scanner (NeoForge/Forge/Fabric/Bukkit) |
 
+### 🔬 Profiling
+
+SourbyCraft does not bundle the Spark profiler (license/distribution concerns), but provides an installer script:
+
+```sh
+./scripts/install-spark.sh /path/to/your/server
+```
+
+After install, use the standard Spark commands:
+
+- `/spark profiler --timeout 120 --thread '*'` — sample all threads for 2 minutes
+- `/spark profiler --timeout 60 --thread 'Server thread'` — main-thread only
+- `/spark profiler stop` — stop and produce shareable URL
+- `/spark health` — live health snapshot
+- `/spark heapsummary` — heap usage snapshot
+
+Profile URLs are at `https://spark.lucko.me/<code>`; the raw protobuf blob is at `https://bytebin.lucko.me/<code>` if you need to script profile parsing.
+
 ### 🧩 NeoForge Mod Support (Foundation)
 - **ModScanner** — reads `mods.toml` / `fabric.mod.json` from JARs in `mods/` folder
 - **FmlBootstrap** — auto-detects NeoForge FML on classpath at startup

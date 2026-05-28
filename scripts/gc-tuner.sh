@@ -21,15 +21,18 @@ while [ $# -gt 0 ]; do
         --apply|--start) START=true; shift ;;
         --flags-only) FLAGS_ONLY=true; shift ;;
         --jar) JAR_FILE="$2"; shift 2 ;;
+        --gc) GC_CHOICE="$2"; shift 2 ;;
         -h|--help)
-            echo "Usage: ./gc-tuner.sh [--apply|--start] [--flags-only] [--jar <file>]"
+            echo "Usage: ./gc-tuner.sh [--apply|--start] [--flags-only] [--jar <file>] [--gc auto|zgc|g1]"
             echo "  --apply, --start   Write flags and start server"
             echo "  --flags-only       Write flags to start.flags (no start)"
             echo "  --jar <file>       Server JAR file (default: $JAR_FILE)"
+            echo "  --gc <choice>      auto (default), zgc, g1"
             exit 0 ;;
         *) shift ;;
     esac
 done
+GC_CHOICE="${GC_CHOICE:-auto}"
 
 # Detect system
 OS=$(uname -s)
@@ -49,58 +52,36 @@ echo "  Total RAM : ${TOTAL_MEM_GB}GB"
 echo "  Heap suggestion : ${HEAP_GB}GB"
 echo ""
 
-# Select GC based on heap + cores
-if [ "$HEAP_GB" -ge 8 ] && [ "$CORES" -ge 4 ]; then
-    GC="zgc"
-    GC_FLAGS="-XX:+UseZGC -XX:+ZGenerational -XX:SoftMaxHeapSize=${HEAP_GB}G"
-    GC_THREADS=$((CORES / 4))
-    [ "$GC_THREADS" -lt 1 ] && GC_THREADS=1
-    GC_FLAGS="$GC_FLAGS -XX:ConcGCThreads=$GC_THREADS -XX:ParallelGCThreads=$((CORES / 2))"
-    GC_FLAGS="$GC_FLAGS -XX:ZCollectionInterval=5 -XX:ZUncommitDelay=300 -XX:ZAllocationSpikeTolerance=3"
-elif [ "$HEAP_GB" -ge 4 ] && [ "$CORES" -ge 2 ]; then
-    GC="shenandoah"
-    GC_FLAGS="-XX:+UseShenandoahGC -XX:ShenandoahGCHeuristics=adaptive"
-    GC_FLAGS="$GC_FLAGS -XX:ShenandoahAllocSpikeFactor=3 -XX:ConcGCThreads=$((CORES / 2))"
-else
-    GC="g1"
-    GC_FLAGS="-XX:+UseG1GC -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=4M"
-    GC_FLAGS="$GC_FLAGS -XX:G1NewSizePercent=20 -XX:G1ReservePercent=10"
-    GC_FLAGS="$GC_FLAGS -XX:ConcGCThreads=2 -XX:ParallelGCThreads=$((CORES / 2))"
+# Decide GC. Auto-rule: ZGC generational if heap >= 8 GB AND Java >= 21, else G1.
+JAVA_MAJOR=$(java -version 2>&1 | awk -F'"' '/version/ {print $2}' | awk -F'.' '{print ($1 == "1") ? $2 : $1}')
+if [ "$GC_CHOICE" = "auto" ]; then
+    if [ "$HEAP_GB" -ge 8 ] && [ "${JAVA_MAJOR:-0}" -ge 21 ]; then
+        GC_CHOICE="zgc"
+    else
+        GC_CHOICE="g1"
+    fi
 fi
 
-COMMON_FLAGS="-XX:+AlwaysPreTouch -XX:+UseStringDeduplication -XX:+UseContainerSupport"
-COMMON_FLAGS="$COMMON_FLAGS -XX:CICompilerCount=2 -XX:TieredStopAtLevel=1"
-COMMON_FLAGS="$COMMON_FLAGS -XX:MaxRAMPercentage=95.0"
-COMMON_FLAGS="$COMMON_FLAGS --add-modules=jdk.incubator.vector"
-COMMON_FLAGS="$COMMON_FLAGS -Dterminal.jline=false -Dterminal.ansi=true"
+case "$GC_CHOICE" in
+    zgc)
+        GC_FLAGS="-XX:+UseZGC -XX:+ZGenerational -XX:+UseTransparentHugePages -XX:+AlwaysPreTouch -XX:+UseCompressedOops"
+        echo -e "${GREEN}GC selected:${NC} ZGC generational (heap ${HEAP_GB}GB, Java ${JAVA_MAJOR})"
+        ;;
+    g1)
+        GC_FLAGS="-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UseTransparentHugePages -XX:+AlwaysPreTouch -XX:G1HeapRegionSize=8M"
+        echo -e "${YELLOW}GC selected:${NC} G1 (heap ${HEAP_GB}GB, Java ${JAVA_MAJOR})"
+        ;;
+    *)
+        echo -e "${RED}Unknown --gc choice: $GC_CHOICE${NC}" >&2
+        exit 1
+        ;;
+esac
 
-JAVA_OPTS="$GC_FLAGS $COMMON_FLAGS"
-
-echo -e "${GREEN}Recommended GC:${NC} $GC"
-echo ""
-echo -e "${YELLOW}Generated flags:${NC}"
-echo "$JAVA_OPTS"
-echo ""
-
-# Write config
-CONFIG_FILE="start.flags"
-echo "# SourbyCraft Auto-Tuned GC Config ($(date))" > "$CONFIG_FILE"
-echo "# System: $CORES cores, ${TOTAL_MEM_GB}GB RAM" >> "$CONFIG_FILE"
-echo "# Selected GC: $GC" >> "$CONFIG_FILE"
-echo "" >> "$CONFIG_FILE"
-echo "$JAVA_OPTS" >> "$CONFIG_FILE"
-
-echo -e "${GREEN}Written to: $CONFIG_FILE${NC}"
-
-if [ "$START" = true ]; then
-    echo ""
-    echo -e "${GREEN}Starting server...${NC}"
-    echo "  java @${CONFIG_FILE} -jar $JAR_FILE --nogui"
-    java @${CONFIG_FILE} -jar "$JAR_FILE" --nogui
-elif [ "$FLAGS_ONLY" != true ]; then
-    echo ""
-    echo "To start the server:"
-    echo "  java @${CONFIG_FILE} -jar $JAR_FILE --nogui"
-    echo ""
-    echo "Or re-run with --apply to auto-start."
+FLAGS="-Xms${HEAP_GB}G -Xmx${HEAP_GB}G ${GC_FLAGS}"
+if [ "$FLAGS_ONLY" = "true" ] || [ "$START" = "true" ]; then
+    echo "$FLAGS" > start.flags
+    echo "Wrote: start.flags"
+fi
+if [ "$START" = "true" ]; then
+    java $FLAGS -jar "$JAR_FILE" nogui
 fi

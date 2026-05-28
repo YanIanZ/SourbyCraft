@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Thu, 28 May 2026 10:49:22 +0700
+Subject: [PATCH] SourbyCraft v9.21 zero velocity on NMS item merge
+ (anti-drift)
+
+
+diff --git a/net/minecraft/world/entity/item/ItemEntity.java b/net/minecraft/world/entity/item/ItemEntity.java
+index 098615dec40e2f560b80009b99ba922d23c9ec6e..b10a8752a48ff8c9f55ed743c22dd41403e8f9aa 100644
+--- a/net/minecraft/world/entity/item/ItemEntity.java
++++ b/net/minecraft/world/entity/item/ItemEntity.java
+@@ -323,6 +323,10 @@ public class ItemEntity extends Entity implements TraceableEntity {
+         if (originStack.isEmpty()) {
+             originEntity.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.MERGE); // CraftBukkit - add Bukkit remove cause
+         }
++        // SourbyCraft v9.21 - zero velocity on NMS merge to prevent knockback drift accumulation
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.wildstackerEnabled) {
++            destinationEntity.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
++        }
+         // SourbyCraft - notify hologram manager after NMS merge
+         try {
+             dev.iyanz.sourbycraft.wildstacker.WildstackerManager.onMerged(
