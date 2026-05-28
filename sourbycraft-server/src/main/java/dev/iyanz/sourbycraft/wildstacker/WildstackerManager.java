@@ -216,12 +216,11 @@ public final class WildstackerManager {
             else titled.append(ch);
         }
         String itemName = titled.toString();
+        // SourbyCraft v9.27 — clean format: Dirt x7 (no brackets, x prefix)
         Component label = Component.text()
-            .append(Component.text("[", dev.iyanz.sourbycraft.SourbyCraftColors.DIM))
             .append(Component.text(itemName, dev.iyanz.sourbycraft.SourbyCraftColors.HEADER))
-            .append(Component.text(" ", dev.iyanz.sourbycraft.SourbyCraftColors.DIM))
-            .append(Component.text(count + "x", dev.iyanz.sourbycraft.SourbyCraftColors.VALUE))
-            .append(Component.text("]", dev.iyanz.sourbycraft.SourbyCraftColors.DIM))
+            .append(Component.text(" x", dev.iyanz.sourbycraft.SourbyCraftColors.DIM))
+            .append(Component.text(String.valueOf(count), dev.iyanz.sourbycraft.SourbyCraftColors.VALUE))
             .build();
         UUID existingId = ITEM_TO_HOLOGRAM.get(item.getUniqueId());
         TextDisplay display = null;
@@ -233,7 +232,7 @@ public final class WildstackerManager {
         }
         if (display == null) {
             // SourbyCraft v9.21 — Y offset raised 0.6 → 1.0, transparent bg, see-through, shadowed
-            Location loc = item.getLocation().add(0, 1.0, 0);
+            Location loc = item.getLocation().add(0, 0.4, 0);
             try {
                 display = item.getWorld().spawn(loc, TextDisplay.class, td -> {
                     td.setBillboard(Display.Billboard.CENTER);
@@ -287,7 +286,7 @@ public final class WildstackerManager {
             Entity e = Bukkit.getEntity(hUid);
             if (e instanceof TextDisplay td && !td.isDead()) {
                 // SourbyCraft v9.21 — Y offset 1.0 (matches refreshHologram)
-                td.teleport(item.getLocation().add(0, 1.0, 0));
+                td.teleport(item.getLocation().add(0, 0.4, 0));
             }
         }
 
