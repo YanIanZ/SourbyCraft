@@ -93,8 +93,10 @@ public final class WildstackerManager {
      *
      * SourbyCraft v9.19
      */
+    // SourbyCraft v9.24 — flip to true only for diagnostics
+    private static final boolean DEBUG = false;
+
     public static void start() {
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] start() invoked, started=" + started);
         if (started) return;
         KEY_STACK_COUNT = NamespacedKey.fromString("sourbycraft:stack_count");
         started = true;
@@ -169,8 +171,7 @@ public final class WildstackerManager {
      * SourbyCraft v9.17
      */
     public static void onMerged(org.bukkit.entity.Item item) {
-        // SourbyCraft v9.21 — diagnostic log to confirm NMS merge callback fires
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] onMerged called for " + item.getUniqueId()
+        if (DEBUG) Bukkit.getLogger().info("[SourbyCraft:Wildstacker] onMerged called for " + item.getUniqueId()
             + " amount=" + item.getItemStack().getAmount());
         if (!SourbyCraftConfig.wildstackerEnabled) return;
         if (!started || KEY_STACK_COUNT == null) return;
@@ -194,16 +195,14 @@ public final class WildstackerManager {
     // =====================================================================
 
     private static void refreshHologram(Item item, long count) {
-        // SourbyCraft v9.21 — diagnostic log to confirm hologram path is reached
-        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] refreshHologram item=" + item.getUniqueId()
-            + " count=" + count + " maxStack=" + item.getItemStack().getMaxStackSize()
-            + " hologramFlag=" + SourbyCraftConfig.wildstackerHologram);
+        if (DEBUG) Bukkit.getLogger().info("[SourbyCraft:Wildstacker] refreshHologram item=" + item.getUniqueId()
+            + " count=" + count + " hologramFlag=" + SourbyCraftConfig.wildstackerHologram);
         if (!SourbyCraftConfig.wildstackerHologram) {
             removeHologram(item);
             return;
         }
-        int maxStack = item.getItemStack().getMaxStackSize();
-        if (count <= maxStack) {
+        // SourbyCraft v9.24 — show hologram for ANY stacked item (count >= 2)
+        if (count <= 1) {
             removeHologram(item);
             return;
         }
@@ -230,7 +229,7 @@ public final class WildstackerManager {
                     td.setShadowRadius(0f);
                 });
                 ITEM_TO_HOLOGRAM.put(item.getUniqueId(), display.getUniqueId());
-                Bukkit.getLogger().info("[SourbyCraft:Wildstacker] spawned hologram " + display.getUniqueId()
+                if (DEBUG) Bukkit.getLogger().info("[SourbyCraft:Wildstacker] spawned hologram " + display.getUniqueId()
                     + " for item " + item.getUniqueId() + " at " + loc);
             } catch (Throwable t) {
                 Bukkit.getLogger().warning("[SourbyCraft] Failed to spawn hologram for item " + item.getUniqueId() + ": " + t);
