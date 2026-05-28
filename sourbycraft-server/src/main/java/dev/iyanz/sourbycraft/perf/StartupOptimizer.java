@@ -46,6 +46,51 @@ public final class StartupOptimizer {
             server.LOGGER.info("  Hint: enable /perf scale on for auto TPS management");
         }
 
+        // SourbyCraft v10.3 — JVM recommendations (no shell script needed)
+        printJvmRecommendations(server, heapGB, cores);
+
         server.LOGGER.info("---------------------------------");
+    }
+
+    private static void printJvmRecommendations(MinecraftServer server, int heapGB, int cores) {
+        java.util.List<String> args = java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments();
+        boolean hasZGC = args.stream().anyMatch(a -> a.contains("UseZGC"));
+        boolean hasG1 = args.stream().anyMatch(a -> a.contains("UseG1GC"));
+        boolean hasShenandoah = args.stream().anyMatch(a -> a.contains("UseShenandoahGC"));
+        boolean hasGenerational = args.stream().anyMatch(a -> a.contains("ZGenerational"));
+        boolean hasPreTouch = args.stream().anyMatch(a -> a.contains("AlwaysPreTouch"));
+        boolean hasHugePages = args.stream().anyMatch(a -> a.contains("UseTransparentHugePages"));
+
+        int jvmMajor = parseJavaMajor(System.getProperty("java.version"));
+        String currentGC = hasZGC ? (hasGenerational ? "ZGC generational" : "ZGC") :
+            hasG1 ? "G1" : hasShenandoah ? "Shenandoah" : "default";
+
+        server.LOGGER.info("  JVM args: GC={} preTouch={} hugePages={}",
+            currentGC, hasPreTouch ? "on" : "off", hasHugePages ? "on" : "off");
+
+        // Recommendations
+        if (heapGB >= 8 && jvmMajor >= 21 && !hasZGC) {
+            server.LOGGER.warn("  ! Recommend ZGC generational on JDK 21+ with {}GB heap:", heapGB);
+            server.LOGGER.warn("    -XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch -XX:+UseTransparentHugePages");
+        } else if (heapGB < 8 && !hasG1 && !hasZGC) {
+            server.LOGGER.warn("  ! Recommend G1 on small heap ({}GB):", heapGB);
+            server.LOGGER.warn("    -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8M -XX:+AlwaysPreTouch -XX:+UseTransparentHugePages");
+        } else if (hasZGC && jvmMajor >= 21 && !hasGenerational) {
+            server.LOGGER.warn("  ! Recommend adding -XX:+ZGenerational on JDK 21+");
+        }
+        if (!hasPreTouch) {
+            server.LOGGER.info("  Hint: add -XX:+AlwaysPreTouch for consistent latency");
+        }
+    }
+
+    private static int parseJavaMajor(String v) {
+        if (v == null) return 0;
+        try {
+            String first = v.split("\\.")[0];
+            int n = Integer.parseInt(first);
+            return n == 1 ? Integer.parseInt(v.split("\\.")[1]) : n;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 }

@@ -48,10 +48,12 @@
 
 ### 🔬 Profiling
 
-SourbyCraft does not bundle the Spark profiler (license/distribution concerns), but provides an installer script:
+SourbyCraft does not bundle the Spark profiler (license/distribution concerns). Install manually:
 
 ```sh
-./scripts/install-spark.sh /path/to/your/server
+# Drop spark plugin JAR into your plugins/ directory
+curl -L -o plugins/spark.jar \
+  "https://ci.lucko.me/job/spark/lastSuccessfulBuild/artifact/spark-bukkit/build/libs/spark-1.10.142-bukkit.jar"
 ```
 
 After install, use the standard Spark commands:
@@ -103,12 +105,11 @@ swm.loadWorld(world, true);
 ```
 
 ### ⚙️ Infrastructure
-- **JDK 25 target** — compiled for Java 25, runs on JDK 25+
-- **ZGC** — generational Z Garbage Collector (sub-ms pauses)
+- **Dual JRE 21/25** — Java 21 bytecode target, runs on JDK 21+ (build toolchain JDK 25)
+- **ZGC generational** — recommended GC on JDK 21+ with heap ≥ 8 GB (sub-ms pauses)
 - **NUMA + Virtual Threads + CDS** — max hardware utilization
-- **GC Auto-Tuner** — `scripts/gc-tuner.sh` selects optimal GC + generates flags
+- **StartupOptimizer** — detects JVM args at boot, prints GC/heap/Java summary + tuning recommendations
 - **MemoryOptimizer** — object pool + soft-reference cache
-- **Startup Optimizer** — prints hardware summary and tuning hints at boot
 
 ---
 
@@ -209,22 +210,31 @@ crash-prevention:
 
 ## Startup
 
+No tuner scripts. Run paperclip directly with recommended flags. StartupOptimizer reads your JVM args and prints recommendations at boot if missing.
+
+**Recommended: JDK 21+, heap ≥ 8 GB (ZGC generational)**
+
 ```bash
-# Auto-tune GC and start (recommended)
-./scripts/gc-tuner.sh --apply
-
-# Generate flags only (no start)
-./scripts/gc-tuner.sh --flags-only
-
-# Start with custom JAR name
-./scripts/gc-tuner.sh --apply --jar my-server.jar
-
-# Manual start with generated flags
-./scripts/gc-tuner.sh --flags-only
-java @start.flags -jar sourbycraft-paperclip-v6-REL-mojmap.jar --nogui
+java \
+  -Xms8G -Xmx8G \
+  -XX:+UseZGC -XX:+ZGenerational \
+  -XX:+AlwaysPreTouch -XX:+UseTransparentHugePages \
+  -XX:+UseNUMA \
+  -jar sourbycraft-paperclip-mojmap.jar --nogui
 ```
 
-The `gc-tuner.sh` script auto-detects system specs (CPU cores, RAM) and selects the optimal GC strategy (ZGC, Shenandoah, or G1) with tuned flags.
+**Small heap (< 8 GB): G1**
+
+```bash
+java \
+  -Xms4G -Xmx4G \
+  -XX:+UseG1GC -XX:+ParallelRefProcEnabled \
+  -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8M \
+  -XX:+AlwaysPreTouch -XX:+UseTransparentHugePages \
+  -jar sourbycraft-paperclip-mojmap.jar --nogui
+```
+
+At boot, look for `--- SourbyCraft Performance ---`. If your GC choice is suboptimal, recommended flags are printed.
 
 ---
 
