@@ -19,6 +19,32 @@ public class KbCommand extends Command {
     }
 
     @Override
+    public java.util.List<String> tabComplete(org.bukkit.command.CommandSender sender, String alias, String[] args)
+            throws IllegalArgumentException {
+        if (args.length == 1) {
+            java.util.List<String> opts = java.util.List.of("global", "player", "reset");
+            return opts.stream().filter(o -> o.startsWith(args[0].toLowerCase())).toList();
+        }
+        if (args.length == 2) {
+            if (args[0].equalsIgnoreCase("global")) {
+                return java.util.List.of("on", "off").stream()
+                    .filter(o -> o.startsWith(args[1].toLowerCase()))
+                    .toList();
+            }
+            if (args[0].equalsIgnoreCase("player") || args[0].equalsIgnoreCase("reset")) {
+                return org.bukkit.Bukkit.getOnlinePlayers().stream()
+                    .map(org.bukkit.entity.Player::getName)
+                    .filter(n -> n.toLowerCase().startsWith(args[1].toLowerCase()))
+                    .toList();
+            }
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("player")) {
+            return java.util.List.of("0.0", "0.5", "1.0", "1.5", "2.0", "2.5", "3.0");
+        }
+        return java.util.Collections.emptyList();
+    }
+
+    @Override
     public boolean execute(CommandSender s, String a, String[] args) {
         if (!testPermission(s)) return true;
 
