@@ -38,7 +38,8 @@ public class SourbyCraftConfig {
 
     public static boolean swmEnabled = true;
     public static String swmVersion = "v7-REL";
-    public static boolean swmAutoInstall = false;
+    public static boolean swmAutoInstall = true;       // SourbyCraft v9.22 — default ON
+    public static boolean swmAutoUpdate = true;        // SourbyCraft v9.22 — check GitHub for updates on startup
     public static String swmLoader = "file";
     public static String swmFileDir = "slime_worlds";
 
@@ -155,6 +156,7 @@ public class SourbyCraftConfig {
         swmEnabled = getBoolean("swm.enabled", swmEnabled);
         swmVersion = getString("swm.version", swmVersion);
         swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
+        swmAutoUpdate = getBoolean("swm.auto-update", swmAutoUpdate);
         swmFileDir = getString("swm.file-dir", swmFileDir);
 
         // Auto-install SWM plugin from GitHub releases
