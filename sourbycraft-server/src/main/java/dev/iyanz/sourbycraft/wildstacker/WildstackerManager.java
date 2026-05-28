@@ -169,6 +169,9 @@ public final class WildstackerManager {
      * SourbyCraft v9.17
      */
     public static void onMerged(org.bukkit.entity.Item item) {
+        // SourbyCraft v9.21 — diagnostic log to confirm NMS merge callback fires
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] onMerged called for " + item.getUniqueId()
+            + " amount=" + item.getItemStack().getAmount());
         if (!SourbyCraftConfig.wildstackerEnabled) return;
         if (!started || KEY_STACK_COUNT == null) return;
         long phys = item.getItemStack().getAmount();
@@ -191,6 +194,10 @@ public final class WildstackerManager {
     // =====================================================================
 
     private static void refreshHologram(Item item, long count) {
+        // SourbyCraft v9.21 — diagnostic log to confirm hologram path is reached
+        Bukkit.getLogger().info("[SourbyCraft:Wildstacker] refreshHologram item=" + item.getUniqueId()
+            + " count=" + count + " maxStack=" + item.getItemStack().getMaxStackSize()
+            + " hologramFlag=" + SourbyCraftConfig.wildstackerHologram);
         if (!SourbyCraftConfig.wildstackerHologram) {
             removeHologram(item);
             return;
@@ -212,16 +219,19 @@ public final class WildstackerManager {
             }
         }
         if (display == null) {
-            Location loc = item.getLocation().add(0, 0.6, 0);
+            // SourbyCraft v9.21 — Y offset raised 0.6 → 1.0, transparent bg, see-through, shadowed
+            Location loc = item.getLocation().add(0, 1.0, 0);
             try {
                 display = item.getWorld().spawn(loc, TextDisplay.class, td -> {
                     td.setBillboard(Display.Billboard.CENTER);
-                    td.setSeeThrough(false);
-                    td.setBackgroundColor(Color.fromARGB(120, 0, 0, 0));
-                    td.setShadowed(false);
+                    td.setSeeThrough(true);
+                    td.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
+                    td.setShadowed(true);
                     td.setShadowRadius(0f);
                 });
                 ITEM_TO_HOLOGRAM.put(item.getUniqueId(), display.getUniqueId());
+                Bukkit.getLogger().info("[SourbyCraft:Wildstacker] spawned hologram " + display.getUniqueId()
+                    + " for item " + item.getUniqueId() + " at " + loc);
             } catch (Throwable t) {
                 Bukkit.getLogger().warning("[SourbyCraft] Failed to spawn hologram for item " + item.getUniqueId() + ": " + t);
                 return;
@@ -251,7 +261,8 @@ public final class WildstackerManager {
             if (hUid == null) continue;
             Entity e = Bukkit.getEntity(hUid);
             if (e instanceof TextDisplay td && !td.isDead()) {
-                td.teleport(item.getLocation().add(0, 0.6, 0));
+                // SourbyCraft v9.21 — Y offset 1.0 (matches refreshHologram)
+                td.teleport(item.getLocation().add(0, 1.0, 0));
             }
         }
 
@@ -290,10 +301,10 @@ public final class WildstackerManager {
                 if (a.getLocation().distanceSquared(b.getLocation()) > radiusSq) continue;
                 if (!a.getItemStack().isSimilar(b.getItemStack())) continue;
                 if (SourbyCraftConfig.wildstackerLosCheck && !hasLineOfSight(a, b)) continue;
-                // Merge b into a: add counts, average velocity, sync pickup delay
+                // Merge b into a: add counts, zero velocity (v9.21 — was averaged, caused drift), sync pickup delay
                 long combined = getVirtualCount(a) + getVirtualCount(b);
-                Vector avgVel = a.getVelocity().add(b.getVelocity()).multiply(0.5);
-                a.setVelocity(avgVel);
+                // SourbyCraft v9.21 — zero velocity on merge to prevent knockback drift accumulation
+                a.setVelocity(new Vector(0, 0, 0));
                 a.setPickupDelay(Math.max(a.getPickupDelay(), b.getPickupDelay()));
                 removeHologram(b);
                 b.remove();
