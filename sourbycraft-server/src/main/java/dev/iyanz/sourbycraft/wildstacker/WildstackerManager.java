@@ -104,13 +104,52 @@ public final class WildstackerManager {
     }
 
     /**
+     * SourbyCraft v10.4: detect the external WildStacker plugin (BG-Software-LLC).
+     * When present, our built-in NMS path becomes a no-op so the external plugin
+     * owns all item-merge/stack-count/hologram behavior. Called from the plugin
+     * enable hook after Bukkit's plugin manager has loaded all plugins.
+     */
+    public static void detectExternalPlugin() {
+        if (!SourbyCraftConfig.wildstackerUsePlugin) {
+            SourbyCraftConfig.wildstackerExternalActive = false;
+            return;
+        }
+        Plugin p = Bukkit.getPluginManager().getPlugin("WildStacker");
+        boolean active = p != null && p.isEnabled();
+        SourbyCraftConfig.wildstackerExternalActive = active;
+        if (active) {
+            // Flip wildstackerEnabled too so NMS-level patches that reference
+            // SourbyCraftConfig.wildstackerEnabled (merge-cap bypass, onMerged
+            // hook) also short-circuit. Restored on next startup from disk.
+            SourbyCraftConfig.wildstackerEnabled = false;
+            Bukkit.getLogger().info("[SourbyCraft:Wildstacker] External WildStacker plugin detected (v"
+                + p.getPluginMeta().getVersion() + "); built-in NMS path disabled.");
+            // Remove any stale built-in holograms so the external plugin can manage from scratch.
+            for (UUID hUid : ITEM_TO_HOLOGRAM.values()) {
+                Entity e = Bukkit.getEntity(hUid);
+                if (e != null) e.remove();
+            }
+            ITEM_TO_HOLOGRAM.clear();
+        } else {
+            Bukkit.getLogger().info("[SourbyCraft:Wildstacker] External WildStacker plugin not present; using built-in NMS path.");
+        }
+    }
+
+    /** True when the built-in NMS path should run. False when an external plugin owns stacking. */
+    public static boolean shouldRunBuiltIn() {
+        return started
+            && SourbyCraftConfig.wildstackerEnabled
+            && !SourbyCraftConfig.wildstackerExternalActive;
+    }
+
+    /**
      * Called every 4 ticks from MinecraftServer.tickChildren NMS hook.
      * Handles hologram sync and merge scan across all worlds.
      *
      * SourbyCraft v9.19
      */
     public static void tickAll() {
-        if (!started || !SourbyCraftConfig.wildstackerEnabled) return;
+        if (!shouldRunBuiltIn()) return;
         for (World world : Bukkit.getWorlds()) {
             tickWorld(world);
         }
@@ -173,8 +212,7 @@ public final class WildstackerManager {
     public static void onMerged(org.bukkit.entity.Item item) {
         if (DEBUG) Bukkit.getLogger().info("[SourbyCraft:Wildstacker] onMerged called for " + item.getUniqueId()
             + " amount=" + item.getItemStack().getAmount());
-        if (!SourbyCraftConfig.wildstackerEnabled) return;
-        if (!started || KEY_STACK_COUNT == null) return;
+        if (!shouldRunBuiltIn() || KEY_STACK_COUNT == null) return;
         long phys = item.getItemStack().getAmount();
         item.getPersistentDataContainer().set(KEY_STACK_COUNT, PersistentDataType.LONG, phys);
         refreshHologram(item, phys);
@@ -395,8 +433,7 @@ public final class WildstackerManager {
         net.minecraft.world.entity.item.ItemEntity nmsItem,
         net.minecraft.world.entity.player.Player nmsPlayer
     ) {
-        if (!started || !SourbyCraftConfig.wildstackerEnabled) return false;
-        if (KEY_STACK_COUNT == null) return false;
+        if (!shouldRunBuiltIn() || KEY_STACK_COUNT == null) return false;
         Item item = (Item) nmsItem.getBukkitEntity();
         long virtual = getVirtualCount(item);
         int physical = item.getItemStack().getAmount();
