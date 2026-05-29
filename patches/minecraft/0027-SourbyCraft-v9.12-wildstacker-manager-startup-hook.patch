@@ -17,9 +17,6 @@ index ec46bc25b485a70148d70f2869e98d2a4e5451be..22ecc0ff28e96f5b893d4f0134899b77
 +        // SourbyCraft start - v9.12 wildstacker manager (pure Bukkit, no NMS)
 +        try { dev.iyanz.sourbycraft.wildstacker.WildstackerManager.start(); }
 +        catch (Throwable t) { LOGGER.warn("[SourbyCraft] WildstackerManager start failed: {}", t.toString()); }
-+        // SourbyCraft v10.4 - detect external WildStacker plugin (BG-Software-LLC)
-+        try { dev.iyanz.sourbycraft.wildstacker.WildstackerManager.detectExternalPlugin(); }
-+        catch (Throwable t) { LOGGER.warn("[SourbyCraft] WildstackerManager detect failed: {}", t.toString()); }
 +        // SourbyCraft end - v9.12 wildstacker manager
          this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
          this.server.spark.enableAfterPlugins(this.server); // Paper - spark
