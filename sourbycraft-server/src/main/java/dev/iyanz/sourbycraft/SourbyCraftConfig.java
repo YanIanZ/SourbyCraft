@@ -85,11 +85,6 @@ public class SourbyCraftConfig {
     public static boolean wildstackerEnabled = true;
     public static boolean wildstackerHologram = true;        // SourbyCraft v9.11
     public static boolean wildstackerLosCheck = true;        // SourbyCraft v9.11 — anti-fraud
-    // SourbyCraft v10.4 — external WildStacker plugin (BG-Software-LLC)
-    public static boolean wildstackerUsePlugin = true;       // prefer external plugin if present
-    public static boolean wildstackerAutoInstall = true;     // auto-download WildStacker.jar
-    public static boolean wildstackerAutoUpdate = true;      // auto-update WildStacker.jar
-    public static volatile boolean wildstackerExternalActive = false; // runtime flag set after plugin detect
     // SourbyCraft v10.0 — knockback manipulation
     public static boolean knockbackGlobalEnabled = true;
     // SourbyCraft end knockback
@@ -180,8 +175,6 @@ public class SourbyCraftConfig {
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins/SourbyCraft/speedtest")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create speedtest directory: " + e.getMessage()); }
         // SourbyCraft end
             dev.iyanz.sourbycraft.swm.installer.PluginInstaller.install("plugins/");
-            // SourbyCraft v10.4 — external WildStacker plugin auto-install
-            dev.iyanz.sourbycraft.wildstacker.WildStackerInstaller.install("plugins/");
         }
 
         // SourbyCraft start - auto-create mods folder
@@ -228,9 +221,6 @@ public class SourbyCraftConfig {
         wildstackerEnabled = getBoolean("performance.wildstacker.enabled", wildstackerEnabled);
         wildstackerHologram = getBoolean("performance.wildstacker.hologram", wildstackerHologram);
         wildstackerLosCheck = getBoolean("performance.wildstacker.los-check", wildstackerLosCheck);
-        wildstackerUsePlugin = getBoolean("performance.wildstacker.use-plugin", wildstackerUsePlugin);
-        wildstackerAutoInstall = getBoolean("performance.wildstacker.auto-install", wildstackerAutoInstall);
-        wildstackerAutoUpdate = getBoolean("performance.wildstacker.auto-update", wildstackerAutoUpdate);
         // SourbyCraft v10.0 — knockback manipulation
         knockbackGlobalEnabled = getBoolean("combat.knockback.global-enabled", knockbackGlobalEnabled);
         // SourbyCraft end knockback
