@@ -22,7 +22,7 @@ public class PufferfishCommand extends Command {
         this.usageMessage = "/pufferfish [reload | version]";
         this.setPermission("bukkit.command.pufferfish");
     }
-
+    
     public static void init() {
         MinecraftServer.getServer().server.getCommandMap().register("pufferfish", "Pufferfish", new PufferfishCommand());
     }
@@ -50,7 +50,7 @@ public class PufferfishCommand extends Command {
         if (args[0].equalsIgnoreCase("reload")) {
             MinecraftServer console = MinecraftServer.getServer();
             try {
-                PufferfishConfig.load((java.io.File) console.options.valueOf("pufferfish-settings"));
+                PufferfishConfig.load((java.io.File) console.options.valueOf("pufferfish-settings")); // SourbyCraft - configurable pufferfish config location
             } catch (IOException e) {
                 sender.sendMessage(Component.text("Failed to reload.", NamedTextColor.RED));
                 e.printStackTrace();

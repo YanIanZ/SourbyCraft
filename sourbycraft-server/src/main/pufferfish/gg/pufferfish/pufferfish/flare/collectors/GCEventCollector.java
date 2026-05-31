@@ -1,6 +1,7 @@
 package gg.pufferfish.pufferfish.flare.collectors;
 
 import co.technove.flare.Flare;
+import co.technove.flare.internal.FlareInternal;
 import co.technove.flare.live.CollectorData;
 import co.technove.flare.live.EventCollector;
 import co.technove.flare.live.LiveEvent;
