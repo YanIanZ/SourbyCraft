@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 31 May 2026 20:53:34 +0700
+Subject: [PATCH] SourbyCraft v10.6 stacker spam-drop fix
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index d46f6d2149ac60aa593f787419131041503c4929..e01a20f0fa63743eb4398f62c7ad31adce2c4992 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1769,7 +1769,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         this.getPlayerList().getPlayers().forEach(serverPlayer1 -> serverPlayer1.connection.suspendFlushing());
+         this.server.getScheduler().mainThreadHeartbeat(); // CraftBukkit
+         // SourbyCraft start - v9.19 wildstacker periodic tick (NMS-only mode, no Bukkit scheduler)
+-        if (this.tickCount % 4 == 0) {
++        // v10.6 — tightened from %4 to %2 (5Hz → 10Hz) to catch fast-drop spam before despawn/loss.
++        if (this.tickCount % 2 == 0) {
+             try { dev.iyanz.sourbycraft.wildstacker.WildstackerManager.tickAll(); }
+             catch (Throwable t) { /* ignore — manager not started or world iteration failed */ }
+         }
+diff --git a/net/minecraft/world/entity/item/ItemEntity.java b/net/minecraft/world/entity/item/ItemEntity.java
+index b10a8752a48ff8c9f55ed743c22dd41403e8f9aa..d5931d9baae9f4130feab32ee492b9aec78dd49a 100644
+--- a/net/minecraft/world/entity/item/ItemEntity.java
++++ b/net/minecraft/world/entity/item/ItemEntity.java
+@@ -323,10 +323,7 @@ public class ItemEntity extends Entity implements TraceableEntity {
+         if (originStack.isEmpty()) {
+             originEntity.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.MERGE); // CraftBukkit - add Bukkit remove cause
+         }
+-        // SourbyCraft v9.21 - zero velocity on NMS merge to prevent knockback drift accumulation
+-        if (dev.iyanz.sourbycraft.SourbyCraftConfig.wildstackerEnabled) {
+-            destinationEntity.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
+-        }
++        // Removed delta movement zeroing to allow water to push items
+         // SourbyCraft - notify hologram manager after NMS merge
+         try {
+             dev.iyanz.sourbycraft.wildstacker.WildstackerManager.onMerged(

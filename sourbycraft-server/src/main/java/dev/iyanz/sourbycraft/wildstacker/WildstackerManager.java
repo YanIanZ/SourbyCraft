@@ -101,6 +101,11 @@ public final class WildstackerManager {
         KEY_STACK_COUNT = NamespacedKey.fromString("sourbycraft:stack_count");
         started = true;
         Bukkit.getLogger().info("[SourbyCraft:Wildstacker] STARTED (NMS-only mode, PDC key: " + KEY_STACK_COUNT + ")");
+        
+        Plugin owner = ownerPlugin();
+        if (owner != null) {
+            Bukkit.getPluginManager().registerEvents(new WildstackerListener(), owner);
+        }
     }
 
     /**
@@ -201,7 +206,8 @@ public final class WildstackerManager {
             overflowStack.setAmount(Math.max(1, spawnAmount));
             World w = item.getWorld();
             Item spawned = w.dropItem(item.getLocation(), overflowStack);
-            spawned.setVelocity(new Vector(0, 0, 0));
+            // SourbyCraft - Prevent overflow drop clipping by giving it a slight velocity instead of 0
+            spawned.setVelocity(new Vector(Math.random() * 0.02 - 0.01, 0.05, Math.random() * 0.02 - 0.01));
             spawned.setPickupDelay(40);
             spawned.getPersistentDataContainer().set(KEY_STACK_COUNT, PersistentDataType.LONG, overflow);
             refreshHologram(spawned, overflow);
@@ -252,7 +258,7 @@ public final class WildstackerManager {
         }
         if (display == null) {
             // SourbyCraft v9.21 — Y offset raised 0.6 → 1.0, transparent bg, see-through, shadowed
-            Location loc = item.getLocation().add(0, 0.4, 0);
+            Location loc = getHologramLocation(item);
             try {
                 display = item.getWorld().spawn(loc, TextDisplay.class, td -> {
                     td.setBillboard(Display.Billboard.CENTER);
@@ -306,7 +312,7 @@ public final class WildstackerManager {
             Entity e = Bukkit.getEntity(hUid);
             if (e instanceof TextDisplay td && !td.isDead()) {
                 // SourbyCraft v9.21 — Y offset 1.0 (matches refreshHologram)
-                td.teleport(item.getLocation().add(0, 0.4, 0));
+                td.teleport(getHologramLocation(item));
             }
         }
 
@@ -344,11 +350,11 @@ public final class WildstackerManager {
                 if (!b.isValid() || b.isDead()) continue;
                 if (a.getLocation().distanceSquared(b.getLocation()) > radiusSq) continue;
                 if (!a.getItemStack().isSimilar(b.getItemStack())) continue;
+                if (!canStack(a) || !canStack(b)) continue;
                 if (SourbyCraftConfig.wildstackerLosCheck && !hasLineOfSight(a, b)) continue;
                 // Merge b into a: add counts, zero velocity (v9.21 — was averaged, caused drift), sync pickup delay
                 long combined = getVirtualCount(a) + getVirtualCount(b);
-                // SourbyCraft v9.21 — zero velocity on merge to prevent knockback drift accumulation
-                a.setVelocity(new Vector(0, 0, 0));
+                // Removed setting velocity to 0 to allow water to push items
                 a.setPickupDelay(Math.max(a.getPickupDelay(), b.getPickupDelay()));
                 // SourbyCraft v10.5 — WildStacker-style merge particle (subtle visual feedback)
                 spawnMergeParticle(a);
@@ -444,13 +450,30 @@ public final class WildstackerManager {
         if (!(nmsPlayer.getBukkitEntity() instanceof HumanEntity human)) return false;
 
         ItemStack give = item.getItemStack().clone();
-        give.setAmount(physical);
-        Map<Integer, ItemStack> leftovers = human.getInventory().addItem(give);
-        int leftoverCount = leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
-        int given = physical - leftoverCount;
-        if (given <= 0) return true; // inventory full — we handled it, don't let vanilla double-give
+        give.setAmount(give.getMaxStackSize());
+        
+        long givenTotal = 0;
+        long remaining = virtual;
 
-        long remaining = virtual - given;
+        // Try to fill inventory as much as possible
+        while (remaining > 0) {
+            int toGive = (int) Math.min(remaining, give.getMaxStackSize());
+            give.setAmount(toGive);
+            Map<Integer, ItemStack> leftovers = human.getInventory().addItem(give);
+            int leftoverCount = leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
+            int successfullyGiven = toGive - leftoverCount;
+            
+            givenTotal += successfullyGiven;
+            remaining -= successfullyGiven;
+            
+            if (leftoverCount > 0) {
+                // Inventory is full
+                break;
+            }
+        }
+
+        if (givenTotal <= 0) return true; // inventory full — we handled it, don't let vanilla double-give
+
         if (remaining <= 0) {
             removeHologram(item);
             item.remove();
@@ -462,5 +485,119 @@ public final class WildstackerManager {
             setVirtualCount(item, remaining);
         }
         return true;
+    }
+
+    private static Location getHologramLocation(Item item) {
+        Location loc = item.getLocation().add(0, 0.4, 0);
+        if (!loc.getBlock().isPassable()) {
+            return item.getLocation().add(0, 0.1, 0);
+        }
+        return loc;
+    }
+
+    private static boolean canStack(Item item) {
+        if (item.getThrower() != null) {
+            if (!item.isOnGround() && item.getTicksLived() <= 40) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static class WildstackerListener implements org.bukkit.event.Listener {
+        @org.bukkit.event.EventHandler(ignoreCancelled = true, priority = org.bukkit.event.EventPriority.HIGHEST)
+        public void onEntityExplode(org.bukkit.event.entity.EntityExplodeEvent event) {
+            if (!SourbyCraftConfig.wildstackerEnabled) return;
+            handleExplosion(event.getLocation(), event.blockList(), event.getYield());
+            event.setYield(0f);
+        }
+
+        @org.bukkit.event.EventHandler(ignoreCancelled = true, priority = org.bukkit.event.EventPriority.HIGHEST)
+        public void onBlockExplode(org.bukkit.event.block.BlockExplodeEvent event) {
+            if (!SourbyCraftConfig.wildstackerEnabled) return;
+            handleExplosion(event.getBlock().getLocation(), event.blockList(), event.getYield());
+            event.setYield(0f);
+        }
+
+        private void handleExplosion(Location center, List<org.bukkit.block.Block> blocks, float yield) {
+            if (yield <= 0) return;
+            java.util.Map<ItemStack, Integer> drops = new java.util.HashMap<>();
+            for (org.bukkit.block.Block b : blocks) {
+                for (ItemStack drop : b.getDrops()) {
+                    if (Math.random() > yield) continue;
+                    boolean merged = false;
+                    for (java.util.Map.Entry<ItemStack, Integer> e : drops.entrySet()) {
+                        if (e.getKey().isSimilar(drop)) {
+                            e.setValue(e.getValue() + drop.getAmount());
+                            merged = true;
+                            break;
+                        }
+                    }
+                    if (!merged) drops.put(drop.clone(), drop.getAmount());
+                }
+            }
+            for (java.util.Map.Entry<ItemStack, Integer> e : drops.entrySet()) {
+                ItemStack stack = e.getKey();
+                int amount = e.getValue();
+                stack.setAmount(1);
+                Item item = center.getWorld().dropItem(center, stack);
+                item.setVelocity(new Vector(Math.random() * 0.1 - 0.05, 0.2, Math.random() * 0.1 - 0.05));
+                setVirtualCount(item, amount);
+            }
+        }
+
+        @org.bukkit.event.EventHandler(ignoreCancelled = true, priority = org.bukkit.event.EventPriority.HIGHEST)
+        public void onHopperPickup(org.bukkit.event.inventory.InventoryPickupItemEvent event) {
+            if (!SourbyCraftConfig.wildstackerEnabled || KEY_STACK_COUNT == null) return;
+            Item item = event.getItem();
+            long virtual = getVirtualCount(item);
+            if (virtual <= 1) return;
+
+            org.bukkit.inventory.Inventory inv = event.getInventory();
+            
+            ItemStack one = item.getItemStack().clone();
+            one.setAmount(1);
+            java.util.HashMap<Integer, ItemStack> leftovers = inv.addItem(one);
+            if (!leftovers.isEmpty()) {
+                event.setCancelled(true);
+                return;
+            }
+            
+            event.setCancelled(true);
+            long remaining = virtual - 1;
+            if (remaining <= 0) {
+                removeHologram(item);
+                item.remove();
+            } else {
+                ItemStack newStack = item.getItemStack().clone();
+                newStack.setAmount((int) Math.min(remaining, item.getItemStack().getMaxStackSize()));
+                item.setItemStack(newStack);
+                setVirtualCount(item, remaining);
+            }
+        }
+
+        @org.bukkit.event.EventHandler(ignoreCancelled = true, priority = org.bukkit.event.EventPriority.HIGHEST)
+        public void onItemDamage(org.bukkit.event.entity.EntityDamageEvent event) {
+            if (!SourbyCraftConfig.wildstackerEnabled || KEY_STACK_COUNT == null) return;
+            if (event.getEntity() instanceof Item item) {
+                long virtual = getVirtualCount(item);
+                int maxStack = item.getItemStack().getMaxStackSize();
+                if (virtual > maxStack) {
+                    long remaining = virtual - maxStack;
+                    ItemStack newStack = item.getItemStack().clone();
+                    newStack.setAmount((int) Math.min(remaining, maxStack));
+                    item.setItemStack(newStack);
+                    setVirtualCount(item, remaining);
+                    
+                    // Cancel the damage so it isn't completely destroyed
+                    event.setCancelled(true);
+                    
+                    // Simulate visual damage effect (fire particles or sounds could be added here)
+                    if (event.getCause() == org.bukkit.event.entity.EntityDamageEvent.DamageCause.LAVA || event.getCause() == org.bukkit.event.entity.EntityDamageEvent.DamageCause.FIRE || event.getCause() == org.bukkit.event.entity.EntityDamageEvent.DamageCause.FIRE_TICK) {
+                        item.setFireTicks(20);
+                    }
+                }
+            }
+        }
     }
 }
