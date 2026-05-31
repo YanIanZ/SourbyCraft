@@ -191,27 +191,6 @@ public final class WildstackerManager {
             item.remove();
             return;
         }
-        // SourbyCraft v10.5 — WildStacker-style stack-limit overflow.
-        // When merged count exceeds dropStackCap, keep the cap on this entity
-        // and spawn a second entity with the overflow so further pickups still
-        // give players the full amount. Matches WStackedItem behaviour.
-        long limit = SourbyCraftConfig.unlimitedDropStack
-            ? Long.MAX_VALUE
-            : Math.max(1L, (long) SourbyCraftConfig.dropStackCap);
-        if (count > limit) {
-            long overflow = count - limit;
-            count = limit;
-            ItemStack overflowStack = item.getItemStack().clone();
-            int spawnAmount = (int) Math.min(overflow, Integer.MAX_VALUE);
-            overflowStack.setAmount(Math.max(1, spawnAmount));
-            World w = item.getWorld();
-            Item spawned = w.dropItem(item.getLocation(), overflowStack);
-            // SourbyCraft - Prevent overflow drop clipping by giving it a slight velocity instead of 0
-            spawned.setVelocity(new Vector(Math.random() * 0.02 - 0.01, 0.05, Math.random() * 0.02 - 0.01));
-            spawned.setPickupDelay(40);
-            spawned.getPersistentDataContainer().set(KEY_STACK_COUNT, PersistentDataType.LONG, overflow);
-            refreshHologram(spawned, overflow);
-        }
         item.getPersistentDataContainer().set(KEY_STACK_COUNT, PersistentDataType.LONG, count);
         refreshHologram(item, count);
     }
@@ -356,29 +335,10 @@ public final class WildstackerManager {
                 long combined = getVirtualCount(a) + getVirtualCount(b);
                 // Removed setting velocity to 0 to allow water to push items
                 a.setPickupDelay(Math.max(a.getPickupDelay(), b.getPickupDelay()));
-                // SourbyCraft v10.5 — WildStacker-style merge particle (subtle visual feedback)
-                spawnMergeParticle(a);
                 removeHologram(b);
                 b.remove();
                 setVirtualCount(a, combined);
             }
-        }
-    }
-
-    /**
-     * SourbyCraft v10.5 — WildStacker-style merge particle.
-     * Subtle COMPOSTER puff at the merged item's location. Mirrors
-     * WStackedItem.spawnStackParticle() but uses Adventure-safe particles.
-     */
-    private static void spawnMergeParticle(Item item) {
-        try {
-            item.getWorld().spawnParticle(
-                org.bukkit.Particle.COMPOSTER,
-                item.getLocation().add(0, 0.2, 0),
-                3, 0.1, 0.1, 0.1, 0.0
-            );
-        } catch (Throwable ignored) {
-            // Particle API can throw if entity world is mid-unload; safe to swallow.
         }
     }
 
