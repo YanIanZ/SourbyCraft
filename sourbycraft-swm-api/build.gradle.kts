@@ -27,11 +27,11 @@ tasks.processResources {
     enabled = false
 }
 
-val extractApi by tasks.registering(Jar::class) {
-    dependsOn(":sourbycraft-server:jar")
-    archiveFileName.set("sourbycraft-swm-api-${project.version}.jar")
+val serverJarProvider = project(":sourbycraft-server").tasks.named<Jar>("jar").flatMap { it.archiveFile }
 
-    from(zipTree(file("../sourbycraft-server/build/libs/sourbycraft-server-v7-REL.jar"))) {
+val extractApi by tasks.registering(Jar::class) {
+    archiveFileName.set("sourbycraft-swm-api-${project.version}.jar")
+    from(zipTree(serverJarProvider)) {
         include("dev/iyanz/sourbycraft/swm/api/**")
     }
 }
