@@ -24,13 +24,14 @@ public class WorldCountCollector extends LiveCollector {
 
     @Override
     public void run() {
+        if (true) return; // This doesn't work, and it's not worth fixing at the moment.
         int entities = 0;
         int chunkCount = 0;
         int tileEntityCount = 0;
 
         if (!Bukkit.isStopping()) {
             for (World world : Bukkit.getWorlds()) {
-                entities += world.getEntityCount();
+                world.getEntityCount();
                 chunkCount += world.getChunkCount();
                 tileEntityCount += world.getTileEntityCount();
             }
