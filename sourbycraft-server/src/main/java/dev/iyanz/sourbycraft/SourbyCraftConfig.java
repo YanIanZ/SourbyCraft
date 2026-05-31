@@ -107,9 +107,6 @@ public class SourbyCraftConfig {
     public static int dropStackCap = Integer.MAX_VALUE;
     public static boolean ownerProtectionEnabled = true;
     public static int ownerProtectionTime = 10;
-    // SourbyCraft v10.2 — Alternate Current redstone optimization (Paper's built-in AC, default OFF)
-    public static boolean redstoneAlternateCurrent = false;
-    // SourbyCraft end
     // SourbyCraft v9.13 — was true; ItemEntityPool recycles entity instances and can return
     // stale objects with noGravity=true or a frozen velocity vector, causing items to levitate.
     // Disabled until pool correctly resets all entity state on recycle.
@@ -226,9 +223,6 @@ public class SourbyCraftConfig {
         // SourbyCraft end knockback
         hopperBatch = getBoolean("entity.hopper-batch", hopperBatch);
         redstoneOptimize = getBoolean("entity.redstone-optimize", redstoneOptimize);
-        // SourbyCraft v10.2 — Alternate Current redstone optimization (delegates to Paper's built-in AC)
-        redstoneAlternateCurrent = getBoolean("performance.redstone.alternate-current", redstoneAlternateCurrent);
-        // SourbyCraft end
         maxEntityPerChunk = getInt("entity.max-per-chunk", maxEntityPerChunk);
         // SourbyCraft start - lag prevention
         maxSpecialsPerChunk = getInt("entity.max-specials-per-chunk", maxSpecialsPerChunk);
