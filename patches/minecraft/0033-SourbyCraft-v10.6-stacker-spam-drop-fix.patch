@@ -5,10 +5,10 @@ Subject: [PATCH] SourbyCraft v10.6 stacker spam-drop fix
 
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index d46f6d2149ac60aa593f787419131041503c4929..e01a20f0fa63743eb4398f62c7ad31adce2c4992 100644
+index 08bf4d10e75ca39e3f9e0b6b45445bfb55e8a000..e5bb746535018b9bd5290d3247da1222dd9a8928 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -1769,7 +1769,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1765,7 +1765,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          this.getPlayerList().getPlayers().forEach(serverPlayer1 -> serverPlayer1.connection.suspendFlushing());
          this.server.getScheduler().mainThreadHeartbeat(); // CraftBukkit
          // SourbyCraft start - v9.19 wildstacker periodic tick (NMS-only mode, no Bukkit scheduler)

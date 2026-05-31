@@ -85,6 +85,22 @@ public class SourbyCraftConfig {
     public static boolean wildstackerEnabled = true;
     public static boolean wildstackerHologram = true;        // SourbyCraft v9.11
     public static boolean wildstackerLosCheck = true;        // SourbyCraft v9.11 — anti-fraud
+    // SourbyCraft v11.0 — PvP server tuning (1.8-style combat + anti-lag + network)
+    public static boolean pvpEnabled = true;                    // master toggle
+    // Knockback formula — vanilla 1.9: horizontal=0.4, vertical=0.4, extraH=0.5, extraV=0.0, friction=2.0
+    // 1.8 feel: horizontal=0.4, vertical=0.4, extraH=0.5, extraV=0.1, friction=1.0
+    public static double pvpKnockbackHorizontal = 0.4;
+    public static double pvpKnockbackVertical = 0.4;
+    public static double pvpKnockbackExtraHorizontal = 0.5;
+    public static double pvpKnockbackExtraVertical = 0.1;
+    public static double pvpKnockbackFriction = 1.0;            // 1.0 = 1.8-style (no halving), 2.0 = 1.9 vanilla
+    public static boolean pvpNoAttackCooldown = true;           // force getAttackStrengthScale() = 1.0
+    // Anti-lag overrides — when pvpEnabled, these tighten defaults during init
+    public static int pvpMobAiActivationRange = 16;             // beyond this distance from any player, mob AI skipped
+    public static int pvpMaxMobsPerChunk = 6;                   // hard cap per chunk
+    public static int pvpViewDistanceCap = 6;                   // forced max view-distance (chunks); 0 = no override
+    public static int pvpSimulationDistanceCap = 5;             // forced max simulation-distance; 0 = no override
+    // SourbyCraft end PvP
     // SourbyCraft start - antixray
     public static boolean fluidObscures = true;
     // SourbyCraft end
@@ -215,6 +231,19 @@ public class SourbyCraftConfig {
         wildstackerEnabled = getBoolean("performance.wildstacker.enabled", wildstackerEnabled);
         wildstackerHologram = getBoolean("performance.wildstacker.hologram", wildstackerHologram);
         wildstackerLosCheck = getBoolean("performance.wildstacker.los-check", wildstackerLosCheck);
+        // SourbyCraft v11.0 — PvP server tuning
+        pvpEnabled = getBoolean("pvp.enabled", pvpEnabled);
+        pvpKnockbackHorizontal = getDouble("pvp.knockback.horizontal", pvpKnockbackHorizontal);
+        pvpKnockbackVertical = getDouble("pvp.knockback.vertical", pvpKnockbackVertical);
+        pvpKnockbackExtraHorizontal = getDouble("pvp.knockback.extra-horizontal", pvpKnockbackExtraHorizontal);
+        pvpKnockbackExtraVertical = getDouble("pvp.knockback.extra-vertical", pvpKnockbackExtraVertical);
+        pvpKnockbackFriction = getDouble("pvp.knockback.friction", pvpKnockbackFriction);
+        pvpNoAttackCooldown = getBoolean("pvp.no-attack-cooldown", pvpNoAttackCooldown);
+        pvpMobAiActivationRange = getInt("pvp.mob-ai-activation-range", pvpMobAiActivationRange);
+        pvpMaxMobsPerChunk = getInt("pvp.max-mobs-per-chunk", pvpMaxMobsPerChunk);
+        pvpViewDistanceCap = getInt("pvp.view-distance-cap", pvpViewDistanceCap);
+        pvpSimulationDistanceCap = getInt("pvp.simulation-distance-cap", pvpSimulationDistanceCap);
+        // SourbyCraft end PvP
         hopperBatch = getBoolean("entity.hopper-batch", hopperBatch);
         redstoneOptimize = getBoolean("entity.redstone-optimize", redstoneOptimize);
         maxEntityPerChunk = getInt("entity.max-per-chunk", maxEntityPerChunk);
@@ -272,6 +301,36 @@ public class SourbyCraftConfig {
         if (idleTimeout > 0) {
             // Idle timeout will be implemented via scheduler
         }
+
+        // SourbyCraft v11.0 — PvP server overrides (applied after all config keys read)
+        if (pvpEnabled) {
+            // Tighten Pufferfish DAB activation distance (more aggressive AI throttle)
+            try {
+                if (pvpMobAiActivationRange > 0
+                    && gg.pufferfish.pufferfish.PufferfishConfig.startDistance > pvpMobAiActivationRange) {
+                    Bukkit.getLogger().info("[SourbyCraft:PvP] Tightening DAB startDistance "
+                        + gg.pufferfish.pufferfish.PufferfishConfig.startDistance + " -> " + pvpMobAiActivationRange);
+                    gg.pufferfish.pufferfish.PufferfishConfig.startDistance = pvpMobAiActivationRange;
+                    gg.pufferfish.pufferfish.PufferfishConfig.startDistanceSquared =
+                        pvpMobAiActivationRange * pvpMobAiActivationRange;
+                }
+            } catch (Throwable t) {
+                Bukkit.getLogger().warning("[SourbyCraft:PvP] Failed to override PufferfishConfig: " + t);
+            }
+            // Tighten entity caps
+            if (pvpMaxMobsPerChunk > 0 && maxEntityPerChunk > pvpMaxMobsPerChunk) {
+                Bukkit.getLogger().info("[SourbyCraft:PvP] Tightening maxEntityPerChunk "
+                    + maxEntityPerChunk + " -> " + pvpMaxMobsPerChunk);
+                maxEntityPerChunk = pvpMaxMobsPerChunk;
+            }
+            if (pvpMaxMobsPerChunk > 0 && maxSpecialsPerChunk > pvpMaxMobsPerChunk * 2) {
+                maxSpecialsPerChunk = pvpMaxMobsPerChunk * 2;
+            }
+            Bukkit.getLogger().info("[SourbyCraft:PvP] PvP server mode active — KB friction="
+                + pvpKnockbackFriction + " no-cooldown=" + pvpNoAttackCooldown
+                + " mob-ai-range=" + pvpMobAiActivationRange);
+        }
+        // SourbyCraft end PvP overrides
 
         dev.iyanz.sourbycraft.util.VirtualExecutor.init();
     }
