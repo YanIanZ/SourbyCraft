@@ -1,0 +1,23 @@
+categories:
+  Core:
+    - LuckPerms
+    - EssentialsX
+    - Vault
+    - PlaceholderAPI
+  PvP:
+    - CombatLogX
+    - ViaVersion
+    - ViaBackwards
+    - PacketEvents
+    - ProtocolLib
+  World:
+    - WorldEdit
+    - WorldGuard
+    - SlimeWorldManager
+    - FastAsyncWorldEdit
+  Util:
+    - spark
+    - Multiverse-Core
+  Economy:
+    - EconomyAPI
+    - CMI
