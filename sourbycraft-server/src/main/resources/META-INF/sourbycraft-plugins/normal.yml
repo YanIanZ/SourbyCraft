@@ -1,0 +1,9 @@
+# SourbyCraft v12 — first-boot plugin auto-installer manifest (NORMAL variant)
+plugins:
+  - name: SlimeWorldManager
+    source: github
+    repo: InfernalSuite/SlimeWorldManager
+    asset-glob: "swm-*.jar"
+  - name: spark
+    source: ci
+    url: "https://ci.lucko.me/job/spark/lastSuccessfulBuild/artifact/spark-bukkit/build/libs/spark-1.10.142-bukkit.jar"
