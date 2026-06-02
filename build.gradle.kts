@@ -196,21 +196,23 @@ if (providers.gradleProperty("updatingMinecraft").getOrElse("false").toBoolean()
 }
 
 // SourbyCraft v12 — track last-applied variant so paperweight re-applies on switch.
-// Paperweight caches the applied source tree — when switching variants we must
+// Paperweight caches the applied source tree — when switching variants we MUST
 // invalidate that tree, else PVP code persists in a normal build (and vice versa).
-val sourbycraftVariantMarker = file("build/.sourbycraft-applied-variant")
-fun resetPatchedTreesIfVariantChanged(currentVariant: String) {
-    val last = if (sourbycraftVariantMarker.exists()) sourbycraftVariantMarker.readText().trim() else ""
-    if (last == currentVariant) return
-    logger.lifecycle("SourbyCraft variant changed ($last -> $currentVariant); resetting patched trees")
-    listOf("paper-server", "paper-api", "sourbycraft-server/src/minecraft").forEach {
-        val d = file(it)
-        if (d.exists()) {
-            d.deleteRecursively()
+// Runs at CONFIGURATION TIME so applyXxxPatches sees a wiped tree and re-applies.
+run {
+    val marker = file("build/.sourbycraft-applied-variant")
+    val last = if (marker.exists()) marker.readText().trim() else ""
+    if (last != sourbycraftVariant) {
+        logger.lifecycle("SourbyCraft variant changed (\"$last\" -> \"$sourbycraftVariant\"); resetting patched trees")
+        listOf("paper-server", "paper-api", "sourbycraft-server/src/minecraft").forEach {
+            val d = file(it)
+            if (d.exists()) {
+                d.deleteRecursively()
+            }
         }
+        marker.parentFile.mkdirs()
+        marker.writeText(sourbycraftVariant)
     }
-    sourbycraftVariantMarker.parentFile.mkdirs()
-    sourbycraftVariantMarker.writeText(currentVariant)
 }
 
 // SourbyCraft v12 — filter PVP patches out of normal builds.
@@ -233,8 +235,6 @@ allprojects {
     tasks.matching { patchKindFor(it.name) != null }.configureEach {
         val taskNameLocal = this.name
         doFirst {
-            // Reset patched trees if variant changed since last apply.
-            resetPatchedTreesIfVariantChanged(sourbycraftVariant)
             if (!isPvpVariant) {
                 val patchKind = patchKindFor(taskNameLocal) ?: return@doFirst
                 val patchDir = rootProject.file("patches/$patchKind")
