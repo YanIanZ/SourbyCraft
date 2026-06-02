@@ -21,11 +21,15 @@ import java.util.logging.Level;
 
 public class SourbyCraftConfig {
 
-    // SourbyCraft v12 — sourbycraft.yml overlay loader (read at class init from classpath resource)
-    private static final Map<String, Object> sourbycraftYml = loadSourbycraftYml();
+    // SourbyCraft v12 — sourbycraft.yml + variant overlay loader.
+    // Baseline is `/sourbycraft.yml`. Build packages variant-specific tweaks at
+    // `/sourbycraft-variant-overlay.yml` (written by processVariantResources task).
+    // ymlGet checks overlay first, then falls back to baseline, then to caller default.
+    private static final Map<String, Object> sourbycraftYmlBaseline = loadYmlResource("/sourbycraft.yml");
+    private static final Map<String, Object> sourbycraftYmlOverlay = loadYmlResource("/sourbycraft-variant-overlay.yml");
 
-    private static Map<String, Object> loadSourbycraftYml() {
-        try (InputStream in = SourbyCraftConfig.class.getResourceAsStream("/sourbycraft.yml")) {
+    private static Map<String, Object> loadYmlResource(String resource) {
+        try (InputStream in = SourbyCraftConfig.class.getResourceAsStream(resource)) {
             if (in == null) return Map.of();
             Map<String, Object> y = new Yaml().load(in);
             return y == null ? Map.of() : y;
@@ -35,23 +39,31 @@ public class SourbyCraftConfig {
     }
 
     /**
-     * Read a value from the bundled <code>sourbycraft.yml</code> overlay using a dotted path.
-     * Returns {@code defaultValue} when any path segment is missing, when an intermediate
-     * segment is not a Map, or when the value cannot be cast to the expected type.
+     * Read a value from sourbycraft.yml (variant overlay first, then baseline) using a
+     * dotted path. Returns {@code defaultValue} when any path segment is missing in BOTH
+     * overlay and baseline.
      */
     @SuppressWarnings("unchecked")
     public static <T> T ymlGet(String dottedPath, T defaultValue) {
-        Object cur = sourbycraftYml;
+        Object overlayVal = lookupYml(sourbycraftYmlOverlay, dottedPath);
+        if (overlayVal != null) {
+            try { return (T) overlayVal; } catch (ClassCastException ignored) {}
+        }
+        Object baseVal = lookupYml(sourbycraftYmlBaseline, dottedPath);
+        if (baseVal != null) {
+            try { return (T) baseVal; } catch (ClassCastException ignored) {}
+        }
+        return defaultValue;
+    }
+
+    private static Object lookupYml(Map<String, Object> root, String dottedPath) {
+        Object cur = root;
         for (String seg : dottedPath.split("\\.")) {
-            if (!(cur instanceof Map<?, ?> m)) return defaultValue;
+            if (!(cur instanceof Map<?, ?> m)) return null;
             cur = m.get(seg);
-            if (cur == null) return defaultValue;
+            if (cur == null) return null;
         }
-        try {
-            return (T) cur;
-        } catch (ClassCastException e) {
-            return defaultValue;
-        }
+        return cur;
     }
 
     private static File CONFIG_FILE;
