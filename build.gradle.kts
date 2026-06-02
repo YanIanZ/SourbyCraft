@@ -125,6 +125,15 @@ subprojects {
         }
     }
 
+    // SourbyCraft v12 — broaden test include pattern for sourbycraft-server.
+    // Existing pattern is "**/**TestSuite.class" (suite-only). New TDD tests live
+    // alongside Java code as *Test.class without per-package suite wrappers.
+    tasks.withType<Test>().configureEach {
+        if (project.name == "sourbycraft-server") {
+            include("**/*Test.class")
+        }
+    }
+
     repositories {
         mavenCentral()
         maven("https://repo.papermc.io/repository/maven-public/")
