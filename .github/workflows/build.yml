@@ -1,15 +1,19 @@
 name: Build
 on:
   push:
-    branches: [ ver/1.21.11, ver/1.21.11-dev, experimental-feat ]
+    branches: [ ver/1.21.11, ver/1.21.11-dev, experimental-feat, feat/pvp-server ]
   pull_request:
-    branches: [ ver/1.21.11 ]
+    branches: [ ver/1.21.11, main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     if: "!contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'ci skip')"
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [normal, pvp]
 
     steps:
       - name: Checkout code
@@ -30,15 +34,38 @@ jobs:
           git config --global user.email "no-reply@github.com"
           git config --global user.name "Github Actions"
 
+      - name: Verify patch parity
+        run: bash scripts/verify-patch-parity.sh
+
       - name: Apply all patches
-        run: ./gradlew applyAllPatches --no-daemon
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: ./gradlew applyAllPatches --no-daemon -Pvariant="$VARIANT"
+
+      - name: Run unit tests
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: ./gradlew :sourbycraft-server:test --no-daemon -Pvariant="$VARIANT"
 
       - name: Build mojang-mapped paperclip jar
-        run: ./gradlew createMojmapPaperclipJar --no-daemon
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: ./gradlew createMojmapPaperclipJar --no-daemon -Pvariant="$VARIANT"
 
-      - name: Upload mojang-mapped paperclip jar
+      - name: Verify variant divergence
+        run: |
+          jar=$(ls sourbycraft-server/build/libs/SourbyCraft*-v12-REL.jar 2>/dev/null | head -1)
+          if [ -z "$jar" ]; then
+            jar=$(ls sourbycraft-server/build/libs/sourbycraft-paperclip-* | head -1)
+          fi
+          echo "Inspecting: $jar"
+          unzip -p "$jar" META-INF/sourbycraft-build.properties || true
+
+      - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
-          name: SourbyCraft-Artifacts
-          path: sourbycraft-server/build/libs/sourbycraft-paperclip-*
+          name: SourbyCraft-${{ matrix.variant }}
+          path: |
+            sourbycraft-server/build/libs/SourbyCraft*-v12-REL.jar
+            sourbycraft-server/build/libs/sourbycraft-paperclip-*
           if-no-files-found: error
