@@ -48,6 +48,38 @@ subprojects {
     tasks.withType<ProcessResources> {
         filteringCharset = Charsets.UTF_8.name()
     }
+
+    // SourbyCraft v12 — variant-specific resource overlay
+    val variantOverlayTask = tasks.register<Copy>("processVariantResources") {
+        val variant = providers.gradleProperty("variant").getOrElse("normal")
+        val baseline = file("${rootProject.projectDir}/sourbycraft-server/src/main/resources")
+        val overlay = file("${rootProject.projectDir}/sourbycraft-server/src/main/resources/variant-overlay/$variant")
+
+        onlyIf { project.name == "sourbycraft-server" && baseline.exists() }
+
+        from(baseline) {
+            exclude("variant-overlay/**")
+        }
+        if (overlay.exists()) {
+            from(overlay) {
+                duplicatesStrategy = DuplicatesStrategy.INCLUDE
+            }
+        }
+        into(layout.buildDirectory.dir("variant-resources"))
+
+        inputs.property("variant", variant)
+    }
+
+    tasks.withType<ProcessResources>().configureEach {
+        if (project.name == "sourbycraft-server") {
+            dependsOn(variantOverlayTask)
+            from(layout.buildDirectory.dir("variant-resources")) {
+                duplicatesStrategy = DuplicatesStrategy.INCLUDE
+            }
+            exclude("variant-overlay/**")
+        }
+    }
+
     tasks.withType<Test> {
         testLogging {
             showStackTraces = true
