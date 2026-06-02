@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Tue, 2 Jun 2026 20:21:17 +0700
+Subject: [PATCH] SourbyCraft v12: wire PluginAutoInstaller into loadPlugins
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 90e45481f56393b3918ff1bf2fb0b40e3fa81ae2..773652e62730eeca97c514fb41048af8e411cd92 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -566,6 +566,24 @@ public final class CraftServer implements Server {
+     }
+ 
+     public void loadPlugins() {
++        // SourbyCraft v12 — auto-install variant plugins before plugin scan
++        try {
++            dev.iyanz.sourbycraft.brand.BuildInfo sbi = dev.iyanz.sourbycraft.brand.BuildInfo.load();
++            boolean autoInstall = Boolean.TRUE.equals(
++                dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("auto-install.enabled", Boolean.TRUE));
++            if (autoInstall) {
++                java.nio.file.Path pluginsDir = java.nio.file.Path.of("plugins");
++                dev.iyanz.sourbycraft.install.PluginAutoInstaller.Result r =
++                    dev.iyanz.sourbycraft.install.PluginAutoInstaller.installFromVariant(sbi.variant(), pluginsDir);
++                org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
++                    "[install] variant={}: installed={} skipped={} failed={}",
++                    sbi.variant(), r.installedCount(), r.skippedCount(), r.failedCount()
++                );
++            }
++        } catch (Throwable t) {
++            org.slf4j.LoggerFactory.getLogger("SourbyCraft").warn(
++                "[install] auto-installer error (continuing boot): " + t.getMessage());
++        }
+         io.papermc.paper.plugin.entrypoint.LaunchEntryPointHandler.INSTANCE.enter(io.papermc.paper.plugin.entrypoint.Entrypoint.PLUGIN); // Paper - replace implementation
+     }
+ 
