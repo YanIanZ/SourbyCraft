@@ -62,11 +62,17 @@ subprojects {
 
         onlyIf { isServerProject && baselineExistsProvider.get() }
 
+        // Copy baseline (excluding variant-overlay dir itself)
         from(baseline) {
             exclude("variant-overlay/**")
         }
         if (overlay.exists()) {
+            // Overlay's sourbycraft.yml goes to a SEPARATE file so SourbyCraftConfig
+            // can deep-merge it at runtime. Other overlay files (server.properties,
+            // paper-global.yml, spigot.yml, paper-world-defaults.yml) replace baseline
+            // — they are first-boot seed files where file-level replace is correct.
             from(overlay) {
+                rename("sourbycraft\\.yml", "sourbycraft-variant-overlay.yml")
                 duplicatesStrategy = DuplicatesStrategy.INCLUDE
             }
         }
