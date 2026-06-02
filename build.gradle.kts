@@ -51,12 +51,16 @@ subprojects {
     }
 
     // SourbyCraft v12 — variant-specific resource overlay
+    // Capture project name at config time so onlyIf{} doesn't break Gradle config cache.
+    val thisProjectName = project.name
     val variantOverlayTask = tasks.register<Copy>("processVariantResources") {
         val variant = providers.gradleProperty("variant").getOrElse("normal")
         val baseline = file("${rootProject.projectDir}/sourbycraft-server/src/main/resources")
         val overlay = file("${rootProject.projectDir}/sourbycraft-server/src/main/resources/variant-overlay/$variant")
+        val baselineExistsProvider = provider { baseline.exists() }
+        val isServerProject = thisProjectName == "sourbycraft-server"
 
-        onlyIf { project.name == "sourbycraft-server" && baseline.exists() }
+        onlyIf { isServerProject && baselineExistsProvider.get() }
 
         from(baseline) {
             exclude("variant-overlay/**")
@@ -71,8 +75,8 @@ subprojects {
         inputs.property("variant", variant)
     }
 
-    tasks.withType<ProcessResources>().configureEach {
-        if (project.name == "sourbycraft-server") {
+    if (thisProjectName == "sourbycraft-server") {
+        tasks.withType<ProcessResources>().configureEach {
             dependsOn(variantOverlayTask)
             from(layout.buildDirectory.dir("variant-resources")) {
                 duplicatesStrategy = DuplicatesStrategy.INCLUDE
@@ -111,8 +115,8 @@ subprojects {
         finalizedBy(writeBuildInfoTask)
     }
 
-    tasks.withType<ProcessResources>().configureEach {
-        if (project.name == "sourbycraft-server") {
+    if (thisProjectName == "sourbycraft-server") {
+        tasks.withType<ProcessResources>().configureEach {
             dependsOn(writeBuildInfoTask)
         }
     }
@@ -128,8 +132,8 @@ subprojects {
     // SourbyCraft v12 — broaden test include pattern for sourbycraft-server.
     // Existing pattern is "**/**TestSuite.class" (suite-only). New TDD tests live
     // alongside Java code as *Test.class without per-package suite wrappers.
-    tasks.withType<Test>().configureEach {
-        if (project.name == "sourbycraft-server") {
+    if (thisProjectName == "sourbycraft-server") {
+        tasks.withType<Test>().configureEach {
             include("**/*Test.class")
         }
     }
