@@ -1,5 +1,6 @@
 import io.papermc.paperweight.patcher.extension.PaperweightPatcherExtension
 import io.papermc.paperweight.tasks.RebuildGitPatches
+import java.time.Instant
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 
@@ -77,6 +78,42 @@ subprojects {
                 duplicatesStrategy = DuplicatesStrategy.INCLUDE
             }
             exclude("variant-overlay/**")
+        }
+    }
+
+    // SourbyCraft v12 — emit META-INF/sourbycraft-build.properties
+    val writeBuildInfoTask = tasks.register("writeBuildInfo") {
+        val variant = providers.gradleProperty("variant").getOrElse("normal")
+        val internalVersion = providers.gradleProperty("internalVersion").getOrElse("dev")
+        val mcVersion = providers.gradleProperty("mcVersion").getOrElse("unknown")
+        val outFile = layout.buildDirectory.file("variant-resources/META-INF/sourbycraft-build.properties")
+
+        inputs.property("variant", variant)
+        inputs.property("internalVersion", internalVersion)
+        inputs.property("mcVersion", mcVersion)
+        outputs.file(outFile)
+
+        doLast {
+            val f = outFile.get().asFile
+            f.parentFile.mkdirs()
+            val timestamp = Instant.now().toString()
+            f.writeText("""
+                variant=$variant
+                version=$internalVersion
+                mcVersion=$mcVersion
+                tagline=Lightning Fast Performance · Feature Rich
+                buildTimestamp=$timestamp
+            """.trimIndent())
+        }
+    }
+
+    tasks.named("processVariantResources").configure {
+        finalizedBy(writeBuildInfoTask)
+    }
+
+    tasks.withType<ProcessResources>().configureEach {
+        if (project.name == "sourbycraft-server") {
+            dependsOn(writeBuildInfoTask)
         }
     }
 
