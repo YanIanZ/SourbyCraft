@@ -148,11 +148,19 @@ plugins:
   - name: SlimeWorldManager
     source: github
     repo: InfernalSuite/SlimeWorldManager
-    asset-glob: "swm-*.jar"
+    asset-glob: "swm-*.jar"            # picks GitHub release asset by name pattern
   - name: spark
     source: ci
     url: "https://ci.lucko.me/job/spark/lastSuccessfulBuild/artifact/spark-bukkit/build/libs/spark-*-bukkit.jar"
 ```
+
+Manifest schema:
+- `name` (required): plugin display name + filename prefix used for existence check
+- `source` (required): `github` (uses GitHub Releases API) or `ci` (direct URL)
+- `repo` (required for `source: github`): `owner/repo` format
+- `url` (required for `source: ci`): direct download URL, wildcards expanded server-side
+- `asset-glob` (optional, `source: github`): asset name pattern when repo has multiple release assets
+- `sha256` (optional): hex digest, enforced when present
 
 `META-INF/sourbycraft-plugins/pvp.yml`:
 ```yaml
@@ -384,7 +392,9 @@ Config knobs: `sourbycraft.yml -> network.netty.{threads, snd-buf-kb, rcv-buf-kb
 
 Advisory only — no JNI/JNA dep. `MinecraftServer` early init:
 - Detect GC via `ManagementFactory.getGarbageCollectorMXBeans()`
-- If not ZGC or G1-generational → loud WARN banner recommending:
+- Accepted GCs: ZGC (with `+ZGenerational`) OR G1 (G1 is generational by default).
+  Anything else (ParallelGC, Serial, CMS, SerialOld) → WARN.
+- If not accepted → loud WARN banner recommending:
   ```
   -XX:+UseZGC -XX:+ZGenerational
   -XX:+AlwaysPreTouch
@@ -416,9 +426,10 @@ Silence: `branding.gc-advisor.enabled: false`.
 - Hit-window widening: tolerate up to `combat.hit-window-ms` ms of attack-packet
   lateness (PVP `150`, vanilla `100`)
 
-### §7.5 `9005-PVP-proxy-kick.patch` (added in §6)
+### §7.5 `9005-PVP-proxy-kick.patch`
 
-See §6: proxy-aware shutdown kick grace + strict IP-forward header.
+Implements proxy-aware shutdown + strict IP-forward header (full description in §6).
+Listed here for completeness of the `9XXX-PVP-*` patch series.
 
 ## §8 Testing + rollout
 
