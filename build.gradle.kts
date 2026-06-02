@@ -190,23 +190,36 @@ if (providers.gradleProperty("updatingMinecraft").getOrElse("false").toBoolean()
     }
 }
 
-// SourbyCraft v12 — filter PVP patches out of normal builds
-tasks.matching { it.name == "applyServerPatches" || it.name == "applyApiPatches" }.configureEach {
+// SourbyCraft v12 — filter PVP patches out of normal builds.
+// PVP-only patches use 9XXX-PVP-*.patch naming and live in any of:
+//   patches/server/ patches/api/ patches/minecraft/
+// They are stashed before applyXxxPatches runs and restored after.
+fun patchKindFor(taskName: String): String? = when (taskName) {
+    "applyServerPatches" -> "server"
+    "applyApiPatches" -> "api"
+    "applyMinecraftPatches",
+    "applyMinecraftSourcePatches",
+    "applyMinecraftFilePatches",
+    "applyMinecraftFeaturePatches" -> "minecraft"
+    else -> null
+}
+
+tasks.matching { patchKindFor(it.name) != null }.configureEach {
     doFirst {
         if (!isPvpVariant) {
-            val patchKind = if (name == "applyServerPatches") "server" else "api"
+            val patchKind = patchKindFor(name) ?: return@doFirst
             val patchDir = file("patches/$patchKind")
             val pvpPatches = patchDir.listFiles { f -> f.name.matches(Regex("^9\\d{3}-.*\\.patch$")) } ?: emptyArray()
             val stashDir = file("build/sourbycraft-pvp-patches-stashed/$patchKind").apply { mkdirs() }
             pvpPatches.forEach { pf ->
                 val dest = stashDir.resolve(pf.name)
-                logger.lifecycle("  stash PVP patch (normal build): ${pf.name}")
+                logger.lifecycle("  stash PVP patch (normal build): $patchKind/${pf.name}")
                 pf.renameTo(dest)
             }
         }
     }
     doLast {
-        val patchKind = if (name == "applyServerPatches") "server" else "api"
+        val patchKind = patchKindFor(name) ?: return@doLast
         val stashDir = file("build/sourbycraft-pvp-patches-stashed/$patchKind")
         if (stashDir.exists()) {
             val patchDir = file("patches/$patchKind")
