@@ -195,25 +195,28 @@ if (providers.gradleProperty("updatingMinecraft").getOrElse("false").toBoolean()
     }
 }
 
-// SourbyCraft v12 — track last-applied variant so paperweight re-applies on switch.
-// Paperweight caches the applied source tree — when switching variants we MUST
-// invalidate that tree, else PVP code persists in a normal build (and vice versa).
-// Runs at CONFIGURATION TIME so applyXxxPatches sees a wiped tree and re-applies.
+// SourbyCraft v12 — variant marker for diagnostic purposes only.
+// Switching variants from the SAME checkout requires manual cleanup of the
+// patched paperweight source tree (paper-api/, paper-server/, sourbycraft-*/buildscript/,
+// sourbycraft-server/src/minecraft/) because paperweight 2.0 caches the applied
+// state and the Gradle subproject graph is bound at settings.gradle.kts evaluation.
+//
+// For CI / release builds: use a fresh checkout per variant (e.g. matrix worktrees).
+// For local dev: `git clean -fdx -e .gradle -e build` before switching, then run
+// `./gradlew applyAllPatches -Pvariant=<target>`.
 run {
     val marker = file("build/.sourbycraft-applied-variant")
     val last = if (marker.exists()) marker.readText().trim() else ""
-    if (last != sourbycraftVariant) {
-        logger.lifecycle("SourbyCraft variant changed (\"$last\" -> \"$sourbycraftVariant\"); resetting NMS tree")
-        // Only sourbycraft-server/src/minecraft/ hosts PVP patches (9XXX-PVP-* in
-        // patches/minecraft/). paper-server, paper-api don't receive PVP patches —
-        // wiping them breaks Gradle subproject resolution.
-        val nmsDir = file("sourbycraft-server/src/minecraft")
-        if (nmsDir.exists()) {
-            nmsDir.deleteRecursively()
-        }
-        marker.parentFile.mkdirs()
-        marker.writeText(sourbycraftVariant)
+    if (last.isNotEmpty() && last != sourbycraftVariant) {
+        logger.warn(
+            "SourbyCraft variant changed from \"$last\" to \"$sourbycraftVariant\" — " +
+            "paperweight source tree still reflects \"$last\". " +
+            "Run: rm -rf paper-api paper-server sourbycraft-*/buildscript sourbycraft-server/src/minecraft " +
+            "then re-run applyAllPatches."
+        )
     }
+    marker.parentFile.mkdirs()
+    marker.writeText(sourbycraftVariant)
 }
 
 // SourbyCraft v12 — filter PVP patches out of normal builds.
