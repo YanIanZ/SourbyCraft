@@ -203,12 +203,13 @@ run {
     val marker = file("build/.sourbycraft-applied-variant")
     val last = if (marker.exists()) marker.readText().trim() else ""
     if (last != sourbycraftVariant) {
-        logger.lifecycle("SourbyCraft variant changed (\"$last\" -> \"$sourbycraftVariant\"); resetting patched trees")
-        listOf("paper-server", "paper-api", "sourbycraft-server/src/minecraft").forEach {
-            val d = file(it)
-            if (d.exists()) {
-                d.deleteRecursively()
-            }
+        logger.lifecycle("SourbyCraft variant changed (\"$last\" -> \"$sourbycraftVariant\"); resetting NMS tree")
+        // Only sourbycraft-server/src/minecraft/ hosts PVP patches (9XXX-PVP-* in
+        // patches/minecraft/). paper-server, paper-api don't receive PVP patches —
+        // wiping them breaks Gradle subproject resolution.
+        val nmsDir = file("sourbycraft-server/src/minecraft")
+        if (nmsDir.exists()) {
+            nmsDir.deleteRecursively()
         }
         marker.parentFile.mkdirs()
         marker.writeText(sourbycraftVariant)
