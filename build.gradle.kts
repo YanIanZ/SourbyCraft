@@ -203,3 +203,24 @@ tasks.matching { it.name == "applyServerPatches" || it.name == "applyApiPatches"
         }
     }
 }
+
+// SourbyCraft v12 — suffix paperclip jar with variant
+gradle.projectsEvaluated {
+    val variant = providers.gradleProperty("variant").getOrElse("normal")
+    val suffix = if (variant == "pvp") "-PVP" else ""
+    val internalVersion = providers.gradleProperty("internalVersion").getOrElse("dev")
+
+    subprojects.filter { it.name == "sourbycraft-server" }.forEach { sp ->
+        sp.tasks.matching { it.name.endsWith("PaperclipJar") }.configureEach {
+            doLast {
+                val outputs = outputs.files.files.filter { it.name.endsWith(".jar") && it.exists() }
+                outputs.forEach { origJar ->
+                    val newName = "SourbyCraft${suffix}-${internalVersion}.jar"
+                    val newFile = origJar.resolveSibling(newName)
+                    origJar.copyTo(newFile, overwrite = true)
+                    logger.lifecycle("SourbyCraft jar: ${newFile.name}")
+                }
+            }
+        }
+    }
+}
