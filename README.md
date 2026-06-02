@@ -1,13 +1,26 @@
+<h1 align="center">⚡ SourbyCraft</h1>
+
+<p align="center"><strong>Lightning Fast Performance · Feature Rich</strong></p>
+
 <p align="center">
   <img src="https://img.shields.io/badge/minecraft-1.21.11-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/version-v6--REL-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/version-v12--REL-orange?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
-<h1 align="center">🍞 SourbyCraft</h1>
+<p align="center"><em>High-performance Paper fork with built-in security, anti-xray, dynamic scaling, SWM, NeoForge mod support, and a PvP-arena variant. Fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a>.</em></p>
 
-<p align="center"><em>High-performance Paper fork with built-in security, anti-xray, dynamic scaling, SWM, and NeoForge mod support. Fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a>.</em></p>
+---
+
+## Variants
+
+| Variant | JAR | When to use |
+|---|---|---|
+| **Normal** | `SourbyCraft-v12-REL.jar` | General-purpose SMP. Default. |
+| **PVP** | `SourbyCraft-PVP-v12-REL.jar` | PvP arena backend. 1.8-style KB, no-cooldown, Velocity-tuned, allow-nether=false. |
+
+Build: `./gradlew createMojmapPaperclipJar -Pvariant=normal|pvp`
 
 ---
 
