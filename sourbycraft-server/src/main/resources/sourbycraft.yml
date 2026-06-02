@@ -1,0 +1,47 @@
+# SourbyCraft configuration (baseline)
+# Variant overlays in variant-overlay/<variant>/ override these at build time.
+
+pvp:
+  enabled: false
+  knockback:
+    friction-divisor: 2.0
+    vertical: 0.4
+    extra-horizontal: 0.5
+  no-attack-cooldown: false
+  view-distance-cap: 10
+  simulation-distance-cap: 8
+  max-mobs-per-chunk: 8
+  mob-ai-activation-range: 32
+
+network:
+  proxy-mode: none
+  netty:
+    threads: auto
+    snd-buf-kb: 64
+    rcv-buf-kb: 64
+    max-packets-per-tick: 100
+  proxy-kick-grace-seconds: 0
+  proxy-kick-fallback: lobby
+
+entity-tracker:
+  mob-range: 48
+  item-range: 64
+  xp-orb-range: 64
+  player-update-interval: 2
+
+combat:
+  sweep-enabled: true
+  hit-delay-ticks: 10
+  hit-window-ms: 100
+  fishing-rod-knockback: false
+  reach-debug-command: false
+
+branding:
+  motd-suffix: false
+  compact-plugin-list: true
+  compact-plugin-log: false
+  gc-advisor:
+    enabled: true
+
+auto-install:
+  enabled: true
