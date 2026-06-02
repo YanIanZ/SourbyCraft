@@ -204,27 +204,33 @@ fun patchKindFor(taskName: String): String? = when (taskName) {
     else -> null
 }
 
-tasks.matching { patchKindFor(it.name) != null }.configureEach {
-    doFirst {
-        if (!isPvpVariant) {
-            val patchKind = patchKindFor(name) ?: return@doFirst
-            val patchDir = file("patches/$patchKind")
-            val pvpPatches = patchDir.listFiles { f -> f.name.matches(Regex("^9\\d{3}-.*\\.patch$")) } ?: emptyArray()
-            val stashDir = file("build/sourbycraft-pvp-patches-stashed/$patchKind").apply { mkdirs() }
-            pvpPatches.forEach { pf ->
-                val dest = stashDir.resolve(pf.name)
-                logger.lifecycle("  stash PVP patch (normal build): $patchKind/${pf.name}")
-                pf.renameTo(dest)
+// SourbyCraft v12 — apply filter to BOTH root + every subproject's tasks
+// (paperweight task lives in :sourbycraft-server, not the root project).
+allprojects {
+    tasks.matching { patchKindFor(it.name) != null }.configureEach {
+        val taskNameLocal = this.name
+        doFirst {
+            if (!isPvpVariant) {
+                val patchKind = patchKindFor(taskNameLocal) ?: return@doFirst
+                val patchDir = rootProject.file("patches/$patchKind")
+                val pvpPatches = patchDir.listFiles { f: File -> f.name.matches(Regex("^9\\d{3}-.*\\.patch$")) } ?: emptyArray()
+                val stashDir = rootProject.file("build/sourbycraft-pvp-patches-stashed/$patchKind")
+                stashDir.mkdirs()
+                pvpPatches.forEach { pf ->
+                    val dest = File(stashDir, pf.name)
+                    logger.lifecycle("  stash PVP patch (normal build): $patchKind/${pf.name}")
+                    pf.renameTo(dest)
+                }
             }
         }
-    }
-    doLast {
-        val patchKind = patchKindFor(name) ?: return@doLast
-        val stashDir = file("build/sourbycraft-pvp-patches-stashed/$patchKind")
-        if (stashDir.exists()) {
-            val patchDir = file("patches/$patchKind")
-            stashDir.listFiles().orEmpty().forEach { sf ->
-                sf.renameTo(patchDir.resolve(sf.name))
+        doLast {
+            val patchKind = patchKindFor(taskNameLocal) ?: return@doLast
+            val stashDir = rootProject.file("build/sourbycraft-pvp-patches-stashed/$patchKind")
+            if (stashDir.exists()) {
+                val patchDir = rootProject.file("patches/$patchKind")
+                stashDir.listFiles().orEmpty().forEach { sf ->
+                    sf.renameTo(File(patchDir, sf.name))
+                }
             }
         }
     }
