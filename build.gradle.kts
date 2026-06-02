@@ -50,30 +50,25 @@ subprojects {
         filteringCharset = Charsets.UTF_8.name()
     }
 
-    // SourbyCraft v12 — variant-specific resource overlay
-    // Capture project name at config time so onlyIf{} doesn't break Gradle config cache.
+    // SourbyCraft v12 — variant-specific resource overlay.
+    // Copies ONLY the variant overlay dir into build/variant-resources/. Baseline
+    // resources are bundled normally via src/main/resources (with variant-overlay/**
+    // excluded — see ProcessResources block below). Overlay's sourbycraft.yml is
+    // renamed to sourbycraft-variant-overlay.yml so SourbyCraftConfig can deep-merge
+    // at runtime; other overlay files (server.properties, paper-global.yml etc) ship
+    // at root as first-boot seed files.
     val thisProjectName = project.name
     val variantOverlayTask = tasks.register<Copy>("processVariantResources") {
         val variant = providers.gradleProperty("variant").getOrElse("normal")
-        val baseline = file("${rootProject.projectDir}/sourbycraft-server/src/main/resources")
         val overlay = file("${rootProject.projectDir}/sourbycraft-server/src/main/resources/variant-overlay/$variant")
-        val baselineExistsProvider = provider { baseline.exists() }
+        val overlayExistsProvider = provider { overlay.exists() }
         val isServerProject = thisProjectName == "sourbycraft-server"
 
-        onlyIf { isServerProject && baselineExistsProvider.get() }
+        onlyIf { isServerProject && overlayExistsProvider.get() }
 
-        // Copy baseline (excluding variant-overlay dir itself)
-        from(baseline) {
-            exclude("variant-overlay/**")
-        }
         if (overlay.exists()) {
-            // Overlay's sourbycraft.yml goes to a SEPARATE file so SourbyCraftConfig
-            // can deep-merge it at runtime. Other overlay files (server.properties,
-            // paper-global.yml, spigot.yml, paper-world-defaults.yml) replace baseline
-            // — they are first-boot seed files where file-level replace is correct.
             from(overlay) {
                 rename("sourbycraft\\.yml", "sourbycraft-variant-overlay.yml")
-                duplicatesStrategy = DuplicatesStrategy.INCLUDE
             }
         }
         into(layout.buildDirectory.dir("variant-resources"))
@@ -84,10 +79,14 @@ subprojects {
     if (thisProjectName == "sourbycraft-server") {
         tasks.withType<ProcessResources>().configureEach {
             dependsOn(variantOverlayTask)
-            from(layout.buildDirectory.dir("variant-resources")) {
-                duplicatesStrategy = DuplicatesStrategy.INCLUDE
-            }
+            // variant-resources comes FIRST so overlay's server.properties etc win
+            // over any baseline copy. Use EXCLUDE to silently drop later duplicates.
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+            from(layout.buildDirectory.dir("variant-resources"))
             exclude("variant-overlay/**")
+        }
+        tasks.withType<Jar>().configureEach {
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
         }
     }
 
@@ -196,6 +195,24 @@ if (providers.gradleProperty("updatingMinecraft").getOrElse("false").toBoolean()
     }
 }
 
+// SourbyCraft v12 — track last-applied variant so paperweight re-applies on switch.
+// Paperweight caches the applied source tree — when switching variants we must
+// invalidate that tree, else PVP code persists in a normal build (and vice versa).
+val sourbycraftVariantMarker = file("build/.sourbycraft-applied-variant")
+fun resetPatchedTreesIfVariantChanged(currentVariant: String) {
+    val last = if (sourbycraftVariantMarker.exists()) sourbycraftVariantMarker.readText().trim() else ""
+    if (last == currentVariant) return
+    logger.lifecycle("SourbyCraft variant changed ($last -> $currentVariant); resetting patched trees")
+    listOf("paper-server", "paper-api", "sourbycraft-server/src/minecraft").forEach {
+        val d = file(it)
+        if (d.exists()) {
+            d.deleteRecursively()
+        }
+    }
+    sourbycraftVariantMarker.parentFile.mkdirs()
+    sourbycraftVariantMarker.writeText(currentVariant)
+}
+
 // SourbyCraft v12 — filter PVP patches out of normal builds.
 // PVP-only patches use 9XXX-PVP-*.patch naming and live in any of:
 //   patches/server/ patches/api/ patches/minecraft/
@@ -216,6 +233,8 @@ allprojects {
     tasks.matching { patchKindFor(it.name) != null }.configureEach {
         val taskNameLocal = this.name
         doFirst {
+            // Reset patched trees if variant changed since last apply.
+            resetPatchedTreesIfVariantChanged(sourbycraftVariant)
             if (!isPvpVariant) {
                 val patchKind = patchKindFor(taskNameLocal) ?: return@doFirst
                 val patchDir = rootProject.file("patches/$patchKind")
