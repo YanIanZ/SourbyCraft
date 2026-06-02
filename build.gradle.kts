@@ -64,6 +64,13 @@ subprojects {
     }
 }
 
+// SourbyCraft v12 — build variant selection
+val sourbycraftVariant = providers.gradleProperty("variant").getOrElse("normal")
+val isPvpVariant = sourbycraftVariant == "pvp"
+
+// Logged at configuration time so operators see which variant is building
+logger.lifecycle("SourbyCraft variant: $sourbycraftVariant (PvP patches: ${if (isPvpVariant) "INCLUDED" else "EXCLUDED"})")
+
 configure<PaperweightPatcherExtension> {
     upstreams.paper {
         ref = providers.gradleProperty("paperRef")
@@ -98,5 +105,32 @@ configure<PaperweightPatcherExtension> {
 if (providers.gradleProperty("updatingMinecraft").getOrElse("false").toBoolean()) {
     tasks.withType<RebuildGitPatches> {
         filterPatches = false
+    }
+}
+
+// SourbyCraft v12 — filter PVP patches out of normal builds
+tasks.matching { it.name == "applyServerPatches" || it.name == "applyApiPatches" }.configureEach {
+    doFirst {
+        if (!isPvpVariant) {
+            val patchKind = if (name == "applyServerPatches") "server" else "api"
+            val patchDir = file("patches/$patchKind")
+            val pvpPatches = patchDir.listFiles { f -> f.name.matches(Regex("^9\\d{3}-.*\\.patch$")) } ?: emptyArray()
+            val stashDir = file("build/sourbycraft-pvp-patches-stashed/$patchKind").apply { mkdirs() }
+            pvpPatches.forEach { pf ->
+                val dest = stashDir.resolve(pf.name)
+                logger.lifecycle("  stash PVP patch (normal build): ${pf.name}")
+                pf.renameTo(dest)
+            }
+        }
+    }
+    doLast {
+        val patchKind = if (name == "applyServerPatches") "server" else "api"
+        val stashDir = file("build/sourbycraft-pvp-patches-stashed/$patchKind")
+        if (stashDir.exists()) {
+            val patchDir = file("patches/$patchKind")
+            stashDir.listFiles().orEmpty().forEach { sf ->
+                sf.renameTo(patchDir.resolve(sf.name))
+            }
+        }
     }
 }
