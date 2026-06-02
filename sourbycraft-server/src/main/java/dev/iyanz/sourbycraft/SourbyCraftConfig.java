@@ -7,16 +7,52 @@ import net.minecraft.world.entity.ai.gossip.GossipType;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.yaml.snakeyaml.Yaml;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 
 public class SourbyCraftConfig {
+
+    // SourbyCraft v12 — sourbycraft.yml overlay loader (read at class init from classpath resource)
+    private static final Map<String, Object> sourbycraftYml = loadSourbycraftYml();
+
+    private static Map<String, Object> loadSourbycraftYml() {
+        try (InputStream in = SourbyCraftConfig.class.getResourceAsStream("/sourbycraft.yml")) {
+            if (in == null) return Map.of();
+            Map<String, Object> y = new Yaml().load(in);
+            return y == null ? Map.of() : y;
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    /**
+     * Read a value from the bundled <code>sourbycraft.yml</code> overlay using a dotted path.
+     * Returns {@code defaultValue} when any path segment is missing, when an intermediate
+     * segment is not a Map, or when the value cannot be cast to the expected type.
+     */
+    @SuppressWarnings("unchecked")
+    public static <T> T ymlGet(String dottedPath, T defaultValue) {
+        Object cur = sourbycraftYml;
+        for (String seg : dottedPath.split("\\.")) {
+            if (!(cur instanceof Map<?, ?> m)) return defaultValue;
+            cur = m.get(seg);
+            if (cur == null) return defaultValue;
+        }
+        try {
+            return (T) cur;
+        } catch (ClassCastException e) {
+            return defaultValue;
+        }
+    }
 
     private static File CONFIG_FILE;
     public static YamlConfiguration config;
