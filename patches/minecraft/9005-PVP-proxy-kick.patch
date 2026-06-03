@@ -12,43 +12,45 @@ diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/Mi
 index 8864c0cfb7724ba30f46b51d57651f6d8224e116..10baa223c736378c89995f62a29e58876b06a8a6 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -1019,6 +1019,40 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1019,6 +1019,42 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          shutdownThread = Thread.currentThread(); // Paper - Improved watchdog support
          org.spigotmc.WatchdogThread.doStop(); // Paper - Improved watchdog support
          // CraftBukkit end
 +        // SourbyCraft v12 PVP — proxy-aware kick grace (transfer-out via BungeeCord/Velocity channel)
-+        try {
-+            int scGraceSec = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                "network.proxy-kick-grace-seconds", Integer.valueOf(0))).intValue();
-+            String scProxyMode = String.valueOf(dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                "network.proxy-mode", "none"));
-+            if (scGraceSec > 0 && (scProxyMode.contains("velocity") || scProxyMode.contains("bungee"))) {
-+                String scFallback = String.valueOf(dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                    "network.proxy-kick-fallback", "lobby"));
-+                try {
-+                    java.io.ByteArrayOutputStream scBout = new java.io.ByteArrayOutputStream();
-+                    java.io.DataOutputStream scDout = new java.io.DataOutputStream(scBout);
-+                    scDout.writeUTF("Connect");
-+                    scDout.writeUTF(scFallback);
-+                    net.minecraft.resources.Identifier scChan =
-+                        net.minecraft.resources.Identifier.parse("bungeecord:main");
-+                    int scN = 0;
-+                    if (this.playerList != null) {
-+                        for (net.minecraft.server.level.ServerPlayer scSp : this.playerList.getPlayers()) {
-+                            try {
-+                                scSp.connection.send(new net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket(
-+                                    new net.minecraft.network.protocol.common.custom.DiscardedPayload(
-+                                        scChan, scBout.toByteArray())));
-+                                scN++;
-+                            } catch (Throwable t) { /* per-player failure ignored */ }
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.pvpEnabled) {
++            try {
++                int scGraceSec = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                    "network.proxy-kick-grace-seconds", Integer.valueOf(0))).intValue();
++                String scProxyMode = String.valueOf(dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                    "network.proxy-mode", "none"));
++                if (scGraceSec > 0 && (scProxyMode.contains("velocity") || scProxyMode.contains("bungee"))) {
++                    String scFallback = String.valueOf(dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                        "network.proxy-kick-fallback", "lobby"));
++                    try {
++                        java.io.ByteArrayOutputStream scBout = new java.io.ByteArrayOutputStream();
++                        java.io.DataOutputStream scDout = new java.io.DataOutputStream(scBout);
++                        scDout.writeUTF("Connect");
++                        scDout.writeUTF(scFallback);
++                        net.minecraft.resources.Identifier scChan =
++                            net.minecraft.resources.Identifier.parse("bungeecord:main");
++                        int scN = 0;
++                        if (this.playerList != null) {
++                            for (net.minecraft.server.level.ServerPlayer scSp : this.playerList.getPlayers()) {
++                                try {
++                                    scSp.connection.send(new net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket(
++                                        new net.minecraft.network.protocol.common.custom.DiscardedPayload(
++                                            scChan, scBout.toByteArray())));
++                                    scN++;
++                                } catch (Throwable t) { /* per-player failure ignored */ }
++                            }
 +                        }
-+                    }
-+                    LOGGER.info("[SourbyCraft:PvP] proxy transfer-out: {} players -> '{}', waiting {}s", scN, scFallback, scGraceSec);
-+                } catch (java.io.IOException ignored) {}
-+                try { Thread.sleep(scGraceSec * 1000L); }
-+                catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
-+            }
-+        } catch (Throwable t) { LOGGER.warn("[SourbyCraft:PvP] proxy-kick grace failed: {}", t.toString()); }
++                        LOGGER.info("[SourbyCraft:PvP] proxy transfer-out: {} players -> '{}', waiting {}s", scN, scFallback, scGraceSec);
++                    } catch (java.io.IOException ignored) {}
++                    try { Thread.sleep(scGraceSec * 1000L); }
++                    catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
++                }
++            } catch (Throwable t) { LOGGER.warn("[SourbyCraft:PvP] proxy-kick grace failed: {}", t.toString()); }
++        }
 +        // SourbyCraft v12 PVP end
          this.packetProcessor.close();
          if (this.metricsRecorder.isRecording()) {
