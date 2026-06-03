@@ -60,7 +60,7 @@ public final class GcAdvisor {
         if (r.acceptable()) return "";
         StringBuilder sb = new StringBuilder();
         sb.append("╔══════════════════════════════════════════════════╗\n");
-        sb.append("║  ⚠  PVP variant tuned for ZGC generational       ║\n");
+        sb.append("║  ⚠  PvP mode tuned for ZGC generational          ║\n");
         sb.append("╠══════════════════════════════════════════════════╣\n");
         for (String w : r.warnings()) {
             String line = w.length() > 46 ? w.substring(0, 43) + "..." : w;
