@@ -5,7 +5,6 @@ import java.io.InputStream;
 import java.util.Properties;
 
 public record BuildInfo(
-    String variant,
     String version,
     String mcVersion,
     String tagline,
@@ -31,15 +30,10 @@ public record BuildInfo(
             }
         }
         return new BuildInfo(
-            p.getProperty("variant", "normal"),
             p.getProperty("version", "dev"),
             p.getProperty("mcVersion", "unknown"),
             p.getProperty("tagline", "Lightning Fast Performance · Feature Rich"),
             p.getProperty("buildTimestamp", "")
         );
-    }
-
-    public boolean isPvp() {
-        return "pvp".equalsIgnoreCase(variant);
     }
 }
