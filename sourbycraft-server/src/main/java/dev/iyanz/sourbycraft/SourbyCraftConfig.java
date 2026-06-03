@@ -565,6 +565,11 @@ public class SourbyCraftConfig {
         }
     }
 
+    /** Test-only view of the dedupe set. Snapshot — mutations to the returned set do not affect WARNED_KEYS. */
+    static java.util.Set<String> warnedKeysForTest() {
+        return java.util.Set.copyOf(WARNED_KEYS);
+    }
+
     private static Component getComponent(String path, Component def) {
         return MiniMessage.miniMessage().deserialize(getString(path,
                 MiniMessage.miniMessage().serialize(def)));
