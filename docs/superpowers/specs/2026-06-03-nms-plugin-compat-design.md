@@ -1,8 +1,18 @@
 # SourbyCraft v12 — NMS Plugin Compatibility Investigation + Fix
 
 **Date**: 2026-06-03
-**Status**: Approved (brainstorm), pending implementation plan
-**Scope**: 4 named plugins (Citizens, NBTAPI, DecentHolograms, FAWE) against Paper 1.21.11. One PR producing: dual-paperclip release artifacts, investigation matrix, per-plugin fixes, smoke harness.
+**Status**: Approved (brainstorm), revised during implementation
+**Scope**: 4 named plugins (Citizens, NBTAPI, DecentHolograms, FAWE) against Paper 1.21.11. One PR producing: single mojmap paperclip release, investigation matrix, per-plugin fixes, smoke harness.
+
+## Revision 2026-06-04 — drop reobf jar shipping
+
+**Original plan** (approved 2026-06-03): ship dual paperclip jars (mojmap + reobf), so operators with legacy NMS plugins could pick the reobf jar.
+
+**Why pivoted**: paperweight 2.0 deprecated reobf jar builds (emits "Reobfuscated server jars are no longer supported and only exist for debugging purposes"). Bypassing the deprecation block via `paperweight.debug=true` produces a jar that crashes at boot with `ExceptionInInitializerError` in `ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry.<clinit>` (commit `5dee16a` removed the reobf wiring).
+
+**Revised plan**: ship a single mojmap jar. Rely on Paper's runtime plugin remapper to translate legacy reobf-built plugins. The investigation matrix becomes mojmap-only (4 rows: 4 plugins × 1 variant). The CompatHarness emits one JUnit XML. Tasks N2 (reobf smoke), `boot-reobf.sh`, `TestServer-reobf/`, `nmsCompatTestReobf` are dropped. The invariant simplifies to "every target plugin works on the mojmap jar" — failures are either upstream plugin bugs or SourbyCraft patch conflicts.
+
+All design sections below are kept for historical context; treat any reference to "reobf variant", "dual jar", or "two variants" as historical only. Implementation follows the single-jar revision.
 **Out of scope**: WorldGuard direct testing (covered transitively via FAWE/WorldEdit), other plugins, older Paper versions, multi-plugin interaction tests, Velocity proxy-side tests.
 
 ## Goal
