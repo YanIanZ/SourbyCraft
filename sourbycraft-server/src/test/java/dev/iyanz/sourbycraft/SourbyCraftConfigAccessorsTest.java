@@ -130,4 +130,12 @@ class SourbyCraftConfigAccessorsTest {
         assertEquals(false, SourbyCraftConfig.ymlBool("particles.disableFallParticles", true));
         assertEquals(false, SourbyCraftConfig.ymlBool("particles.disableDeathParticles", true));
     }
+
+    @Test
+    void ymlBool_readsNewParticlesBatch1Keys() {
+        assertEquals(false, SourbyCraftConfig.ymlBool("particles.disableBlockBreakParticles", true));
+        assertEquals(false, SourbyCraftConfig.ymlBool("particles.disableEffectParticles", true));
+        assertEquals(false, SourbyCraftConfig.ymlBool("particles.disableWaterSplashParticles", true));
+        assertEquals(false, SourbyCraftConfig.ymlBool("particles.disableNewCombatParticles", true));
+    }
 }
