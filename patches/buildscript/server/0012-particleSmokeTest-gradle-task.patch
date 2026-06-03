@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Thu, 4 Jun 2026 02:50:00 +0700
+Subject: [PATCH] particleSmokeTest gradle task
+
+
+diff --git a/build.gradle.kts b/build.gradle.kts
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -516,3 +516,17 @@ if (runNmsCompat) {
+         }
+     }
+ }
++
++// SourbyCraft v12 — UniverseSpigot Foundation particle-suppression smoke test.
++// Opt-in via -PrunParticleSmoke=true to keep the regular build fast.
++val runParticleSmoke = providers.gradleProperty("runParticleSmoke").map { it.toBoolean() }.getOrElse(false)
++
++if (runParticleSmoke) {
++    tasks.register<Exec>("particleSmokeTest") {
++        group = "verification"
++        description = "Boot single-jar with particle toggles on; assert gated branches fire"
++        dependsOn(":assembleReleaseArtifacts")
++        workingDir = rootProject.rootDir
++        commandLine("bash", rootProject.file("test-harness/scripts/particle-smoke.sh").absolutePath)
++    }
++}
