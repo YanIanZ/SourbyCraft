@@ -12,37 +12,41 @@ diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/lev
 index 6a95b09bf82e46009eb9f040e74c6eb50dd46ccc..1364b87ca8d4f111aa9cbc80b4e4896bf6e7be5e 100644
 --- a/net/minecraft/server/level/ChunkMap.java
 +++ b/net/minecraft/server/level/ChunkMap.java
-@@ -996,8 +996,33 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+@@ -996,8 +996,37 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
              EntityType<?> type = entity.getType();
              int i = type.clientTrackingRange() * 16;
              i = org.spigotmc.TrackingRange.getEntityTrackingRange(entity, i); // Spigot
 +            // SourbyCraft v12 PVP — cap tracker ranges per category (read from sourbycraft.yml)
-+            try {
-+                if (entity instanceof net.minecraft.world.entity.item.ItemEntity) {
-+                    int cap = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                        "entity-tracker.item-range", Integer.valueOf(0))).intValue();
-+                    if (cap > 0) i = Math.min(i, cap);
-+                } else if (entity instanceof net.minecraft.world.entity.ExperienceOrb) {
-+                    int cap = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                        "entity-tracker.xp-orb-range", Integer.valueOf(0))).intValue();
-+                    if (cap > 0) i = Math.min(i, cap);
-+                } else if (entity instanceof net.minecraft.world.entity.Mob
-+                        && !(entity instanceof net.minecraft.server.level.ServerPlayer)) {
-+                    int cap = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                        "entity-tracker.mob-range", Integer.valueOf(0))).intValue();
-+                    if (cap > 0) i = Math.min(i, cap);
-+                }
-+            } catch (Throwable t) { /* ignore — never block tracker init on config */ }
++            if (dev.iyanz.sourbycraft.SourbyCraftConfig.pvpEnabled) {
++                try {
++                    if (entity instanceof net.minecraft.world.entity.item.ItemEntity) {
++                        int cap = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                            "entity-tracker.item-range", Integer.valueOf(0))).intValue();
++                        if (cap > 0) i = Math.min(i, cap);
++                    } else if (entity instanceof net.minecraft.world.entity.ExperienceOrb) {
++                        int cap = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                            "entity-tracker.xp-orb-range", Integer.valueOf(0))).intValue();
++                        if (cap > 0) i = Math.min(i, cap);
++                    } else if (entity instanceof net.minecraft.world.entity.Mob
++                            && !(entity instanceof net.minecraft.server.level.ServerPlayer)) {
++                        int cap = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                            "entity-tracker.mob-range", Integer.valueOf(0))).intValue();
++                        if (cap > 0) i = Math.min(i, cap);
++                    }
++                } catch (Throwable t) { /* ignore — never block tracker init on config */ }
++            }
              if (i != 0) {
                  int updateInterval = type.updateInterval();
 +                // SourbyCraft v12 PVP — override player update interval (lower = more frequent updates)
-+                try {
-+                    int forced = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                        "entity-tracker.player-update-interval", Integer.valueOf(0))).intValue();
-+                    if (forced > 0 && entity instanceof net.minecraft.server.level.ServerPlayer) {
-+                        updateInterval = forced;
-+                    }
-+                } catch (Throwable t) { /* ignore */ }
++                if (dev.iyanz.sourbycraft.SourbyCraftConfig.pvpEnabled) {
++                    try {
++                        int forced = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                            "entity-tracker.player-update-interval", Integer.valueOf(0))).intValue();
++                        if (forced > 0 && entity instanceof net.minecraft.server.level.ServerPlayer) {
++                            updateInterval = forced;
++                        }
++                    } catch (Throwable t) { /* ignore */ }
++                }
                  if (this.entityMap.containsKey(entity.getId())) {
                      throw (IllegalStateException)Util.pauseInIde(new IllegalStateException("Entity is already tracked!"));
                  } else {
