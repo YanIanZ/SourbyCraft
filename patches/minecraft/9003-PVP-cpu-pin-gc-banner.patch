@@ -12,12 +12,13 @@ diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/Mi
 index 5bd25bdd51c7ee0b8e34755cadaf619f181d5e53..8864c0cfb7724ba30f46b51d57651f6d8224e116 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -1271,6 +1271,14 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1271,6 +1271,15 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
                  dev.iyanz.sourbycraft.brand.BuildInfo.load()
              ));
              // SourbyCraft v12 end
 +            // SourbyCraft v12 PVP — GC advisor (warns on non-ZGC/G1, Xms!=Xmx, missing AlwaysPreTouch)
-+            if (Boolean.TRUE.equals(dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("branding.gc-advisor.enabled", Boolean.TRUE))) {
++            if (dev.iyanz.sourbycraft.SourbyCraftConfig.pvpEnabled
++                && Boolean.TRUE.equals(dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("branding.gc-advisor.enabled", Boolean.TRUE))) {
 +                dev.iyanz.sourbycraft.brand.GcAdvisor.Result gcr = dev.iyanz.sourbycraft.brand.GcAdvisor.run();
 +                if (!gcr.acceptable()) {
 +                    System.out.print(dev.iyanz.sourbycraft.brand.GcAdvisor.renderWarningBanner(gcr));
