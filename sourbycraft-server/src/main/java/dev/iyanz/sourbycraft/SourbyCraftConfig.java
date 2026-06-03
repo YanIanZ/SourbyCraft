@@ -21,12 +21,11 @@ import java.util.logging.Level;
 
 public class SourbyCraftConfig {
 
-    // SourbyCraft v12 — sourbycraft.yml + variant overlay loader.
-    // Baseline is `/sourbycraft.yml`. Build packages variant-specific tweaks at
-    // `/sourbycraft-variant-overlay.yml` (written by processVariantResources task).
-    // ymlGet checks overlay first, then falls back to baseline, then to caller default.
+    // SourbyCraft v12 — sourbycraft.yml resource loader (single-jar, no variants).
+    // PvP-only consumers gate their reads with `if (pvpEnabled)`; values for both
+    // modes live in the same baseline file. ymlGet returns the baseline value,
+    // falling back to the caller-supplied default if the key is absent.
     private static final Map<String, Object> sourbycraftYmlBaseline = loadYmlResource("/sourbycraft.yml");
-    private static final Map<String, Object> sourbycraftYmlOverlay = loadYmlResource("/sourbycraft-variant-overlay.yml");
 
     private static Map<String, Object> loadYmlResource(String resource) {
         try (InputStream in = SourbyCraftConfig.class.getResourceAsStream(resource)) {
@@ -45,10 +44,6 @@ public class SourbyCraftConfig {
      */
     @SuppressWarnings("unchecked")
     public static <T> T ymlGet(String dottedPath, T defaultValue) {
-        Object overlayVal = lookupYml(sourbycraftYmlOverlay, dottedPath);
-        if (overlayVal != null) {
-            try { return (T) overlayVal; } catch (ClassCastException ignored) {}
-        }
         Object baseVal = lookupYml(sourbycraftYmlBaseline, dottedPath);
         if (baseVal != null) {
             try { return (T) baseVal; } catch (ClassCastException ignored) {}
@@ -134,7 +129,7 @@ public class SourbyCraftConfig {
     public static boolean wildstackerHologram = true;        // SourbyCraft v9.11
     public static boolean wildstackerLosCheck = true;        // SourbyCraft v9.11 — anti-fraud
     // SourbyCraft v11.0 — PvP server tuning (1.8-style combat + anti-lag + network)
-    public static boolean pvpEnabled = true;                    // master toggle
+    public static boolean pvpEnabled = false;                   // master toggle (opt-in)
     // Knockback formula — vanilla 1.9: horizontal=0.4, vertical=0.4, extraH=0.5, extraV=0.0, friction=2.0
     // 1.8 feel: horizontal=0.4, vertical=0.4, extraH=0.5, extraV=0.1, friction=1.0
     public static double pvpKnockbackHorizontal = 0.4;
