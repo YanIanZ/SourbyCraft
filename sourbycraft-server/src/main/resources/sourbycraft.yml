@@ -57,3 +57,27 @@ particles:
   disableFallParticles: false
   # Disable entity death particles (UniverseSpigot: particles.disableDeathParticles).
   disableDeathParticles: false
+  # Disable block-break particles when a block is destroyed (UniverseSpigot: particles.disableBlockBreakParticles).
+  disableBlockBreakParticles: false
+  # Disable potion / status-effect ambient particles (UniverseSpigot: particles.disableEffectParticles).
+  disableEffectParticles: false
+  # Disable water-splash particles when an entity enters water (UniverseSpigot: particles.disableWaterSplashParticles).
+  disableWaterSplashParticles: false
+  # Disable sweep-attack and other 1.21+ combat particles (UniverseSpigot: particles.disableNewCombatParticles).
+  disableNewCombatParticles: false
+
+# UniverseSpigot config import — sounds category (sub-project 01).
+# All toggles default to false → vanilla Paper behavior preserved.
+sounds:
+  # Disable parrot shoulder-perched ambient mimicry (UniverseSpigot: sounds.disableShoulderEntityAmbientSound).
+  disableShoulderEntityAmbientSound: false
+  # Suppress only the piglin anger ambient variant (other piglin ambient sounds unaffected) (UniverseSpigot: sounds.disablePiglinAngerSound).
+  disablePiglinAngerSound: false
+  # Disable entity footstep sounds across step + swim-step variants (UniverseSpigot: sounds.disableFootStepSounds).
+  disableFootStepSounds: false
+  # Disable PLAYER_ATTACK_* sound family from 1.9+ combat (UniverseSpigot: sounds.disableNewCombatSounds).
+  disableNewCombatSounds: false
+  # Disable shield-block impact sound (UniverseSpigot: sounds.disableShieldSounds).
+  disableShieldSounds: false
+  # Disable piston extend / retract sounds (UniverseSpigot: sounds.disablePistonSounds).
+  disablePistonSounds: false
