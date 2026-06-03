@@ -16,8 +16,8 @@ public final class PluginAutoInstaller {
 
     private PluginAutoInstaller() {}
 
-    public static Result installFromVariant(String variant, Path pluginsDir) {
-        String resource = "/META-INF/sourbycraft-plugins/" + variant + ".yml";
+    public static Result install(Path pluginsDir) {
+        String resource = "/META-INF/sourbycraft-plugins.yml";
         try (InputStream in = PluginAutoInstaller.class.getResourceAsStream(resource)) {
             List<PluginEntry> entries = PluginManifest.parse(in);
             return installAll(entries, pluginsDir);
