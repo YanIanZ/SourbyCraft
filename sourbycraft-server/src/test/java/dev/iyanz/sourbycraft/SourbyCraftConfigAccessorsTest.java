@@ -105,4 +105,23 @@ class SourbyCraftConfigAccessorsTest {
         assertNull(SourbyCraftConfig.parseEntityTypeEntry(""));
         assertNull(SourbyCraftConfig.parseEntityTypeEntry(null));
     }
+
+    @Test
+    void warnOnce_emitsExactlyOnceForRepeatedBadReads() {
+        // The dedupe Set is the source of truth for "warned at most once."
+        // (Capturing via Bukkit.getLogger() would not work because warnOnce
+        // routes through SourbyLogger directly, bypassing Bukkit's logger chain.)
+        // pvp.view-distance-cap is an Integer in baseline; reading as bool triggers warnOnce.
+        // This key is not used as a wrong-type read by any other test, so before-snapshot
+        // is guaranteed to not contain it.
+        String badKey = "pvp.view-distance-cap";
+        java.util.Set<String> before = SourbyCraftConfig.warnedKeysForTest();
+        SourbyCraftConfig.ymlBool(badKey, false);
+        SourbyCraftConfig.ymlBool(badKey, false);
+        SourbyCraftConfig.ymlBool(badKey, false);
+        java.util.Set<String> after = SourbyCraftConfig.warnedKeysForTest();
+        assertEquals(before.size() + 1, after.size(),
+            "exactly one new dedupe entry for repeated bad reads of " + badKey);
+        assertTrue(after.contains(badKey));
+    }
 }
