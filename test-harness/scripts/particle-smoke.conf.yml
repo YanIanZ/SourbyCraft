@@ -1,0 +1,5 @@
+# Operator sourbycraft.yml used by particle-smoke.sh — both toggles ON to verify
+# the gated branches in patch 0042 actually fire.
+particles:
+  disableFallParticles: true
+  disableDeathParticles: true
