@@ -1,7 +1,0 @@
-proxies:
-  velocity:
-    enabled: true
-    online-mode: true
-    secret: "CHANGE-ME-SEE-DOCS"
-  bungee-cord:
-    online-mode: true

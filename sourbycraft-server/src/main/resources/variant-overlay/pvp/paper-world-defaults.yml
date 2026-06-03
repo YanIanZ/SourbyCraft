@@ -1,8 +1,0 @@
-chunks:
-  prevent-moving-into-unloaded-chunks: true
-entities:
-  spawning:
-    despawn-ranges:
-      monster:
-        hard: 64
-        soft: 24
