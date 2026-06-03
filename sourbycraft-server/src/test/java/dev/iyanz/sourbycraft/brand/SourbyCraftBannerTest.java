@@ -6,11 +6,10 @@ import static org.junit.jupiter.api.Assertions.*;
 class SourbyCraftBannerTest {
 
     @Test
-    void pvpBannerContainsVariantLine() {
-        var info = new BuildInfo("pvp", "v12.0-REL", "1.21.11",
+    void bannerContainsVersionAndTagline() {
+        var info = new BuildInfo("v12.0-REL", "1.21.11",
             "Lightning Fast Performance · Feature Rich", "2026-06-02T00:00:00Z");
         String b = SourbyCraftBanner.render(info);
-        assertTrue(b.contains("PVP"), "banner should mention PVP variant");
         assertTrue(b.contains("v12.0-REL"));
         assertTrue(b.contains("Lightning Fast Performance"));
         assertTrue(b.contains("Feature Rich"));
@@ -18,17 +17,18 @@ class SourbyCraftBannerTest {
     }
 
     @Test
-    void normalBannerOmitsPvpSummary() {
-        var info = new BuildInfo("normal", "v12.0-REL", "1.21.11",
+    void bannerOmitsVariantLabel() {
+        var info = new BuildInfo("v12.0-REL", "1.21.11",
             "Lightning Fast Performance · Feature Rich", "");
         String b = SourbyCraftBanner.render(info);
-        assertTrue(b.contains("NORMAL"));
-        assertFalse(b.contains("PvP-tuned defaults active"), "normal banner should not show pvp-tuned line");
+        assertFalse(b.contains("PVP"), "banner must not show variant label");
+        assertFalse(b.contains("NORMAL"), "banner must not show variant label");
+        assertFalse(b.contains("PvP-tuned defaults active"), "banner must not show pvp-tuned line");
     }
 
     @Test
     void bannerHasBoxFraming() {
-        var info = new BuildInfo("normal", "v12.0-REL", "1.21.11", "tag", "");
+        var info = new BuildInfo("v12.0-REL", "1.21.11", "tag", "");
         String b = SourbyCraftBanner.render(info);
         assertTrue(b.contains("╔"));
         assertTrue(b.contains("╚"));
