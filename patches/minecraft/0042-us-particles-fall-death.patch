@@ -1,0 +1,56 @@
+From 698888cd02ea7343ac088e0a3e97b22e6b51470d Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Thu, 4 Jun 2026 02:46:22 +0700
+Subject: [PATCH] SourbyCraft v12 US import particles fall+death gated emit
+
+Sub-project 00 Foundation reference patch. Gates the fall-particle emit in
+LivingEntity#checkFallDamage and the death-particle (POOF) emit in
+LivingEntity#tickDeath behind particles.disableFallParticles and
+particles.disableDeathParticles respectively. Defaults off so vanilla Paper
+behavior is preserved. The else branch emits a debug marker line when
+-Ddev.iyanz.sourbycraft.particle.debug=true is set; particleSmokeTest asserts
+on those markers.
+---
+ net/minecraft/world/entity/LivingEntity.java | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 6f49b5e..d2c5a03 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -397,11 +397,17 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                 double d1 = Math.min(0.2F + d / 15.0, 2.5);
+                 int i = (int)(150.0 * d1);
+                 // CraftBukkit start - visibility api
++                // SourbyCraft start - US import - gated fall particle emit
++                if (!dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("particles.disableFallParticles", false)) { // SourbyCraft - US import
+                 if (this instanceof ServerPlayer) {
+                     serverLevel.sendParticlesSource((ServerPlayer) this, new BlockParticleOption(ParticleTypes.BLOCK, state), false, false, x, y1, z, i, 0.0, 0.0, 0.0, 0.15F);
+                 } else {
+                     serverLevel.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, state), x, y1, z, i, 0.0, 0.0, 0.0, 0.15F);
+                 }
++                } else if (Boolean.getBoolean("dev.iyanz.sourbycraft.particle.debug")) { // SourbyCraft - US import
++                    dev.iyanz.sourbycraft.util.SourbyLogger.info("[SourbyCraft] particle gated:fall"); // SourbyCraft - US import
++                }
++                // SourbyCraft end - US import
+                 // CraftBukkit end
+             }
+         }
+@@ -586,7 +592,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     protected void tickDeath() {
+         this.deathTime++;
+         if (this.deathTime >= 20 && !this.level().isClientSide() && !this.isRemoved()) {
+-            this.level().broadcastEntityEvent(this, EntityEvent.POOF);
++            // SourbyCraft start - US import - gated death particle emit
++            if (!dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("particles.disableDeathParticles", false)) { // SourbyCraft - US import
++                this.level().broadcastEntityEvent(this, EntityEvent.POOF);
++            } else if (Boolean.getBoolean("dev.iyanz.sourbycraft.particle.debug")) { // SourbyCraft - US import
++                dev.iyanz.sourbycraft.util.SourbyLogger.info("[SourbyCraft] particle gated:death"); // SourbyCraft - US import
++            }
++            // SourbyCraft end - US import
+             this.remove(Entity.RemovalReason.KILLED, org.bukkit.event.entity.EntityRemoveEvent.Cause.DEATH); // CraftBukkit - add Bukkit remove cause
+         }
+     }
+-- 
+2.50.1 (Apple Git-155)
+
