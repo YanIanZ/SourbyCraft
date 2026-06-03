@@ -138,4 +138,14 @@ class SourbyCraftConfigAccessorsTest {
         assertEquals(false, SourbyCraftConfig.ymlBool("particles.disableWaterSplashParticles", true));
         assertEquals(false, SourbyCraftConfig.ymlBool("particles.disableNewCombatParticles", true));
     }
+
+    @Test
+    void ymlBool_readsNewSoundsBatch1Keys() {
+        assertEquals(false, SourbyCraftConfig.ymlBool("sounds.disableShoulderEntityAmbientSound", true));
+        assertEquals(false, SourbyCraftConfig.ymlBool("sounds.disablePiglinAngerSound", true));
+        assertEquals(false, SourbyCraftConfig.ymlBool("sounds.disableFootStepSounds", true));
+        assertEquals(false, SourbyCraftConfig.ymlBool("sounds.disableNewCombatSounds", true));
+        assertEquals(false, SourbyCraftConfig.ymlBool("sounds.disableShieldSounds", true));
+        assertEquals(false, SourbyCraftConfig.ymlBool("sounds.disablePistonSounds", true));
+    }
 }
