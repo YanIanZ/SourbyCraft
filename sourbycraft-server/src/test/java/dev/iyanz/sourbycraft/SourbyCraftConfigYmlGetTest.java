@@ -20,15 +20,15 @@ class SourbyCraftConfigYmlGetTest {
 
     @Test
     void readsBaselineIntWithDottedPath() {
-        // pvp.view-distance-cap = 10 in baseline
+        // pvp.view-distance-cap = 6 in baseline (per sourbycraft.yml resource)
         Integer v = SourbyCraftConfig.ymlGet("pvp.view-distance-cap", 99);
-        assertEquals(10, v);
+        assertEquals(6, v);
     }
 
     @Test
     void readsBaselineDouble() {
-        // pvp.knockback.friction-divisor = 2.0 in baseline
+        // pvp.knockback.friction-divisor = 1.0 in baseline (per sourbycraft.yml resource)
         Double v = SourbyCraftConfig.ymlGet("pvp.knockback.friction-divisor", 99.0);
-        assertEquals(2.0, v);
+        assertEquals(1.0, v);
     }
 }
