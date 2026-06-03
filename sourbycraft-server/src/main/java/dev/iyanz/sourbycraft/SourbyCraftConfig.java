@@ -458,14 +458,11 @@ public class SourbyCraftConfig {
 
     private static void warnOnce(String path, Object actual, String expected) {
         if (WARNED_KEYS.add(path)) {
-            String msg = "[SourbyCraft] config key '" + path + "' invalid type '"
-                + (actual == null ? "null" : actual.getClass().getSimpleName())
-                + "', expected " + expected + " — using default";
-            if (Bukkit.getServer() != null) {
-                Bukkit.getLogger().warning(msg);
-            } else {
-                java.util.logging.Logger.getLogger("SourbyCraft").warning(msg);
-            }
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn(
+                "[SourbyCraft] config key '" + path + "' invalid type '"
+                + actual.getClass().getSimpleName()
+                + "', expected " + expected + " — using default"
+            );
         }
     }
 
