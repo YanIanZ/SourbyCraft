@@ -9,11 +9,11 @@ Content-Transfer-Encoding: 8bit
 
 
 diff --git a/net/minecraft/server/network/ServerConnectionListener.java b/net/minecraft/server/network/ServerConnectionListener.java
-index 33e1cdb00d648c992af03a976899253141314b27..026dfd6492d82e324b5afc328149d802a781fff3 100644
+index 33e1cdb00d648c992af03a976899253141314b27..f81ad296f68e62d3ba5885b954c2e088c762485f 100644
 --- a/net/minecraft/server/network/ServerConnectionListener.java
 +++ b/net/minecraft/server/network/ServerConnectionListener.java
 @@ -38,6 +38,28 @@ import org.slf4j.Logger;
-
+ 
  public class ServerConnectionListener {
      private static final Logger LOGGER = LogUtils.getLogger();
 +    // SourbyCraft v12 PVP — netty tuning (threads, buffer sizes) read from sourbycraft.yml.
@@ -56,4 +56,4 @@ index 33e1cdb00d648c992af03a976899253141314b27..026dfd6492d82e324b5afc328149d802
 +                                        }
                                      } catch (ChannelException var5) {
                                      }
-
+ 

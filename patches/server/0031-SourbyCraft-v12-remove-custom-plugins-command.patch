@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 3 Jun 2026 21:05:52 +0700
+Subject: [PATCH] SourbyCraft v12 remove custom /plugins command
+
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java
+deleted file mode 100644
+index b72f104b1317b988d11f90aa731719bacdcbc61d..0000000000000000000000000000000000000000
+--- a/src/main/java/dev/iyanz/sourbycraft/command/PluginsCommand.java
++++ /dev/null
+@@ -1,11 +0,0 @@
+-package dev.iyanz.sourbycraft.command;
+-import dev.iyanz.sourbycraft.SourbyCraftColors;
+-import org.bukkit.Bukkit;
+-import org.bukkit.command.Command;
+-import org.bukkit.command.CommandSender;
+-import java.util.Arrays;
+-import static net.kyori.adventure.text.Component.text;
+-public class PluginsCommand extends Command {
+-    public PluginsCommand(String n){super(n);this.description="Plugin list";this.usageMessage="/plugins";this.setPermission("sourbycraft.command.plugins");}
+-    public boolean execute(CommandSender s,String a,String[] args){if(!testPermission(s))return true;var pl=Bukkit.getPluginManager().getPlugins();s.sendMessage(text().append(text("Plugins ("+pl.length+"): ",SourbyCraftColors.HEADER)).append(text(Arrays.stream(pl).map(p->p.getName()+" v"+p.getDescription().getVersion()).reduce((x,y)->x+", "+y).orElse("none"),SourbyCraftColors.VALUE)));return true;}
+-}
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 773652e62730eeca97c514fb41048af8e411cd92..b9744d8c513cbc6a743a2c8924fff814eacc6c44 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -421,7 +421,6 @@ public final class CraftServer implements Server {
+         // SourbyCraft start - register custom commands
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsCommand("tps"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
+@@ -1060,7 +1059,6 @@ public final class CraftServer implements Server {
+         // SourbyCraft start - register commands
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsCommand("tps"));
+         this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
