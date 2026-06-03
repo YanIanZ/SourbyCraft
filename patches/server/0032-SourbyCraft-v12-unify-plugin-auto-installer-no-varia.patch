@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Wed, 3 Jun 2026 21:07:28 +0700
+Subject: [PATCH] SourbyCraft v12 unify plugin auto-installer (no variant)
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index b9744d8c513cbc6a743a2c8924fff814eacc6c44..5fa45365848e7aa859ea42814421f9d030c31fb4 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -565,18 +565,17 @@ public final class CraftServer implements Server {
+     }
+ 
+     public void loadPlugins() {
+-        // SourbyCraft v12 — auto-install variant plugins before plugin scan
++        // SourbyCraft v12 — auto-install bundled plugins before plugin scan
+         try {
+-            dev.iyanz.sourbycraft.brand.BuildInfo sbi = dev.iyanz.sourbycraft.brand.BuildInfo.load();
+             boolean autoInstall = Boolean.TRUE.equals(
+                 dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("auto-install.enabled", Boolean.TRUE));
+             if (autoInstall) {
+                 java.nio.file.Path pluginsDir = java.nio.file.Path.of("plugins");
+                 dev.iyanz.sourbycraft.install.PluginAutoInstaller.Result r =
+-                    dev.iyanz.sourbycraft.install.PluginAutoInstaller.installFromVariant(sbi.variant(), pluginsDir);
++                    dev.iyanz.sourbycraft.install.PluginAutoInstaller.install(pluginsDir);
+                 org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
+-                    "[install] variant={}: installed={} skipped={} failed={}",
+-                    sbi.variant(), r.installedCount(), r.skippedCount(), r.failedCount()
++                    "[install] installed={} skipped={} failed={}",
++                    r.installedCount(), r.skippedCount(), r.failedCount()
+                 );
+             }
+         } catch (Throwable t) {
