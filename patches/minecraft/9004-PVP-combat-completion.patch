@@ -12,15 +12,19 @@ diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/
 index fca9f37692c70f53364535d19a70ea670daf124b..a2b29e028aae302c0147b39b7d94c5465871373e 100644
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
-@@ -1502,7 +1502,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -1502,7 +1502,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
                  }
                  if (this instanceof ServerPlayer && event.getDamage() == 0 && originAmount == 0) return false; // Paper - revert to vanilla damage - players are not affected by damage that is 0 - skip damage if the vanilla damage is 0 and was not modified by plugins in the event.
                  this.lastHurt = amount;
 -                this.invulnerableTime = this.invulnerableDuration; // CraftBukkit - restore use of maxNoDamageTicks
 +                // SourbyCraft v12 PVP — configurable hit-delay-ticks (overrides invulnerableDuration)
-+                int scHitDelay = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                    "combat.hit-delay-ticks", Integer.valueOf(this.invulnerableDuration))).intValue();
-+                this.invulnerableTime = scHitDelay > 0 ? scHitDelay : this.invulnerableDuration; // CraftBukkit - restore use of maxNoDamageTicks
++                if (dev.iyanz.sourbycraft.SourbyCraftConfig.pvpEnabled) {
++                    int scHitDelay = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                        "combat.hit-delay-ticks", Integer.valueOf(this.invulnerableDuration))).intValue();
++                    this.invulnerableTime = scHitDelay > 0 ? scHitDelay : this.invulnerableDuration;
++                } else {
++                    this.invulnerableTime = this.invulnerableDuration; // CraftBukkit - restore use of maxNoDamageTicks
++                }
                  // this.actuallyHurt(level, damageSource, amount);
                  // CraftBukkit end
                  this.hurtDuration = 10;
@@ -28,25 +32,27 @@ diff --git a/net/minecraft/world/entity/player/Player.java b/net/minecraft/world
 index 59f038f60454a3dac6d0e40f928e53bc69977c36..b232b7e8adc0a942ac5f556e9fbd9f0084994cc8 100644
 --- a/net/minecraft/world/entity/player/Player.java
 +++ b/net/minecraft/world/entity/player/Player.java
-@@ -1056,7 +1056,9 @@ public abstract class Player extends Avatar implements ContainerUser {
+@@ -1056,7 +1056,10 @@ public abstract class Player extends Avatar implements ContainerUser {
                      }
- 
+
                      float f2 = f + f1;
 -                    boolean isSweepAttack = this.isSweepAttack(flag, flag2, flag1);
 +                    // SourbyCraft v12 PVP — gate sweep attack on combat.sweep-enabled
 +                    boolean isSweepAttack = this.isSweepAttack(flag, flag2, flag1)
-+                        && Boolean.TRUE.equals(dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("combat.sweep-enabled", Boolean.TRUE));
++                        && (!dev.iyanz.sourbycraft.SourbyCraftConfig.pvpEnabled
++                            || Boolean.TRUE.equals(dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("combat.sweep-enabled", Boolean.TRUE)));
                      float f3 = 0.0F;
                      if (target instanceof LivingEntity livingEntity) {
                          f3 = livingEntity.getHealth();
-@@ -1065,6 +1067,21 @@ public abstract class Player extends Avatar implements ContainerUser {
+@@ -1065,6 +1068,22 @@ public abstract class Player extends Avatar implements ContainerUser {
                      Vec3 deltaMovement = target.getDeltaMovement();
                      boolean flag3 = target.hurtOrSimulate(damageSource, f2);
                      if (flag3) {
 +                        // SourbyCraft v12 PVP — record reach for /reach debug
 +                        try {
-+                            if (Boolean.TRUE.equals(dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                                "combat.reach-debug-command", Boolean.FALSE))) {
++                            if (dev.iyanz.sourbycraft.SourbyCraftConfig.pvpEnabled
++                                && Boolean.TRUE.equals(dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                                    "combat.reach-debug-command", Boolean.FALSE))) {
 +                                double scDist = this.distanceTo(target);
 +                                int scPing = (this instanceof net.minecraft.server.level.ServerPlayer scSp && scSp.connection != null)
 +                                    ? scSp.connection.latency() : 0;
