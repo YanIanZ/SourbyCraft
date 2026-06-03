@@ -124,4 +124,10 @@ class SourbyCraftConfigAccessorsTest {
             "exactly one new dedupe entry for repeated bad reads of " + badKey);
         assertTrue(after.contains(badKey));
     }
+
+    @Test
+    void ymlBool_readsNewParticlesSection() {
+        assertEquals(false, SourbyCraftConfig.ymlBool("particles.disableFallParticles", true));
+        assertEquals(false, SourbyCraftConfig.ymlBool("particles.disableDeathParticles", true));
+    }
 }
