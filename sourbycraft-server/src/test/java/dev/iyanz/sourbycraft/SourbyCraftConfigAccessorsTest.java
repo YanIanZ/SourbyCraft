@@ -40,4 +40,21 @@ class SourbyCraftConfigAccessorsTest {
         // No baseline key has these specific shapes, so we only assert the default-on-miss path:
         assertEquals(7, SourbyCraftConfig.ymlInt("nonexistent.long.path", 7));
     }
+
+    @Test
+    void ymlDouble_readsBaselineValue() {
+        // pvp.knockback.friction-divisor = 1.0 in baseline (per resource header)
+        assertEquals(1.0, SourbyCraftConfig.ymlDouble("pvp.knockback.friction-divisor", 9.9));
+    }
+
+    @Test
+    void ymlDouble_returnsDefaultWhenMissing() {
+        assertEquals(2.5, SourbyCraftConfig.ymlDouble("nonexistent.double.key", 2.5));
+    }
+
+    @Test
+    void ymlDouble_coercesIntegerValue() {
+        // pvp.view-distance-cap is an Integer (6) in baseline. ymlDouble must coerce.
+        assertEquals(6.0, SourbyCraftConfig.ymlDouble("pvp.view-distance-cap", 0.0));
+    }
 }
