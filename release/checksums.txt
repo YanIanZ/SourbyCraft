@@ -1,2 +1,1 @@
-1afea11d1eea4e1221ad9e273d4592a9aa5306c819ae880169d9cc0761c4c8e7  release/SourbyCraft-v12-REL.jar
-665ec062df5f09143a0a9aca990160fe35d4e074a64e6fc0ff735a22a2a4d0d6  release/SourbyCraft-v12-REL-reobf.jar
+38cf41cde34dbb3d31e76de22748cd9364ea509fef8741dd3ef708cd199de9ef  release/SourbyCraft-v12-REL.jar

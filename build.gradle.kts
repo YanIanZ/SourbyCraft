@@ -150,39 +150,29 @@ if (providers.gradleProperty("updatingMinecraft").getOrElse("false").toBoolean()
     }
 }
 
-// SourbyCraft v12 — bypass paperweight 2.0 reobf-jar deprecation block.
-// Paper officially supports mojmap-only since the plugin remapper handles
-// legacy reobf plugins at runtime. We still ship reobf jar for operators with
-// plugin sets that bypass the remapper. Flag must be set before any paperweight
-// reobf task evaluates.
-System.setProperty("paperweight.debug", "true")
-
-// SourbyCraft v12 — assemble both paperclip jars into release/ with checksums.
+// SourbyCraft v12 — assemble mojmap paperclip jar into release/ with checksums.
+// Reobf jar dropped: paperweight 2.0 deprecates reobf builds, and the reobf
+// paperclip jar produced via debug-mode bypass fails at boot with
+// ExceptionInInitializerError in ca.spottedleaf.dataconverter.MCTypeRegistry.
+// Paper's runtime plugin remapper handles legacy reobf plugins on the mojmap jar.
 tasks.register("assembleReleaseArtifacts") {
     group = "release"
-    description = "Copy mojmap + reobf paperclip jars into release/ and regenerate checksums.txt"
+    description = "Copy mojmap paperclip jar into release/ and regenerate checksums.txt"
 
     val releaseDir = rootProject.layout.projectDirectory.dir("release")
     val internalVersion = providers.gradleProperty("internalVersion").getOrElse("dev")
 
-    // Capture task outputs at configuration time so doLast doesn't hold a script object reference.
     val mojmapOutputs = project(":sourbycraft-server").tasks
         .named("createMojmapPaperclipJar").map { it.outputs.files }
-    val reobfOutputs = project(":sourbycraft-server").tasks
-        .named("createReobfPaperclipJar").map { it.outputs.files }
 
     dependsOn(":sourbycraft-server:createMojmapPaperclipJar")
-    dependsOn(":sourbycraft-server:createReobfPaperclipJar")
     inputs.files(mojmapOutputs)
-    inputs.files(reobfOutputs)
 
     val mojmapDest = releaseDir.file("SourbyCraft-${internalVersion}.jar").asFile
-    val reobfDest = releaseDir.file("SourbyCraft-${internalVersion}-reobf.jar").asFile
     val checksumsFile = releaseDir.file("checksums.txt").asFile
     val releaseDirFile = releaseDir.asFile
 
     outputs.file(mojmapDest)
-    outputs.file(reobfDest)
     outputs.file(checksumsFile)
 
     doLast {
@@ -194,11 +184,9 @@ tasks.register("assembleReleaseArtifacts") {
         }
 
         val mojmapSrc = firstJarFrom(mojmapOutputs.get(), "createMojmapPaperclipJar")
-        val reobfSrc = firstJarFrom(reobfOutputs.get(), "createReobfPaperclipJar")
 
         releaseDirFile.mkdirs()
         mojmapSrc.copyTo(mojmapDest, overwrite = true)
-        reobfSrc.copyTo(reobfDest, overwrite = true)
 
         fun sha256(f: java.io.File): String {
             val digest = MessageDigest.getInstance("SHA-256")
@@ -213,11 +201,10 @@ tasks.register("assembleReleaseArtifacts") {
             return digest.digest().joinToString("") { b: Byte -> "%02x".format(b) }
         }
         checksumsFile.writeText(
-            "${sha256(mojmapDest)}  release/${mojmapDest.name}\n" +
-            "${sha256(reobfDest)}  release/${reobfDest.name}\n"
+            "${sha256(mojmapDest)}  release/${mojmapDest.name}\n"
         )
 
-        logger.lifecycle("SourbyCraft release: ${mojmapDest.name} + ${reobfDest.name}")
+        logger.lifecycle("SourbyCraft release: ${mojmapDest.name}")
     }
 }
 
