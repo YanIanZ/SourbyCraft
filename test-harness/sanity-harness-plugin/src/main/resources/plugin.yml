@@ -1,0 +1,13 @@
+name: SanityHarnessPlugin
+version: 1.0.0
+main: dev.iyanz.sourbycraft.nms.SanityHarnessPlugin
+api-version: "1.21"
+author: SourbyCraft
+description: NMS-compat sanity harness — invokes target plugins on enable, writes nms-compat-result.json
+load: POSTWORLD
+depend: []
+softdepend:
+  - Citizens
+  - NBTAPI
+  - DecentHolograms
+  - FastAsyncWorldEdit
