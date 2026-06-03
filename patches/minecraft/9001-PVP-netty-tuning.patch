@@ -12,8 +12,8 @@ diff --git a/net/minecraft/server/network/ServerConnectionListener.java b/net/mi
 index 33e1cdb00d648c992af03a976899253141314b27..026dfd6492d82e324b5afc328149d802a781fff3 100644
 --- a/net/minecraft/server/network/ServerConnectionListener.java
 +++ b/net/minecraft/server/network/ServerConnectionListener.java
-@@ -38,6 +38,26 @@ import org.slf4j.Logger;
- 
+@@ -38,6 +38,28 @@ import org.slf4j.Logger;
+
  public class ServerConnectionListener {
      private static final Logger LOGGER = LogUtils.getLogger();
 +    // SourbyCraft v12 PVP — netty tuning (threads, buffer sizes) read from sourbycraft.yml.
@@ -21,35 +21,39 @@ index 33e1cdb00d648c992af03a976899253141314b27..026dfd6492d82e324b5afc328149d802
 +    // MultiThreadIoEventLoopGroup reads at constructor time. SO_SNDBUF / SO_RCVBUF are
 +    // applied per-channel in initChannel below.
 +    static {
-+        try {
-+            String threads = String.valueOf(
-+                dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("network.netty.threads", "auto"));
-+            int resolved = -1;
-+            if ("auto-doubled".equalsIgnoreCase(threads)) {
-+                resolved = Math.max(2, Runtime.getRuntime().availableProcessors() * 2);
-+            } else if (!"auto".equalsIgnoreCase(threads)) {
-+                try { resolved = Integer.parseInt(threads); } catch (NumberFormatException ignored) {}
-+            }
-+            if (resolved > 0 && System.getProperty("io.netty.eventLoopThreads") == null) {
-+                System.setProperty("io.netty.eventLoopThreads", Integer.toString(resolved));
-+                LOGGER.info("[SourbyCraft:PvP] netty eventLoopThreads set to {}", resolved);
-+            }
-+        } catch (Throwable t) { /* ignore — never block server startup on advisory config */ }
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.pvpEnabled) {
++            try {
++                String threads = String.valueOf(
++                    dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("network.netty.threads", "auto"));
++                int resolved = -1;
++                if ("auto-doubled".equalsIgnoreCase(threads)) {
++                    resolved = Math.max(2, Runtime.getRuntime().availableProcessors() * 2);
++                } else if (!"auto".equalsIgnoreCase(threads)) {
++                    try { resolved = Integer.parseInt(threads); } catch (NumberFormatException ignored) {}
++                }
++                if (resolved > 0 && System.getProperty("io.netty.eventLoopThreads") == null) {
++                    System.setProperty("io.netty.eventLoopThreads", Integer.toString(resolved));
++                    LOGGER.info("[SourbyCraft:PvP] netty eventLoopThreads set to {}", resolved);
++                }
++            } catch (Throwable t) { /* ignore — never block server startup on advisory config */ }
++        }
 +    }
      final MinecraftServer server;
      public volatile boolean running;
      private final List<ChannelFuture> channels = Collections.synchronizedList(Lists.newArrayList());
-@@ -90,6 +110,13 @@ public class ServerConnectionListener {
+@@ -90,6 +112,15 @@ public class ServerConnectionListener {
                                  protected void initChannel(Channel channel) {
                                      try {
                                          channel.config().setOption(ChannelOption.TCP_NODELAY, true);
 +                                        // SourbyCraft v12 PVP — apply configurable SO_SNDBUF/SO_RCVBUF
-+                                        int sndKb = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                                            "network.netty.snd-buf-kb", Integer.valueOf(0))).intValue();
-+                                        int rcvKb = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
-+                                            "network.netty.rcv-buf-kb", Integer.valueOf(0))).intValue();
-+                                        if (sndKb > 0) channel.config().setOption(ChannelOption.SO_SNDBUF, sndKb * 1024);
-+                                        if (rcvKb > 0) channel.config().setOption(ChannelOption.SO_RCVBUF, rcvKb * 1024);
++                                        if (dev.iyanz.sourbycraft.SourbyCraftConfig.pvpEnabled) {
++                                            int sndKb = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                                                "network.netty.snd-buf-kb", Integer.valueOf(0))).intValue();
++                                            int rcvKb = ((Number) dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(
++                                                "network.netty.rcv-buf-kb", Integer.valueOf(0))).intValue();
++                                            if (sndKb > 0) channel.config().setOption(ChannelOption.SO_SNDBUF, sndKb * 1024);
++                                            if (rcvKb > 0) channel.config().setOption(ChannelOption.SO_RCVBUF, rcvKb * 1024);
++                                        }
                                      } catch (ChannelException var5) {
                                      }
- 
+
