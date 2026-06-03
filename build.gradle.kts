@@ -50,54 +50,15 @@ subprojects {
         filteringCharset = Charsets.UTF_8.name()
     }
 
-    // SourbyCraft v12 — variant-specific resource overlay.
-    // Copies ONLY the variant overlay dir into build/variant-resources/. Baseline
-    // resources are bundled normally via src/main/resources (with variant-overlay/**
-    // excluded — see ProcessResources block below). Overlay's sourbycraft.yml is
-    // renamed to sourbycraft-variant-overlay.yml so SourbyCraftConfig can deep-merge
-    // at runtime; other overlay files (server.properties, paper-global.yml etc) ship
-    // at root as first-boot seed files.
     val thisProjectName = project.name
-    val variantOverlayTask = tasks.register<Copy>("processVariantResources") {
-        val variant = providers.gradleProperty("variant").getOrElse("normal")
-        val overlay = file("${rootProject.projectDir}/sourbycraft-server/src/main/resources/variant-overlay/$variant")
-        val overlayExistsProvider = provider { overlay.exists() }
-        val isServerProject = thisProjectName == "sourbycraft-server"
 
-        onlyIf { isServerProject && overlayExistsProvider.get() }
-
-        if (overlay.exists()) {
-            from(overlay) {
-                rename("sourbycraft\\.yml", "sourbycraft-variant-overlay.yml")
-            }
-        }
-        into(layout.buildDirectory.dir("variant-resources"))
-
-        inputs.property("variant", variant)
-    }
-
-    if (thisProjectName == "sourbycraft-server") {
-        tasks.withType<ProcessResources>().configureEach {
-            dependsOn(variantOverlayTask)
-            // variant-resources comes FIRST so overlay's server.properties etc win
-            // over any baseline copy. Use EXCLUDE to silently drop later duplicates.
-            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-            from(layout.buildDirectory.dir("variant-resources"))
-            exclude("variant-overlay/**")
-        }
-        tasks.withType<Jar>().configureEach {
-            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-        }
-    }
-
-    // SourbyCraft v12 — emit META-INF/sourbycraft-build.properties
+    // SourbyCraft v12 — emit META-INF/sourbycraft-build.properties (no variant field;
+    // single-jar build means variant identity is no longer meaningful).
     val writeBuildInfoTask = tasks.register("writeBuildInfo") {
-        val variant = providers.gradleProperty("variant").getOrElse("normal")
         val internalVersion = providers.gradleProperty("internalVersion").getOrElse("dev")
         val mcVersion = providers.gradleProperty("mcVersion").getOrElse("unknown")
-        val outFile = layout.buildDirectory.file("variant-resources/META-INF/sourbycraft-build.properties")
+        val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
 
-        inputs.property("variant", variant)
         inputs.property("internalVersion", internalVersion)
         inputs.property("mcVersion", mcVersion)
         outputs.file(outFile)
@@ -107,7 +68,6 @@ subprojects {
             f.parentFile.mkdirs()
             val timestamp = Instant.now().toString()
             f.writeText("""
-                variant=$variant
                 version=$internalVersion
                 mcVersion=$mcVersion
                 tagline=Lightning Fast Performance · Feature Rich
@@ -116,13 +76,14 @@ subprojects {
         }
     }
 
-    tasks.named("processVariantResources").configure {
-        finalizedBy(writeBuildInfoTask)
-    }
-
     if (thisProjectName == "sourbycraft-server") {
         tasks.withType<ProcessResources>().configureEach {
             dependsOn(writeBuildInfoTask)
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+            from(layout.buildDirectory.dir("generated-resources"))
+        }
+        tasks.withType<Jar>().configureEach {
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
         }
     }
 
@@ -150,13 +111,6 @@ subprojects {
         maven("https://maven.neoforged.net/releases/") // SourbyCraft - NeoForge
     }
 }
-
-// SourbyCraft v12 — build variant selection
-val sourbycraftVariant = providers.gradleProperty("variant").getOrElse("normal")
-val isPvpVariant = sourbycraftVariant == "pvp"
-
-// Logged at configuration time so operators see which variant is building
-logger.lifecycle("SourbyCraft variant: $sourbycraftVariant (PvP patches: ${if (isPvpVariant) "INCLUDED" else "EXCLUDED"})")
 
 configure<PaperweightPatcherExtension> {
     upstreams.paper {
@@ -195,93 +149,3 @@ if (providers.gradleProperty("updatingMinecraft").getOrElse("false").toBoolean()
     }
 }
 
-// SourbyCraft v12 — variant marker for diagnostic purposes only.
-// Switching variants from the SAME checkout requires manual cleanup of the
-// patched paperweight source tree (paper-api/, paper-server/, sourbycraft-*/buildscript/,
-// sourbycraft-server/src/minecraft/) because paperweight 2.0 caches the applied
-// state and the Gradle subproject graph is bound at settings.gradle.kts evaluation.
-//
-// For CI / release builds: use a fresh checkout per variant (e.g. matrix worktrees).
-// For local dev: `git clean -fdx -e .gradle -e build` before switching, then run
-// `./gradlew applyAllPatches -Pvariant=<target>`.
-run {
-    val marker = file("build/.sourbycraft-applied-variant")
-    val last = if (marker.exists()) marker.readText().trim() else ""
-    if (last.isNotEmpty() && last != sourbycraftVariant) {
-        logger.warn(
-            "SourbyCraft variant changed from \"$last\" to \"$sourbycraftVariant\" — " +
-            "paperweight source tree still reflects \"$last\". " +
-            "Run: rm -rf paper-api paper-server sourbycraft-*/buildscript sourbycraft-server/src/minecraft " +
-            "then re-run applyAllPatches."
-        )
-    }
-    marker.parentFile.mkdirs()
-    marker.writeText(sourbycraftVariant)
-}
-
-// SourbyCraft v12 — filter PVP patches out of normal builds.
-// PVP-only patches use 9XXX-PVP-*.patch naming and live in any of:
-//   patches/server/ patches/api/ patches/minecraft/
-// They are stashed before applyXxxPatches runs and restored after.
-fun patchKindFor(taskName: String): String? = when (taskName) {
-    "applyServerPatches" -> "server"
-    "applyApiPatches" -> "api"
-    "applyMinecraftPatches",
-    "applyMinecraftSourcePatches",
-    "applyMinecraftFilePatches",
-    "applyMinecraftFeaturePatches" -> "minecraft"
-    else -> null
-}
-
-// SourbyCraft v12 — apply filter to BOTH root + every subproject's tasks
-// (paperweight task lives in :sourbycraft-server, not the root project).
-allprojects {
-    tasks.matching { patchKindFor(it.name) != null }.configureEach {
-        val taskNameLocal = this.name
-        doFirst {
-            if (!isPvpVariant) {
-                val patchKind = patchKindFor(taskNameLocal) ?: return@doFirst
-                val patchDir = rootProject.file("patches/$patchKind")
-                val pvpPatches = patchDir.listFiles { f: File -> f.name.matches(Regex("^9\\d{3}-.*\\.patch$")) } ?: emptyArray()
-                val stashDir = rootProject.file("build/sourbycraft-pvp-patches-stashed/$patchKind")
-                stashDir.mkdirs()
-                pvpPatches.forEach { pf ->
-                    val dest = File(stashDir, pf.name)
-                    logger.lifecycle("  stash PVP patch (normal build): $patchKind/${pf.name}")
-                    pf.renameTo(dest)
-                }
-            }
-        }
-        doLast {
-            val patchKind = patchKindFor(taskNameLocal) ?: return@doLast
-            val stashDir = rootProject.file("build/sourbycraft-pvp-patches-stashed/$patchKind")
-            if (stashDir.exists()) {
-                val patchDir = rootProject.file("patches/$patchKind")
-                stashDir.listFiles().orEmpty().forEach { sf ->
-                    sf.renameTo(File(patchDir, sf.name))
-                }
-            }
-        }
-    }
-}
-
-// SourbyCraft v12 — suffix paperclip jar with variant
-gradle.projectsEvaluated {
-    val variant = providers.gradleProperty("variant").getOrElse("normal")
-    val suffix = if (variant == "pvp") "-PVP" else ""
-    val internalVersion = providers.gradleProperty("internalVersion").getOrElse("dev")
-
-    subprojects.filter { it.name == "sourbycraft-server" }.forEach { sp ->
-        sp.tasks.matching { it.name.endsWith("PaperclipJar") }.configureEach {
-            doLast {
-                val outputs = outputs.files.files.filter { it.name.endsWith(".jar") && it.exists() }
-                outputs.forEach { origJar ->
-                    val newName = "SourbyCraft${suffix}-${internalVersion}.jar"
-                    val newFile = origJar.resolveSibling(newName)
-                    origJar.copyTo(newFile, overwrite = true)
-                    logger.lifecycle("SourbyCraft jar: ${newFile.name}")
-                }
-            }
-        }
-    }
-}
