@@ -86,6 +86,30 @@ public class SourbyCraftConfig {
         return defaultValue;
     }
 
+    /**
+     * Reads a list of strings from sourbycraft.yml. Returns an empty list when the
+     * key is missing or the value is not a List. Non-string entries are filtered out
+     * with one WARN per offending value position.
+     */
+    public static java.util.List<String> ymlStringList(String dottedPath) {
+        Object v = lookupYml(sourbycraftYmlBaseline, dottedPath);
+        if (!(v instanceof java.util.List<?> raw)) {
+            if (v != null) warnOnce(dottedPath, v, "List<String>");
+            return java.util.List.of();
+        }
+        java.util.ArrayList<String> out = new java.util.ArrayList<>(raw.size());
+        int idx = 0;
+        for (Object item : raw) {
+            if (item instanceof String s) {
+                out.add(s);
+            } else {
+                warnOnce(dottedPath + "[" + idx + "]", item, "String");
+            }
+            idx++;
+        }
+        return java.util.Collections.unmodifiableList(out);
+    }
+
     private static Object lookupYml(Map<String, Object> root, String dottedPath) {
         Object cur = root;
         for (String seg : dottedPath.split("\\.")) {
