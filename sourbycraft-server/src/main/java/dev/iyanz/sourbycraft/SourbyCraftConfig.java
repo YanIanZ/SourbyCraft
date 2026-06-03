@@ -110,6 +110,57 @@ public class SourbyCraftConfig {
         return java.util.Collections.unmodifiableList(out);
     }
 
+    /**
+     * Parses a list of {@code "EntityType:Number"} entries from sourbycraft.yml into
+     * a typed map. Bad entries are skipped with one WARN each; valid entries collected.
+     * Returns an empty map when the key is missing or the value is not a List.
+     */
+    public static java.util.Map<org.bukkit.entity.EntityType, Integer> ymlEntityTypeMap(String dottedPath) {
+        Object v = lookupYml(sourbycraftYmlBaseline, dottedPath);
+        if (!(v instanceof java.util.List<?> raw)) {
+            if (v != null) warnOnce(dottedPath, v, "List<String>");
+            return java.util.Map.of();
+        }
+        java.util.EnumMap<org.bukkit.entity.EntityType, Integer> out =
+            new java.util.EnumMap<>(org.bukkit.entity.EntityType.class);
+        int idx = 0;
+        for (Object item : raw) {
+            if (item instanceof String s) {
+                Map.Entry<org.bukkit.entity.EntityType, Integer> entry = parseEntityTypeEntry(s);
+                if (entry != null) {
+                    out.put(entry.getKey(), entry.getValue());
+                } else {
+                    warnOnce(dottedPath + "[" + idx + "]", s, "EntityType:Number");
+                }
+            } else {
+                warnOnce(dottedPath + "[" + idx + "]", item, "String");
+            }
+            idx++;
+        }
+        return java.util.Collections.unmodifiableMap(out);
+    }
+
+    /**
+     * Parses a single {@code "TYPE:N"} entry. Returns {@code null} on any failure
+     * (no colon, blank type, non-numeric value, unknown EntityType). Package-private
+     * so it can be unit-tested without a populated baseline.
+     */
+    static java.util.Map.Entry<org.bukkit.entity.EntityType, Integer> parseEntityTypeEntry(String entry) {
+        if (entry == null) return null;
+        int colon = entry.indexOf(':');
+        if (colon <= 0 || colon == entry.length() - 1) return null;
+        String typeStr = entry.substring(0, colon).trim();
+        String numStr = entry.substring(colon + 1).trim();
+        if (typeStr.isEmpty() || numStr.isEmpty()) return null;
+        try {
+            org.bukkit.entity.EntityType type = org.bukkit.entity.EntityType.valueOf(typeStr);
+            int num = Integer.parseInt(numStr);
+            return java.util.Map.entry(type, num);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
     private static Object lookupYml(Map<String, Object> root, String dottedPath) {
         Object cur = root;
         for (String seg : dottedPath.split("\\.")) {

@@ -79,4 +79,30 @@ class SourbyCraftConfigAccessorsTest {
         assertNotNull(result);
         assertEquals(0, result.size());
     }
+
+    @Test
+    void ymlEntityTypeMap_returnsEmptyWhenMissing() {
+        var map = SourbyCraftConfig.ymlEntityTypeMap("nonexistent.entity.map");
+        assertNotNull(map);
+        assertTrue(map.isEmpty());
+    }
+
+    @Test
+    void ymlEntityTypeMap_parseHelperRoundtrip() {
+        // The parser is exposed via a package-private helper so we can unit-test the
+        // "TYPE:N" splitting logic without needing a baseline list to exist.
+        var parsed = SourbyCraftConfig.parseEntityTypeEntry("PLAYER:2");
+        assertNotNull(parsed);
+        assertEquals(org.bukkit.entity.EntityType.PLAYER, parsed.getKey());
+        assertEquals(2, parsed.getValue());
+    }
+
+    @Test
+    void ymlEntityTypeMap_parseHelperRejectsBadFormat() {
+        assertNull(SourbyCraftConfig.parseEntityTypeEntry("nocolon"));
+        assertNull(SourbyCraftConfig.parseEntityTypeEntry("PLAYER:notanumber"));
+        assertNull(SourbyCraftConfig.parseEntityTypeEntry("NONEXISTENT_ENTITY:5"));
+        assertNull(SourbyCraftConfig.parseEntityTypeEntry(""));
+        assertNull(SourbyCraftConfig.parseEntityTypeEntry(null));
+    }
 }
