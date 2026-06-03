@@ -1,2 +1,1 @@
-e7e33f07205b2783c57d64df89b9ab0ee804ed930f9034e6b62b3c255b115148  SourbyCraft-v12-REL.jar
-4242633fa6b2feae891c028c82cd96de963ec8ff899ae1392190d041879b5c2f  SourbyCraft-PVP-v12-REL.jar
+ee04c8d1e6bc51cebadcf4bb8dbd79151c60daf5badb883eb1b63aa42f897d80  SourbyCraft-v12-REL.jar
