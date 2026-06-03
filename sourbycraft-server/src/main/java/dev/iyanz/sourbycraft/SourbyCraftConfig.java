@@ -74,6 +74,18 @@ public class SourbyCraftConfig {
         return defaultValue;
     }
 
+    /**
+     * Type-safe double read from sourbycraft.yml. Coerces any {@link Number} via
+     * {@code doubleValue()}. Returns {@code defaultValue} when the key is missing
+     * or the value is not numeric.
+     */
+    public static double ymlDouble(String dottedPath, double defaultValue) {
+        Object v = lookupYml(sourbycraftYmlBaseline, dottedPath);
+        if (v instanceof Number n) return n.doubleValue();
+        if (v != null) warnOnce(dottedPath, v, "double");
+        return defaultValue;
+    }
+
     private static Object lookupYml(Map<String, Object> root, String dottedPath) {
         Object cur = root;
         for (String seg : dottedPath.split("\\.")) {
