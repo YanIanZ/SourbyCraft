@@ -51,6 +51,17 @@ public class SourbyCraftConfig {
         return defaultValue;
     }
 
+    /**
+     * Type-safe boolean read from sourbycraft.yml. Returns {@code defaultValue} when the
+     * key is missing or the value cannot be cast to Boolean.
+     */
+    public static boolean ymlBool(String dottedPath, boolean defaultValue) {
+        Object v = lookupYml(sourbycraftYmlBaseline, dottedPath);
+        if (v instanceof Boolean b) return b;
+        if (v != null) warnOnce(dottedPath, v, "boolean");
+        return defaultValue;
+    }
+
     private static Object lookupYml(Map<String, Object> root, String dottedPath) {
         Object cur = root;
         for (String seg : dottedPath.split("\\.")) {
@@ -440,6 +451,23 @@ public class SourbyCraftConfig {
     }
 
     private static int clamp(int v, int min, int max) { return Math.max(min, Math.min(max, v)); }
+
+    // SourbyCraft v12 — UniverseSpigot config import accessors. Once-per-startup WARN dedupe
+    // so a single malformed key doesn't spam the log every tick a patch reads it.
+    private static final java.util.Set<String> WARNED_KEYS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private static void warnOnce(String path, Object actual, String expected) {
+        if (WARNED_KEYS.add(path)) {
+            String msg = "[SourbyCraft] config key '" + path + "' invalid type '"
+                + (actual == null ? "null" : actual.getClass().getSimpleName())
+                + "', expected " + expected + " — using default";
+            if (Bukkit.getServer() != null) {
+                Bukkit.getLogger().warning(msg);
+            } else {
+                java.util.logging.Logger.getLogger("SourbyCraft").warning(msg);
+            }
+        }
+    }
 
     private static Component getComponent(String path, Component def) {
         return MiniMessage.miniMessage().deserialize(getString(path,
