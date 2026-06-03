@@ -1,0 +1,65 @@
+name: NMS Compat
+
+on:
+  pull_request:
+    paths:
+      - 'patches/**'
+      - 'release/**'
+      - 'gradle.properties'
+      - 'sourbycraft-server/buildscript/build.gradle.kts'
+      - 'build.gradle.kts'
+      - 'test-harness/**'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Cache Gradle + paperweight
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            .gradle/caches/paperweight
+          key: ${{ runner.os }}-gradle-${{ hashFiles('gradle.properties', '**/*.gradle.kts') }}
+
+      - name: Cache test-plugin jars
+        uses: actions/cache@v4
+        with:
+          path: test-harness/test-plugins/*.jar
+          key: ${{ runner.os }}-test-plugins-${{ hashFiles('test-harness/test-plugins/manifest.yml') }}
+
+      - name: Apply paperweight patches
+        run: ./gradlew applyAllPatches --offline 2>&1 | tail -30
+
+      - name: Download test plugins
+        run: test-harness/scripts/download-test-plugins.sh
+
+      - name: Run NMS-compat smoke harness
+        run: ./gradlew :sourbycraft-server:nmsCompatTest -PrunNmsCompat=true
+
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nms-compat-junit
+          path: sourbycraft-server/build/test-results/nms-compat/
+
+      - name: Upload boot logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nms-compat-boot-logs
+          path: |
+            test-harness/TestServer-mojmap/boot.log
+            test-harness/TestServer-mojmap/nms-compat-result.json
