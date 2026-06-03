@@ -9,7 +9,7 @@ Content-Transfer-Encoding: 8bit
 
 
 diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
-index 6a95b09bf82e46009eb9f040e74c6eb50dd46ccc..1364b87ca8d4f111aa9cbc80b4e4896bf6e7be5e 100644
+index 6a95b09bf82e46009eb9f040e74c6eb50dd46ccc..5d1bd8cb7afd3ada31327e24aeed90dff5783967 100644
 --- a/net/minecraft/server/level/ChunkMap.java
 +++ b/net/minecraft/server/level/ChunkMap.java
 @@ -996,8 +996,37 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP

@@ -9,10 +9,10 @@ Content-Transfer-Encoding: 8bit
 
 
 diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
-index fca9f37692c70f53364535d19a70ea670daf124b..a2b29e028aae302c0147b39b7d94c5465871373e 100644
+index fca9f37692c70f53364535d19a70ea670daf124b..9a3762bb713ab140d1e01a45c96252423a264051 100644
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
-@@ -1502,7 +1502,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -1502,7 +1502,14 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
                  }
                  if (this instanceof ServerPlayer && event.getDamage() == 0 && originAmount == 0) return false; // Paper - revert to vanilla damage - players are not affected by damage that is 0 - skip damage if the vanilla damage is 0 and was not modified by plugins in the event.
                  this.lastHurt = amount;
@@ -29,12 +29,12 @@ index fca9f37692c70f53364535d19a70ea670daf124b..a2b29e028aae302c0147b39b7d94c546
                  // CraftBukkit end
                  this.hurtDuration = 10;
 diff --git a/net/minecraft/world/entity/player/Player.java b/net/minecraft/world/entity/player/Player.java
-index 59f038f60454a3dac6d0e40f928e53bc69977c36..b232b7e8adc0a942ac5f556e9fbd9f0084994cc8 100644
+index 59f038f60454a3dac6d0e40f928e53bc69977c36..f97d24e47b007c2bbe37fa84bbabcbc569bbd8d7 100644
 --- a/net/minecraft/world/entity/player/Player.java
 +++ b/net/minecraft/world/entity/player/Player.java
 @@ -1056,7 +1056,10 @@ public abstract class Player extends Avatar implements ContainerUser {
                      }
-
+ 
                      float f2 = f + f1;
 -                    boolean isSweepAttack = this.isSweepAttack(flag, flag2, flag1);
 +                    // SourbyCraft v12 PVP — gate sweep attack on combat.sweep-enabled

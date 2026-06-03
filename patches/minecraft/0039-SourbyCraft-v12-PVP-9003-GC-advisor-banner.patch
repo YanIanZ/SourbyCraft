@@ -9,7 +9,7 @@ Content-Transfer-Encoding: 8bit
 
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 5bd25bdd51c7ee0b8e34755cadaf619f181d5e53..8864c0cfb7724ba30f46b51d57651f6d8224e116 100644
+index 5bd25bdd51c7ee0b8e34755cadaf619f181d5e53..1506a170de092771b288e72ec6dae2e3ae0fe55b 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -1271,6 +1271,15 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
