@@ -48,3 +48,12 @@ branding:
 
 auto-install:
   enabled: true
+
+# UniverseSpigot config import — particles category (sub-project 00 Foundation reference impl).
+# All toggles default to false → vanilla Paper behavior preserved.
+# Changes to this file require a server restart; SourbyCraft does not support hot-reload.
+particles:
+  # Disable entity fall particles (UniverseSpigot: particles.disableFallParticles).
+  disableFallParticles: false
+  # Disable entity death particles (UniverseSpigot: particles.disableDeathParticles).
+  disableDeathParticles: false
