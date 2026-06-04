@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Thu, 4 Jun 2026 12:44:00 +0700
+Subject: [PATCH] test task maxHeapSize 2G to prevent OOM
+
+
+diff --git a/build.gradle.kts b/build.gradle.kts
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -335,6 +335,10 @@ tasks.test {
+         forkEvery = 1
+         excludeTags("Slow")
+     }
++
++    // SourbyCraft: Paper test suite OOMs under default 512M when forkEvery=1 spawns
++    // heap-heavy reflection tests (Mockito + ASM + classgraph). Bump to 2G.
++    maxHeapSize = "2G"
+ 
+     // Configure mockito agent that is needed in newer java versions
+     val provider = objects.newInstance<MockitoAgentProvider>()
