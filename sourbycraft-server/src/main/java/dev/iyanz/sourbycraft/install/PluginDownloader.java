@@ -25,9 +25,51 @@ public final class PluginDownloader {
     private PluginDownloader() {}
 
     public static Path download(PluginEntry entry, Path pluginsDir) throws IOException {
-        String url = entry.isGithub() ? resolveGithubAsset(entry) : entry.url();
+        String url;
+        if (entry.isGithub()) {
+            url = resolveGithubAsset(entry);
+        } else if (entry.isJenkins()) {
+            url = resolveJenkinsArtifact(entry);
+        } else {
+            url = entry.url();
+        }
         if (url == null) return null;
         return downloadToFile(url, pluginsDir, entry.name());
+    }
+
+    /**
+     * Resolve a Jenkins job's latest artifact by querying {@code <baseUrl>/api/json}.
+     * {@code entry.url()} is the job's lastSuccessfulBuild URL (no trailing slash, no /artifact),
+     * e.g. {@code https://ci.lucko.me/job/spark/lastSuccessfulBuild}.
+     * {@code entry.assetGlob()} matches against {@code artifacts[].fileName}.
+     */
+    private static String resolveJenkinsArtifact(PluginEntry entry) throws IOException {
+        String base = entry.url();
+        if (base == null) return null;
+        URI api = URI.create(base.replaceAll("/+$", "") + "/api/json?tree=artifacts[fileName,relativePath]");
+        HttpRequest req = HttpRequest.newBuilder(api)
+            .timeout(Duration.ofSeconds(15))
+            .header("Accept", "application/json")
+            .GET().build();
+        try {
+            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (resp.statusCode() != 200) return null;
+            Pattern artPat = Pattern.compile(
+                "\"fileName\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"relativePath\"\\s*:\\s*\"([^\"]+)\"");
+            Pattern globRe = entry.assetGlob() == null ? null : globToRegex(entry.assetGlob());
+            Matcher m = artPat.matcher(resp.body());
+            while (m.find()) {
+                String fileName = m.group(1);
+                String relPath = m.group(2);
+                if (globRe == null || globRe.matcher(fileName).matches()) {
+                    return base.replaceAll("/+$", "") + "/artifact/" + relPath;
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted resolving Jenkins artifact", e);
+        }
+        return null;
     }
 
     private static String resolveGithubAsset(PluginEntry entry) throws IOException {
