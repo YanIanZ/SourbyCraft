@@ -10,4 +10,5 @@ public record PluginEntry(
 ) {
     public boolean isGithub() { return "github".equalsIgnoreCase(source); }
     public boolean isCi() { return "ci".equalsIgnoreCase(source); }
+    public boolean isJenkins() { return "jenkins".equalsIgnoreCase(source); }
 }
