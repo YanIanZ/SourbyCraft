@@ -167,8 +167,54 @@ boot_and_assert() {
 # === SCENARIO_0_BOOT (Task 1) ===
 boot_and_assert "0_boot_sanity" "" ""
 
-# === SCENARIO_1_DEFAULT_STAYS_GREEN (added in Task 3) ===
-# === SCENARIO_2_FORCE_YELLOW_VIA_MSPT (added in Task 3) ===
+# === SCENARIO_1_DEFAULT_STAYS_GREEN ===
+# No yml override. Default thresholds. Idle server should stay in GREEN through the
+# 10s observation window inside boot_and_assert.
+# Asserts on the sensor-loaded log line emitted by PerfSensor.loadFromYml so this
+# scenario doubles as a smoke-test of the boot wiring.
+boot_and_assert "1_default_stays_green" "perf sensor: cadence=20 dwell=3" ""
+if grep -E -q "perf tier transition" "$TS_DIR/boot.log"; then
+    echo "ERROR: scenario=1 unexpected tier transition in idle boot" >&2
+    grep "perf tier transition" "$TS_DIR/boot.log" >&2
+    exit 5
+fi
+
+# === SCENARIO_2_FORCE_YELLOW_VIA_MSPT ===
+# Lower MSPT.yellow threshold to 0.001 ms so every server tick exceeds it.
+# dwell-samples=1 so transition fires after the first sample.
+SCENARIO_2_YML='perf:
+  sensor:
+    enabled: true
+    warmup-ticks: 0
+    dwell-samples: 1
+    thresholds:
+      mspt:
+        yellow: 0.001
+        orange: 1000
+        red: 1000
+        emergency: 1000
+      tps:
+        yellow: 1.0
+        orange: 0.5
+        red: 0.1
+        emergency: 0.0
+      mem:
+        yellow: 99.0
+        orange: 99.5
+        red: 99.8
+        emergency: 99.9
+      gc-ms-per-min:
+        yellow: 100000
+        orange: 200000
+        red: 300000
+        emergency: 400000'
+boot_and_assert "2_force_yellow_via_mspt" "" "$SCENARIO_2_YML"
+if ! grep -E -q "perf tier transition: GREEN -> YELLOW" "$TS_DIR/boot.log"; then
+    echo "ERROR: scenario=2 expected GREEN->YELLOW transition not found in boot.log" >&2
+    grep "perf tier transition" "$TS_DIR/boot.log" >&2 || echo "(no tier transition lines found)" >&2
+    exit 4
+fi
+echo "p1-tier-smoke: scenario=2 post-boot transition check PASS"
 # === SCENARIO_3_DWELL_PREVENTS_TRANSIENT (added in Task 5) ===
 # === SCENARIO_4_FORCE_EMERGENCY_VIA_MEM (added in Task 5) ===
 # === SCENARIO_5_NON_MONOTONIC_WARN (added in Task 5) ===
