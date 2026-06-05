@@ -1,0 +1,235 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 6 Jun 2026 03:33:04 +0700
+Subject: [PATCH] =?UTF-8?q?feat:=20sourby-bootstrap=20=E2=80=94=20lazy=20s?=
+ =?UTF-8?q?peedtest=20binary=20download?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Removes the bundled Linux x86-64 ELF speedtest binary extraction from
+classloader resources. SpeedtestCommand now downloads the Ookla CLI
+tarball on first /speedtest invocation, extracts the speedtest binary
+into libraries/speedtest/linux-x86_64/, sets +x, runs.
+Subsequent invocations reuse the cached binary.
+
+Linux-only for now. Multi-OS deferred to follow-on sub-spec.
+
+diff --git a/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java b/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java
+index 748532b011d51a7386f4822a9064cc4ea2b78370..e5dd7ffd888792d1fe32562903997fd11615d80b 100644
+--- a/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java
++++ b/src/main/java/dev/iyanz/sourbycraft/command/SpeedtestCommand.java
+@@ -5,53 +5,181 @@ import dev.iyanz.sourbycraft.util.VirtualExecutor;
+ import org.bukkit.command.Command;
+ import org.bukkit.command.CommandSender;
+ import java.io.*;
++import java.net.URI;
++import java.net.http.HttpClient;
++import java.net.http.HttpRequest;
++import java.net.http.HttpResponse;
+ import java.nio.file.*;
++import java.time.Duration;
++import java.util.zip.GZIPInputStream;
+ import static net.kyori.adventure.text.Component.text;
++
+ public class SpeedtestCommand extends Command {
+-    private static final Path BIN=Paths.get("plugins/sourbycraft/speedtest-cli");
+-    public SpeedtestCommand(String n){super(n);this.description="Ookla speedtest";this.usageMessage="/speedtest";this.setPermission("sourbycraft.command.speedtest");}
+-    public boolean execute(CommandSender s,String a,String[] args){
++    // Linux x86-64 only for now. Multi-OS expansion deferred to follow-on sub-spec.
++    // Path mirrors the bootstrap libraries/ layout so a future bootstrap manifest could
++    // pre-warm it if desired.
++    private static final Path BIN = Paths.get("libraries/speedtest/linux-x86_64/speedtest");
++    private static final String OOKLA_URL =
++        "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz";
++
++    public SpeedtestCommand(String n) {
++        super(n);
++        this.description = "Ookla speedtest";
++        this.usageMessage = "/speedtest";
++        this.setPermission("sourbycraft.command.speedtest");
++    }
++
++    public boolean execute(CommandSender s, String a, String[] args) {
+         final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("SourbyCraft:Speedtest");
+         LOG.info("Speedtest invoked. OS={} arch={} binPath={} binExists={}",
+             System.getProperty("os.name"),
+             System.getProperty("os.arch"),
+             BIN.toAbsolutePath(),
+             Files.exists(BIN));
+-        if(!testPermission(s))return true;
+-        s.sendMessage(text("Running...",SourbyCraftColors.LABEL));
+-        // SourbyCraft v9.23 — use virtual thread executor instead of Bukkit scheduler (no plugin required)
+-        VirtualExecutor.run(()->{
+-            try{
+-                if(!Files.exists(BIN)){
+-                    try{var p=BIN.getParent();Files.createDirectories(p);try(InputStream in=getClass().getClassLoader().getResourceAsStream("speedtest")){if(in!=null){Files.copy(in,BIN,StandardCopyOption.REPLACE_EXISTING);BIN.toFile().setExecutable(true);}}}catch(IOException ioe){
+-                        org.slf4j.LoggerFactory.getLogger("SourbyCraft:Speedtest").error(
+-                            "Failed to extract speedtest binary to {}: {}", BIN, ioe.toString());
+-                    }
++        if (!testPermission(s)) return true;
++        s.sendMessage(text("Running...", SourbyCraftColors.LABEL));
++        VirtualExecutor.run(() -> {
++            try {
++                if (!Files.exists(BIN)) {
++                    s.sendMessage(text("Downloading speedtest CLI (first run, ~1MB)...", SourbyCraftColors.LABEL));
++                    downloadSpeedtestBinary(LOG);
+                 }
+-                if(!Files.exists(BIN)){s.sendMessage(text("Speedtest unavailable",SourbyCraftColors.DANGER));return;}
+-                Process proc=new ProcessBuilder(BIN.toString(),"--format=json","--accept-license","--accept-gdpr").redirectErrorStream(true).start();
+-                String output=new String(proc.getInputStream().readAllBytes());
++                if (!Files.exists(BIN)) {
++                    s.sendMessage(text("Speedtest unavailable (download failed)", SourbyCraftColors.DANGER));
++                    return;
++                }
++                Process proc = new ProcessBuilder(BIN.toString(),
++                        "--format=json", "--accept-license", "--accept-gdpr")
++                    .redirectErrorStream(true).start();
++                String output = new String(proc.getInputStream().readAllBytes());
+                 proc.waitFor();
+-                var g=new com.google.gson.Gson();var r=g.fromJson(output,java.util.Map.class);var dl=(java.util.Map)r.get("download");var ul=(java.util.Map)r.get("upload");var ping=(java.util.Map)r.get("ping");var sv=(java.util.Map)r.get("server");
+-                double dm=((Number)dl.get("bandwidth")).doubleValue()*8/1000000,um=((Number)ul.get("bandwidth")).doubleValue()*8/1000000,pm=((Number)ping.get("latency")).doubleValue();
+-                net.minecraft.server.MinecraftServer.getServer().execute(()->{
++                var g = new com.google.gson.Gson();
++                var r = g.fromJson(output, java.util.Map.class);
++                var dl = (java.util.Map) r.get("download");
++                var ul = (java.util.Map) r.get("upload");
++                var ping = (java.util.Map) r.get("ping");
++                var sv = (java.util.Map) r.get("server");
++                double dm = ((Number) dl.get("bandwidth")).doubleValue() * 8 / 1000000;
++                double um = ((Number) ul.get("bandwidth")).doubleValue() * 8 / 1000000;
++                double pm = ((Number) ping.get("latency")).doubleValue();
++                net.minecraft.server.MinecraftServer.getServer().execute(() -> {
+                     s.sendMessage(text()
+-                        .append(text("DL: ",SourbyCraftColors.LABEL))
+-                        .append(BarUtil.coloredBar(Math.min(dm/100,100),20))
+-                        .append(text(String.format(" %.1f Mbps",dm),SourbyCraftColors.SUCCESS))
+-                        .append(text("\nUL: ",SourbyCraftColors.LABEL))
+-                        .append(BarUtil.coloredBar(Math.min(um/50,100),20))
+-                        .append(text(String.format(" %.1f Mbps",um),SourbyCraftColors.SUCCESS))
+-                        .append(text("\nPing: ",SourbyCraftColors.LABEL))
+-                        .append(text(String.format("%.0fms",pm),pm<30?SourbyCraftColors.SUCCESS:SourbyCraftColors.PRIMARY))
+-                        .append(text(" | "+sv.get("name")+", "+sv.get("location"),SourbyCraftColors.DIM)));
++                        .append(text("DL: ", SourbyCraftColors.LABEL))
++                        .append(BarUtil.coloredBar(Math.min(dm / 100, 100), 20))
++                        .append(text(String.format(" %.1f Mbps", dm), SourbyCraftColors.SUCCESS))
++                        .append(text("\nUL: ", SourbyCraftColors.LABEL))
++                        .append(BarUtil.coloredBar(Math.min(um / 50, 100), 20))
++                        .append(text(String.format(" %.1f Mbps", um), SourbyCraftColors.SUCCESS))
++                        .append(text("\nPing: ", SourbyCraftColors.LABEL))
++                        .append(text(String.format("%.0fms", pm),
++                            pm < 30 ? SourbyCraftColors.SUCCESS : SourbyCraftColors.PRIMARY))
++                        .append(text(" | " + sv.get("name") + ", " + sv.get("location"), SourbyCraftColors.DIM)));
+                 });
+-            }catch(Exception e){
+-                org.slf4j.LoggerFactory.getLogger("SourbyCraft:Speedtest").error(
+-                    "Speedtest process failed: {}", e.toString(), e);
+-                s.sendMessage(text("Speedtest failed: "+e.getMessage(),SourbyCraftColors.DANGER));
++            } catch (Exception e) {
++                org.slf4j.LoggerFactory.getLogger("SourbyCraft:Speedtest")
++                    .error("Speedtest process failed: {}", e.toString(), e);
++                s.sendMessage(text("Speedtest failed: " + e.getMessage(), SourbyCraftColors.DANGER));
+             }
+         });
+         return true;
+     }
++
++    /**
++     * Downloads the Ookla speedtest CLI tarball, extracts the `speedtest` binary into BIN,
++     * sets executable bit. Linux x86-64 only.
++     */
++    private static void downloadSpeedtestBinary(org.slf4j.Logger LOG) throws IOException {
++        Files.createDirectories(BIN.getParent());
++        HttpClient http = HttpClient.newBuilder()
++            .connectTimeout(Duration.ofSeconds(15))
++            .followRedirects(HttpClient.Redirect.NORMAL)
++            .build();
++        HttpRequest req = HttpRequest.newBuilder(URI.create(OOKLA_URL))
++            .timeout(Duration.ofMinutes(2))
++            .GET().build();
++        Path tarball = BIN.getParent().resolve("speedtest.tgz.tmp");
++        Files.deleteIfExists(tarball);
++        HttpResponse<Path> resp;
++        try {
++            resp = http.send(req, HttpResponse.BodyHandlers.ofFile(tarball));
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IOException("interrupted during speedtest download", e);
++        }
++        if (resp.statusCode() != 200) {
++            Files.deleteIfExists(tarball);
++            throw new IOException("HTTP " + resp.statusCode() + " from " + OOKLA_URL);
++        }
++        try (InputStream raw = Files.newInputStream(tarball);
++             GZIPInputStream gz = new GZIPInputStream(raw)) {
++            extractSpeedtestFromTar(gz, BIN);
++        }
++        Files.deleteIfExists(tarball);
++        if (!Files.exists(BIN)) {
++            throw new IOException("speedtest binary missing from extracted tarball");
++        }
++        try {
++            BIN.toFile().setExecutable(true);
++        } catch (SecurityException ignored) { }
++        LOG.info("Speedtest binary downloaded to {}", BIN);
++    }
++
++    /**
++     * Reads a USTAR/POSIX tar stream and extracts a file named "speedtest" into dest.
++     * Skips other entries.
++     */
++    private static void extractSpeedtestFromTar(InputStream tar, Path dest) throws IOException {
++        byte[] header = new byte[512];
++        while (true) {
++            int r = tar.readNBytes(header, 0, 512);
++            if (r < 512) return;
++            if (isZeroBlock(header)) return;
++            String name = readNulString(header, 0, 100);
++            long size = parseTarOctal(header, 124, 12);
++            if (name.equals("speedtest")) {
++                try (OutputStream out = Files.newOutputStream(dest)) {
++                    long remaining = size;
++                    byte[] buf = new byte[64 * 1024];
++                    while (remaining > 0) {
++                        int n = tar.read(buf, 0, (int) Math.min(buf.length, remaining));
++                        if (n < 0) throw new IOException("EOF inside tar entry");
++                        out.write(buf, 0, n);
++                        remaining -= n;
++                    }
++                }
++                long pad = (512 - (size % 512)) % 512;
++                if (pad > 0) tar.readNBytes((int) pad);
++                return;
++            } else {
++                long toSkip = size + ((512 - (size % 512)) % 512);
++                while (toSkip > 0) {
++                    long skipped = tar.skip(toSkip);
++                    if (skipped <= 0) throw new IOException("cannot skip past tar entry");
++                    toSkip -= skipped;
++                }
++            }
++        }
++    }
++
++    private static boolean isZeroBlock(byte[] b) {
++        for (byte x : b) if (x != 0) return false;
++        return true;
++    }
++
++    private static String readNulString(byte[] b, int off, int len) {
++        int end = off;
++        while (end < off + len && b[end] != 0) end++;
++        return new String(b, off, end - off);
++    }
++
++    private static long parseTarOctal(byte[] b, int off, int len) {
++        long v = 0;
++        for (int i = off; i < off + len; i++) {
++            byte c = b[i];
++            if (c == 0 || c == ' ') break;
++            if (c < '0' || c > '7') break;
++            v = v * 8 + (c - '0');
++        }
++        return v;
++    }
+ }
