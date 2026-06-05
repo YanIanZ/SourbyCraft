@@ -205,8 +205,53 @@ if grep -E -q "knob 'perf\.entity-tick-rate' value 4 clamped" "$TS_DIR/boot.log"
     echo "ERROR: scenario=2 unexpected clamp WARN" >&2; exit 5
 fi
 
-# === SCENARIO_3_CLAMP_HI (added in Task 4) ===
-# === SCENARIO_4_CLAMP_LO (added in Task 4) ===
-# === SCENARIO_5_WRONG_TYPE (added in Task 4) ===
+# === SCENARIO_3_CLAMP_HI ===
+# Operator sourbycraft.yml `entity.tick-rate: 99` exceeds IntKnob max of 20.
+# The Task 3 bridge (SourbyCraftConfig.init) calls Knobs.ENTITY_TICK_RATE.set(99),
+# which clamps to 20 and emits a KnobRegistry.warnOnce WARN line.
+SCENARIO_3_CFG='entity:
+  tick-rate-limit: true
+  tick-rate: 99'
+boot_and_assert "3_clamp_hi_99" "" \
+  "knob 'perf\.entity-tick-rate' value 99 clamped to 20" \
+  "$SCENARIO_3_CFG"
+# Also verify the final knob summary shows the clamped value
+if ! grep -E -q "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=20" "$TS_DIR/boot.log"; then
+    echo "ERROR: scenario=3 final knob value not 20 after clamp" >&2; exit 7
+fi
+
+# === SCENARIO_4_CLAMP_LO ===
+# Operator sourbycraft.yml `entity.tick-rate: 0` is below IntKnob min of 1.
+# The Task 3 bridge calls Knobs.ENTITY_TICK_RATE.set(0), which clamps to 1
+# and emits a KnobRegistry.warnOnce WARN line.
+SCENARIO_4_CFG='entity:
+  tick-rate-limit: true
+  tick-rate: 0'
+boot_and_assert "4_clamp_lo_0" "" \
+  "knob 'perf\.entity-tick-rate' value 0 clamped to 1" \
+  "$SCENARIO_4_CFG"
+# Also verify the final knob summary shows the clamped value
+if ! grep -E -q "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=1" "$TS_DIR/boot.log"; then
+    echo "ERROR: scenario=4 final knob value not 1 after clamp" >&2; exit 8
+fi
+
+# === SCENARIO_5_WRONG_TYPE ===
+# Operator sourbycraft.yml `entity.tick-rate: "high"` — string where int is expected.
+# Paper's YamlConfiguration.getInt(path, default) silently returns the supplied default
+# (the knob's current value, 20) without emitting any WARN. The bridge then calls
+# Knobs.ENTITY_TICK_RATE.set(20), which is in-range so no clamp WARN fires either.
+# Assert safe-fallback: boot succeeds, final knob value is default 20, no clamp WARN.
+# NOTE: the originally-planned type-mismatch WARN (from SourbyCraftConfig.warnOnce /
+# ymlInt path) is not reachable via operator sourbycraft.yml — that path only fires
+# for JAR-baked yml reads, not Bukkit-config getInt() calls.
+SCENARIO_5_CFG='entity:
+  tick-rate-limit: true
+  tick-rate: "high"'
+boot_and_assert "5_wrong_type_string" "" \
+  "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=20" \
+  "$SCENARIO_5_CFG"
+if grep -E -q "knob 'perf\.entity-tick-rate' value .* clamped" "$TS_DIR/boot.log"; then
+    echo "ERROR: scenario=5 unexpected clamp WARN (string should have fallen back silently)" >&2; exit 9
+fi
 
 echo "p0-knob-smoke: all scenarios PASS"
