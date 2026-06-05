@@ -485,6 +485,7 @@ public class SourbyCraftConfig {
         }
         // SourbyCraft end PvP overrides
 
+        dev.iyanz.sourbycraft.perf.knob.Knobs.loadFromYml();
         dev.iyanz.sourbycraft.util.VirtualExecutor.init();
     }
 

@@ -81,3 +81,11 @@ sounds:
   disableShieldSounds: false
   # Disable piston extend / retract sounds (UniverseSpigot: sounds.disablePistonSounds).
   disablePistonSounds: false
+
+perf:
+  # Skip-rate for entity ticking. 1 = tick every server tick (vanilla);
+  # higher = skip ticks (less smooth movement, lower CPU).
+  # Range 1..20. Default 20 (SourbyCraft historical default).
+  # Operator config.yml `entity.tick-rate` overrides this at boot.
+  # Auto-tuned at runtime by DynamicPerformanceScaler when /perf scale on.
+  entity-tick-rate: 20
