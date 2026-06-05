@@ -2,8 +2,44 @@ import io.papermc.paperweight.patcher.extension.PaperweightPatcherExtension
 import io.papermc.paperweight.tasks.RebuildGitPatches
 import java.security.MessageDigest
 import java.time.Instant
+import java.util.jar.JarEntry
+import java.util.jar.JarFile
+import java.util.jar.JarOutputStream
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
+
+data class LibSpec(val paperclipPath: String, val downloadUrl: String)
+
+val externalLibs = listOf(
+    LibSpec(
+        "org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar",
+        "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar"
+    ),
+    LibSpec(
+        "me/lucko/spark-paper/1.10.152/spark-paper-1.10.152.jar",
+        "https://repo.lucko.me/me/lucko/spark-paper/1.10.152/spark-paper-1.10.152.jar"
+    ),
+    LibSpec(
+        "com/mysql/mysql-connector-j/9.2.0/mysql-connector-j-9.2.0.jar",
+        "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/9.2.0/mysql-connector-j-9.2.0.jar"
+    ),
+    LibSpec(
+        "com/github/technove/Flare/34637f3f87/Flare-34637f3f87.jar",
+        "https://jitpack.io/com/github/technove/Flare/34637f3f87/Flare-34637f3f87.jar"
+    ),
+    LibSpec(
+        "com/google/protobuf/protobuf-java/4.29.0/protobuf-java-4.29.0.jar",
+        "https://repo1.maven.org/maven2/com/google/protobuf/protobuf-java/4.29.0/protobuf-java-4.29.0.jar"
+    ),
+    LibSpec(
+        "io/papermc/parchment/data/parchment/1.21.11-pre3+build.2/parchment-1.21.11-pre3+build.2.jar",
+        "https://maven.parchmentmc.org/io/papermc/parchment/data/parchment/1.21.11-pre3+build.2/parchment-1.21.11-pre3+build.2.jar"
+    ),
+    LibSpec(
+        "io/sentry/sentry/7.15.0/sentry-7.15.0.jar",
+        "https://repo1.maven.org/maven2/io/sentry/sentry/7.15.0/sentry-7.15.0.jar"
+    )
+)
 
 plugins {
     id("java-library")
@@ -150,6 +186,134 @@ if (providers.gradleProperty("updatingMinecraft").getOrElse("false").toBoolean()
     }
 }
 
+tasks.register("createSlimPaperclipJar") {
+    group = "build"
+    description = "Strip optional libs from paperclip jar + generate bootstrap manifest"
+
+    dependsOn(":sourbycraft-server:createMojmapPaperclipJar")
+
+    // Capture fat jar outputs as a serializable FileCollection (config-cache safe)
+    val fatJarFiles: FileCollection = project(":sourbycraft-server").tasks
+        .named("createMojmapPaperclipJar").map { it.outputs.files }.get()
+    inputs.files(fatJarFiles)
+
+    val slimJar = layout.buildDirectory.file("libs/SourbyCraft-slim.jar")
+    outputs.file(slimJar)
+
+    // Snapshot externalLibs as plain serializable pairs (config-cache safe — no script refs)
+    val libPaths: List<String> = externalLibs.map { it.paperclipPath }
+    val libUrls: List<String> = externalLibs.map { it.downloadUrl }
+
+    doLast {
+        val fatJarFile = fatJarFiles.files
+            .filter { it.name.endsWith(".jar") && it.exists() }
+            .firstOrNull() ?: error("No jar output from createMojmapPaperclipJar")
+        val out = slimJar.get().asFile
+        out.parentFile.mkdirs()
+
+        val libs = libPaths.zip(libUrls)
+
+        // Step A: enumerate externalized lib bytes + compute sha256 + size
+        val externalizedPaths = libPaths.toSet()
+        val externalizedJarEntries = externalizedPaths.map { "META-INF/libraries/$it" }.toSet()
+        val manifestEntries = mutableListOf<Map<String, Any>>()
+
+        JarFile(fatJarFile).use { jar ->
+            for ((path, url) in libs) {
+                val entryName = "META-INF/libraries/$path"
+                val entry = jar.getJarEntry(entryName)
+                    ?: error("fat jar missing expected entry: $entryName " +
+                        "(check externalLibs against current paperclip output)")
+                val bytes = jar.getInputStream(entry).use { it.readAllBytes() }
+                val md = MessageDigest.getInstance("SHA-256")
+                val sha256 = md.digest(bytes).joinToString("") { b: Byte -> "%02x".format(b) }
+                manifestEntries.add(linkedMapOf(
+                    "paperclipPath" to path,
+                    "downloadUrl"   to url,
+                    "sha256"        to sha256,
+                    "sizeBytes"     to bytes.size.toLong()
+                ))
+            }
+        }
+
+        // Step B: build manifest JSON (deterministic order)
+        val manifestJson = buildString {
+            append("{\"entries\":[")
+            manifestEntries.forEachIndexed { i, e ->
+                if (i > 0) append(",")
+                append("{")
+                append("\"paperclipPath\":\"${e["paperclipPath"]}\",")
+                append("\"downloadUrl\":\"${e["downloadUrl"]}\",")
+                append("\"sha256\":\"${e["sha256"]}\",")
+                append("\"sizeBytes\":${e["sizeBytes"]}")
+                append("}")
+            }
+            append("]}")
+        }
+
+        // Step C: read + filter libraries.list
+        val filteredLibrariesList: String = JarFile(fatJarFile).use { jar ->
+            val listEntry = jar.getJarEntry("META-INF/libraries.list")
+                ?: error("fat jar missing META-INF/libraries.list")
+            val original = jar.getInputStream(listEntry).use { String(it.readAllBytes(), Charsets.UTF_8) }
+            original.lines()
+                .filter { line ->
+                    val parts = line.trim().split('\t')
+                    // libraries.list format is "<sha>\t<maven-coords>\t<relative-path>" (3 tab-separated columns).
+                    // Filter by the path column (index 2). Keep lines that don't match any externalized path.
+                    if (parts.size < 3) true
+                    else !externalizedPaths.contains(parts[2])
+                }
+                .joinToString("\n")
+        }
+
+        // Step D: read + rewrite MANIFEST.MF (replace Main-Class)
+        val newManifestMf: String = JarFile(fatJarFile).use { jar ->
+            val mfEntry = jar.getJarEntry("META-INF/MANIFEST.MF")
+                ?: error("fat jar missing META-INF/MANIFEST.MF")
+            val original = jar.getInputStream(mfEntry).use { String(it.readAllBytes(), Charsets.UTF_8) }
+            val mainClassRe = Regex("(?m)^Main-Class:.*\\r?\\n?")
+            val replacement = "Main-Class: dev.iyanz.sourbycraft.bootstrap.SourbyBootstrap\r\n"
+            if (mainClassRe.containsMatchIn(original)) {
+                original.replace(mainClassRe, replacement)
+            } else {
+                original.trimEnd() + "\r\n" + replacement + "\r\n"
+            }
+        }
+
+        // Step E: write slim jar
+        JarFile(fatJarFile).use { jar ->
+            JarOutputStream(out.outputStream().buffered()).use { jos ->
+                for (entry in jar.entries()) {
+                    val name = entry.name
+                    when {
+                        name in externalizedJarEntries -> continue                     // skip externalized libs
+                        name == "META-INF/libraries.list" -> continue                  // replaced below
+                        name == "META-INF/MANIFEST.MF" -> continue                     // replaced below
+                        name == "speedtest" -> continue                                // bundled linux binary; Task 5 replaces
+                        else -> {
+                            jos.putNextEntry(JarEntry(name))
+                            jar.getInputStream(entry).use { it.copyTo(jos) }
+                            jos.closeEntry()
+                        }
+                    }
+                }
+                jos.putNextEntry(JarEntry("META-INF/libraries.list"))
+                jos.write(filteredLibrariesList.toByteArray(Charsets.UTF_8))
+                jos.closeEntry()
+                jos.putNextEntry(JarEntry("META-INF/sourby-bootstrap-manifest.json"))
+                jos.write(manifestJson.toByteArray(Charsets.UTF_8))
+                jos.closeEntry()
+                jos.putNextEntry(JarEntry("META-INF/MANIFEST.MF"))
+                jos.write(newManifestMf.toByteArray(Charsets.UTF_8))
+                jos.closeEntry()
+            }
+        }
+
+        logger.lifecycle("createSlimPaperclipJar: wrote ${out.length() / 1024 / 1024}M to ${out.absolutePath}")
+    }
+}
+
 // SourbyCraft v12 — assemble mojmap paperclip jar into release/ with checksums.
 // Reobf jar dropped: paperweight 2.0 deprecates reobf builds, and the reobf
 // paperclip jar produced via debug-mode bypass fails at boot with
@@ -162,10 +326,9 @@ tasks.register("assembleReleaseArtifacts") {
     val releaseDir = rootProject.layout.projectDirectory.dir("release")
     val internalVersion = providers.gradleProperty("internalVersion").getOrElse("dev")
 
-    val mojmapOutputs = project(":sourbycraft-server").tasks
-        .named("createMojmapPaperclipJar").map { it.outputs.files }
+    val mojmapOutputs = tasks.named("createSlimPaperclipJar").map { it.outputs.files }
 
-    dependsOn(":sourbycraft-server:createMojmapPaperclipJar")
+    dependsOn("createSlimPaperclipJar")
     inputs.files(mojmapOutputs)
 
     val mojmapDest = releaseDir.file("SourbyCraft-${internalVersion}.jar").asFile
