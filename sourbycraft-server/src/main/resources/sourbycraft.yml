@@ -86,6 +86,6 @@ perf:
   # Skip-rate for entity ticking. 1 = tick every server tick (vanilla);
   # higher = skip ticks (less smooth movement, lower CPU).
   # Range 1..20. Default 20 (SourbyCraft historical default).
-  # Task 3 will bridge operator config.yml `entity.tick-rate` into this knob at boot.
-  # Future (Task 4+): DynamicPerformanceScaler will drive this knob via /perf scale on.
+  # Operator sourbycraft.yml `entity.tick-rate` bridges into this knob at boot.
+  # DynamicPerformanceScaler drives this knob automatically via /perf scale on.
   entity-tick-rate: 20

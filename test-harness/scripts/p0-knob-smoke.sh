@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
 # Perf-engine P0 — knob registry boot smoke.
-# Runs 5 scenarios against test-harness/TestServer-mojmap/, each with a different
-# plugins/SourbyCraft/sourbycraft.yml `perf` block. Asserts via boot.log grep
-# and (when scenarios extend beyond Task 1) RCON /perf output.
-#
-# Scenarios populated incrementally across plan tasks:
-#   Task 1: SCENARIO_0_BOOT (just verify the harness wires up)
-#   Task 2: SCENARIO_1_DEFAULT
-#   Task 3: SCENARIO_2_IN_RANGE
-#   Task 4: SCENARIO_3_CLAMP_HI, SCENARIO_4_CLAMP_LO, SCENARIO_5_WRONG_TYPE
+# Runs 6 scenarios (0_boot_sanity, 1_default, 2_in_range, 3_clamp_hi, 4_clamp_lo,
+# 5_wrong_type) against test-harness/TestServer-mojmap/, each with a different
+# sourbycraft.yml entity-block override. Asserts via boot.log grep.
 #
 # Exit codes:
 #   0 = all scenarios PASS
@@ -102,16 +96,13 @@ PYEOF
 
 boot_and_assert() {
     local scenario="$1"
-    local yml="$2"
-    local logre="$3"  # boot.log regex (basic grep -E); empty = no log assertion
-    local sourbycraft_entity_override="${4:-}"  # entity: block content to inject into sourbycraft.yml; empty = leave as-is
+    local logre="$2"  # boot.log regex (basic grep -E); empty = no log assertion
+    local sourbycraft_entity_override="${3:-}"  # entity: block content to inject into sourbycraft.yml; empty = leave as-is
 
     echo "p0-knob-smoke: scenario=$scenario"
-    if [[ -n "$yml" ]]; then
-        printf '%s\n' "$yml" > "$TS_DIR/plugins/SourbyCraft/sourbycraft.yml"
-    else
-        rm -f "$TS_DIR/plugins/SourbyCraft/sourbycraft.yml"
-    fi
+
+    # Reset operator yml to known defaults before each scenario.
+    seed_sourbycraft_entity_block
 
     # If a sourbycraft.yml entity-block override is provided, inject it before boot.
     # sourbycraft.yml is the operator config read by SourbyCraftConfig.init().
@@ -180,25 +171,20 @@ PYEOF
     kill -KILL "$pid" 2>/dev/null || true
     cd - >/dev/null
 
-    # Restore default entity block in sourbycraft.yml if we overrode it for this scenario
-    if [[ -n "$sourbycraft_entity_override" ]]; then
-        seed_sourbycraft_entity_block
-    fi
-
     echo "p0-knob-smoke: scenario=$scenario PASS"
 }
 
 # === SCENARIO_0_BOOT (Task 1) ===
 # Sanity: harness boots the current jar with no perf yml; assert Done ( reached.
-boot_and_assert "0_boot_sanity" "" "" ""
+boot_and_assert "0_boot_sanity" "" ""
 
 # === SCENARIO_1_DEFAULT ===
 # yml omits perf block entirely; expect default value 20 (preserves existing behavior).
 # Assertion: KnobRegistry prints a summary line at boot listing loaded knob values.
 # StartupOptimizer.print() is not yet wired into server startup (Task 3+ concern);
 # the registry log line is the canonical proof that loadFromYml() ran and the value loaded.
-boot_and_assert "1_default_no_perf_block" "" \
-  "\[SourbyCraft\] perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=20" ""
+boot_and_assert "1_default_no_perf_block" \
+  "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=20" ""
 
 # === SCENARIO_2_IN_RANGE ===
 # Operator sourbycraft.yml `entity.tick-rate: 4` should bridge into Knobs.ENTITY_TICK_RATE.
@@ -208,8 +194,8 @@ boot_and_assert "1_default_no_perf_block" "" \
 SCENARIO_2_CFG='entity:
   tick-rate-limit: true
   tick-rate: 4'
-boot_and_assert "2_in_range_rate_4" "" \
-  "\[SourbyCraft\] perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=4" \
+boot_and_assert "2_in_range_rate_4" \
+  "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=4" \
   "$SCENARIO_2_CFG"
 
 # Negative assertion: no clamp WARN should appear (4 is in-range)
@@ -224,8 +210,8 @@ fi
 SCENARIO_3_CFG='entity:
   tick-rate-limit: true
   tick-rate: 99'
-boot_and_assert "3_clamp_hi_99" "" \
-  "\[SourbyCraft\] knob 'perf\.entity-tick-rate' value 99 clamped to 20" \
+boot_and_assert "3_clamp_hi_99" \
+  "knob 'perf\.entity-tick-rate' value 99 clamped to 20" \
   "$SCENARIO_3_CFG"
 # Also verify the final knob summary shows the clamped value
 if ! grep -E -q "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=20([^0-9]|$)" "$TS_DIR/boot.log"; then
@@ -239,8 +225,8 @@ fi
 SCENARIO_4_CFG='entity:
   tick-rate-limit: true
   tick-rate: 0'
-boot_and_assert "4_clamp_lo_0" "" \
-  "\[SourbyCraft\] knob 'perf\.entity-tick-rate' value 0 clamped to 1" \
+boot_and_assert "4_clamp_lo_0" \
+  "knob 'perf\.entity-tick-rate' value 0 clamped to 1" \
   "$SCENARIO_4_CFG"
 # Also verify the final knob summary shows the clamped value
 if ! grep -E -q "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=1([^0-9]|$)" "$TS_DIR/boot.log"; then
@@ -259,7 +245,7 @@ fi
 SCENARIO_5_CFG='entity:
   tick-rate-limit: true
   tick-rate: "high"'
-boot_and_assert "5_wrong_type_string" "" \
+boot_and_assert "5_wrong_type_string" \
   "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=20" \
   "$SCENARIO_5_CFG"
 if grep -E -q "knob 'perf\.entity-tick-rate' value .* clamped" "$TS_DIR/boot.log"; then

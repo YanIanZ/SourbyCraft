@@ -25,7 +25,7 @@ final class KnobRegistry {
         String dedupeKey = key + ":" + (requested < clamped ? "lo" : "hi");
         if (WARNED.add(dedupeKey)) {
             SourbyLogger.warn(
-                "[SourbyCraft] knob '" + key + "' value " + requested
+                "knob '" + key + "' value " + requested
                     + " clamped to " + clamped
             );
         }
@@ -42,7 +42,7 @@ final class KnobRegistry {
     }
 
     static void logLoaded(String context) {
-        StringBuilder sb = new StringBuilder("[SourbyCraft] perf knobs loaded [")
+        StringBuilder sb = new StringBuilder("perf knobs loaded [")
             .append(context).append("]:");
         KNOBS.forEach((key, knob) -> sb.append(" ").append(key).append("=").append(knob.snapshot()));
         SourbyLogger.info(sb.toString());
