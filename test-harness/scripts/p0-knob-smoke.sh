@@ -64,34 +64,65 @@ seed_server_properties() {
 }
 seed_server_properties
 
-# Seed plugins/SourbyCraft/config.yml so entityTickRateLimit/entityTickRate
-# are present for when StartupOptimizer.print() is wired (Task 3+).
-# SCENARIO_1 currently asserts on KnobRegistry's "perf knobs loaded:" log line,
-# not on StartupOptimizer output, so this seeding is precautionary.
-seed_sourbycraft_config() {
-    local cfg="$TS_DIR/plugins/SourbyCraft/config.yml"
-    local tmp="$cfg.seed"
-    {
-        echo "entity.tick-rate-limit: true"
-        echo "entity.tick-rate: 20"
-    } > "$tmp"
-    if [[ -f "$cfg" ]]; then
-        grep -v -E '^(entity\.tick-rate-limit|entity\.tick-rate):' "$cfg" >> "$tmp" || true
+# Capture the baseline sourbycraft.yml entity block after first boot so we can restore it
+# between scenarios. Written after Step 0 boots (which lets the server generate the full file).
+SOURBYCRAFT_YML_ENTITY_DEFAULT='entity:
+  tick-rate-limit: false
+  tick-rate: 20'
+
+seed_sourbycraft_entity_block() {
+    local sc="$TS_DIR/sourbycraft.yml"
+    if [[ -f "$sc" ]]; then
+        local tmp="$sc.seed"
+        python3 - "$sc" "$tmp" <<'PYEOF'
+import sys, re
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+    text = f.read()
+default_block = "entity:\n  tick-rate-limit: false\n  tick-rate: 20"
+text = re.sub(r'^entity:(?:\n  [^\n]*)*', default_block, text, flags=re.MULTILINE)
+with open(dst, 'w') as f:
+    f.write(text)
+PYEOF
+        mv "$tmp" "$sc"
     fi
-    mv "$tmp" "$cfg"
 }
-seed_sourbycraft_config
 
 boot_and_assert() {
     local scenario="$1"
     local yml="$2"
     local logre="$3"  # boot.log regex (basic grep -E); empty = no log assertion
+    local sourbycraft_entity_override="${4:-}"  # entity: block content to inject into sourbycraft.yml; empty = leave as-is
 
     echo "p0-knob-smoke: scenario=$scenario"
     if [[ -n "$yml" ]]; then
         printf '%s\n' "$yml" > "$TS_DIR/plugins/SourbyCraft/sourbycraft.yml"
     else
         rm -f "$TS_DIR/plugins/SourbyCraft/sourbycraft.yml"
+    fi
+
+    # If a sourbycraft.yml entity-block override is provided, inject it before boot.
+    # sourbycraft.yml is the operator config read by SourbyCraftConfig.init().
+    if [[ -n "$sourbycraft_entity_override" && -f "$TS_DIR/sourbycraft.yml" ]]; then
+        local sc="$TS_DIR/sourbycraft.yml"
+        local tmp="$sc.override"
+        local override_file="$sc.override_block"
+        printf '%s\n' "$sourbycraft_entity_override" > "$override_file"
+        # Replace the entity: block (and its indented children) with the override content.
+        python3 - "$sc" "$override_file" "$tmp" <<'PYEOF'
+import sys, re
+src, over_f, dst = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(over_f) as f:
+    override = f.read()
+with open(src) as f:
+    text = f.read()
+# Replace entity: block (entity: followed by indented lines) with override.
+text = re.sub(r'^entity:(?:\n  [^\n]*)*', override.rstrip('\n'), text, flags=re.MULTILINE)
+with open(dst, 'w') as f:
+    f.write(text)
+PYEOF
+        mv "$tmp" "$sc"
+        rm -f "$override_file"
     fi
 
     cd "$TS_DIR"
@@ -132,12 +163,18 @@ boot_and_assert() {
     sleep 5
     kill -KILL "$pid" 2>/dev/null || true
     cd - >/dev/null
+
+    # Restore default entity block in sourbycraft.yml if we overrode it for this scenario
+    if [[ -n "$sourbycraft_entity_override" ]]; then
+        seed_sourbycraft_entity_block
+    fi
+
     echo "p0-knob-smoke: scenario=$scenario PASS"
 }
 
 # === SCENARIO_0_BOOT (Task 1) ===
 # Sanity: harness boots the current jar with no perf yml; assert Done ( reached.
-boot_and_assert "0_boot_sanity" "" ""
+boot_and_assert "0_boot_sanity" "" "" ""
 
 # === SCENARIO_1_DEFAULT ===
 # yml omits perf block entirely; expect default value 20 (preserves existing behavior).
@@ -145,9 +182,25 @@ boot_and_assert "0_boot_sanity" "" ""
 # StartupOptimizer.print() is not yet wired into server startup (Task 3+ concern);
 # the registry log line is the canonical proof that loadFromYml() ran and the value loaded.
 boot_and_assert "1_default_no_perf_block" "" \
-  "\[SourbyCraft\] perf knobs loaded:.*perf\.entity-tick-rate=20"
+  "\[SourbyCraft\] perf knobs loaded:.*perf\.entity-tick-rate=20" ""
 
-# === SCENARIO_2_IN_RANGE (added in Task 3) ===
+# === SCENARIO_2_IN_RANGE ===
+# Operator sourbycraft.yml `entity.tick-rate: 4` should bridge into Knobs.ENTITY_TICK_RATE.
+# SourbyCraftConfig reads from sourbycraft.yml (server root); the bridge routes the Bukkit-config
+# read through Knobs.ENTITY_TICK_RATE.set() so the knob reflects the operator value.
+# After Task 3 wiring, KnobRegistry log line shows perf.entity-tick-rate=4.
+SCENARIO_2_CFG='entity:
+  tick-rate-limit: true
+  tick-rate: 4'
+boot_and_assert "2_in_range_rate_4" "" \
+  "\[SourbyCraft\] perf knobs loaded:.*perf\.entity-tick-rate=4" \
+  "$SCENARIO_2_CFG"
+
+# Negative assertion: no clamp WARN should appear (4 is in-range)
+if grep -E -q "knob 'perf\.entity-tick-rate' value 4 clamped" "$TS_DIR/boot.log"; then
+    echo "ERROR: scenario=2 unexpected clamp WARN" >&2; exit 5
+fi
+
 # === SCENARIO_3_CLAMP_HI (added in Task 4) ===
 # === SCENARIO_4_CLAMP_LO (added in Task 4) ===
 # === SCENARIO_5_WRONG_TYPE (added in Task 4) ===

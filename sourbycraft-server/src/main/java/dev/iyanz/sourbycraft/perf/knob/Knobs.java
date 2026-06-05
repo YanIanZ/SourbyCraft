@@ -22,4 +22,9 @@ public final class Knobs {
     public static void loadFromYml() {
         KnobRegistry.loadAllFromYml();
     }
+
+    /** Log current knob values. Call after all boot-time overrides (Bukkit-config bridge) have run. */
+    public static void logLoaded() {
+        KnobRegistry.logLoaded();
+    }
 }
