@@ -22,7 +22,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 HARNESS_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 ROOT_DIR="$( cd "$HARNESS_DIR/.." && pwd )"
 
-JAR_SRC="$ROOT_DIR/release/SourbyCraft-v12-REL.jar"
+JAR_SRC="$ROOT_DIR/release/SourbyCraft-12-REL.jar"
 TS_DIR="$HARNESS_DIR/TestServer-mojmap"
 PORT=25600
 RCON_PORT=25675

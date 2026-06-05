@@ -5,7 +5,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/minecraft-1.21.11-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/version-v12--REL-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/version-12--REL-orange?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
@@ -17,8 +17,8 @@
 
 | Variant | JAR | When to use |
 |---|---|---|
-| **Normal** | `SourbyCraft-v12-REL.jar` | General-purpose SMP. Default. |
-| **PVP** | `SourbyCraft-PVP-v12-REL.jar` | PvP arena backend. 1.8-style KB, no-cooldown, Velocity-tuned, allow-nether=false. |
+| **Normal** | `SourbyCraft-12-REL.jar` | General-purpose SMP. Default. |
+| **PVP** | `SourbyCraft-PVP-12-REL.jar` | PvP arena backend. 1.8-style KB, no-cooldown, Velocity-tuned, allow-nether=false. |
 
 Build: `./gradlew createMojmapPaperclipJar -Pvariant=normal|pvp`
 
