@@ -5,7 +5,7 @@
 ## Two JARs
 
 - `SourbyCraft-12-REL.jar` — general-purpose SMP (default)
-- `SourbyCraft-PVP-v12-REL.jar` — PvP arena backend (Velocity-tuned, 1.8-style KB, allow-nether=false)
+- `SourbyCraft-PVP-12-REL.jar` — PvP arena backend (Velocity-tuned, 1.8-style KB, allow-nether=false)
 
 Both built from same codebase via `-Pvariant=normal|pvp`. PVP variant adds 5 PvP-only NMS patches (9001–9005), proxy backend defaults, plugin auto-installer manifest tuned for PvP, and distinct branding.
 
@@ -64,3 +64,24 @@ See `docs/superpowers/specs/2026-06-02-sourbycraft-v12-smoke-checklist.md`.
 ```
 
 JAR outputs in `sourbycraft-server/build/libs/`.
+
+## Sourby Bootstrap (NEW)
+
+The release jar is now slim (~40M, was ~57M). First boot downloads optional
+libraries into `libraries/` with SHA-256 verification:
+
+- `sqlite-jdbc-3.49.1.0.jar` (~14M) — Maven Central
+- `mysql-connector-j-9.2.0.jar` (~2.6M) — Maven Central
+- Ookla `speedtest` CLI (~2.5M) — `install.speedtest.net`, lazy on first `/speedtest`
+
+Subsequent boots are silent cache-hit (zero downloads).
+
+**Offline first-boot:** the `[SourbyBootstrap] FATAL` log lists every URL +
+destination path under `libraries/`. Side-load the files manually and restart.
+
+**Operators upgrading:** if you already have a `libraries/` directory from a
+prior boot, mismatched SHA-256 triggers re-download. Matching files are reused.
+
+Paper-special-cased libs (spark-paper, Flare, protobuf, sentry) remain bundled
+— externalizing them requires deeper paperclip-internals work, deferred to a
+follow-on sub-spec.
