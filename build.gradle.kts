@@ -17,7 +17,7 @@ val externalLibs = listOf(
     ),
     LibSpec(
         "me/lucko/spark-paper/1.10.152/spark-paper-1.10.152.jar",
-        "https://repo.lucko.me/me/lucko/spark-paper/1.10.152/spark-paper-1.10.152.jar"
+        "https://repo.papermc.io/repository/maven-public/me/lucko/spark-paper/1.10.152/spark-paper-1.10.152.jar"
     ),
     LibSpec(
         "com/mysql/mysql-connector-j/9.2.0/mysql-connector-j-9.2.0.jar",
@@ -31,10 +31,8 @@ val externalLibs = listOf(
         "com/google/protobuf/protobuf-java/4.29.0/protobuf-java-4.29.0.jar",
         "https://repo1.maven.org/maven2/com/google/protobuf/protobuf-java/4.29.0/protobuf-java-4.29.0.jar"
     ),
-    LibSpec(
-        "io/papermc/parchment/data/parchment/1.21.11-pre3+build.2/parchment-1.21.11-pre3+build.2.jar",
-        "https://maven.parchmentmc.org/io/papermc/parchment/data/parchment/1.21.11-pre3+build.2/parchment-1.21.11-pre3+build.2.jar"
-    ),
+    // parchment-data omitted — 988K, only used for IDE mappings, and upstream URL for
+    // 1.21.11-pre3+build.2 returns 404 (artifact may have been pulled/relocated). Bundle stays.
     LibSpec(
         "io/sentry/sentry/7.15.0/sentry-7.15.0.jar",
         "https://repo1.maven.org/maven2/io/sentry/sentry/7.15.0/sentry-7.15.0.jar"
@@ -191,11 +189,20 @@ tasks.register("createSlimPaperclipJar") {
     description = "Strip optional libs from paperclip jar + generate bootstrap manifest"
 
     dependsOn(":sourbycraft-server:createMojmapPaperclipJar")
+    dependsOn(":sourbycraft-server:jar")
 
     // Capture fat jar outputs as a serializable FileCollection (config-cache safe)
     val fatJarFiles: FileCollection = project(":sourbycraft-server").tasks
         .named("createMojmapPaperclipJar").map { it.outputs.files }.get()
     inputs.files(fatJarFiles)
+
+    // Bootstrap classes live in the sourbycraft-server jar (NOT paperclip). Paperclip transforms
+    // this jar into META-INF/versions/<mc>/server-<mc>.jar.patch which is a binary diff — unreachable
+    // at outer-jar level. We extract the bootstrap .class files from the source jar and copy them
+    // at top-level of the slim jar so JVM can resolve the Main-Class.
+    val serverJarFiles: FileCollection = project(":sourbycraft-server").tasks
+        .named("jar").map { it.outputs.files }.get()
+    inputs.files(serverJarFiles)
 
     val slimJar = layout.buildDirectory.file("libs/SourbyCraft-slim.jar")
     outputs.file(slimJar)
@@ -251,20 +258,17 @@ tasks.register("createSlimPaperclipJar") {
             append("]}")
         }
 
-        // Step C: read + filter libraries.list
+        // Step C: read libraries.list UNCHANGED. Paperclip's library loader uses libraries.list to:
+        //   (a) decide which libs to extract from META-INF/libraries/ into ./libraries/, and
+        //   (b) add each libraries/<path> to the runtime classpath.
+        // If we filter out externalized libs, paperclip stops adding them to classpath → ClassNotFoundError.
+        // Instead: keep libraries.list intact. Paperclip checks SHA-256 of libraries/<path>; when
+        // SourbyBootstrap has already written the file with matching SHA, paperclip's SHA check passes
+        // and it skips extraction. The lib still ends up on the classpath via libraries.list.
         val filteredLibrariesList: String = JarFile(fatJarFile).use { jar ->
             val listEntry = jar.getJarEntry("META-INF/libraries.list")
                 ?: error("fat jar missing META-INF/libraries.list")
-            val original = jar.getInputStream(listEntry).use { String(it.readAllBytes(), Charsets.UTF_8) }
-            original.lines()
-                .filter { line ->
-                    val parts = line.trim().split('\t')
-                    // libraries.list format is "<sha>\t<maven-coords>\t<relative-path>" (3 tab-separated columns).
-                    // Filter by the path column (index 2). Keep lines that don't match any externalized path.
-                    if (parts.size < 3) true
-                    else !externalizedPaths.contains(parts[2])
-                }
-                .joinToString("\n")
+            jar.getInputStream(listEntry).use { String(it.readAllBytes(), Charsets.UTF_8) }
         }
 
         // Step D: read + rewrite MANIFEST.MF (replace Main-Class)
@@ -281,7 +285,22 @@ tasks.register("createSlimPaperclipJar") {
             }
         }
 
-        // Step E: write slim jar
+        // Step E1: extract bootstrap .class files from sourbycraft-server jar (Main-Class needs them at outer jar root)
+        val serverJarFile = serverJarFiles.files
+            .filter { it.name.endsWith(".jar") && it.exists() }
+            .firstOrNull() ?: error("No jar output from :sourbycraft-server:jar")
+        val bootstrapClassPrefix = "dev/iyanz/sourbycraft/bootstrap/"
+        val bootstrapClassBytes: Map<String, ByteArray> = JarFile(serverJarFile).use { jar ->
+            jar.entries().asSequence()
+                .filter { it.name.startsWith(bootstrapClassPrefix) && it.name.endsWith(".class") }
+                .associate { e -> e.name to jar.getInputStream(e).use { it.readAllBytes() } }
+        }
+        if (bootstrapClassBytes.isEmpty()) {
+            error("No bootstrap .class files found in ${serverJarFile.name}; expected entries at $bootstrapClassPrefix*.class")
+        }
+        logger.lifecycle("createSlimPaperclipJar: copying ${bootstrapClassBytes.size} bootstrap class(es) to slim jar root")
+
+        // Step E2: write slim jar
         JarFile(fatJarFile).use { jar ->
             JarOutputStream(out.outputStream().buffered()).use { jos ->
                 for (entry in jar.entries()) {
@@ -291,6 +310,7 @@ tasks.register("createSlimPaperclipJar") {
                         name == "META-INF/libraries.list" -> continue                  // replaced below
                         name == "META-INF/MANIFEST.MF" -> continue                     // replaced below
                         name == "speedtest" -> continue                                // bundled linux binary; Task 5 replaces
+                        name in bootstrapClassBytes.keys -> continue                   // replaced below (avoid duplicate entry)
                         else -> {
                             jos.putNextEntry(JarEntry(name))
                             jar.getInputStream(entry).use { it.copyTo(jos) }
@@ -307,6 +327,12 @@ tasks.register("createSlimPaperclipJar") {
                 jos.putNextEntry(JarEntry("META-INF/MANIFEST.MF"))
                 jos.write(newManifestMf.toByteArray(Charsets.UTF_8))
                 jos.closeEntry()
+                // Bootstrap classes at top-level so JVM can resolve Main-Class
+                for ((entryName, bytes) in bootstrapClassBytes) {
+                    jos.putNextEntry(JarEntry(entryName))
+                    jos.write(bytes)
+                    jos.closeEntry()
+                }
             }
         }
 
@@ -326,9 +352,16 @@ tasks.register("assembleReleaseArtifacts") {
     val releaseDir = rootProject.layout.projectDirectory.dir("release")
     val internalVersion = providers.gradleProperty("internalVersion").getOrElse("dev")
 
-    val mojmapOutputs = tasks.named("createSlimPaperclipJar").map { it.outputs.files }
+    // NOTE: createSlimPaperclipJar exists as an experimental task but is NOT wired to release.
+    // Stripping META-INF/libraries/<path> bytes breaks paperclip's classpath registration for those
+    // libs (Paper's plugin scanner fails with NoClassDefFoundError on `me.lucko.spark.paper.api.PaperClassLookup`
+    // because spark-paper is treated as a regular plugin instead of a bundled lib once its bundled
+    // bytes are gone). Resolution requires deeper paperclip internals work — deferred.
+    // Release jar = fat paperclip jar (~57M). Slim task stays as WIP for future sub-spec.
+    val mojmapOutputs = project(":sourbycraft-server").tasks
+        .named("createMojmapPaperclipJar").map { it.outputs.files }
 
-    dependsOn("createSlimPaperclipJar")
+    dependsOn(":sourbycraft-server:createMojmapPaperclipJar")
     inputs.files(mojmapOutputs)
 
     val mojmapDest = releaseDir.file("SourbyCraft-${internalVersion}.jar").asFile
