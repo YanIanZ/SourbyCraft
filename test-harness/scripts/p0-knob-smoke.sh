@@ -9,6 +9,18 @@
 #   Task 2: SCENARIO_1_DEFAULT
 #   Task 3: SCENARIO_2_IN_RANGE
 #   Task 4: SCENARIO_3_CLAMP_HI, SCENARIO_4_CLAMP_LO, SCENARIO_5_WRONG_TYPE
+#
+# Exit codes:
+#   0 = all scenarios PASS
+#   1 = missing release jar
+#   2 = server died before Done (
+#   3 = boot timeout
+#   4 = logre assertion failed inside boot_and_assert
+#   5 = scenario 2 unexpected clamp WARN
+#   6 = scenario needs sourbycraft.yml but file missing
+#   7 = scenario 3 final knob value wrong (clamp_hi)
+#   8 = scenario 4 final knob value wrong (clamp_lo)
+#   9 = scenario 5 unexpected clamp WARN (wrong_type)
 
 set -euo pipefail
 
@@ -213,10 +225,10 @@ SCENARIO_3_CFG='entity:
   tick-rate-limit: true
   tick-rate: 99'
 boot_and_assert "3_clamp_hi_99" "" \
-  "knob 'perf\.entity-tick-rate' value 99 clamped to 20" \
+  "\[SourbyCraft\] knob 'perf\.entity-tick-rate' value 99 clamped to 20" \
   "$SCENARIO_3_CFG"
 # Also verify the final knob summary shows the clamped value
-if ! grep -E -q "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=20" "$TS_DIR/boot.log"; then
+if ! grep -E -q "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=20([^0-9]|$)" "$TS_DIR/boot.log"; then
     echo "ERROR: scenario=3 final knob value not 20 after clamp" >&2; exit 7
 fi
 
@@ -228,10 +240,10 @@ SCENARIO_4_CFG='entity:
   tick-rate-limit: true
   tick-rate: 0'
 boot_and_assert "4_clamp_lo_0" "" \
-  "knob 'perf\.entity-tick-rate' value 0 clamped to 1" \
+  "\[SourbyCraft\] knob 'perf\.entity-tick-rate' value 0 clamped to 1" \
   "$SCENARIO_4_CFG"
 # Also verify the final knob summary shows the clamped value
-if ! grep -E -q "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=1" "$TS_DIR/boot.log"; then
+if ! grep -E -q "perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=1([^0-9]|$)" "$TS_DIR/boot.log"; then
     echo "ERROR: scenario=4 final knob value not 1 after clamp" >&2; exit 8
 fi
 
