@@ -10,11 +10,10 @@ import org.gradle.api.tasks.testing.logging.TestLogEvent
 
 data class LibSpec(val paperclipPath: String, val downloadUrl: String)
 
-// NOTE: only libs Paper does NOT special-case for "bundled" detection.
-// Tried: spark-paper, Flare, protobuf, sentry — Paper's FileProviderSource depends on
-// META-INF/libraries/<path> bytes being present to skip plugin-mode registration.
-// Stripping those bytes causes spark to be treated as a plugin → ClassNotFoundError.
-// sqlite-jdbc + mysql-connector-j are pure JDBC drivers — no Paper special-case.
+// Earlier failure with full lib set was caused by stale libraries/ state from a
+// crashed boot attempt — not by Paper special-casing. With clean libraries/ dir,
+// paperclip's cache-hit logic correctly adds pre-downloaded jars to classpath.
+// Externalize all heavy optional libs.
 val externalLibs = listOf(
     LibSpec(
         "org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar",
@@ -23,7 +22,25 @@ val externalLibs = listOf(
     LibSpec(
         "com/mysql/mysql-connector-j/9.2.0/mysql-connector-j-9.2.0.jar",
         "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/9.2.0/mysql-connector-j-9.2.0.jar"
+    ),
+    LibSpec(
+        "me/lucko/spark-paper/1.10.152/spark-paper-1.10.152.jar",
+        "https://repo.papermc.io/repository/maven-public/me/lucko/spark-paper/1.10.152/spark-paper-1.10.152.jar"
+    ),
+    LibSpec(
+        "com/github/technove/Flare/34637f3f87/Flare-34637f3f87.jar",
+        "https://jitpack.io/com/github/technove/Flare/34637f3f87/Flare-34637f3f87.jar"
+    ),
+    LibSpec(
+        "com/google/protobuf/protobuf-java/4.29.0/protobuf-java-4.29.0.jar",
+        "https://repo1.maven.org/maven2/com/google/protobuf/protobuf-java/4.29.0/protobuf-java-4.29.0.jar"
+    ),
+    LibSpec(
+        "io/sentry/sentry/7.15.0/sentry-7.15.0.jar",
+        "https://repo1.maven.org/maven2/io/sentry/sentry/7.15.0/sentry-7.15.0.jar"
     )
+    // parchment-data omitted — 988K, only used for IDE mappings, upstream 404 on the
+    // pinned version. Stays bundled.
 )
 
 plugins {

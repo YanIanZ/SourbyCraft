@@ -26,14 +26,19 @@ Build: `./gradlew createMojmapPaperclipJar -Pvariant=normal|pvp`
 
 ## First Boot
 
-The release jar is slim (~40M) and downloads optional libraries on first boot
+The release jar is slim (~33M) and downloads optional libraries on first boot
 into `libraries/` with SHA-256 verification:
 
-- **SQLite driver** (~14M) — `sqlite-jdbc`
-- **MySQL driver** (~2.6M) — `mysql-connector-j`
-- **Speedtest CLI** (~2.5M) — on first `/speedtest` invocation only
+- `sqlite-jdbc` (~14M) — SQLite driver
+- `mysql-connector-j` (~2.6M) — MySQL driver
+- `spark-paper` (~3M) — profiler
+- `Flare` (~2M) — profiler engine
+- `protobuf-java` (~1.9M) — profiler dep
+- `sentry` (~918K) — opt-in error tracking
+- Ookla `speedtest` CLI (~2.5M) — on first `/speedtest` invocation only
 
-Requires outbound HTTPS to `repo1.maven.org` and (on `/speedtest`) `install.speedtest.net`.
+Requires outbound HTTPS to `repo1.maven.org`, `repo.papermc.io`, `jitpack.io`,
+and (on `/speedtest`) `install.speedtest.net`.
 
 If first boot has no network access: `[SourbyBootstrap] FATAL` logs the URLs and
 destination paths. Side-load the files manually under `libraries/<path>` and restart.
