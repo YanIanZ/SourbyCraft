@@ -50,12 +50,15 @@ jobs:
         run: test-harness/scripts/download-test-plugins.sh
 
       - name: Run NMS-compat smoke harness
+        id: nms_compat_smoke
         run: ./gradlew :sourbycraft-server:nmsCompatTest -PrunNmsCompat=true
 
       - name: Run particle-suppression smoke
+        id: particle_smoke
         run: ./gradlew :sourbycraft-server:particleSmokeTest -PrunParticleSmoke=true
 
       - name: Run perf-engine P0 knob smoke
+        id: p0_knob_smoke
         run: ./gradlew :sourbycraft-server:p0KnobSmokeTest -PrunP0KnobSmoke=true
 
       - name: Upload particle-smoke boot log
@@ -66,7 +69,7 @@ jobs:
           path: test-harness/TestServer-particle-smoke/boot.log
 
       - name: Upload P0 knob smoke boot log
-        if: failure()
+        if: failure() && steps.p0_knob_smoke.conclusion == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: p0-knob-smoke-boot-log
@@ -79,8 +82,8 @@ jobs:
           name: nms-compat-junit
           path: sourbycraft-server/build/test-results/nms-compat/
 
-      - name: Upload boot logs
-        if: failure()
+      - name: Upload nms-compat boot logs
+        if: failure() && steps.nms_compat_smoke.conclusion == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: nms-compat-boot-logs
