@@ -8,7 +8,7 @@
 # Exit codes:
 #   0 = all scenarios PASS
 #   1 = missing release jar
-#   2 = server died before Done (
+#   2 = server died before "Done (" line appeared
 #   3 = boot timeout
 #   4 = logre assertion failed inside boot_and_assert
 #   5 = scenario 1 unexpected transition fired
@@ -67,21 +67,22 @@ cleanup() {
         kill -KILL "$pid" 2>/dev/null || true
         rm -f "$TS_DIR/.server.pid"
     fi
-    rm -f "$TS_DIR/sourbycraft.yml.seed" "$TS_DIR/server.properties.seed"
 }
 trap cleanup EXIT INT TERM
 
 # Reset sourbycraft.yml to a known baseline (empty file = use jar defaults entirely)
 seed_sourbycraft_baseline() {
+    # Intentionally destructive — CI harness owns this file. Empty file = use jar defaults.
     : > "$TS_DIR/sourbycraft.yml"
 }
 
-# RCON via Python (no external deps)
+# RCON via Python (no external deps). cmd is passed as argv to avoid shell expansion inside the heredoc.
 rcon_cmd() {
     local cmd="$1"
-    python3 - <<PYEOF
-import socket, struct
-s = socket.create_connection(("127.0.0.1", $RCON_PORT), timeout=5)
+    python3 - "$RCON_PASS" "$RCON_PORT" "$cmd" <<'PYEOF'
+import socket, struct, sys
+rcon_pass, rcon_port, cmd = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+s = socket.create_connection(("127.0.0.1", rcon_port), timeout=5)
 def send(req_id, kind, body):
     pkt = struct.pack('<ii', req_id, kind) + body.encode('utf-8') + b'\x00\x00'
     s.sendall(struct.pack('<i', len(pkt)) + pkt)
@@ -90,9 +91,9 @@ def recv():
     data = s.recv(ln)
     req_id, kind = struct.unpack('<ii', data[:8])
     return req_id, kind, data[8:-2].decode('utf-8', errors='replace')
-send(1, 3, "$RCON_PASS")
+send(1, 3, rcon_pass)
 recv()
-send(2, 2, "$cmd")
+send(2, 2, cmd)
 _, _, body = recv()
 print(body)
 s.close()
@@ -122,8 +123,9 @@ boot_and_assert() {
     while [[ $(date +%s) -lt $deadline ]]; do
         if grep -q "Done (" boot.log 2>/dev/null; then ok=1; break; fi
         if ! kill -0 "$pid" 2>/dev/null; then
-            echo "ERROR: scenario=$scenario server died before Done (" >&2
+            echo "ERROR: scenario=$scenario server died before \"Done (\"" >&2
             tail -50 boot.log >&2
+            cd - >/dev/null
             exit 2
         fi
         sleep 2
@@ -131,6 +133,10 @@ boot_and_assert() {
     if [[ $ok -eq 0 ]]; then
         echo "ERROR: scenario=$scenario BOOT_TIMEOUT after 90s" >&2
         tail -50 boot.log >&2
+        kill -TERM "$pid" 2>/dev/null || true
+        sleep 5
+        kill -KILL "$pid" 2>/dev/null || true
+        cd - >/dev/null
         exit 3
     fi
 
@@ -138,12 +144,22 @@ boot_and_assert() {
         if ! grep -E -q "$logre" boot.log; then
             echo "ERROR: scenario=$scenario log assertion failed; expected regex: $logre" >&2
             tail -100 boot.log >&2
+            kill -TERM "$pid" 2>/dev/null || true
+            sleep 5
+            kill -KILL "$pid" 2>/dev/null || true
+            cd - >/dev/null
             exit 4
         fi
     fi
 
     # Sleep 10s post-boot to let sensor samples accumulate before any caller-side assertions run
     sleep 10
+
+    # Shutdown server before next scenario can boot. Cleanup trap is belt-and-suspenders only.
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 5
+    kill -KILL "$pid" 2>/dev/null || true
+    cd - >/dev/null
 
     echo "p1-tier-smoke: scenario=$scenario PASS"
 }
