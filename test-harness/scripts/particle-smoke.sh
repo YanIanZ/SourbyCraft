@@ -7,7 +7,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$ROOT/test-harness/TestServer-particle-smoke"
-JAR_GLOB="$ROOT/release/SourbyCraft-v12-REL.jar"
+JAR_GLOB="$ROOT/release/SourbyCraft-12-REL.jar"
 
 rm -rf "$WORK"
 mkdir -p "$WORK/plugins/SourbyCraft"
