@@ -109,7 +109,7 @@ subprojects {
             f.writeText("""
                 version=$internalVersion
                 mcVersion=$mcVersion
-                tagline=Lightning Fast Performance · Feature Rich
+                tagline=Lightning Fast Performance Feature Rich
                 buildTimestamp=$timestamp
             """.trimIndent())
         }
