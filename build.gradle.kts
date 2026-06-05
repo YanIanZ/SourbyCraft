@@ -10,32 +10,19 @@ import org.gradle.api.tasks.testing.logging.TestLogEvent
 
 data class LibSpec(val paperclipPath: String, val downloadUrl: String)
 
+// NOTE: only libs Paper does NOT special-case for "bundled" detection.
+// Tried: spark-paper, Flare, protobuf, sentry — Paper's FileProviderSource depends on
+// META-INF/libraries/<path> bytes being present to skip plugin-mode registration.
+// Stripping those bytes causes spark to be treated as a plugin → ClassNotFoundError.
+// sqlite-jdbc + mysql-connector-j are pure JDBC drivers — no Paper special-case.
 val externalLibs = listOf(
     LibSpec(
         "org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar",
         "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar"
     ),
     LibSpec(
-        "me/lucko/spark-paper/1.10.152/spark-paper-1.10.152.jar",
-        "https://repo.papermc.io/repository/maven-public/me/lucko/spark-paper/1.10.152/spark-paper-1.10.152.jar"
-    ),
-    LibSpec(
         "com/mysql/mysql-connector-j/9.2.0/mysql-connector-j-9.2.0.jar",
         "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/9.2.0/mysql-connector-j-9.2.0.jar"
-    ),
-    LibSpec(
-        "com/github/technove/Flare/34637f3f87/Flare-34637f3f87.jar",
-        "https://jitpack.io/com/github/technove/Flare/34637f3f87/Flare-34637f3f87.jar"
-    ),
-    LibSpec(
-        "com/google/protobuf/protobuf-java/4.29.0/protobuf-java-4.29.0.jar",
-        "https://repo1.maven.org/maven2/com/google/protobuf/protobuf-java/4.29.0/protobuf-java-4.29.0.jar"
-    ),
-    // parchment-data omitted — 988K, only used for IDE mappings, and upstream URL for
-    // 1.21.11-pre3+build.2 returns 404 (artifact may have been pulled/relocated). Bundle stays.
-    LibSpec(
-        "io/sentry/sentry/7.15.0/sentry-7.15.0.jar",
-        "https://repo1.maven.org/maven2/io/sentry/sentry/7.15.0/sentry-7.15.0.jar"
     )
 )
 
@@ -352,16 +339,11 @@ tasks.register("assembleReleaseArtifacts") {
     val releaseDir = rootProject.layout.projectDirectory.dir("release")
     val internalVersion = providers.gradleProperty("internalVersion").getOrElse("dev")
 
-    // NOTE: createSlimPaperclipJar exists as an experimental task but is NOT wired to release.
-    // Stripping META-INF/libraries/<path> bytes breaks paperclip's classpath registration for those
-    // libs (Paper's plugin scanner fails with NoClassDefFoundError on `me.lucko.spark.paper.api.PaperClassLookup`
-    // because spark-paper is treated as a regular plugin instead of a bundled lib once its bundled
-    // bytes are gone). Resolution requires deeper paperclip internals work — deferred.
-    // Release jar = fat paperclip jar (~57M). Slim task stays as WIP for future sub-spec.
-    val mojmapOutputs = project(":sourbycraft-server").tasks
-        .named("createMojmapPaperclipJar").map { it.outputs.files }
+    // Release uses slim jar — externalizes only JDBC drivers (sqlite + mysql, ~17M) which
+    // Paper does NOT special-case. Boot test required after every externalLibs change.
+    val mojmapOutputs = tasks.named("createSlimPaperclipJar").map { it.outputs.files }
 
-    dependsOn(":sourbycraft-server:createMojmapPaperclipJar")
+    dependsOn("createSlimPaperclipJar")
     inputs.files(mojmapOutputs)
 
     val mojmapDest = releaseDir.file("SourbyCraft-${internalVersion}.jar").asFile
