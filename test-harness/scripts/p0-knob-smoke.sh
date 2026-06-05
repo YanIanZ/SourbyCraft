@@ -22,6 +22,18 @@ PORT=25600
 RCON_PORT=25675
 RCON_PASS=p0test
 
+cleanup() {
+    if [[ -f "$TS_DIR/.server.pid" ]]; then
+        local pid
+        pid=$(cat "$TS_DIR/.server.pid")
+        kill -TERM "$pid" 2>/dev/null || true
+        sleep 3
+        kill -KILL "$pid" 2>/dev/null || true
+        rm -f "$TS_DIR/.server.pid"
+    fi
+}
+trap cleanup EXIT INT TERM
+
 if [[ ! -f "$JAR_SRC" ]]; then
     echo "ERROR: $JAR_SRC missing. Run gradle assembleReleaseArtifacts first." >&2
     exit 1
@@ -31,15 +43,42 @@ mkdir -p "$TS_DIR/plugins/SourbyCraft"
 cp "$JAR_SRC" "$TS_DIR/server.jar"
 echo "eula=true" > "$TS_DIR/eula.txt"
 
-# Seed server.properties with port + online-mode + RCON
-cat > "$TS_DIR/server.properties" <<EOF
-server-port=$PORT
-online-mode=false
-enable-rcon=true
-rcon.port=$RCON_PORT
-rcon.password=$RCON_PASS
-broadcast-rcon-to-ops=false
-EOF
+# Seed server.properties: only write the RCON+port+online-mode lines we need;
+# preserve any other keys Paper has previously written.
+seed_server_properties() {
+    local sp="$TS_DIR/server.properties"
+    local tmp="$sp.seed"
+    {
+        echo "server-port=$PORT"
+        echo "online-mode=false"
+        echo "enable-rcon=true"
+        echo "rcon.port=$RCON_PORT"
+        echo "rcon.password=$RCON_PASS"
+        echo "broadcast-rcon-to-ops=false"
+    } > "$tmp"
+    if [[ -f "$sp" ]]; then
+        # Append any existing keys that we didn't override.
+        grep -v -E '^(server-port|online-mode|enable-rcon|rcon\.port|rcon\.password|broadcast-rcon-to-ops)=' "$sp" >> "$tmp" || true
+    fi
+    mv "$tmp" "$sp"
+}
+seed_server_properties
+
+# Seed plugins/SourbyCraft/config.yml: enable entity-tick-rate-limit so
+# StartupOptimizer prints the "Entity Tick Rate:" line we assert on.
+seed_sourbycraft_config() {
+    local cfg="$TS_DIR/plugins/SourbyCraft/config.yml"
+    local tmp="$cfg.seed"
+    {
+        echo "entity.tick-rate-limit: true"
+        echo "entity.tick-rate: 20"
+    } > "$tmp"
+    if [[ -f "$cfg" ]]; then
+        grep -v -E '^(entity\.tick-rate-limit|entity\.tick-rate):' "$cfg" >> "$tmp" || true
+    fi
+    mv "$tmp" "$cfg"
+}
+seed_sourbycraft_config
 
 boot_and_assert() {
     local scenario="$1"
@@ -98,7 +137,14 @@ boot_and_assert() {
 # Sanity: harness boots the current jar with no perf yml; assert Done ( reached.
 boot_and_assert "0_boot_sanity" "" ""
 
-# === SCENARIO_1_DEFAULT (added in Task 2) ===
+# === SCENARIO_1_DEFAULT ===
+# yml omits perf block entirely; expect default value 20 (preserves existing behavior).
+# Assertion: KnobRegistry prints a summary line at boot listing loaded knob values.
+# StartupOptimizer.print() is not yet wired into server startup (Task 3+ concern);
+# the registry log line is the canonical proof that loadFromYml() ran and the value loaded.
+boot_and_assert "1_default_no_perf_block" "" \
+  "\[SourbyCraft\] perf knobs loaded:.*perf\.entity-tick-rate=20"
+
 # === SCENARIO_2_IN_RANGE (added in Task 3) ===
 # === SCENARIO_3_CLAMP_HI (added in Task 4) ===
 # === SCENARIO_4_CLAMP_LO (added in Task 4) ===
