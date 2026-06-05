@@ -23,8 +23,9 @@ public final class Knobs {
         KnobRegistry.loadAllFromYml();
     }
 
-    /** Log current knob values. Call after all boot-time overrides (Bukkit-config bridge) have run. */
-    public static void logLoaded() {
-        KnobRegistry.logLoaded();
-    }
+    /** Logs the current knob snapshot under context "boot". Convenience for boot-time call site. */
+    public static void logLoaded() { KnobRegistry.logLoaded("boot"); }
+
+    /** Logs the current knob snapshot under a caller-chosen context label (e.g. "tier-transition"). */
+    public static void logLoaded(String context) { KnobRegistry.logLoaded(context); }
 }

@@ -103,7 +103,11 @@ boot_and_assert() {
 
     # If a sourbycraft.yml entity-block override is provided, inject it before boot.
     # sourbycraft.yml is the operator config read by SourbyCraftConfig.init().
-    if [[ -n "$sourbycraft_entity_override" && -f "$TS_DIR/sourbycraft.yml" ]]; then
+    if [[ -n "$sourbycraft_entity_override" ]]; then
+        if [[ ! -f "$TS_DIR/sourbycraft.yml" ]]; then
+            echo "ERROR: scenario=$scenario needs sourbycraft.yml present but file missing; SCENARIO_0 should have created it" >&2
+            exit 6
+        fi
         local sc="$TS_DIR/sourbycraft.yml"
         local tmp="$sc.override"
         local override_file="$sc.override_block"
@@ -182,7 +186,7 @@ boot_and_assert "0_boot_sanity" "" "" ""
 # StartupOptimizer.print() is not yet wired into server startup (Task 3+ concern);
 # the registry log line is the canonical proof that loadFromYml() ran and the value loaded.
 boot_and_assert "1_default_no_perf_block" "" \
-  "\[SourbyCraft\] perf knobs loaded:.*perf\.entity-tick-rate=20" ""
+  "\[SourbyCraft\] perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=20" ""
 
 # === SCENARIO_2_IN_RANGE ===
 # Operator sourbycraft.yml `entity.tick-rate: 4` should bridge into Knobs.ENTITY_TICK_RATE.
@@ -193,7 +197,7 @@ SCENARIO_2_CFG='entity:
   tick-rate-limit: true
   tick-rate: 4'
 boot_and_assert "2_in_range_rate_4" "" \
-  "\[SourbyCraft\] perf knobs loaded:.*perf\.entity-tick-rate=4" \
+  "\[SourbyCraft\] perf knobs loaded \[boot\]:.*perf\.entity-tick-rate=4" \
   "$SCENARIO_2_CFG"
 
 # Negative assertion: no clamp WARN should appear (4 is in-range)
