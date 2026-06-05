@@ -41,8 +41,9 @@ final class KnobRegistry {
         for (PerfKnob k : KNOBS.values()) k.loadFrom();
     }
 
-    static void logLoaded() {
-        StringBuilder sb = new StringBuilder("[SourbyCraft] perf knobs loaded:");
+    static void logLoaded(String context) {
+        StringBuilder sb = new StringBuilder("[SourbyCraft] perf knobs loaded [")
+            .append(context).append("]:");
         KNOBS.forEach((key, knob) -> sb.append(" ").append(key).append("=").append(knob.snapshot()));
         SourbyLogger.info(sb.toString());
     }
