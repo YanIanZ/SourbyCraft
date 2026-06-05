@@ -8,6 +8,7 @@ on:
       - 'gradle.properties'
       - 'sourbycraft-server/buildscript/build.gradle.kts'
       - 'sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/SourbyCraftConfig.java'
+      - 'sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/perf/**'
       - 'sourbycraft-server/src/main/resources/sourbycraft.yml'
       - 'sourbycraft-server/src/test/java/dev/iyanz/sourbycraft/**'
       - 'build.gradle.kts'
@@ -54,12 +55,22 @@ jobs:
       - name: Run particle-suppression smoke
         run: ./gradlew :sourbycraft-server:particleSmokeTest -PrunParticleSmoke=true
 
+      - name: Run perf-engine P0 knob smoke
+        run: ./gradlew :sourbycraft-server:p0KnobSmokeTest -PrunP0KnobSmoke=true
+
       - name: Upload particle-smoke boot log
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: particle-smoke-boot-log
           path: test-harness/TestServer-particle-smoke/boot.log
+
+      - name: Upload P0 knob smoke boot log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-knob-smoke-boot-log
+          path: test-harness/TestServer-mojmap/boot.log
 
       - name: Upload JUnit XML
         if: always()
