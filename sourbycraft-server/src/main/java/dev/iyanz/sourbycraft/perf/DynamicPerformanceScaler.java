@@ -19,7 +19,7 @@ public final class DynamicPerformanceScaler {
         tickCounter = 0;
 
         double tps = getAverageTPS(server);
-        int rate = SourbyCraftConfig.entityTickRate;
+        int rate = dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get();
 
         if (tps < TPS_CRITICAL) {
             rate = Math.min(RATE_MAX, rate * 2);
@@ -29,7 +29,7 @@ public final class DynamicPerformanceScaler {
             rate = Math.max(RATE_MIN, rate - 1);
         }
 
-        SourbyCraftConfig.entityTickRate = rate;
+        dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.set(rate);
     }
 
     private static double getAverageTPS(MinecraftServer server) {

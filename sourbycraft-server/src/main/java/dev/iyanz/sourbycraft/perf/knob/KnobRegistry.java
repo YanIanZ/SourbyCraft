@@ -39,6 +39,9 @@ final class KnobRegistry {
 
     static void loadAllFromYml() {
         for (PerfKnob k : KNOBS.values()) k.loadFrom();
+    }
+
+    static void logLoaded() {
         StringBuilder sb = new StringBuilder("[SourbyCraft] perf knobs loaded:");
         KNOBS.forEach((key, knob) -> sb.append(" ").append(key).append("=").append(knob.snapshot()));
         SourbyLogger.info(sb.toString());

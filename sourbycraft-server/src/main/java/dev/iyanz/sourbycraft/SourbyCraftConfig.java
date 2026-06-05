@@ -203,7 +203,9 @@ public class SourbyCraftConfig {
     // code in paper-server actually reads it to gate item-entity ticks. Leaving it true caused
     // confusion (false sense of throttling). Disable until a real tick-gate consumer is wired.
     public static boolean entityTickRateLimit = false;
-    public static volatile int entityTickRate = 20;
+    public static int entityTickRate() {
+        return dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get();
+    }
     public static boolean hopperBatch = true;
     public static boolean redstoneOptimize = true;
     public static int maxEntityPerChunk = 10;
@@ -309,6 +311,9 @@ public class SourbyCraftConfig {
 
         readConfig(SourbyCraftConfig.class, null);
 
+        // SourbyCraft - perf-engine P0: load JAR-baked perf knobs BEFORE Bukkit-config block
+        dev.iyanz.sourbycraft.perf.knob.Knobs.loadFromYml();
+
         asyncChunkLoad = getBoolean("performance.async-chunk-load", asyncChunkLoad);
         asyncPathfinding = getBoolean("performance.async-pathfinding", asyncPathfinding);
 
@@ -362,7 +367,9 @@ public class SourbyCraftConfig {
         minViewDistance = getInt("network.min-view-distance", minViewDistance);
         compressionLevel = getInt("network.compression-level", compressionLevel);
         entityTickRateLimit = getBoolean("entity.tick-rate-limit", entityTickRateLimit);
-        entityTickRate = getInt("entity.tick-rate", entityTickRate);
+        dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.set(
+            getInt("entity.tick-rate", dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get())
+        );
         v9Enabled = getBoolean("performance.v9.enabled", v9Enabled);
         v9AsyncLighting = getBoolean("performance.v9.async-lighting", v9AsyncLighting);
         v9AsyncPathfind = getBoolean("performance.v9.async-pathfind", v9AsyncPathfind);
@@ -485,7 +492,9 @@ public class SourbyCraftConfig {
         }
         // SourbyCraft end PvP overrides
 
-        dev.iyanz.sourbycraft.perf.knob.Knobs.loadFromYml();
+        // SourbyCraft - perf-engine P0: log final knob values AFTER all Bukkit-config bridge overrides
+        dev.iyanz.sourbycraft.perf.knob.Knobs.logLoaded();
+
         dev.iyanz.sourbycraft.util.VirtualExecutor.init();
     }
 

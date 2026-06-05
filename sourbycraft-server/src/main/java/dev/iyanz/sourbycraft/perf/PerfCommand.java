@@ -75,7 +75,7 @@ public class PerfCommand {
 
         String scaling = DynamicPerformanceScaler.isEnabled() ? "ON" : "OFF";
         ChatFormatting sc = DynamicPerformanceScaler.isEnabled() ? ChatFormatting.GREEN : ChatFormatting.RED;
-        src.sendSystemMessage(Component.literal("  Scale: " + scaling + " | Rate: 1/" + SourbyCraftConfig.entityTickRate)
+        src.sendSystemMessage(Component.literal("  Scale: " + scaling + " | Rate: 1/" + SourbyCraftConfig.entityTickRate())
             .withStyle(sc));
 
         return 1;
@@ -89,7 +89,7 @@ public class PerfCommand {
     }
 
     private static int setRate(CommandSourceStack src, int rate) {
-        SourbyCraftConfig.entityTickRate = rate;
+        dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.set(rate);
         src.sendSystemMessage(Component.literal("[Perf] Entity tick rate set to 1/" + rate).withStyle(ChatFormatting.GREEN));
         return 1;
     }

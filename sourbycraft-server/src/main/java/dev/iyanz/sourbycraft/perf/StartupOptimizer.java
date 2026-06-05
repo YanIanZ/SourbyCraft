@@ -20,7 +20,7 @@ public final class StartupOptimizer {
 
         // Config review
         if (SourbyCraftConfig.entityTickRateLimit) {
-            server.LOGGER.info("  Entity Tick Rate: 1/{} (limiter ON)", SourbyCraftConfig.entityTickRate);
+            server.LOGGER.info("  Entity Tick Rate: 1/{} (limiter ON)", SourbyCraftConfig.entityTickRate());
         }
         if (SourbyCraftConfig.mobTickDistance > 0) {
             server.LOGGER.info("  Mob AI Distance: {} blocks", SourbyCraftConfig.mobTickDistance);
@@ -42,7 +42,7 @@ public final class StartupOptimizer {
         if (cores < 4) {
             server.LOGGER.warn("  ! < 4 CPU cores — performance may degrade with many players");
         }
-        if (SourbyCraftConfig.entityTickRate <= 1 && !DynamicPerformanceScaler.isEnabled()) {
+        if (SourbyCraftConfig.entityTickRate() <= 1 && !DynamicPerformanceScaler.isEnabled()) {
             server.LOGGER.info("  Hint: enable /perf scale on for auto TPS management");
         }
 
