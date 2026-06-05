@@ -67,14 +67,18 @@ JAR outputs in `sourbycraft-server/build/libs/`.
 
 ## Sourby Bootstrap (NEW)
 
-The release jar is now slim (~40M, was ~57M). First boot downloads optional
+The release jar is now slim (~33M, was ~57M, -42%). First boot downloads optional
 libraries into `libraries/` with SHA-256 verification:
 
 - `sqlite-jdbc-3.49.1.0.jar` (~14M) — Maven Central
 - `mysql-connector-j-9.2.0.jar` (~2.6M) — Maven Central
+- `spark-paper-1.10.152.jar` (~3M) — PaperMC Maven
+- `Flare-34637f3f87.jar` (~2M) — Jitpack
+- `protobuf-java-4.29.0.jar` (~1.9M) — Maven Central
+- `sentry-7.15.0.jar` (~918K) — Maven Central
 - Ookla `speedtest` CLI (~2.5M) — `install.speedtest.net`, lazy on first `/speedtest`
 
-Subsequent boots are silent cache-hit (zero downloads).
+Subsequent boots are silent cache-hit (zero downloads, baseline boot time).
 
 **Offline first-boot:** the `[SourbyBootstrap] FATAL` log lists every URL +
 destination path under `libraries/`. Side-load the files manually and restart.
@@ -82,6 +86,5 @@ destination path under `libraries/`. Side-load the files manually and restart.
 **Operators upgrading:** if you already have a `libraries/` directory from a
 prior boot, mismatched SHA-256 triggers re-download. Matching files are reused.
 
-Paper-special-cased libs (spark-paper, Flare, protobuf, sentry) remain bundled
-— externalizing them requires deeper paperclip-internals work, deferred to a
-follow-on sub-spec.
+`parchment-data` remains bundled (~988K, IDE mappings only, pinned version
+returns 404 from upstream Maven).
