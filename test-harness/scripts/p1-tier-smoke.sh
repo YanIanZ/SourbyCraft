@@ -104,6 +104,8 @@ boot_and_assert() {
     local scenario="$1"
     local logre="$2"                          # boot.log regex (grep -E); empty = no log assertion
     local sourbycraft_override="${3:-}"       # full content for sourbycraft.yml; empty = baseline
+    local rcon_block="${4:-}"                 # optional bash commands evaluated while server is still up
+                                              # Use 'return N' (not exit) to signal failure from the block.
 
     echo "p1-tier-smoke: scenario=$scenario"
 
@@ -152,8 +154,22 @@ boot_and_assert() {
         fi
     fi
 
-    # Sleep 10s post-boot to let sensor samples accumulate before any caller-side assertions run
+    # Sleep 10s post-boot to let sensor samples accumulate before RCON/caller-side assertions run
     sleep 10
+
+    # Run optional RCON assertions while the server is still up.
+    # The block uses 'return N' to signal failure; we capture that and forward as exit.
+    if [[ -n "$rcon_block" ]]; then
+        local rcon_rc=0
+        ( eval "$rcon_block" ) || rcon_rc=$?
+        if [[ $rcon_rc -ne 0 ]]; then
+            kill -TERM "$pid" 2>/dev/null || true
+            sleep 5
+            kill -KILL "$pid" 2>/dev/null || true
+            cd - >/dev/null
+            exit $rcon_rc
+        fi
+    fi
 
     # Shutdown server before next scenario can boot. Cleanup trap is belt-and-suspenders only.
     kill -TERM "$pid" 2>/dev/null || true
@@ -172,7 +188,16 @@ boot_and_assert "0_boot_sanity" "" ""
 # 10s observation window inside boot_and_assert.
 # Asserts on the sensor-loaded log line emitted by PerfSensor.loadFromYml so this
 # scenario doubles as a smoke-test of the boot wiring.
-boot_and_assert "1_default_stays_green" "perf sensor: cadence=20 dwell=3" ""
+# The 4th arg RCON block runs while the server is still up and verifies /perf tier
+# reports GREEN (initial snapshot tier is always GREEN before any transition fires).
+boot_and_assert "1_default_stays_green" "perf sensor: cadence=20 dwell=3" "" '
+TIER_OUT=$(rcon_cmd "perf tier")
+if ! echo "$TIER_OUT" | grep -E -q "Tier:[[:space:]]+GREEN"; then
+    echo "ERROR: scenario=1 /perf tier did not return GREEN. Output:" >&2
+    echo "$TIER_OUT" >&2
+    exit 5
+fi
+'
 if grep -E -q "perf tier transition" "$TS_DIR/boot.log"; then
     echo "ERROR: scenario=1 unexpected tier transition in idle boot" >&2
     grep "perf tier transition" "$TS_DIR/boot.log" >&2
@@ -219,6 +244,18 @@ echo "p1-tier-smoke: scenario=2 post-boot transition check PASS"
 # === SCENARIO_4_FORCE_EMERGENCY_VIA_MEM (added in Task 5) ===
 # === SCENARIO_5_NON_MONOTONIC_WARN (added in Task 5) ===
 # === SCENARIO_6_SENSOR_DISABLED (added in Task 5) ===
-# === SCENARIO_7_PERF_SENSORS_CMD (added in Task 4) ===
+# === SCENARIO_7_PERF_SENSORS_CMD ===
+# Boot with defaults; verify /perf sensors output contains the required signal labels.
+boot_and_assert "7_perf_sensors_cmd" "" "" '
+SENSORS_OUT=$(rcon_cmd "perf sensors")
+for token in "TPS:" "MSPT:" "Mem:" "GC:"; do
+    if ! echo "$SENSORS_OUT" | grep -F -q "$token"; then
+        echo "ERROR: scenario=7 /perf sensors output missing token: $token" >&2
+        echo "Output was:" >&2
+        echo "$SENSORS_OUT" >&2
+        exit 9
+    fi
+done
+'
 
 echo "p1-tier-smoke: all scenarios PASS"

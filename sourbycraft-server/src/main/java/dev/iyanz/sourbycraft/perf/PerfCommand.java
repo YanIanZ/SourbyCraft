@@ -37,6 +37,10 @@ public class PerfCommand {
                 .then(Commands.argument("rate", IntegerArgumentType.integer(1, 20))
                     .executes(ctx -> setRate(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "rate"))))
             )
+            .then(Commands.literal("tier")
+                .executes(ctx -> showTier(ctx.getSource())))
+            .then(Commands.literal("sensors")
+                .executes(ctx -> showSensors(ctx.getSource())))
         );
     }
 
@@ -107,5 +111,52 @@ public class PerfCommand {
             org.slf4j.LoggerFactory.getLogger("SourbyCraft:PerfCommand").warn("Failed to get CPU load", e);
             return 0;
         }
+    }
+
+    private static int showTier(CommandSourceStack src) {
+        if (!dev.iyanz.sourbycraft.perf.sensor.PerfSensor.isEnabled()) {
+            src.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "[Perf] Sensor disabled (perf.sensor.enabled=false)"));
+            return 0;
+        }
+        dev.iyanz.sourbycraft.perf.sensor.SensorSnapshot snap =
+            dev.iyanz.sourbycraft.perf.sensor.PerfSensor.snapshot();
+        long timeInTier = dev.iyanz.sourbycraft.perf.sensor.PerfSensor.timeInTierNanos();
+        long timeInTierSec = timeInTier / 1_000_000_000L;
+        src.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+            "[Perf] Tier: " + snap.tier()));
+        src.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+            "[Perf] Candidate: " + snap.candidateTier() + " (" + snap.dwellSamples() + " samples in candidate)"));
+        src.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+            "[Perf] Time in tier: " + timeInTierSec + "s"
+                + (snap.timestampNanos() == 0L ? " (no samples yet)" : "")));
+        return 1;
+    }
+
+    private static int showSensors(CommandSourceStack src) {
+        if (!dev.iyanz.sourbycraft.perf.sensor.PerfSensor.isEnabled()) {
+            src.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "[Perf] Sensor disabled (perf.sensor.enabled=false)"));
+            return 0;
+        }
+        dev.iyanz.sourbycraft.perf.sensor.SensorSnapshot snap =
+            dev.iyanz.sourbycraft.perf.sensor.PerfSensor.snapshot();
+        double[] tpsT = dev.iyanz.sourbycraft.perf.sensor.PerfSensor.thresholdsFor("tps");
+        double[] msptT = dev.iyanz.sourbycraft.perf.sensor.PerfSensor.thresholdsFor("mspt");
+        double[] memT = dev.iyanz.sourbycraft.perf.sensor.PerfSensor.thresholdsFor("mem");
+        double[] gcT = dev.iyanz.sourbycraft.perf.sensor.PerfSensor.thresholdsFor("gc-ms-per-min");
+        src.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+            String.format("[Perf] TPS:  %.2f (1s)  %.2f (1m)  %.2f (5m)  thresholds Y/O/R/E: %.1f/%.1f/%.1f/%.1f",
+                snap.tps1s(), snap.tps30s(), snap.tps5m(), tpsT[1], tpsT[2], tpsT[3], tpsT[4])));
+        src.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+            String.format("[Perf] MSPT: %.1f ms  thresholds Y/O/R/E: %.0f/%.0f/%.0f/%.0f",
+                snap.msptAvg(), msptT[1], msptT[2], msptT[3], msptT[4])));
+        src.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+            String.format("[Perf] Mem:  %.0f%% used  thresholds Y/O/R/E: %.0f/%.0f/%.0f/%.0f",
+                snap.memPct(), memT[1], memT[2], memT[3], memT[4])));
+        src.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+            String.format("[Perf] GC:   %.0f ms/min  thresholds Y/O/R/E: %.0f/%.0f/%.0f/%.0f",
+                snap.gcMsPerMin(), gcT[1], gcT[2], gcT[3], gcT[4])));
+        return 1;
     }
 }
