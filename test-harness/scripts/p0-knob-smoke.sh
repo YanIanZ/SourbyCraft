@@ -64,8 +64,10 @@ seed_server_properties() {
 }
 seed_server_properties
 
-# Seed plugins/SourbyCraft/config.yml: enable entity-tick-rate-limit so
-# StartupOptimizer prints the "Entity Tick Rate:" line we assert on.
+# Seed plugins/SourbyCraft/config.yml so entityTickRateLimit/entityTickRate
+# are present for when StartupOptimizer.print() is wired (Task 3+).
+# SCENARIO_1 currently asserts on KnobRegistry's "perf knobs loaded:" log line,
+# not on StartupOptimizer output, so this seeding is precautionary.
 seed_sourbycraft_config() {
     local cfg="$TS_DIR/plugins/SourbyCraft/config.yml"
     local tmp="$cfg.seed"
