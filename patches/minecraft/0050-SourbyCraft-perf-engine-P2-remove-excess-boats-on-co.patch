@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 6 Jun 2026 18:11:52 +0700
+Subject: [PATCH] SourbyCraft perf-engine P2 remove excess boats on collision
+
+
+diff --git a/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java b/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
+index 6b337848d91cc4f24655d053bc69b0cd22447dda..3676be9c90ce1a4d8eaeabfa708985af2e810853 100644
+--- a/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
++++ b/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
+@@ -184,6 +184,20 @@ public abstract class AbstractBoat extends VehicleEntity implements Leashable {
+ 
+     @Override
+     public void push(Entity entity) {
++        // SourbyCraft start - perf-engine P2 lag-machine: remove excess boats on collision
++        if (dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.get()) {
++            final int limit = dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.get();
++            if (limit > 0) {
++                net.minecraft.world.phys.AABB area = this.getBoundingBox().inflate(2.0);
++                java.util.List<? extends AbstractBoat> nearby =
++                    this.level().getEntitiesOfClass(AbstractBoat.class, area);
++                if (nearby.size() > limit) {
++                    this.discard();
++                    return;
++                }
++            }
++        }
++        // SourbyCraft end - perf-engine P2 lag-machine
+         if (!this.level().paperConfig().collisions.allowVehicleCollisions && this.level().paperConfig().collisions.onlyPlayersCollide && !(entity instanceof Player)) return; // Paper - Collision option for requiring a player participant
+         if (entity instanceof AbstractBoat) {
+             if (entity.getBoundingBox().minY < this.getBoundingBox().maxY) {

@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 6 Jun 2026 18:41:26 +0700
+Subject: [PATCH] =?UTF-8?q?SourbyCraft:=20raise=20fast-drop=20kick=20thres?=
+ =?UTF-8?q?hold=2020=20=E2=86=92=20200=20per=20tick?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index e2e2d11387c8f576ee958613037b457b2db09b09..df6a92f4f888401843c172d51c40cd496e21e9a0 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -1972,8 +1972,12 @@ public class ServerGamePacketListenerImpl
+                             this.lastDropTick = MinecraftServer.currentTick;
+                         } else {
+                             // Else we increment the drop count and check the amount.
++                            // SourbyCraft - raise from vanilla 20 to 200 per tick. 20/tick too
++                            // aggressive for legitimate clears (Ctrl+Q a full inventory = ~36 stacks
++                            // queued in a single tick on fast clients); 200 keeps anti-hack signal
++                            // while letting normal-but-fast play through.
+                             this.dropCount++;
+-                            if (this.dropCount >= 20) {
++                            if (this.dropCount >= 200) {
+                                 ServerGamePacketListenerImpl.LOGGER.warn(this.player.getScoreboardName() + " dropped their items too quickly!");
+                                 this.disconnect(Component.literal("You dropped your items too quickly (Hacking?)"), org.bukkit.event.player.PlayerKickEvent.Cause.ILLEGAL_ACTION); // Paper - kick event cause
+                                 return;
