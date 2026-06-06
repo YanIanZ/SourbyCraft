@@ -252,12 +252,12 @@ public final class WildstackerManager {
             }
         }
         if (display == null) {
-            // SourbyCraft v9.21 — Y offset raised 0.6 → 1.0, transparent bg, see-through, shadowed
+            // SourbyCraft 12-EXP — hologram occluded by blocks (setSeeThrough false), transparent bg, shadowed
             Location loc = getHologramLocation(item);
             try {
                 display = item.getWorld().spawn(loc, TextDisplay.class, td -> {
                     td.setBillboard(Display.Billboard.CENTER);
-                    td.setSeeThrough(true);
+                    td.setSeeThrough(false);
                     td.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
                     td.setShadowed(true);
                     td.setShadowRadius(0f);
@@ -271,6 +271,8 @@ public final class WildstackerManager {
             }
         }
         display.text(label);
+        // SourbyCraft 12-EXP — ensure occlusion stays correct on existing displays too
+        display.setSeeThrough(false);
     }
 
     private static void removeHologram(Item item) {
