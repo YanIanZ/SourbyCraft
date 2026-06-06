@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 6 Jun 2026 17:51:05 +0700
+Subject: [PATCH] SourbyCraft: perf-engine P2 disable saving fireworks
+
+
+diff --git a/net/minecraft/world/entity/projectile/FireworkRocketEntity.java b/net/minecraft/world/entity/projectile/FireworkRocketEntity.java
+index 1b633d2eb77704fd9a6358f09ed368fab2a5b212..336aefce12d7d986678cc4e297805cb9298d33ea 100644
+--- a/net/minecraft/world/entity/projectile/FireworkRocketEntity.java
++++ b/net/minecraft/world/entity/projectile/FireworkRocketEntity.java
+@@ -350,4 +350,14 @@ public class FireworkRocketEntity extends Projectile implements ItemSupplier {
+         double d1 = entity.position().z - this.position().z;
+         return DoubleDoubleImmutablePair.of(d, d1);
+     }
++
++    // SourbyCraft start - perf-engine P2 lag-machine: skip NBT save for fireworks
++    @Override
++    public boolean shouldBeSaved() {
++        if (dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_DISABLE_SAVING_FIREWORKS.get()) {
++            return false;
++        }
++        return super.shouldBeSaved();
++    }
++    // SourbyCraft end - perf-engine P2 lag-machine
+ }

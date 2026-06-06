@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 6 Jun 2026 17:44:33 +0700
+Subject: [PATCH] SourbyCraft: perf-engine P2 disable saving snowballs
+
+
+diff --git a/net/minecraft/world/entity/projectile/throwableitemprojectile/Snowball.java b/net/minecraft/world/entity/projectile/throwableitemprojectile/Snowball.java
+index 89a061cd0a2b39fc05ea96ac0f5d5a8c26582f97..0b6e18428d90b1ef8ae1c4e9ed1098899d708df9 100644
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/Snowball.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/Snowball.java
+@@ -65,4 +65,14 @@ public class Snowball extends ThrowableItemProjectile {
+             this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.HIT); // CraftBukkit - add Bukkit remove cause
+         }
+     }
++
++    // SourbyCraft start - perf-engine P2 lag-machine: skip NBT save for snowballs
++    @Override
++    public boolean shouldBeSaved() {
++        if (dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_DISABLE_SAVING_SNOWBALLS.get()) {
++            return false;
++        }
++        return super.shouldBeSaved();
++    }
++    // SourbyCraft end - perf-engine P2 lag-machine
+ }
