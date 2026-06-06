@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 6 Jun 2026 18:07:08 +0700
+Subject: [PATCH] SourbyCraft perf-engine P2 remove excess minecarts on
+ collision
+
+
+diff --git a/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java b/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
+index 1123ec0038552e0b40774f4a433ff325695ea071..b7910337722c7a0f2de3d1eef2a899f12c0e6985 100644
+--- a/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
++++ b/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
+@@ -538,6 +538,20 @@ public abstract class AbstractMinecart extends VehicleEntity {
+ 
+     @Override
+     public void push(Entity entity) {
++        // SourbyCraft start - perf-engine P2 lag-machine: remove excess minecarts on collision
++        if (dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_REMOVE_EXCESS_MINECARTS.get()) {
++            final int limit = dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.get();
++            if (limit > 0) {
++                net.minecraft.world.phys.AABB area = this.getBoundingBox().inflate(2.0);
++                java.util.List<? extends AbstractMinecart> nearby =
++                    this.level().getEntitiesOfClass(AbstractMinecart.class, area);
++                if (nearby.size() > limit) {
++                    this.discard();
++                    return;
++                }
++            }
++        }
++        // SourbyCraft end - perf-engine P2 lag-machine
+         if (!this.level().isClientSide()) {
+             if (!entity.noPhysics && !this.noPhysics) {
+                 if (!this.level().paperConfig().collisions.allowVehicleCollisions && this.level().paperConfig().collisions.onlyPlayersCollide && !(entity instanceof Player)) return; // Paper - Collision option for requiring a player participant
