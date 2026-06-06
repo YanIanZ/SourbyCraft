@@ -1,10 +1,10 @@
-# SourbyCraft 12.0-REL
+# SourbyCraft 12-EXP
 
 **Tagline:** Lightning Fast Performance · Feature Rich
 
 ## Two JARs
 
-- `SourbyCraft-12-REL.jar` — general-purpose SMP (default)
+- `SourbyCraft-12-EXP.jar` — general-purpose SMP (default)
 - `SourbyCraft-PVP-12-REL.jar` — PvP arena backend (Velocity-tuned, 1.8-style KB, allow-nether=false)
 
 Both built from same codebase via `-Pvariant=normal|pvp`. PVP variant adds 5 PvP-only NMS patches (9001–9005), proxy backend defaults, plugin auto-installer manifest tuned for PvP, and distinct branding.
@@ -47,7 +47,7 @@ auto-install:
 
 ## Migration v11 → v12
 
-- Single-jar v11 users: download `SourbyCraft-12-REL.jar` (normal variant).
+- Single-jar v11 users: download `SourbyCraft-12-EXP.jar` (normal variant).
   Existing `sourbycraft.yml` preserved — variant overlay seeds only on fresh install.
 - PvP-tuned v11 users: download `SourbyCraft-PVP-v12-REL.jar`. Operator may
   merge new defaults manually.
