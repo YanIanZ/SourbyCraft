@@ -1,15 +1,30 @@
 <h1 align="center">⚡ SourbyCraft</h1>
 
-<p align="center"><strong>Lightning Fast Performance · Feature Rich</strong></p>
+<p align="center"><strong>Lightning Fast Performance · Feature Rich · Self-Tuning</strong></p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/minecraft-1.21.11-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/version-12--REL-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/version-12--EXP-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/jar%20size-33M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
-<p align="center"><em>High-performance Paper fork with built-in security, anti-xray, dynamic scaling, SWM, NeoForge mod support, and a PvP-arena variant. Fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a>.</em></p>
+<p align="center"><em>High-performance Paper fork with self-tuning perf engine, slim jar bootstrap, NMS-level security, anti-xray, SWM, NeoForge mod support, and a PvP-arena variant. Fork of <a href="https://github.com/PaperMC/Paper">Paper</a> and <a href="https://github.com/pufferfish-gg/Pufferfish">Pufferfish</a>.</em></p>
+
+---
+
+## What's New in 12-EXP
+
+Highlights since prior REL builds:
+
+- **Perf-engine P0 (Knob Registry)** — typed `BoolKnob`/`IntKnob` abstraction + `Knobs` static holder. `entityTickRate` migrated to the registry as the reference knob. `KnobRegistry.logLoaded("boot")` emits a single boot-time line with every knob's resolved value.
+- **Perf-engine P1 (Load Sensor + Tier Classifier)** — multi-signal sensor (TPS rolling / MSPT / mem% / GC pause ms-per-min) running every 20 ticks. 5-tier state machine (GREEN → EMERGENCY) with dwell + band hysteresis. `/perf tier` and `/perf sensors` commands. NMS hook in `MinecraftServer.tickChildren`.
+- **Sourby Bootstrap (slim jar)** — release jar slimmed from **57M → 33M (-42%)**. 6 optional libs + the Ookla speedtest CLI lazy-download on first boot into `libraries/` with SHA-256 verification. Hard-fail on offline first boot with operator-actionable diagnostics (URLs + destination paths). Subsequent boots are silent cache-hit fast path.
+- **Multi-OS speedtest CLI** — `/speedtest` auto-detects OS (Linux x86-64, Linux aarch64, Linux armhf, macOS universal, Windows x64, Windows arm64) and downloads the matching Ookla binary on first invocation.
+- **Version naming** — `internalVersion` drops the `v` prefix (`v12-REL` → `12-REL`). EXP builds use `12-EXP`.
+
+See `release/RELEASE-NOTES-12.md` for the full first-boot migration guide.
 
 ---
 
@@ -17,33 +32,89 @@
 
 | Variant | JAR | When to use |
 |---|---|---|
-| **Normal** | `SourbyCraft-12-REL.jar` | General-purpose SMP. Default. |
-| **PVP** | `SourbyCraft-PVP-12-REL.jar` | PvP arena backend. 1.8-style KB, no-cooldown, Velocity-tuned, allow-nether=false. |
+| **Normal** | `SourbyCraft-12-EXP.jar` | General-purpose SMP. Default. `allow-nether=true` on first boot. |
+| **PVP** | `SourbyCraft-PVP-12-EXP.jar` | PvP arena backend. 1.8-style KB, no-cooldown, Velocity-tuned, `allow-nether=false` (NMS-patched into `DedicatedServerProperties` default). |
 
-Build: `./gradlew createMojmapPaperclipJar -Pvariant=normal|pvp`
+Build:
+```bash
+./gradlew assembleReleaseArtifacts -Pvariant=normal     # default
+./gradlew assembleReleaseArtifacts -Pvariant=pvp        # PvP variant
+```
+
+Output: `release/SourbyCraft-12-EXP.jar` (or `release/SourbyCraft-PVP-12-EXP.jar`) + `release/checksums.txt`.
 
 ---
 
 ## First Boot
 
-The release jar is slim (~33M) and downloads optional libraries on first boot
-into `libraries/` with SHA-256 verification:
+The release jar is slim (~33M). First boot downloads ~28M of optional libraries into `libraries/` with SHA-256 verification:
 
-- `sqlite-jdbc` (~14M) — SQLite driver
-- `mysql-connector-j` (~2.6M) — MySQL driver
-- `spark-paper` (~3M) — profiler
-- `Flare` (~2M) — profiler engine
-- `protobuf-java` (~1.9M) — profiler dep
-- `sentry` (~918K) — opt-in error tracking
-- Ookla `speedtest` CLI (~2.5M) — on first `/speedtest` invocation only
+| Lib | Size | Source |
+|---|---|---|
+| `sqlite-jdbc` | ~14M | `repo1.maven.org` |
+| `mysql-connector-j` | ~2.6M | `repo1.maven.org` |
+| `spark-paper` | ~3M | `repo.papermc.io` |
+| `Flare` (profiler engine) | ~2M | `jitpack.io` |
+| `protobuf-java` | ~1.9M | `repo1.maven.org` |
+| `sentry` (opt-in error tracking) | ~918K | `repo1.maven.org` |
+| Ookla `speedtest` CLI (lazy on `/speedtest`) | ~2.5M | `install.speedtest.net` |
 
-Requires outbound HTTPS to `repo1.maven.org`, `repo.papermc.io`, `jitpack.io`,
-and (on `/speedtest`) `install.speedtest.net`.
+**Required outbound HTTPS:** `repo1.maven.org`, `repo.papermc.io`, `jitpack.io`, `install.speedtest.net`.
 
-If first boot has no network access: `[SourbyBootstrap] FATAL` logs the URLs and
-destination paths. Side-load the files manually under `libraries/<path>` and restart.
+**Offline first boot:** `[SourbyBootstrap] FATAL` log lists every URL + destination path under `libraries/`. Side-load the files manually and restart. Subsequent boots are silent cache-hit fast path (zero downloads, baseline boot time).
 
-Subsequent boots use the cached libraries — no further downloads, silent fast path.
+`parchment-data` remains bundled (~988K, IDE mappings only; upstream Maven returns 404 for the pinned version).
+
+**`server.properties` defaults** (generated by Paper on first boot, present in `server.properties` from boot 1):
+- Normal variant: `allow-nether=true` (vanilla Paper default)
+- PVP variant: `allow-nether=false` (NMS-patched in `DedicatedServerProperties`)
+
+---
+
+## Self-Tuning Perf Engine
+
+The perf-engine is a 9-sub-project roadmap. Shipped sub-projects and their status:
+
+| Sub-project | Status | What it ships |
+|---|---|---|
+| **P0** Knob Registry API | ✓ shipped | `BoolKnob`/`IntKnob` abstraction, `Knobs` static holder, `KnobRegistry`, `logLoaded("boot")` boot-time snapshot line |
+| **P1** Load Sensor + Tier Classifier | ✓ shipped | `PerfSensor` (TPS rolling / MSPT / mem% / GC), 5-tier state machine, `/perf tier`, `/perf sensors`, NMS hook in `tickChildren` |
+| **P2** Lag-Machine Protection | spec drafted | 8 NMS-gated knobs: snowball/firework save fixes, projectile chunk-load throttle, excess minecart/boat removal |
+| P3 Adaptive Entity AI | planned | Tier-aware DAB, dynamic-brain, per-entity-type allowlist |
+| P4 Combat Profiles | planned | 1.21-vanilla / 1.8-pvp / custom switchable bundles |
+| P5 Async Chunk Pipeline | planned | Async chunk packet send, async entity tracker |
+| P6 Async Packet & World subsystems | planned | Async packet send, async data save, virtual-thread Bukkit scheduler |
+| P7 Self-Tune Controller | planned | Reads `PerfSensor.currentTier()` → applies tier-mapped knob deltas |
+| P8 Operator UX + Telemetry | planned | BossBar tier display, `/perf history`, Sentry breadcrumbs |
+
+### `/perf` Command Tree
+
+```
+/perf                       — live readout: TPS, MSPT, scale on/off, rate
+/perf scale on              — enable DynamicPerformanceScaler auto-scaling
+/perf scale off             — disable auto-scaling
+/perf rate <1-20>           — manually set entity tick rate
+/perf tier                  — (P1) current tier + candidate + dwell + uptime
+/perf sensors               — (P1) live raw readings + thresholds (TPS/MSPT/Mem/GC)
+```
+
+### Knobs config (`sourbycraft.yml`)
+
+```yaml
+perf:
+  entity-tick-rate: 20                # P0 reference knob (1=vanilla every-tick; 20=1-in-20)
+  sensor:                             # P1
+    enabled: true
+    cadence-ticks: 20                 # 1s at 20 TPS
+    dwell-samples: 3                  # samples in candidate tier required before escalation
+    recovery-dwell-multiplier: 2.0    # recovery needs dwell-samples × multiplier
+    warmup-ticks: 200                 # ticks to skip at startup before sampling (10s at 20 TPS)
+    thresholds:
+      tps:           { yellow: 19.5, orange: 18.0, red: 15.0, emergency: 10.0 }
+      mspt:          { yellow: 30,   orange: 40,   red: 60,   emergency: 100 }
+      mem:           { yellow: 75,   orange: 85,   red: 92,   emergency: 97 }
+      gc-ms-per-min: { yellow: 20,   orange: 50,   red: 100,  emergency: 300 }
+```
 
 ---
 
@@ -57,8 +128,8 @@ Subsequent boots use the cached libraries — no further downloads, silent fast 
 - **Packet/Dupe Protection** — covered by Paper 1.21.11 engine
 
 ### ⚡ Performance NMS
-- **Dynamic Performance Scaler** — auto-adjusts entity tick rate based on TPS
-- **Entity Tick Rate Limiter** — skips entity ticks at configurable intervals
+- **Dynamic Performance Scaler** — auto-adjusts entity tick rate based on TPS (folds into P7 controller in future)
+- **Entity Tick Rate Limiter** — skips entity ticks at configurable intervals (now a P0 Knob)
 - **Mob AI Distance Cutoff** — skips AI/pathfinding beyond configured range
 - **Entity Data Pooling** — reuses SynchedEntityData arrays to reduce GC pressure
 - **Packet Buffer Pre-size** — larger initial allocations to reduce buffer reallocation
@@ -71,12 +142,12 @@ Subsequent boots use the cached libraries — no further downloads, silent fast 
 |---------|-------------|
 | `/tps` | SourbyCraft-colored TPS readout (1m/5m/15m) + optional `/tps mem` |
 | `/perf` | Live performance monitor + `scale on/off` + `rate <1-20>` |
-| `/perf scale on` | Enable dynamic performance auto-scaling |
-| `/perf scale off` | Disable auto-scaling |
+| `/perf tier` | **NEW** P1 — current load tier (GREEN/YELLOW/ORANGE/RED/EMERGENCY) |
+| `/perf sensors` | **NEW** P1 — raw signals (TPS/MSPT/Mem/GC) + thresholds |
 | `/sys` | Server specs: uptime, CPU, RAM, Java, worlds, SWM hint |
 | `/ping [player]` | Latency + client brand + GeoIP location |
 | `/plugins` | Active plugin list with versions |
-| `/speedtest` | Built-in Ookla network speed test |
+| `/speedtest` | Built-in Ookla network speed test (lazy-downloaded multi-OS binary) |
 | `/tpsbar` / `/rambar` | BossBar visual monitors |
 | `/ver` | Version info: SourbyCraft + Minecraft + API + uptime (aliases: `version`, `about`) |
 | `/swm <list/load/save/info>` | SlimeWorldManager control (save/info require SWM plugin) |
@@ -84,15 +155,7 @@ Subsequent boots use the cached libraries — no further downloads, silent fast 
 
 ### 🔬 Profiling
 
-SourbyCraft does not bundle the Spark profiler (license/distribution concerns). Install manually:
-
-```sh
-# Drop spark plugin JAR into your plugins/ directory
-curl -L -o plugins/spark.jar \
-  "https://ci.lucko.me/job/spark/lastSuccessfulBuild/artifact/spark-bukkit/build/libs/spark-1.10.142-bukkit.jar"
-```
-
-After install, use the standard Spark commands:
+**Spark profiler is now bundled** (downloaded on first boot via Sourby Bootstrap from `repo.papermc.io`). Use standard Spark commands directly:
 
 - `/spark profiler --timeout 120 --thread '*'` — sample all threads for 2 minutes
 - `/spark profiler --timeout 60 --thread 'Server thread'` — main-thread only
@@ -100,7 +163,15 @@ After install, use the standard Spark commands:
 - `/spark health` — live health snapshot
 - `/spark heapsummary` — heap usage snapshot
 
-Profile URLs are at `https://spark.lucko.me/<code>`; the raw protobuf blob is at `https://bytebin.lucko.me/<code>` if you need to script profile parsing.
+Profile URLs at `https://spark.lucko.me/<code>`. Raw protobuf blob at `https://bytebin.lucko.me/<code>` for script parsing.
+
+### 🌐 Speedtest
+
+`/speedtest` runs the Ookla CLI in `--format=json` mode and renders DL/UL/Ping with hex-colored progress bars. Binary auto-downloads on first invocation from `install.speedtest.net`. Supported OS/arch:
+
+- Linux x86-64, Linux aarch64, Linux armhf
+- macOS universal (x86-64 + arm64)
+- Windows x64, Windows arm64
 
 ### 🧩 NeoForge Mod Support (Foundation)
 - **ModScanner** — reads `mods.toml` / `fabric.mod.json` from JARs in `mods/` folder
@@ -119,21 +190,22 @@ Built-in SlimeWorldManager for `.slime` world format. SRF v13 binary format with
 | **External plugin** | Standalone `SourbyCraftSWM.jar` plugin for external plugins | When third-party plugins need SWM API access |
 
 **Commands** (save/info require SWM plugin active):
-- `/swm list` — shows `.slime` worlds with `[LOADED]` status
-- `/swm load <world>` — loads a slime world at runtime
-- `/swm save <world>` — serializes and persists a loaded world
+- `/swm list` — `.slime` worlds with `[LOADED]` status
+- `/swm load <world>` — load a slime world at runtime
+- `/swm save <world>` — serialize and persist a loaded world
 - `/swm info` — loaded/found world counts
 
 **Configuration** (`sourbycraft.yml`):
 ```yaml
 swm:
-  enabled: true           # Enable built-in SWM bootstrap at startup
+  enabled: true            # Enable built-in SWM bootstrap at startup
   auto-install: false      # Auto-download external plugin JAR
-  version: "v6-REL"       # Plugin version to download
+  version: "v6-REL"        # Plugin version to download
 ```
-Note: `swm.file-dir` is hardcoded to `slime_worlds`. World files go in `slime_worlds/` directory.
 
-**API usage** (for plugin developers):
+`swm.file-dir` is hardcoded to `slime_worlds/`.
+
+**API usage** (plugin developers):
 ```java
 AdvancedSlimePaperAPI swm = AdvancedSlimePaperAPI.instance();
 SlimeWorld world = swm.readWorld(new FileLoader("slime_worlds"), "myworld", false, new SlimePropertyMap());
@@ -151,40 +223,46 @@ swm.loadWorld(world, true);
 
 ## Configuration
 
+`sourbycraft.yml` lives at the server root (NOT `plugins/SourbyCraft/`). Operator overrides JAR-baked defaults.
+
 ```yaml
-# sourbycraft.yml — main config
-performance:
-  async-threads: 2              # ForkJoinPool workers
-  async-chunk-load: false      # Async chunk loading
-  async-pathfinding: false     # Async pathfinding
+# sourbycraft.yml — main config (operator-edited)
+
+perf:
+  entity-tick-rate: 20            # P0 — 1=vanilla every-tick, 20=1-in-20
+  sensor:                         # P1 — multi-signal load sensor
+    enabled: true
+    cadence-ticks: 20
+    dwell-samples: 3
+    recovery-dwell-multiplier: 2.0
+    warmup-ticks: 200
+    thresholds:
+      tps:           { yellow: 19.5, orange: 18.0, red: 15.0, emergency: 10.0 }
+      mspt:          { yellow: 30,   orange: 40,   red: 60,   emergency: 100 }
+      mem:           { yellow: 75,   orange: 85,   red: 92,   emergency: 97 }
+      gc-ms-per-min: { yellow: 20,   orange: 50,   red: 100,  emergency: 300 }
 
 entity:
-  tick-rate: 20                # 1/N ticks (1=every tick, 20=every 20th)
-  tick-rate-limit: true        # Enable tick rate limiting
-  mob-tick-distance: 32        # skip AI > N blocks from player
-  mob-pathfind-interval: 20    # pathfind every N ticks
-  max-per-chunk: 10            # hard entity per-chunk limit
-  max-specials-per-chunk: 15   # armor stand, frame, painting
+  tick-rate-limit: true            # enable tick-rate limiting (gates P0 knob)
+  mob-tick-distance: 32            # skip AI > N blocks from player
+  mob-pathfind-interval: 20        # pathfind every N ticks
+  max-per-chunk: 10                # hard entity per-chunk limit
+  max-specials-per-chunk: 15       # armor stand, frame, painting
   max-falling-block-per-chunk: 20
   max-arrows-per-world: 5000
   max-redstone-updates-per-tick: 2000
   redstone-optimize: true
   hopper-batch: true
   item-merge-optimize: true
-  item-despawn-rate: 6000      # ticks before item despawn
+  item-despawn-rate: 6000          # ticks before item despawn
   item-merge-radius: 3
 
 item:
-  max-stack-size: 99           # max stack size (overrides vanilla 64)
-  unlimited-drop-stack: true   # bypass stack cap on drops
-  drop-stack-cap: 2147483647   # cap when unlimited (Integer.MAX_VALUE)
-  owner-protection-enabled: true  # anti-snatch: items return to dropper
-  owner-protection-time: 10    # protection ticks (seconds × 20)
-  no-durability-except: false  # skip durability for all except elytra/trident
-
-multithreading:
-  enabled: false                # per-dimension threads (experimental)
-  dimension-threads: false
+  max-stack-size: 99               # max stack size (overrides vanilla 64)
+  unlimited-drop-stack: true
+  drop-stack-cap: 2147483647
+  owner-protection-enabled: true   # anti-snatch: items return to dropper
+  owner-protection-time: 10        # protection seconds × 20
 
 memory:
   skip-empty-sections: true
@@ -204,18 +282,17 @@ settings:
   detailed-brand-info: true
   translate-items: true
   disable-communication-commands: false
-  allow-surface-rules-for-default-fluids: false
 
 server:
   idle-timeout: 0
 
-# per-world config (sourbycraft-world.yml)
+# anti-xray (per-world)
 anticheat:
   anti-xray:
-    fluid-obscures: true        # water+lava as solid blockers
-    all-blocks: false           # mark all blocks as target
-    entity-obfuscation: true    # hide entities behind walls
-    entity-obfuscation-range: 64  # range for entity hiding
+    fluid-obscures: true
+    all-blocks: false
+    entity-obfuscation: true
+    entity-obfuscation-range: 64
 
 swm:
   enabled: true
@@ -227,7 +304,7 @@ swm:
 # sourbycraft-security.yml — crash prevention
 crash-prevention:
   nbt:
-    max-bytes: 2097152          # 2MB
+    max-bytes: 2097152             # 2MB
     max-depth: 64
     max-string-length: 4096
     max-list-size: 65536
@@ -246,9 +323,9 @@ crash-prevention:
 
 ## Startup
 
-No tuner scripts. Run paperclip directly with recommended flags. StartupOptimizer reads your JVM args and prints recommendations at boot if missing.
+No tuner scripts. Run paperclip directly with recommended flags. `StartupOptimizer` reads your JVM args and prints recommendations at boot if missing.
 
-**Recommended: JDK 21+, heap ≥ 8 GB (ZGC generational)**
+**Recommended: JDK 25, heap ≥ 8 GB (ZGC generational)**
 
 ```bash
 java \
@@ -256,7 +333,7 @@ java \
   -XX:+UseZGC -XX:+ZGenerational \
   -XX:+AlwaysPreTouch -XX:+UseTransparentHugePages \
   -XX:+UseNUMA \
-  -jar sourbycraft-paperclip-mojmap.jar --nogui
+  -jar SourbyCraft-12-EXP.jar --nogui
 ```
 
 **Small heap (< 8 GB): G1**
@@ -267,8 +344,10 @@ java \
   -XX:+UseG1GC -XX:+ParallelRefProcEnabled \
   -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8M \
   -XX:+AlwaysPreTouch -XX:+UseTransparentHugePages \
-  -jar sourbycraft-paperclip-mojmap.jar --nogui
+  -jar SourbyCraft-12-EXP.jar --nogui
 ```
+
+First boot downloads ~23M of libs from Maven Central + PaperMC + Jitpack. Subsequent boots are silent fast-path.
 
 At boot, look for `--- SourbyCraft Performance ---`. If your GC choice is suboptimal, recommended flags are printed.
 
@@ -281,10 +360,15 @@ git clone https://github.com/YanIanZ/SourbyCraft.git
 cd SourbyCraft
 git checkout ver/1.21.11
 ./gradlew applyAllPatches
-./gradlew createMojmapPaperclipJar
+./gradlew assembleReleaseArtifacts
 ```
 
-Jar: `sourbycraft-server/build/libs/sourbycraft-paperclip-v6-REL-mojmap.jar`
+Output: `release/SourbyCraft-12-EXP.jar` (slim, ~33M) + `release/checksums.txt`.
+
+PVP variant:
+```bash
+./gradlew assembleReleaseArtifacts -Pvariant=pvp
+```
 
 ---
 
@@ -293,7 +377,7 @@ Jar: `sourbycraft-server/build/libs/sourbycraft-paperclip-v6-REL-mojmap.jar`
 ```kotlin
 repositories { maven("https://jitpack.io") }
 dependencies {
-    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:v6-REL")
+    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:12-EXP")
 }
 ```
 
