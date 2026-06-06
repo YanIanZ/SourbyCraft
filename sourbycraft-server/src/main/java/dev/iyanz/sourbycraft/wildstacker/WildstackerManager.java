@@ -170,19 +170,35 @@ public final class WildstackerManager {
      */
     /**
      * Called from NMS ItemEntity.tryToMerge (via the static merge overload) after a successful
-     * vanilla merge. Updates PDC virtual count to match the new physical count and refreshes
-     * the floating hologram when count > maxStackSize.
+     * vanilla merge. The new virtual count is the SUM of both pre-merge virtual counts (which
+     * include any virtual overflow above maxStackSize).
      *
-     * SourbyCraft v9.17
+     * Bug fix 2026-06-06: prior version overwrote dest.virtual with dest.phys, losing any
+     * virtual overflow stored on either side. Fast-drop scenarios merging 100+ items into one
+     * stack would lose the overflow because phys was capped at vanilla maxStackSize (64).
+     *
+     * SourbyCraft v9.17 (revised)
      */
-    public static void onMerged(org.bukkit.entity.Item item) {
+    public static void onMerged(org.bukkit.entity.Item item, long preMergeDestVirtual, long preMergeOriginVirtual) {
         if (DEBUG) Bukkit.getLogger().info("[SourbyCraft:Wildstacker] onMerged called for " + item.getUniqueId()
-            + " amount=" + item.getItemStack().getAmount());
+            + " amount=" + item.getItemStack().getAmount()
+            + " preDestVirt=" + preMergeDestVirtual + " preOrigVirt=" + preMergeOriginVirtual);
         if (!SourbyCraftConfig.wildstackerEnabled) return;
         if (!started || KEY_STACK_COUNT == null) return;
         long phys = item.getItemStack().getAmount();
-        item.getPersistentDataContainer().set(KEY_STACK_COUNT, PersistentDataType.LONG, phys);
-        refreshHologram(item, phys);
+        // Virtual = max(sum of pre-merge virtuals, current phys). Sum may exceed Long.MAX_VALUE
+        // in pathological inputs but realistic counts stay well below.
+        long sum = preMergeDestVirtual + preMergeOriginVirtual;
+        long virtual = Math.max(sum, phys);
+        item.getPersistentDataContainer().set(KEY_STACK_COUNT, PersistentDataType.LONG, virtual);
+        refreshHologram(item, virtual);
+    }
+
+    /** Backward-compat shim — assumes virtuals = phys (loses overflow). New NMS sites should call the 3-arg form. */
+    @Deprecated
+    public static void onMerged(org.bukkit.entity.Item item) {
+        long phys = item.getItemStack().getAmount();
+        onMerged(item, phys, 0L);
     }
 
     public static void setVirtualCount(Item item, long count) {
