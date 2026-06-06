@@ -528,6 +528,28 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("PerfSensor.applyOperatorConfig failed; using yml defaults", t);
         }
 
+        // SourbyCraft - perf-engine P2: operator sourbycraft.yml bridge for lag-machine knobs.
+        try {
+            dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_DISABLE_SAVING_SNOWBALLS.set(
+                cfgBool("perf.lag-machine.disable-saving-snowballs", true));
+            dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_DISABLE_SAVING_FIREWORKS.set(
+                cfgBool("perf.lag-machine.disable-saving-fireworks", true));
+            dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(
+                cfgInt("perf.lag-machine.max-projectile-loads-per-tick", 10));
+            dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.set(
+                cfgInt("perf.lag-machine.max-projectile-loads-per-projectile", 10));
+            dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_REMOVE_EXCESS_MINECARTS.set(
+                cfgBool("perf.lag-machine.remove-excess-minecarts", false));
+            dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.set(
+                cfgInt("perf.lag-machine.excess-minecarts-limit", 10));
+            dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.set(
+                cfgBool("perf.lag-machine.remove-excess-boats", false));
+            dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(
+                cfgInt("perf.lag-machine.excess-boats-limit", 10));
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("P2 lag-machine operator-config bridge failed; using yml defaults", t);
+        }
+
         // SourbyCraft - perf-engine P0: log final knob values AFTER all Bukkit-config bridge overrides
         dev.iyanz.sourbycraft.perf.knob.Knobs.logLoaded();
 
