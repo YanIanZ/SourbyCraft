@@ -71,6 +71,20 @@ public class PufferfishConfig {
             SIMDDetection.versionLimited = SIMDDetection.getJavaVersion() < 17 || SIMDDetection.getJavaVersion() > 25;
         } catch (NoClassDefFoundError | Exception ignored) {}
 
+        // SourbyCraft start - operator opt-out for SIMD
+        // Some CPUs (notably aarch64 NEON 128-bit, or AVX2-only CPUs forced into emulated AVX-512 lanes)
+        // are SLOWER with the vector API than with the scalar fallback. Operator can flip this knob
+        // to disable SIMD even when --add-modules=jdk.incubator.vector is loaded.
+        boolean simdForceDisable = getBoolean("simd.force-disable", false,
+            "Disable SIMD optimisations even when --add-modules=jdk.incubator.vector is loaded.",
+            "Set true if chunk rendering / noise generation is SLOWER with the vector flag than without.",
+            "Common cause: aarch64 NEON or non-AVX-512 CPU running emulated wide lanes.");
+        if (simdForceDisable && SIMDDetection.isEnabled) {
+            SIMDDetection.isEnabled = false;
+            PufferfishLogger.LOGGER.warning("SIMD force-disabled via simd.force-disable=true. Falling back to scalar paths.");
+        }
+        // SourbyCraft end
+
         if (!SIMDDetection.isEnabled) {
             if (SIMDDetection.versionLimited) {
                 PufferfishLogger.LOGGER.warning("Will not enable SIMD! These optimizations are only safely supported on Java 17+.");
