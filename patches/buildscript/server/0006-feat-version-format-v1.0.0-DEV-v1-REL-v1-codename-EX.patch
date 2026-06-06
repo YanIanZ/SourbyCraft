@@ -25,9 +25,9 @@ index 81cf27833b78b210f517d5ca4921c4504403d21f..2946f93bede93e5b4a08846abbbdb575
          }
 -        val implementationVersion = "v$releaseVersion-$suffix"
 +        val implementationVersion = when {
-+            suffix == "EXP" -> "v$releaseMajor$codename-EXP"
-+            suffix == "REL" -> "v$releaseMajor-REL"
-+            else -> "v$releaseVersionFull-DEV"
++            suffix == "EXP" -> "$releaseMajor-EXP"
++            suffix == "REL" -> "$releaseMajor-REL"
++            else -> "$releaseVersionFull-DEV"
 +        }
          val date = git.exec(providers, "show", "-s", "--format=%ci", gitHash).get().trim()
          attributes(
