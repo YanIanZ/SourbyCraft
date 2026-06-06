@@ -79,7 +79,7 @@ The perf-engine is a 9-sub-project roadmap. Shipped sub-projects and their statu
 |---|---|---|
 | **P0** Knob Registry API | ✓ shipped | `BoolKnob`/`IntKnob` abstraction, `Knobs` static holder, `KnobRegistry`, `logLoaded("boot")` boot-time snapshot line |
 | **P1** Load Sensor + Tier Classifier | ✓ shipped | `PerfSensor` (TPS rolling / MSPT / mem% / GC), 5-tier state machine, `/perf tier`, `/perf sensors`, NMS hook in `tickChildren` |
-| **P2** Lag-Machine Protection | spec drafted | 8 NMS-gated knobs: snowball/firework save fixes, projectile chunk-load throttle, excess minecart/boat removal |
+| **P2** Lag-Machine Protection | ✓ shipped | 8 NMS-gated knobs: snowball/firework save fixes (default ON), projectile chunk-load throttle (10/tick, 10/projectile), excess minecart/boat removal (default OFF). 5 NMS patches (0046-0050). |
 | P3 Adaptive Entity AI | planned | Tier-aware DAB, dynamic-brain, per-entity-type allowlist |
 | P4 Combat Profiles | planned | 1.21-vanilla / 1.8-pvp / custom switchable bundles |
 | P5 Async Chunk Pipeline | planned | Async chunk packet send, async entity tracker |
