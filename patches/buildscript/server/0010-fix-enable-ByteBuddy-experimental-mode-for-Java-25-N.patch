@@ -10,10 +10,10 @@ entity classes (Entity, LivingEntity, ItemEntity, ExperienceOrb,
 AbstractArrow) can be instrumented for mocking in unit tests on Java 25.
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 8aa099bc43c2abb74469864ef06a818240b6791d..0045619527ab525f5b8d690fa5f6f6e55f5c726a 100644
+index 6b0a6bd2ef3f3965450822dda82d3448d1b07fa2..b76e4194f2cbf94e1f0dd522d8ed6ab1d8ce4cfb 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
-@@ -340,6 +340,8 @@ tasks.test {
+@@ -313,6 +313,8 @@ tasks.test {
      val provider = objects.newInstance<MockitoAgentProvider>()
      provider.fileCollection.from(mockitoAgent)
      jvmArgumentProviders.add(provider)

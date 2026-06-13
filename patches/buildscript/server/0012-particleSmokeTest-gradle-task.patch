@@ -5,10 +5,10 @@ Subject: [PATCH] particleSmokeTest gradle task
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+index 2c46b22eca61b186b5edfff5f2fb9258d6709083..2dd684a83278fc3828cf018e71a182e9467fb03a 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
-@@ -516,3 +516,17 @@ if (runNmsCompat) {
+@@ -475,3 +475,17 @@ if (runNmsCompat) {
          }
      }
  }

@@ -5,7 +5,7 @@ Subject: [PATCH] Setup paperweight fork changes
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 5be93c40d4803476fb8b484180212ebe7c4eb289..b98a9404d42d3865780c14209322e0ab3edf0d9a 100644
+index b97f97467f438e0e6e8d1a171e7874cf5f82ee55..80ec4cd9eb50290c84f3af5226ea454b555ba68c 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
 @@ -22,6 +22,25 @@ paperweight {
@@ -31,10 +31,10 @@ index 5be93c40d4803476fb8b484180212ebe7c4eb289..b98a9404d42d3865780c14209322e0ab
 +    }
 +    // SourbyCraft end - setup paperweight fork
 +
-     spigot {
-         enabled = true
-         buildDataRef = "17f77cee7117ab9d6175f088ae8962bfd04e61a9"
-@@ -109,12 +128,30 @@ sourceSets {
+     updatingMinecraft {
+         // oldPaperCommit = "711c5de2b05df39b72c44ff54e9f9381f8d153cb"
+     }
+@@ -91,12 +110,30 @@ sourceSets {
      main {
          java {
              srcDir("src/main/pufferfish")
@@ -66,16 +66,16 @@ index 5be93c40d4803476fb8b484180212ebe7c4eb289..b98a9404d42d3865780c14209322e0ab
  configurations.named(log4jPlugins.compileClasspathConfigurationName) {
      extendsFrom(configurations.compileClasspath.get())
  }
-@@ -137,7 +174,7 @@ abstract class MockitoAgentProvider : CommandLineArgumentProvider {
+@@ -119,7 +156,7 @@ abstract class MockitoAgentProvider : CommandLineArgumentProvider {
  }
  
  dependencies {
 -    implementation(project(":paper-api"))
 +    implementation(projects.sourbycraftApi) // SourbyCraft - update to own api
-     implementation("ca.spottedleaf:concurrentutil:0.0.8")
+     implementation("ca.spottedleaf:concurrentutil:0.0.10")
      implementation("org.jline:jline-terminal-ffm:3.27.1") // use ffm on java 22+
      implementation("org.jline:jline-terminal-jni:3.27.1") // fall back to jni on java 21
-@@ -283,7 +320,7 @@ tasks.test {
+@@ -256,7 +293,7 @@ tasks.test {
      jvmArgumentProviders.add(provider)
  }
  
@@ -84,7 +84,7 @@ index 5be93c40d4803476fb8b484180212ebe7c4eb289..b98a9404d42d3865780c14209322e0ab
  idea {
      module {
          generatedSourceDirs.add(generatedDir.toFile())
-@@ -391,3 +428,12 @@ fill {
+@@ -350,3 +387,12 @@ fill {
          }
      }
  }
