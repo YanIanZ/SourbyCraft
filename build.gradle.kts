@@ -45,7 +45,7 @@ val externalLibs = listOf(
 
 plugins {
     id("java-library")
-    id("io.papermc.paperweight.patcher") version "2.0.0-beta.19"
+    id("io.papermc.paperweight.patcher") version "2.0.0-beta.21"
 }
 
 subprojects {
