@@ -192,12 +192,12 @@ tasks.register("createSlimPaperclipJar") {
     group = "build"
     description = "Strip optional libs from paperclip jar + generate bootstrap manifest"
 
-    dependsOn(":sourbycraft-server:createMojmapPaperclipJar")
+    dependsOn(":sourbycraft-server:createPaperclipJar")
     dependsOn(":sourbycraft-server:jar")
 
     // Capture fat jar outputs as a serializable FileCollection (config-cache safe)
     val fatJarFiles: FileCollection = project(":sourbycraft-server").tasks
-        .named("createMojmapPaperclipJar").map { it.outputs.files }.get()
+        .named("createPaperclipJar").map { it.outputs.files }.get()
     inputs.files(fatJarFiles)
 
     // Bootstrap classes live in the sourbycraft-server jar (NOT paperclip). Paperclip transforms
@@ -218,7 +218,7 @@ tasks.register("createSlimPaperclipJar") {
     doLast {
         val fatJarFile = fatJarFiles.files
             .filter { it.name.endsWith(".jar") && it.exists() }
-            .firstOrNull() ?: error("No jar output from createMojmapPaperclipJar")
+            .firstOrNull() ?: error("No jar output from createPaperclipJar")
         val out = slimJar.get().asFile
         out.parentFile.mkdirs()
 
@@ -378,7 +378,7 @@ tasks.register("assembleReleaseArtifacts") {
                 ?: error("No jar output found for $label")
         }
 
-        val mojmapSrc = firstJarFrom(mojmapOutputs.get(), "createMojmapPaperclipJar")
+        val mojmapSrc = firstJarFrom(mojmapOutputs.get(), "createPaperclipJar")
 
         releaseDirFile.mkdirs()
         mojmapSrc.copyTo(mojmapDest, overwrite = true)
