@@ -5,7 +5,7 @@ Subject: [PATCH] feat: version format vN-DEV/REL/EXP with GMT+7 build time
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index c1239082f87bdb005fad6184b4d80cde747b325b..0e32a7f6edb465310583ec0704fb8fa7d6886101 100644
+index 39a5da5fd6074159e7979e81ffb4f2eb5cceb181..f5b9edc82ec09d0b89b4515e8379d290ff03c1e2 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
 @@ -2,6 +2,9 @@ import io.papermc.fill.model.BuildChannel
@@ -18,7 +18,7 @@ index c1239082f87bdb005fad6184b4d80cde747b325b..0e32a7f6edb465310583ec0704fb8fa7
  
  plugins {
      `java-library`
-@@ -247,11 +250,18 @@ tasks.jar {
+@@ -220,11 +223,18 @@ tasks.jar {
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
@@ -40,7 +40,7 @@ index c1239082f87bdb005fad6184b4d80cde747b325b..0e32a7f6edb465310583ec0704fb8fa7
          attributes(
              "Main-Class" to "org.bukkit.craftbukkit.Main",
              "Implementation-Title" to "SourbyCraft", // SourbyCraft - branding
-@@ -263,7 +273,7 @@ tasks.jar {
+@@ -236,7 +246,7 @@ tasks.jar {
              "Brand-Id" to "sourbycraft:sourbycraft", // SourbyCraft - branding
              "Brand-Name" to "SourbyCraft", // SourbyCraft - branding
              "Build-Number" to (build ?: ""),

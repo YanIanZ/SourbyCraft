@@ -5,10 +5,10 @@ Subject: [PATCH] feat: version suffix from codename
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 6f6575ec9ccb96834a9471446a473b29edae10ee..e32616ec21895e9deb1e45bbb8ac6b3d411441ea 100644
+index b56c68c50b8bd13551eef08c0c4c232694f3bd43..17d9f794c9730091f5897bcbf41f00b4cb628c13 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
-@@ -260,6 +260,7 @@ tasks.jar {
+@@ -233,6 +233,7 @@ tasks.jar {
          val suffix = when {
              gitBranch.contains("experimental") || gitBranch.contains("feat") -> "EXP"
              gitBranch.contains("-dev") || gitBranch.contains("develop") -> "DEV"

@@ -5,10 +5,10 @@ Subject: [PATCH] nmsCompatTest gradle task
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 0045619527ab525f5b8d690fa5f6f6e55f5c726a..04f07ddb54db8d580af7f229bd28345017b92a16 100644
+index b76e4194f2cbf94e1f0dd522d8ed6ab1d8ce4cfb..2c46b22eca61b186b5edfff5f2fb9258d6709083 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
-@@ -461,3 +461,58 @@ afterEvaluate {
+@@ -420,3 +420,58 @@ afterEvaluate {
      }
  }
  // SourbyCraft end - work around strange paperweight madness
