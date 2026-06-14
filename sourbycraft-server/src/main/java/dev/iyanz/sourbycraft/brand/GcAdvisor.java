@@ -5,10 +5,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * SourbyCraft v12 PVP — JVM GC + flag advisor.
+ * SourbyCraft JVM GC + flag advisor.
  *
  * <p>Inspects the running JVM at startup and warns operators about GC choices and
- * flag combinations known to cause unpredictable PvP latency.
+ * flag combinations known to cause unpredictable server latency.
  */
 public final class GcAdvisor {
 
@@ -36,7 +36,7 @@ public final class GcAdvisor {
             warns.add("Xms != Xmx (Xms=" + xms + "MB, Xmx=" + xmx + "MB). Set them equal to avoid heap resize pauses.");
         }
         if (jvmArgs.stream().noneMatch(a -> a.contains("AlwaysPreTouch"))) {
-            warns.add("Missing -XX:+AlwaysPreTouch — recommended for predictable PvP latency.");
+            warns.add("Missing -XX:+AlwaysPreTouch — recommended for predictable tick latency.");
         }
         return new Result(warns.isEmpty(), warns);
     }
@@ -60,7 +60,7 @@ public final class GcAdvisor {
         if (r.acceptable()) return "";
         StringBuilder sb = new StringBuilder();
         sb.append("╔══════════════════════════════════════════════════╗\n");
-        sb.append("║  ⚠  PvP mode tuned for ZGC generational          ║\n");
+        sb.append("║  ⚠  SourbyCraft tuned for ZGC generational       ║\n");
         sb.append("╠══════════════════════════════════════════════════╣\n");
         for (String w : r.warnings()) {
             String line = w.length() > 46 ? w.substring(0, 43) + "..." : w;

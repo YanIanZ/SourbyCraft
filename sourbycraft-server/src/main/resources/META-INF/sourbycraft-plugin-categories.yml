@@ -4,12 +4,6 @@ categories:
     - EssentialsX
     - Vault
     - PlaceholderAPI
-  PvP:
-    - CombatLogX
-    - ViaVersion
-    - ViaBackwards
-    - PacketEvents
-    - ProtocolLib
   World:
     - WorldEdit
     - WorldGuard

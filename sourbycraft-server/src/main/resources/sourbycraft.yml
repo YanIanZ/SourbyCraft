@@ -1,20 +1,5 @@
 # SourbyCraft configuration (baseline, bundled in jar resources).
 # Values here are read by patches via SourbyCraftConfig.ymlGet(...).
-# PvP-only consumers wrap their ymlGet calls in `if (SourbyCraftConfig.pvpEnabled)`
-# so these PvP-tuned values are effective only when the operator opts in via
-# pvp.enabled in plugins/SourbyCraft/sourbycraft.yml.
-
-pvp:
-  enabled: false
-  knockback:
-    friction-divisor: 1.0
-    vertical: 0.4
-    extra-horizontal: 0.5
-  no-attack-cooldown: true
-  view-distance-cap: 6
-  simulation-distance-cap: 5
-  max-mobs-per-chunk: 4
-  mob-ai-activation-range: 24
 
 network:
   proxy-mode: velocity-modern
@@ -31,13 +16,6 @@ entity-tracker:
   item-range: 16
   xp-orb-range: 16
   player-update-interval: 1
-
-combat:
-  sweep-enabled: false
-  hit-delay-ticks: 8
-  hit-window-ms: 150
-  fishing-rod-knockback: true
-  reach-debug-command: true
 
 branding:
   motd-suffix: false

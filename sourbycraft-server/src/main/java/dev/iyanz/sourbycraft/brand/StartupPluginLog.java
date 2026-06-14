@@ -10,8 +10,8 @@ import java.util.Map;
 
 public final class StartupPluginLog {
 
-    private static final String[] ORDER = {"Core", "PvP", "World", "Util", "Economy", "Other"};
-    private static final String[] ICONS = {"⚡", "⚔", "🌍", "🔧", "💰", "·"};
+    private static final String[] ORDER = {"Core", "World", "Util", "Economy", "Other"};
+    private static final String[] ICONS = {"⚡", "🌍", "🔧", "💰", "·"};
 
     private StartupPluginLog() {}
 
