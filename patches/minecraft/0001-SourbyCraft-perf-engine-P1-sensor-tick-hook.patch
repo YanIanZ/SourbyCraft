@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Fri, 5 Jun 2026 22:39:42 +0700
+Subject: [PATCH] SourbyCraft perf-engine P1 sensor tick hook
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index cc35c6271c98615a486422d0490145227626bd85..c3226206fccc0b8087a63041e0390d0b4211fb5d 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1790,6 +1790,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         ProfilerFiller profiler = Profiler.get();
+         this.getPlayerList().getPlayers().forEach(playerx -> playerx.connection.suspendFlushing());
+         this.server.getScheduler().mainThreadHeartbeat(); // CraftBukkit
++        // SourbyCraft start - perf-engine P1 sensor tick (NMS-driven, main thread)
++        try { dev.iyanz.sourbycraft.perf.sensor.PerfSensor.tick(this); }
++        catch (Throwable t) { /* ignore - never fail tickChildren */ }
++        // SourbyCraft end - perf-engine P1 sensor tick
+         // Paper start - optimise Folia entity scheduler
+         ((io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler)org.bukkit.Bukkit.getGlobalRegionScheduler()).tick();
+         for (io.papermc.paper.threadedregions.EntityScheduler scheduler : this.entitySchedulerTickList.getAllSchedulers()) {

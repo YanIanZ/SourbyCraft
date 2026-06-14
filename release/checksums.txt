@@ -1,1 +1,1 @@
-96bbe2d164293b6f870529ff69670abb9f83338b58bf881b1dc0f05c9d7fa66c  release/SourbyCraft-12-EXP.jar
+848faef705f9073d7235910e33dac8ca3056c126b2092cd8ba38c4bf789a9665  release/SourbyCraft-26.1.2-EXP.jar
