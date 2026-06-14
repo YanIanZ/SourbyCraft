@@ -17,7 +17,7 @@ Released: 2026-06-14 on branch `release/26.1.2`.
 - Plugins relying on the deleted SourbyCraft NMS hooks (Pufferfish DAB writes, wildstacker NMS-only mode, parallel tick router, BossBar ticker) will see no-op behavior — their config knobs are dead.
 - PvP variant is gone — `variant=pvp` CLI flag is no longer recognized.
 
-## SourbyCraft patches (13 minecraft + 4 api + 14 server buildscript + 2 api buildscript)
+## SourbyCraft patches (18 minecraft + 4 api + 14 server buildscript + 2 api buildscript)
 
 ### Minecraft source patches
 
@@ -36,6 +36,11 @@ Released: 2026-06-14 on branch `release/26.1.2`.
 | 0011 | fire PlayerPickupArrowEvent for creative players | Allow `CREATIVE_ONLY` pickup mode to fire event when `player.getAbilities().instabuild` |
 | 0012 | log exceptions caused by packet sending | Promote `Failed to sent packet` + `Double fault` from `LOGGER.debug` to `LOGGER.error` so connection errors visible at default log level |
 | 0013 | add option for processing default fluids with surface rules | Gate fluid-state skip branch on `SourbyCraftConfig.srPlaceInDefaultFluid`; lets surface rules run through default fluid (bedrock roof on water dimension) |
+| 0014 | fix children copying when filling missing command redirects | Consumer overload of `fillUsableCommands` so redirect-flatten branch recurses through children instead of bulk-cloning |
+| 0015 | add more detailed brand info | Brand payload appends `ServerBuildInfo` version-simple string when `SourbyCraftConfig.detailedBrand` true |
+| 0016 | US import particles fall+death gated emit | LivingEntity fall + tickDeath POOF particles gated behind `particles.disableFallParticles` / `disableDeathParticles` yml toggles |
+| 0017 | startup banner | Print SourbyCraftBanner ASCII art to stdout at MinecraftServer.runServer before initServer |
+| 0018 | startup plugin summary hook | After enablePlugins(POSTWORLD), print compact category-grouped plugin listing via StartupPluginLog.printSummary with boot duration |
 
 ### API patches (preserved from prior baseline)
 
