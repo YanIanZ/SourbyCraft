@@ -211,31 +211,6 @@ public class SourbyCraftConfig {
     public static int maxFallingBlockPerChunk = 20;
     public static int maxArrowsPerWorld = 5000;
     // SourbyCraft end
-    // SourbyCraft v9 — performance.v9 block (each feature has its own killswitch + circuit breaker).
-    public static boolean v9Enabled = true;
-    public static boolean v9AsyncLighting = true;
-    public static boolean v9AsyncPathfind = true;
-    public static boolean v9AsyncChunkSave = true;
-    // SourbyCraft v9.10 - parallel-tick defaults FALSE; physics phase is currently noop and
-    // deferred end-of-tick drain caused floating items (no real perf benefit until v10+ real physics split).
-    public static boolean v9ParallelMobAi = false;
-    public static boolean v9ParallelItemTick = false;
-    public static boolean v9ParallelOrbArrowTick = false;
-    public static boolean v9RegionIoPool = true;
-    public static boolean v9ObjectPools = true;
-    public static int v9PoolSizeLighting = 2;
-    public static int v9PoolSizePathfind = 4;
-    public static int v9PoolSizeChunkSave = 2;
-    public static int v9PoolSizeItemTick = 3;
-    public static int v9PoolSizeMobAi = 4;
-    public static int v9PoolSizeRegionIo = 4;
-    public static double v9WatchdogTaskTimeoutMultiplier = 5.0;
-    public static int v9WatchdogCircuitBreakSeconds = 30;
-    public static int v9BackpressureQueueDepthCap = 256;
-    // SourbyCraft v9.5 — wildstacker ground item merge (virtual stack count)
-    public static boolean wildstackerEnabled = true;
-    public static boolean wildstackerHologram = true;        // SourbyCraft v9.11
-    public static boolean wildstackerLosCheck = true;        // SourbyCraft v9.11 — anti-fraud
     // SourbyCraft start - antixray
     public static boolean fluidObscures = true;
     // SourbyCraft end
@@ -355,27 +330,6 @@ public class SourbyCraftConfig {
         dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.set(
             getInt("entity.tick-rate", dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get())
         );
-        v9Enabled = getBoolean("performance.v9.enabled", v9Enabled);
-        v9AsyncLighting = getBoolean("performance.v9.async-lighting", v9AsyncLighting);
-        v9AsyncPathfind = getBoolean("performance.v9.async-pathfind", v9AsyncPathfind);
-        v9AsyncChunkSave = getBoolean("performance.v9.async-chunk-save", v9AsyncChunkSave);
-        v9ParallelMobAi = getBoolean("performance.v9.parallel-mob-ai", v9ParallelMobAi);
-        v9ParallelItemTick = getBoolean("performance.v9.parallel-item-tick", v9ParallelItemTick);
-        v9ParallelOrbArrowTick = getBoolean("performance.v9.parallel-orb-arrow-tick", v9ParallelOrbArrowTick);
-        v9RegionIoPool = getBoolean("performance.v9.region-io-pool", v9RegionIoPool);
-        v9ObjectPools = getBoolean("performance.v9.object-pools", v9ObjectPools);
-        v9PoolSizeLighting = clamp(getInt("performance.v9.pool-size.lighting", v9PoolSizeLighting), 1, 16);
-        v9PoolSizePathfind = clamp(getInt("performance.v9.pool-size.pathfind", v9PoolSizePathfind), 1, 16);
-        v9PoolSizeChunkSave = clamp(getInt("performance.v9.pool-size.chunk-save", v9PoolSizeChunkSave), 1, 16);
-        v9PoolSizeItemTick = clamp(getInt("performance.v9.pool-size.item-tick", v9PoolSizeItemTick), 1, 16);
-        v9PoolSizeMobAi = clamp(getInt("performance.v9.pool-size.mob-ai", v9PoolSizeMobAi), 1, 16);
-        v9PoolSizeRegionIo = clamp(getInt("performance.v9.pool-size.region-io", v9PoolSizeRegionIo), 1, 16);
-        v9WatchdogTaskTimeoutMultiplier = getDouble("performance.v9.watchdog.task-timeout-multiplier", v9WatchdogTaskTimeoutMultiplier);
-        v9WatchdogCircuitBreakSeconds = clamp(getInt("performance.v9.watchdog.circuit-break-seconds", v9WatchdogCircuitBreakSeconds), 1, 3600);
-        v9BackpressureQueueDepthCap = clamp(getInt("performance.v9.backpressure.queue-depth-cap", v9BackpressureQueueDepthCap), 16, 65536);
-        wildstackerEnabled = getBoolean("performance.wildstacker.enabled", wildstackerEnabled);
-        wildstackerHologram = getBoolean("performance.wildstacker.hologram", wildstackerHologram);
-        wildstackerLosCheck = getBoolean("performance.wildstacker.los-check", wildstackerLosCheck);
         hopperBatch = getBoolean("entity.hopper-batch", hopperBatch);
         redstoneOptimize = getBoolean("entity.redstone-optimize", redstoneOptimize);
         maxEntityPerChunk = getInt("entity.max-per-chunk", maxEntityPerChunk);
