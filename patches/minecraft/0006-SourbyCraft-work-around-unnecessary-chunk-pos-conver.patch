@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 14 Jun 2026 18:42:52 +0700
+Subject: [PATCH] SourbyCraft: work around unnecessary chunk pos conversion
+ (direct borderOnly call)
+
+
+diff --git a/net/minecraft/server/level/ChunkHolder.java b/net/minecraft/server/level/ChunkHolder.java
+index cd5a325d37f617431ceb568a655701601618198f..1c1c901ff5d9064ef76a47de8a4fb4f041ab0ebe 100644
+--- a/net/minecraft/server/level/ChunkHolder.java
++++ b/net/minecraft/server/level/ChunkHolder.java
+@@ -93,7 +93,7 @@ public class ChunkHolder extends GenerationChunkHolder implements ca.spottedleaf
+         final ServerPlayer[] raw = this.playersSentChunkTo.getRawDataUnchecked();
+         for (int i = 0, len = this.playersSentChunkTo.size(); i < len; ++i) {
+             final ServerPlayer player = raw[i];
+-            if (onlyOnWatchDistanceEdge && !((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.getChunkMap().level).moonrise$getPlayerChunkLoader().isChunkSent(player, this.pos.x(), this.pos.z(), onlyOnWatchDistanceEdge)) {
++            if (onlyOnWatchDistanceEdge && !((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.getChunkMap().level).moonrise$getPlayerChunkLoader().isChunkSentBorderOnly(player, this.pos.x(), this.pos.z())) { // SourbyCraft - work around unnecessary chunk pos conversion (direct borderOnly call)
+                 continue;
+             }
+             ret.add(player);

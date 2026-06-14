@@ -1,13 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yan <Yan>
-Date: Sat, 14 Jun 2026 15:30:00 +0700
+Date: Sun, 14 Jun 2026 15:30:00 +0700
 Subject: [PATCH] SourbyCraft: defer POI worldgen updates via scheduleOnMain
 
 
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 229ff740e0418a05d824a67401ae6f105b4c3642..a5b2f443c223649def6b670cc03c710290b92065 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -2380,11 +2380,11 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -2380,11 +2380,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
          Optional<Holder<PoiType>> newType = PoiTypes.forState(newState);
          if (!Objects.equals(oldType, newType)) {
              BlockPos immutable = pos.immutable();
