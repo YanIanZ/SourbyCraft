@@ -1,9 +1,0 @@
---- a/data/minecraft/frog_variant/warm.json
-+++ b/data/minecraft/frog_variant/warm.json
-@@ -1,5 +_,5 @@
- {
--  "asset_id": "minecraft:entity/frog/frog_warm",
-+  "asset_id": "minecraft:entity/frog/warm_frog",
-   "spawn_conditions": [
-     {
-       "condition": {

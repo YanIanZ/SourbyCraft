@@ -1,8 +1,0 @@
---- a/data/minecraft/trade_set/farmer/level_3.json
-+++ /dev/null
-@@ -1,5 +_,0 @@
--{
--  "amount": 2.0,
--  "random_sequence": "minecraft:trade_set/farmer/level_3",
--  "trades": "#minecraft:farmer/level_3"
--}

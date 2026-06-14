@@ -1,8 +1,0 @@
---- /dev/null
-+++ b/data/minecraft/datapacks/trade_rebalance/data/minecraft/enchantment_provider/trades/desert_armorer_leggings_4.json
-@@ -1,0 +_,5 @@
-+{
-+  "type": "minecraft:single",
-+  "enchantment": "minecraft:thorns",
-+  "level": 1
-+}

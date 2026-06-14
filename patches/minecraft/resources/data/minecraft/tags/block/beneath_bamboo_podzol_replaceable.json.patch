@@ -1,8 +1,0 @@
---- a/data/minecraft/tags/block/beneath_bamboo_podzol_replaceable.json
-+++ /dev/null
-@@ -1,5 +_,0 @@
--{
--  "values": [
--    "#minecraft:substrate_overworld"
--  ]
--}

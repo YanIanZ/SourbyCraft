@@ -1,7 +1,0 @@
---- /dev/null
-+++ b/data/minecraft/recipe/banner_duplicate.json
-@@ -1,0 +_,4 @@
-+{
-+  "type": "minecraft:crafting_special_bannerduplicate",
-+  "category": "misc"
-+}
