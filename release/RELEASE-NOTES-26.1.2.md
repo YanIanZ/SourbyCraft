@@ -17,7 +17,7 @@ Released: 2026-06-14 on branch `release/26.1.2`.
 - Plugins relying on the deleted SourbyCraft NMS hooks (Pufferfish DAB writes, wildstacker NMS-only mode, parallel tick router, BossBar ticker) will see no-op behavior — their config knobs are dead.
 - PvP variant is gone — `variant=pvp` CLI flag is no longer recognized.
 
-## SourbyCraft patches (18 minecraft + 4 api + 14 server buildscript + 2 api buildscript)
+## SourbyCraft patches (22 minecraft + 4 api + 14 server buildscript + 2 api buildscript)
 
 ### Minecraft source patches
 
@@ -41,6 +41,10 @@ Released: 2026-06-14 on branch `release/26.1.2`.
 | 0016 | US import particles fall+death gated emit | LivingEntity fall + tickDeath POOF particles gated behind `particles.disableFallParticles` / `disableDeathParticles` yml toggles |
 | 0017 | startup banner | Print SourbyCraftBanner ASCII art to stdout at MinecraftServer.runServer before initServer |
 | 0018 | startup plugin summary hook | After enablePlugins(POSTWORLD), print compact category-grouped plugin listing via StartupPluginLog.printSummary with boot duration |
+| 0019 | v6 virtual threads for server thread pools | Gates makeExecutor / makeIoExecutor / makeExtraIoExecutor / DOWNLOAD_POOL on `SourbyCraftConfig.virtualThreads`; uses `Executors.newVirtualThreadPerTaskExecutor()` when enabled (default). Unbounded I/O concurrency without platform thread overhead |
+| 0020 | sounds.disablePiglinAngerSound gate | Piglin#getAmbientSound returns null when current activity sound is PIGLIN_ANGRY and yml toggle set |
+| 0021 | sounds.disableShieldSounds gate | Early-return at BlocksAttacks#onBlocked before playSound dispatch when yml toggle set |
+| 0022 | sounds.disablePistonSounds gate | Wraps both PistonBaseBlock playSound sites (PISTON_EXTEND + PISTON_CONTRACT) in single-line yml check |
 
 ### API patches (preserved from prior baseline)
 
