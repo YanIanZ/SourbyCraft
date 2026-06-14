@@ -15,10 +15,16 @@ import net.minecraft.util.datafix.DataFixers;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.dimension.LevelStem;
+import net.minecraft.world.level.levelgen.WorldGenSettings;
+import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.storage.LevelData;
+import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.PrimaryLevelData;
+import net.minecraft.world.level.storage.SavedDataStorage;
 import net.minecraft.world.level.validation.DirectoryValidator;
+import io.papermc.paper.world.PaperWorldLoader;
+import io.papermc.paper.world.saveddata.PaperLevelOverrides;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -51,6 +57,11 @@ public class SlimeLevelInstance extends ServerLevel {
 
     public final SlimeInMemoryWorld slimeInstance;
 
+    // Keep our own handle to the temp LevelStorageAccess so deleteTempFiles() can
+    // locate the directory after the world is unloaded. Paper 26.1.2 no longer
+    // exposes a levelStorageAccess field on ServerLevel.
+    private final LevelStorageSource.LevelStorageAccess customLevelStorageAccess;
+
     // Per-instance write chain: serializes saveWorld() writes for this world so an
     // older snapshot's write can never finish after a newer one's (stale persist).
     private java.util.concurrent.CompletableFuture<?> lastWrite =
@@ -63,26 +74,52 @@ public class SlimeLevelInstance extends ServerLevel {
             LevelStem levelStem,
             org.bukkit.World.Environment environment
     ) throws IOException {
+        this(
+                slimeBootstrap,
+                primaryLevelData,
+                worldKey,
+                levelStem,
+                environment,
+                CUSTOM_LEVEL_STORAGE.createAccess(slimeBootstrap.initial().getName() + UUID.randomUUID())
+        );
+    }
+
+    private SlimeLevelInstance(
+            SlimeBootstrap slimeBootstrap,
+            PrimaryLevelData primaryLevelData,
+            ResourceKey<net.minecraft.world.level.Level> worldKey,
+            LevelStem levelStem,
+            org.bukkit.World.Environment environment,
+            LevelStorageSource.LevelStorageAccess levelStorageAccess
+    ) throws IOException {
         super(
                 MinecraftServer.getServer(),
                 MinecraftServer.getServer().executor,
-                CUSTOM_LEVEL_STORAGE.createAccess(
-                        slimeBootstrap.initial().getName() + UUID.randomUUID(),
-                        (net.minecraft.resources.ResourceKey) (Object) worldKey
-                ),
-                primaryLevelData,
+                levelStorageAccess,
+                // Paper 26.1.2: ServerLevel now expects WorldGenSettings (was PrimaryLevelData).
+                // The level data is wired in via the SavedDataStorage / LoadedWorldData below.
+                buildWorldGenSettings(MinecraftServer.getServer()),
                 worldKey,
                 levelStem,
                 false,
                 0,
                 Collections.emptyList(),
                 true,
+                // Paper 26.1.2: added typeKey, savedDataStorage, loadedWorldData params.
                 null,
                 environment,
                 null,
-                null
+                null,
+                buildSavedDataStorage(MinecraftServer.getServer(), worldKey),
+                new PaperWorldLoader.LoadedWorldData(
+                        slimeBootstrap.initial().getName(),
+                        UUID.randomUUID(),
+                        null,
+                        PaperLevelOverrides.createFromLiveLevelData(primaryLevelData).attach(primaryLevelData, worldKey)
+                )
         );
 
+        this.customLevelStorageAccess = levelStorageAccess;
         this.slimeInstance = new SlimeInMemoryWorld(slimeBootstrap.initial(), this);
 
         SlimePropertyMap propertyMap = slimeBootstrap.initial().getPropertyMap();
@@ -113,6 +150,24 @@ public class SlimeLevelInstance extends ServerLevel {
                 getWorld().readBukkitValues(values);
             });
         }
+    }
+
+    private static WorldGenSettings buildWorldGenSettings(MinecraftServer server) {
+        // Reuse the existing server-wide WorldOptions seed/structure flags so chunk
+        // generation behaves consistently with the host server. The dimensions map
+        // is sourced from the registry — we never persist this storage for SWM.
+        WorldOptions options = new WorldOptions(0L, false, false);
+        return WorldGenSettings.of(options, server.registryAccess());
+    }
+
+    private static SavedDataStorage buildSavedDataStorage(
+            MinecraftServer server,
+            ResourceKey<net.minecraft.world.level.Level> worldKey
+    ) {
+        java.nio.file.Path dataFolder = server.storageSource
+                .getDimensionPath(worldKey)
+                .resolve(LevelResource.DATA.id());
+        return new SavedDataStorage(dataFolder, DataFixers.getDataFixer(), server.registryAccess());
     }
 
     @Override
@@ -180,7 +235,7 @@ public class SlimeLevelInstance extends ServerLevel {
     }
 
     public void deleteTempFiles() {
-        Path path = this.levelStorageAccess.levelDirectory.path();
+        Path path = this.customLevelStorageAccess.levelDirectory.path();
         try {
             java.nio.file.Files.walkFileTree(path, new java.nio.file.SimpleFileVisitor<>() {
                 @Override

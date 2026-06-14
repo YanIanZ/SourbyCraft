@@ -240,11 +240,11 @@ public class PufferfishConfig {
                 "If you want further away entities to tick more often, try 9.");
 
         for (EntityType<?> entityType : BuiltInRegistries.ENTITY_TYPE) {
-            entityType.dabEnabled = true; // reset all, before setting the ones to true
+            DabState.setEnabled(entityType, true); // reset all, before setting the ones to true
         }
         getStringList("dab.blacklisted-entities", "activation-range.blacklisted-entities", Collections.emptyList(), "A list of entities to ignore for activation")
                 .forEach(name -> EntityType.byString(name).ifPresentOrElse(entityType -> {
-                    entityType.dabEnabled = false;
+                    DabState.setEnabled(entityType, false);
                 }, () -> MinecraftServer.LOGGER.warn("Unknown entity \"" + name + "\"")));
 
         setComment("dab", "Optimizes entity brains when", "they're far away from the player");

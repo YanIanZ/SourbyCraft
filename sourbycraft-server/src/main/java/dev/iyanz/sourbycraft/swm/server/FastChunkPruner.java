@@ -14,7 +14,7 @@ public class FastChunkPruner {
     }
 
     public static boolean canBePruned(SlimeWorld world, LevelChunk chunk, ChunkEntitySlices slices) {
-        NewChunkHolder chunkHolder = ((ChunkSystemServerLevel) chunk.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunk.getPos().x, chunk.getPos().z);
+        NewChunkHolder chunkHolder = ((ChunkSystemServerLevel) chunk.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunk.getPos().x(), chunk.getPos().z());
 
         if (chunkHolder == null) {
             return false;

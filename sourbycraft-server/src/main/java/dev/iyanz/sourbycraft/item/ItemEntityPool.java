@@ -128,8 +128,8 @@ public final class ItemEntityPool {
         int count = 0;
         for (Entity e : level.getEntities().getAll()) {
             if (e instanceof ItemEntity
-                    && e.chunkPosition().x == chunkX
-                    && e.chunkPosition().z == chunkZ) {
+                    && e.chunkPosition().x() == chunkX
+                    && e.chunkPosition().z() == chunkZ) {
                 count++;
             }
         }
@@ -138,8 +138,8 @@ public final class ItemEntityPool {
             for (Entity e : level.getEntities().getAll()) {
                 if (toRemove <= 0) break;
                 if (e instanceof ItemEntity ie
-                        && ie.chunkPosition().x == chunkX
-                        && ie.chunkPosition().z == chunkZ) {
+                        && ie.chunkPosition().x() == chunkX
+                        && ie.chunkPosition().z() == chunkZ) {
                     release(ie);
                     toRemove--;
                 }
