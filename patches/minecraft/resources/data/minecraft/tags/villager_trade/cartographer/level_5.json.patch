@@ -1,9 +1,0 @@
---- a/data/minecraft/tags/villager_trade/cartographer/level_5.json
-+++ /dev/null
-@@ -1,6 +_,0 @@
--{
--  "values": [
--    "minecraft:cartographer/5/emerald_globe_banner_pattern",
--    "minecraft:cartographer/5/emerald_and_compass_woodland_mansion_map"
--  ]
--}

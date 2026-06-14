@@ -1,9 +1,0 @@
---- a/data/minecraft/tags/villager_trade/mason/level_5.json
-+++ /dev/null
-@@ -1,6 +_,0 @@
--{
--  "values": [
--    "minecraft:mason/5/emerald_quartz_pillar",
--    "minecraft:mason/5/emerald_quartz_block"
--  ]
--}

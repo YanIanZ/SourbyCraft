@@ -1,8 +1,0 @@
---- a/data/minecraft/tags/block/prevents_nearby_leaf_decay.json
-+++ /dev/null
-@@ -1,5 +_,0 @@
--{
--  "values": [
--    "#minecraft:logs"
--  ]
--}

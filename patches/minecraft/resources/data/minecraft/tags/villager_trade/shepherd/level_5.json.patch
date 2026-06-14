@@ -1,8 +1,0 @@
---- a/data/minecraft/tags/villager_trade/shepherd/level_5.json
-+++ /dev/null
-@@ -1,5 +_,0 @@
--{
--  "values": [
--    "minecraft:shepherd/5/emerald_painting"
--  ]
--}

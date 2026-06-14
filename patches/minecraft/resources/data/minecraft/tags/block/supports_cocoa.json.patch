@@ -1,8 +1,0 @@
---- a/data/minecraft/tags/block/supports_cocoa.json
-+++ /dev/null
-@@ -1,5 +_,0 @@
--{
--  "values": [
--    "#minecraft:jungle_logs"
--  ]
--}

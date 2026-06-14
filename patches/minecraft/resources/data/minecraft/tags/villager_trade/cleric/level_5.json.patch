@@ -1,9 +1,0 @@
---- a/data/minecraft/tags/villager_trade/cleric/level_5.json
-+++ /dev/null
-@@ -1,6 +_,0 @@
--{
--  "values": [
--    "minecraft:cleric/5/nether_wart_emerald",
--    "minecraft:cleric/5/emerald_experience_bottle"
--  ]
--}

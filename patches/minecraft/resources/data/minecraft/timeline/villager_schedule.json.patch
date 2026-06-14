@@ -1,8 +1,0 @@
---- a/data/minecraft/timeline/villager_schedule.json
-+++ b/data/minecraft/timeline/villager_schedule.json
-@@ -1,5 +_,4 @@
- {
--  "clock": "minecraft:overworld",
-   "period_ticks": 24000,
-   "tracks": {
-     "minecraft:gameplay/baby_villager_activity": {

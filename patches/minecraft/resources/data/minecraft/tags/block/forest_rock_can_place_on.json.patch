@@ -1,9 +1,0 @@
---- a/data/minecraft/tags/block/forest_rock_can_place_on.json
-+++ /dev/null
-@@ -1,6 +_,0 @@
--{
--  "values": [
--    "#minecraft:substrate_overworld",
--    "#minecraft:base_stone_overworld"
--  ]
--}

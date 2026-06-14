@@ -1,9 +1,0 @@
---- a/data/minecraft/tags/villager_trade/common_smith/level_2.json
-+++ /dev/null
-@@ -1,6 +_,0 @@
--{
--  "values": [
--    "minecraft:smith/2/iron_ingot_emerald",
--    "minecraft:smith/2/emerald_bell"
--  ]
--}

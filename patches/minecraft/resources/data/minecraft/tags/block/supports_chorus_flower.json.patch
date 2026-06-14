@@ -1,8 +1,0 @@
---- a/data/minecraft/tags/block/supports_chorus_flower.json
-+++ /dev/null
-@@ -1,5 +_,0 @@
--{
--  "values": [
--    "minecraft:end_stone"
--  ]
--}

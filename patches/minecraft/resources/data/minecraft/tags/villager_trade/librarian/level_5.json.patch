@@ -1,9 +1,0 @@
---- a/data/minecraft/tags/villager_trade/librarian/level_5.json
-+++ /dev/null
-@@ -1,6 +_,0 @@
--{
--  "values": [
--    "minecraft:librarian/5/emerald_yellow_candle",
--    "minecraft:librarian/5/emerald_red_candle"
--  ]
--}
