@@ -17,7 +17,7 @@ Released: 2026-06-14 on branch `release/26.1.2`.
 - Plugins relying on the deleted SourbyCraft NMS hooks (Pufferfish DAB writes, wildstacker NMS-only mode, parallel tick router, BossBar ticker) will see no-op behavior — their config knobs are dead.
 - PvP variant is gone — `variant=pvp` CLI flag is no longer recognized.
 
-## SourbyCraft patches (5 minecraft + 2 api + 14 server buildscript + 2 api buildscript)
+## SourbyCraft patches (13 minecraft + 4 api + 14 server buildscript + 2 api buildscript)
 
 ### Minecraft source patches
 
@@ -28,6 +28,14 @@ Released: 2026-06-14 on branch `release/26.1.2`.
 | 0003 | perf-engine P2 disable saving fireworks | NBT save skip for fireworks (same rationale) |
 | 0004 | raise fast-drop kick threshold 20 to 200 | Ctrl+Q on full inventory no longer trips anti-hack disconnect on fast clients |
 | 0005 | defer POI worldgen updates via scheduleOnMain | Moonrise treats chunk-gen workers as tick threads; `getServer().execute()` runs inline on worker and trips PoiManager's strict main-thread guard. Force-defer via `scheduleOnMain` |
+| 0006 | work around unnecessary chunk pos conversion | ChunkHolder.moonrise$getPlayers calls `isChunkSentBorderOnly` directly instead of dispatching through 4-arg `isChunkSent` |
+| 0007 | don't apply de-synced opencount for shulker boxes | Skip self-write in `triggerEvent`; desyncs if multiple opens trigger in same tick (block events batched) |
+| 0008 | fix redstone ore lit state desync on interact cancel | Resend `ClientboundBlockUpdatePacket` when interact event cancelled to keep client in sync |
+| 0009 | prevent healing amplifier from overflowing | `Math.max(_, 0)` clamp on all `4 << amp` and `6 << amp` sites in `HealOrHarmMobEffect` |
+| 0010 | split item lore lines on newline characters | Network-level `\n` splitter via new `SPLITTING_STREAM_CODEC` on `ItemLore`; routes through `ItemUtil.getLines` |
+| 0011 | fire PlayerPickupArrowEvent for creative players | Allow `CREATIVE_ONLY` pickup mode to fire event when `player.getAbilities().instabuild` |
+| 0012 | log exceptions caused by packet sending | Promote `Failed to sent packet` + `Double fault` from `LOGGER.debug` to `LOGGER.error` so connection errors visible at default log level |
+| 0013 | add option for processing default fluids with surface rules | Gate fluid-state skip branch on `SourbyCraftConfig.srPlaceInDefaultFluid`; lets surface rules run through default fluid (bedrock roof on water dimension) |
 
 ### API patches (preserved from prior baseline)
 
@@ -91,10 +99,11 @@ Group A (perf-engine):
 
 Group B (general optimization):
 - 0003 Optimise non-flush packet sending — netty `AbstractChannelHandlerContext.safeExecute` reflection conflicts with Paper 26.1.2 netty internals
+- 0012 resend more data on locale change — adds new methods + private field across 2 files; needs careful integration
+- 0016 fix elastic leash behaviour on unleash cancel — adds new boolean return method, deprecated wrapper; structural API change
 - 0018-0019 Improve-Player-canSee — requires CraftPlayer.canSee(NMS Entity) overload which was deleted
 - 0020 Keep-track-of-brain-behaviors-directly — 194-line Brain.java structural change conflicts
 - 0021 Convert-spawn-category-limits-and-ticks-to-array — Paper 26.1.2 still uses Object2LongOpenHashMap
-- 0008-0017 (Player events, item lore, locale resend, redstone desync fix, etc.) — blob mismatch; each needs individual re-anchoring
 
 Group C (Pufferfish): not attempted. Whole Pufferfish patchset would need re-derivation against new mob brain / activation range / SIMD detection APIs. `DabState` stub remains in place to preserve `gg.pufferfish.pufferfish.PufferfishConfig.setEnabled` config writes (reads now no-op).
 
