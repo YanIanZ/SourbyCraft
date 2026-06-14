@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 14 Jun 2026 18:56:59 +0700
+Subject: [PATCH] Fire PlayerPickupArrowEvent for creative players
+
+
+diff --git a/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java b/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
+index 183c4a8..d2756bc 100644
+--- a/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
++++ b/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
+@@ -691,7 +691,7 @@ public abstract class AbstractArrow extends Projectile {
+         if (!this.level().isClientSide() && (this.isInGround() || this.isNoPhysics()) && this.shakeTime <= 0) {
+             // CraftBukkit start
+             ItemStack itemstack = this.getPickupItem();
+-            if (this.pickup == Pickup.ALLOWED && !itemstack.isEmpty() && player.getInventory().canHold(itemstack) > 0) {
++            if (!itemstack.isEmpty() && ((this.pickup == Pickup.ALLOWED && player.getInventory().canHold(itemstack) > 0) || (this.pickup == AbstractArrow.Pickup.CREATIVE_ONLY && player.getAbilities().instabuild))) { // SourbyCraft - fire arrow pickup for creative players
+                 net.minecraft.world.entity.item.ItemEntity item = new net.minecraft.world.entity.item.ItemEntity(this.level(), this.getX(), this.getY(), this.getZ(), itemstack);
+                 org.bukkit.event.player.PlayerPickupArrowEvent event = new org.bukkit.event.player.PlayerPickupArrowEvent((org.bukkit.entity.Player) player.getBukkitEntity(), (org.bukkit.entity.Item) item.getBukkitEntity(), (org.bukkit.entity.AbstractArrow) this.getBukkitEntity());
+                 // event.setCancelled(!entityhuman.canPickUpLoot); TODO
