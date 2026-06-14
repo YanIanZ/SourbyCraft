@@ -1,0 +1,18 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 14 Jun 2026 23:50:24 +0700
+Subject: [PATCH] SourbyCraft US import: sounds disableShieldSounds gate
+
+
+diff --git a/net/minecraft/world/item/component/BlocksAttacks.java b/net/minecraft/world/item/component/BlocksAttacks.java
+index f5280c9..e8f2a4a 100644
+--- a/net/minecraft/world/item/component/BlocksAttacks.java
++++ b/net/minecraft/world/item/component/BlocksAttacks.java
+@@ -70,6 +70,7 @@ public record BlocksAttacks(
+     );
+ 
+     public void onBlocked(final ServerLevel level, final LivingEntity user) {
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("sounds.disableShieldSounds", false)) return; // SourbyCraft - US import
+         this.blockSound
+             .ifPresent(
+                 sound -> level.playSound(
