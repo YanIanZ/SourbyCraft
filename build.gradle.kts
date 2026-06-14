@@ -55,9 +55,9 @@ subprojects {
     configure<JavaPluginExtension> {
         withSourcesJar()
 
-        // SourbyCraft - dual Java 21/25 support: emit Java 21 bytecode, build with 25 toolchain
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
+        // SourbyCraft - Paper 26.1.2 requires Java 25 (unnamed variables, etc.)
+        sourceCompatibility = JavaVersion.VERSION_25
+        targetCompatibility = JavaVersion.VERSION_25
 
         toolchain {
             languageVersion = JavaLanguageVersion.of(25)
@@ -77,7 +77,7 @@ subprojects {
     }
     tasks.withType<JavaCompile> {
         options.encoding = Charsets.UTF_8.name()
-        options.release = 21 // SourbyCraft - dual Java 21/25: emit Java 21 bytecode for plugin compat
+        options.release = 25 // SourbyCraft - Paper 26.1.2 requires Java 25 (unnamed variables)
         options.isIncremental = true
         options.isFork = true
         options.forkOptions.memoryMaximumSize = "512M"
