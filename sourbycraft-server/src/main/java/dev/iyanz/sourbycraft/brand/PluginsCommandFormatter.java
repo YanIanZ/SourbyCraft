@@ -13,8 +13,8 @@ public final class PluginsCommandFormatter {
         boolean enabled();
     }
 
-    private static final String[] CATEGORY_ORDER = {"Core", "PvP", "World", "Util", "Economy", "Other"};
-    private static final String[] CATEGORY_COLORS = {"§6", "§c", "§a", "§e", "§b", "§8"};
+    private static final String[] CATEGORY_ORDER = {"Core", "World", "Util", "Economy", "Other"};
+    private static final String[] CATEGORY_COLORS = {"§6", "§a", "§e", "§b", "§8"};
 
     private PluginsCommandFormatter() {}
 
