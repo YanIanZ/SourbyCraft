@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/crafting_table.json
++++ b/data/minecraft/recipe/crafting_table.json
+@@ -9,6 +_,7 @@
+     "##"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:crafting_table"
+   },
+   "show_notification": false

@@ -1,0 +1,12 @@
+--- a/data/minecraft/tags/block/enderman_holdable.json
++++ b/data/minecraft/tags/block/enderman_holdable.json
+@@ -2,9 +_,6 @@
+   "values": [
+     "#minecraft:small_flowers",
+     "#minecraft:dirt",
+-    "#minecraft:mud",
+-    "#minecraft:moss_blocks",
+-    "#minecraft:grass_blocks",
+     "minecraft:sand",
+     "minecraft:red_sand",
+     "minecraft:gravel",

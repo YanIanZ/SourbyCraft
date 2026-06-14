@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/overoverkill.json
++++ b/data/minecraft/advancement/adventure/overoverkill.json
+@@ -34,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:mace"
+     },
+     "title": {

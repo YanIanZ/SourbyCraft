@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/end_crystal.json
++++ b/data/minecraft/recipe/end_crystal.json
+@@ -12,6 +_,7 @@
+     "GTG"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:end_crystal"
+   }
+ }

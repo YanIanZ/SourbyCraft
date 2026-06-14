@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/summon_iron_golem.json
++++ b/data/minecraft/advancement/adventure/summon_iron_golem.json
+@@ -22,6 +_,7 @@
+     },
+     "frame": "goal",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:carved_pumpkin"
+     },
+     "title": {

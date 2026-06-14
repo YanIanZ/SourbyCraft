@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/black_dye_from_wither_rose.json
++++ b/data/minecraft/recipe/black_dye_from_wither_rose.json
+@@ -6,6 +_,7 @@
+     "minecraft:wither_rose"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:black_dye"
+   }
+ }

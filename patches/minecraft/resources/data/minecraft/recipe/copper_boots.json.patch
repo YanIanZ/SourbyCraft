@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/copper_boots.json
++++ b/data/minecraft/recipe/copper_boots.json
+@@ -9,6 +_,7 @@
+     "X X"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:copper_boots"
+   }
+ }

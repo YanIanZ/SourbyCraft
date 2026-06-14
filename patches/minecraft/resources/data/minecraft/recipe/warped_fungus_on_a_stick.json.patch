@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/warped_fungus_on_a_stick.json
++++ b/data/minecraft/recipe/warped_fungus_on_a_stick.json
+@@ -10,6 +_,7 @@
+     " X"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:warped_fungus_on_a_stick"
+   }
+ }

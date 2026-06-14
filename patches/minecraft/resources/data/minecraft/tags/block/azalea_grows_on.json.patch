@@ -1,0 +1,10 @@
+--- a/data/minecraft/tags/block/azalea_grows_on.json
++++ b/data/minecraft/tags/block/azalea_grows_on.json
+@@ -1,6 +_,6 @@
+ {
+   "values": [
+-    "#minecraft:substrate_overworld",
++    "#minecraft:dirt",
+     "#minecraft:sand",
+     "#minecraft:terracotta",
+     "minecraft:snow_block",

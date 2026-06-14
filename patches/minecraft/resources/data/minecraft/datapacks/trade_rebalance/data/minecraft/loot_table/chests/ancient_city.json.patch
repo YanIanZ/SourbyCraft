@@ -1,0 +1,14 @@
+--- a/data/minecraft/datapacks/trade_rebalance/data/minecraft/loot_table/chests/ancient_city.json
++++ b/data/minecraft/datapacks/trade_rebalance/data/minecraft/loot_table/chests/ancient_city.json
+@@ -53,6 +_,11 @@
+         },
+         {
+           "type": "minecraft:item",
++          "name": "minecraft:name_tag",
++          "weight": 2
++        },
++        {
++          "type": "minecraft:item",
+           "functions": [
+             {
+               "add": false,

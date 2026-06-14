@@ -1,0 +1,11 @@
+--- a/data/minecraft/tags/item/piglin_loved.json
++++ b/data/minecraft/tags/item/piglin_loved.json
+@@ -24,7 +_,6 @@
+     "minecraft:golden_axe",
+     "minecraft:golden_hoe",
+     "minecraft:raw_gold",
+-    "minecraft:raw_gold_block",
+-    "minecraft:golden_dandelion"
++    "minecraft:raw_gold_block"
+   ]
+ }

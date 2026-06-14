@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/birch_button.json
++++ b/data/minecraft/recipe/birch_button.json
+@@ -6,6 +_,7 @@
+     "minecraft:birch_planks"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:birch_button"
+   }
+ }

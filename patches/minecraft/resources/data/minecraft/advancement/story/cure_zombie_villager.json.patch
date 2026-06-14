@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/story/cure_zombie_villager.json
++++ b/data/minecraft/advancement/story/cure_zombie_villager.json
+@@ -11,6 +_,7 @@
+     },
+     "frame": "goal",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:golden_apple"
+     },
+     "title": {

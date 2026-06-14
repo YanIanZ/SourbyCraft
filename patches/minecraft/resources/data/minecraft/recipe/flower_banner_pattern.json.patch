@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/flower_banner_pattern.json
++++ b/data/minecraft/recipe/flower_banner_pattern.json
+@@ -6,6 +_,7 @@
+     "minecraft:oxeye_daisy"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:flower_banner_pattern"
+   }
+ }

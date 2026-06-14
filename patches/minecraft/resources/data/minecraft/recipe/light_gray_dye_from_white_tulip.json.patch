@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/light_gray_dye_from_white_tulip.json
++++ b/data/minecraft/recipe/light_gray_dye_from_white_tulip.json
+@@ -6,6 +_,7 @@
+     "minecraft:white_tulip"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:light_gray_dye"
+   }
+ }

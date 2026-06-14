@@ -1,0 +1,11 @@
+--- /dev/null
++++ b/data/minecraft/recipe/chiseled_stone_bricks_stone_from_stonecutting.json
+@@ -1,0 +_,8 @@
++{
++  "type": "minecraft:stonecutting",
++  "ingredient": "minecraft:stone",
++  "result": {
++    "count": 1,
++    "id": "minecraft:chiseled_stone_bricks"
++  }
++}

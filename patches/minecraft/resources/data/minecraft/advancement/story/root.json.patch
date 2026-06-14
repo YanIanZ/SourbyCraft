@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/story/root.json
++++ b/data/minecraft/advancement/story/root.json
+@@ -18,6 +_,7 @@
+       "translate": "advancements.story.root.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:grass_block"
+     },
+     "show_toast": false,

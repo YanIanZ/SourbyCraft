@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/place_dried_ghast_in_water.json
++++ b/data/minecraft/advancement/husbandry/place_dried_ghast_in_water.json
+@@ -21,6 +_,7 @@
+       "translate": "advancements.husbandry.place_dried_ghast_in_water.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:dried_ghast"
+     },
+     "title": {

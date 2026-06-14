@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/spruce_chest_boat.json
++++ b/data/minecraft/recipe/spruce_chest_boat.json
+@@ -7,6 +_,7 @@
+     "minecraft:spruce_boat"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:spruce_chest_boat"
+   }
+ }

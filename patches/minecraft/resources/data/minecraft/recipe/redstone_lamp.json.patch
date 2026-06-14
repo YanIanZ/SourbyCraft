@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/redstone_lamp.json
++++ b/data/minecraft/recipe/redstone_lamp.json
+@@ -11,6 +_,7 @@
+     " R "
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:redstone_lamp"
+   }
+ }

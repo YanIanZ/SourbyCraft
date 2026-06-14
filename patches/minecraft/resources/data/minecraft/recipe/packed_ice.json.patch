@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/packed_ice.json
++++ b/data/minecraft/recipe/packed_ice.json
+@@ -13,6 +_,7 @@
+     "minecraft:ice"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:packed_ice"
+   }
+ }

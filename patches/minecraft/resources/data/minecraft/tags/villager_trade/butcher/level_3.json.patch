@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/villager_trade/butcher/level_3.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:butcher/3/mutton_emerald",
+-    "minecraft:butcher/3/beef_emerald"
+-  ]
+-}

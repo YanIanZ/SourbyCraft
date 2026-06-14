@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/fletching_table.json
++++ b/data/minecraft/recipe/fletching_table.json
+@@ -11,6 +_,7 @@
+     "##"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:fletching_table"
+   }
+ }

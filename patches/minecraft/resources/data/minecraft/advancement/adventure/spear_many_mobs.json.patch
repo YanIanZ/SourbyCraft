@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/spear_many_mobs.json
++++ b/data/minecraft/advancement/adventure/spear_many_mobs.json
+@@ -14,6 +_,7 @@
+     },
+     "frame": "goal",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:iron_spear"
+     },
+     "title": {

@@ -1,0 +1,10 @@
+--- a/data/minecraft/cow_variant/temperate.json
++++ b/data/minecraft/cow_variant/temperate.json
+@@ -1,6 +_,5 @@
+ {
+-  "asset_id": "minecraft:entity/cow/cow_temperate",
+-  "baby_asset_id": "minecraft:entity/cow/cow_temperate_baby",
++  "asset_id": "minecraft:entity/cow/temperate_cow",
+   "spawn_conditions": [
+     {
+       "priority": 0

@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/block/supports_vegetation.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:substrate_overworld",
+-    "minecraft:farmland"
+-  ]
+-}

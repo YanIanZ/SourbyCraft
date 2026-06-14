@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/waxed_weathered_copper_grate_from_honeycomb.json
++++ b/data/minecraft/recipe/waxed_weathered_copper_grate_from_honeycomb.json
+@@ -7,6 +_,7 @@
+     "minecraft:honeycomb"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:waxed_weathered_copper_grate"
+   }
+ }

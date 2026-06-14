@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/tactical_fishing.json
++++ b/data/minecraft/advancement/husbandry/tactical_fishing.json
+@@ -39,6 +_,7 @@
+       "translate": "advancements.husbandry.tactical_fishing.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:pufferfish_bucket"
+     },
+     "title": {

@@ -1,0 +1,14 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_small_dripleaf.json
++++ /dev/null
+@@ -1,11 +_,0 @@
+-{
+-  "gives": {
+-    "count": 2,
+-    "id": "minecraft:small_dripleaf"
+-  },
+-  "max_uses": 5.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "id": "minecraft:emerald"
+-  }
+-}

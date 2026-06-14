@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/nether/find_bastion.json
++++ b/data/minecraft/advancement/nether/find_bastion.json
+@@ -23,6 +_,7 @@
+       "translate": "advancements.nether.find_bastion.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:polished_blackstone_bricks"
+     },
+     "title": {

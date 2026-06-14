@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/story/upgrade_tools.json
++++ b/data/minecraft/advancement/story/upgrade_tools.json
+@@ -17,6 +_,7 @@
+       "translate": "advancements.story.upgrade_tools.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:stone_pickaxe"
+     },
+     "title": {

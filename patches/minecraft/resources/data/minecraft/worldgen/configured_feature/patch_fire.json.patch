@@ -1,0 +1,70 @@
+--- a/data/minecraft/worldgen/configured_feature/patch_fire.json
++++ b/data/minecraft/worldgen/configured_feature/patch_fire.json
+@@ -1,19 +_,52 @@
+ {
+-  "type": "minecraft:simple_block",
++  "type": "minecraft:random_patch",
+   "config": {
+-    "to_place": {
+-      "type": "minecraft:simple_state_provider",
+-      "state": {
+-        "Name": "minecraft:fire",
+-        "Properties": {
+-          "age": "0",
+-          "east": "false",
+-          "north": "false",
+-          "south": "false",
+-          "up": "false",
+-          "west": "false"
+-        }
+-      }
+-    }
++    "feature": {
++      "feature": {
++        "type": "minecraft:simple_block",
++        "config": {
++          "to_place": {
++            "type": "minecraft:simple_state_provider",
++            "state": {
++              "Name": "minecraft:fire",
++              "Properties": {
++                "age": "0",
++                "east": "false",
++                "north": "false",
++                "south": "false",
++                "up": "false",
++                "west": "false"
++              }
++            }
++          }
++        }
++      },
++      "placement": [
++        {
++          "type": "minecraft:block_predicate_filter",
++          "predicate": {
++            "type": "minecraft:all_of",
++            "predicates": [
++              {
++                "type": "minecraft:matching_blocks",
++                "blocks": "minecraft:air"
++              },
++              {
++                "type": "minecraft:matching_blocks",
++                "blocks": "minecraft:netherrack",
++                "offset": [
++                  0,
++                  -1,
++                  0
++                ]
++              }
++            ]
++          }
++        }
++      ]
++    },
++    "tries": 96,
++    "xz_spread": 7,
++    "y_spread": 3
+   }
+ }

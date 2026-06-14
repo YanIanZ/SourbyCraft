@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/stone_brick_stairs_from_stone_stonecutting.json
++++ b/data/minecraft/recipe/stone_brick_stairs_from_stone_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:stone",
+   "result": {
++    "count": 1,
+     "id": "minecraft:stone_brick_stairs"
+   }
+ }

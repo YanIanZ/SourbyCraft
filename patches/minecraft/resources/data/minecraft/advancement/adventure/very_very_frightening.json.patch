@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/very_very_frightening.json
++++ b/data/minecraft/advancement/adventure/very_very_frightening.json
+@@ -23,6 +_,7 @@
+       "translate": "advancements.adventure.very_very_frightening.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:trident"
+     },
+     "title": {

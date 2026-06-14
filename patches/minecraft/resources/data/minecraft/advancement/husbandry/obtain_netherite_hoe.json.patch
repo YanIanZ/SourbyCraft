@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/obtain_netherite_hoe.json
++++ b/data/minecraft/advancement/husbandry/obtain_netherite_hoe.json
+@@ -18,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:netherite_hoe"
+     },
+     "title": {

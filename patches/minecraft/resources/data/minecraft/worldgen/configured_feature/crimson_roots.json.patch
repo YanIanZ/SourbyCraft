@@ -1,0 +1,14 @@
+--- a/data/minecraft/worldgen/configured_feature/crimson_roots.json
++++ /dev/null
+@@ -1,11 +_,0 @@
+-{
+-  "type": "minecraft:simple_block",
+-  "config": {
+-    "to_place": {
+-      "type": "minecraft:simple_state_provider",
+-      "state": {
+-        "Name": "minecraft:crimson_roots"
+-      }
+-    }
+-  }
+-}

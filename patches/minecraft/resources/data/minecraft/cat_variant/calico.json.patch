@@ -1,0 +1,10 @@
+--- a/data/minecraft/cat_variant/calico.json
++++ b/data/minecraft/cat_variant/calico.json
+@@ -1,6 +_,5 @@
+ {
+-  "asset_id": "minecraft:entity/cat/cat_calico",
+-  "baby_asset_id": "minecraft:entity/cat/cat_calico_baby",
++  "asset_id": "minecraft:entity/cat/calico",
+   "spawn_conditions": [
+     {
+       "priority": 0

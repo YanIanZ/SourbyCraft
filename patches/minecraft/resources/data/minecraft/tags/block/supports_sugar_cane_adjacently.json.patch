@@ -1,0 +1,8 @@
+--- a/data/minecraft/tags/block/supports_sugar_cane_adjacently.json
++++ /dev/null
+@@ -1,5 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:frosted_ice"
+-  ]
+-}

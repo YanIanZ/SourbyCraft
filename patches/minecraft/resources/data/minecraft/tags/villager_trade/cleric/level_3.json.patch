@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/villager_trade/cleric/level_3.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:cleric/3/rabbit_foot_emerald",
+-    "minecraft:cleric/3/emerald_glowstone"
+-  ]
+-}

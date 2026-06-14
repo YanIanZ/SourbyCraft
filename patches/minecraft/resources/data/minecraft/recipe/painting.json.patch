@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/painting.json
++++ b/data/minecraft/recipe/painting.json
+@@ -11,6 +_,7 @@
+     "###"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:painting"
+   }
+ }

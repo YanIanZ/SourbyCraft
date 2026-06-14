@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/chest.json
++++ b/data/minecraft/recipe/chest.json
+@@ -10,6 +_,7 @@
+     "###"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:chest"
+   }
+ }

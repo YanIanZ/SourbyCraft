@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/nether/distract_piglin.json
++++ b/data/minecraft/advancement/nether/distract_piglin.json
+@@ -163,6 +_,7 @@
+       "translate": "advancements.nether.distract_piglin.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:gold_ingot"
+     },
+     "title": {

@@ -1,0 +1,9 @@
+--- a/data/minecraft/frog_variant/temperate.json
++++ b/data/minecraft/frog_variant/temperate.json
+@@ -1,5 +_,5 @@
+ {
+-  "asset_id": "minecraft:entity/frog/frog_temperate",
++  "asset_id": "minecraft:entity/frog/temperate_frog",
+   "spawn_conditions": [
+     {
+       "priority": 0

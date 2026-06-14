@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/lime_harness.json
++++ b/data/minecraft/recipe/lime_harness.json
+@@ -12,6 +_,7 @@
+     "G#G"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:lime_harness"
+   }
+ }

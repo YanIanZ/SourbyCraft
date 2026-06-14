@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/hay_block.json
++++ b/data/minecraft/recipe/hay_block.json
+@@ -13,6 +_,7 @@
+     "minecraft:wheat"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:hay_block"
+   }
+ }

@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/hopper_minecart.json
++++ b/data/minecraft/recipe/hopper_minecart.json
+@@ -6,6 +_,7 @@
+     "minecraft:minecart"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:hopper_minecart"
+   }
+ }

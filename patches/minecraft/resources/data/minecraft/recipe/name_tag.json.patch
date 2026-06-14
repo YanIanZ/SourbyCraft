@@ -1,0 +1,18 @@
+--- a/data/minecraft/recipe/name_tag.json
++++ /dev/null
+@@ -1,15 +_,0 @@
+-{
+-  "type": "minecraft:crafting_shaped",
+-  "category": "equipment",
+-  "key": {
+-    "#": "minecraft:paper",
+-    "X": "#minecraft:metal_nuggets"
+-  },
+-  "pattern": [
+-    " X",
+-    "# "
+-  ],
+-  "result": {
+-    "id": "minecraft:name_tag"
+-  }
+-}

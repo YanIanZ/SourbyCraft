@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/block/supports_azalea.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:supports_vegetation",
+-    "minecraft:clay"
+-  ]
+-}

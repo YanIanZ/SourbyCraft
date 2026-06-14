@@ -1,0 +1,14 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_tube_coral_block.json
++++ /dev/null
+@@ -1,11 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:tube_coral_block"
+-  },
+-  "max_uses": 8.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "count": 3.0,
+-    "id": "minecraft:emerald"
+-  }
+-}

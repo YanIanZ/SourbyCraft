@@ -1,0 +1,10 @@
+--- a/data/minecraft/cat_variant/all_black.json
++++ b/data/minecraft/cat_variant/all_black.json
+@@ -1,6 +_,5 @@
+ {
+-  "asset_id": "minecraft:entity/cat/cat_all_black",
+-  "baby_asset_id": "minecraft:entity/cat/cat_all_black_baby",
++  "asset_id": "minecraft:entity/cat/all_black",
+   "spawn_conditions": [
+     {
+       "condition": {

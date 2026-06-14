@@ -1,0 +1,10 @@
+--- a/data/minecraft/cat_variant/white.json
++++ b/data/minecraft/cat_variant/white.json
+@@ -1,6 +_,5 @@
+ {
+-  "asset_id": "minecraft:entity/cat/cat_white",
+-  "baby_asset_id": "minecraft:entity/cat/cat_white_baby",
++  "asset_id": "minecraft:entity/cat/white",
+   "spawn_conditions": [
+     {
+       "priority": 0

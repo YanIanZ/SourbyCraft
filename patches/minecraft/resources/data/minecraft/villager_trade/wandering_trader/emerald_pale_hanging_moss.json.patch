@@ -1,0 +1,13 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_pale_hanging_moss.json
++++ /dev/null
+@@ -1,10 +_,0 @@
+-{
+-  "gives": {
+-    "count": 3,
+-    "id": "minecraft:pale_hanging_moss"
+-  },
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "id": "minecraft:emerald"
+-  }
+-}

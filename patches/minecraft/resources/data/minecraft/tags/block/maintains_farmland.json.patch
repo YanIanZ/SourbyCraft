@@ -1,0 +1,12 @@
+--- a/data/minecraft/tags/block/maintains_farmland.json
++++ b/data/minecraft/tags/block/maintains_farmland.json
+@@ -10,8 +_,6 @@
+     "minecraft:torchflower_crop",
+     "minecraft:torchflower",
+     "minecraft:pitcher_crop",
+-    "minecraft:wheat",
+-    "minecraft:moving_piston",
+-    "#minecraft:fence_gates"
++    "minecraft:wheat"
+   ]
+ }

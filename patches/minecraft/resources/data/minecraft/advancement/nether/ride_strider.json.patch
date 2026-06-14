@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/nether/ride_strider.json
++++ b/data/minecraft/advancement/nether/ride_strider.json
+@@ -26,6 +_,7 @@
+       "translate": "advancements.nether.ride_strider.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:warped_fungus_on_a_stick"
+     },
+     "title": {

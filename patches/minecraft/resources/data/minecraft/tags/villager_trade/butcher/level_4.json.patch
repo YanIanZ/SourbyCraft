@@ -1,0 +1,8 @@
+--- a/data/minecraft/tags/villager_trade/butcher/level_4.json
++++ /dev/null
+@@ -1,5 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:butcher/4/dried_kelp_block_emerald"
+-  ]
+-}

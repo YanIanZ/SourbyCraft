@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/crafter.json
++++ b/data/minecraft/recipe/crafter.json
+@@ -13,6 +_,7 @@
+     "RDR"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:crafter"
+   }
+ }

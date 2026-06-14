@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/plant_any_sniffer_seed.json
++++ b/data/minecraft/advancement/husbandry/plant_any_sniffer_seed.json
+@@ -30,6 +_,7 @@
+     },
+     "hidden": true,
+     "icon": {
++      "count": 1,
+       "id": "minecraft:pitcher_pod"
+     },
+     "title": {

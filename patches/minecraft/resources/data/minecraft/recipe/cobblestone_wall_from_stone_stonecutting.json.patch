@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/cobblestone_wall_from_stone_stonecutting.json
++++ /dev/null
+@@ -1,7 +_,0 @@
+-{
+-  "type": "minecraft:stonecutting",
+-  "ingredient": "minecraft:stone",
+-  "result": {
+-    "id": "minecraft:cobblestone_wall"
+-  }
+-}

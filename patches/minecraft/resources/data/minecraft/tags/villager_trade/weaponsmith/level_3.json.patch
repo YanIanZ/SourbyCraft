@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/villager_trade/weaponsmith/level_3.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:common_smith/level_3",
+-    "minecraft:weaponsmith/3/flint_emerald"
+-  ]
+-}

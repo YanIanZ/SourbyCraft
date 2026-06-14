@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/balanced_diet.json
++++ b/data/minecraft/advancement/husbandry/balanced_diet.json
+@@ -328,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:apple"
+     },
+     "title": {

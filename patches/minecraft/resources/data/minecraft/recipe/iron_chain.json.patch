@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/iron_chain.json
++++ b/data/minecraft/recipe/iron_chain.json
+@@ -11,6 +_,7 @@
+     "N"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:iron_chain"
+   }
+ }

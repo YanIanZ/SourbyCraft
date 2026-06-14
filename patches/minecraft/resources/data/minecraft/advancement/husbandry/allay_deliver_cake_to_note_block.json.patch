@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/allay_deliver_cake_to_note_block.json
++++ b/data/minecraft/advancement/husbandry/allay_deliver_cake_to_note_block.json
+@@ -29,6 +_,7 @@
+     },
+     "hidden": true,
+     "icon": {
++      "count": 1,
+       "id": "minecraft:note_block"
+     },
+     "title": {

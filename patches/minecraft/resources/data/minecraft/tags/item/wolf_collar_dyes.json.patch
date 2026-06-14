@@ -1,0 +1,8 @@
+--- a/data/minecraft/tags/item/wolf_collar_dyes.json
++++ /dev/null
+@@ -1,5 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:dyes"
+-  ]
+-}

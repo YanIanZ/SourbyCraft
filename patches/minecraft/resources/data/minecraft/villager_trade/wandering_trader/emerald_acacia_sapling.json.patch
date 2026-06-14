@@ -1,0 +1,14 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_acacia_sapling.json
++++ /dev/null
+@@ -1,11 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:acacia_sapling"
+-  },
+-  "max_uses": 8.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "count": 5.0,
+-    "id": "minecraft:emerald"
+-  }
+-}

@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/block/support_override_cactus_flower.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:cactus",
+-    "minecraft:farmland"
+-  ]
+-}

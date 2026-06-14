@@ -1,0 +1,17 @@
+--- a/data/minecraft/worldgen/configured_feature/tall_grass.json
++++ /dev/null
+@@ -1,14 +_,0 @@
+-{
+-  "type": "minecraft:simple_block",
+-  "config": {
+-    "to_place": {
+-      "type": "minecraft:simple_state_provider",
+-      "state": {
+-        "Name": "minecraft:tall_grass",
+-        "Properties": {
+-          "half": "lower"
+-        }
+-      }
+-    }
+-  }
+-}

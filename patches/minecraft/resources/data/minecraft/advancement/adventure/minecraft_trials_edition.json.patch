@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/minecraft_trials_edition.json
++++ b/data/minecraft/advancement/adventure/minecraft_trials_edition.json
+@@ -23,6 +_,7 @@
+       "translate": "advancements.adventure.minecraft_trials_edition.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:chiseled_tuff"
+     },
+     "title": {

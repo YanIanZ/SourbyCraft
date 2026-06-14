@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/tnt.json
++++ b/data/minecraft/recipe/tnt.json
+@@ -14,6 +_,7 @@
+     "X#X"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:tnt"
+   }
+ }

@@ -1,0 +1,14 @@
+--- a/data/minecraft/villager_trade/shepherd/1/emerald_shears.json
++++ /dev/null
+@@ -1,11 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:shears"
+-  },
+-  "max_uses": 12.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "count": 2.0,
+-    "id": "minecraft:emerald"
+-  }
+-}

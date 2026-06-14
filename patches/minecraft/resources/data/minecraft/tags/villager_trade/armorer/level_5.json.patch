@@ -1,0 +1,10 @@
+--- a/data/minecraft/tags/villager_trade/armorer/level_5.json
++++ /dev/null
+@@ -1,7 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:common_smith/level_5",
+-    "minecraft:armorer/5/emerald_enchanted_diamond_helmet",
+-    "minecraft:armorer/5/emerald_enchanted_diamond_chestplate"
+-  ]
+-}

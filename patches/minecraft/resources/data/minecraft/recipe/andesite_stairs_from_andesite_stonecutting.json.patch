@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/andesite_stairs_from_andesite_stonecutting.json
++++ b/data/minecraft/recipe/andesite_stairs_from_andesite_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:andesite",
+   "result": {
++    "count": 1,
+     "id": "minecraft:andesite_stairs"
+   }
+ }

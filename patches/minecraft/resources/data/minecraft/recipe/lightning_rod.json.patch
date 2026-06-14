@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/lightning_rod.json
++++ b/data/minecraft/recipe/lightning_rod.json
+@@ -10,6 +_,7 @@
+     "#"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:lightning_rod"
+   }
+ }

@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/brewing_stand.json
++++ b/data/minecraft/recipe/brewing_stand.json
+@@ -10,6 +_,7 @@
+     "###"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:brewing_stand"
+   }
+ }

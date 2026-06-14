@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/dye_purple_wool.json
++++ b/data/minecraft/recipe/dye_purple_wool.json
+@@ -23,6 +_,7 @@
+     ]
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:purple_wool"
+   }
+ }

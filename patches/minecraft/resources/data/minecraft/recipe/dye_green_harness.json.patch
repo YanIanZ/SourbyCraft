@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/dye_green_harness.json
++++ b/data/minecraft/recipe/dye_green_harness.json
+@@ -23,6 +_,7 @@
+     ]
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:green_harness"
+   }
+ }

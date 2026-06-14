@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/nether/root.json
++++ b/data/minecraft/advancement/nether/root.json
+@@ -14,6 +_,7 @@
+       "translate": "advancements.nether.root.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:red_nether_bricks"
+     },
+     "show_toast": false,

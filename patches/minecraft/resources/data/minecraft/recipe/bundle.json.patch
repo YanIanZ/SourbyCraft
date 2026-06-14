@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/bundle.json
++++ b/data/minecraft/recipe/bundle.json
+@@ -10,6 +_,7 @@
+     "#"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:bundle"
+   }
+ }

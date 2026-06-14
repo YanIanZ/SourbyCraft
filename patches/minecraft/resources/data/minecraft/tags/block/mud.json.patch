@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/block/mud.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:mud",
+-    "minecraft:muddy_mangrove_roots"
+-  ]
+-}

@@ -1,0 +1,10 @@
+--- a/data/minecraft/chicken_variant/warm.json
++++ b/data/minecraft/chicken_variant/warm.json
+@@ -1,6 +_,5 @@
+ {
+-  "asset_id": "minecraft:entity/chicken/chicken_warm",
+-  "baby_asset_id": "minecraft:entity/chicken/chicken_warm_baby",
++  "asset_id": "minecraft:entity/chicken/warm_chicken",
+   "spawn_conditions": [
+     {
+       "condition": {

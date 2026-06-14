@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/red_dye_from_beetroot.json
++++ b/data/minecraft/recipe/red_dye_from_beetroot.json
+@@ -6,6 +_,7 @@
+     "minecraft:beetroot"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:red_dye"
+   }
+ }

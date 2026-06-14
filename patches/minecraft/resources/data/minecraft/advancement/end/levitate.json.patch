@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/end/levitate.json
++++ b/data/minecraft/advancement/end/levitate.json
+@@ -18,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:shulker_shell"
+     },
+     "title": {

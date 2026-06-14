@@ -1,0 +1,11 @@
+--- /dev/null
++++ b/data/minecraft/recipe/prismarine_brick_stairs_from_prismarine_stonecutting.json
+@@ -1,0 +_,8 @@
++{
++  "type": "minecraft:stonecutting",
++  "ingredient": "minecraft:prismarine_bricks",
++  "result": {
++    "count": 1,
++    "id": "minecraft:prismarine_brick_stairs"
++  }
++}

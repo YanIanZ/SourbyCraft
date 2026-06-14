@@ -1,0 +1,13 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_name_tag.json
++++ /dev/null
+@@ -1,10 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:name_tag"
+-  },
+-  "max_uses": 5.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "id": "minecraft:emerald"
+-  }
+-}

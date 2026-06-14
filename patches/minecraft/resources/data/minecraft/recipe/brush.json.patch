@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/brush.json
++++ b/data/minecraft/recipe/brush.json
+@@ -12,6 +_,7 @@
+     "I"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:brush"
+   }
+ }

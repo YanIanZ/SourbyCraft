@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/purple_banner.json
++++ b/data/minecraft/recipe/purple_banner.json
+@@ -12,6 +_,7 @@
+     " | "
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:purple_banner"
+   }
+ }

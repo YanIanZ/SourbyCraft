@@ -1,0 +1,10 @@
+--- a/data/minecraft/tags/block/supports_dry_vegetation.json
++++ /dev/null
+@@ -1,7 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:sand",
+-    "#minecraft:terracotta",
+-    "#minecraft:supports_vegetation"
+-  ]
+-}

@@ -1,0 +1,10 @@
+--- a/data/minecraft/cat_variant/tabby.json
++++ b/data/minecraft/cat_variant/tabby.json
+@@ -1,6 +_,5 @@
+ {
+-  "asset_id": "minecraft:entity/cat/cat_tabby",
+-  "baby_asset_id": "minecraft:entity/cat/cat_tabby_baby",
++  "asset_id": "minecraft:entity/cat/tabby",
+   "spawn_conditions": [
+     {
+       "priority": 0

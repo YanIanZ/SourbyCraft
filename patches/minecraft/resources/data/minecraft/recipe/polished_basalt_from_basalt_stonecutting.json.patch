@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/polished_basalt_from_basalt_stonecutting.json
++++ b/data/minecraft/recipe/polished_basalt_from_basalt_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:basalt",
+   "result": {
++    "count": 1,
+     "id": "minecraft:polished_basalt"
+   }
+ }

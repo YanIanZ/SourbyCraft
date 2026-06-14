@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/blue_dye.json
++++ b/data/minecraft/recipe/blue_dye.json
+@@ -6,6 +_,7 @@
+     "minecraft:lapis_lazuli"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:blue_dye"
+   }
+ }

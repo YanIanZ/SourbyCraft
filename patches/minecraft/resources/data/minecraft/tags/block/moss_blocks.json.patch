@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/block/moss_blocks.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:moss_block",
+-    "minecraft:pale_moss_block"
+-  ]
+-}

@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/mossy_cobblestone_stairs_from_mossy_cobblestone_stonecutting.json
++++ b/data/minecraft/recipe/mossy_cobblestone_stairs_from_mossy_cobblestone_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:mossy_cobblestone",
+   "result": {
++    "count": 1,
+     "id": "minecraft:mossy_cobblestone_stairs"
+   }
+ }

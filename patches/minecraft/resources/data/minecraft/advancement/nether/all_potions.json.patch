@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/nether/all_potions.json
++++ b/data/minecraft/advancement/nether/all_potions.json
+@@ -32,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:milk_bucket"
+     },
+     "title": {

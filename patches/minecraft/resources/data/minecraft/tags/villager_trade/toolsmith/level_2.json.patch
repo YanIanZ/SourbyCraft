@@ -1,0 +1,8 @@
+--- a/data/minecraft/tags/villager_trade/toolsmith/level_2.json
++++ /dev/null
+@@ -1,5 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:common_smith/level_2"
+-  ]
+-}

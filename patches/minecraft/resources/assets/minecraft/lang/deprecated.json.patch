@@ -1,0 +1,38 @@
+--- a/assets/minecraft/lang/deprecated.json
++++ b/assets/minecraft/lang/deprecated.json
+@@ -342,16 +_,7 @@
+     "gamerule.doFireTick",
+     "gamerule.allowFireTicksAwayFromPlayer",
+     "options.showNowPlayingToast",
+-    "options.showNowPlayingToast.tooltip",
+-    "gamerule.universalAnger.description",
+-    "commands.time.query",
+-    "commands.time.set",
+-    "chat.disabled.launcher",
+-    "chat.disabled.profile",
+-    "chat.disabled.profile.moreInfo",
+-    "subtitles.entity.baby_horse.land",
+-    "selectWorld.world_gen_settings_access",
+-    "selectWorld.backupRequiredTooltip"
++    "options.showNowPlayingToast.tooltip"
+   ],
+   "renamed": {
+     "item.minecraft.dune_armor_trim_smithing_template.new": "item.minecraft.dune_armor_trim_smithing_template",
+@@ -474,6 +_,7 @@
+     "gamerule.playersNetherPortalDefaultDelay.description": "gamerule.minecraft.players_nether_portal_default_delay.description",
+     "gamerule.playersNetherPortalCreativeDelay.description": "gamerule.minecraft.players_nether_portal_creative_delay.description",
+     "gamerule.forgiveDeadPlayers.description": "gamerule.minecraft.forgive_dead_players.description",
++    "gamerule.universalAnger.description": "gamerule.minecraft.universal_anger.description",
+     "gamerule.playersSleepingPercentage.description": "gamerule.minecraft.players_sleeping_percentage.description",
+     "gamerule.blockExplosionDropDecay.description": "gamerule.minecraft.block_explosion_drop_decay.description",
+     "gamerule.mobExplosionDropDecay.description": "gamerule.minecraft.mob_explosion_drop_decay.description",
+@@ -495,8 +_,6 @@
+     "gamerule.category.mobs": "gamerule.category.minecraft.mobs",
+     "gamerule.category.player":  "gamerule.category.minecraft.player",
+     "gamerule.category.spawning": "gamerule.category.minecraft.spawning",
+-    "gamerule.category.updates":  "gamerule.category.minecraft.updates",
+-    "selecteWorld.backupRequiredTooltip":  "selectWorld.backupRequiredTooltip",
+-    "subtitles.entity.baby_chicken.hurts": "subtitles.entity.baby_chicken.hurt"
++    "gamerule.category.updates":  "gamerule.category.minecraft.updates"
+   }
+ }

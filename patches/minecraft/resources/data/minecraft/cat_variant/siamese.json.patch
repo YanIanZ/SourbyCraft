@@ -1,0 +1,10 @@
+--- a/data/minecraft/cat_variant/siamese.json
++++ b/data/minecraft/cat_variant/siamese.json
+@@ -1,6 +_,5 @@
+ {
+-  "asset_id": "minecraft:entity/cat/cat_siamese",
+-  "baby_asset_id": "minecraft:entity/cat/cat_siamese_baby",
++  "asset_id": "minecraft:entity/cat/siamese",
+   "spawn_conditions": [
+     {
+       "priority": 0

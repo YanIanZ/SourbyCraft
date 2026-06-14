@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/orange_dye_from_torchflower.json
++++ b/data/minecraft/recipe/orange_dye_from_torchflower.json
+@@ -6,6 +_,7 @@
+     "minecraft:torchflower"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:orange_dye"
+   }
+ }

@@ -1,0 +1,8 @@
+--- a/data/minecraft/tags/item/loom_dyes.json
++++ /dev/null
+@@ -1,5 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:dyes"
+-  ]
+-}

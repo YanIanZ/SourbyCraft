@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/nether/create_full_beacon.json
++++ b/data/minecraft/advancement/nether/create_full_beacon.json
+@@ -14,6 +_,7 @@
+     },
+     "frame": "goal",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:beacon"
+     },
+     "title": {

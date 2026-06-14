@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/villager_trade/fletcher/level_4.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:fletcher/4/feather_emerald",
+-    "minecraft:fletcher/4/emerald_enchanted_bow"
+-  ]
+-}

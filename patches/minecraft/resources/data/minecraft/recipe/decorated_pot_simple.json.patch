@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/decorated_pot_simple.json
++++ b/data/minecraft/recipe/decorated_pot_simple.json
+@@ -10,6 +_,7 @@
+     " # "
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:decorated_pot"
+   }
+ }

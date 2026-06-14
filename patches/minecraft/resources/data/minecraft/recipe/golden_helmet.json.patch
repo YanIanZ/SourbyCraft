@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/golden_helmet.json
++++ b/data/minecraft/recipe/golden_helmet.json
+@@ -9,6 +_,7 @@
+     "X X"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:golden_helmet"
+   }
+ }

@@ -1,0 +1,10 @@
+--- a/data/minecraft/tags/block/supports_nether_sprouts.json
++++ /dev/null
+@@ -1,7 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:supports_vegetation",
+-    "#minecraft:nylium",
+-    "minecraft:soul_soil"
+-  ]
+-}

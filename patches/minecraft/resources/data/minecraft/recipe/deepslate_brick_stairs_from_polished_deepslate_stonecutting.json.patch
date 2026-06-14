@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/deepslate_brick_stairs_from_polished_deepslate_stonecutting.json
++++ b/data/minecraft/recipe/deepslate_brick_stairs_from_polished_deepslate_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:polished_deepslate",
+   "result": {
++    "count": 1,
+     "id": "minecraft:deepslate_brick_stairs"
+   }
+ }

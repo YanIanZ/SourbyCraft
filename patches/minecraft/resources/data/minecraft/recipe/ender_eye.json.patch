@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/ender_eye.json
++++ b/data/minecraft/recipe/ender_eye.json
+@@ -6,6 +_,7 @@
+     "minecraft:blaze_powder"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:ender_eye"
+   }
+ }

@@ -1,0 +1,8 @@
+--- a/data/minecraft/tags/block/supports_nether_wart.json
++++ /dev/null
+@@ -1,5 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:soul_sand"
+-  ]
+-}

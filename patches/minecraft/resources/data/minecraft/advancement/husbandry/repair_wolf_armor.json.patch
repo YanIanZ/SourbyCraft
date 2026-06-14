@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/repair_wolf_armor.json
++++ b/data/minecraft/advancement/husbandry/repair_wolf_armor.json
+@@ -32,6 +_,7 @@
+       "translate": "advancements.husbandry.repair_wolf_armor.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:wolf_armor"
+     },
+     "title": {

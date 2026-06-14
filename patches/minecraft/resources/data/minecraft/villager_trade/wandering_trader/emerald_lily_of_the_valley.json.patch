@@ -1,0 +1,13 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_lily_of_the_valley.json
++++ /dev/null
+@@ -1,10 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:lily_of_the_valley"
+-  },
+-  "max_uses": 7.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "id": "minecraft:emerald"
+-  }
+-}

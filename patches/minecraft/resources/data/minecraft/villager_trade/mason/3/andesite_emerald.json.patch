@@ -1,0 +1,15 @@
+--- a/data/minecraft/villager_trade/mason/3/andesite_emerald.json
++++ /dev/null
+@@ -1,12 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:emerald"
+-  },
+-  "max_uses": 16.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "count": 16.0,
+-    "id": "minecraft:andesite"
+-  },
+-  "xp": 20.0
+-}

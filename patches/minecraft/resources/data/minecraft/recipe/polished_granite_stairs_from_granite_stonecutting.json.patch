@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/polished_granite_stairs_from_granite_stonecutting.json
++++ b/data/minecraft/recipe/polished_granite_stairs_from_granite_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:granite",
+   "result": {
++    "count": 1,
+     "id": "minecraft:polished_granite_stairs"
+   }
+ }

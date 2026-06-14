@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/nether/summon_wither.json
++++ b/data/minecraft/advancement/nether/summon_wither.json
+@@ -21,6 +_,7 @@
+       "translate": "advancements.nether.summon_wither.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:nether_star"
+     },
+     "title": {

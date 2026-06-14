@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/villager_trade/cartographer/level_1.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:cartographer/1/paper_emerald",
+-    "minecraft:cartographer/1/emerald_map"
+-  ]
+-}

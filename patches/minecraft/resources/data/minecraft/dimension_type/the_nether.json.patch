@@ -1,0 +1,18 @@
+--- a/data/minecraft/dimension_type/the_nether.json
++++ b/data/minecraft/dimension_type/the_nether.json
+@@ -13,7 +_,6 @@
+     "minecraft:gameplay/sky_light_level": 4.0,
+     "minecraft:gameplay/snow_golem_melts": true,
+     "minecraft:gameplay/water_evaporates": true,
+-    "minecraft:visual/ambient_light_color": "#302821",
+     "minecraft:visual/default_dripstone_particle": {
+       "type": "minecraft:dripping_dripstone_lava"
+     },
+@@ -25,7 +_,6 @@
+   "cardinal_light": "nether",
+   "coordinate_scale": 8.0,
+   "has_ceiling": true,
+-  "has_ender_dragon_fight": false,
+   "has_fixed_time": true,
+   "has_skylight": false,
+   "height": 256,

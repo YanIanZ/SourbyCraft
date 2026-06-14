@@ -1,0 +1,12 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_pumpkin.json
++++ /dev/null
+@@ -1,9 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:pumpkin"
+-  },
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "id": "minecraft:emerald"
+-  }
+-}

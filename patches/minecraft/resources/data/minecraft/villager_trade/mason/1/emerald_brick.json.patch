@@ -1,0 +1,14 @@
+--- a/data/minecraft/villager_trade/mason/1/emerald_brick.json
++++ /dev/null
+@@ -1,11 +_,0 @@
+-{
+-  "gives": {
+-    "count": 10,
+-    "id": "minecraft:brick"
+-  },
+-  "max_uses": 16.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "id": "minecraft:emerald"
+-  }
+-}

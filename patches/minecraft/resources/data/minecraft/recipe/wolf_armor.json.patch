@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/wolf_armor.json
++++ b/data/minecraft/recipe/wolf_armor.json
+@@ -10,6 +_,7 @@
+     "X X"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:wolf_armor"
+   }
+ }

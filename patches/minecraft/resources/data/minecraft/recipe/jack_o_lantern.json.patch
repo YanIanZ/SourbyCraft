@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/jack_o_lantern.json
++++ b/data/minecraft/recipe/jack_o_lantern.json
+@@ -10,6 +_,7 @@
+     "B"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:jack_o_lantern"
+   }
+ }

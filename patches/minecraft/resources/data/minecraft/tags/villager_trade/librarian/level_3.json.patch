@@ -1,0 +1,10 @@
+--- a/data/minecraft/tags/villager_trade/librarian/level_3.json
++++ /dev/null
+@@ -1,7 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:librarian/3/ink_sac_emerald",
+-    "minecraft:librarian/3/emerald_and_book_enchanted_book",
+-    "minecraft:librarian/3/emerald_glass"
+-  ]
+-}

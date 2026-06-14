@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/white_dye_from_lily_of_the_valley.json
++++ b/data/minecraft/recipe/white_dye_from_lily_of_the_valley.json
+@@ -6,6 +_,7 @@
+     "minecraft:lily_of_the_valley"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:white_dye"
+   }
+ }

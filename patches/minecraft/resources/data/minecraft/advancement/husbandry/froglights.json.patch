@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/froglights.json
++++ b/data/minecraft/advancement/husbandry/froglights.json
+@@ -24,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:verdant_froglight"
+     },
+     "title": {

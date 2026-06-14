@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/throw_trident.json
++++ b/data/minecraft/advancement/adventure/throw_trident.json
+@@ -25,6 +_,7 @@
+       "translate": "advancements.adventure.throw_trident.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:trident"
+     },
+     "title": {

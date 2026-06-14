@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/smithing_table.json
++++ b/data/minecraft/recipe/smithing_table.json
+@@ -11,6 +_,7 @@
+     "##"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:smithing_table"
+   }
+ }

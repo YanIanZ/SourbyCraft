@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/voluntary_exile.json
++++ b/data/minecraft/advancement/adventure/voluntary_exile.json
+@@ -111,6 +_,7 @@
+           ]
+         }
+       },
++      "count": 1,
+       "id": "minecraft:white_banner"
+     },
+     "title": {

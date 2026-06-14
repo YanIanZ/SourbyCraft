@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/waxed_weathered_chiseled_copper_from_waxed_weathered_cut_copper_stonecutting.json
++++ b/data/minecraft/recipe/waxed_weathered_chiseled_copper_from_waxed_weathered_cut_copper_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:waxed_weathered_cut_copper",
+   "result": {
++    "count": 1,
+     "id": "minecraft:waxed_weathered_chiseled_copper"
+   }
+ }
