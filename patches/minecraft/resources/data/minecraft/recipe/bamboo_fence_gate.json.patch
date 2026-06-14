@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/bamboo_fence_gate.json
++++ b/data/minecraft/recipe/bamboo_fence_gate.json
+@@ -11,6 +_,7 @@
+     "#W#"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:bamboo_fence_gate"
+   }
+ }

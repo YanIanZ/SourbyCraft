@@ -1,0 +1,15 @@
+--- a/data/minecraft/villager_trade/shepherd/1/white_wool_emerald.json
++++ /dev/null
+@@ -1,12 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:emerald"
+-  },
+-  "max_uses": 16.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "count": 18.0,
+-    "id": "minecraft:white_wool"
+-  },
+-  "xp": 2.0
+-}

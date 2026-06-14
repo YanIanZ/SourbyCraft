@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/beacon.json
++++ b/data/minecraft/recipe/beacon.json
+@@ -12,6 +_,7 @@
+     "OOO"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:beacon"
+   }
+ }

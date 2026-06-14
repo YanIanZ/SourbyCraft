@@ -1,0 +1,8 @@
+--- a/data/minecraft/tags/fluid/supports_lily_pad.json
++++ /dev/null
+@@ -1,5 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:water"
+-  ]
+-}

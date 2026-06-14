@@ -1,0 +1,50 @@
+--- a/data/minecraft/worldgen/configured_feature/birch_leaf_litter.json
++++ b/data/minecraft/worldgen/configured_feature/birch_leaf_litter.json
+@@ -1,26 +_,6 @@
+ {
+   "type": "minecraft:tree",
+   "config": {
+-    "below_trunk_provider": {
+-      "type": "minecraft:rule_based_state_provider",
+-      "rules": [
+-        {
+-          "if_true": {
+-            "type": "minecraft:not",
+-            "predicate": {
+-              "type": "minecraft:matching_block_tag",
+-              "tag": "minecraft:cannot_replace_below_tree_trunk"
+-            }
+-          },
+-          "then": {
+-            "type": "minecraft:simple_state_provider",
+-            "state": {
+-              "Name": "minecraft:dirt"
+-            }
+-          }
+-        }
+-      ]
+-    },
+     "decorators": [
+       {
+         "type": "minecraft:place_on_ground",
+@@ -325,6 +_,12 @@
+         "tries": 150
+       }
+     ],
++    "dirt_provider": {
++      "type": "minecraft:simple_state_provider",
++      "state": {
++        "Name": "minecraft:dirt"
++      }
++    },
+     "foliage_placer": {
+       "type": "minecraft:blob_foliage_placer",
+       "height": 3,
+@@ -342,6 +_,7 @@
+         }
+       }
+     },
++    "force_dirt": false,
+     "ignore_vines": true,
+     "minimum_size": {
+       "type": "minecraft:two_layers_feature_size",

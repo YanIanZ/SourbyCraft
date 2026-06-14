@@ -1,0 +1,11 @@
+--- a/data/minecraft/tags/block/cannot_replace_below_tree_trunk.json
++++ /dev/null
+@@ -1,8 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:dirt",
+-    "#minecraft:mud",
+-    "#minecraft:moss_blocks",
+-    "minecraft:podzol"
+-  ]
+-}

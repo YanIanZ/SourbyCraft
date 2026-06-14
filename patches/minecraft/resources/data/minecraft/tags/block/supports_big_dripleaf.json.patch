@@ -1,0 +1,18 @@
+--- a/data/minecraft/tags/block/supports_big_dripleaf.json
++++ /dev/null
+@@ -1,15 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:supports_small_dripleaf",
+-    "minecraft:dirt",
+-    "minecraft:grass_block",
+-    "minecraft:podzol",
+-    "minecraft:coarse_dirt",
+-    "minecraft:mycelium",
+-    "minecraft:rooted_dirt",
+-    "minecraft:moss_block",
+-    "minecraft:mud",
+-    "minecraft:muddy_mangrove_roots",
+-    "minecraft:farmland"
+-  ]
+-}

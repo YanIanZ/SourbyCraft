@@ -1,0 +1,8 @@
+--- a/data/minecraft/tags/fluid/bubble_column_can_occupy.json
++++ /dev/null
+@@ -1,5 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:water"
+-  ]
+-}

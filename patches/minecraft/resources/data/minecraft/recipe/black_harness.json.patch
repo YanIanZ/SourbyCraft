@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/black_harness.json
++++ b/data/minecraft/recipe/black_harness.json
+@@ -12,6 +_,7 @@
+     "G#G"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:black_harness"
+   }
+ }

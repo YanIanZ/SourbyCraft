@@ -1,0 +1,9 @@
+--- a/data/minecraft/tags/villager_trade/fletcher/level_3.json
++++ /dev/null
+@@ -1,6 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:fletcher/3/string_emerald",
+-    "minecraft:fletcher/3/emerald_crossbow"
+-  ]
+-}

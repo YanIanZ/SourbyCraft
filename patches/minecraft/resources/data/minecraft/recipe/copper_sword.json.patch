@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/copper_sword.json
++++ b/data/minecraft/recipe/copper_sword.json
+@@ -11,6 +_,7 @@
+     "#"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:copper_sword"
+   }
+ }

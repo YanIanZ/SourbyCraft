@@ -1,0 +1,10 @@
+--- a/data/minecraft/tags/block/cannot_support_snow_layer.json
++++ /dev/null
+@@ -1,7 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:ice",
+-    "minecraft:packed_ice",
+-    "minecraft:barrier"
+-  ]
+-}

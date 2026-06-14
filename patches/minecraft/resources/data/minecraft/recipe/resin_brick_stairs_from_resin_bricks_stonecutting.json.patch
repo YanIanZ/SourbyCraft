@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/resin_brick_stairs_from_resin_bricks_stonecutting.json
++++ b/data/minecraft/recipe/resin_brick_stairs_from_resin_bricks_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:resin_bricks",
+   "result": {
++    "count": 1,
+     "id": "minecraft:resin_brick_stairs"
+   }
+ }

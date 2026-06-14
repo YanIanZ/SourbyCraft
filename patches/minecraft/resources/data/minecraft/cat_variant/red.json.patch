@@ -1,0 +1,10 @@
+--- a/data/minecraft/cat_variant/red.json
++++ b/data/minecraft/cat_variant/red.json
+@@ -1,6 +_,5 @@
+ {
+-  "asset_id": "minecraft:entity/cat/cat_red",
+-  "baby_asset_id": "minecraft:entity/cat/cat_red_baby",
++  "asset_id": "minecraft:entity/cat/red",
+   "spawn_conditions": [
+     {
+       "priority": 0

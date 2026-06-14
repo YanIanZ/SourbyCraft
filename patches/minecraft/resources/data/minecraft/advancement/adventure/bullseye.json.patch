@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/bullseye.json
++++ b/data/minecraft/advancement/adventure/bullseye.json
+@@ -27,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:target"
+     },
+     "title": {

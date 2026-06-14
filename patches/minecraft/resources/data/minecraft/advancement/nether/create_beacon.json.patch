@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/nether/create_beacon.json
++++ b/data/minecraft/advancement/nether/create_beacon.json
+@@ -15,6 +_,7 @@
+       "translate": "advancements.nether.create_beacon.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:beacon"
+     },
+     "title": {

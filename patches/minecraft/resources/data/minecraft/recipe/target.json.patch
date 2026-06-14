@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/target.json
++++ b/data/minecraft/recipe/target.json
+@@ -11,6 +_,7 @@
+     " R "
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:target"
+   }
+ }

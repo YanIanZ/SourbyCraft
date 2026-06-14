@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/magma_cream.json
++++ b/data/minecraft/recipe/magma_cream.json
+@@ -6,6 +_,7 @@
+     "minecraft:slime_ball"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:magma_cream"
+   }
+ }

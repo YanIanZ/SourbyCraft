@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/shield.json
++++ b/data/minecraft/recipe/shield.json
+@@ -11,6 +_,7 @@
+     " W "
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:shield"
+   }
+ }

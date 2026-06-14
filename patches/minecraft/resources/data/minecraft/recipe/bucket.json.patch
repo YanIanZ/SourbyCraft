@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/bucket.json
++++ b/data/minecraft/recipe/bucket.json
+@@ -9,6 +_,7 @@
+     " # "
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:bucket"
+   }
+ }

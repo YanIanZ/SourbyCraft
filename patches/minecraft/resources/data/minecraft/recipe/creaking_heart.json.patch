@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/creaking_heart.json
++++ b/data/minecraft/recipe/creaking_heart.json
+@@ -11,6 +_,7 @@
+     " L "
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:creaking_heart"
+   }
+ }

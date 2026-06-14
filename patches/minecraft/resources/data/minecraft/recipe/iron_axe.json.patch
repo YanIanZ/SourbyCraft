@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/iron_axe.json
++++ b/data/minecraft/recipe/iron_axe.json
+@@ -11,6 +_,7 @@
+     " #"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:iron_axe"
+   }
+ }

@@ -1,0 +1,13 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_open_eyeblossom.json
++++ /dev/null
+@@ -1,10 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:open_eyeblossom"
+-  },
+-  "max_uses": 7.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "id": "minecraft:emerald"
+-  }
+-}

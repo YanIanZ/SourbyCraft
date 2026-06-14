@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/barrel.json
++++ b/data/minecraft/recipe/barrel.json
+@@ -11,6 +_,7 @@
+     "PSP"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:barrel"
+   }
+ }

@@ -1,0 +1,10 @@
+--- a/data/minecraft/tags/villager_trade/leatherworker/level_2.json
++++ /dev/null
+@@ -1,7 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:leatherworker/2/flint_emerald",
+-    "minecraft:leatherworker/2/emerald_dyed_leather_helmet",
+-    "minecraft:leatherworker/2/emerald_dyed_leather_boots"
+-  ]
+-}

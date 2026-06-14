@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/diorite_wall_from_diorite_stonecutting.json
++++ b/data/minecraft/recipe/diorite_wall_from_diorite_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:diorite",
+   "result": {
++    "count": 1,
+     "id": "minecraft:diorite_wall"
+   }
+ }

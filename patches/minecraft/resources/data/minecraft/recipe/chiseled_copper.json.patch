@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/chiseled_copper.json
++++ b/data/minecraft/recipe/chiseled_copper.json
+@@ -9,6 +_,7 @@
+     "#"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:chiseled_copper"
+   }
+ }

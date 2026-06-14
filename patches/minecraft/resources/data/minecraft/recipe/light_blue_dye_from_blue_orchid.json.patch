@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/light_blue_dye_from_blue_orchid.json
++++ b/data/minecraft/recipe/light_blue_dye_from_blue_orchid.json
+@@ -6,6 +_,7 @@
+     "minecraft:blue_orchid"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:light_blue_dye"
+   }
+ }

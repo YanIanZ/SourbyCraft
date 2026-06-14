@@ -1,0 +1,12 @@
+--- a/data/minecraft/tags/villager_trade/toolsmith/level_1.json
++++ /dev/null
+@@ -1,9 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:common_smith/level_1",
+-    "minecraft:toolsmith/1/emerald_stone_axe",
+-    "minecraft:toolsmith/1/emerald_stone_shovel",
+-    "minecraft:toolsmith/1/emerald_stone_pickaxe",
+-    "minecraft:toolsmith/1/emerald_stone_hoe"
+-  ]
+-}

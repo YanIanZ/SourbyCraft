@@ -1,0 +1,14 @@
+--- a/data/minecraft/loot_table/chests/woodland_mansion.json
++++ b/data/minecraft/loot_table/chests/woodland_mansion.json
+@@ -31,6 +_,11 @@
+         },
+         {
+           "type": "minecraft:item",
++          "name": "minecraft:name_tag",
++          "weight": 20
++        },
++        {
++          "type": "minecraft:item",
+           "name": "minecraft:chainmail_chestplate",
+           "weight": 10
+         },

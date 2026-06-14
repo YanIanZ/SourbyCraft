@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/story/form_obsidian.json
++++ b/data/minecraft/advancement/story/form_obsidian.json
+@@ -17,6 +_,7 @@
+       "translate": "advancements.story.form_obsidian.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:obsidian"
+     },
+     "title": {

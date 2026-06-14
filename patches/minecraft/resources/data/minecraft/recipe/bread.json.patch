@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/bread.json
++++ b/data/minecraft/recipe/bread.json
+@@ -8,6 +_,7 @@
+     "###"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:bread"
+   }
+ }

@@ -1,0 +1,11 @@
+--- a/data/minecraft/tags/block/sculk_replaceable.json
++++ b/data/minecraft/tags/block/sculk_replaceable.json
+@@ -1,7 +_,7 @@
+ {
+   "values": [
+     "#minecraft:base_stone_overworld",
+-    "#minecraft:substrate_overworld",
++    "#minecraft:dirt",
+     "#minecraft:terracotta",
+     "#minecraft:nylium",
+     "#minecraft:base_stone_nether",

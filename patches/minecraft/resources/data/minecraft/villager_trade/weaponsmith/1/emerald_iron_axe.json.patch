@@ -1,0 +1,14 @@
+--- a/data/minecraft/villager_trade/weaponsmith/1/emerald_iron_axe.json
++++ /dev/null
+@@ -1,11 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:iron_axe"
+-  },
+-  "max_uses": 12.0,
+-  "reputation_discount": 0.2,
+-  "wants": {
+-    "count": 3.0,
+-    "id": "minecraft:emerald"
+-  }
+-}

@@ -1,0 +1,11 @@
+--- a/data/minecraft/datapacks/trade_rebalance/data/minecraft/tags/villager_trade/armorer/level_3.json
++++ /dev/null
+@@ -1,8 +_,0 @@
+-{
+-  "replace": true,
+-  "values": [
+-    "minecraft:armorer/3/lava_bucket_emerald",
+-    "minecraft:armorer/3/emerald_shield",
+-    "minecraft:armorer/3/emerald_bell"
+-  ]
+-}

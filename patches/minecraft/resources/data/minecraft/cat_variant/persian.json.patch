@@ -1,0 +1,10 @@
+--- a/data/minecraft/cat_variant/persian.json
++++ b/data/minecraft/cat_variant/persian.json
+@@ -1,6 +_,5 @@
+ {
+-  "asset_id": "minecraft:entity/cat/cat_persian",
+-  "baby_asset_id": "minecraft:entity/cat/cat_persian_baby",
++  "asset_id": "minecraft:entity/cat/persian",
+   "spawn_conditions": [
+     {
+       "priority": 0

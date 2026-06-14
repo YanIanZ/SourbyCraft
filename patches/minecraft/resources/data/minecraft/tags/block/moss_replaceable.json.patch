@@ -1,0 +1,13 @@
+--- a/data/minecraft/tags/block/moss_replaceable.json
++++ b/data/minecraft/tags/block/moss_replaceable.json
+@@ -2,9 +_,6 @@
+   "values": [
+     "#minecraft:base_stone_overworld",
+     "#minecraft:cave_vines",
+-    "#minecraft:dirt",
+-    "#minecraft:mud",
+-    "#minecraft:moss_blocks",
+-    "#minecraft:grass_blocks"
++    "#minecraft:dirt"
+   ]
+ }

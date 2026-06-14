@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/kill_a_mob.json
++++ b/data/minecraft/advancement/adventure/kill_a_mob.json
+@@ -581,6 +_,7 @@
+       "translate": "advancements.adventure.kill_a_mob.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:iron_sword"
+     },
+     "title": {

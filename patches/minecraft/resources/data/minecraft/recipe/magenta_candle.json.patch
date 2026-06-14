@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/magenta_candle.json
++++ b/data/minecraft/recipe/magenta_candle.json
+@@ -7,6 +_,7 @@
+     "minecraft:magenta_dye"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:magenta_candle"
+   }
+ }

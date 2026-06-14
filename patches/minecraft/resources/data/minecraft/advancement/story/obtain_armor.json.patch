@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/story/obtain_armor.json
++++ b/data/minecraft/advancement/story/obtain_armor.json
+@@ -47,6 +_,7 @@
+       "translate": "advancements.story.obtain_armor.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:iron_chestplate"
+     },
+     "title": {

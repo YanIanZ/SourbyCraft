@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/spyglass.json
++++ b/data/minecraft/recipe/spyglass.json
+@@ -11,6 +_,7 @@
+     " X "
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:spyglass"
+   }
+ }

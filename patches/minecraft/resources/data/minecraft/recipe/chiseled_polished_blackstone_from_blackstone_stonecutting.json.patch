@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/chiseled_polished_blackstone_from_blackstone_stonecutting.json
++++ b/data/minecraft/recipe/chiseled_polished_blackstone_from_blackstone_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:blackstone",
+   "result": {
++    "count": 1,
+     "id": "minecraft:chiseled_polished_blackstone"
+   }
+ }

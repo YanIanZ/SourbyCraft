@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/sea_lantern.json
++++ b/data/minecraft/recipe/sea_lantern.json
+@@ -11,6 +_,7 @@
+     "SCS"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:sea_lantern"
+   }
+ }

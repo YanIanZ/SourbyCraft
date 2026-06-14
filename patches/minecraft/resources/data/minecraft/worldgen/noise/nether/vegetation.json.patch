@@ -1,0 +1,10 @@
+--- a/data/minecraft/worldgen/noise/nether/vegetation.json
++++ /dev/null
+@@ -1,7 +_,0 @@
+-{
+-  "amplitudes": [
+-    1.0,
+-    1.0
+-  ],
+-  "firstOctave": -7
+-}

@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/feed_snifflet.json
++++ b/data/minecraft/advancement/husbandry/feed_snifflet.json
+@@ -28,6 +_,7 @@
+     },
+     "hidden": true,
+     "icon": {
++      "count": 1,
+       "id": "minecraft:torchflower_seeds"
+     },
+     "title": {

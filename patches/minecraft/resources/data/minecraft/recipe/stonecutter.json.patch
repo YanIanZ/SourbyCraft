@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/stonecutter.json
++++ b/data/minecraft/recipe/stonecutter.json
+@@ -10,6 +_,7 @@
+     "###"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:stonecutter"
+   }
+ }

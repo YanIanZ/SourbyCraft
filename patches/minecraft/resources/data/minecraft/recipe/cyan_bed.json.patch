@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/cyan_bed.json
++++ b/data/minecraft/recipe/cyan_bed.json
+@@ -11,6 +_,7 @@
+     "XXX"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:cyan_bed"
+   }
+ }

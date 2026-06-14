@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/complete_catalogue.json
++++ b/data/minecraft/advancement/husbandry/complete_catalogue.json
+@@ -184,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:cod"
+     },
+     "title": {

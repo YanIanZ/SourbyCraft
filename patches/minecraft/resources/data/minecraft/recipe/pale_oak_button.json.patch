@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/pale_oak_button.json
++++ b/data/minecraft/recipe/pale_oak_button.json
+@@ -6,6 +_,7 @@
+     "minecraft:pale_oak_planks"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:pale_oak_button"
+   }
+ }

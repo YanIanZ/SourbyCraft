@@ -1,0 +1,14 @@
+--- a/data/minecraft/villager_trade/farmer/1/emerald_bread.json
++++ /dev/null
+@@ -1,11 +_,0 @@
+-{
+-  "gives": {
+-    "count": 6,
+-    "id": "minecraft:bread"
+-  },
+-  "max_uses": 16.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "id": "minecraft:emerald"
+-  }
+-}

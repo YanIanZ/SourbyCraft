@@ -1,0 +1,13 @@
+--- a/data/minecraft/tags/item/cauldron_can_remove_dye.json
++++ /dev/null
+@@ -1,10 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:leather_helmet",
+-    "minecraft:leather_chestplate",
+-    "minecraft:leather_leggings",
+-    "minecraft:leather_boots",
+-    "minecraft:leather_horse_armor",
+-    "minecraft:wolf_armor"
+-  ]
+-}

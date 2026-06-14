@@ -1,0 +1,13 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_mangrove_log.json
++++ /dev/null
+@@ -1,10 +_,0 @@
+-{
+-  "gives": {
+-    "count": 8,
+-    "id": "minecraft:mangrove_log"
+-  },
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "id": "minecraft:emerald"
+-  }
+-}

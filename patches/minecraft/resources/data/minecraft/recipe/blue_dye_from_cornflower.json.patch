@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/blue_dye_from_cornflower.json
++++ b/data/minecraft/recipe/blue_dye_from_cornflower.json
+@@ -6,6 +_,7 @@
+     "minecraft:cornflower"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:blue_dye"
+   }
+ }

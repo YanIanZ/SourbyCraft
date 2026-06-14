@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/netherite_block.json
++++ b/data/minecraft/recipe/netherite_block.json
+@@ -10,6 +_,7 @@
+     "###"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:netherite_block"
+   }
+ }

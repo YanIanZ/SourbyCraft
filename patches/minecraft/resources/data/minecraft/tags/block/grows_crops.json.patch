@@ -1,0 +1,8 @@
+--- a/data/minecraft/tags/block/grows_crops.json
++++ /dev/null
+@@ -1,5 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:farmland"
+-  ]
+-}

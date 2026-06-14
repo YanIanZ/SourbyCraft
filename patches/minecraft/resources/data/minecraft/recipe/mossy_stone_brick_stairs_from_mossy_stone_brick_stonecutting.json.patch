@@ -1,0 +1,11 @@
+--- /dev/null
++++ b/data/minecraft/recipe/mossy_stone_brick_stairs_from_mossy_stone_brick_stonecutting.json
+@@ -1,0 +_,8 @@
++{
++  "type": "minecraft:stonecutting",
++  "ingredient": "minecraft:mossy_stone_bricks",
++  "result": {
++    "count": 1,
++    "id": "minecraft:mossy_stone_brick_stairs"
++  }
++}

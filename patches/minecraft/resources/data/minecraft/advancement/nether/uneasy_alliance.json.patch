@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/nether/uneasy_alliance.json
++++ b/data/minecraft/advancement/nether/uneasy_alliance.json
+@@ -25,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:ghast_tear"
+     },
+     "title": {

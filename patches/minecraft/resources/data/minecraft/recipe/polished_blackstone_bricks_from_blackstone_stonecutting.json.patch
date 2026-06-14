@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/polished_blackstone_bricks_from_blackstone_stonecutting.json
++++ b/data/minecraft/recipe/polished_blackstone_bricks_from_blackstone_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:blackstone",
+   "result": {
++    "count": 1,
+     "id": "minecraft:polished_blackstone_bricks"
+   }
+ }

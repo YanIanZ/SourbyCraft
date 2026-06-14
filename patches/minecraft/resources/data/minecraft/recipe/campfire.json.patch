@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/campfire.json
++++ b/data/minecraft/recipe/campfire.json
+@@ -12,6 +_,7 @@
+     "LLL"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:campfire"
+   }
+ }

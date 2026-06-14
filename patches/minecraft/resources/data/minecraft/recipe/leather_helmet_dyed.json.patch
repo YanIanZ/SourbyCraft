@@ -1,0 +1,13 @@
+--- a/data/minecraft/recipe/leather_helmet_dyed.json
++++ /dev/null
+@@ -1,10 +_,0 @@
+-{
+-  "type": "minecraft:crafting_dye",
+-  "category": "misc",
+-  "dye": "#minecraft:dyes",
+-  "group": "dyed_armor",
+-  "result": {
+-    "id": "minecraft:leather_helmet"
+-  },
+-  "target": "minecraft:leather_helmet"
+-}

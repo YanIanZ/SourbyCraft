@@ -1,0 +1,11 @@
+--- /dev/null
++++ b/data/minecraft/tags/block/mushroom_grow_block.json
+@@ -1,0 +_,8 @@
++{
++  "values": [
++    "minecraft:mycelium",
++    "minecraft:podzol",
++    "minecraft:crimson_nylium",
++    "minecraft:warped_nylium"
++  ]
++}

@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/story/iron_tools.json
++++ b/data/minecraft/advancement/story/iron_tools.json
+@@ -17,6 +_,7 @@
+       "translate": "advancements.story.iron_tools.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:iron_pickaxe"
+     },
+     "title": {

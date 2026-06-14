@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/bamboo_mosaic.json
++++ b/data/minecraft/recipe/bamboo_mosaic.json
+@@ -9,6 +_,7 @@
+     "#"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:bamboo_mosaic"
+   }
+ }

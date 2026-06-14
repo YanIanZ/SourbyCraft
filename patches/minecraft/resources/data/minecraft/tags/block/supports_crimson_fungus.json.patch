@@ -1,0 +1,8 @@
+--- a/data/minecraft/tags/block/supports_crimson_fungus.json
++++ /dev/null
+@@ -1,5 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:supports_warped_fungus"
+-  ]
+-}

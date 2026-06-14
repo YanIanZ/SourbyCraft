@@ -1,0 +1,12 @@
+--- a/data/minecraft/tags/villager_trade/farmer/level_1.json
++++ /dev/null
+@@ -1,9 +_,0 @@
+-{
+-  "values": [
+-    "minecraft:farmer/1/wheat_emerald",
+-    "minecraft:farmer/1/potato_emerald",
+-    "minecraft:farmer/1/carrot_emerald",
+-    "minecraft:farmer/1/beetroot_emerald",
+-    "minecraft:farmer/1/emerald_bread"
+-  ]
+-}

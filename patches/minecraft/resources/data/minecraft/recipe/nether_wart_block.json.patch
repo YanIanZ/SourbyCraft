@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/nether_wart_block.json
++++ b/data/minecraft/recipe/nether_wart_block.json
+@@ -13,6 +_,7 @@
+     "minecraft:nether_wart"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:nether_wart_block"
+   }
+ }

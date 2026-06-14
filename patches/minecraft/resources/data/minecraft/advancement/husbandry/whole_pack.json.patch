@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/whole_pack.json
++++ b/data/minecraft/advancement/husbandry/whole_pack.json
+@@ -152,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:bone"
+     },
+     "title": {

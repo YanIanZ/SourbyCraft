@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/beetroot_soup.json
++++ b/data/minecraft/recipe/beetroot_soup.json
+@@ -11,6 +_,7 @@
+     "minecraft:beetroot"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:beetroot_soup"
+   }
+ }

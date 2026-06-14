@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/glowstone.json
++++ b/data/minecraft/recipe/glowstone.json
+@@ -9,6 +_,7 @@
+     "##"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:glowstone"
+   }
+ }

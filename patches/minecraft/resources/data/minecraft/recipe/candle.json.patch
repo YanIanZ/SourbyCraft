@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/candle.json
++++ b/data/minecraft/recipe/candle.json
+@@ -10,6 +_,7 @@
+     "H"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:candle"
+   }
+ }

@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/rabbit_stew_from_brown_mushroom.json
++++ b/data/minecraft/recipe/rabbit_stew_from_brown_mushroom.json
+@@ -10,6 +_,7 @@
+     "minecraft:brown_mushroom"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:rabbit_stew"
+   }
+ }

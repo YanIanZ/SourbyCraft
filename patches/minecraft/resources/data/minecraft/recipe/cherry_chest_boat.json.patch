@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/cherry_chest_boat.json
++++ b/data/minecraft/recipe/cherry_chest_boat.json
+@@ -7,6 +_,7 @@
+     "minecraft:cherry_boat"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:cherry_chest_boat"
+   }
+ }

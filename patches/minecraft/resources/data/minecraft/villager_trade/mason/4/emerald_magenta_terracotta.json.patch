@@ -1,0 +1,14 @@
+--- a/data/minecraft/villager_trade/mason/4/emerald_magenta_terracotta.json
++++ /dev/null
+@@ -1,11 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:magenta_terracotta"
+-  },
+-  "max_uses": 12.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "id": "minecraft:emerald"
+-  },
+-  "xp": 15.0
+-}

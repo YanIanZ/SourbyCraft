@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/golden_chestplate.json
++++ b/data/minecraft/recipe/golden_chestplate.json
+@@ -10,6 +_,7 @@
+     "XXX"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:golden_chestplate"
+   }
+ }

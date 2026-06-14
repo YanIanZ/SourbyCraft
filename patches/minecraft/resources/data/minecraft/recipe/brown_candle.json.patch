@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/brown_candle.json
++++ b/data/minecraft/recipe/brown_candle.json
+@@ -7,6 +_,7 @@
+     "minecraft:brown_dye"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:brown_candle"
+   }
+ }

@@ -1,0 +1,9 @@
+--- /dev/null
++++ b/data/minecraft/tags/block/small_dripleaf_placeable.json
+@@ -1,0 +_,6 @@
++{
++  "values": [
++    "minecraft:clay",
++    "minecraft:moss_block"
++  ]
++}

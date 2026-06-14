@@ -1,0 +1,13 @@
+--- a/data/minecraft/worldgen/placed_feature/lush_caves_ceiling_vegetation.json
++++ b/data/minecraft/worldgen/placed_feature/lush_caves_ceiling_vegetation.json
+@@ -23,8 +_,8 @@
+     {
+       "type": "minecraft:environment_scan",
+       "allowed_search_condition": {
+-        "type": "minecraft:matching_block_tag",
+-        "tag": "minecraft:air"
++        "type": "minecraft:matching_blocks",
++        "blocks": "minecraft:air"
+       },
+       "direction_of_search": "up",
+       "max_steps": 12,

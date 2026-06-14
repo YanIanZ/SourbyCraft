@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/pale_oak_boat.json
++++ b/data/minecraft/recipe/pale_oak_boat.json
+@@ -10,6 +_,7 @@
+     "###"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:pale_oak_boat"
+   }
+ }

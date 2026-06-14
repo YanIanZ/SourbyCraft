@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/lectern.json
++++ b/data/minecraft/recipe/lectern.json
+@@ -11,6 +_,7 @@
+     " S "
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:lectern"
+   }
+ }

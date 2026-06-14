@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/husbandry/wax_on.json
++++ b/data/minecraft/advancement/husbandry/wax_on.json
+@@ -89,6 +_,7 @@
+       "translate": "advancements.husbandry.wax_on.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:honeycomb"
+     },
+     "title": {

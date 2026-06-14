@@ -1,0 +1,13 @@
+--- a/data/minecraft/worldgen/placed_feature/lake_lava_underground.json
++++ b/data/minecraft/worldgen/placed_feature/lake_lava_underground.json
+@@ -30,8 +_,8 @@
+           {
+             "type": "minecraft:not",
+             "predicate": {
+-              "type": "minecraft:matching_block_tag",
+-              "tag": "minecraft:air"
++              "type": "minecraft:matching_blocks",
++              "blocks": "minecraft:air"
+             }
+           },
+           {

@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/book.json
++++ b/data/minecraft/recipe/book.json
+@@ -8,6 +_,7 @@
+     "minecraft:leather"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:book"
+   }
+ }

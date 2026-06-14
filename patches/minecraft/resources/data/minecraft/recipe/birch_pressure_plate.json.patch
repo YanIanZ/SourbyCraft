@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/birch_pressure_plate.json
++++ b/data/minecraft/recipe/birch_pressure_plate.json
+@@ -9,6 +_,7 @@
+     "##"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:birch_pressure_plate"
+   }
+ }

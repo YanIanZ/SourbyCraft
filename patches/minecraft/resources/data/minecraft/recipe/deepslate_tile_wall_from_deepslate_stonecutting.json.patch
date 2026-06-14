@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/deepslate_tile_wall_from_deepslate_stonecutting.json
++++ /dev/null
+@@ -1,7 +_,0 @@
+-{
+-  "type": "minecraft:stonecutting",
+-  "ingredient": "minecraft:deepslate",
+-  "result": {
+-    "id": "minecraft:deepslate_tile_wall"
+-  }
+-}

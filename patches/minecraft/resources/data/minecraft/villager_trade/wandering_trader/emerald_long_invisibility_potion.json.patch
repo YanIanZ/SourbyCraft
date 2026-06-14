@@ -1,0 +1,20 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_long_invisibility_potion.json
++++ /dev/null
+@@ -1,17 +_,0 @@
+-{
+-  "given_item_modifiers": [
+-    {
+-      "function": "minecraft:set_potion",
+-      "id": "minecraft:long_invisibility"
+-    }
+-  ],
+-  "gives": {
+-    "id": "minecraft:potion"
+-  },
+-  "max_uses": 1.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "count": 5.0,
+-    "id": "minecraft:emerald"
+-  }
+-}

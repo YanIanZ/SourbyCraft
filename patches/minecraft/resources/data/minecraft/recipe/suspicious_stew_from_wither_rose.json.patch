@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/suspicious_stew_from_wither_rose.json
++++ b/data/minecraft/recipe/suspicious_stew_from_wither_rose.json
+@@ -17,6 +_,7 @@
+         }
+       ]
+     },
++    "count": 1,
+     "id": "minecraft:suspicious_stew"
+   }
+ }

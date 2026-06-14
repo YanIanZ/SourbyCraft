@@ -1,0 +1,11 @@
+--- a/data/minecraft/tags/block/supports_warped_fungus.json
++++ /dev/null
+@@ -1,8 +_,0 @@
+-{
+-  "values": [
+-    "#minecraft:supports_vegetation",
+-    "#minecraft:nylium",
+-    "minecraft:mycelium",
+-    "minecraft:soul_soil"
+-  ]
+-}

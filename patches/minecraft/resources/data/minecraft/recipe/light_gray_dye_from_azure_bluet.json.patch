@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/light_gray_dye_from_azure_bluet.json
++++ b/data/minecraft/recipe/light_gray_dye_from_azure_bluet.json
+@@ -6,6 +_,7 @@
+     "minecraft:azure_bluet"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:light_gray_dye"
+   }
+ }

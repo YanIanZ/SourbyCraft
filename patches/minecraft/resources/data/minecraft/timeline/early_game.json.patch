@@ -1,0 +1,8 @@
+--- a/data/minecraft/timeline/early_game.json
++++ b/data/minecraft/timeline/early_game.json
+@@ -1,5 +_,4 @@
+ {
+-  "clock": "minecraft:overworld",
+   "tracks": {
+     "minecraft:gameplay/can_pillager_patrol_spawn": {
+       "keyframes": [

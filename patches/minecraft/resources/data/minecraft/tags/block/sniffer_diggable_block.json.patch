@@ -1,0 +1,20 @@
+--- a/data/minecraft/tags/block/sniffer_diggable_block.json
++++ b/data/minecraft/tags/block/sniffer_diggable_block.json
+@@ -1,9 +_,13 @@
+ {
+   "values": [
+-    "#minecraft:dirt",
+-    "#minecraft:mud",
+-    "#minecraft:moss_blocks",
++    "minecraft:dirt",
+     "minecraft:grass_block",
+-    "minecraft:podzol"
++    "minecraft:podzol",
++    "minecraft:coarse_dirt",
++    "minecraft:rooted_dirt",
++    "minecraft:moss_block",
++    "minecraft:pale_moss_block",
++    "minecraft:mud",
++    "minecraft:muddy_mangrove_roots"
+   ]
+ }

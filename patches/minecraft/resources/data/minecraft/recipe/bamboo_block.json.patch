@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/bamboo_block.json
++++ b/data/minecraft/recipe/bamboo_block.json
+@@ -13,6 +_,7 @@
+     "minecraft:bamboo"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:bamboo_block"
+   }
+ }

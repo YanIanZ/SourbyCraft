@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/nether/return_to_sender.json
++++ b/data/minecraft/advancement/nether/return_to_sender.json
+@@ -33,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:fire_charge"
+     },
+     "title": {

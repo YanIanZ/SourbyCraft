@@ -1,0 +1,10 @@
+--- a/data/minecraft/worldgen/configured_feature/disk_sand.json
++++ b/data/minecraft/worldgen/configured_feature/disk_sand.json
+@@ -8,7 +_,6 @@
+       "min_inclusive": 2
+     },
+     "state_provider": {
+-      "type": "minecraft:rule_based_state_provider",
+       "fallback": {
+         "type": "minecraft:simple_state_provider",
+         "state": {

@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/kill_all_mobs.json
++++ b/data/minecraft/advancement/adventure/kill_all_mobs.json
+@@ -582,6 +_,7 @@
+     },
+     "frame": "challenge",
+     "icon": {
++      "count": 1,
+       "id": "minecraft:diamond_sword"
+     },
+     "title": {

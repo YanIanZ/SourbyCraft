@@ -1,0 +1,19 @@
+--- a/data/minecraft/recipe/golden_dandelion.json
++++ /dev/null
+@@ -1,16 +_,0 @@
+-{
+-  "type": "minecraft:crafting_shaped",
+-  "category": "misc",
+-  "key": {
+-    "#": "minecraft:gold_nugget",
+-    "I": "minecraft:dandelion"
+-  },
+-  "pattern": [
+-    "###",
+-    "#I#",
+-    "###"
+-  ],
+-  "result": {
+-    "id": "minecraft:golden_dandelion"
+-  }
+-}

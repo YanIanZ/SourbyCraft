@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/golden_spear.json
++++ b/data/minecraft/recipe/golden_spear.json
+@@ -11,6 +_,7 @@
+     "#  "
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:golden_spear"
+   }
+ }

@@ -1,0 +1,11 @@
+--- /dev/null
++++ b/data/minecraft/tags/block/dry_vegetation_may_place_on.json
+@@ -1,0 +_,8 @@
++{
++  "values": [
++    "#minecraft:sand",
++    "#minecraft:terracotta",
++    "#minecraft:dirt",
++    "minecraft:farmland"
++  ]
++}

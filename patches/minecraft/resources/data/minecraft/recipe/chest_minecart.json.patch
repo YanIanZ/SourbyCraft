@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/chest_minecart.json
++++ b/data/minecraft/recipe/chest_minecart.json
+@@ -6,6 +_,7 @@
+     "minecraft:minecart"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:chest_minecart"
+   }
+ }

@@ -1,0 +1,20 @@
+--- a/data/minecraft/worldgen/configured_feature/ice_patch.json
++++ b/data/minecraft/worldgen/configured_feature/ice_patch.json
+@@ -8,10 +_,13 @@
+       "min_inclusive": 2
+     },
+     "state_provider": {
+-      "type": "minecraft:simple_state_provider",
+-      "state": {
+-        "Name": "minecraft:packed_ice"
+-      }
++      "fallback": {
++        "type": "minecraft:simple_state_provider",
++        "state": {
++          "Name": "minecraft:packed_ice"
++        }
++      },
++      "rules": []
+     },
+     "target": {
+       "type": "minecraft:matching_blocks",

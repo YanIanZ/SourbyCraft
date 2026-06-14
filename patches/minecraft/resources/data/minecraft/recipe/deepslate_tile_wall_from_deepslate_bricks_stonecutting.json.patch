@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/deepslate_tile_wall_from_deepslate_bricks_stonecutting.json
++++ b/data/minecraft/recipe/deepslate_tile_wall_from_deepslate_bricks_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:deepslate_bricks",
+   "result": {
++    "count": 1,
+     "id": "minecraft:deepslate_tile_wall"
+   }
+ }

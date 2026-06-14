@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/birch_chest_boat.json
++++ b/data/minecraft/recipe/birch_chest_boat.json
+@@ -7,6 +_,7 @@
+     "minecraft:birch_boat"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:birch_chest_boat"
+   }
+ }

@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/leather_horse_armor.json
++++ b/data/minecraft/recipe/leather_horse_armor.json
+@@ -10,6 +_,7 @@
+     "X X"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:leather_horse_armor"
+   }
+ }

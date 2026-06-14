@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/calibrated_sculk_sensor.json
++++ b/data/minecraft/recipe/calibrated_sculk_sensor.json
+@@ -10,6 +_,7 @@
+     "#X#"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:calibrated_sculk_sensor"
+   }
+ }

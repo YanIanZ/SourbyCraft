@@ -1,0 +1,10 @@
+--- a/data/minecraft/advancement/adventure/under_lock_and_key.json
++++ b/data/minecraft/advancement/adventure/under_lock_and_key.json
+@@ -31,6 +_,7 @@
+       "translate": "advancements.adventure.under_lock_and_key.description"
+     },
+     "icon": {
++      "count": 1,
+       "id": "minecraft:trial_key"
+     },
+     "title": {

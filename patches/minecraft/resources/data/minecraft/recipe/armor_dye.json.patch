@@ -1,0 +1,7 @@
+--- /dev/null
++++ b/data/minecraft/recipe/armor_dye.json
+@@ -1,0 +_,4 @@
++{
++  "type": "minecraft:crafting_special_armordye",
++  "category": "misc"
++}

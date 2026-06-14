@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/light_blue_candle.json
++++ b/data/minecraft/recipe/light_blue_candle.json
+@@ -7,6 +_,7 @@
+     "minecraft:light_blue_dye"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:light_blue_candle"
+   }
+ }

@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/acacia_chest_boat.json
++++ b/data/minecraft/recipe/acacia_chest_boat.json
+@@ -7,6 +_,7 @@
+     "minecraft:acacia_boat"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:acacia_chest_boat"
+   }
+ }

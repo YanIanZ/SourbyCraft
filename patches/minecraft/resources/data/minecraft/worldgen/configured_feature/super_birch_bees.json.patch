@@ -1,0 +1,49 @@
+--- a/data/minecraft/worldgen/configured_feature/super_birch_bees.json
++++ b/data/minecraft/worldgen/configured_feature/super_birch_bees.json
+@@ -1,32 +_,18 @@
+ {
+   "type": "minecraft:tree",
+   "config": {
+-    "below_trunk_provider": {
+-      "type": "minecraft:rule_based_state_provider",
+-      "rules": [
+-        {
+-          "if_true": {
+-            "type": "minecraft:not",
+-            "predicate": {
+-              "type": "minecraft:matching_block_tag",
+-              "tag": "minecraft:cannot_replace_below_tree_trunk"
+-            }
+-          },
+-          "then": {
+-            "type": "minecraft:simple_state_provider",
+-            "state": {
+-              "Name": "minecraft:dirt"
+-            }
+-          }
+-        }
+-      ]
+-    },
+     "decorators": [
+       {
+         "type": "minecraft:beehive",
+         "probability": 1.0
+       }
+     ],
++    "dirt_provider": {
++      "type": "minecraft:simple_state_provider",
++      "state": {
++        "Name": "minecraft:dirt"
++      }
++    },
+     "foliage_placer": {
+       "type": "minecraft:blob_foliage_placer",
+       "height": 3,
+@@ -44,6 +_,7 @@
+         }
+       }
+     },
++    "force_dirt": false,
+     "ignore_vines": true,
+     "minimum_size": {
+       "type": "minecraft:two_layers_feature_size",

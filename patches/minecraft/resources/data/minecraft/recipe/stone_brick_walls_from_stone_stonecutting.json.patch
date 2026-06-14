@@ -1,0 +1,11 @@
+--- /dev/null
++++ b/data/minecraft/recipe/stone_brick_walls_from_stone_stonecutting.json
+@@ -1,0 +_,8 @@
++{
++  "type": "minecraft:stonecutting",
++  "ingredient": "minecraft:stone",
++  "result": {
++    "count": 1,
++    "id": "minecraft:stone_brick_wall"
++  }
++}

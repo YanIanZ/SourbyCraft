@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/red_dye_from_poppy.json
++++ b/data/minecraft/recipe/red_dye_from_poppy.json
+@@ -6,6 +_,7 @@
+     "minecraft:poppy"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:red_dye"
+   }
+ }

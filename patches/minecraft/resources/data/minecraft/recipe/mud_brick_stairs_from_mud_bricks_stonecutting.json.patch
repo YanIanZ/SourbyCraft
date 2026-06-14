@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/mud_brick_stairs_from_mud_bricks_stonecutting.json
++++ b/data/minecraft/recipe/mud_brick_stairs_from_mud_bricks_stonecutting.json
+@@ -2,6 +_,7 @@
+   "type": "minecraft:stonecutting",
+   "ingredient": "minecraft:mud_bricks",
+   "result": {
++    "count": 1,
+     "id": "minecraft:mud_brick_stairs"
+   }
+ }

@@ -1,0 +1,10 @@
+--- a/data/minecraft/recipe/saddle.json
++++ b/data/minecraft/recipe/saddle.json
+@@ -10,6 +_,7 @@
+     "X#X"
+   ],
+   "result": {
++    "count": 1,
+     "id": "minecraft:saddle"
+   }
+ }

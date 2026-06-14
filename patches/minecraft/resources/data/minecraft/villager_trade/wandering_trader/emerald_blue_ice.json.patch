@@ -1,0 +1,14 @@
+--- a/data/minecraft/villager_trade/wandering_trader/emerald_blue_ice.json
++++ /dev/null
+@@ -1,11 +_,0 @@
+-{
+-  "gives": {
+-    "id": "minecraft:blue_ice"
+-  },
+-  "max_uses": 6.0,
+-  "reputation_discount": 0.05,
+-  "wants": {
+-    "count": 6.0,
+-    "id": "minecraft:emerald"
+-  }
+-}
