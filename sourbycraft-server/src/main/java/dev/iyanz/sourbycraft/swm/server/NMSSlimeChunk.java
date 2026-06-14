@@ -43,12 +43,12 @@ public class NMSSlimeChunk implements SlimeChunk {
 
     @Override
     public int getX() {
-        return chunk.getPos().x;
+        return chunk.getPos().x();
     }
 
     @Override
     public int getZ() {
-        return chunk.getPos().z;
+        return chunk.getPos().z();
     }
 
     @Override
@@ -85,7 +85,7 @@ public class NMSSlimeChunk implements SlimeChunk {
         CompoundTag heightMaps = new CompoundTag();
         for (Heightmap.Types type : Heightmap.Types.values()) {
             if (!type.keepAfterWorldgen()) continue;
-            Heightmap heightmap = this.chunk.heightmaps[type.ordinal()];
+            Heightmap heightmap = this.chunk.heightmaps.get(type);
             if (heightmap != null) {
                 heightMaps.putLongArray(type.getSerializedName(), heightmap.getRawData());
             }
@@ -106,7 +106,7 @@ public class NMSSlimeChunk implements SlimeChunk {
 
     @Override
     public ListTag getEntities() {
-        NewChunkHolder chunkHolder = ((ChunkSystemServerLevel) chunk.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunk.getPos().x, chunk.getPos().z);
+        NewChunkHolder chunkHolder = ((ChunkSystemServerLevel) chunk.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunk.getPos().x(), chunk.getPos().z());
         if (chunkHolder == null) return new ListTag();
         ChunkEntitySlices slices = chunkHolder.getEntityChunk();
         return getEntities(slices);
@@ -154,7 +154,7 @@ public class NMSSlimeChunk implements SlimeChunk {
 
     @Override
     public CompoundTag getPoiChunkSections() {
-        NewChunkHolder chunkHolder = ((ChunkSystemServerLevel) chunk.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunk.getPos().x, chunk.getPos().z);
+        NewChunkHolder chunkHolder = ((ChunkSystemServerLevel) chunk.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunk.getPos().x(), chunk.getPos().z());
         if (chunkHolder == null) return null;
         PoiChunk poiChunk = chunkHolder.getPoiChunk();
         if (poiChunk == null) return null;
