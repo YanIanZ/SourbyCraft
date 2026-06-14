@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Mon, 15 Jun 2026 02:09:58 +0700
+Subject: [PATCH] SourbyCraft: skip too-recent file fixers instead of
+ throwing
+
+
+diff --git a/net/minecraft/util/filefix/FileFixerUpper.java b/net/minecraft/util/filefix/FileFixerUpper.java
+index 7f24ee5..fba7e79 100644
+--- a/net/minecraft/util/filefix/FileFixerUpper.java
++++ b/net/minecraft/util/filefix/FileFixerUpper.java
+@@ -457,14 +457,8 @@ public class FileFixerUpper {
+ 
+             int fileFixVersion = fileFix.getVersion();
+             if (fileFix.getVersion() > this.currentVersion) {
+-                throw new IllegalArgumentException(
+-                    String.format(
+-                        Locale.ROOT,
+-                        "Tried to add too recent file fix for version: %s. The data version of the game is: %s",
+-                        fileFixVersion,
+-                        this.currentVersion
+-                    )
+-                );
++                // SourbyCraft - skip too-recent file fixers instead of throwing; mache 26.1.2+build.3 registers fixers up to v4772 but vanilla MC 1.21.11 (DataVersion 4671) doesn't recognize them
++                return;
+             }
+ 
+             if (!this.fileFixes.isEmpty()) {
