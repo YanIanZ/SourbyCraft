@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Tue, 2 Jun 2026 19:55:08 +0700
+Subject: [PATCH] SourbyCraft v12 startup banner
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index c322620..406f3d1 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1288,6 +1288,11 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+     protected void runServer() {
+         try {
++            // SourbyCraft v12 — startup banner
++            System.out.print(dev.iyanz.sourbycraft.brand.SourbyCraftBanner.render(
++                dev.iyanz.sourbycraft.brand.BuildInfo.load()
++            ));
++            // SourbyCraft v12 end
+             if (!this.initServer()) {
+                 throw new IllegalStateException("Failed to initialize server");
+             }
