@@ -1,0 +1,111 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Mon, 15 Jun 2026 15:27:00 +0700
+Subject: [PATCH] Make entity variant baby_asset_id optional (vanilla
+ 1.21.11 fallback)
+
+
+diff --git a/net/minecraft/world/entity/animal/chicken/ChickenVariant.java b/net/minecraft/world/entity/animal/chicken/ChickenVariant.java
+index 6eae595..7b2af90 100644
+--- a/net/minecraft/world/entity/animal/chicken/ChickenVariant.java
++++ b/net/minecraft/world/entity/animal/chicken/ChickenVariant.java
+@@ -23,17 +23,17 @@ public record ChickenVariant(
+     public static final Codec<ChickenVariant> DIRECT_CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+                 ModelAndTexture.codec(ChickenVariant.ModelType.CODEC, ChickenVariant.ModelType.NORMAL).forGetter(ChickenVariant::modelAndTexture),
+-                ClientAsset.ResourceTexture.CODEC.fieldOf("baby_asset_id").forGetter(ChickenVariant::babyTexture),
++                ClientAsset.ResourceTexture.CODEC.optionalFieldOf("baby_asset_id").forGetter(v -> java.util.Optional.ofNullable(v.babyTexture())),
+                 SpawnPrioritySelectors.CODEC.fieldOf("spawn_conditions").forGetter(ChickenVariant::spawnConditions)
+             )
+-            .apply(i, ChickenVariant::new)
++            .apply(i, (mt, babyOpt, spawn) -> new ChickenVariant(mt, babyOpt.orElse(mt.asset()), spawn)) // SourbyCraft - default baby to adult
+     );
+     public static final Codec<ChickenVariant> NETWORK_CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+                 ModelAndTexture.codec(ChickenVariant.ModelType.CODEC, ChickenVariant.ModelType.NORMAL).forGetter(ChickenVariant::modelAndTexture),
+-                ClientAsset.ResourceTexture.CODEC.fieldOf("baby_asset_id").forGetter(ChickenVariant::babyTexture)
++                ClientAsset.ResourceTexture.CODEC.optionalFieldOf("baby_asset_id").forGetter(v -> java.util.Optional.ofNullable(v.babyTexture()))
+             )
+-            .apply(i, ChickenVariant::new)
++            .apply(i, (mt, babyOpt) -> new ChickenVariant(mt, babyOpt.orElse(mt.asset()))) // SourbyCraft - default baby to adult
+     );
+     public static final Codec<Holder<ChickenVariant>> CODEC = RegistryFixedCodec.create(Registries.CHICKEN_VARIANT);
+     public static final StreamCodec<RegistryFriendlyByteBuf, Holder<ChickenVariant>> STREAM_CODEC = ByteBufCodecs.holderRegistry(Registries.CHICKEN_VARIANT);
+diff --git a/net/minecraft/world/entity/animal/cow/CowVariant.java b/net/minecraft/world/entity/animal/cow/CowVariant.java
+index 963722a..7311320 100644
+--- a/net/minecraft/world/entity/animal/cow/CowVariant.java
++++ b/net/minecraft/world/entity/animal/cow/CowVariant.java
+@@ -22,17 +22,17 @@ public record CowVariant(ModelAndTexture<CowVariant.ModelType> modelAndTexture,
+     public static final Codec<CowVariant> DIRECT_CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+                 ModelAndTexture.codec(CowVariant.ModelType.CODEC, CowVariant.ModelType.NORMAL).forGetter(CowVariant::modelAndTexture),
+-                ClientAsset.ResourceTexture.CODEC.fieldOf("baby_asset_id").forGetter(CowVariant::babyTexture),
++                ClientAsset.ResourceTexture.CODEC.optionalFieldOf("baby_asset_id").forGetter(v -> java.util.Optional.ofNullable(v.babyTexture())),
+                 SpawnPrioritySelectors.CODEC.fieldOf("spawn_conditions").forGetter(CowVariant::spawnConditions)
+             )
+-            .apply(i, CowVariant::new)
++            .apply(i, (mt, babyOpt, spawn) -> new CowVariant(mt, babyOpt.orElse(mt.asset()), spawn)) // SourbyCraft - default baby to adult
+     );
+     public static final Codec<CowVariant> NETWORK_CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+                 ModelAndTexture.codec(CowVariant.ModelType.CODEC, CowVariant.ModelType.NORMAL).forGetter(CowVariant::modelAndTexture),
+-                ClientAsset.ResourceTexture.CODEC.fieldOf("baby_asset_id").forGetter(CowVariant::babyTexture)
++                ClientAsset.ResourceTexture.CODEC.optionalFieldOf("baby_asset_id").forGetter(v -> java.util.Optional.ofNullable(v.babyTexture()))
+             )
+-            .apply(i, CowVariant::new)
++            .apply(i, (mt, babyOpt) -> new CowVariant(mt, babyOpt.orElse(mt.asset()))) // SourbyCraft - default baby to adult
+     );
+     public static final Codec<Holder<CowVariant>> CODEC = RegistryFixedCodec.create(Registries.COW_VARIANT);
+     public static final StreamCodec<RegistryFriendlyByteBuf, Holder<CowVariant>> STREAM_CODEC = ByteBufCodecs.holderRegistry(Registries.COW_VARIANT);
+diff --git a/net/minecraft/world/entity/animal/feline/CatVariant.java b/net/minecraft/world/entity/animal/feline/CatVariant.java
+index 2b652f8..90e6f78 100644
+--- a/net/minecraft/world/entity/animal/feline/CatVariant.java
++++ b/net/minecraft/world/entity/animal/feline/CatVariant.java
+@@ -20,17 +20,17 @@ public record CatVariant(ClientAsset.ResourceTexture adultAssetInfo, ClientAsset
+     public static final Codec<CatVariant> DIRECT_CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+                 ClientAsset.ResourceTexture.DEFAULT_FIELD_CODEC.forGetter(CatVariant::adultAssetInfo),
+-                ClientAsset.ResourceTexture.CODEC.fieldOf("baby_asset_id").forGetter(CatVariant::babyAssetInfo),
++                ClientAsset.ResourceTexture.CODEC.optionalFieldOf("baby_asset_id").forGetter(v -> java.util.Optional.ofNullable(v.babyAssetInfo())),
+                 SpawnPrioritySelectors.CODEC.fieldOf("spawn_conditions").forGetter(CatVariant::spawnConditions)
+             )
+-            .apply(i, CatVariant::new)
++            .apply(i, (adult, babyOpt, spawn) -> new CatVariant(adult, babyOpt.orElse(adult), spawn)) // SourbyCraft - default baby to adult when missing (vanilla 1.21.11 JSON lacks baby_asset_id)
+     );
+     public static final Codec<CatVariant> NETWORK_CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+                 ClientAsset.ResourceTexture.DEFAULT_FIELD_CODEC.forGetter(CatVariant::adultAssetInfo),
+-                ClientAsset.ResourceTexture.CODEC.fieldOf("baby_asset_id").forGetter(CatVariant::babyAssetInfo)
++                ClientAsset.ResourceTexture.CODEC.optionalFieldOf("baby_asset_id").forGetter(v -> java.util.Optional.ofNullable(v.babyAssetInfo()))
+             )
+-            .apply(i, CatVariant::new)
++            .apply(i, (adult, babyOpt) -> new CatVariant(adult, babyOpt.orElse(adult))) // SourbyCraft - default baby to adult
+     );
+     public static final Codec<Holder<CatVariant>> CODEC = RegistryFixedCodec.create(Registries.CAT_VARIANT);
+     public static final StreamCodec<RegistryFriendlyByteBuf, Holder<CatVariant>> STREAM_CODEC = ByteBufCodecs.holderRegistry(Registries.CAT_VARIANT);
+diff --git a/net/minecraft/world/entity/animal/pig/PigVariant.java b/net/minecraft/world/entity/animal/pig/PigVariant.java
+index 39eeb1e..84936a8 100644
+--- a/net/minecraft/world/entity/animal/pig/PigVariant.java
++++ b/net/minecraft/world/entity/animal/pig/PigVariant.java
+@@ -22,17 +22,17 @@ public record PigVariant(ModelAndTexture<PigVariant.ModelType> modelAndTexture,
+     public static final Codec<PigVariant> DIRECT_CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+                 ModelAndTexture.codec(PigVariant.ModelType.CODEC, PigVariant.ModelType.NORMAL).forGetter(PigVariant::modelAndTexture),
+-                ClientAsset.ResourceTexture.CODEC.fieldOf("baby_asset_id").forGetter(PigVariant::babyTexture),
++                ClientAsset.ResourceTexture.CODEC.optionalFieldOf("baby_asset_id").forGetter(v -> java.util.Optional.ofNullable(v.babyTexture())),
+                 SpawnPrioritySelectors.CODEC.fieldOf("spawn_conditions").forGetter(PigVariant::spawnConditions)
+             )
+-            .apply(i, PigVariant::new)
++            .apply(i, (mt, babyOpt, spawn) -> new PigVariant(mt, babyOpt.orElse(mt.asset()), spawn)) // SourbyCraft - default baby to adult
+     );
+     public static final Codec<PigVariant> NETWORK_CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+                 ModelAndTexture.codec(PigVariant.ModelType.CODEC, PigVariant.ModelType.NORMAL).forGetter(PigVariant::modelAndTexture),
+-                ClientAsset.ResourceTexture.CODEC.fieldOf("baby_asset_id").forGetter(PigVariant::babyTexture)
++                ClientAsset.ResourceTexture.CODEC.optionalFieldOf("baby_asset_id").forGetter(v -> java.util.Optional.ofNullable(v.babyTexture()))
+             )
+-            .apply(i, PigVariant::new)
++            .apply(i, (mt, babyOpt) -> new PigVariant(mt, babyOpt.orElse(mt.asset()))) // SourbyCraft - default baby to adult
+     );
+     public static final Codec<Holder<PigVariant>> CODEC = RegistryFixedCodec.create(Registries.PIG_VARIANT);
+     public static final StreamCodec<RegistryFriendlyByteBuf, Holder<PigVariant>> STREAM_CODEC = ByteBufCodecs.holderRegistry(Registries.PIG_VARIANT);
