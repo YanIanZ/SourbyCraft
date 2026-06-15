@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Mon, 15 Jun 2026 15:45:12 +0700
+Subject: [PATCH] SourbyCraft v12 US import sounds batch-1 gated emit
+ (Parrot/footsteps/Player attack)
+
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 56da17d..c6e78cc 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -1885,17 +1885,20 @@ public abstract class Entity
+     }
+ 
+     protected void playCombinationStepSounds(final BlockState primaryStepSound, final BlockState secondaryStepSound) {
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("sounds.disableFootStepSounds", false)) return; // SourbyCraft - US import
+         SoundType primaryStepSoundType = primaryStepSound.getSoundType();
+         this.playSound(primaryStepSoundType.getStepSound(), primaryStepSoundType.getVolume() * 0.15F, primaryStepSoundType.getPitch());
+         this.playMuffledStepSound(secondaryStepSound);
+     }
+ 
+     protected void playMuffledStepSound(final BlockState blockState) {
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("sounds.disableFootStepSounds", false)) return; // SourbyCraft - US import
+         SoundType secondaryStepSoundType = blockState.getSoundType();
+         this.playSound(secondaryStepSoundType.getStepSound(), secondaryStepSoundType.getVolume() * 0.05F, secondaryStepSoundType.getPitch() * 0.8F);
+     }
+ 
+     protected void playStepSound(final BlockPos pos, final BlockState blockState) {
++        if (dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("sounds.disableFootStepSounds", false)) return; // SourbyCraft - US import
+         SoundType soundType = blockState.getSoundType();
+         this.playSound(soundType.getStepSound(), soundType.getVolume() * 0.15F, soundType.getPitch());
+     }
+diff --git a/net/minecraft/world/entity/animal/parrot/Parrot.java b/net/minecraft/world/entity/animal/parrot/Parrot.java
+index f6a15a7..9556ad3 100644
+--- a/net/minecraft/world/entity/animal/parrot/Parrot.java
++++ b/net/minecraft/world/entity/animal/parrot/Parrot.java
+@@ -239,6 +239,7 @@ public class Parrot extends ShoulderRidingEntity implements FlyingAnimal {
+                 Mob mob = mobs.get(random.nextInt(mobs.size()));
+                 if (!mob.isSilent()) {
+                     SoundEvent soundEvent = getImitatedSound(mob.getType());
++                    if (!dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("sounds.disableShoulderEntityAmbientSound", false)) // SourbyCraft - US import
+                     level.playSound(null, entity.getX(), entity.getY(), entity.getZ(), soundEvent, entity.getSoundSource(), 0.7F, getPitch(random));
+                     return true;
+                 }
+diff --git a/net/minecraft/world/entity/player/Player.java b/net/minecraft/world/entity/player/Player.java
+index 537d375..00a4db9 100644
+--- a/net/minecraft/world/entity/player/Player.java
++++ b/net/minecraft/world/entity/player/Player.java
+@@ -1038,10 +1038,11 @@ public abstract class Player extends Avatar implements ContainerUser {
+             final float dmgFinal = magicBoost; // Paper - damage events
+             if (!this.deflectProjectile(entity, () -> !org.bukkit.craftbukkit.event.CraftEventFactory.handleNonLivingEntityDamageEvent(entity, dmgSourceFinal, dmgFinal, false))) {
+                 if (baseDamage > 0.0F || magicBoost > 0.0F) {
++                    final boolean newCombatSoundsOff = dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("sounds.disableNewCombatSounds", false); // SourbyCraft - US import
+                     boolean fullStrengthAttack = attackStrengthScale > 0.9F;
+                     boolean knockbackAttack;
+                     if (this.isSprinting() && fullStrengthAttack) {
+-                        this.playServerSideSound(SoundEvents.PLAYER_ATTACK_KNOCKBACK);
++                        if (!newCombatSoundsOff) this.playServerSideSound(SoundEvents.PLAYER_ATTACK_KNOCKBACK); // SourbyCraft - US import
+                         knockbackAttack = true;
+                     } else {
+                         knockbackAttack = false;
+@@ -1076,7 +1077,7 @@ public abstract class Player extends Avatar implements ContainerUser {
+                         this.damageStatsAndHearts(entity, oldLivingEntityHealth);
+                         this.causeFoodExhaustion(this.level().spigotConfig.combatExhaustion, org.bukkit.event.entity.EntityExhaustionEvent.ExhaustionReason.ATTACK); // CraftBukkit - EntityExhaustionEvent // Spigot - Change to use configurable value
+                     } else {
+-                        this.playServerSideSound(SoundEvents.PLAYER_ATTACK_NODAMAGE);
++                        if (!newCombatSoundsOff) this.playServerSideSound(SoundEvents.PLAYER_ATTACK_NODAMAGE); // SourbyCraft - US import
+                     }
+                 }
+ 
+@@ -1102,6 +1103,7 @@ public abstract class Player extends Avatar implements ContainerUser {
+             && entity instanceof Projectile projectile
+             && callEvent.getAsBoolean() // Paper - damage events
+             && projectile.deflect(ProjectileDeflection.AIM_DEFLECT, this, EntityReference.of(this), true)) {
++            if (!dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("sounds.disableNewCombatSounds", false)) // SourbyCraft - US import
+             this.makeSound(SoundEvents.PLAYER_ATTACK_NODAMAGE); // Paper - Use makeSound to avoid duplicating client-side sound for source player
+             return true;
+         } else {
+@@ -1140,13 +1142,14 @@ public abstract class Player extends Avatar implements ContainerUser {
+         final boolean stabAttack,
+         final float magicBoost
+     ) {
++        final boolean newCombatSoundsOff = dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("sounds.disableNewCombatSounds", false); // SourbyCraft - US import
+         if (criticalAttack) {
+-            this.playServerSideSound(SoundEvents.PLAYER_ATTACK_CRIT);
++            if (!newCombatSoundsOff) this.playServerSideSound(SoundEvents.PLAYER_ATTACK_CRIT); // SourbyCraft - US import
+             this.crit(entity);
+         }
+ 
+         if (!criticalAttack && !sweepAttack && !stabAttack) {
+-            this.playServerSideSound(fullStrengthAttack ? SoundEvents.PLAYER_ATTACK_STRONG : SoundEvents.PLAYER_ATTACK_WEAK);
++            if (!newCombatSoundsOff) this.playServerSideSound(fullStrengthAttack ? SoundEvents.PLAYER_ATTACK_STRONG : SoundEvents.PLAYER_ATTACK_WEAK); // SourbyCraft - US import
+         }
+ 
+         if (magicBoost > 0.0F) {
+@@ -1245,6 +1248,7 @@ public abstract class Player extends Avatar implements ContainerUser {
+     }
+ 
+     private void doSweepAttack(final Entity entity, final float baseDamage, final DamageSource damageSource, final float attackStrengthScale) {
++        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("sounds.disableNewCombatSounds", false)) // SourbyCraft - US import
+         this.playServerSideSound(SoundEvents.PLAYER_ATTACK_SWEEP);
+         if (this.level() instanceof ServerLevel serverLevel) {
+             float var12 = 1.0F + (float)this.getAttributeValue(Attributes.SWEEPING_DAMAGE_RATIO) * baseDamage;
