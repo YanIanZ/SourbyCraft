@@ -36,7 +36,7 @@ public class SwmCommand implements CommandExecutor, TabCompleter {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (args.length == 0) {
-            sendMessage(sender, Component.text("Usage: /swm list|load|save|info", NamedTextColor.YELLOW));
+            sendMessage(sender, Component.text("Usage: /swm list|load|save|info|inspect|delete", NamedTextColor.YELLOW));
             return true;
         }
 
@@ -45,9 +45,91 @@ public class SwmCommand implements CommandExecutor, TabCompleter {
             case "load" -> handleLoad(sender, args);
             case "save" -> handleSave(sender, args);
             case "info" -> handleInfo(sender);
-            default -> sendMessage(sender, Component.text("Unknown subcommand. Use /swm list|load|save|info", NamedTextColor.RED));
+            case "inspect" -> handleInspect(sender, args);
+            case "delete" -> handleDelete(sender, args);
+            default -> sendMessage(sender, Component.text("Unknown subcommand. Use /swm list|load|save|info|inspect|delete", NamedTextColor.RED));
         }
         return true;
+    }
+
+    private void handleInspect(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sendMessage(sender, Component.text("Usage: /swm inspect <world>", NamedTextColor.YELLOW));
+            return;
+        }
+
+        String worldName = args[1];
+        SlimeLoader loader = loaderManager.getDefault();
+        if (loader == null) {
+            sendMessage(sender, Component.text("No loader configured.", NamedTextColor.RED));
+            return;
+        }
+
+        // First check if already loaded so we can report the live in-memory state
+        // including any chunks that were promoted from NMS via loadCallback().
+        SlimeWorldInstance loaded = api.getLoadedWorld(worldName);
+        if (loaded instanceof dev.iyanz.sourbycraft.swm.server.SlimeInMemoryWorld imw) {
+            int live = imw.getChunkStorage().size();
+            sendMessage(sender, Component.text("Loaded world '" + worldName + "':", NamedTextColor.GREEN));
+            sendMessage(sender, Component.text("  In-memory chunks: " + live, NamedTextColor.WHITE));
+            sendMessage(sender, Component.text("  read-only: " + imw.isReadOnly(), NamedTextColor.GRAY));
+            return;
+        }
+
+        try {
+            if (!loader.worldExists(worldName)) {
+                sendMessage(sender, Component.text("World '" + worldName + "' does not exist on the loader.", NamedTextColor.GRAY));
+                return;
+            }
+            SlimePropertyMap props = new SlimePropertyMap();
+            SlimeWorld world = api.readWorld(loader, worldName, true, props);
+            int onDisk = world.getChunks() == null ? 0 : world.getChunks().size();
+            sendMessage(sender, Component.text("On-disk world '" + worldName + "':", NamedTextColor.GREEN));
+            sendMessage(sender, Component.text("  Persisted chunks: " + onDisk, NamedTextColor.WHITE));
+            if (onDisk == 0) {
+                sendMessage(sender, Component.text("  ⚠ World is empty — use `/swm delete " + worldName
+                        + "` and re-trigger the originating plugin (e.g. /is admin schematic …) to repopulate.",
+                        NamedTextColor.YELLOW));
+            }
+        } catch (Exception e) {
+            sendMessage(sender, Component.text("Failed to inspect world: " + e.getMessage(), NamedTextColor.RED));
+        }
+    }
+
+    private void handleDelete(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sendMessage(sender, Component.text("Usage: /swm delete <world>", NamedTextColor.YELLOW));
+            return;
+        }
+        String worldName = args[1];
+        if (!sender.isOp() && !sender.hasPermission("sourbycraft.swm.delete")) {
+            sendMessage(sender, Component.text("Insufficient permission.", NamedTextColor.RED));
+            return;
+        }
+        // Refuse to delete a currently-loaded world. The operator must first
+        // unload via Bukkit (`/swm` does not own world lifecycle) or remove via
+        // SS2 (`/is admin delete <player>`) to release the world reference.
+        if (api.getLoadedWorld(worldName) != null) {
+            sendMessage(sender, Component.text(
+                    "World '" + worldName + "' is still loaded. Unload it first (e.g. /is admin delete) before deletion.",
+                    NamedTextColor.RED));
+            return;
+        }
+        SlimeLoader loader = loaderManager.getDefault();
+        if (loader == null) {
+            sendMessage(sender, Component.text("No loader configured.", NamedTextColor.RED));
+            return;
+        }
+        try {
+            if (!loader.worldExists(worldName)) {
+                sendMessage(sender, Component.text("World '" + worldName + "' does not exist on the loader.", NamedTextColor.GRAY));
+                return;
+            }
+            loader.deleteWorld(worldName);
+            sendMessage(sender, Component.text("Deleted '" + worldName + "' from loader. Re-trigger creation via the owning plugin to rebuild.", NamedTextColor.GREEN));
+        } catch (Exception e) {
+            sendMessage(sender, Component.text("Failed to delete world: " + e.getMessage(), NamedTextColor.RED));
+        }
     }
 
     private void handleList(CommandSender sender) {
@@ -142,9 +224,19 @@ public class SwmCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
-            return List.of("list", "load", "save", "info").stream()
+            return List.of("list", "load", "save", "info", "inspect", "delete").stream()
                     .filter(s -> s.startsWith(args[0].toLowerCase(java.util.Locale.ROOT)))
                     .collect(Collectors.toList());
+        }
+        if (args.length == 2 && (args[0].equalsIgnoreCase("inspect") || args[0].equalsIgnoreCase("delete"))) {
+            try {
+                SlimeLoader loader = loaderManager.getDefault();
+                if (loader != null) {
+                    return loader.listWorlds().stream()
+                            .filter(s -> s.startsWith(args[1]))
+                            .collect(Collectors.toList());
+                }
+            } catch (IOException ignored) {}
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("load")) {

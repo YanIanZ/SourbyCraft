@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r10-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r11-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,13 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r10`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r10) — Friday, 19 June 2026, 12:18 (GMT+7).
+**Latest tag:** [`v26.1.2-r11`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r11) — Tuesday, 16 June 2026, 13:35 (GMT+7).
+
+### r11 highlights
+- **SWM admin diagnostics** — operators reporting "It seems like this island has no safe blocks" after the r9 NBT fix were hitting on-disk islands persisted with zero chunks (the r1..r8 SafeExecutor failure aborted before the schematic-paste save ever ran). Two new `/swm` subcommands surface the issue and clear stale state:
+  - `/swm inspect <world>` reports the persisted-chunk count for a world on the loader, plus a warning when the count is 0.
+  - `/swm delete <world>` removes a stale-empty world from the loader so the originating plugin (SS2's `/is admin schematic <player>` etc.) can rebuild it on the next access. Refuses to operate on currently-loaded worlds.
+- **Startup empty-world warning** — `loadWorld()` now logs a WARN line on every load that finds zero persisted chunks, pointing operators at the `/swm inspect` / `/swm delete` recovery flow instead of waiting for a teleport failure to expose the problem.
 
 ### r10 highlights
 - **Emoji shortcode chat translator** — `dev.iyanz.sourbycraft.chat.EmojiShortcodes` ships with 50+ built-in `:name: → glyph` mappings (`:smile: :heart: :+1: :fire: :rocket: :100:` etc). `EmojiChatListener` hooks `AsyncChatEvent` at `HIGH` priority + cancel-aware, rewrites every matching token via Adventure `Component#replaceText` so emoji works across MiniMessage, legacy `&` codes, and raw text. Toggle via `emoji.shortcodes.enabled` in `sourbycraft.yml`; the full map is written back to disk on first boot under `emoji.shortcodes.codes` so operators can add / override codes without touching code.

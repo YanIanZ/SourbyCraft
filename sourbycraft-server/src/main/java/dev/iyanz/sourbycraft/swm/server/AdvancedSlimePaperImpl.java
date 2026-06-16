@@ -90,6 +90,20 @@ public class AdvancedSlimePaperImpl implements AdvancedSlimePaperAPI {
         MinecraftServer server = MinecraftServer.getServer();
         ResourceKey<Level> dimensionKey = Level.OVERWORLD;
 
+        // Operator diagnostic: surface empty / under-populated worlds at load time
+        // instead of waiting for a "no safe blocks" teleport failure to expose them.
+        // Persisted chunk count is read from the bootstrap SkeletonSlimeWorld
+        // BEFORE wrapping; afterwards the in-memory map is mutated by NMS callbacks.
+        try {
+            int persistedChunks = world.getChunks() == null ? 0 : world.getChunks().size();
+            if (persistedChunks == 0) {
+                LOGGER.warn("SlimeWorld '{}' loaded with 0 persisted chunks. Originating plugin must repopulate "
+                                + "(e.g. SS2 schematic paste) or the world will appear as empty void. "
+                                + "Use `/swm inspect {}` to confirm and `/swm delete {}` to clear stale state.",
+                        world.getName(), world.getName(), world.getName());
+            }
+        } catch (Throwable ignored) {}
+
         SlimeWorldInstance instance = BRIDGE_INSTANCE.loadInstance(world, server, dimensionKey);
 
         Bukkit.getPluginManager().callEvent(new LoadSlimeWorldEvent(instance));
