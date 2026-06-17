@@ -227,6 +227,18 @@ public final class PerfSensor {
         tierSinceNanos = System.nanoTime();
         SourbyLogger.info("perf tier transition: " + old + " -> " + newTier
             + " (after dwell=" + dwellSamples + " sample(s))");
+        // SourbyCraft perf-engine P7 — Self-Tune Controller policy hook
+        try {
+            dev.iyanz.sourbycraft.perf.SelfTuneController.onTierChange(old, newTier);
+        } catch (Throwable t) {
+            SourbyLogger.error("SelfTuneController.onTierChange failed", t);
+        }
+        // SourbyCraft perf-engine P8 — Tier BossBar broadcast
+        try {
+            dev.iyanz.sourbycraft.perf.TierBossBar.onTierChange(newTier);
+        } catch (Throwable t) {
+            SourbyLogger.error("TierBossBar.onTierChange failed", t);
+        }
     }
 
     // --- Signal readers ---
