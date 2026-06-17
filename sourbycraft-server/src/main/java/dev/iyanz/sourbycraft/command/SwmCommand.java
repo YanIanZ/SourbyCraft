@@ -45,6 +45,11 @@ public class SwmCommand extends Command {
                         return true;
                     }
                     String nm = args[1];
+                    // Reject path-traversal / separator characters before handing to Bukkit
+                    if (nm.isBlank() || nm.contains("/") || nm.contains("\\") || nm.contains("..") || nm.startsWith(".")) {
+                        s.sendMessage(text("Invalid world name: " + nm, SourbyCraftColors.DANGER));
+                        return true;
+                    }
                     if (Bukkit.getWorld(nm) != null) {
                         s.sendMessage(text("Already loaded", SourbyCraftColors.WARNING));
                         return true;
