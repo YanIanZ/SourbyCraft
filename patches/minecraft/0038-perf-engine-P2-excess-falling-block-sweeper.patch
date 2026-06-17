@@ -3,11 +3,12 @@ From: Yan <superwhisz@gmail.com>
 Date: Wed, 17 Jun 2026 18:00:00 +0700
 Subject: [PATCH] SourbyCraft perf-engine P2 excess falling-block sweeper
 
-Wires the SourbyCraftConfig.maxFallingBlockPerChunk knob that was
-defined but unread. Every 40 ticks (2s), each falling block counts
-siblings in its chunk via getEntitiesOfClass and discards itself if
-the count exceeds the limit. Cascading discards bring count under
-limit across consecutive sweep ticks.
+Wires the SourbyCraftConfig.maxFallingBlockPerChunk knob (defined
+but unread). Every 40 ticks (2s) each falling block counts siblings
+in its chunk via getEntitiesOfClass. Only the (count - limit)
+highest-ID (= newest) falling blocks get culled, so a single legit
+20-block sand column at limit=20 is never touched and only the
+post-limit overflow gets removed deterministically.
 
 Falling blocks are short-lived (~80 ticks typical), so the 40-tick
 gate fires roughly twice per entity. Same chunk-AABB pattern as
@@ -17,14 +18,17 @@ Blocks the sand-cascade lag-machine pattern where TNT or piston
 triggers thousands of FallingBlockEntities in one chunk.
 
 diff --git a/net/minecraft/world/entity/item/FallingBlockEntity.java b/net/minecraft/world/entity/item/FallingBlockEntity.java
-index 045ce9c..c9e5480 100644
+index 045ce9c..83f78e5 100644
 --- a/net/minecraft/world/entity/item/FallingBlockEntity.java
 +++ b/net/minecraft/world/entity/item/FallingBlockEntity.java
-@@ -147,6 +147,24 @@ public class FallingBlockEntity extends Entity {
+@@ -147,6 +147,36 @@ public class FallingBlockEntity extends Entity {
 
      @Override
      public void tick() {
-+        // SourbyCraft start - perf-engine P2 lag-machine: excess falling-block sweeper
++        // SourbyCraft start - perf-engine P2 lag-machine: excess falling-block sweeper.
++        // Only the (count - limit) highest-ID falling blocks (= newest) get culled,
++        // so a single 20-block sand column at limit=20 is never touched and a
++        // cascade beyond the limit gets trimmed deterministically.
 +        if (!this.level().isClientSide()
 +            && this.tickCount > 0
 +            && this.tickCount % 40 == 0) {
@@ -34,10 +38,19 @@ index 045ce9c..c9e5480 100644
 +                net.minecraft.world.phys.AABB chunkBox = new net.minecraft.world.phys.AABB(
 +                    cp.getMinBlockX(), this.level().getMinY(), cp.getMinBlockZ(),
 +                    cp.getMaxBlockX() + 1, this.level().getMaxY() + 1, cp.getMaxBlockZ() + 1);
-+                int count = this.level().getEntitiesOfClass(FallingBlockEntity.class, chunkBox, e -> true).size();
-+                if (count > limit) {
-+                    this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN);
-+                    return;
++                java.util.List<FallingBlockEntity> siblings = this.level().getEntitiesOfClass(FallingBlockEntity.class, chunkBox, e -> true);
++                if (siblings.size() > limit) {
++                    int myId = this.getId();
++                    int rank = 0;
++                    for (FallingBlockEntity other : siblings) {
++                        if (other.getId() > myId) {
++                            rank++;
++                        }
++                    }
++                    if (rank < siblings.size() - limit) {
++                        this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN);
++                        return;
++                    }
 +                }
 +            }
 +        }
