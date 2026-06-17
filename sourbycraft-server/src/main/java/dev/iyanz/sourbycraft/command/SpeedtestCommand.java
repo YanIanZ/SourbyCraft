@@ -156,12 +156,12 @@ public class SpeedtestCommand extends Command {
                         sender.sendMessage(text()
                             .append(text("DL: ", SourbyCraftColors.LABEL))
                             .append(BarUtil.coloredBar(Math.min(dm / 100, 100), 20))
-                            .append(text(String.format(" %.1f Mbps", dm), SourbyCraftColors.SUCCESS))
+                            .append(text(String.format(java.util.Locale.ROOT, " %.1f Mbps", dm), SourbyCraftColors.SUCCESS))
                             .append(text("\nUL: ", SourbyCraftColors.LABEL))
                             .append(BarUtil.coloredBar(Math.min(um / 50, 100), 20))
-                            .append(text(String.format(" %.1f Mbps", um), SourbyCraftColors.SUCCESS))
+                            .append(text(String.format(java.util.Locale.ROOT, " %.1f Mbps", um), SourbyCraftColors.SUCCESS))
                             .append(text("\nPing: ", SourbyCraftColors.LABEL))
-                            .append(text(String.format("%.0fms", pm),
+                            .append(text(String.format(java.util.Locale.ROOT, "%.0fms", pm),
                                 pm < 30 ? SourbyCraftColors.SUCCESS : SourbyCraftColors.PRIMARY))
                             .append(text(" | " + sv.get("name") + ", " + sv.get("location"), SourbyCraftColors.DIM)));
                     } catch (Exception ex) {
