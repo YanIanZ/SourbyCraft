@@ -1,21 +1,26 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yan <superwhisz@gmail.com>
 Date: Tue, 2 Jun 2026 19:55:08 +0700
-Subject: [PATCH] SourbyCraft v12 startup banner
+Subject: [PATCH] SourbyCraft v12 startup banner + GcAdvisor
 
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index c322620..406f3d1 100644
+index cc35c62..fba20d6 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -1288,6 +1288,11 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
- 
+@@ -1288,6 +1288,16 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+
      protected void runServer() {
          try {
 +            // SourbyCraft v12 — startup banner
 +            System.out.print(dev.iyanz.sourbycraft.brand.SourbyCraftBanner.render(
 +                dev.iyanz.sourbycraft.brand.BuildInfo.load()
 +            ));
++            // SourbyCraft - GC + JVM-arg advisor (warn-only)
++            String __gcWarn = dev.iyanz.sourbycraft.brand.GcAdvisor.renderWarningBanner(
++                dev.iyanz.sourbycraft.brand.GcAdvisor.run()
++            );
++            if (!__gcWarn.isEmpty()) System.out.print(__gcWarn);
 +            // SourbyCraft v12 end
              if (!this.initServer()) {
                  throw new IllegalStateException("Failed to initialize server");
