@@ -5,31 +5,35 @@ Subject: [PATCH] SourbyCraft perf-engine P2 excess minecart/boat sweeper
 
 Wires the LAG_MACHINE_REMOVE_EXCESS_MINECARTS + _LIMIT and
 LAG_MACHINE_REMOVE_EXCESS_BOATS + _LIMIT knobs that were defined in
-Knobs.java but never read. Every 200 ticks (10s), each minecart and
-each boat counts how many siblings of its own type share its chunk
-via getEntitiesOfClass(class, AABB). If the count exceeds the operator
-limit, the entity discards itself.
+Knobs.java but never read. Every 200 ticks (10s), each vehicle counts
+siblings of its own type in its chunk via getEntitiesOfClass(class,
+AABB). Only the (count - limit) highest-ID (= newest) vehicles get
+culled, so a legit train/fleet of up to `limit` carts/boats is never
+touched and only the post-limit overflow is removed deterministically.
 
 Cheap because:
-  - The check fires once every 10s per entity (low amortized cost).
-  - The AABB is chunk-sized; getEntitiesOfClass filters via the
-    chunk-system entity index, not a full-world scan.
-  - Discard cascades naturally bring the count under the limit
-    across consecutive sweep ticks without coordinated bookkeeping.
+  - Fires once every 10s per entity (low amortized cost).
+  - AABB is chunk-sized; getEntitiesOfClass uses the chunk-system
+    entity index, not a full-world scan.
+  - Highest-ID-first ranking is deterministic: every cart in the
+    chunk reaches the same conclusion about which subset is excess.
 
 Blocks the classic minecart/boat hopper-feeder lag-machine pattern
 where thousands of stacked vehicles in one chunk burn ticks on
 collision + movement updates.
 
 diff --git a/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java b/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
-index 84c97b2..32ad191 100644
+index 84c97b2..dd14fc7 100644
 --- a/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
 +++ b/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
-@@ -236,6 +236,25 @@ public abstract class AbstractBoat extends VehicleEntity implements Leashable {
+@@ -236,6 +236,37 @@ public abstract class AbstractBoat extends VehicleEntity implements Leashable {
 
      @Override
      public void tick() {
-+        // SourbyCraft start - perf-engine P2 lag-machine: excess boat sweeper
++        // SourbyCraft start - perf-engine P2 lag-machine: excess boat sweeper.
++        // Only the (count - limit) highest-ID boats (= newest) get culled,
++        // so legit boat fleets up to `limit` are never touched and only the
++        // post-limit overflow gets removed deterministically.
 +        if (!this.level().isClientSide()
 +            && this.tickCount > 0
 +            && this.tickCount % 200 == 0
@@ -40,10 +44,19 @@ index 84c97b2..32ad191 100644
 +                net.minecraft.world.phys.AABB chunkBox = new net.minecraft.world.phys.AABB(
 +                    cp.getMinBlockX(), this.level().getMinY(), cp.getMinBlockZ(),
 +                    cp.getMaxBlockX() + 1, this.level().getMaxY() + 1, cp.getMaxBlockZ() + 1);
-+                int count = this.level().getEntitiesOfClass(AbstractBoat.class, chunkBox, e -> true).size();
-+                if (count > limit) {
-+                    this.discard();
-+                    return;
++                java.util.List<AbstractBoat> siblings = this.level().getEntitiesOfClass(AbstractBoat.class, chunkBox, e -> true);
++                if (siblings.size() > limit) {
++                    int myId = this.getId();
++                    int rank = 0;
++                    for (AbstractBoat other : siblings) {
++                        if (other.getId() > myId) {
++                            rank++;
++                        }
++                    }
++                    if (rank < siblings.size() - limit) {
++                        this.discard();
++                        return;
++                    }
 +                }
 +            }
 +        }
@@ -52,14 +65,17 @@ index 84c97b2..32ad191 100644
          this.status = this.getStatus();
          if (this.status != AbstractBoat.Status.UNDER_WATER && this.status != AbstractBoat.Status.UNDER_FLOWING_WATER) {
 diff --git a/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java b/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
-index 1c043c1..076e9ce 100644
+index 1c043c1..aef9f8e 100644
 --- a/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
 +++ b/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
-@@ -289,6 +289,25 @@ public abstract class AbstractMinecart extends VehicleEntity {
+@@ -289,6 +289,37 @@ public abstract class AbstractMinecart extends VehicleEntity {
 
      @Override
      public void tick() {
-+        // SourbyCraft start - perf-engine P2 lag-machine: excess minecart sweeper
++        // SourbyCraft start - perf-engine P2 lag-machine: excess minecart sweeper.
++        // Only the (count - limit) highest-ID minecarts (= newest) get culled,
++        // so a legit train of <=limit carts is never touched and only the
++        // post-limit overflow gets removed deterministically.
 +        if (!this.level().isClientSide()
 +            && this.tickCount > 0
 +            && this.tickCount % 200 == 0
@@ -70,10 +86,19 @@ index 1c043c1..076e9ce 100644
 +                net.minecraft.world.phys.AABB chunkBox = new net.minecraft.world.phys.AABB(
 +                    cp.getMinBlockX(), this.level().getMinY(), cp.getMinBlockZ(),
 +                    cp.getMaxBlockX() + 1, this.level().getMaxY() + 1, cp.getMaxBlockZ() + 1);
-+                int count = this.level().getEntitiesOfClass(AbstractMinecart.class, chunkBox, e -> true).size();
-+                if (count > limit) {
-+                    this.discard();
-+                    return;
++                java.util.List<AbstractMinecart> siblings = this.level().getEntitiesOfClass(AbstractMinecart.class, chunkBox, e -> true);
++                if (siblings.size() > limit) {
++                    int myId = this.getId();
++                    int rank = 0;
++                    for (AbstractMinecart other : siblings) {
++                        if (other.getId() > myId) {
++                            rank++;
++                        }
++                    }
++                    if (rank < siblings.size() - limit) {
++                        this.discard();
++                        return;
++                    }
 +                }
 +            }
 +        }
