@@ -33,7 +33,7 @@ public final class StartupPluginLog {
         }
         long elapsedMs = (System.nanoTime() - bootStartNanos) / 1_000_000;
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("[SourbyCraft] Plugins ready (%.1fs):%n", elapsedMs / 1000.0));
+        sb.append(String.format(java.util.Locale.ROOT, "[SourbyCraft] Plugins ready (%.1fs):%n", elapsedMs / 1000.0));
         for (int i = 0; i < ORDER.length; i++) {
             List<String> list = grouped.get(ORDER[i]);
             if (list == null || list.isEmpty()) continue;

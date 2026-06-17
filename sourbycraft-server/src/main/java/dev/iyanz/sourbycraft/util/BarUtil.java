@@ -27,7 +27,7 @@ public final class BarUtil {
         if (bytes < 1024) return bytes + " B";
         if (bytes < 1048576) return (bytes / 1024) + " KB";
         if (bytes < 1073741824) return (bytes / 1048576) + " MB";
-        return String.format("%.1f GB", bytes / 1073741824.0);
+        return String.format(java.util.Locale.ROOT, "%.1f GB", bytes / 1073741824.0);
     }
 
 

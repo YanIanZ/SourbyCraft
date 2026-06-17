@@ -35,7 +35,7 @@ public class TpsBarCommand extends Command {
         double mspt = Bukkit.getAverageTickTime();
         bar.progress((float) (tps[0] / 20.0));
         bar.color(tps[0] > 18 ? BossBar.Color.GREEN : tps[0] > 15 ? BossBar.Color.YELLOW : BossBar.Color.RED);
-        bar.name(text(String.format("TPS: %.1f  MSPT: %.1fms", tps[0], mspt), SourbyCraftColors.VALUE));
+        bar.name(text(String.format(java.util.Locale.ROOT, "TPS: %.1f  MSPT: %.1fms", tps[0], mspt), SourbyCraftColors.VALUE));
         p.showBossBar(bar);
         Plugin owner = WildstackerManager.ownerPlugin();
         if (owner != null) {

@@ -40,7 +40,7 @@ public class RamBarCommand extends Command {
         String lbl = max == Long.MAX_VALUE ? BarUtil.INFINITY : (max / 1048576) + "MB";
         bar.progress((float) Math.min(pct, 1.0));
         bar.color(pct < 0.5 ? BossBar.Color.GREEN : pct < 0.8 ? BossBar.Color.YELLOW : BossBar.Color.RED);
-        bar.name(text(String.format("RAM: %d/%s (%.0f%%)", used / 1048576, lbl, pct * 100), SourbyCraftColors.VALUE));
+        bar.name(text(String.format(java.util.Locale.ROOT, "RAM: %d/%s (%.0f%%)", used / 1048576, lbl, pct * 100), SourbyCraftColors.VALUE));
         p.showBossBar(bar);
         Plugin owner = WildstackerManager.ownerPlugin();
         if (owner != null) {
