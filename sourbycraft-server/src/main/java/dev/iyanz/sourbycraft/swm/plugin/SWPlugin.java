@@ -104,10 +104,14 @@ public class SWPlugin extends JavaPlugin {
                 saves.add(ASP.saveWorldAsync(world));
             }
         }
-        // Wait for all saves to complete
+        // Wait for all saves to complete with per-world timeout so a stuck save
+        // cannot hang server shutdown indefinitely.
         for (CompletableFuture<Void> save : saves) {
             try {
-                save.join();
+                save.get(30, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException te) {
+                getSLF4JLogger().warn("Slime world save did not complete within 30s; abandoning to allow shutdown");
+                save.cancel(true);
             } catch (Exception ex) {
                 getLogger().severe("Failed to save world: " + ex.getMessage());
             }
