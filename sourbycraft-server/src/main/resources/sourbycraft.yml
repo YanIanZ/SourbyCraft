@@ -65,7 +65,7 @@ perf:
   # higher = skip ticks (less smooth movement, lower CPU).
   # Range 1..20. Default 20 (SourbyCraft historical default).
   # Operator sourbycraft.yml `entity.tick-rate` bridges into this knob at boot.
-  # DynamicPerformanceScaler drives this knob automatically via /perf scale on.
+  # P7 SelfTuneController may override at runtime per PerfSensor tier.
   entity-tick-rate: 20
   sensor:
     # Multi-signal load sensor feeding the 5-tier state machine
@@ -97,3 +97,13 @@ perf:
     excess-minecarts-limit: 10
     remove-excess-boats: false
     excess-boats-limit: 10
+  ai:
+    # P3 adaptive AI throttle. Default OFF (every mob ticks AI every server tick).
+    # When throttle-beyond-distance > 0, Mob.aiStep returns early on non-multiple-
+    # of-N ticks for mobs whose nearest player is beyond N blocks. P7
+    # SelfTuneController escalates these on tier transitions:
+    #   ORANGE     distance=64, interval=2
+    #   RED        distance=48, interval=4
+    #   EMERGENCY  distance=32, interval=8
+    throttle-beyond-distance: 0
+    throttle-tick-interval: 4
