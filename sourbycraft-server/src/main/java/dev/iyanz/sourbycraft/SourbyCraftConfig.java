@@ -294,6 +294,12 @@ public class SourbyCraftConfig {
         swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
         swmAutoUpdate = getBoolean("swm.auto-update", swmAutoUpdate);
         swmFileDir = getString("swm.file-dir", swmFileDir);
+        // SourbyCraft - reject swm.file-dir that escapes the server root or hits the FS root
+        if (swmFileDir.contains("..") || swmFileDir.startsWith("/") || swmFileDir.startsWith("\\")
+            || (swmFileDir.length() > 1 && swmFileDir.charAt(1) == ':')) {
+            Bukkit.getLogger().warning("Ignoring unsafe swm.file-dir='" + swmFileDir + "', falling back to slime_worlds");
+            swmFileDir = "slime_worlds";
+        }
 
         // Auto-install SWM plugin from GitHub releases
         if (swmEnabled && swmAutoInstall) {
