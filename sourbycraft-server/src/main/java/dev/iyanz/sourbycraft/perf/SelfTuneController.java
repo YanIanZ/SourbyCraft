@@ -34,6 +34,8 @@ public final class SelfTuneController {
     private static volatile int baselineMinecartsLimit = -1;
     private static volatile boolean baselineRemoveBoats;
     private static volatile int baselineBoatsLimit = -1;
+    private static volatile int baselineAiThrottleDistance = -1;
+    private static volatile int baselineAiThrottleInterval = -1;
     private static volatile boolean enabled = true;
 
     private SelfTuneController() {}
@@ -62,6 +64,8 @@ public final class SelfTuneController {
         baselineMinecartsLimit = Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.get();
         baselineRemoveBoats = Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.get();
         baselineBoatsLimit = Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.get();
+        baselineAiThrottleDistance = Knobs.AI_THROTTLE_BEYOND_DISTANCE.get();
+        baselineAiThrottleInterval = Knobs.AI_THROTTLE_TICK_INTERVAL.get();
     }
 
     private static void applyTier(final Tier tier) {
@@ -75,6 +79,8 @@ public final class SelfTuneController {
                 Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.set(baselineMinecartsLimit);
                 Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.set(baselineRemoveBoats);
                 Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(baselineBoatsLimit);
+                Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(64);
+                Knobs.AI_THROTTLE_TICK_INTERVAL.set(2);
             }
             case RED -> {
                 Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(Math.max(1, baselineProjectilePerTick / 4));
@@ -83,6 +89,8 @@ public final class SelfTuneController {
                 Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.set(Math.max(1, baselineMinecartsLimit / 2));
                 Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.set(true);
                 Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(Math.max(1, baselineBoatsLimit / 2));
+                Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(48);
+                Knobs.AI_THROTTLE_TICK_INTERVAL.set(4);
             }
             case EMERGENCY -> {
                 Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(1);
@@ -91,6 +99,8 @@ public final class SelfTuneController {
                 Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.set(2);
                 Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.set(true);
                 Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(2);
+                Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(32);
+                Knobs.AI_THROTTLE_TICK_INTERVAL.set(8);
             }
         }
     }
@@ -103,5 +113,7 @@ public final class SelfTuneController {
         Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.set(baselineMinecartsLimit);
         Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.set(baselineRemoveBoats);
         Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(baselineBoatsLimit);
+        Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(baselineAiThrottleDistance);
+        Knobs.AI_THROTTLE_TICK_INTERVAL.set(baselineAiThrottleInterval);
     }
 }

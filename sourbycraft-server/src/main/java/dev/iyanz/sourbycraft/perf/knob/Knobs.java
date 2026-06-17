@@ -50,6 +50,18 @@ public final class Knobs {
     public static final IntKnob LAG_MACHINE_EXCESS_BOATS_LIMIT =
         new IntKnob("perf.lag-machine.excess-boats-limit", 10, 1, 1000);
 
+    // === P3 Adaptive Entity AI knobs ===
+
+    /** Distance (blocks) beyond the nearest player at which mob aiStep gets throttled.
+     *  0 = disabled (vanilla every-tick AI for all mobs). */
+    public static final IntKnob AI_THROTTLE_BEYOND_DISTANCE =
+        new IntKnob("perf.ai.throttle-beyond-distance", 0, 0, 256);
+
+    /** When throttled (nearest player beyond AI_THROTTLE_BEYOND_DISTANCE), run aiStep only
+     *  every N server ticks. Higher = cheaper but more visibly frozen. */
+    public static final IntKnob AI_THROTTLE_TICK_INTERVAL =
+        new IntKnob("perf.ai.throttle-tick-interval", 4, 1, 40);
+
     public static Map<String, Object> snapshot() {
         return KnobRegistry.snapshot();
     }
