@@ -20,7 +20,7 @@ public final class VirtualExecutor {
     private VirtualExecutor() {}
 
     /** Initialize the virtual thread executor. Safe to call multiple times. */
-    public static void init() {
+    public static synchronized void init() {
         if (EXECUTOR != null && !EXECUTOR.isShutdown()) return;
         EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
         LOGGER.info("Virtual thread executor initialized");
@@ -28,10 +28,12 @@ public final class VirtualExecutor {
 
     /** Returns the shared virtual thread executor. */
     public static ExecutorService executor() {
-        if (EXECUTOR == null || EXECUTOR.isShutdown()) {
+        ExecutorService exec = EXECUTOR;
+        if (exec == null || exec.isShutdown()) {
             init();
+            exec = EXECUTOR;
         }
-        return EXECUTOR;
+        return exec;
     }
 
     /** Run a task on a virtual thread. Fire-and-forget. */
