@@ -14,6 +14,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 
@@ -113,14 +114,60 @@ public final class PluginInstaller {
         }
     }
 
+    private static final long MAX_PLUGIN_BYTES = 100L * 1024 * 1024; // 100 MB hard cap
+
     private static void download(String url, Path target) throws IOException {
-        HttpURLConnection c = (HttpURLConnection) URI.create(url).toURL().openConnection();
-        c.setInstanceFollowRedirects(true);
+        URI uri = URI.create(url);
+        String scheme = uri.getScheme();
+        if (scheme == null || !scheme.equalsIgnoreCase("https")) {
+            throw new IOException("Refusing non-https plugin download: " + url);
+        }
+        HttpURLConnection c = (HttpURLConnection) uri.toURL().openConnection();
+        c.setInstanceFollowRedirects(false); // manual redirect handling to enforce https on each hop
         c.setRequestProperty("User-Agent", "SourbyCraft");
         c.setConnectTimeout(30_000);
         c.setReadTimeout(60_000);
+        int redirects = 0;
+        while (redirects < 5) {
+            int code = c.getResponseCode();
+            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                String location = c.getHeaderField("Location");
+                if (location == null) throw new IOException("Redirect with no Location header from " + url);
+                URI next = URI.create(location);
+                String nextScheme = next.getScheme();
+                if (nextScheme == null || !nextScheme.equalsIgnoreCase("https")) {
+                    throw new IOException("Refusing redirect to non-https: " + location);
+                }
+                c.disconnect();
+                c = (HttpURLConnection) next.toURL().openConnection();
+                c.setInstanceFollowRedirects(false);
+                c.setRequestProperty("User-Agent", "SourbyCraft");
+                c.setConnectTimeout(30_000);
+                c.setReadTimeout(60_000);
+                redirects++;
+                continue;
+            }
+            break;
+        }
+        long contentLength = c.getContentLengthLong();
+        if (contentLength > MAX_PLUGIN_BYTES) {
+            throw new IOException("Plugin download exceeds " + MAX_PLUGIN_BYTES + " bytes: " + url);
+        }
         try (InputStream in = c.getInputStream()) {
-            Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            byte[] buf = new byte[64 * 1024];
+            long written = 0;
+            try (java.io.OutputStream out = Files.newOutputStream(target, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    written += n;
+                    if (written > MAX_PLUGIN_BYTES) {
+                        out.close();
+                        Files.deleteIfExists(target);
+                        throw new IOException("Plugin download exceeds " + MAX_PLUGIN_BYTES + " bytes: " + url);
+                    }
+                    out.write(buf, 0, n);
+                }
+            }
         }
     }
 
