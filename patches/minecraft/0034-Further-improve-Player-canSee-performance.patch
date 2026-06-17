@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: iyanz <boooky10@gmail.com>
+Date: Fri, 20 Sep 2024 01:13:04 +0200
+Subject: [PATCH] Further improve Player#canSee performance
+
+Adds a long-form UUID (msb ^ lsb) on every entity so hot-path canSee
+lookups can use fastutil Long2* collections instead of Object-keyed
+hashmaps. Re-routes UUID assignment through setUUID() so the long
+mirror stays in sync.
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 74a2b3d..cabaa13 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -332,6 +332,15 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     private boolean invulnerable;
+     protected UUID uuid = Mth.createInsecureUUID(this.random);
+     protected String stringUUID = this.uuid.toString();
++    // SourbyCraft start - further improve Player#canSee performance;
++    // combine UUID to single value to allow for easier hashmap lookups
++    // and allow using fastutil number sets
++    // this is less "secure" than using a full UUID, but should still not cause
++    // any collisions on this non-distributed system
++    // there may be a slight chance for collision, but this chance
++    // is way too small to actually account for
++    public long longUUID = this.uuid.getMostSignificantBits() ^ this.uuid.getLeastSignificantBits();
++    // SourbyCraft end - further improve Player#canSee performance
+     private boolean hasGlowingTag;
+     private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>(), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl
+     private final double[] pistonDeltas = new double[]{0.0, 0.0, 0.0};
+@@ -556,6 +565,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+         this.position = Vec3.ZERO;
+         this.blockPosition = BlockPos.ZERO;
+         this.chunkPosition = ChunkPos.ZERO;
++        this.setUUID(this.uuid); // SourbyCraft - further improve Player#canSee performance; call common setter
+         // Paper start - EAR 2
+         if (level != null) {
+             this.defaultActivationState = io.papermc.paper.entity.activation.ActivationRange.initializeEntityActivationState(this, level.spigotConfig);
+@@ -2710,8 +2720,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+             this.invulnerable = input.getBooleanOr("Invulnerable", false);
+             this.portalCooldown = input.getIntOr("PortalCooldown", 0);
+             input.read("UUID", UUIDUtil.CODEC).ifPresent(id -> {
+-                this.uuid = id;
+-                this.stringUUID = this.uuid.toString();
++                this.setUUID(id); // SourbyCraft - further improve Player#canSee performance; call common setter
+             });
+             if (!Double.isFinite(this.getX()) || !Double.isFinite(this.getY()) || !Double.isFinite(this.getZ())) {
+                 throw new IllegalStateException("Entity has invalid position");
+@@ -4293,6 +4302,9 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     public void setUUID(final UUID uuid) {
+         this.uuid = uuid;
+         this.stringUUID = this.uuid.toString();
++        // SourbyCraft start - further improve Player#canSee performance
++        this.longUUID = this.uuid.getMostSignificantBits() ^ this.uuid.getLeastSignificantBits();
++        // SourbyCraft end - further improve Player#canSee performance
+     }
+
+     @Override
+@@ -4302,7 +4314,13 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+
+     public String getStringUUID() {
+         return this.stringUUID;
++    }
++
++    // SourbyCraft start - further improve Player#canSee performance
++    public final long getLongUUID() {
++        return this.longUUID;
+     }
++    // SourbyCraft end - further improve Player#canSee performance
+
+     @Override
+     public String getScoreboardName() {
