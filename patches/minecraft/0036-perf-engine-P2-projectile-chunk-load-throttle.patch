@@ -6,14 +6,18 @@ Subject: [PATCH] SourbyCraft perf-engine P2 projectile chunk-load throttle
 Caps projectile chunk-load fan-out per tick and per-projectile via
 the LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK and
 LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE knobs. Counter resets
-each server tick from MinecraftServer.tickChildren so the cap is a
-rate limit, not a budget.
+each server tick from MinecraftServer.tickChildren so the per-tick cap
+is a rate limit, not a budget.
 
-Projectile.tick() is the chosen hook because every entity-type
-chunk-load (arrows, eggs, snowballs, fish hooks, etc.) routes
-through it via super.tick(). Over-limit projectiles get discarded
-before the chunk-load fans out, blocking the classic snowball /
-fish-hook lag-machine pattern.
+The check fires only when the projectile actually crosses into a new
+chunk (tracked via sourbyLastChunkKey). A high-velocity arrow that
+ticks 60+ times during its flight contributes at most one count per
+chunk it enters, not one per tick — so the default per-projectile
+cap of 10 caps lifetime chunk fan-out at 10 chunks, not 10 ticks.
+
+Over-limit projectiles get discarded before the chunk-cross-triggered
+load fans out, blocking the classic snowball / fish-hook lag-machine
+pattern.
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
 index c12287c..b6c407d 100644
@@ -31,37 +35,50 @@ index c12287c..b6c407d 100644
          ((io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler)org.bukkit.Bukkit.getGlobalRegionScheduler()).tick();
          for (io.papermc.paper.threadedregions.EntityScheduler scheduler : this.entitySchedulerTickList.getAllSchedulers()) {
 diff --git a/net/minecraft/world/entity/projectile/Projectile.java b/net/minecraft/world/entity/projectile/Projectile.java
-index 9af4bf7..de1bc08 100644
+index 9af4bf7..49dc1aa 100644
 --- a/net/minecraft/world/entity/projectile/Projectile.java
 +++ b/net/minecraft/world/entity/projectile/Projectile.java
-@@ -43,6 +43,8 @@ public abstract class Projectile extends Entity implements TraceableEntity {
+@@ -43,6 +43,9 @@ public abstract class Projectile extends Entity implements TraceableEntity {
      public boolean leftOwner = false;
      private boolean leftOwnerChecked;
      public boolean hasBeenShot = false;
-+    // SourbyCraft - perf-engine P2 lag-machine: per-projectile chunk-load counter
++    // SourbyCraft - perf-engine P2 lag-machine: per-projectile chunk-cross counter + last seen chunk
 +    public int sourbyLoadsByProjectile = 0;
++    public long sourbyLastChunkKey = Long.MIN_VALUE;
      private @Nullable Entity lastDeflectedBy;
      protected boolean hitCancelled = false; // CraftBukkit
 
-@@ -99,6 +101,23 @@ public abstract class Projectile extends Entity implements TraceableEntity {
+@@ -99,6 +101,35 @@ public abstract class Projectile extends Entity implements TraceableEntity {
 
      @Override
      public void tick() {
-+        // SourbyCraft start - perf-engine P2 lag-machine: projectile chunk-load throttle
++        // SourbyCraft start - perf-engine P2 lag-machine: projectile chunk-cross throttle.
++        // Only count + check when the projectile actually crosses into a new chunk,
++        // so per-tick / per-projectile caps reflect chunk-load fan-out rather than
++        // tick count (an arrow naturally ticks 60+ times in flight without crossing
++        // many chunks).
 +        {
-+            final int perTickMax = dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.get();
-+            final int perProjMax = dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.get();
-+            if (perTickMax > 0 &&
-+                dev.iyanz.sourbycraft.perf.LagMachineCounters.projectileChunkLoadsThisTick() >= perTickMax) {
-+                this.discard();
-+                return;
++            long curChunkKey = net.minecraft.world.level.ChunkPos.pack(
++                net.minecraft.util.Mth.floor(this.getX()) >> 4,
++                net.minecraft.util.Mth.floor(this.getZ()) >> 4);
++            if (this.sourbyLastChunkKey == Long.MIN_VALUE) {
++                this.sourbyLastChunkKey = curChunkKey;
++            } else if (curChunkKey != this.sourbyLastChunkKey) {
++                this.sourbyLastChunkKey = curChunkKey;
++                final int perTickMax = dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.get();
++                final int perProjMax = dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.get();
++                if (perTickMax > 0 &&
++                    dev.iyanz.sourbycraft.perf.LagMachineCounters.projectileChunkLoadsThisTick() >= perTickMax) {
++                    this.discard();
++                    return;
++                }
++                if (perProjMax > 0 && this.sourbyLoadsByProjectile >= perProjMax) {
++                    this.discard();
++                    return;
++                }
++                dev.iyanz.sourbycraft.perf.LagMachineCounters.incrementProjectileChunkLoad();
++                this.sourbyLoadsByProjectile++;
 +            }
-+            if (perProjMax > 0 && this.sourbyLoadsByProjectile >= perProjMax) {
-+                this.discard();
-+                return;
-+            }
-+            dev.iyanz.sourbycraft.perf.LagMachineCounters.incrementProjectileChunkLoad();
-+            this.sourbyLoadsByProjectile++;
 +        }
 +        // SourbyCraft end - perf-engine P2 lag-machine
          if (!this.hasBeenShot) {
