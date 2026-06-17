@@ -59,9 +59,20 @@ public final class BookSanitizer {
         }
     }
 
+    /** Hard cap on recursion depth so a deeply-nested component bomb cannot stack-overflow the sanitizer. */
+    private static final int MAX_DEPTH = 64;
+
     private static Component stripEvents(final Component component) {
+        return stripEvents(component, 0);
+    }
+
+    private static Component stripEvents(final Component component, final int depth) {
         if (component == null) {
             return null;
+        }
+        if (depth >= MAX_DEPTH) {
+            // Beyond the depth cap drop the subtree entirely rather than recurse further.
+            return Component.empty();
         }
         Style style = component.getStyle();
         boolean needsRewrite = style.getClickEvent() != null || style.getHoverEvent() != null;
@@ -69,7 +80,7 @@ public final class BookSanitizer {
         List<Component> rebuiltSiblings = null;
         for (int i = 0; i < siblings.size(); i++) {
             Component child = siblings.get(i);
-            Component cleanChild = stripEvents(child);
+            Component cleanChild = stripEvents(child, depth + 1);
             if (cleanChild != child) {
                 if (rebuiltSiblings == null) {
                     rebuiltSiblings = new ArrayList<>(siblings.size());
