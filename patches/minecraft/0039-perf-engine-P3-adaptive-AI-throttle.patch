@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Wed, 17 Jun 2026 22:20:00 +0700
+Subject: [PATCH] SourbyCraft perf-engine P3 adaptive AI throttle
+
+Wires the perf-engine P3 hook: skip Mob.aiStep on non-multiple-of-N
+ticks when the nearest player is beyond a configurable distance.
+Vanilla mobs still tick every server tick; the early-return only
+fires when the AI_THROTTLE_BEYOND_DISTANCE knob is > 0.
+
+  - throttle-beyond-distance: 0   (default — disabled, vanilla behaviour)
+  - throttle-tick-interval: 4     (when throttled, run aiStep 1 in N ticks)
+
+The SelfTuneController (P7) escalates these knobs per tier:
+  ORANGE     dist=64,  interval=2
+  RED        dist=48,  interval=4
+  EMERGENCY  dist=32,  interval=8
+
+Burn-in-daylight + looting checks live AFTER super.aiStep(), so a
+throttled tick skips them too — acceptable for far-from-player mobs
+since they are off-screen for the player anyway.
+
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+index cb42607..775d98b 100644
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -537,6 +537,22 @@ public abstract class Mob extends LivingEntity implements EquipmentUser, Leashab
+
+     @Override
+     public void aiStep() {
++        // SourbyCraft start - perf-engine P3: throttle aiStep beyond nearest-player distance
++        {
++            int throttleDistance = dev.iyanz.sourbycraft.perf.knob.Knobs.AI_THROTTLE_BEYOND_DISTANCE.get();
++            if (throttleDistance > 0 && this.level() instanceof net.minecraft.server.level.ServerLevel) {
++                int interval = dev.iyanz.sourbycraft.perf.knob.Knobs.AI_THROTTLE_TICK_INTERVAL.get();
++                if (interval > 1 && (this.tickCount % interval) != 0) {
++                    double distSqLimit = (double) throttleDistance * (double) throttleDistance;
++                    net.minecraft.world.entity.player.Player nearest =
++                        this.level().getNearestPlayer(this.getX(), this.getY(), this.getZ(), throttleDistance, false);
++                    if (nearest == null || nearest.distanceToSqr(this) > distSqLimit) {
++                        return;
++                    }
++                }
++            }
++        }
++        // SourbyCraft end - perf-engine P3
+         super.aiStep();
+         if (this.is(EntityTypeTags.BURN_IN_DAYLIGHT)) {
+             this.burnUndead();
