@@ -18,9 +18,11 @@ public final class WildstackerManager {
 
     /**
      * Returns an enabled plugin for scheduler registration. Tries legacy
-     * SimplePluginManager first, then PaperPluginManagerImpl, then falls back
-     * to the first non-null entry from either. Returns {@code null} only if
-     * literally no plugins are loaded.
+     * SimplePluginManager first, then PaperPluginManagerImpl. Returns
+     * {@code null} if no enabled plugin is available — callers must
+     * null-check and bail out rather than schedule against a disabled
+     * plugin (the Bukkit scheduler throws IllegalPluginAccessException
+     * on disabled owners).
      */
     public static Plugin ownerPlugin() {
         Plugin[] legacy = Bukkit.getPluginManager().getPlugins();
@@ -34,7 +36,6 @@ public final class WildstackerManager {
                 if (p != null && p.isEnabled()) return p;
             }
         } catch (Throwable ignored) {}
-        if (legacy.length > 0 && legacy[0] != null) return legacy[0];
         return null;
     }
 }
