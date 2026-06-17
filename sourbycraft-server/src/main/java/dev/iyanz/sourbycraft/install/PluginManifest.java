@@ -12,7 +12,9 @@ public final class PluginManifest {
 
     public static List<PluginEntry> parse(InputStream in) {
         if (in == null) return List.of();
-        Map<String, Object> root = new Yaml().load(in);
+        // SourbyCraft - SafeConstructor (defense-in-depth)
+        Yaml yaml = new Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(new org.yaml.snakeyaml.LoaderOptions()));
+        Map<String, Object> root = yaml.load(in);
         if (root == null) return List.of();
         Object pluginsObj = root.get("plugins");
         if (!(pluginsObj instanceof List<?> list)) return List.of();

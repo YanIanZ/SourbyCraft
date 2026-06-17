@@ -19,7 +19,9 @@ public final class PluginCategoryMap {
     public static PluginCategoryMap parse(InputStream in) {
         Map<String, String> p2c = new HashMap<>();
         if (in == null) return new PluginCategoryMap(p2c);
-        Map<String, Object> root = new Yaml().load(in);
+        // SourbyCraft - SafeConstructor (defense-in-depth)
+        Yaml yaml = new Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(new org.yaml.snakeyaml.LoaderOptions()));
+        Map<String, Object> root = yaml.load(in);
         if (root == null) return new PluginCategoryMap(p2c);
         Object catsObj = root.get("categories");
         if (!(catsObj instanceof Map<?, ?> cats)) return new PluginCategoryMap(p2c);

@@ -115,17 +115,45 @@ public final class PluginDownloader {
         return Pattern.compile(sb.toString());
     }
 
+    private static final long MAX_DOWNLOAD_BYTES = 100L * 1024 * 1024; // 100 MB hard cap
+
     private static Path downloadToFile(String url, Path pluginsDir, String pluginName) throws IOException {
         URI uri = URI.create(url);
+        String scheme = uri.getScheme();
+        if (scheme == null || !scheme.equalsIgnoreCase("https")) {
+            throw new IOException("Refusing non-https plugin download: " + url);
+        }
         String fileName = extractFileName(uri, pluginName);
-        Path target = pluginsDir.resolve(fileName);
+        Path pluginsRoot = pluginsDir.toAbsolutePath().normalize();
+        Path target = pluginsRoot.resolve(fileName).normalize();
+        if (!target.startsWith(pluginsRoot) || target.equals(pluginsRoot)) {
+            throw new IOException("Refusing plugin write outside plugins dir: " + target);
+        }
         HttpRequest req = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(2)).GET().build();
         try {
             HttpResponse<InputStream> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofInputStream());
             if (resp.statusCode() != 200) return null;
-            try (InputStream in = resp.body()) {
-                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            long contentLength = resp.headers().firstValueAsLong("Content-Length").orElse(-1L);
+            if (contentLength > MAX_DOWNLOAD_BYTES) {
+                throw new IOException("Plugin download exceeds " + MAX_DOWNLOAD_BYTES + " bytes: " + url);
             }
+            Path tmp = Files.createTempFile(pluginsRoot, ".sourbycraft-dl-", ".jar.tmp");
+            try (InputStream in = resp.body();
+                 java.io.OutputStream out = Files.newOutputStream(tmp)) {
+                byte[] buf = new byte[64 * 1024];
+                long written = 0;
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    written += n;
+                    if (written > MAX_DOWNLOAD_BYTES) {
+                        out.close();
+                        Files.deleteIfExists(tmp);
+                        throw new IOException("Plugin download exceeds " + MAX_DOWNLOAD_BYTES + " bytes: " + url);
+                    }
+                    out.write(buf, 0, n);
+                }
+            }
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             return target;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -135,10 +163,12 @@ public final class PluginDownloader {
 
     private static String extractFileName(URI uri, String pluginName) {
         String path = uri.getPath();
-        int slash = path.lastIndexOf('/');
-        String name = slash >= 0 ? path.substring(slash + 1) : path;
+        int slash = path == null ? -1 : path.lastIndexOf('/');
+        String name = slash >= 0 ? path.substring(slash + 1) : (path == null ? "" : path);
         name = URLDecoder.decode(name, StandardCharsets.UTF_8);
-        if (name.isBlank() || !name.endsWith(".jar")) {
+        // Strip any path separators that survived decode to block traversal via "%2F.."
+        name = name.replace('/', '_').replace('\\', '_');
+        if (name.isBlank() || name.contains("..") || !name.endsWith(".jar")) {
             name = pluginName + ".jar";
         }
         return name;
