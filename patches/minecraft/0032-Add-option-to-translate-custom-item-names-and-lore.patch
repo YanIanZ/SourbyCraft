@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: iyanz <boooky10@gmail.com>
+Date: Mon, 27 May 2024 03:13:37 +0200
+Subject: [PATCH] Add option to translate custom item names and lore
+
+Hooks dev.iyanz.sourbycraft.ItemUtil.pack/unpackPatchSaves into ItemStack
+network codec (decode + encode) and the ItemCost STREAM_CODEC so custom
+item display names and lore can be pre-rendered against the client locale
+via GlobalTranslator. Gated by SourbyCraftConfig.localizeItems.
+
+ItemUtil round-trips originals through a CUSTOM_DATA tag
+("SourbyCraft$SavedData") so the rendered components don't survive a
+server-side round-trip into persistent storage.
+
+diff --git a/net/minecraft/world/item/ItemStack.java b/net/minecraft/world/item/ItemStack.java
+index 1d08ac6..12a7841 100644
+--- a/net/minecraft/world/item/ItemStack.java
++++ b/net/minecraft/world/item/ItemStack.java
+@@ -182,7 +182,13 @@ public final class ItemStack implements DataComponentHolder {
+
+                 Holder<Item> item = Item.STREAM_CODEC.decode(input);
+                 DataComponentPatch patch = patchCodec.decode(input);
+-                return new ItemStack(item, count, patch);
++                // SourbyCraft start - item localization
++                ItemStack stack = new ItemStack(item, count, patch);
++                if (dev.iyanz.sourbycraft.SourbyCraftConfig.localizeItems) {
++                    dev.iyanz.sourbycraft.ItemUtil.unpackPatchSaves(stack);
++                }
++                return stack;
++                // SourbyCraft end - item localization
+             }
+
+             @Override
+@@ -192,15 +198,23 @@ public final class ItemStack implements DataComponentHolder {
+                 } else {
+                     output.writeVarInt(io.papermc.paper.util.sanitizer.ItemComponentSanitizer.sanitizeCount(io.papermc.paper.util.sanitizer.ItemObfuscationSession.currentSession(), itemStack, itemStack.getCount())); // Paper - potentially sanitize count
+                     Item.STREAM_CODEC.encode(output, itemStack.typeHolder());
++                    // SourbyCraft start - item localization
++                    if (dev.iyanz.sourbycraft.SourbyCraftConfig.localizeItems && output.adventure$locale != null) {
++                        try (final io.papermc.paper.util.SafeAutoClosable ignored = io.papermc.paper.util.sanitizer.ItemObfuscationSession.withContext(c -> c.itemStack(itemStack))) { // pass the itemstack as context to the obfuscation session
++                            patchCodec.encode(output, dev.iyanz.sourbycraft.ItemUtil.packPatchSaves(itemStack));
++                        }
++                    } else {
++                    // SourbyCraft end - item localization
+                     // Paper start - adventure; conditionally render translatable components
+                     boolean prev = net.minecraft.network.chat.ComponentSerialization.DONT_RENDER_TRANSLATABLES.get();
+-                    try (final io.papermc.paper.util.SafeAutoClosable ignored = io.papermc.paper.util.sanitizer.ItemObfuscationSession.withContext(c -> c.itemStack(itemStack))) { // pass the itemstack as context to the obfuscation session
++                    try (final io.papermc.paper.util.SafeAutoClosable ignored = io.papermc.paper.util.sanitizer.ItemObfuscationSession.withContext(c -> c.itemStack(itemStack))) { // pass the itemstack as context to the obfuscation session // SourbyCraft - item localization; diff on change
+                         net.minecraft.network.chat.ComponentSerialization.DONT_RENDER_TRANSLATABLES.set(true);
+-                    patchCodec.encode(output, itemStack.components.asPatch());
++                    patchCodec.encode(output, itemStack.components.asPatch()); // SourbyCraft - item localization; diff on change
+                     } finally {
+                         net.minecraft.network.chat.ComponentSerialization.DONT_RENDER_TRANSLATABLES.set(prev);
+                     }
+                     // Paper end - adventure; conditionally render translatable components
++                    } // SourbyCraft - item localization
+                 }
+             }
+         };
+diff --git a/net/minecraft/world/item/trading/ItemCost.java b/net/minecraft/world/item/trading/ItemCost.java
+index ba85e6c..2a3d379 100644
+--- a/net/minecraft/world/item/trading/ItemCost.java
++++ b/net/minecraft/world/item/trading/ItemCost.java
+@@ -31,7 +31,7 @@ public record ItemCost(Holder<Item> item, int count, DataComponentExactPredicate
+         DataComponentExactPredicate.STREAM_CODEC,
+         ItemCost::components,
+         ItemCost::new
+-    );
++    ).map(dev.iyanz.sourbycraft.ItemUtil::unpackPatchSaves, dev.iyanz.sourbycraft.ItemUtil::packPatchSaves); // SourbyCraft - item translations; fix merchant offers de-sync
+     public static final StreamCodec<RegistryFriendlyByteBuf, Optional<ItemCost>> OPTIONAL_STREAM_CODEC = STREAM_CODEC.apply(ByteBufCodecs::optional);
+
+     public ItemCost(final ItemLike item) {
