@@ -97,7 +97,7 @@ public final class PluginInstaller {
                 for (int i = 0; i < assets.size(); i++) {
                     JsonObject a = assets.get(i).getAsJsonObject();
                     String name = a.get("name").getAsString();
-                    if (name.toLowerCase().contains("swm") && name.endsWith(".jar")) {
+                    if (name.toLowerCase(java.util.Locale.ROOT).contains("swm") && name.endsWith(".jar")) {
                         downloadUrl = a.get("browser_download_url").getAsString();
                         break;
                     }

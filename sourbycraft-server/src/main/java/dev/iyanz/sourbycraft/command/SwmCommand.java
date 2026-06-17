@@ -23,7 +23,7 @@ public class SwmCommand extends Command {
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
-        String sub = args.length > 0 ? args[0].toLowerCase() : "status";
+        String sub = args.length > 0 ? args[0].toLowerCase(java.util.Locale.ROOT) : "status";
         try {
             switch (sub) {
                 case "list" -> {

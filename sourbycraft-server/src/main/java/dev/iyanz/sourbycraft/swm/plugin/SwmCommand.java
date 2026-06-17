@@ -40,7 +40,7 @@ public class SwmCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        switch (args[0].toLowerCase()) {
+        switch (args[0].toLowerCase(java.util.Locale.ROOT)) {
             case "list" -> handleList(sender);
             case "load" -> handleLoad(sender, args);
             case "save" -> handleSave(sender, args);
@@ -143,7 +143,7 @@ public class SwmCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
             return List.of("list", "load", "save", "info").stream()
-                    .filter(s -> s.startsWith(args[0].toLowerCase()))
+                    .filter(s -> s.startsWith(args[0].toLowerCase(java.util.Locale.ROOT)))
                     .collect(Collectors.toList());
         }
 

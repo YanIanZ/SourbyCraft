@@ -92,7 +92,7 @@ public final class SourbyBootstrap {
         Matcher m = entryPat.matcher(json);
         while (m.find()) {
             entries.add(new BootstrapManifest.Entry(
-                m.group(1), m.group(2), m.group(3).toLowerCase(),
+                m.group(1), m.group(2), m.group(3).toLowerCase(java.util.Locale.ROOT),
                 Long.parseLong(m.group(4))));
         }
         if (entries.isEmpty()) throw new IOException("manifest has no entries (parse failed?)");

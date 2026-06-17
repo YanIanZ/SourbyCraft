@@ -25,8 +25,8 @@ public class SpeedtestCommand extends Command {
     private static final Logger LOG = LoggerFactory.getLogger("SourbyCraft:Speedtest");
     private static final String OOKLA_BASE_URL = "https://install.speedtest.net/app/cli/";
 
-    private static final String OS_NAME = System.getProperty("os.name").toLowerCase();
-    private static final String OS_ARCH = System.getProperty("os.arch").toLowerCase();
+    private static final String OS_NAME = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT);
+    private static final String OS_ARCH = System.getProperty("os.arch").toLowerCase(java.util.Locale.ROOT);
 
     private static String resolveBinaryName() {
         if (OS_NAME.contains("linux")) {
