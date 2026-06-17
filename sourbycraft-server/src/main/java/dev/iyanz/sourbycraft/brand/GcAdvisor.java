@@ -44,7 +44,7 @@ public final class GcAdvisor {
     private static long parseMemArg(List<String> args, String prefix) {
         for (String a : args) {
             if (a.startsWith(prefix)) {
-                String v = a.substring(prefix.length()).toLowerCase();
+                String v = a.substring(prefix.length()).toLowerCase(java.util.Locale.ROOT);
                 try {
                     if (v.endsWith("g")) return Long.parseLong(v.substring(0, v.length() - 1)) * 1024;
                     if (v.endsWith("m")) return Long.parseLong(v.substring(0, v.length() - 1));
