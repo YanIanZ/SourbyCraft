@@ -25,7 +25,11 @@ final class LibDownloader {
      * Throws IOException on any network, size, or hash failure.
      */
     static boolean ensure(BootstrapManifest.Entry entry, Path librariesDir) throws IOException {
-        Path dest = librariesDir.resolve(entry.paperclipPath());
+        Path librariesRoot = librariesDir.toAbsolutePath().normalize();
+        Path dest = librariesRoot.resolve(entry.paperclipPath()).normalize();
+        if (!dest.startsWith(librariesRoot) || dest.equals(librariesRoot)) {
+            throw new IOException("Refusing library write outside libraries dir: " + dest);
+        }
         if (Files.exists(dest) && Sha256Verifier.matches(dest, entry.sha256())) {
             return false;
         }
@@ -33,7 +37,12 @@ final class LibDownloader {
         Path tmp = dest.resolveSibling(dest.getFileName() + ".tmp");
         Files.deleteIfExists(tmp);
 
-        HttpRequest req = HttpRequest.newBuilder(URI.create(entry.downloadUrl()))
+        URI uri = URI.create(entry.downloadUrl());
+        String scheme = uri.getScheme();
+        if (scheme == null || !scheme.equalsIgnoreCase("https")) {
+            throw new IOException("Refusing non-https library download: " + entry.downloadUrl());
+        }
+        HttpRequest req = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofMinutes(5))
             .GET().build();
         HttpResponse<Path> resp;

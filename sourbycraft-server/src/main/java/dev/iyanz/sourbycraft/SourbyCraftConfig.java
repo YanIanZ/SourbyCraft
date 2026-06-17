@@ -27,7 +27,9 @@ public class SourbyCraftConfig {
     private static Map<String, Object> loadYmlResource(String resource) {
         try (InputStream in = SourbyCraftConfig.class.getResourceAsStream(resource)) {
             if (in == null) return Map.of();
-            Map<String, Object> y = new Yaml().load(in);
+            // SourbyCraft - SafeConstructor (defense-in-depth; resource is classpath-baked)
+            Yaml yaml = new Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(new org.yaml.snakeyaml.LoaderOptions()));
+            Map<String, Object> y = yaml.load(in);
             return y == null ? Map.of() : y;
         } catch (Exception e) {
             return Map.of();
