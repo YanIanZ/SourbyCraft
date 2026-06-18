@@ -3,6 +3,9 @@ From: Yan <superwhisz@gmail.com>
 Date: Wed, 17 Jun 2026 16:00:00 +0700
 Subject: [PATCH] Strip click/hover events from written book pages (force-op
  exploit fix)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Blocks the "force op book" exploit family where a crafted
 WrittenBookContent is delivered via creative-mode slot packets with
@@ -18,10 +21,10 @@ Component#literal and never carry these style fields, so legitimate
 loot/quest books are untouched.
 
 diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-index 810b352..fe61b44 100644
+index 892f2d8d551cdba69bb4e21bddd356f61dbc2955..35083eaa429d9062ea5959c9d0147b1773a1793a 100644
 --- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-@@ -3492,6 +3492,8 @@ public class ServerGamePacketListenerImpl extends ServerCommonPacketListenerImpl
+@@ -3496,6 +3496,8 @@ public class ServerGamePacketListenerImpl
          if (this.player.hasInfiniteMaterials()) {
              boolean drop = packet.slotNum() < 0;
              ItemStack itemStack = packet.itemStack();

@@ -5,11 +5,11 @@ Subject: [PATCH] SourbyCraft v12 startup banner + GcAdvisor + HardeningAdvisor
 
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index cc35c62..df1f490 100644
+index c3226206fccc0b8087a63041e0390d0b4211fb5d..d22d5ad8b58a6e62bc59c685d82564ea749dfdbf 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -1288,9 +1288,21 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
-
+ 
      protected void runServer() {
          try {
 +            // SourbyCraft v12 — startup banner
@@ -27,6 +27,6 @@ index cc35c62..df1f490 100644
              }
 +            // SourbyCraft - paper-global hardening advisor (warn-only, after Paper config loaded)
 +            dev.iyanz.sourbycraft.security.HardeningAdvisor.run();
-
+ 
              this.nextTickTimeNanos = Util.getNanos();
              this.initTickSchedule(); // Paper - improve tick loop

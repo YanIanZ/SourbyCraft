@@ -23,11 +23,11 @@ where thousands of stacked vehicles in one chunk burn ticks on
 collision + movement updates.
 
 diff --git a/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java b/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
-index 84c97b2..dd14fc7 100644
+index 84c97b21400d642e225e30f882fbd6a58684496a..dd14fc79d5aad479c2f74fb820de90551a7ea16d 100644
 --- a/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
 +++ b/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
 @@ -236,6 +236,37 @@ public abstract class AbstractBoat extends VehicleEntity implements Leashable {
-
+ 
      @Override
      public void tick() {
 +        // SourbyCraft start - perf-engine P2 lag-machine: excess boat sweeper.
@@ -65,11 +65,11 @@ index 84c97b2..dd14fc7 100644
          this.status = this.getStatus();
          if (this.status != AbstractBoat.Status.UNDER_WATER && this.status != AbstractBoat.Status.UNDER_FLOWING_WATER) {
 diff --git a/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java b/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
-index 1c043c1..aef9f8e 100644
+index 1c043c1136fc42e888125047ed73b1dc32276183..aef9f8ed1f06e800fab2ed67a59940b232e19828 100644
 --- a/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
 +++ b/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
 @@ -289,6 +289,37 @@ public abstract class AbstractMinecart extends VehicleEntity {
-
+ 
      @Override
      public void tick() {
 +        // SourbyCraft start - perf-engine P2 lag-machine: excess minecart sweeper.

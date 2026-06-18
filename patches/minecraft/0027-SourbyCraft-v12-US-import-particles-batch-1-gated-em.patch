@@ -5,7 +5,7 @@ Subject: [PATCH] SourbyCraft v12 US import particles batch-1 gated emit
 
 
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 8d191db..56da17d 100644
+index 8d191dbf974f8b61ef8359c6dca5bbf4ec187036..56da17d065283202b8c09acf7cbf88ba65f9a83c 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -2126,9 +2126,11 @@ public abstract class Entity
@@ -21,7 +21,7 @@ index 8d191db..56da17d 100644
          }
  
 diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
-index 490aa1e..a0f3765 100644
+index 490aa1e93db41e9c09dd43595e3da71c5e6ddd8f..a0f376560bf80fa182bd6aa37571c0c0adbefef9 100644
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
 @@ -1033,6 +1033,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
@@ -33,7 +33,7 @@ index 490aa1e..a0f3765 100644
          this.entityData.set(DATA_EFFECT_AMBIENCE_ID, areAllEffectsAmbient(this.activeEffects.values()));
      }
 diff --git a/net/minecraft/world/entity/player/Player.java b/net/minecraft/world/entity/player/Player.java
-index e34b050..537d375 100644
+index e34b050cfeb9d9afa1869b19ff862627d27d60f7..537d3755edd922f78c758d8d7e9852813e3d277e 100644
 --- a/net/minecraft/world/entity/player/Player.java
 +++ b/net/minecraft/world/entity/player/Player.java
 @@ -1268,6 +1268,7 @@ public abstract class Player extends Avatar implements ContainerUser {
@@ -45,7 +45,7 @@ index e34b050..537d375 100644
          }
      }
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index 5665918..22fe973 100644
+index 56659181dc817ea028428eabf5937308c04b8cc5..22fe9732ffdbcd996ec21225e805a9e27768694d 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
 @@ -1223,7 +1223,9 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl

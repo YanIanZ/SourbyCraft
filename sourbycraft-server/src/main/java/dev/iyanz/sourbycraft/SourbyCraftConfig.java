@@ -495,6 +495,17 @@ public class SourbyCraftConfig {
         dev.iyanz.sourbycraft.perf.knob.Knobs.logLoaded();
 
         dev.iyanz.sourbycraft.util.VirtualExecutor.init();
+
+        // SourbyCraft - final save: readConfig() saves after its reflective field walk but every
+        // post-readConfig getBoolean/getInt/getString call (antixray, particle, perf-sensor bridge,
+        // combat profile etc) writes new defaults to the in-memory config that the early save
+        // never sees. Persist those now so sourbycraft.yml is a complete materialisation of the
+        // baseline on first boot instead of the four-line stub operators currently get.
+        try {
+            config.save(CONFIG_FILE);
+        } catch (IOException exception) {
+            Bukkit.getLogger().log(Level.SEVERE, "Could not save final " + CONFIG_FILE, exception);
+        }
     }
 
     protected static void log(String string) {
@@ -532,30 +543,54 @@ public class SourbyCraftConfig {
         config.set(path, val);
     }
 
+    /**
+     * Read a key, persisting the default when missing.
+     *
+     * <p>Earlier versions relied on {@code config.addDefault(...)} +
+     * {@code copyDefaults(true)} to materialise unset keys at save
+     * time, but the YamlConfiguration default-merge path does not
+     * actually serialise defaults that were never read through the
+     * tree visitor — operators ended up with a near-empty
+     * {@code sourbycraft.yml} that contained only the keys our code
+     * wrote via {@code set(...)}. We now use {@code config.set} when
+     * the key is absent so every default the boot path consults
+     * lands on disk on the next save.
+     */
     private static boolean getBoolean(String path, boolean def) {
-        config.addDefault(path, def);
-        return config.getBoolean(path, config.getBoolean(path));
+        if (!config.isSet(path)) {
+            config.set(path, def);
+        }
+        return config.getBoolean(path, def);
     }
 
     private static double getDouble(String path, double def) {
-        config.addDefault(path, def);
-        return config.getDouble(path, config.getDouble(path));
+        if (!config.isSet(path)) {
+            config.set(path, def);
+        }
+        return config.getDouble(path, def);
     }
 
     private static int getInt(String path, int def) {
-        config.addDefault(path, def);
-        return config.getInt(path, config.getInt(path));
+        if (!config.isSet(path)) {
+            config.set(path, def);
+        }
+        return config.getInt(path, def);
     }
 
     @SuppressWarnings("unchecked")
     private static <T> List<T> getList(String path, List<T> def) {
-        config.addDefault(path, def);
-        return (List<T>) config.getList(path, config.getList(path));
+        if (!config.isSet(path)) {
+            config.set(path, def);
+        }
+        List<?> raw = config.getList(path, def);
+        return (List<T>) raw;
     }
 
     private static String getString(String path, String def) {
-        config.addDefault(path, def);
-        return config.getString(path, config.getString(path));
+        if (!config.isSet(path)) {
+            config.set(path, def);
+        }
+        return config.getString(path, def);
     }
 
     private static int clamp(int v, int min, int max) { return Math.max(min, Math.min(max, v)); }

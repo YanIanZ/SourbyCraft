@@ -6,15 +6,13 @@ Subject: [PATCH] Resend more data on locale change
 Includes advancements, inventories, entity custom names, text display texts and item frame items.
 
 diff --git a/net/minecraft/server/PlayerAdvancements.java b/net/minecraft/server/PlayerAdvancements.java
-index f8c3b8b..77ffd9a 100644
+index f8c3b8b1f153157074452b3d13b94efa568d048e..77ffd9a0ba4c6f96836d10e606d26a31b99cb7f7 100644
 --- a/net/minecraft/server/PlayerAdvancements.java
 +++ b/net/minecraft/server/PlayerAdvancements.java
-@@ -71,7 +71,17 @@ public class PlayerAdvancements {
-         int defaultVersion = 1343;
-         this.codec = DataFixTypes.ADVANCEMENTS.wrapCodec(PlayerAdvancements.Data.CODEC, dataFixer, 1343);
+@@ -73,6 +73,16 @@ public class PlayerAdvancements {
          this.load(manager);
-+    }
-+
+     }
+ 
 +    // SourbyCraft start - refresh data on locale change; advancement refreshing
 +    public void refreshAll() {
 +        this.isFirstPacket = true;
@@ -22,24 +20,25 @@ index f8c3b8b..77ffd9a 100644
 +            this.markForVisibilityUpdate(advancement);
 +        }
 +        this.visible.clear();
-     }
++    }
 +    // SourbyCraft end - refresh data on locale change; advancement refreshing
-
++
      public void setPlayer(final ServerPlayer player) {
          this.player = player;
+     }
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
-index 60ff817..a01dbe7 100644
+index 60ff8173750b57aa05bb19a3dd1c744f870f59a5..a01dbe7a49d20d7a81378e584a06f496262e6a85 100644
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
-@@ -465,6 +465,8 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
-         return this.viewDistanceHolder;
+@@ -466,6 +466,8 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
      }
      // Paper end - rewrite chunk system
-+
+ 
 +    private long lastLocaleChange = 0L; // SourbyCraft - refresh data on locale change; throttling
-
++
      public ServerPlayer(final MinecraftServer server, final ServerLevel level, final GameProfile gameProfile, final ClientInformation clientInformation) {
          super(level, gameProfile);
+         this.server = server;
 @@ -2459,6 +2461,33 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
                  information.language()
              );

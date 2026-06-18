@@ -26,12 +26,12 @@ runnables on the event loop.
 Co-authored-by: iyanz <boooky10@gmail.com>
 
 diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
-index 0f06d50..0b430e4 100644
+index 397b00a3f5306c785f344622154151cb74644971..f5c39c9f0c80341f7f004386b352851f00cc914d 100644
 --- a/net/minecraft/network/Connection.java
 +++ b/net/minecraft/network/Connection.java
 @@ -55,6 +55,22 @@ import org.slf4j.Marker;
  import org.slf4j.MarkerFactory;
-
+ 
  public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
 +
 +    // Paper start - optimise non-flush packet sending
@@ -74,4 +74,4 @@ index 0f06d50..0b430e4 100644
 +            // Paper end - optimise packets that are not flushed
          }
      }
-
+ 

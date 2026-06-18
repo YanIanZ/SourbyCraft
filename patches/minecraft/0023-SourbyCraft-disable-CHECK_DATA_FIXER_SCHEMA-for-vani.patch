@@ -1,12 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yan <Yan>
 Date: Mon, 15 Jun 2026 02:02:18 +0700
-Subject: [PATCH] SourbyCraft: disable CHECK_DATA_FIXER_SCHEMA for
- vanilla 1.21.11/mache 26.1.2 mismatch
+Subject: [PATCH] SourbyCraft: disable CHECK_DATA_FIXER_SCHEMA for vanilla
+ 1.21.11/mache 26.1.2 mismatch
 
 
 diff --git a/net/minecraft/SharedConstants.java b/net/minecraft/SharedConstants.java
-index ade4afa..0665be0 100644
+index ade4afa70cc014fc548a3dc1de78a18c92709994..0665be0145bf05696257f7a6c4918369434f2b81 100644
 --- a/net/minecraft/SharedConstants.java
 +++ b/net/minecraft/SharedConstants.java
 @@ -122,7 +122,7 @@ public class SharedConstants {

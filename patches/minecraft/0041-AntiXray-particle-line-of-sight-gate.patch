@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: iyanz <boooky10@gmail.com>
-Date: Wed, 18 Jun 2026 00:00:00 +0000
+Date: Thu, 18 Jun 2026 00:00:00 +0000
 Subject: [PATCH] AntiXray particle line-of-sight gate
 
 Adds an opt-in per-(player, particle-origin) line-of-sight check
@@ -14,10 +14,10 @@ would otherwise leak. Toggle off by default; off-by-default also
 preserves vanilla "you can hear/see fire spread behind a wall" feel.
 
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index a5b2f44..6e9f91b 100644
+index a5b2f443c223649def6b670cc03c710290b92065..6e9f91b1fea99985407b61159c1a5273783bc7ac 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -2187,6 +2187,12 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -2187,6 +2187,12 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
          } else {
              BlockPos pos = player.blockPosition();
              if (pos.closerToCenterThan(new Vec3(x, y, z), overrideLimiter ? 512.0 : 32.0)) {

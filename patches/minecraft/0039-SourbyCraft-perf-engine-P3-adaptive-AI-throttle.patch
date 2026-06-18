@@ -2,6 +2,9 @@ From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yan <superwhisz@gmail.com>
 Date: Wed, 17 Jun 2026 22:20:00 +0700
 Subject: [PATCH] SourbyCraft perf-engine P3 adaptive AI throttle
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Skip Mob.aiStep on non-multiple-of-N ticks when no live player is
 within a configurable distance. Vanilla mobs still tick every server
@@ -25,11 +28,11 @@ check is bounded by player count, not by the chunk-system entity
 index size. Cheaper for the common case of a few dozen players.
 
 diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
-index ea14421..983d955 100644
+index cb4260791501c0c15c5a7b0509d6631fefb492b7..cd0a7f4bb25f056eaf17096ff5226d8f47c76be1 100644
 --- a/net/minecraft/world/entity/Mob.java
 +++ b/net/minecraft/world/entity/Mob.java
-@@ -537,6 +537,22 @@ public abstract class Mob extends LivingEntity implements EquipmentUser, Leashab
-
+@@ -537,6 +537,22 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+ 
      @Override
      public void aiStep() {
 +        // SourbyCraft start - perf-engine P3: throttle aiStep beyond nearest-player distance

@@ -13,11 +13,11 @@ ItemUtil round-trips originals through a CUSTOM_DATA tag
 server-side round-trip into persistent storage.
 
 diff --git a/net/minecraft/world/item/ItemStack.java b/net/minecraft/world/item/ItemStack.java
-index 1d08ac6..12a7841 100644
+index 5e965b2f9b1e8f682e394adf07a09381a93be433..ce9d984e32e45ee00e773a514f75acae585d42ee 100644
 --- a/net/minecraft/world/item/ItemStack.java
 +++ b/net/minecraft/world/item/ItemStack.java
-@@ -182,7 +182,13 @@ public final class ItemStack implements DataComponentHolder {
-
+@@ -182,7 +182,13 @@ public final class ItemStack implements DataComponentHolder, ItemInstance {
+ 
                  Holder<Item> item = Item.STREAM_CODEC.decode(input);
                  DataComponentPatch patch = patchCodec.decode(input);
 -                return new ItemStack(item, count, patch);
@@ -29,9 +29,9 @@ index 1d08ac6..12a7841 100644
 +                return stack;
 +                // SourbyCraft end - item localization
              }
-
+ 
              @Override
-@@ -192,15 +198,23 @@ public final class ItemStack implements DataComponentHolder {
+@@ -192,15 +198,23 @@ public final class ItemStack implements DataComponentHolder, ItemInstance {
                  } else {
                      output.writeVarInt(io.papermc.paper.util.sanitizer.ItemComponentSanitizer.sanitizeCount(io.papermc.paper.util.sanitizer.ItemObfuscationSession.currentSession(), itemStack, itemStack.getCount())); // Paper - potentially sanitize count
                      Item.STREAM_CODEC.encode(output, itemStack.typeHolder());
@@ -58,7 +58,7 @@ index 1d08ac6..12a7841 100644
              }
          };
 diff --git a/net/minecraft/world/item/trading/ItemCost.java b/net/minecraft/world/item/trading/ItemCost.java
-index ba85e6c..2a3d379 100644
+index ba85e6c1051c8b8285676dbff22783b2829907d9..2a3d379729dd142333aa2593bbbb2fc9e2894751 100644
 --- a/net/minecraft/world/item/trading/ItemCost.java
 +++ b/net/minecraft/world/item/trading/ItemCost.java
 @@ -31,7 +31,7 @@ public record ItemCost(Holder<Item> item, int count, DataComponentExactPredicate
@@ -68,5 +68,5 @@ index ba85e6c..2a3d379 100644
 -    );
 +    ).map(dev.iyanz.sourbycraft.ItemUtil::unpackPatchSaves, dev.iyanz.sourbycraft.ItemUtil::packPatchSaves); // SourbyCraft - item translations; fix merchant offers de-sync
      public static final StreamCodec<RegistryFriendlyByteBuf, Optional<ItemCost>> OPTIONAL_STREAM_CODEC = STREAM_CODEC.apply(ByteBufCodecs::optional);
-
+ 
      public ItemCost(final ItemLike item) {

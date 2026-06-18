@@ -6,7 +6,7 @@ Subject: [PATCH] SourbyCraft v12 US import sounds batch-1 gated emit
 
 
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 56da17d..c6e78cc 100644
+index 56da17d065283202b8c09acf7cbf88ba65f9a83c..c6e78cc69c18c1613e67a56afa54028ad0ad5dae 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -1885,17 +1885,20 @@ public abstract class Entity
@@ -31,7 +31,7 @@ index 56da17d..c6e78cc 100644
          this.playSound(soundType.getStepSound(), soundType.getVolume() * 0.15F, soundType.getPitch());
      }
 diff --git a/net/minecraft/world/entity/animal/parrot/Parrot.java b/net/minecraft/world/entity/animal/parrot/Parrot.java
-index f6a15a7..9556ad3 100644
+index f6a15a7699d6f3ccfb95d9c8e0d316d58236a26e..9556ad38428914be13f744e3000513221dd37250 100644
 --- a/net/minecraft/world/entity/animal/parrot/Parrot.java
 +++ b/net/minecraft/world/entity/animal/parrot/Parrot.java
 @@ -239,6 +239,7 @@ public class Parrot extends ShoulderRidingEntity implements FlyingAnimal {
@@ -43,7 +43,7 @@ index f6a15a7..9556ad3 100644
                      return true;
                  }
 diff --git a/net/minecraft/world/entity/player/Player.java b/net/minecraft/world/entity/player/Player.java
-index 537d375..00a4db9 100644
+index 537d3755edd922f78c758d8d7e9852813e3d277e..00a4db93cee39e78d9b28a044a7043b68e07b251 100644
 --- a/net/minecraft/world/entity/player/Player.java
 +++ b/net/minecraft/world/entity/player/Player.java
 @@ -1038,10 +1038,11 @@ public abstract class Player extends Avatar implements ContainerUser {
