@@ -28,6 +28,7 @@ Major upgrade from `12-EXP` (1.21.11) to year-based Minecraft 26.1.2:
 - **Perf-engine P2 lag-machine wiring** — projectile chunk-load throttle (per-tick + per-projectile), excess minecart/boat sweeper, excess falling-block sweeper. All gated by `Knobs.LAG_MACHINE_*` (default ON for snowball/firework save fixes, OFF for sweepers).
 - **Sourby Bootstrap (slim jar)** — release jar 31 M (down from 57 M). 6 optional libs + Ookla speedtest CLI lazy-download on first boot into `libraries/` with SHA-256 verification.
 - **Anti-xray extension (stonar96 RayTraceAntiXray port)** — async ore visibility cache + entity LOS gate + particle LOS gate. NMS hooks on `ChunkMap.TrackedEntity#updatePlayer` (patch 0040) and `ServerLevel#sendParticles` (patch 0041). Hides mobs / item drops / `TextDisplay` holograms / particles behind walls. Liquid surface delegated to Paper `anticheat.anti-xray.fluid-obscures`. All toggles default OFF.
+- **Spark profiler integration** — `SparkBridge` lazy-binds to `me.lucko.spark.api.SparkProvider`, `/sparkview` command renders TPS 5s/10s/1m/5m/15m + MSPT 10s/1m/5m mean/max/95th + CPU process/system + per-GC totals through the SourbyCraft hex palette and the same `▰▱` bar style as the rest of /tps /sys /ver. Toggle via `spark.enabled` in sourbycraft.yml.
 
 See `release/RELEASE-NOTES-26.1.2.md` for the full patch list.
 
@@ -142,18 +143,24 @@ perf:
 
 | Command | Description |
 |---------|-------------|
-| `/tps` | SourbyCraft-colored TPS readout (1m/5m/15m) |
+| `/tps` | SourbyCraft-colored TPS readout (instant + 1m/5m/15m) with warmup banner |
 | `/sys` | Server specs: uptime, CPU, RAM, Java, worlds, SWM hint |
 | `/ping [player]` | Latency + client brand + GeoIP location |
 | `/plugins` | Active plugin list with versions |
 | `/speedtest` | Built-in Ookla network speed test (lazy-downloaded multi-OS binary) |
-| `/tpsbar` / `/rambar` | BossBar visual monitors |
+| `/sparkview` (`/sparkv`, `/spk`) | Comprehensive Spark profiler view: TPS 5s/10s/1m/5m/15m + MSPT 10s/1m/5m mean/max/95th + CPU process/system + per-GC totals |
+| `/tpsbar` / `/rambar` | BossBar visual monitors with warmup label |
 | `/ver` | Version info: SourbyCraft + Minecraft + API + uptime + git (aliases: `version`, `about`) |
 | `/swm <list/load/status>` | SlimeWorldManager control |
 
 ### 🔬 Profiling
 
-SourbyCraft does not bundle the Spark profiler (license/distribution concerns). Install manually:
+Paper 26.1.2 bundles Spark as a built-in profiler. SourbyCraft adds two integration layers on top:
+
+1. **Auto-install fallback** — if you remove Paper's bundled Spark, the SourbyCraft auto-installer downloads `spark-*-bukkit.jar` from `ci.lucko.me` on first boot.
+2. **SourbyCraft Spark viewer** — `/sparkview` (aliases `/sparkv`, `/spk`) renders the full spark-api statistic set through the SourbyCraft hex palette + `▰▱` bar style: rolling TPS windows, MSPT mean/max/95th, CPU process+system, per-GC totals. Toggle the bridge with `spark.enabled: true|false` in `sourbycraft.yml`.
+
+Manual install (only needed for non-Paper deployments):
 
 ```sh
 # Drop spark plugin JAR into your plugins/ directory
