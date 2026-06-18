@@ -27,6 +27,7 @@ Major upgrade from `12-EXP` (1.21.11) to year-based Minecraft 26.1.2:
 - **SWM `FileLoader` path traversal fixed** — `/swm load <name>` rejects slash / `..` / leading-dot, normalizes target, verifies containment inside baseDir.
 - **Perf-engine P2 lag-machine wiring** — projectile chunk-load throttle (per-tick + per-projectile), excess minecart/boat sweeper, excess falling-block sweeper. All gated by `Knobs.LAG_MACHINE_*` (default ON for snowball/firework save fixes, OFF for sweepers).
 - **Sourby Bootstrap (slim jar)** — release jar 31 M (down from 57 M). 6 optional libs + Ookla speedtest CLI lazy-download on first boot into `libraries/` with SHA-256 verification.
+- **Anti-xray extension (stonar96 RayTraceAntiXray port)** — async ore visibility cache + entity LOS gate + particle LOS gate. NMS hooks on `ChunkMap.TrackedEntity#updatePlayer` (patch 0040) and `ServerLevel#sendParticles` (patch 0041). Hides mobs / item drops / `TextDisplay` holograms / particles behind walls. Liquid surface delegated to Paper `anticheat.anti-xray.fluid-obscures`. All toggles default OFF.
 
 See `release/RELEASE-NOTES-26.1.2.md` for the full patch list.
 
@@ -121,7 +122,7 @@ perf:
 - **VirtualExecutor** — `init()` synchronized + DCL in `executor()` so a concurrent shutdown cannot return a dead executor.
 - **SWPlugin shutdown** — `saveWorldAsync` wait bounded at 30 s per world so a stuck SWM write cannot hang server shutdown.
 - **Crash Prevention** — NbtAccounter limits (books, skulls, bundles), sign / anvil length limits, recipe book packet size, creative NBT size. Paper's `CountingOps` codec-depth tracker bounds `ItemStack.CODEC` decode.
-- **AntiXray** — fluid obscures (water/lava as solids), all-blocks mode, entity obfuscation.
+- **AntiXray** — Paper engine-mode 1 obfuscator (fluid obscures, all-blocks, entity obfuscation) plus SourbyCraft RayTraceAntiXray port: async ore visibility cache (`RayTraceWorker` on `VirtualExecutor`), sync entity LOS gate (`ChunkMap.TrackedEntity` hook, patch 0040) for mobs / item drops / `TextDisplay` holograms / custom-named armor stands, and per-(player, particle-origin) LOS gate (`ServerLevel.sendParticles` hook, patch 0041). All three toggles default OFF.
 - **Command Security** — RCON rate limiting, RCON brute-force protection.
 - **Locale.ROOT correctness** — every `toLowerCase` + numeric `String.format` site uses `Locale.ROOT`. Prevents Turkish-locale OS detection breakage and avoids comma-vs-period decimal divergence in TPS / RAM / Ping bar text.
 
@@ -352,7 +353,7 @@ git checkout release/26.1.2
 Output: `release/SourbyCraft-26.1.2-EXP.jar` (slim, ~31 M) + `release/checksums.txt`.
 
 Active patch counts:
-- 39 minecraft NMS patches (`patches/minecraft/`)
+- 41 minecraft NMS patches (`patches/minecraft/`)
 - 6 paper-server patches (`patches/server/`)
 - 14 buildscript-server patches + 2 api patches (`patches/buildscript/`)
 - 4 api patches (`patches/api/`)

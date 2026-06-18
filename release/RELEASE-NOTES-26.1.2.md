@@ -20,9 +20,9 @@ Released: 2026-06-17 on branch `release/26.1.2`.
 - Plugins relying on the deleted SourbyCraft NMS hooks (Pufferfish DAB writes, wildstacker NMS-only mode, parallel tick router, BossBar ticker, ModScanner) will see no-op behavior — their config knobs are dead.
 - PvP variant is gone — `variant=pvp` CLI flag is no longer recognized.
 
-## SourbyCraft patches (39 minecraft + 6 server + 14 server buildscript + 2 api buildscript + 4 api)
+## SourbyCraft patches (41 minecraft + 6 server + 14 server buildscript + 2 api buildscript + 4 api)
 
-### Minecraft source patches (39)
+### Minecraft source patches (41)
 
 | # | Patch | Effect |
 |---|-------|--------|
@@ -65,6 +65,8 @@ Released: 2026-06-17 on branch `release/26.1.2`.
 | 0037 | perf-engine P2 excess minecart/boat sweeper | 10s chunk-AABB sweep on AbstractMinecart + AbstractBoat |
 | 0038 | perf-engine P2 excess falling-block sweeper | 2s chunk-AABB sweep on FallingBlockEntity |
 | 0039 | perf-engine P3 adaptive AI throttle | `Mob.aiStep` early-return on (knob > 0 && tickCount % interval != 0 && nearestPlayer > distance) |
+| 0040 | AntiXray entity / hologram / drop occlusion hook | `ChunkMap.TrackedEntity#updatePlayer` consults `EntityVisibilityCheck.isVisibleSync` (3-ray AABB sample, sync `level.clip`) before adding the player to `seenBy` |
+| 0041 | AntiXray particle line-of-sight gate | `ServerLevel#sendParticles` (private overload) consults `ParticleVisibilityCheck.canSee` before forwarding the packet |
 
 ### Paper-server feature patches (6)
 
