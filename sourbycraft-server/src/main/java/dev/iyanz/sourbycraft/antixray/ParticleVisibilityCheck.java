@@ -26,11 +26,18 @@ public final class ParticleVisibilityCheck {
 
     private ParticleVisibilityCheck() {}
 
+    /** Particles closer than 8 blocks to the player's eye are always shown. */
+    private static final double NEAR_DISTANCE_SQUARED = 8.0 * 8.0;
+
     public static boolean canSee(final ServerPlayer player, final double x, final double y, final double z) {
         if (player == null) return true;
         if (!ENABLED.get()) return true;
         if (player.level() == null) return true;
         Vec3 eye = player.getEyePosition();
+        // Near-distance bypass keeps the player's own footstep / breath / interact particles
+        // visible even when the camera momentarily sits "behind" a wall as the chunk packets
+        // stream in (e.g. join / dimension transition / SWM world load).
+        if (eye.distanceToSqr(x, y, z) <= NEAR_DISTANCE_SQUARED) return true;
         Vec3 target = new Vec3(x, y, z);
         return OcclusionUtil.isVisible(player.level(), eye, target);
     }
