@@ -159,13 +159,28 @@ public class SourbyCraftConfig {
         }
     }
 
+    /**
+     * Hot-path cache for dotted-path lookups. {@code ymlBool}/{@code ymlInt}/etc are called
+     * per-entity-tick from NMS patches (LivingEntity#aiStep particle/sound gates, Entity#playStepSound,
+     * etc) so the cost of split + map traversal compounds quickly. Cache misses populate
+     * the map; cache returns the {@link #SENTINEL_ABSENT} marker for missing keys to avoid
+     * re-walking the YAML map on every absent lookup.
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Object> LOOKUP_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Object SENTINEL_ABSENT = new Object();
+
     private static Object lookupYml(Map<String, Object> root, String dottedPath) {
+        Object cached = LOOKUP_CACHE.get(dottedPath);
+        if (cached != null) {
+            return cached == SENTINEL_ABSENT ? null : cached;
+        }
         Object cur = root;
         for (String seg : dottedPath.split("\\.")) {
-            if (!(cur instanceof Map<?, ?> m)) return null;
+            if (!(cur instanceof Map<?, ?> m)) { cur = null; break; }
             cur = m.get(seg);
-            if (cur == null) return null;
+            if (cur == null) break;
         }
+        LOOKUP_CACHE.put(dottedPath, cur == null ? SENTINEL_ABSENT : cur);
         return cur;
     }
 
