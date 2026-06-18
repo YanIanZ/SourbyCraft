@@ -28,8 +28,17 @@ public final class PerfSensor {
     private static volatile int cadenceTicks = 20;
     private static volatile int dwellSamples = 3;
     private static volatile double recoveryDwellMultiplier = 2.0;
-    /** Ticks to skip at server startup before the sensor starts sampling (default 200 = 10s). */
-    private static volatile int warmupTicks = 200;
+    /**
+     * Ticks to skip at server startup before the sensor starts sampling.
+     * Bumped from 200 (10s) to 600 (30s) in 26.1.2-EXP because the
+     * MC 26 plugin-enable phase with 50+ plugins on the heaviest
+     * payloads (skyblock + economy + protect + holograms + AC) takes
+     * 20-25 s before the tick loop reaches steady state. Sampling
+     * during that window pollutes the rolling MSPT/TPS averages and
+     * causes a false ORANGE/RED escalation that operators see as
+     * "TPS dropped under 18 immediately after Done (".
+     */
+    private static volatile int warmupTicks = 600;
 
     // Threshold arrays indexed by Tier.ordinal(). Index 0 (GREEN) is a sentinel boundary.
     // tpsThresholds: lower value is worse — entry at index N means "value below this -> at least Tier.values()[N]".
@@ -63,7 +72,7 @@ public final class PerfSensor {
         enabled      = SourbyCraftConfig.ymlBool("perf.sensor.enabled", true);
         cadenceTicks = clampInt(SourbyCraftConfig.ymlInt("perf.sensor.cadence-ticks", 20), 1, "cadence-ticks");
         dwellSamples = clampInt(SourbyCraftConfig.ymlInt("perf.sensor.dwell-samples", 3), 1, "dwell-samples");
-        warmupTicks  = clampInt(SourbyCraftConfig.ymlInt("perf.sensor.warmup-ticks", 200), 0, "warmup-ticks");
+        warmupTicks  = clampInt(SourbyCraftConfig.ymlInt("perf.sensor.warmup-ticks", 600), 0, "warmup-ticks");
         double mult  = SourbyCraftConfig.ymlDouble("perf.sensor.recovery-dwell-multiplier", 2.0);
         if (Double.isNaN(mult) || mult < 1.0) {
             SourbyLogger.warn("perf sensor recovery-dwell-multiplier " + mult + " < 1.0, clamping to 1.0");
@@ -284,6 +293,23 @@ public final class PerfSensor {
     public static Tier currentTier() { return lastSnapshot.tier(); }
     public static SensorSnapshot snapshot() { return lastSnapshot; }
     public static boolean isEnabled() { return enabled; }
+
+    /**
+     * Returns the number of tick samples remaining in the boot-warmup
+     * window before {@link #tick(net.minecraft.server.MinecraftServer)}
+     * starts feeding the rolling averages. Used by /tps and /tpsbar
+     * to surface a "warming up" label so operators know the boot
+     * MSPT/TPS dip is expected and not a regression.
+     *
+     * <p>Returns 0 once the warmup is complete. Returns the configured
+     * total when sampling has not yet started (sensor not ticked yet).
+     */
+    public static int warmupRemainingTicks() {
+        if (warmupRemaining < 0) return warmupTicks;
+        return warmupRemaining;
+    }
+
+    public static int warmupTotalTicks() { return warmupTicks; }
 
     /** Time in nanoseconds since the last tier transition. 0 if no transition has occurred yet. */
     public static long timeInTierNanos() {

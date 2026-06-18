@@ -4,22 +4,24 @@ Date: Wed, 17 Jun 2026 14:20:00 +0700
 Subject: [PATCH] SourbyCraft: register custom commands
 
 Hooks the CraftServer command registration path to install
-ping/sys/plugins/tpsbar/speedtest/swm/rambar/ver. Sources live in
+ping/sys/plugins/tps/tpsbar/speedtest/swm/rambar/ver. Sources live in
 sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/command/ and
 get compiled into the paper-server jar via the sourbycraft-server
 dependency on classpath.
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index c5fb64b..ef2aaba 100644
+index c5fb64b6d61e04ce6fa08ddf7e7bccdb67c349a4..ef2aaba9191ae793e0287d83716694ba881010a1 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -1039,4 +1039,14 @@ public final class CraftServer implements Server {
+@@ -1038,6 +1038,17 @@ public final class CraftServer implements Server {
+         org.spigotmc.SpigotConfig.registerCommands(); // Spigot
          io.papermc.paper.command.PaperCommands.registerCommands(this.console); // Paper
          this.spark.registerCommandBeforePlugins(this); // Paper - spark
 +        // SourbyCraft start - register commands
 +        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
 +        this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
 +        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
++        this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsCommand("tps"));
 +        this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
 +        this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
 +        this.commandMap.register("", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));
@@ -28,5 +30,4 @@ index c5fb64b..ef2aaba 100644
 +        // SourbyCraft end - register commands
          this.overrideAllCommandBlockCommands = this.commandsConfiguration.getStringList("command-block-overrides").contains("*");
          this.ignoreVanillaPermissions = this.commandsConfiguration.getBoolean("ignore-vanilla-permissions");
-
-
+ 

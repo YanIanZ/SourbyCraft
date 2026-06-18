@@ -46,13 +46,17 @@ public class TpsBarCommand extends Command {
             : tps[0] > 15 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
         bar.progress((float) pct);
         bar.color(tps[0] > 18 ? BossBar.Color.GREEN : tps[0] > 15 ? BossBar.Color.YELLOW : BossBar.Color.RED);
-        bar.name(text()
+        int warmupTicks = dev.iyanz.sourbycraft.perf.sensor.PerfSensor.warmupRemainingTicks();
+        net.kyori.adventure.text.TextComponent.Builder line = text()
             .append(text("TPS ", SourbyCraftColors.HEADER))
             .append(text(BarUtil.bar(pct * 100.0, 20), color))
             .append(text(" " + String.format(java.util.Locale.ROOT, "%.1f", tps[0]), color))
             .append(text("  MSPT ", SourbyCraftColors.LABEL))
-            .append(text(String.format(java.util.Locale.ROOT, "%.1fms", mspt), SourbyCraftColors.VALUE))
-            .build());
+            .append(text(String.format(java.util.Locale.ROOT, "%.1fms", mspt), SourbyCraftColors.VALUE));
+        if (warmupTicks > 0) {
+            line.append(text("  warmup " + (int) Math.ceil(warmupTicks / 20.0) + "s", SourbyCraftColors.WARNING));
+        }
+        bar.name(line.build());
         p.showBossBar(bar);
         Plugin owner = WildstackerManager.ownerPlugin();
         if (owner != null) {
