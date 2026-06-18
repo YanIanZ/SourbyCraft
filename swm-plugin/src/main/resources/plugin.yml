@@ -1,8 +1,8 @@
 name: SourbyCraftSWM
-version: "5.0.0"
+version: "5.1.0"
 main: dev.iyanz.sourbycraft.swmplugin.hook.SWPlugin
 api-version: "1.21"
-description: Advanced SlimeWorldManager for SourbyCraft — SRF v13, in-memory worlds, async saves
+description: Advanced SlimeWorldManager for SourbyCraft — SRF v13, in-memory worlds, async saves, paired with SourbyCraft 26.1.2-EXP
 author: SourbyCraft
 website: https://github.com/YanIanZ/SourbyCraft
 
