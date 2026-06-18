@@ -75,7 +75,7 @@ perf:
     cadence-ticks: 20                # 1s at 20 TPS
     dwell-samples: 3                 # samples in candidate tier required before escalation
     recovery-dwell-multiplier: 2.0   # recovery requires dwell-samples * multiplier samples
-    warmup-ticks: 200                # ticks to skip at startup before sampling (10s at 20 TPS)
+    warmup-ticks: 600                # ticks to skip at startup before sampling (30s at 20 TPS) — covers heavy plugin-enable phase on servers running 50+ plugins
     thresholds:
       # TPS: lower value escalates worse. yellow=19.5 means TPS<19.5 -> at-least YELLOW.
       tps:           { yellow: 19.5, orange: 18.0, red: 15.0, emergency: 10.0 }

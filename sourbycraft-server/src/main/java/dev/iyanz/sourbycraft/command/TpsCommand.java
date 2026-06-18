@@ -61,6 +61,16 @@ public class TpsCommand extends Command {
             .append(text(String.format(java.util.Locale.ROOT, "%.1fms", mspt), msptColor(mspt)))
             .build());
 
+        int warmup = dev.iyanz.sourbycraft.perf.sensor.PerfSensor.warmupRemainingTicks();
+        if (warmup > 0) {
+            int secs = (int) Math.ceil(warmup / 20.0);
+            s.sendMessage(text()
+                .append(text("warmup: ", SourbyCraftColors.DIM))
+                .append(text(secs + "s left", SourbyCraftColors.WARNING))
+                .append(text(" — boot tick averages settling; dips during plugin enable are expected.", SourbyCraftColors.DIM))
+                .build());
+        }
+
         s.sendMessage(text()
             .append(text("1m / 5m / 15m: ", SourbyCraftColors.DIM))
             .append(text(ONE.get().format(btps[0]), tpsColor(btps[0])))

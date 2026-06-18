@@ -283,6 +283,13 @@ public class SourbyCraftConfig {
 
         readConfig(SourbyCraftConfig.class, null);
 
+        // SourbyCraft - boot-time JVM heap configuration advisory
+        try {
+            dev.iyanz.sourbycraft.perf.JvmHeapAdvisor.init();
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("JvmHeapAdvisor.init failed", t);
+        }
+
         // SourbyCraft - perf-engine P0: load JAR-baked perf knobs BEFORE Bukkit-config block
         dev.iyanz.sourbycraft.perf.knob.Knobs.loadFromYml();
         try {
