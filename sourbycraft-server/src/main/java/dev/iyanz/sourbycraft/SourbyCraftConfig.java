@@ -298,6 +298,13 @@ public class SourbyCraftConfig {
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("CombatProfile.apply failed; using P0 defaults", t);
         }
+        // SourbyCraft - RayTraceAntiXray opt-in toggle
+        try {
+            dev.iyanz.sourbycraft.antixray.RayTraceWorker.ENABLED.set(
+                getBoolean("antixray.raytrace.enabled", false));
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("RayTrace antixray toggle bridge failed", t);
+        }
 
         asyncChunkLoad = getBoolean("performance.async-chunk-load", asyncChunkLoad);
         asyncPathfinding = getBoolean("performance.async-pathfinding", asyncPathfinding);
