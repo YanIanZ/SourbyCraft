@@ -111,15 +111,19 @@ perf:
 
 ### 🔒 Security (NMS-level)
 
-- **BookSanitizer** — strips `click_event` / `hover_event` from any `WRITTEN_BOOK_CONTENT` delivered via `ServerboundSetCreativeModeSlotPacket`. Blocks the force-op book exploit family where a crafted book carries `click_event:run_command` that fires as the opener.
+- **BookSanitizer** — strips `click_event` / `hover_event` from any `WRITTEN_BOOK_CONTENT` delivered via `ServerboundSetCreativeModeSlotPacket`. Blocks the force-op book exploit family where a crafted book carries `click_event:run_command` that fires as the opener. Recursion-capped at depth 64 to block component-bomb DOS.
+- **HardeningAdvisor** — boot-time scan of `paper-global.yml` `unsupported-settings`. Logs a per-finding warning if the operator has enabled any of: `allow-headless-pistons`, `allow-permanent-block-break-exploits`, `allow-piston-duplication`, `allow-unsafe-end-portal-teleportation`, `skip-tripwire-hook-placement-validation`, or `book-size.page-max > 4096`. Pure advisory; operator keeps control.
 - **YAML SafeConstructor** — every `Yaml.load` site (`SourbyCraftSecurityConfig`, `SourbyCraftConfig`, `PluginManifest`, `PluginCategoryMap`) uses `SafeConstructor` to block `!!tag`-based gadget RCE.
 - **PluginDownloader / LibDownloader / SWM PluginInstaller** — https-only on initial + every redirect hop, 100 MB cap with running byte counter, path-traversal containment (`startsWith` root check).
-- **SWM FileLoader** — `/swm load <name>` rejects slash/`..`/leading-dot, normalizes and contains within `slime_worlds/`.
+- **SWM FileLoader + SwmCommand + swm.file-dir** — `/swm load <name>` rejects slash/`..`/leading-dot, normalizes and contains within `slime_worlds/`. `swm.file-dir` operator yml rejected if it tries to escape the server root or hit an absolute path.
 - **APILoader (remote SWM)** — startup WARN when `ignoreSslCertificate=true`; UTF-8 charset for basic-auth Base64.
 - **GeoUtil** (`/ping`) — https to `ip-api.com`, bounded 1024-entry IP cache, `InetAddress.isSiteLocalAddress` for RFC1918 detection.
-- **Crash Prevention** — NbtAccounter limits (books, skulls, bundles), sign / anvil length limits, recipe book packet size, creative NBT size.
+- **VirtualExecutor** — `init()` synchronized + DCL in `executor()` so a concurrent shutdown cannot return a dead executor.
+- **SWPlugin shutdown** — `saveWorldAsync` wait bounded at 30 s per world so a stuck SWM write cannot hang server shutdown.
+- **Crash Prevention** — NbtAccounter limits (books, skulls, bundles), sign / anvil length limits, recipe book packet size, creative NBT size. Paper's `CountingOps` codec-depth tracker bounds `ItemStack.CODEC` decode.
 - **AntiXray** — fluid obscures (water/lava as solids), all-blocks mode, entity obfuscation.
 - **Command Security** — RCON rate limiting, RCON brute-force protection.
+- **Locale.ROOT correctness** — every `toLowerCase` + numeric `String.format` site uses `Locale.ROOT`. Prevents Turkish-locale OS detection breakage and avoids comma-vs-period decimal divergence in TPS / RAM / Ping bar text.
 
 ### ⚡ Performance NMS
 
