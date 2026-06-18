@@ -67,15 +67,39 @@ public class PingCommand extends Command {
             .append(text("  (protocol " + t.getProtocolVersion() + ")", SourbyCraftColors.DIM))
             .build());
 
+        // Always emit a Location row so the panel layout is consistent regardless of geo
+        // outcome. Show a "looking up..." placeholder synchronously, then the async path
+        // either rewrites by sending the resolved row (city / country / ISP) or — on a
+        // miss (null address, proxy-stripped IP, ip-api offline, RFC1918) — appends a
+        // labelled "unavailable" line so operators can tell at a glance whether the geo
+        // signal was empty vs the lookup never ran.
+        s.sendMessage(text()
+            .append(text("  Location: ", SourbyCraftColors.LABEL))
+            .append(text("looking up...", SourbyCraftColors.DIM))
+            .build());
+
         VirtualExecutor.run(() -> {
-            String geo = GeoUtil.lookup(t);
-            if (geo != null) {
-                net.minecraft.server.MinecraftServer.getServer().execute(() ->
+            String geo;
+            try {
+                geo = GeoUtil.lookup(t);
+            } catch (Throwable err) {
+                geo = null;
+            }
+            final String geoFinal = geo;
+            net.minecraft.server.MinecraftServer.getServer().execute(() -> {
+                if (geoFinal != null && !geoFinal.isEmpty()) {
                     s.sendMessage(text()
                         .append(text("  Location: ", SourbyCraftColors.LABEL))
-                        .append(text(geo, SourbyCraftColors.VALUE))
-                        .build()));
-            }
+                        .append(text(geoFinal, SourbyCraftColors.VALUE))
+                        .build());
+                } else {
+                    s.sendMessage(text()
+                        .append(text("  Location: ", SourbyCraftColors.LABEL))
+                        .append(text("unavailable", SourbyCraftColors.DIM))
+                        .append(text("  (proxy-stripped IP, RFC1918, or ip-api offline)", SourbyCraftColors.DIM))
+                        .build());
+                }
+            });
         });
         return true;
     }
