@@ -153,7 +153,15 @@ perf:
 
 ### 🔬 Profiling
 
-Spark profiler bundled (downloaded on first boot via Sourby Bootstrap from `repo.papermc.io`). Use standard Spark commands directly:
+SourbyCraft does not bundle the Spark profiler (license/distribution concerns). Install manually:
+
+```sh
+# Drop spark plugin JAR into your plugins/ directory
+curl -L -o plugins/spark.jar \
+  "https://ci.lucko.me/job/spark/lastSuccessfulBuild/artifact/spark-bukkit/build/libs/spark-1.10.142-bukkit.jar"
+```
+
+After install, use the standard Spark commands:
 
 - `/spark profiler --timeout 120 --thread '*'` — sample all threads for 2 minutes
 - `/spark profiler --timeout 60 --thread 'Server thread'` — main-thread only
@@ -205,10 +213,11 @@ swm.loadWorld(world, true);
 ```
 
 ### ⚙️ Infrastructure
-
-- **Java 25 required** — virtual threads, unnamed variables, ZGC generational. JDK 21 no longer supported.
-- **ZGC generational** — recommended GC on JDK 25 with heap ≥ 8 GB (sub-ms pauses)
+- **Dual JRE 21/25** — Java 21 bytecode target, runs on JDK 21+ (build toolchain JDK 25)
+- **ZGC generational** — recommended GC on JDK 21+ with heap ≥ 8 GB (sub-ms pauses)
 - **NUMA + Virtual Threads + CDS** — max hardware utilization
+- **StartupOptimizer** — detects JVM args at boot, prints GC/heap/Java summary + tuning recommendations
+- **MemoryOptimizer** — object pool + soft-reference cache
 
 ---
 
@@ -312,9 +321,9 @@ crash-prevention:
 
 ## Startup
 
-No tuner scripts. Run paperclip directly with recommended flags.
+No tuner scripts. Run paperclip directly with recommended flags. StartupOptimizer reads your JVM args and prints recommendations at boot if missing.
 
-**Recommended: JDK 25, heap ≥ 8 GB (ZGC generational)**
+**Recommended: JDK 21+, heap ≥ 8 GB (ZGC generational)**
 
 ```bash
 java \
@@ -322,7 +331,7 @@ java \
   -XX:+UseZGC -XX:+ZGenerational \
   -XX:+AlwaysPreTouch -XX:+UseTransparentHugePages \
   -XX:+UseNUMA \
-  -jar SourbyCraft-26.1.2-EXP.jar --nogui
+  -jar sourbycraft-paperclip-mojmap.jar --nogui
 ```
 
 **Small heap (< 8 GB): G1**
@@ -333,10 +342,10 @@ java \
   -XX:+UseG1GC -XX:+ParallelRefProcEnabled \
   -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8M \
   -XX:+AlwaysPreTouch -XX:+UseTransparentHugePages \
-  -jar SourbyCraft-26.1.2-EXP.jar --nogui
+  -jar sourbycraft-paperclip-mojmap.jar --nogui
 ```
 
-First boot downloads ~28 M of libs from Maven Central + PaperMC + Jitpack. Subsequent boots are silent fast-path.
+At boot, look for `--- SourbyCraft Performance ---`. If your GC choice is suboptimal, recommended flags are printed.
 
 ---
 
