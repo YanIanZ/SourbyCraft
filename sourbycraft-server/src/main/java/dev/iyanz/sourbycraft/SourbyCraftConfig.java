@@ -304,6 +304,8 @@ public class SourbyCraftConfig {
                 getBoolean("antixray.raytrace.enabled", false));
             dev.iyanz.sourbycraft.antixray.EntityVisibilityCheck.ENABLED.set(
                 getBoolean("antixray.entity-raytrace.enabled", false));
+            dev.iyanz.sourbycraft.antixray.ParticleVisibilityCheck.ENABLED.set(
+                getBoolean("antixray.particle-raytrace.enabled", false));
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("RayTrace antixray toggle bridge failed", t);
         }

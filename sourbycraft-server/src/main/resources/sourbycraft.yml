@@ -128,6 +128,13 @@ antixray:
   # client until they regain a clear line-of-sight.
   entity-raytrace:
     enabled: false
+  # Particle line-of-sight gate. When enabled the per-player
+  # ServerLevel.sendParticles overload drops the packet if the particle
+  # origin is occluded from the receiver's eye. Closes the wallhack
+  # signal that ore-pillar / fire / door-frame particles would otherwise
+  # leak. Off by default; vanilla feel preserved when off.
+  particle-raytrace:
+    enabled: false
   # Liquid surface obfuscation is delegated to Paper's existing
   # anticheat.anti-xray.fluid-obscures + replacement-blocks list in
   # paper-world.yml; SourbyCraft adds no NMS patch for liquids.

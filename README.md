@@ -281,6 +281,11 @@ antixray:
     # Sync check on the entity tracker tick. Liquid surface obfuscation is
     # delegated to Paper's anticheat.anti-xray.fluid-obscures above.
     enabled: false
+  particle-raytrace:
+    # Drops particle packets whose origin is occluded from the receiver's
+    # eye. Closes the wallhack signal from ore-pillar / fire / door-frame
+    # particles.
+    enabled: false
 ```
 
 ```yaml
