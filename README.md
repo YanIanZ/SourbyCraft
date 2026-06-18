@@ -5,7 +5,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/version-26.1.2--EXP-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r4-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -14,13 +15,21 @@
 
 ---
 
-## What's New in 26.1.2-EXP
+## What's New in 26.1.2-REL
+
+**Latest tag:** [`v26.1.2-r4`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r4) — Friday, 19 June 2026 (GMT+7).
+
+### r4 highlights
+- **REL artifact naming** — `release/*` branches stamp the manifest as `Implementation-Version: 26.1.2-REL`. Canonical jar is `SourbyCraft-26.1.2-REL.jar`.
+- **Persistent `/tpsbar` + `/rambar` toggle** — `BarToggleManager` owns per-player BossBars with 1s live refresh. First invocation shows, second hides. Replaces the 10-second auto-hide.
+- **`/perf` command** (aliases `/perfengine`, `/tuner`) — branded panel with live `PerfSensor` tier + warmup, six signal lines (TPS 1s/30s/5m, MSPT, Mem%, GC/min), full `KnobRegistry` snapshot.
+- **`/ping` always emits the Location row** — async GeoIP via `VirtualExecutor`, "looking up..." placeholder, "unavailable" fallback when the lookup misses.
 
 Major upgrade from `12-EXP` (1.21.11) to year-based Minecraft 26.1.2:
 
 - **Paper 26.1.2 hard-fork migration** — paperweight-patcher 2.0.0-beta.21, mache 26.1.2+build.3, paperclip 3.0.4. Year-based MC versioning (no more 1.x). Spigot mappings + reobf pipeline dropped.
 - **Java 25 required** — uses unnamed variables, virtual threads, ZGC generational. JDK 21 no longer supported.
-- **Single-variant build** — PVP variant + Pufferfish vendor dropped. Single `SourbyCraft-26.1.2-EXP.jar` artifact.
+- **Single-variant build** — PVP variant + Pufferfish vendor dropped. Single `SourbyCraft-26.1.2-REL.jar` artifact.
 - **Adventure book force-op exploit blocked** — `BookSanitizer` strips `click_event` + `hover_event` from written-book page components on the creative-slot inject path. Closes the classic rigged-book-clicks-as-op vector.
 - **YAML loaders hardened** — every `new Yaml()` site replaced with `SafeConstructor` to block tag-based gadget RCE (`!!javax.script.ScriptEngineManager` etc.).
 - **Plugin / library downloaders hardened** — `PluginDownloader`, `LibDownloader`, SWM `PluginInstaller`: https-only (manual redirect re-check), 100 MB cap with running byte counter, path-traversal containment.
@@ -40,7 +49,7 @@ See `release/RELEASE-NOTES-26.1.2.md` for the full patch list.
 ./gradlew assembleReleaseArtifacts
 ```
 
-Output: `release/SourbyCraft-26.1.2-EXP.jar` (~31 M slim) + `release/checksums.txt`.
+Output: `release/SourbyCraft-26.1.2-REL.jar` (~31 M slim) + `release/checksums.txt`.
 
 ---
 
@@ -141,15 +150,18 @@ perf:
 
 ### 🛠 Commands (hex-colored)
 
+Registered with the `sourbycraft` fallback prefix in `DedicatedServer#initServer` (patch 0030). Use `/sourbycraft:<name>` if Paper has claimed the bare slot.
+
 | Command | Description |
 |---------|-------------|
 | `/tps` | SourbyCraft-colored TPS readout (instant + 1m/5m/15m) with warmup banner |
 | `/sys` | Server specs: uptime, CPU, RAM, Java, worlds, SWM hint |
-| `/ping [player]` | Latency + client brand + GeoIP location |
+| `/ping [player]` | Latency + client brand + GeoIP location (always emits Location row) |
 | `/plugins` | Active plugin list with versions |
 | `/speedtest` | Built-in Ookla network speed test (lazy-downloaded multi-OS binary) |
 | `/sparkview` (`/sparkv`, `/spk`) | Comprehensive Spark profiler view: TPS 5s/10s/1m/5m/15m + MSPT 10s/1m/5m mean/max/95th + CPU process/system + per-GC totals |
-| `/tpsbar` / `/rambar` | BossBar visual monitors with warmup label |
+| `/tpsbar` / `/rambar` | Toggle persistent BossBar with 1s live refresh (toggle on/off) |
+| `/perf` (`/perfengine`, `/tuner`) | PerfSensor tier + warmup, six signal lines, full KnobRegistry snapshot |
 | `/ver` | Version info: SourbyCraft + Minecraft + API + uptime + git (aliases: `version`, `about`) |
 | `/swm <list/load/status>` | SlimeWorldManager control |
 
@@ -366,7 +378,7 @@ git checkout release/26.1.2
 ./gradlew assembleReleaseArtifacts
 ```
 
-Output: `release/SourbyCraft-26.1.2-EXP.jar` (slim, ~31 M) + `release/checksums.txt`.
+Output: `release/SourbyCraft-26.1.2-REL.jar` (slim, ~31 M) + `release/checksums.txt`.
 
 Active patch counts:
 - 41 minecraft NMS patches (`patches/minecraft/`)
@@ -381,7 +393,7 @@ Active patch counts:
 ```kotlin
 repositories { maven("https://jitpack.io") }
 dependencies {
-    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:26.1.2-EXP")
+    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:26.1.2-REL")
 }
 ```
 
