@@ -71,12 +71,12 @@ Status across the 9-sub-project roadmap:
 | **P0** Knob Registry API | ✓ shipped | `BoolKnob`/`IntKnob` abstraction, `Knobs` static holder, `KnobRegistry`, boot-time snapshot line |
 | **P1** Load Sensor + Tier Classifier | ✓ shipped | `PerfSensor` (TPS rolling / MSPT / mem% / GC), 5-tier state machine, NMS hook in `tickChildren` |
 | **P2** Lag-Machine Protection | ✓ shipped | 8 knobs wired across 5 NMS patches: snowball / firework save fix (default ON), projectile chunk-load throttle (10/tick, 10/projectile), excess minecart/boat/falling-block sweeper (default OFF + per-chunk caps) |
-| P3 Adaptive Entity AI | planned | Tier-aware DAB, dynamic-brain, per-entity-type allowlist |
-| P4 Combat Profiles | planned | Switchable profile bundles |
-| P5 Async Chunk Pipeline | planned | Async chunk packet send, async entity tracker |
-| P6 Async Packet & World subsystems | planned | Async packet send, async data save, virtual-thread Bukkit scheduler |
-| P7 Self-Tune Controller | planned | Reads `PerfSensor.currentTier()` → applies tier-mapped knob deltas |
-| P8 Operator UX + Telemetry | planned | BossBar tier display, `/perf history`, Sentry breadcrumbs |
+| **P3** Adaptive Entity AI | ✓ shipped | 2 knobs + Mob.aiStep early-return when no live player within distance (0039) |
+| **P4** Combat Profiles | ✓ shipped | `CombatProfile` enum (VANILLA / BALANCED / PVP) applied at boot from `combat.profile` yml key; bundles P0..P3 knob defaults per playstyle |
+| **P5** Async Chunk Pipeline | ✓ shipped (helper) | `AsyncChunkPipeline` routes read-only chunk/tracker work onto `VirtualExecutor`; complements Moonrise's async chunk system |
+| **P6** Async Packet & World | ✓ shipped | non-flush packet (0033) + virtual-thread server pools (0019) + `AsyncDataSaver` helper for off-main IO. Read-side async owned by Moonrise |
+| **P7** Self-Tune Controller | ✓ shipped | `SelfTuneController` subscribes to `PerfSensor` transitions; tier policy escalates lag-machine + AI knobs; restores operator baseline on recovery |
+| **P8** Operator UX | ✓ shipped (BossBar) | `TierBossBar` per-player opt-in; tier-coloured (GREEN/YELLOW/PINK/RED/PURPLE); refresh on transition |
 
 ### Knobs config (`sourbycraft.yml`)
 
