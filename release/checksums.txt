@@ -1,2 +1,2 @@
-8aa779027cab8d92868aa4feaf92516bc964ce3fa88b42b869d0d47ebe6d52b8  SourbyCraft-26.1.2-EXP.jar
+dc2c5a4b4febdb159d55df11e9ddb4861ebe5fe61286df57bbcc88bad58430ec  SourbyCraft-26.1.2-REL.jar
 9fc3f87ce5024bd9c9242b48aaaf1e2b76d01e765e1170b447db322b2beeb3c0  SourbyCraftSWM-5.1.0.jar
