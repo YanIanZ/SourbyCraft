@@ -268,6 +268,22 @@ anticheat:
 ```
 
 ```yaml
+# sourbycraft.yml — anti-xray ray-trace extension (stonar96/RayTraceAntiXray port)
+antixray:
+  raytrace:
+    # Per-(player, ore) line-of-sight gate on top of Paper's engine-mode 1
+    # block obfuscator. Hides cave-exposed ores that vanilla Paper would
+    # otherwise leak. Async on VirtualExecutor, results cached per-player.
+    enabled: false
+  entity-raytrace:
+    # Hides mobs, item drops, holograms (TextDisplay / custom-named armor
+    # stands) when they sit behind solid blocks from the player's POV.
+    # Sync check on the entity tracker tick. Liquid surface obfuscation is
+    # delegated to Paper's anticheat.anti-xray.fluid-obscures above.
+    enabled: false
+```
+
+```yaml
 # sourbycraft-security.yml — crash prevention
 crash-prevention:
   nbt:
