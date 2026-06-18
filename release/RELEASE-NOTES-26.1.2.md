@@ -77,7 +77,7 @@ Released: 2026-06-17 on branch `release/26.1.2`.
 | 0003 | Improve Player#canSee performance | `CraftPlayer.canSee(NMS Entity)` overload, no bukkit-wrapper boxing |
 | 0004 | SourbyCraft v9.19 disable outdated version warning | Suppress vanilla "outdated server" warning at boot |
 | 0005 | SourbyCraft v12 wire PluginAutoInstaller into loadPlugins | Hook auto-install before plugin scan |
-| 0006 | SourbyCraft register custom commands | commandMap.register for ping/sys/plugins/tpsbar/speedtest/swm/rambar/ver |
+| 0006 | SourbyCraft register custom commands | commandMap.register for ping/sys/plugins/tps/tpsbar/speedtest/sparkview/swm/rambar/ver |
 
 ### Buildscript patches
 

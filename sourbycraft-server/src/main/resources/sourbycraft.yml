@@ -108,6 +108,14 @@ perf:
     throttle-beyond-distance: 0
     throttle-tick-interval: 4
 
+# SourbyCraft Spark integration. SourbyCraft ships spark-paper at runtime
+# so the SparkProvider singleton is available once the spark plugin loads
+# (during the normal Bukkit enable phase). Setting `spark.enabled: false`
+# short-circuits the SparkBridge so /sparkview never touches the spark
+# API — useful for paranoid setups that pin the spark plugin off.
+spark:
+  enabled: true
+
 antixray:
   raytrace:
     # SourbyCraft port of stonar96/RayTraceAntiXray. When enabled the
