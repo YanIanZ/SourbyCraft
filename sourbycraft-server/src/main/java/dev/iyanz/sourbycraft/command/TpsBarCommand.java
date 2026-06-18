@@ -1,8 +1,10 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
+import dev.iyanz.sourbycraft.util.BarUtil;
 import dev.iyanz.sourbycraft.wildstacker.WildstackerManager;
 import net.kyori.adventure.bossbar.BossBar;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -11,7 +13,13 @@ import org.bukkit.plugin.Plugin;
 
 import static net.kyori.adventure.text.Component.text;
 
+/**
+ * /tpsbar — pops a 10s BossBar with the SourbyCraft-style filled/empty
+ * parallelogram readout in the title. The BossBar progress fraction
+ * mirrors the bar so the in-world widget tracks the text-based view.
+ */
 public class TpsBarCommand extends Command {
+
     private static BossBar bar;
 
     public TpsBarCommand(String n) {
@@ -33,9 +41,18 @@ public class TpsBarCommand extends Command {
         }
         double[] tps = Bukkit.getTPS();
         double mspt = Bukkit.getAverageTickTime();
-        bar.progress((float) (tps[0] / 20.0));
+        double pct = Math.clamp(tps[0] / 20.0, 0.0, 1.0);
+        TextColor color = tps[0] > 18 ? SourbyCraftColors.SUCCESS
+            : tps[0] > 15 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
+        bar.progress((float) pct);
         bar.color(tps[0] > 18 ? BossBar.Color.GREEN : tps[0] > 15 ? BossBar.Color.YELLOW : BossBar.Color.RED);
-        bar.name(text(String.format(java.util.Locale.ROOT, "TPS: %.1f  MSPT: %.1fms", tps[0], mspt), SourbyCraftColors.VALUE));
+        bar.name(text()
+            .append(text("TPS ", SourbyCraftColors.HEADER))
+            .append(text(BarUtil.bar(pct * 100.0, 20), color))
+            .append(text(" " + String.format(java.util.Locale.ROOT, "%.1f", tps[0]), color))
+            .append(text("  MSPT ", SourbyCraftColors.LABEL))
+            .append(text(String.format(java.util.Locale.ROOT, "%.1fms", mspt), SourbyCraftColors.VALUE))
+            .build());
         p.showBossBar(bar);
         Plugin owner = WildstackerManager.ownerPlugin();
         if (owner != null) {
