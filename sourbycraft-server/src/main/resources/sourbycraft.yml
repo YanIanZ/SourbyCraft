@@ -118,3 +118,16 @@ antixray:
     # leak them (cave-exposed ores). Disabled by default; integration with
     # the chunk-packet send path is operator-wired.
     enabled: false
+  # Entity-level occlusion (mobs, item drops, holograms via TextDisplay or
+  # custom-named armor stands). When enabled the entity tracker
+  # (ChunkMap.TrackedEntity#updatePlayer NMS patch) calls
+  # EntityVisibilityCheck.isVisibleSync(player, entity) before adding the
+  # player to the tracked set, so entities behind walls stay client-invisible.
+  # Sync line-of-sight check on the tracker tick. Off by default; gameplay
+  # impact: any entity not visible to the player will not appear on their
+  # client until they regain a clear line-of-sight.
+  entity-raytrace:
+    enabled: false
+  # Liquid surface obfuscation is delegated to Paper's existing
+  # anticheat.anti-xray.fluid-obscures + replacement-blocks list in
+  # paper-world.yml; SourbyCraft adds no NMS patch for liquids.
