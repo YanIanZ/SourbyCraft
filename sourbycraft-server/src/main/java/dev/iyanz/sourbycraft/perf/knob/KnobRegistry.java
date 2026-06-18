@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-final class KnobRegistry {
+public final class KnobRegistry {
 
     private static final Map<String, PerfKnob> KNOBS = new ConcurrentHashMap<>();
     private static final Set<String> WARNED = ConcurrentHashMap.newKeySet();
@@ -31,7 +31,7 @@ final class KnobRegistry {
         }
     }
 
-    static Map<String, Object> snapshot() {
+    public static Map<String, Object> snapshot() {
         Map<String, Object> out = new LinkedHashMap<>();
         KNOBS.forEach((k, knob) -> out.put(k, knob.snapshot()));
         return Collections.unmodifiableMap(out);
