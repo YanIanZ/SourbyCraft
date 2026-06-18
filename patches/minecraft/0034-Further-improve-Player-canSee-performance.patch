@@ -9,10 +9,10 @@ hashmaps. Re-routes UUID assignment through setUUID() so the long
 mirror stays in sync.
 
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 74a2b3d..cabaa13 100644
+index c6e78cc69c18c1613e67a56afa54028ad0ad5dae..4a4ed63c485cd13e081c0d4bfe191b0eb1be29ae 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
-@@ -332,6 +332,15 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -332,6 +332,15 @@ public abstract class Entity
      private boolean invulnerable;
      protected UUID uuid = Mth.createInsecureUUID(this.random);
      protected String stringUUID = this.uuid.toString();
@@ -28,7 +28,7 @@ index 74a2b3d..cabaa13 100644
      private boolean hasGlowingTag;
      private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>(), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl
      private final double[] pistonDeltas = new double[]{0.0, 0.0, 0.0};
-@@ -556,6 +565,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -556,6 +565,7 @@ public abstract class Entity
          this.position = Vec3.ZERO;
          this.blockPosition = BlockPos.ZERO;
          this.chunkPosition = ChunkPos.ZERO;
@@ -36,7 +36,7 @@ index 74a2b3d..cabaa13 100644
          // Paper start - EAR 2
          if (level != null) {
              this.defaultActivationState = io.papermc.paper.entity.activation.ActivationRange.initializeEntityActivationState(this, level.spigotConfig);
-@@ -2710,8 +2720,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -2715,8 +2725,7 @@ public abstract class Entity
              this.invulnerable = input.getBooleanOr("Invulnerable", false);
              this.portalCooldown = input.getIntOr("PortalCooldown", 0);
              input.read("UUID", UUIDUtil.CODEC).ifPresent(id -> {
@@ -46,7 +46,7 @@ index 74a2b3d..cabaa13 100644
              });
              if (!Double.isFinite(this.getX()) || !Double.isFinite(this.getY()) || !Double.isFinite(this.getZ())) {
                  throw new IllegalStateException("Entity has invalid position");
-@@ -4293,6 +4302,9 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4298,6 +4307,9 @@ public abstract class Entity
      public void setUUID(final UUID uuid) {
          this.uuid = uuid;
          this.stringUUID = this.uuid.toString();
@@ -54,19 +54,18 @@ index 74a2b3d..cabaa13 100644
 +        this.longUUID = this.uuid.getMostSignificantBits() ^ this.uuid.getLeastSignificantBits();
 +        // SourbyCraft end - further improve Player#canSee performance
      }
-
+ 
      @Override
-@@ -4302,7 +4314,13 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
-
-     public String getStringUUID() {
+@@ -4309,6 +4321,12 @@ public abstract class Entity
          return this.stringUUID;
-+    }
-+
+     }
+ 
 +    // SourbyCraft start - further improve Player#canSee performance
 +    public final long getLongUUID() {
 +        return this.longUUID;
-     }
++    }
 +    // SourbyCraft end - further improve Player#canSee performance
-
++
      @Override
      public String getScoreboardName() {
+         return this.stringUUID;

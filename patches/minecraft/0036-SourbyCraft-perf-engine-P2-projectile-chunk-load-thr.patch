@@ -2,6 +2,9 @@ From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yan <superwhisz@gmail.com>
 Date: Wed, 17 Jun 2026 17:05:00 +0700
 Subject: [PATCH] SourbyCraft perf-engine P2 projectile chunk-load throttle
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Caps projectile chunk-load fan-out per tick and per-projectile via
 the LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK and
@@ -20,10 +23,10 @@ load fans out, blocking the classic snowball / fish-hook lag-machine
 pattern.
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index c12287c..b6c407d 100644
+index f6793af15c2c3acc198f3923483f22eab6f7a46a..f07ed1921555f29adbb8ab4f0b0d6a6fd2a81844 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -1805,6 +1805,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1812,6 +1812,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          try { dev.iyanz.sourbycraft.perf.sensor.PerfSensor.tick(this); }
          catch (Throwable t) { /* ignore - never fail tickChildren */ }
          // SourbyCraft end - perf-engine P1 sensor tick
@@ -35,7 +38,7 @@ index c12287c..b6c407d 100644
          ((io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler)org.bukkit.Bukkit.getGlobalRegionScheduler()).tick();
          for (io.papermc.paper.threadedregions.EntityScheduler scheduler : this.entitySchedulerTickList.getAllSchedulers()) {
 diff --git a/net/minecraft/world/entity/projectile/Projectile.java b/net/minecraft/world/entity/projectile/Projectile.java
-index 9af4bf7..49dc1aa 100644
+index 9af4bf76974f05d9f752bbd4e8037560ec481cdf..49dc1aa83c68456b1a0635cf3ed0b6fec64ddb7f 100644
 --- a/net/minecraft/world/entity/projectile/Projectile.java
 +++ b/net/minecraft/world/entity/projectile/Projectile.java
 @@ -43,6 +43,9 @@ public abstract class Projectile extends Entity implements TraceableEntity {
@@ -47,9 +50,9 @@ index 9af4bf7..49dc1aa 100644
 +    public long sourbyLastChunkKey = Long.MIN_VALUE;
      private @Nullable Entity lastDeflectedBy;
      protected boolean hitCancelled = false; // CraftBukkit
-
-@@ -99,6 +101,35 @@ public abstract class Projectile extends Entity implements TraceableEntity {
-
+ 
+@@ -99,6 +102,35 @@ public abstract class Projectile extends Entity implements TraceableEntity {
+ 
      @Override
      public void tick() {
 +        // SourbyCraft start - perf-engine P2 lag-machine: projectile chunk-cross throttle.

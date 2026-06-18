@@ -1,12 +1,11 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yan <Yan>
 Date: Sun, 14 Jun 2026 21:05:55 +0700
-Subject: [PATCH] SourbyCraft v12 US import particles fall+death gated
- emit
+Subject: [PATCH] SourbyCraft v12 US import particles fall+death gated emit
 
 
 diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
-index 358ff43..490aa1e 100644
+index 358ff4330102a058c86d8209374d8cb9dd18b6ad..490aa1e93db41e9c09dd43595e3da71c5e6ddd8f 100644
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
 @@ -391,11 +391,17 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin

@@ -1,12 +1,11 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yan <Yan>
 Date: Mon, 15 Jun 2026 02:09:58 +0700
-Subject: [PATCH] SourbyCraft: skip too-recent file fixers instead of
- throwing
+Subject: [PATCH] SourbyCraft: skip too-recent file fixers instead of throwing
 
 
 diff --git a/net/minecraft/util/filefix/FileFixerUpper.java b/net/minecraft/util/filefix/FileFixerUpper.java
-index 7f24ee5..fba7e79 100644
+index 7f24ee51244868c38315cc777db8bd88fc85a8c7..fba7e79da5ebe85b507af8ac1e8432284183fc32 100644
 --- a/net/minecraft/util/filefix/FileFixerUpper.java
 +++ b/net/minecraft/util/filefix/FileFixerUpper.java
 @@ -457,14 +457,8 @@ public class FileFixerUpper {

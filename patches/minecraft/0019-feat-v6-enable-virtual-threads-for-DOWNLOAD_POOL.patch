@@ -5,7 +5,7 @@ Subject: [PATCH] feat(v6): enable virtual threads for DOWNLOAD_POOL
 
 
 diff --git a/net/minecraft/util/Util.java b/net/minecraft/util/Util.java
-index c87ea3d..df9fce4 100644
+index c87ea3d25c52aa99a2abf5ad018967dfb48856d2..df9fce485c0e1a99c5ad2d0e9d3dd087bd7dee6c 100644
 --- a/net/minecraft/util/Util.java
 +++ b/net/minecraft/util/Util.java
 @@ -100,20 +100,25 @@ public class Util {

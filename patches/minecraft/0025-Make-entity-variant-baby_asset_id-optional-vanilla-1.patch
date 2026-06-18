@@ -1,12 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yan <Yan>
 Date: Mon, 15 Jun 2026 15:27:00 +0700
-Subject: [PATCH] Make entity variant baby_asset_id optional (vanilla
- 1.21.11 fallback)
+Subject: [PATCH] Make entity variant baby_asset_id optional (vanilla 1.21.11
+ fallback)
 
 
 diff --git a/net/minecraft/world/entity/animal/chicken/ChickenVariant.java b/net/minecraft/world/entity/animal/chicken/ChickenVariant.java
-index 6eae595..7b2af90 100644
+index 6eae595d176f591db1c4a18aa433656845e1abee..7b2af90c56189e6f41fa0a39183e387592f26826 100644
 --- a/net/minecraft/world/entity/animal/chicken/ChickenVariant.java
 +++ b/net/minecraft/world/entity/animal/chicken/ChickenVariant.java
 @@ -23,17 +23,17 @@ public record ChickenVariant(
@@ -32,7 +32,7 @@ index 6eae595..7b2af90 100644
      public static final Codec<Holder<ChickenVariant>> CODEC = RegistryFixedCodec.create(Registries.CHICKEN_VARIANT);
      public static final StreamCodec<RegistryFriendlyByteBuf, Holder<ChickenVariant>> STREAM_CODEC = ByteBufCodecs.holderRegistry(Registries.CHICKEN_VARIANT);
 diff --git a/net/minecraft/world/entity/animal/cow/CowVariant.java b/net/minecraft/world/entity/animal/cow/CowVariant.java
-index 963722a..7311320 100644
+index 963722ae76a0cef754f3449a16c615a01b35a3a1..73113203e7d223c864526399ee5f3f2c10fbc5ed 100644
 --- a/net/minecraft/world/entity/animal/cow/CowVariant.java
 +++ b/net/minecraft/world/entity/animal/cow/CowVariant.java
 @@ -22,17 +22,17 @@ public record CowVariant(ModelAndTexture<CowVariant.ModelType> modelAndTexture,
@@ -58,7 +58,7 @@ index 963722a..7311320 100644
      public static final Codec<Holder<CowVariant>> CODEC = RegistryFixedCodec.create(Registries.COW_VARIANT);
      public static final StreamCodec<RegistryFriendlyByteBuf, Holder<CowVariant>> STREAM_CODEC = ByteBufCodecs.holderRegistry(Registries.COW_VARIANT);
 diff --git a/net/minecraft/world/entity/animal/feline/CatVariant.java b/net/minecraft/world/entity/animal/feline/CatVariant.java
-index 2b652f8..90e6f78 100644
+index 2b652f855e206fc097028c3657b37f140b40e31e..90e6f78b5f52eea02da22a85ba788b017db9ddd4 100644
 --- a/net/minecraft/world/entity/animal/feline/CatVariant.java
 +++ b/net/minecraft/world/entity/animal/feline/CatVariant.java
 @@ -20,17 +20,17 @@ public record CatVariant(ClientAsset.ResourceTexture adultAssetInfo, ClientAsset
@@ -84,7 +84,7 @@ index 2b652f8..90e6f78 100644
      public static final Codec<Holder<CatVariant>> CODEC = RegistryFixedCodec.create(Registries.CAT_VARIANT);
      public static final StreamCodec<RegistryFriendlyByteBuf, Holder<CatVariant>> STREAM_CODEC = ByteBufCodecs.holderRegistry(Registries.CAT_VARIANT);
 diff --git a/net/minecraft/world/entity/animal/pig/PigVariant.java b/net/minecraft/world/entity/animal/pig/PigVariant.java
-index 39eeb1e..84936a8 100644
+index 39eeb1ef3dcfbfb0cbf130a2c3af75fdf1c2772f..84936a8030c2dd2fd6fe5bba2e50f8ac0e8f8dbd 100644
 --- a/net/minecraft/world/entity/animal/pig/PigVariant.java
 +++ b/net/minecraft/world/entity/animal/pig/PigVariant.java
 @@ -22,17 +22,17 @@ public record PigVariant(ModelAndTexture<PigVariant.ModelType> modelAndTexture,

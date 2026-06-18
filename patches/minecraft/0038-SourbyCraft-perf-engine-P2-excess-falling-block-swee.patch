@@ -18,11 +18,11 @@ Blocks the sand-cascade lag-machine pattern where TNT or piston
 triggers thousands of FallingBlockEntities in one chunk.
 
 diff --git a/net/minecraft/world/entity/item/FallingBlockEntity.java b/net/minecraft/world/entity/item/FallingBlockEntity.java
-index 045ce9c..83f78e5 100644
+index 045ce9cf39ec1c106bf7e9694e6d309f58900850..83f78e5a5ee771ff9e2dbef03185917313a8f73c 100644
 --- a/net/minecraft/world/entity/item/FallingBlockEntity.java
 +++ b/net/minecraft/world/entity/item/FallingBlockEntity.java
 @@ -147,6 +147,36 @@ public class FallingBlockEntity extends Entity {
-
+ 
      @Override
      public void tick() {
 +        // SourbyCraft start - perf-engine P2 lag-machine: excess falling-block sweeper.

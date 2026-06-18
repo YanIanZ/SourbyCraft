@@ -1,12 +1,11 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yan <Yan>
 Date: Sun, 14 Jun 2026 23:49:59 +0700
-Subject: [PATCH] SourbyCraft US import: sounds disablePiglinAngerSound
- gate
+Subject: [PATCH] SourbyCraft US import: sounds disablePiglinAngerSound gate
 
 
 diff --git a/net/minecraft/world/entity/monster/piglin/Piglin.java b/net/minecraft/world/entity/monster/piglin/Piglin.java
-index b0e8b2d..88d6969 100644
+index b0e8b2db95aa5a0f53ddf8c7d082963dc693f879..88d69697c0c3ce4ed555069fc256f7f44df5c5ee 100644
 --- a/net/minecraft/world/entity/monster/piglin/Piglin.java
 +++ b/net/minecraft/world/entity/monster/piglin/Piglin.java
 @@ -429,7 +429,10 @@ public class Piglin extends AbstractPiglin implements CrossbowAttackMob, Invento
