@@ -290,6 +290,14 @@ public class SourbyCraftConfig {
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("PerfSensor.loadFromYml failed; using defaults", t);
         }
+        // SourbyCraft - perf-engine P4: apply combat-profile preset on top of P0 defaults
+        try {
+            String profileName = getString("combat.profile", "vanilla");
+            dev.iyanz.sourbycraft.perf.CombatProfile.parse(profileName,
+                dev.iyanz.sourbycraft.perf.CombatProfile.VANILLA).apply();
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("CombatProfile.apply failed; using P0 defaults", t);
+        }
 
         asyncChunkLoad = getBoolean("performance.async-chunk-load", asyncChunkLoad);
         asyncPathfinding = getBoolean("performance.async-pathfinding", asyncPathfinding);
