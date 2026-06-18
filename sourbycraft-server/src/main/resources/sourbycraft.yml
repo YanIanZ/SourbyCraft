@@ -107,3 +107,14 @@ perf:
     #   EMERGENCY  distance=32, interval=8
     throttle-beyond-distance: 0
     throttle-tick-interval: 4
+
+antixray:
+  raytrace:
+    # SourbyCraft port of stonar96/RayTraceAntiXray. When enabled the
+    # RayTraceWorker submits per-(player, ore) line-of-sight checks on the
+    # VirtualExecutor pool; results land in a per-player VisibilityCache so
+    # the chunk-packet obfuscator can hide ores that are not currently
+    # visible to the player even though Paper's engine-mode 1 alone would
+    # leak them (cave-exposed ores). Disabled by default; integration with
+    # the chunk-packet send path is operator-wired.
+    enabled: false
