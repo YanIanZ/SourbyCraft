@@ -1,2 +1,2 @@
-2ab20bc055205309451e67d8ea5b09df82535bb39ac3d89376266b6336603f28  release/SourbyCraft-26.1.2-REL.jar
+e6f5aa88089fe3d300864bd80bc0882bf6c0d7098162a84b542104e71c747116  release/SourbyCraft-26.1.2-REL.jar
 9fc3f87ce5024bd9c9242b48aaaf1e2b76d01e765e1170b447db322b2beeb3c0  release/SourbyCraftSWM-5.1.0.jar
