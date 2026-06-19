@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Wed, 17 Jun 2026 22:20:00 +0700
+Subject: [PATCH] SourbyCraft perf-engine P3 adaptive AI throttle
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Skip Mob.aiStep on non-multiple-of-N ticks when no live player is
+within a configurable distance. Vanilla mobs still tick every server
+tick; the early-return only fires when the
+AI_THROTTLE_BEYOND_DISTANCE knob is > 0.
+
+  - throttle-beyond-distance: 0   (default — disabled, vanilla behaviour)
+  - throttle-tick-interval: 4     (when throttled, run aiStep 1 in N ticks)
+
+The SelfTuneController (P7) escalates these knobs per tier:
+  ORANGE     dist=64,  interval=2
+  RED        dist=48,  interval=4
+  EMERGENCY  dist=32,  interval=8
+
+Burn-in-daylight + looting checks live AFTER super.aiStep(), so a
+throttled tick skips them too — acceptable for off-screen mobs.
+
+Uses hasNearbyAlivePlayer (boolean iter of level.players() with
+early short-circuit) instead of getNearestPlayer so the throttle
+check is bounded by player count, not by the chunk-system entity
+index size. Cheaper for the common case of a few dozen players.
+
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+index cb4260791501c0c15c5a7b0509d6631fefb492b7..cd0a7f4bb25f056eaf17096ff5226d8f47c76be1 100644
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -537,6 +537,22 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+ 
+     @Override
+     public void aiStep() {
++        // SourbyCraft start - perf-engine P3: throttle aiStep beyond nearest-player distance
++        {
++            int throttleDistance = dev.iyanz.sourbycraft.perf.knob.Knobs.AI_THROTTLE_BEYOND_DISTANCE.get();
++            if (throttleDistance > 0 && this.level() instanceof net.minecraft.server.level.ServerLevel) {
++                int interval = dev.iyanz.sourbycraft.perf.knob.Knobs.AI_THROTTLE_TICK_INTERVAL.get();
++                if (interval > 1 && (this.tickCount % interval) != 0) {
++                    // hasNearbyAlivePlayer is a yes/no iter of level.players() — cheaper than
++                    // getNearestPlayer because it short-circuits on the first match and never
++                    // builds a chunk-bounded entity index.
++                    if (!this.level().hasNearbyAlivePlayer(this.getX(), this.getY(), this.getZ(), throttleDistance)) {
++                        return;
++                    }
++                }
++            }
++        }
++        // SourbyCraft end - perf-engine P3
+         super.aiStep();
+         if (this.is(EntityTypeTags.BURN_IN_DAYLIGHT)) {
+             this.burnUndead();

@@ -48,6 +48,36 @@ plugins {
     id("io.papermc.paperweight.patcher") version "2.0.0-beta.21"
 }
 
+// Suffix-aware version derived from current git branch. Single source of truth
+// for `assembleReleaseArtifacts` jar filename + subproject writeBuildInfo task
+// so banner / BuildInfo / jar manifest stay in sync. Matches the suffix mapping
+// in sourbycraft-server/buildscript/build.gradle.kts (tasks.jar manifest).
+// Wrapped in providers.exec for Gradle configuration-cache compatibility.
+val sourbycraftBranchProvider: Provider<String> = providers.exec {
+    workingDir = rootProject.projectDir
+    commandLine("git", "rev-parse", "--abbrev-ref", "HEAD")
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { it.trim() }
+
+val sourbycraftSuffixProvider: Provider<String> = sourbycraftBranchProvider.map { branch ->
+    val releaseVersionFull = providers.gradleProperty("releaseVersion").getOrElse("dev")
+    val releaseMajor = releaseVersionFull.substringBefore('-')
+    val codename = providers.gradleProperty("codename").getOrElse("dev")
+    val suffix = when {
+        branch.contains("experimental") || branch.contains("feat") -> "EXP"
+        branch.startsWith("release/") -> "REL"
+        branch.contains("-dev") || branch.contains("develop") -> "DEV"
+        codename == "dev" -> "DEV"
+        else -> "REL"
+    }
+    when (suffix) {
+        "EXP" -> "$releaseMajor-EXP"
+        "REL" -> "$releaseMajor-REL"
+        else -> "$releaseVersionFull-DEV"
+    }
+}
+extra["sourbycraftSuffixProvider"] = sourbycraftSuffixProvider
+
 subprojects {
     apply<JavaLibraryPlugin>()
     apply<MavenPublishPlugin>()
@@ -93,21 +123,32 @@ subprojects {
 
     // SourbyCraft v12 — emit META-INF/sourbycraft-build.properties (no variant field;
     // single-jar build means variant identity is no longer meaningful).
+    // Suffix sourced from rootProject.extra["sourbycraftSuffixVersion"] so banner /
+    // BuildInfo stay in sync with the jar manifest (REL on release/*, EXP on
+    // experimental/feat*, DEV elsewhere). See computeSourbycraftSuffixVersion in
+    // root build.gradle.kts.
+    @Suppress("UNCHECKED_CAST")
+    val internalVersionProvider = rootProject.extra["sourbycraftSuffixProvider"] as Provider<String>
     val writeBuildInfoTask = tasks.register("writeBuildInfo") {
-        val internalVersion = providers.gradleProperty("internalVersion").getOrElse("dev")
         val mcVersion = providers.gradleProperty("mcVersion").getOrElse("unknown")
         val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
 
-        inputs.property("internalVersion", internalVersion)
+        inputs.property("internalVersion", internalVersionProvider)
         inputs.property("mcVersion", mcVersion)
         outputs.file(outFile)
+        // Reading the git branch via providers.exec is not config-cache-friendly
+        // here because the provider gets captured into a doLast closure that the
+        // cache layer cannot serialise. Marking the task incompatible is cheap —
+        // it only opts THIS task out, not the whole build.
+        notCompatibleWithConfigurationCache("Reads git branch via providers.exec at task execution time.")
 
         doLast {
             val f = outFile.get().asFile
             f.parentFile.mkdirs()
             val timestamp = Instant.now().toString()
+            val resolved = internalVersionProvider.get()
             f.writeText("""
-                version=$internalVersion
+                version=$resolved
                 mcVersion=$mcVersion
                 tagline=Lightning Fast Performance Feature Rich
                 buildTimestamp=$timestamp
@@ -354,7 +395,7 @@ tasks.register("assembleReleaseArtifacts") {
     description = "Copy mojmap paperclip jar into release/ and regenerate checksums.txt"
 
     val releaseDir = rootProject.layout.projectDirectory.dir("release")
-    val internalVersion = providers.gradleProperty("internalVersion").getOrElse("dev")
+    val internalVersionProvider = sourbycraftSuffixProvider
 
     // Release uses slim jar — externalizes only JDBC drivers (sqlite + mysql, ~17M) which
     // Paper does NOT special-case. Boot test required after every externalLibs change.
@@ -363,12 +404,12 @@ tasks.register("assembleReleaseArtifacts") {
     dependsOn("createSlimPaperclipJar")
     inputs.files(mojmapOutputs)
 
-    val mojmapDest = releaseDir.file("SourbyCraft-${internalVersion}.jar").asFile
     val checksumsFile = releaseDir.file("checksums.txt").asFile
     val releaseDirFile = releaseDir.asFile
 
-    outputs.file(mojmapDest)
+    inputs.property("internalVersion", internalVersionProvider)
     outputs.file(checksumsFile)
+    notCompatibleWithConfigurationCache("Reads git branch via providers.exec at task execution time.")
 
     doLast {
         fun firstJarFrom(files: org.gradle.api.file.FileCollection, label: String): java.io.File {
@@ -378,6 +419,8 @@ tasks.register("assembleReleaseArtifacts") {
                 ?: error("No jar output found for $label")
         }
 
+        val internalVersion = internalVersionProvider.get()
+        val mojmapDest = releaseDir.file("SourbyCraft-${internalVersion}.jar").asFile
         val mojmapSrc = firstJarFrom(mojmapOutputs.get(), "createPaperclipJar")
 
         releaseDirFile.mkdirs()

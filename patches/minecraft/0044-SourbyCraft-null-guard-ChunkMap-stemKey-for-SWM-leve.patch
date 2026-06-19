@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Fri, 19 Jun 2026 08:27:42 +0700
+Subject: [PATCH] SourbyCraft null-guard ChunkMap stemKey for SWM levels
+
+
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index c21ff9bc0da3e972c1f1ddc8c480f1a593fd6c4c..821b68d4308f50978d76d8f59d37dced16e2ba99 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -696,7 +696,14 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+ 
+     public static CompoundTag getChunkDataFixContextTag(final ResourceKey<net.minecraft.world.level.dimension.LevelStem> stemKey, final Optional<Identifier> generatorIdentifier) { // CraftBukkit
+         CompoundTag contextTag = new CompoundTag();
+-        contextTag.putString("dimension", stemKey.identifier().toString()); // CraftBukkit
++        // SourbyCraft - null-guard stemKey. SWM-backed levels (and any plugin that
++        // calls runActionOnUnloadedChunks on a level without a registered LevelStem
++        // type key) can pass a null stemKey. Vanilla code dereferenced unconditionally
++        // and threw NPE on every chunk upgrade, which spammed the console with stack
++        // traces during SS2 island generation.
++        if (stemKey != null) {
++            contextTag.putString("dimension", stemKey.identifier().toString()); // CraftBukkit
++        }
+         generatorIdentifier.ifPresent(identifier -> contextTag.putString("generator", identifier.toString()));
+         return contextTag;
+     }
