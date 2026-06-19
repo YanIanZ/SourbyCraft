@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r7-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r8-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,11 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r7`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r7) — Friday, 19 June 2026, 11:10 (GMT+7).
+**Latest tag:** [`v26.1.2-r8`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r8) — Friday, 19 June 2026, 11:16 (GMT+7).
+
+### r8 highlights
+- **Unified text-rendering helper** — new `dev.iyanz.sourbycraft.util.TextRender` accepts any mix of MiniMessage tags (`<red>`, `<gradient:#A:#B>`, `<rainbow>`), legacy `&` colour codes, Adventure-style `&#RRGGBB` hex, classic `§x§R§R§G§G§B§B`, and raw unicode emoji glyphs. Malformed input never throws — it falls through to legacy parsing and finally to a plain text component, so a typo in `sourbycraft.yml` cannot crash the boot path.
+- **`SourbyCraftConfig.getComponent` + world-config getComponent** swapped to TextRender. Previously a single bad MiniMessage tag in an operator's config would surface as a `ParsingException` on boot.
 
 ### r7 highlights
 - **SWM heap-leak fix** — `AdvancedSlimePaperImpl#onWorldUnload` was defined but never called, so every unloaded SS2 island world stayed pinned in heap (full `chunkStorage` retained). `SWPlugin#onEnable` now registers a `WorldUnloadEvent` listener that bridges to `onWorldUnload(name)`. Operators reporting 90 %+ RAM with steady island generation will see flat memory after r7.
