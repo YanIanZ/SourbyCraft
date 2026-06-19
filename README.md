@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r13-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r14-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,14 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r13`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r13) — Friday, 19 June 2026, 22:27 (GMT+7).
+**Latest tag:** [`v26.1.2-r14`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r14) — Saturday, 20 June 2026, 00:17 (GMT+7).
+
+### r14 highlights
+- **Companion bundle release** — bundles the SSB-SlimeWorldManager 2026.1 + SuperiorSkyblock2 2026.1 jars that fix the SS2 island-create + /spawn issues reported against r9..r13. SourbyCraft jar itself is unchanged from r13 (rebuilt for fresh build timestamp).
+- **Spawn-routing fix (SSB-SWM)** — `SlimeWorldsProvider#getIslandsWorld` short-circuits for `island.isSpawn()` and returns the host world via `island.getCenter(dim).getWorld()` instead of synthesising an empty SWM world. `/spawn` and void-fallback teleports now land in the operator-configured spawn world.
+- **Post-paste safety net (SSB-SWM)** — `SlimeWorldsCreationAlgorithm` schedules a 40-tick check after SS2 paste completes; if the island center is still empty (paste failed silently / chunk-section race), drops a 5×5 grass platform automatically + clears 3-block headspace so the spawn point passes SS2's safe-block check.
+- **Relaxed safe-spot fallback (SS2)** — `EntityTeleports#findNewSafeSpotOnIsland` retries with `NO_EMPTY_CHUNKS` off when the strict scan returns nothing. Finds the bedrock anchor / safety platform on fresh SWM islands.
+- **Pre-paste chunk primer + anchor (SSB-SWM)** — `SlimeWorldsProvider#primeSpawnChunks` force-loads 3×3 chunks around (0,0) of new island world + drops bedrock at `(0, islandHeight-1, 0)` if void. Stops the chunk-creation race against schematic paste.
 
 ### r13 highlights
 - **SWP multi-loader bootstrap** — `SWPlugin#onLoad` now reads `sourbycraft.yml swm.loader.{mysql,mongo,api,redis}.*` and registers each backing `SlimeLoader` with `LoaderManager` when credentials are present. `swm.loader.type` (with `mongodb` alias for `mongo`) sets the default. Bridge plugins like SSB-SlimeWorldManager can now route SWM requests to non-file backends via `LoaderManager#getLoader(type)`. Redis stays a warn-only stub for now (no Redis impl shipped yet — type=redis falls back to the default loader).
