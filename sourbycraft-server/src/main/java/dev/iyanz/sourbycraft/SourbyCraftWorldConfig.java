@@ -73,8 +73,10 @@ public class SourbyCraftWorldConfig {
     }
 
     private Component getComponent(String path, Component def) {
-        return MiniMessage.miniMessage().deserialize(getString(path,
-                MiniMessage.miniMessage().serialize(def)));
+        // See SourbyCraftConfig#getComponent — TextRender catches MiniMessage
+        // parser exceptions and falls back to legacy &-codes (then plain text).
+        String raw = getString(path, MiniMessage.miniMessage().serialize(def));
+        return dev.iyanz.sourbycraft.util.TextRender.parseOr(raw, def);
     }
 
     // SourbyCraft start - antixray config

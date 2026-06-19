@@ -638,8 +638,12 @@ public class SourbyCraftConfig {
     }
 
     private static Component getComponent(String path, Component def) {
-        return MiniMessage.miniMessage().deserialize(getString(path,
-                MiniMessage.miniMessage().serialize(def)));
+        // Defensive: the operator may have edited the config with legacy &-codes,
+        // Adventure &#RRGGBB hex, or malformed MiniMessage. TextRender catches
+        // any parser failure and returns the input as plain text so the boot
+        // sequence cannot crash on a typo in sourbycraft.yml.
+        String raw = getString(path, MiniMessage.miniMessage().serialize(def));
+        return dev.iyanz.sourbycraft.util.TextRender.parseOr(raw, def);
     }
 
     public static boolean detailedBrand = true;
