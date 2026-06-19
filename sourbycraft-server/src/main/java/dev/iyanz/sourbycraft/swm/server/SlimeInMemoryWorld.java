@@ -103,22 +103,11 @@ public class SlimeInMemoryWorld implements SlimeWorld, SlimeWorldInstance {
         for (Long2ObjectMap.Entry<SlimeChunk> entry : this.chunkStorage.long2ObjectEntrySet()) {
             SlimeChunk clonedChunk = entry.getValue();
 
-            if (clonedChunk instanceof SafeNmsChunkWrapper safeNmsChunkWrapper) {
-                if (safeNmsChunkWrapper.shouldDefaultBackToSlimeChunk()) {
-                    clonedChunk = safeNmsChunkWrapper.getSafety();
-                } else {
-                    NMSSlimeChunk nmsChunk = safeNmsChunkWrapper.getWrapper();
-                    if (FastChunkPruner.canBePruned(this, nmsChunk.getChunk())) {
-                        continue;
-                    }
-                    clonedChunk = PartiallySerializedSlimeChunk.of(
-                            nmsChunk,
-                            getPropertyMap().saveBlockTicks(),
-                            getPropertyMap().saveFluidTicks(),
-                            getPropertyMap().savePoi()
-                    );
-                }
-            } else if (clonedChunk instanceof NMSSlimeChunk nmsChunk) {
+            // ASP dev/26.2 parity: NMSSlimeChunk is the only live wrapper we
+            // promote into chunkStorage now. The previous SafeNmsChunkWrapper
+            // branch was discarding live-mutated blocks on unload, which broke
+            // SS2 schematic paste persistence.
+            if (clonedChunk instanceof NMSSlimeChunk nmsChunk) {
                 if (FastChunkPruner.canBePruned(this, nmsChunk.getChunk())) {
                     continue;
                 }
@@ -202,7 +191,8 @@ public class SlimeInMemoryWorld implements SlimeWorld, SlimeWorldInstance {
     }
 
     public void promoteInChunkStorage(SlimeChunkLevel chunk) {
-        chunkStorage.put(key(chunk.locX, chunk.locZ), chunk.getSafeSlimeReference());
+        // ASP dev/26.2 parity: always promote the live NMSSlimeChunk view.
+        chunkStorage.put(key(chunk.locX, chunk.locZ), chunk.getNmsSlimeChunk());
     }
 
     public SlimeLevelInstance getInstance() {

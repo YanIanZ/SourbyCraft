@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r14-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r15-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,10 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r14`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r14) — Saturday, 20 June 2026, 00:17 (GMT+7).
+**Latest tag:** [`v26.1.2-r15`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r15) — Saturday, 20 June 2026, 00:49 (GMT+7).
+
+### r15 highlights
+- **SWM chunk dual-track removed** — `SlimeChunkLevel` no longer holds a `slimeReference` field, the `SafeNmsChunkWrapper` class is gone, and `SlimeInMemoryWorld.promoteInChunkStorage` always stores the live `NMSSlimeChunk` instead of the dual-track wrapper. ASP dev/26.2 parity. Fixes the silent block-loss on chunk unload that was eating SS2's schematic-paste output the moment the island world unloaded after `/is create` — the bug where `/swm inspect island_<uuid>_normal` reported 0 persisted chunks on what should have been a freshly-pasted island.
 
 ### r14 highlights
 - **Companion bundle release** — bundles the SSB-SlimeWorldManager 2026.1 + SuperiorSkyblock2 2026.1 jars that fix the SS2 island-create + /spawn issues reported against r9..r13. SourbyCraft jar itself is unchanged from r13 (rebuilt for fresh build timestamp).

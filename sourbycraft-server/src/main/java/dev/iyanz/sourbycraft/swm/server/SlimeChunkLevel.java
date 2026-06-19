@@ -15,7 +15,6 @@ public class SlimeChunkLevel extends LevelChunk {
 
     private final SlimeInMemoryWorld inMemoryWorld;
     private final NMSSlimeChunk nmsSlimeChunk;
-    private final @Nullable SlimeChunk slimeReference;
 
     public SlimeChunkLevel(
             SlimeLevelInstance world,
@@ -31,19 +30,21 @@ public class SlimeChunkLevel extends LevelChunk {
     ) {
         super(world, pos, upgradeData, blockTickScheduler, fluidTickScheduler, inhabitedTime, sectionArrayInitializer, entityLoader, blendingData);
         this.inMemoryWorld = world.slimeInstance;
+        // ASP dev/26.2 parity: SlimeChunkLevel keeps a single NMSSlimeChunk view
+        // of the live chunk. The previous dual-track via `slimeReference` +
+        // `SafeNmsChunkWrapper` would silently discard live-mutated blocks on
+        // chunk unload because `SafeNmsChunkWrapper.shouldDefaultBackToSlimeChunk`
+        // returned true when `wrapper.getChunk().loaded == false`, swapping the
+        // live NMS view back to the original on-disk reference. That ate
+        // schematic paste blocks the moment SS2's island world unloaded after
+        // /is create. See project_asp_swm_port.md.
         this.nmsSlimeChunk = new NMSSlimeChunk(this, reference);
-        this.slimeReference = reference;
     }
 
     @Override
     public void loadCallback() {
         this.inMemoryWorld.promoteInChunkStorage(this);
         super.loadCallback();
-    }
-
-    public SlimeChunk getSafeSlimeReference() {
-        if (this.slimeReference == null) return this.nmsSlimeChunk;
-        return new SafeNmsChunkWrapper(this.nmsSlimeChunk, this.slimeReference);
     }
 
     public NMSSlimeChunk getNmsSlimeChunk() {
