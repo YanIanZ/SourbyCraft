@@ -51,7 +51,12 @@ public final class SlimeSerializer {
             extraCompound.put("properties", propsTag);
         }
         ByteArrayOutputStream extraBaos = new ByteArrayOutputStream();
-        NbtIo.writeCompressed(extraCompound, extraBaos);
+        // Uncompressed NBT here so the outer zlib pass is the only compression
+        // layer. Previously this used NbtIo.writeCompressed (gzip) which double-
+        // wrapped the payload — the v13 reader's `NbtIo.read(...)` hit the gzip
+        // magic byte 0x1F as a tag id and threw "Invalid tag id: 31" on every
+        // SS2 island join.
+        NbtIo.write(extraCompound, new DataOutputStream(extraBaos));
         byte[] extraRaw = extraBaos.toByteArray();
         byte[] compressedExtra = compress(extraRaw);
 
