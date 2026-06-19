@@ -8,10 +8,16 @@ import dev.iyanz.sourbycraft.swm.api.SlimePropertyMap;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
@@ -36,7 +42,7 @@ public class SwmCommand implements CommandExecutor, TabCompleter {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (args.length == 0) {
-            sendMessage(sender, Component.text("Usage: /swm list|load|save|info|inspect|delete", NamedTextColor.YELLOW));
+            sendMessage(sender, Component.text("Usage: /swm list|load|save|info|inspect|delete|platform", NamedTextColor.YELLOW));
             return true;
         }
 
@@ -47,9 +53,91 @@ public class SwmCommand implements CommandExecutor, TabCompleter {
             case "info" -> handleInfo(sender);
             case "inspect" -> handleInspect(sender, args);
             case "delete" -> handleDelete(sender, args);
-            default -> sendMessage(sender, Component.text("Unknown subcommand. Use /swm list|load|save|info|inspect|delete", NamedTextColor.RED));
+            case "platform" -> handlePlatform(sender, args);
+            default -> sendMessage(sender, Component.text("Unknown subcommand. Use /swm list|load|save|info|inspect|delete|platform", NamedTextColor.RED));
         }
         return true;
+    }
+
+    /**
+     * Emergency platform builder for empty worlds. Plants a square slab of safe
+     * blocks beneath the operator (or at given coords) so they can recover from
+     * a "no safe blocks" / void-spawn situation without WorldEdit. Cleans up
+     * any non-air blocks in the 3-block headspace above the platform so the
+     * teleport-target spot is clear.
+     */
+    private void handlePlatform(CommandSender sender, String[] args) {
+        if (!sender.isOp() && !sender.hasPermission("sourbycraft.swm.platform")) {
+            sendMessage(sender, Component.text("Insufficient permission.", NamedTextColor.RED));
+            return;
+        }
+        Location target;
+        int radius = 4;
+        Material material = Material.GRASS_BLOCK;
+        if (args.length >= 5) {
+            World w = Bukkit.getWorld(args[1]);
+            if (w == null) {
+                sendMessage(sender, Component.text("Unknown world: " + args[1], NamedTextColor.RED));
+                return;
+            }
+            try {
+                target = new Location(w,
+                        Integer.parseInt(args[2]),
+                        Integer.parseInt(args[3]),
+                        Integer.parseInt(args[4]));
+            } catch (NumberFormatException e) {
+                sendMessage(sender, Component.text("Usage: /swm platform <world> <x> <y> <z> [radius] [material]", NamedTextColor.YELLOW));
+                return;
+            }
+            if (args.length >= 6) {
+                try { radius = Math.max(1, Math.min(32, Integer.parseInt(args[5]))); }
+                catch (NumberFormatException ignored) {}
+            }
+            if (args.length >= 7) {
+                Material m = Material.matchMaterial(args[6]);
+                if (m != null && m.isBlock()) material = m;
+            }
+        } else if (sender instanceof Player p) {
+            target = p.getLocation();
+            if (args.length >= 2) {
+                try { radius = Math.max(1, Math.min(32, Integer.parseInt(args[1]))); }
+                catch (NumberFormatException ignored) {}
+            }
+            if (args.length >= 3) {
+                Material m = Material.matchMaterial(args[2]);
+                if (m != null && m.isBlock()) material = m;
+            }
+        } else {
+            sendMessage(sender, Component.text(
+                    "Usage from console: /swm platform <world> <x> <y> <z> [radius] [material]",
+                    NamedTextColor.YELLOW));
+            return;
+        }
+
+        int cx = target.getBlockX();
+        int cy = target.getBlockY();
+        int cz = target.getBlockZ();
+        int placed = 0;
+        World world = target.getWorld();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                Block floor = world.getBlockAt(cx + dx, cy - 1, cz + dz);
+                if (floor.getType() != material) {
+                    floor.setType(material, false);
+                    placed++;
+                }
+                // Clear the 3-block headspace above the floor so the teleport
+                // target spot satisfies SS2's safe-block check.
+                for (int dy = 0; dy < 3; dy++) {
+                    Block above = world.getBlockAt(cx + dx, cy + dy, cz + dz);
+                    if (above.getType() != Material.AIR) above.setType(Material.AIR, false);
+                }
+            }
+        }
+        sendMessage(sender, Component.text("Built " + (radius * 2 + 1) + "x" + (radius * 2 + 1)
+                + " " + material.name().toLowerCase(java.util.Locale.ROOT) + " platform at "
+                + world.getName() + " " + cx + "," + (cy - 1) + "," + cz + " (" + placed + " blocks placed).",
+                NamedTextColor.GREEN));
     }
 
     private void handleInspect(CommandSender sender, String[] args) {
@@ -224,7 +312,7 @@ public class SwmCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
-            return List.of("list", "load", "save", "info", "inspect", "delete").stream()
+            return List.of("list", "load", "save", "info", "inspect", "delete", "platform").stream()
                     .filter(s -> s.startsWith(args[0].toLowerCase(java.util.Locale.ROOT)))
                     .collect(Collectors.toList());
         }
