@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
+import dev.iyanz.sourbycraft.brand.BuildInfo;
 import dev.iyanz.sourbycraft.util.BarUtil;
 import io.papermc.paper.ServerBuildInfo;
 import net.kyori.adventure.text.Component;
@@ -9,6 +10,11 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 
 import java.lang.management.ManagementFactory;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 import static net.kyori.adventure.text.Component.text;
 
@@ -20,6 +26,13 @@ import static net.kyori.adventure.text.Component.text;
 public class VerCommand extends Command {
 
     private static final String DIVIDER = BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH);
+    // GMT+7 day-name format matching the GH release title convention
+    // (e.g. "Friday, 19 June 2026 10:45"). Sourced from the buildTimestamp in
+    // META-INF/sourbycraft-build.properties so /ver shows when the jar was
+    // built, not when the server happened to boot.
+    private static final DateTimeFormatter BUILD_DATE_FMT =
+            DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy HH:mm", Locale.ENGLISH);
+    private static final ZoneId GMT_PLUS_7 = ZoneId.of("Asia/Jakarta");
 
     public VerCommand(String n) {
         super(n);
@@ -33,13 +46,25 @@ public class VerCommand extends Command {
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
         ServerBuildInfo bi = ServerBuildInfo.buildInfo();
+        BuildInfo brand = BuildInfo.load();
+
+        String buildDate;
+        try {
+            Instant inst = Instant.parse(brand.buildTimestamp());
+            buildDate = ZonedDateTime.ofInstant(inst, GMT_PLUS_7).format(BUILD_DATE_FMT);
+        } catch (Exception ignored) {
+            buildDate = "";
+        }
 
         s.sendMessage(text(DIVIDER, SourbyCraftColors.PRIMARY));
-        s.sendMessage(text()
+        var headerLine = text()
             .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
             .append(text("SourbyCraft ", SourbyCraftColors.HEADER))
-            .append(text(bi.asString(ServerBuildInfo.StringRepresentation.VERSION_FULL), SourbyCraftColors.VALUE))
-            .build());
+            .append(text(brand.version(), SourbyCraftColors.VALUE));
+        if (!buildDate.isEmpty()) {
+            headerLine.append(text("  " + buildDate, SourbyCraftColors.DIM));
+        }
+        s.sendMessage(headerLine.build());
 
         s.sendMessage(line("Minecraft", bi.minecraftVersionId() + "  (" + bi.minecraftVersionName() + ")"));
         s.sendMessage(line("Bukkit API", Bukkit.getBukkitVersion()));

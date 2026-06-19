@@ -2,14 +2,15 @@ package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
+import dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics;
 import dev.iyanz.sourbycraft.util.BarUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.plugin.Plugin;
 
 import java.lang.management.ManagementFactory;
-import java.util.Arrays;
 
 import static net.kyori.adventure.text.Component.text;
 
@@ -89,11 +90,41 @@ public class SysCommand extends Command {
                 .build());
         }
 
-        var pl = Bukkit.getPluginManager().getPlugins();
+        Plugin[] pl = Bukkit.getPluginManager().getPlugins();
+        int active = 0;
+        int inactive = 0;
+        for (Plugin p : pl) {
+            if (p.isEnabled()) active++;
+            else inactive++;
+        }
+        var failures = PluginLoadDiagnostics.recent();
         s.sendMessage(text()
-            .append(text("  Plugins (" + pl.length + "): ", SourbyCraftColors.HEADER))
-            .append(text(Arrays.stream(pl).map(p -> p.getName()).reduce((x, y) -> x + ", " + y).orElse("none"), SourbyCraftColors.VALUE))
+            .append(text("  Plugins: ", SourbyCraftColors.HEADER))
+            .append(text(active + " active", SourbyCraftColors.SUCCESS))
+            .append(text("  /  ", SourbyCraftColors.DIM))
+            .append(text(pl.length + " loaded", SourbyCraftColors.VALUE))
+            .append(text("  /  ", SourbyCraftColors.DIM))
+            .append(text((inactive + failures.size()) + " errored",
+                (inactive + failures.size()) > 0 ? SourbyCraftColors.DANGER : SourbyCraftColors.DIM))
             .build());
+        // Disabled-but-registered plugins (enable phase aborted post-load).
+        for (Plugin p : pl) {
+            if (p.isEnabled()) continue;
+            s.sendMessage(text()
+                .append(text("    ✗ ", SourbyCraftColors.DANGER))
+                .append(text(p.getName(), SourbyCraftColors.VALUE))
+                .append(text("  disabled", SourbyCraftColors.DIM))
+                .build());
+        }
+        // Plugins that never reached the manager (load-time failure captured
+        // by PluginLoadDiagnostics).
+        for (PluginLoadDiagnostics.Entry entry : failures) {
+            s.sendMessage(text()
+                .append(text("    ✗ ", SourbyCraftColors.DANGER))
+                .append(text(entry.pluginJar(), SourbyCraftColors.VALUE))
+                .append(text("  " + entry.reason(), SourbyCraftColors.DIM))
+                .build());
+        }
 
         s.sendMessage(text()
             .append(text("  SWM: ", SourbyCraftColors.LABEL))

@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r6-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r7-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,13 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r6`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r6) — Friday, 19 June 2026, 10:30 (GMT+7).
+**Latest tag:** [`v26.1.2-r7`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r7) — Friday, 19 June 2026, 11:10 (GMT+7).
+
+### r7 highlights
+- **SWM heap-leak fix** — `AdvancedSlimePaperImpl#onWorldUnload` was defined but never called, so every unloaded SS2 island world stayed pinned in heap (full `chunkStorage` retained). `SWPlugin#onEnable` now registers a `WorldUnloadEvent` listener that bridges to `onWorldUnload(name)`. Operators reporting 90 %+ RAM with steady island generation will see flat memory after r7.
+- **`/ver` banner format** — Replaces Paper's `VERSION_FULL` (`26.1.2-DEV-<hash>`) with the SourbyCraft build identity from `META-INF/sourbycraft-build.properties` plus the GMT+7 day-name build timestamp (e.g. `26.1.2-REL  Friday, 19 June 2026 11:10`).
+- **`/perf` command now registered** — Was defined but missing from the boot registration array, so the Brigadier root shadowed it. Added `perf`, `perfengine`, `tuner` to `sourbycraftCommandNames` + the register-loop in `DedicatedServer#initServer` (new patch `0045`).
+- **`/sys plugins` rewrite** — Reports `<active> active / <loaded> loaded / <errored> errored`. Disabled-but-registered plugins and load-time failures (captured by the new `PluginLoadDiagnostics` JUL handler) are each listed with their name + first deep-cause line so operators see "X failed, last message: Y" without grepping the log.
 
 ### r6 highlights
 - **Banner version sync** — the in-jar `META-INF/sourbycraft-build.properties` is now derived from the current git branch (REL on `release/*`, EXP on `experimental/feat*`, DEV elsewhere) via `sourbycraftSuffixProvider`. The hardcoded `internalVersion` in `gradle.properties` is gone — the banner always matches the jar filename and manifest.

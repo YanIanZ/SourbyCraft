@@ -9,11 +9,15 @@ import dev.iyanz.sourbycraft.swm.api.exceptions.UnknownWorldException;
 import dev.iyanz.sourbycraft.swm.api.SlimeLoader;
 import dev.iyanz.sourbycraft.swm.api.SlimePropertyMap;
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
+import dev.iyanz.sourbycraft.swm.server.AdvancedSlimePaperImpl;
 import dev.iyanz.sourbycraft.swm.server.SwmIoExecutor;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.FileInputStream;
@@ -82,6 +86,18 @@ public class SWPlugin extends JavaPlugin {
             command.setExecutor(cmd);
             command.setTabCompleter(cmd);
         }
+
+        // Heap-leak fix: AdvancedSlimePaperImpl#loadedWorlds (and the entire
+        // chunkStorage of each SlimeWorldInstance) was retained forever because
+        // Bukkit's WorldUnloadEvent was never bridged into onWorldUnload. SS2
+        // unloads SWM worlds aggressively when islands go cold; without this
+        // listener every unloaded island stayed pinned in heap.
+        Bukkit.getPluginManager().registerEvents(new Listener() {
+            @EventHandler
+            public void onWorldUnload(WorldUnloadEvent event) {
+                AdvancedSlimePaperImpl.instance().onWorldUnload(event.getWorld().getName());
+            }
+        }, this);
 
         worldsToLoad.values().stream()
                 .filter(slimeWorld -> Objects.isNull(Bukkit.getWorld(slimeWorld.getName())))
