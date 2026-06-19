@@ -47,6 +47,7 @@ public class SWPlugin extends JavaPlugin {
         ioExecutor = new SwmIoExecutor();
 
         this.loaderManager = new LoaderManager(SourbyCraftConfig.swmFileDir);
+        registerOptionalLoaders(this.loaderManager);
 
         List<String> erroredWorlds = loadWorlds();
 
@@ -150,6 +151,98 @@ public class SWPlugin extends JavaPlugin {
         if (ioExecutor != null) {
             ioExecutor.shutdown();
             ioExecutor = null;
+        }
+    }
+
+    /**
+     * Register optional MySQL / MongoDB / API / Redis SlimeLoaders if the operator
+     * has filled credentials in {@code sourbycraft.yml swm.loader.*}. Each loader is
+     * registered under its canonical short name so SSB-SWM (and any other bridge
+     * plugin) can resolve them by type via {@link LoaderManager#getLoader(String)}.
+     *
+     * <p>If {@code swm.loader.type} names a non-file loader, the corresponding
+     * registered loader becomes the default (replacing the file loader installed
+     * by {@code LoaderManager}'s ctor). Boot order: this runs in {@code onLoad}
+     * so even {@code worldsToLoad} sees the right default.
+     */
+    private static void registerOptionalLoaders(LoaderManager manager) {
+        org.bukkit.configuration.file.YamlConfiguration cfg = SourbyCraftConfig.config;
+        if (cfg == null) return;
+        org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger("SourbyCraftSWM");
+
+        org.bukkit.configuration.ConfigurationSection mysql = cfg.getConfigurationSection("swm.loader.mysql");
+        if (mysql != null && !mysql.getString("username", "").isEmpty()) {
+            try {
+                String url = mysql.getString("url",
+                        "jdbc:mysql://{host}:{port}/{database}?autoReconnect=true&allowMultiQueries=true&useSSL={usessl}");
+                manager.register("mysql", new dev.iyanz.sourbycraft.swm.loader.MysqlLoader(
+                        url,
+                        mysql.getString("host", "127.0.0.1"),
+                        mysql.getInt("port", 3306),
+                        mysql.getString("database", "slime_worlds"),
+                        mysql.contains("use-ssl") ? mysql.getBoolean("use-ssl") : mysql.getBoolean("useSSL", false),
+                        mysql.getString("username"),
+                        mysql.getString("password", "")));
+                log.info("[SWP] Registered mysql SlimeLoader from sourbycraft.yml swm.loader.mysql.");
+            } catch (Throwable t) {
+                log.warn("[SWP] Failed to register mysql SlimeLoader: {}", t.getMessage());
+            }
+        }
+
+        org.bukkit.configuration.ConfigurationSection mongo = cfg.getConfigurationSection("swm.loader.mongo");
+        // Accept legacy `swm.loader.mongodb` sub-key for back-compat.
+        if (mongo == null) mongo = cfg.getConfigurationSection("swm.loader.mongodb");
+        if (mongo != null && (!mongo.getString("username", "").isEmpty() || !mongo.getString("uri", "").isEmpty())) {
+            try {
+                manager.register("mongo", new dev.iyanz.sourbycraft.swm.loader.MongoLoader(
+                        mongo.getString("database", "slime_worlds"),
+                        mongo.getString("collection", "worlds"),
+                        mongo.getString("username", null),
+                        mongo.getString("password", null),
+                        mongo.getString("auth-source", mongo.getString("auth", "admin")),
+                        mongo.getString("host", "127.0.0.1"),
+                        mongo.getInt("port", 27017),
+                        mongo.getString("uri", "")));
+                log.info("[SWP] Registered mongo SlimeLoader from sourbycraft.yml swm.loader.mongo.");
+            } catch (Throwable t) {
+                log.warn("[SWP] Failed to register mongo SlimeLoader: {}", t.getMessage());
+            }
+        }
+
+        org.bukkit.configuration.ConfigurationSection api = cfg.getConfigurationSection("swm.loader.api");
+        if (api != null && !api.getString("uri", api.getString("url", "")).isEmpty()) {
+            try {
+                manager.register("api", new dev.iyanz.sourbycraft.swm.loader.APILoader(
+                        api.getString("uri", api.getString("url", "")),
+                        api.getString("username", ""),
+                        api.getString("token", ""),
+                        api.getBoolean("ignore-ssl-certificate", false)));
+                log.info("[SWP] Registered api SlimeLoader from sourbycraft.yml swm.loader.api.");
+            } catch (Throwable t) {
+                log.warn("[SWP] Failed to register api SlimeLoader: {}", t.getMessage());
+            }
+        }
+
+        // Redis loader: SWP ships the config block but no loader class yet.
+        // Log a notice so operators know type=redis falls back to default.
+        org.bukkit.configuration.ConfigurationSection redis = cfg.getConfigurationSection("swm.loader.redis");
+        if (redis != null && !redis.getString("uri", "").isEmpty()) {
+            log.warn("[SWP] Redis loader is configured ({}) but the SWP redis backend is not implemented yet; "
+                    + "requests for type=redis will fall through to the default loader.", redis.getString("uri"));
+        }
+
+        // Set default based on swm.loader.type. Accept `mongodb` alias.
+        String type = cfg.getString("swm.loader.type", "file").toLowerCase(java.util.Locale.ROOT);
+        if (type.equals("mongodb")) type = "mongo";
+        if (!type.equals("file")) {
+            dev.iyanz.sourbycraft.swm.api.SlimeLoader picked = manager.getLoader(type);
+            if (picked != null && picked != manager.getDefault()) {
+                manager.setDefault(picked);
+                log.info("[SWP] Default SlimeLoader set to '{}' per sourbycraft.yml swm.loader.type.", type);
+            } else if (picked == null) {
+                log.warn("[SWP] swm.loader.type='{}' requested but no matching loader registered; "
+                        + "default stays as file. Check the corresponding sub-block credentials.", type);
+            }
         }
     }
 
