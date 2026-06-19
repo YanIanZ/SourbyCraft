@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r11-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r12-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,10 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r11`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r11) — Tuesday, 16 June 2026, 13:35 (GMT+7).
+**Latest tag:** [`v26.1.2-r12`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r12) — Friday, 19 June 2026, 15:59 (GMT+7).
+
+### r12 highlights
+- **`/swm platform` emergency builder** — operators stuck on empty spawn / island worlds (post-r1..r8 data loss) can now place a safe-block slab without WorldEdit. Defaults to a 9×9 grass platform under the running player; clears the 3-block headspace above so SS2's safe-block check passes. Console form: `/swm platform <world> <x> <y> <z> [radius] [material]`. Op + `sourbycraft.swm.platform` permission gated; radius clamped to 32.
 
 ### r11 highlights
 - **SWM admin diagnostics** — operators reporting "It seems like this island has no safe blocks" after the r9 NBT fix were hitting on-disk islands persisted with zero chunks (the r1..r8 SafeExecutor failure aborted before the schematic-paste save ever ran). Two new `/swm` subcommands surface the issue and clear stale state:
