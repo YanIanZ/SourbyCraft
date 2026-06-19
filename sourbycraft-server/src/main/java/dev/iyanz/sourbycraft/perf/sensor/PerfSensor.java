@@ -30,7 +30,7 @@ public final class PerfSensor {
     private static volatile double recoveryDwellMultiplier = 2.0;
     /**
      * Ticks to skip at server startup before the sensor starts sampling.
-     * Bumped from 200 (10s) to 600 (30s) in 26.1.2-EXP because the
+     * Bumped from 200 (10s) to 600 (30s) in 26.1.2-REL because the
      * MC 26 plugin-enable phase with 50+ plugins on the heaviest
      * payloads (skyblock + economy + protect + holograms + AC) takes
      * 20-25 s before the tick loop reaches steady state. Sampling

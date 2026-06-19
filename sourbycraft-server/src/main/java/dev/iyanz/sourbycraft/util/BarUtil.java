@@ -9,7 +9,7 @@ import static net.kyori.adventure.text.Component.text;
 /**
  * SourbyCraft progress-bar helper.
  *
- * <p>Bar style switched in 26.1.2-EXP from the legacy ASCII full/light
+ * <p>Bar style switched in 26.1.2-REL from the legacy ASCII full/light
  * blocks ({@code █░}) to the parallelogram glyphs ({@code ▰▱}) for a
  * tighter, lower-stroke look that lines up cleanly with the hex-coloured
  * SourbyCraft palette. The default width is 40 so a full bar gives a

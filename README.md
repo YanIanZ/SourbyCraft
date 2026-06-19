@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r4-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r6-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,12 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r4`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r4) — Friday, 19 June 2026 (GMT+7).
+**Latest tag:** [`v26.1.2-r6`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r6) — Friday, 19 June 2026, 10:30 (GMT+7).
+
+### r6 highlights
+- **Banner version sync** — the in-jar `META-INF/sourbycraft-build.properties` is now derived from the current git branch (REL on `release/*`, EXP on `experimental/feat*`, DEV elsewhere) via `sourbycraftSuffixProvider`. The hardcoded `internalVersion` in `gradle.properties` is gone — the banner always matches the jar filename and manifest.
+- **`ChunkMap#getChunkDataFixContextTag` null-guard** — SWM-backed levels (and any plugin that calls `runActionOnUnloadedChunks` on a level without a registered `LevelStem` typeKey) used to NPE on every chunk upgrade. New feature patch `0044` wraps the `stemKey.identifier()` deref in a null check, killing the stack-trace spam during SS2 island generation.
+- **Release-task config-cache safety** — `writeBuildInfo` + `assembleReleaseArtifacts` now opt out of the configuration cache (they shell out to git at task time). Other tasks keep caching.
 
 ### r4 highlights
 - **REL artifact naming** — `release/*` branches stamp the manifest as `Implementation-Version: 26.1.2-REL`. Canonical jar is `SourbyCraft-26.1.2-REL.jar`.
