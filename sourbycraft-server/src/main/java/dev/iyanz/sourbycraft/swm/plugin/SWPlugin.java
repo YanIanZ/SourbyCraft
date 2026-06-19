@@ -99,6 +99,12 @@ public class SWPlugin extends JavaPlugin {
             }
         }, this);
 
+        // SourbyCraft - emoji shortcode chat translator. Disabled at runtime
+        // via `emoji.shortcodes.enabled: false` in sourbycraft.yml; the
+        // listener itself stays registered so toggling the config takes effect
+        // on the next chat message rather than requiring a server restart.
+        Bukkit.getPluginManager().registerEvents(new dev.iyanz.sourbycraft.chat.EmojiChatListener(), this);
+
         worldsToLoad.values().stream()
                 .filter(slimeWorld -> Objects.isNull(Bukkit.getWorld(slimeWorld.getName())))
                 .forEach(slimeWorld -> {

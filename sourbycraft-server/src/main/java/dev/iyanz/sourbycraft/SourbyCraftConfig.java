@@ -330,6 +330,31 @@ public class SourbyCraftConfig {
         preSizePackets = getBoolean("memory.pre-size-packets", preSizePackets);
         chunkCompressionCache = getBoolean("memory.chunk-compression-cache", chunkCompressionCache);
 
+        // SourbyCraft - emoji shortcode chat translator (:smile: -> 😀 etc.).
+        // Defaults loaded from EmojiShortcodes#defaults(); operators can override
+        // / extend via `emoji.shortcodes.codes` in sourbycraft.yml.
+        try {
+            boolean emojiEnabled = getBoolean("emoji.shortcodes.enabled", true);
+            dev.iyanz.sourbycraft.chat.EmojiShortcodes.setEnabled(emojiEnabled);
+            org.bukkit.configuration.ConfigurationSection codesSec =
+                    config.getConfigurationSection("emoji.shortcodes.codes");
+            if (codesSec == null) {
+                // Write the default map back so operators can see + edit it.
+                org.bukkit.configuration.ConfigurationSection created =
+                        config.createSection("emoji.shortcodes.codes");
+                dev.iyanz.sourbycraft.chat.EmojiShortcodes.map().forEach(created::set);
+            } else {
+                java.util.Map<String, String> custom = new java.util.LinkedHashMap<>();
+                for (String key : codesSec.getKeys(false)) {
+                    Object raw = codesSec.get(key);
+                    if (raw != null) custom.put(key, raw.toString());
+                }
+                dev.iyanz.sourbycraft.chat.EmojiShortcodes.replaceAll(custom);
+            }
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("EmojiShortcodes init failed; defaults still active", t);
+        }
+
         swmEnabled = getBoolean("swm.enabled", swmEnabled);
         swmVersion = getString("swm.version", swmVersion);
         swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);

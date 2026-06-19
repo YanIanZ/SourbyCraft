@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r9-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r10-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,10 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r9`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r9) — Friday, 19 June 2026, 12:01 (GMT+7).
+**Latest tag:** [`v26.1.2-r10`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r10) — Friday, 19 June 2026, 12:18 (GMT+7).
+
+### r10 highlights
+- **Emoji shortcode chat translator** — `dev.iyanz.sourbycraft.chat.EmojiShortcodes` ships with 50+ built-in `:name: → glyph` mappings (`:smile: :heart: :+1: :fire: :rocket: :100:` etc). `EmojiChatListener` hooks `AsyncChatEvent` at `HIGH` priority + cancel-aware, rewrites every matching token via Adventure `Component#replaceText` so emoji works across MiniMessage, legacy `&` codes, and raw text. Toggle via `emoji.shortcodes.enabled` in `sourbycraft.yml`; the full map is written back to disk on first boot under `emoji.shortcodes.codes` so operators can add / override codes without touching code.
 
 ### r9 highlights
 - **SWM v13 NBT mismatch fix** — `SlimeSerializer` previously wrote extra data via `NbtIo.writeCompressed` (gzip) then wrapped the result in the outer zlib pass, while `v13SlimeWorldReader` decompressed only the zlib layer and called `NbtIo.read` on raw gzip bytes — first byte `0x1F` got parsed as a tag id, blowing up every SS2 island join with `Invalid tag id: 31`. Writer now emits uncompressed NBT (canonical), reader detects the legacy gzip magic and falls back to `NbtIo.readCompressed` so existing on-disk islands keep loading.
