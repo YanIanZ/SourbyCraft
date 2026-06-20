@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 20 Jun 2026 15:06:18 +0700
+Subject: [PATCH] SourbyCraft SWM temp-dir cleanup on world unload
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 7bbb69c92590461a5ef182a106d8aeca57bf715f..1514057708d6df2a5177fc3de0ef90788c2fbcd8 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1395,6 +1395,15 @@ public final class CraftServer implements Server {
+ 
+             handle.getChunkSource().close(save);
+             io.papermc.paper.FeatureHooks.closeEntityManager(handle, save); // SPIGOT-6722: close entityManager // Paper - chunk system
++
++            // SourbyCraft start - SWM temp-dir cleanup on world unload (ASP dev/26.2 parity).
++            // Without this the temp LevelStorageAccess dir accumulates dead SWM worlds
++            // across the JVM lifetime — a long-uptime server that loads/unloads SS2
++            // islands fills /tmp with orphan dimension folders.
++            if (handle instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance sli) {
++                sli.deleteTempFiles();
++            }
++            // SourbyCraft end
+         } catch (Exception ex) {
+             this.getLogger().log(Level.SEVERE, null, ex);
+         }
