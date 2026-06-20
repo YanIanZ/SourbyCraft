@@ -171,6 +171,23 @@ public class NMSSlimeChunk implements SlimeChunk {
         return SlimeChunkConverter.toSlimeSections(poiChunk);
     }
 
+    /**
+     * ASP dev/26.2 parity. Copies the chunk's PersistentDataContainer into the
+     * extra blob under {@code "ChunkBukkitValues"} so per-chunk PDC entries
+     * survive the unload → serialize → reload round-trip. Without this the
+     * Bukkit chunk PDC silently empties on every save.
+     */
+    public void updatePersistentDataContainer() {
+        if (this.chunk == null || this.chunk.persistentDataContainer == null) return;
+        try {
+            CompoundTag pdcTag = this.chunk.persistentDataContainer.toTagCompound();
+            if (pdcTag != null) this.extra.put("ChunkBukkitValues", pdcTag);
+        } catch (Throwable ignored) {
+            // Defensive: PDC serialization can throw on entries with a stale
+            // type registry; drop the entry rather than break the unload path.
+        }
+    }
+
     public LevelChunk getChunk() {
         return chunk;
     }

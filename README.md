@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r17-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r18-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,11 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r17`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r17) — Saturday, 20 June 2026, 13:21 (GMT+7).
+**Latest tag:** [`v26.1.2-r18`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r18) — Saturday, 20 June 2026, 13:41 (GMT+7).
+
+### r18 highlights
+- **Chunk PDC + block/fluid ticks persisted on SWM unload** — `NMSSlimeChunk.updatePersistentDataContainer()` snapshots the live `DirtyCraftPersistentDataContainer` into `extra["ChunkBukkitValues"]` so per-chunk plugin PDC entries (e.g. WorldGuard region cache, slimefun chunk markers) survive a save/load round-trip. `SlimeInMemoryWorld.unload` now also encodes `ChunkAccess.PackedTicks` via the same `SavedTick` codecs vanilla uses and writes them into the SlimeChunk's `block_ticks` / `fluid_ticks` blobs, matching the existing read path in `SlimeChunkConverter.deserializeSlimeChunk`. Block ticks (fire spread, redstone, observers, repeaters) and fluid ticks (water / lava flow) finally persist across SWM chunk unloads instead of vanishing on first save.
+- ASP dev/26.2 parity (all changes compile against 26.1.2 paperweight + Moonrise APIs — no 26.2-only symbols pulled in).
 
 ### r17 highlights
 - **3-arg SWM unload + entity-save bypass** — `SlimeInMemoryWorld.unload(LevelChunk, ChunkEntitySlices, PoiChunk)` and `SlimeLevelInstance.unload(...)` overloads accept the moonrise-supplied slices + POI chunk handles BEFORE `NewChunkHolder.unloadStage1` nulls them out. Entities + villager POIs now persist across chunk unload on SWM worlds (previously lost — written from r15 dual-track fix to disk but with empty entity/POI sections).
