@@ -125,10 +125,49 @@ public final class SourbyBootstrap {
                 .orElse(System.getProperty("java.home") + "/bin/java");
         String ownJar = SourbyBootstrap.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath();
 
+        // CDS archive is locked to the exact jar size + mtime it was generated
+        // against. If operator updates the SourbyCraft jar (any byte change →
+        // size + mtime change) the archive becomes invalid and JVM falls back
+        // to non-CDS boot with a noisy warning. Track jar fingerprint next to
+        // the archive; mismatch → wipe archive + regenerate this boot.
+        Path fingerprintPath = archivePath.resolveSibling(archivePath.getFileName() + ".fingerprint");
+        Path ownJarPath = Paths.get(ownJar);
+        String currentFingerprint;
+        try {
+            currentFingerprint = Files.size(ownJarPath) + ":" + Files.getLastModifiedTime(ownJarPath).toMillis();
+        } catch (IOException ioex) {
+            currentFingerprint = "unknown";
+        }
         boolean haveArchive = Files.isRegularFile(archivePath) && Files.size(archivePath) > 0;
-        String cdsFlag = haveArchive
-                ? "-XX:SharedArchiveFile=" + archivePath
-                : "-XX:ArchiveClassesAtExit=" + archivePath;
+        if (haveArchive) {
+            String storedFingerprint = "";
+            try {
+                if (Files.isRegularFile(fingerprintPath)) {
+                    storedFingerprint = Files.readString(fingerprintPath).trim();
+                }
+            } catch (Throwable ignored) {}
+            if (!currentFingerprint.equals(storedFingerprint)) {
+                System.out.println("[SourbyBootstrap] CDS archive stale (server jar changed) — regenerating");
+                try { Files.deleteIfExists(archivePath); } catch (Throwable ignored) {}
+                try { Files.deleteIfExists(fingerprintPath); } catch (Throwable ignored) {}
+                haveArchive = false;
+            }
+        }
+
+        String cdsFlag;
+        if (haveArchive) {
+            cdsFlag = "-XX:SharedArchiveFile=" + archivePath;
+        } else {
+            cdsFlag = "-XX:ArchiveClassesAtExit=" + archivePath;
+            // Write fingerprint now so the post-/stop archive is paired with
+            // the current jar identity. JVM only writes the archive on clean
+            // shutdown; the fingerprint pre-write is harmless if /stop never
+            // happens (archive won't exist either, file gets overwritten next
+            // run).
+            try {
+                Files.writeString(fingerprintPath, currentFingerprint);
+            } catch (Throwable ignored) {}
+        }
 
         java.util.List<String> cmd = new java.util.ArrayList<>();
         cmd.add(javaCmd);
