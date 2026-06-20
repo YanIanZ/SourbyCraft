@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 20 Jun 2026 17:57:19 +0700
+Subject: [PATCH] SourbyCraft async page-cache warm of plugin data folders +
+ per-plugin enable timing
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 1514057708d6df2a5177fc3de0ef90788c2fbcd8..ddda2578cfca824aa99fc057ab6a33487b533542 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -605,6 +605,35 @@ public final class CraftServer implements Server {
+ 
+         Plugin[] plugins = this.pluginManager.getPlugins();
+ 
++        // SourbyCraft - async page-cache warm of every plugin's data folder.
++        // Plugins typically do synchronous YAML reads in onEnable. By forcing
++        // the OS to keep these files in page cache BEFORE the per-plugin
++        // sequential enable loop starts, every plugin's first config read is
++        // served from RAM instead of disk. Fire-and-forget on a virtual-thread
++        // pool so it doesn't add wall-clock to the boot path.
++        if (type == PluginLoadOrder.STARTUP) {
++            try {
++                java.util.concurrent.ExecutorService warmer = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
++                for (Plugin plugin : plugins) {
++                    java.io.File dataFolder = plugin.getDataFolder();
++                    if (dataFolder == null || !dataFolder.isDirectory()) continue;
++                    warmer.submit(() -> {
++                        try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(dataFolder.toPath(), 4)) {
++                            walk.filter(java.nio.file.Files::isRegularFile)
++                                .filter(p -> {
++                                    String n = p.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
++                                    return n.endsWith(".yml") || n.endsWith(".yaml") || n.endsWith(".json") || n.endsWith(".properties") || n.endsWith(".txt") || n.endsWith(".db");
++                                })
++                                .forEach(p -> {
++                                    try { java.nio.file.Files.readAllBytes(p); } catch (Throwable ignored) {}
++                                });
++                        } catch (Throwable ignored) {}
++                    });
++                }
++                warmer.shutdown();
++            } catch (Throwable ignored) {}
++        }
++
+         for (Plugin plugin : plugins) {
+             if ((!plugin.isEnabled()) && (plugin.getDescription().getLoad() == type)) {
+                 this.enablePlugin(plugin);
+@@ -636,6 +665,10 @@ public final class CraftServer implements Server {
+     }
+ 
+     private void enablePlugin(Plugin plugin) {
++        // SourbyCraft - per-plugin enable timing diagnostic. Operators chasing
++        // slow startup ("server stuck on plugin X for 30s") can grep the boot
++        // log for `[plugin-timing]` to find outliers. Threshold-warn at 500ms.
++        final long pluginEnableStartNanos = System.nanoTime();
+         try {
+             List<Permission> perms = plugin.getDescription().getPermissions();
+             List<Permission> permsToLoad = new ArrayList<>(); // Paper
+@@ -651,6 +684,16 @@ public final class CraftServer implements Server {
+             this.paperPluginManager.addPermissions(permsToLoad); // Paper
+ 
+             this.pluginManager.enablePlugin(plugin);
++            long elapsedMs = (System.nanoTime() - pluginEnableStartNanos) / 1_000_000L;
++            if (elapsedMs >= 500L) {
++                this.getLogger().log(java.util.logging.Level.WARNING,
++                    "[plugin-timing] " + plugin.getDescription().getFullName()
++                        + " enable=" + elapsedMs + "ms (slow — may bottleneck startup)");
++            } else if (elapsedMs >= 100L) {
++                this.getLogger().log(java.util.logging.Level.INFO,
++                    "[plugin-timing] " + plugin.getDescription().getFullName()
++                        + " enable=" + elapsedMs + "ms");
++            }
+         } catch (Throwable ex) {
+             Logger.getLogger(CraftServer.class.getName()).log(Level.SEVERE, ex.getMessage() + " loading " + plugin.getDescription().getFullName() + " (Is it up to date?)", ex);
+         }
