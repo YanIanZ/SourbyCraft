@@ -98,9 +98,12 @@ public final class ChunkDataLoadTask implements CommonLoadTask {
     }
 
     public boolean schedule(boolean schedule) {
-        if (!schedule) {
-            return false;
-        }
+        // ASP dev/26.2 parity. The boolean arg from Moonrise ChunkLoadTask is the
+        // GenericDataLoadTask "delay" flag — false means "run now". The previous
+        // implementation guarded with !schedule and returned early, which left the
+        // task BLOCKING forever and caused initial-spawn chunk loads on SLI worlds
+        // to deadlock the main thread (5/15/20s watchdog dumps + Pterodactyl crash
+        // at exit 70). Always submit to the chunk task scheduler.
         this.scheduler.scheduleChunkTask(chunkX, chunkZ, this.task::execute);
         return true;
     }
