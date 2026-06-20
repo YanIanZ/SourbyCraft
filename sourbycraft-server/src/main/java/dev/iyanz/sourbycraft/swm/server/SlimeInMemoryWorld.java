@@ -187,6 +187,39 @@ public class SlimeInMemoryWorld implements SlimeWorld, SlimeWorldInstance {
         } else {
             nmsChunk = new NMSSlimeChunk(providedChunk, getChunk(x, z));
         }
+        // ASP dev/26.2 parity: stash the chunk PDC into extra before we read
+        // sections/entities/POI so the persisted snapshot includes any per-chunk
+        // bukkit values plugins wrote between load and unload.
+        nmsChunk.updatePersistentDataContainer();
+
+        // ASP dev/26.2 parity: capture block + fluid ticks for serialisation. We
+        // wrap the encoded list under a "block_ticks"/"fluid_ticks" key inside a
+        // CompoundTag so the existing SlimeChunkConverter.deserialize path
+        // (which already expects this shape) can parse the result on next load.
+        CompoundTag blockTicks = null;
+        CompoundTag fluidTicks = null;
+        if (getPropertyMap().saveBlockTicks() || getPropertyMap().saveFluidTicks()) {
+            try {
+                net.minecraft.world.level.chunk.ChunkAccess.PackedTicks packed =
+                        providedChunk.getTicksForSerialization(this.instance.getGameTime());
+                if (getPropertyMap().saveBlockTicks()) {
+                    net.minecraft.nbt.ListTag encoded = SlimeChunkConverter.convertSavedBlockTicks(packed.blocks());
+                    if (!encoded.isEmpty()) {
+                        blockTicks = new CompoundTag();
+                        blockTicks.put("block_ticks", encoded);
+                    }
+                }
+                if (getPropertyMap().saveFluidTicks()) {
+                    net.minecraft.nbt.ListTag encoded = SlimeChunkConverter.convertSavedFluidTicks(packed.fluids());
+                    if (!encoded.isEmpty()) {
+                        fluidTicks = new CompoundTag();
+                        fluidTicks.put("fluid_ticks", encoded);
+                    }
+                }
+            } catch (Throwable ignored) {
+                // Defensive: codec encode can throw on stale registry entries.
+            }
+        }
 
         net.minecraft.nbt.ListTag entities = entitySlices != null
                 ? nmsChunk.getEntities(entitySlices)
@@ -204,8 +237,11 @@ public class SlimeInMemoryWorld implements SlimeWorld, SlimeWorldInstance {
                 entities,
                 nmsChunk.getExtraData(),
                 nmsChunk.getUpgradeData(),
-                nmsChunk.getBlockTicks(),
-                nmsChunk.getFluidTicks(),
+                // Prefer the packed ticks we encoded above; fall back to nmsChunk's
+                // (always null today, kept for API stability) only if the codec
+                // encode path bailed out.
+                blockTicks != null ? blockTicks : nmsChunk.getBlockTicks(),
+                fluidTicks != null ? fluidTicks : nmsChunk.getFluidTicks(),
                 poiSections
         ));
     }
