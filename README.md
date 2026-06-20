@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r15-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r16-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,12 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r15`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r15) — Saturday, 20 June 2026, 00:49 (GMT+7).
+**Latest tag:** [`v26.1.2-r16`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r16) — Saturday, 20 June 2026, 12:56 (GMT+7).
+
+### r16 highlights
+- **SWM Moonrise data controllers** — new `SlimeEntityDataLoader` + `SlimePoiDataLoader` under `dev.iyanz.sourbycraft.swm.server.moonrise` serve entity + POI chunk data straight out of the in-memory `SlimeWorld` instead of trying to read region files that don't exist on SWM-backed worlds. Adapted from `com.infernalsuite.asp.level.moonrise.SlimeEntityDataLoader` / `SlimePoiDataLoader` (AdvancedSlimePaper dev/26.2), using our existing NMS NBT representation (no Adventure NBT conversion step).
+- **`SlimeLevelInstance` ctor** swaps Paper's vanilla data controllers with the SWM loaders post-`super()` so the chunk task scheduler picks them up the first time it reads a chunk.
+- **Paper patches `0046` + `0047`** drop `final` on `EntityDataController` / `PoiDataController` and on `ServerLevel.entityDataController` / `ServerLevel.poiDataController` so the SWM subclass can replace them. Vanilla worlds still get the default controllers — only SWM levels see the swap.
 
 ### r15 highlights
 - **SWM chunk dual-track removed** — `SlimeChunkLevel` no longer holds a `slimeReference` field, the `SafeNmsChunkWrapper` class is gone, and `SlimeInMemoryWorld.promoteInChunkStorage` always stores the live `NMSSlimeChunk` instead of the dual-track wrapper. ASP dev/26.2 parity. Fixes the silent block-loss on chunk unload that was eating SS2's schematic-paste output the moment the island world unloaded after `/is create` — the bug where `/swm inspect island_<uuid>_normal` reported 0 persisted chunks on what should have been a freshly-pasted island.
