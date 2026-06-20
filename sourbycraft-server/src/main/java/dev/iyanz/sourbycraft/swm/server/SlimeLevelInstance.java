@@ -143,6 +143,31 @@ public class SlimeLevelInstance extends ServerLevel {
 
         super.chunkSource.setSpawnSettings(false, false);
 
+        // Swap Paper's vanilla EntityDataController + PoiDataController with SWM-backed
+        // loaders so the chunk system serves entity + POI data from our in-memory
+        // SlimeWorld instead of trying to read region files that don't exist. The
+        // superclass fields were made protected via the SourbyCraft Paper patch; here
+        // we replace them post-super so the chunk task scheduler picks them up the
+        // first time it reads a chunk.
+        try {
+            this.entityDataController = new dev.iyanz.sourbycraft.swm.server.moonrise.SlimeEntityDataLoader(
+                    new ca.spottedleaf.moonrise.patches.chunk_system.io.datacontroller.EntityDataController.EntityRegionFileStorage(
+                            new net.minecraft.world.level.chunk.storage.RegionStorageInfo(
+                                    customLevelStorageAccess.getLevelId(),
+                                    worldKey,
+                                    "entities"),
+                            customLevelStorageAccess.getDimensionPath(worldKey).resolve("entities"),
+                            MinecraftServer.getServer().forceSynchronousWrites()),
+                    this.moonrise$getChunkTaskScheduler(),
+                    this);
+            this.poiDataController = new dev.iyanz.sourbycraft.swm.server.moonrise.SlimePoiDataLoader(
+                    this, this.moonrise$getChunkTaskScheduler());
+        } catch (Throwable t) {
+            org.slf4j.LoggerFactory.getLogger("SourbyCraftSWM").warn(
+                    "Failed to install SWM data controllers; falling back to vanilla region-file loaders for entity/POI. " +
+                            "Entities + villager POIs may not persist across world unloads.", t);
+        }
+
         // Attempt to read PDC
         CompoundTag extraData = this.slimeInstance.getExtraData();
         if (extraData.contains("BukkitValues")) {
