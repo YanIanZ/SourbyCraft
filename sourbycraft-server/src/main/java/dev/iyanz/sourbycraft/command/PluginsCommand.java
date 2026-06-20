@@ -43,8 +43,15 @@ public class PluginsCommand extends Command {
         var line = text();
         for (int i = 0; i < pl.length; i++) {
             Plugin p = pl[i];
-            line.append(text(p.getName() + " v" + p.getPluginMeta().getVersion(),
-                p.isEnabled() ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DIM));
+            String pluginVer = p.getPluginMeta().getVersion();
+            // Strip leading v/V if plugin already prefixes — avoids "vv10".
+            if (pluginVer != null && (pluginVer.startsWith("v") || pluginVer.startsWith("V"))) {
+                line.append(text(p.getName() + " " + pluginVer,
+                    p.isEnabled() ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DIM));
+            } else {
+                line.append(text(p.getName() + " v" + (pluginVer == null ? "?" : pluginVer),
+                    p.isEnabled() ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DIM));
+            }
             if (i < pl.length - 1) line.append(text(", ", SourbyCraftColors.DIM));
         }
         s.sendMessage(text().append(text("  ", SourbyCraftColors.DIM)).append(line.build()).build());

@@ -46,7 +46,7 @@ public class SwmCommand extends Command {
         s.sendMessage(text().append(text("SWM: ", SourbyCraftColors.LABEL))
             .append(text(SourbyCraftConfig.swmEnabled ? "Enabled" : "Disabled",
                 SourbyCraftConfig.swmEnabled ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DANGER))
-            .append(text(" v" + SourbyCraftConfig.swmVersion, SourbyCraftColors.DIM)));
+            .append(text(" " + normalizeVersion(SourbyCraftConfig.swmVersion), SourbyCraftColors.DIM)));
         s.sendMessage(text().append(text("Worlds: ", SourbyCraftColors.LABEL))
             .append(text(new FileLoader(SourbyCraftConfig.swmFileDir).listWorlds().size() + " found", SourbyCraftColors.VALUE)));
         s.sendMessage(text("Type /swm help for subcommands", SourbyCraftColors.DIM));
@@ -75,6 +75,15 @@ public class SwmCommand extends Command {
             s.sendMessage(text().append(text("  " + x, loaded ? SourbyCraftColors.SUCCESS : SourbyCraftColors.VALUE))
                 .append(text(loaded ? " [LOADED]" : "", SourbyCraftColors.SUCCESS)));
         }
+    }
+
+    // Strip duplicate leading 'v' to fix "vv10" rendering when stored version
+    // already includes a 'v' prefix (e.g. "v7-REL").
+    private static String normalizeVersion(String raw) {
+        if (raw == null || raw.isEmpty()) return "";
+        String s = raw.trim();
+        if (s.startsWith("v") || s.startsWith("V")) return s;
+        return "v" + s;
     }
 
     private boolean validName(CommandSender s, String nm) {
