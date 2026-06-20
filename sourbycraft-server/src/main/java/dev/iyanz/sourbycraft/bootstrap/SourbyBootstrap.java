@@ -23,7 +23,35 @@ import java.util.regex.Pattern;
  */
 public final class SourbyBootstrap {
 
+    private static final String ORCHESTRATOR_BYPASS = "sourbycraft.orchestrator.bypass";
+    private static final String CDS_ARCHIVE_PATH = "cache/sourbycraft.jsa";
+
     public static void main(String[] args) throws Throwable {
+        // Auto-CDS orchestrator. First-time + missing archive flow:
+        //   1. operator runs `java -jar SourbyCraft-...jar`
+        //   2. orchestrator detects no CDS flag + missing archive
+        //   3. fork child JVM with -XX:ArchiveClassesAtExit=cache/sourbycraft.jsa
+        //   4. child runs server normally; on /stop, JVM writes archive
+        //   5. orchestrator parent waits + propagates exit code
+        // Subsequent boots:
+        //   1. orchestrator sees cache/sourbycraft.jsa exists
+        //   2. forks child with -XX:SharedArchiveFile=cache/sourbycraft.jsa
+        //   3. child boots ~30-50% faster from mmap'd class data
+        if (System.getProperty(ORCHESTRATOR_BYPASS) == null
+                && System.getenv("SOURBYCRAFT_ORCHESTRATOR_BYPASS") == null) {
+            try {
+                Integer orchExit = runOrchestrator(args);
+                if (orchExit != null) {
+                    System.exit(orchExit);
+                    return;
+                }
+                // null means orchestrator detected operator-provided CDS flag
+                // and chose to skip — fall through to inline boot.
+            } catch (Throwable t) {
+                System.err.println("[SourbyBootstrap] orchestrator failed (running inline without CDS): " + t.getMessage());
+                // Fall through to inline boot — server still works, just no CDS.
+            }
+        }
         Path librariesDir = Paths.get("libraries");
         Files.createDirectories(librariesDir);
 
@@ -70,6 +98,73 @@ public final class SourbyBootstrap {
 
         Class<?> paperclipMain = Class.forName("io.papermc.paperclip.Main");
         paperclipMain.getMethod("main", String[].class).invoke(null, (Object) args);
+    }
+
+    /**
+     * Forks a child JVM with CDS flags + waits for completion. Returns child
+     * exit code. Parent JVM stays alive as orchestrator (~30MB footprint;
+     * Pterodactyl sees parent PID; signals propagate via shutdown hook).
+     */
+    private static Integer runOrchestrator(String[] args) throws Throwable {
+        Path archivePath = Paths.get(CDS_ARCHIVE_PATH);
+        Path archiveDir = archivePath.getParent();
+        if (archiveDir != null && !Files.exists(archiveDir)) Files.createDirectories(archiveDir);
+
+        java.lang.management.RuntimeMXBean rt = java.lang.management.ManagementFactory.getRuntimeMXBean();
+        java.util.List<String> existingJvmArgs = rt.getInputArguments();
+        // If operator already passed a CDS flag, respect it — skip orchestrator.
+        for (String a : existingJvmArgs) {
+            if (a.startsWith("-XX:SharedArchiveFile") || a.startsWith("-XX:ArchiveClassesAtExit")) {
+                System.out.println("[SourbyBootstrap] operator-provided CDS flag detected, skipping orchestrator");
+                return null; // null = caller falls through to inline boot
+            }
+        }
+
+        // Discover java binary + own jar path.
+        String javaCmd = ProcessHandle.current().info().command()
+                .orElse(System.getProperty("java.home") + "/bin/java");
+        String ownJar = SourbyBootstrap.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath();
+
+        boolean haveArchive = Files.isRegularFile(archivePath) && Files.size(archivePath) > 0;
+        String cdsFlag = haveArchive
+                ? "-XX:SharedArchiveFile=" + archivePath
+                : "-XX:ArchiveClassesAtExit=" + archivePath;
+
+        java.util.List<String> cmd = new java.util.ArrayList<>();
+        cmd.add(javaCmd);
+        for (String a : existingJvmArgs) {
+            // Drop flags incompatible with re-exec (jdwp port re-use, agent
+            // re-attach) but keep all heap / GC / system property flags.
+            if (a.startsWith("-agentlib:jdwp")) continue;
+            cmd.add(a);
+        }
+        cmd.add(cdsFlag);
+        cmd.add("-D" + ORCHESTRATOR_BYPASS + "=1");
+        cmd.add("-jar");
+        cmd.add(ownJar);
+        cmd.addAll(java.util.Arrays.asList(args));
+
+        System.out.println("[SourbyBootstrap] orchestrator " + (haveArchive ? "USING" : "GENERATING")
+                + " CDS archive " + archivePath);
+        if (!haveArchive) {
+            System.out.println("[SourbyBootstrap] first boot — archive will be written on /stop. "
+                + "Subsequent boots will be 30-50% faster.");
+        }
+
+        ProcessBuilder pb = new ProcessBuilder(cmd).inheritIO();
+        Process child = pb.start();
+        // Forward TERM/INT to child so /stop propagates from Pterodactyl.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                if (child.isAlive()) {
+                    child.destroy();
+                    if (!child.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                        child.destroyForcibly();
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }, "SourbyBootstrap-Shutdown-Forwarder"));
+        return child.waitFor();
     }
 
     static BootstrapManifest loadManifest() throws IOException {
