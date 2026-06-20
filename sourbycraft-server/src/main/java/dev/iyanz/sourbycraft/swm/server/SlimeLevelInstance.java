@@ -192,7 +192,12 @@ public class SlimeLevelInstance extends ServerLevel {
         java.nio.file.Path dataFolder = server.storageSource
                 .getDimensionPath(worldKey)
                 .resolve(LevelResource.DATA.id());
-        return new SavedDataStorage(dataFolder, DataFixers.getDataFixer(), server.registryAccess());
+        // ASP dev/26.2 parity: SWM owns its persistence via the SlimeWorld
+        // round-trip. Use the read-only storage so vanilla SavedDataStorage
+        // doesn't schedule per-tick writes into the temp dir for raids /
+        // scheduled events / forced_chunks — those would just be orphaned
+        // when the temp dir is wiped on JVM exit.
+        return new ReadOnlyDimensionDataStorage(dataFolder, DataFixers.getDataFixer(), server.registryAccess());
     }
 
     @Override
