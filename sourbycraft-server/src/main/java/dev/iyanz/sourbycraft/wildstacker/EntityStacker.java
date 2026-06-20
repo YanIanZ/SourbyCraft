@@ -33,16 +33,18 @@ public final class EntityStacker implements Listener {
     private static volatile boolean ENABLED = false;
     private static volatile double RADIUS = 10.0;
     private static volatile int MAX_STACK_MULTIPLIER = 100;
+    private static volatile Plugin OWNER;
+    private static final java.util.concurrent.atomic.AtomicInteger DEBUG_COUNTER = new java.util.concurrent.atomic.AtomicInteger();
 
     private EntityStacker() {}
 
     public static void register(Plugin plugin) {
+        OWNER = plugin;
         reload();
         Bukkit.getPluginManager().registerEvents(new EntityStacker(), plugin);
-        if (ENABLED) {
-            plugin.getLogger().info("[stacker] item stacker enabled (radius="
-                    + RADIUS + " maxStackMultiplier=" + MAX_STACK_MULTIPLIER + ")");
-        }
+        plugin.getLogger().info("[stacker] item stacker " + (ENABLED ? "ENABLED" : "disabled")
+                + " (stacker.enabled=" + ENABLED + " radius=" + RADIUS
+                + " maxStackMultiplier=" + MAX_STACK_MULTIPLIER + ")");
     }
 
     public static void reload() {
@@ -51,7 +53,7 @@ public final class EntityStacker implements Listener {
         MAX_STACK_MULTIPLIER = Math.max(1, SourbyCraftConfig.stackerMaxStack);
     }
 
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onItemSpawn(ItemSpawnEvent e) {
         if (!ENABLED) return;
         Item newItem = e.getEntity();
@@ -61,7 +63,9 @@ public final class EntityStacker implements Listener {
         if (cap <= 0) cap = Integer.MAX_VALUE;
 
         Location loc = newItem.getLocation();
+        int scanned = 0;
         for (Entity nearby : newItem.getWorld().getNearbyEntities(loc, RADIUS, RADIUS, RADIUS)) {
+            scanned++;
             if (nearby == newItem) continue;
             if (!(nearby instanceof Item nearItem)) continue;
             if (nearItem.isDead()) continue;
@@ -72,9 +76,25 @@ public final class EntityStacker implements Listener {
             if (sum > cap) continue;
             near.setAmount(sum);
             nearItem.setItemStack(near);
-            // Keep nearest-floor representative; cancel new spawn.
+            // Cancel new spawn — merged into existing.
             e.setCancelled(true);
+            if (OWNER != null) {
+                int n = DEBUG_COUNTER.incrementAndGet();
+                if (n <= 20) {
+                    OWNER.getLogger().info("[stacker] merged " + newStack.getType()
+                            + " into nearby item @ " + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ()
+                            + " (newAmount=" + sum + " scanned=" + scanned + ")");
+                }
+            }
             return;
+        }
+        if (OWNER != null) {
+            int n = DEBUG_COUNTER.incrementAndGet();
+            if (n <= 20) {
+                OWNER.getLogger().info("[stacker] no-match for " + newStack.getType()
+                        + " @ " + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ()
+                        + " (scanned=" + scanned + " radius=" + RADIUS + ")");
+            }
         }
     }
 
