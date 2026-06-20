@@ -204,6 +204,12 @@ public class SourbyCraftConfig {
 
     public static boolean swmEnabled = true;
     public static String swmVersion = "v7-REL";
+
+    // Entity stacker (re-port from legacy WildStacker, slimmer)
+    public static boolean stackerEnabled = false;
+    public static double stackerRadius = 10.0;
+    public static int stackerMaxStack = 100;
+    public static java.util.List<String> stackerBlacklist = java.util.List.of("PLAYER", "ARMOR_STAND", "ENDER_DRAGON", "WITHER");
     public static boolean swmAutoInstall = true;       // SourbyCraft v9.22 — default ON
     public static boolean swmAutoUpdate = true;        // SourbyCraft v9.22 — check GitHub for updates on startup
     public static String swmLoader = "file";
@@ -357,6 +363,20 @@ public class SourbyCraftConfig {
 
         swmEnabled = getBoolean("swm.enabled", swmEnabled);
         swmVersion = getString("swm.version", swmVersion);
+        // Entity stacker config (re-port era v10+)
+        stackerEnabled = getBoolean("stacker.enabled", stackerEnabled);
+        stackerRadius = getDouble("stacker.radius", stackerRadius);
+        stackerMaxStack = getInt("stacker.max-stack", stackerMaxStack);
+        try {
+            java.util.List<?> raw = config.getList("stacker.blacklist");
+            if (raw == null) {
+                set("stacker.blacklist", stackerBlacklist);
+            } else {
+                java.util.List<String> parsed = new java.util.ArrayList<>();
+                for (Object o : raw) if (o != null) parsed.add(o.toString());
+                stackerBlacklist = parsed;
+            }
+        } catch (Throwable ignored) {}
         swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
         swmAutoUpdate = getBoolean("swm.auto-update", swmAutoUpdate);
         swmFileDir = getString("swm.file-dir", swmFileDir);

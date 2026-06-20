@@ -106,6 +106,12 @@ public class SWPlugin extends JavaPlugin {
         // on the next chat message rather than requiring a server restart.
         Bukkit.getPluginManager().registerEvents(new dev.iyanz.sourbycraft.chat.EmojiChatListener(), this);
 
+        // SourbyCraft - entity stacker. Merges same-type living mob spawns
+        // within a configured radius into a stacked representative with PDC
+        // count + on-death drops/xp multiplication. Off by default; enable via
+        // `stacker.enabled: true` in sourbycraft.yml.
+        dev.iyanz.sourbycraft.wildstacker.EntityStacker.register(this);
+
         worldsToLoad.values().stream()
                 .filter(slimeWorld -> Objects.isNull(Bukkit.getWorld(slimeWorld.getName())))
                 .forEach(slimeWorld -> {
