@@ -3,8 +3,8 @@ plugins {
 }
 
 group = "dev.iyanz.sourbycraft"
-version = "5.1.0"
-description = "SourbyCraft SlimeWorldManager Plugin"
+version = "5.2.0"
+description = "SourbyCraft SlimeWorldManager Plugin (ASP dev/26.2 parity)"
 
 repositories {
     mavenCentral()
