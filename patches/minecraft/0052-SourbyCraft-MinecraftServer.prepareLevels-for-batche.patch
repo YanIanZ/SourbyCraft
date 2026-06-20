@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 20 Jun 2026 17:00:50 +0700
+Subject: [PATCH] SourbyCraft MinecraftServer.prepareLevels for batched
+ initial-chunk drain
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index f07ed1921555f29adbb8ab4f0b0d6a6fd2a81844..ec48b0c9e40f298b13cbb19b0e864e4d4b4e0e89 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -943,6 +943,52 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         new org.bukkit.event.world.WorldLoadEvent(level.getWorld()).callEvent(); // Paper - call WorldLoadEvent
+     }
+ 
++    // SourbyCraft start - parallel initial-chunk load across worlds. Vanilla
++    // prepareLevel drains one world's chunk gen at a time on the main thread,
++    // leaving chunk-worker threads idle whenever a single world's batch is
++    // small. Batching activation across all worlds + a single drain loop keeps
++    // worker threads saturated and cuts startup time roughly proportional to
++    // worldCount on multi-core hosts.
++    public void prepareLevels(java.util.Collection<ServerLevel> levels) {
++        if (levels.isEmpty()) return;
++        if (levels.size() == 1) {
++            this.prepareLevel(levels.iterator().next());
++            return;
++        }
++        this.forceTicks = true;
++        ChunkLoadCounter sharedCounter = new ChunkLoadCounter();
++        java.util.List<ServerLevel> tracked = new java.util.ArrayList<>(levels.size());
++
++        for (ServerLevel level : levels) {
++            sharedCounter.track(level, () -> {
++                TicketStorage savedTickets = level.getDataStorage().get(TicketStorage.TYPE);
++                if (savedTickets != null) {
++                    savedTickets.activateAllDeactivatedTickets();
++                }
++            });
++            level.levelLoadListener.start(LevelLoadListener.Stage.LOAD_INITIAL_CHUNKS, sharedCounter.totalChunks());
++            tracked.add(level);
++        }
++
++        do {
++            int ready = sharedCounter.readyChunks();
++            int total = sharedCounter.totalChunks();
++            for (ServerLevel level : tracked) {
++                level.levelLoadListener.update(LevelLoadListener.Stage.LOAD_INITIAL_CHUNKS, ready, total);
++            }
++            this.executeModerately();
++        } while (sharedCounter.pendingChunks() > 0);
++
++        for (ServerLevel level : tracked) {
++            level.levelLoadListener.finish(LevelLoadListener.Stage.LOAD_INITIAL_CHUNKS);
++            level.setSpawnSettings(level.isSpawningMonsters());
++            new org.bukkit.event.world.WorldLoadEvent(level.getWorld()).callEvent();
++        }
++        this.updateEffectiveRespawnData();
++        this.forceTicks = false;
++    }
++    // SourbyCraft end
++
+     protected GlobalPos selectLevelLoadFocusPos() {
+         return this.worldData.overworldData().getRespawnData().globalPos();
+     }
