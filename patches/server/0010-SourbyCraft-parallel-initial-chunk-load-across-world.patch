@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 20 Jun 2026 17:00:50 +0700
+Subject: [PATCH] SourbyCraft parallel initial-chunk load across worlds
+
+
+diff --git a/src/main/java/io/papermc/paper/world/PaperWorldLoader.java b/src/main/java/io/papermc/paper/world/PaperWorldLoader.java
+index cd3e7cc8cf083915de46e03d9b2aaea3003f48fb..9c6091d8591401987299bce764b56143b70c85c3 100644
+--- a/src/main/java/io/papermc/paper/world/PaperWorldLoader.java
++++ b/src/main/java/io/papermc/paper/world/PaperWorldLoader.java
+@@ -141,9 +141,14 @@ public record PaperWorldLoader(MinecraftServer server, String levelId) {
+ 
+         // ((DedicatedServer) this.server).forceDifficulty();
+ 
+-        for (ServerLevel serverLevel : this.server.getAllLevels()) {
+-            this.server.prepareLevel(serverLevel);
++        // SourbyCraft - parallel initial-chunk load: batch all worlds' tickets
++        // + drain once so chunk-worker threads stay saturated across cores.
++        // Falls back to sequential when only one world is registered.
++        final java.util.List<net.minecraft.server.level.ServerLevel> allLevels = new java.util.ArrayList<>();
++        for (net.minecraft.server.level.ServerLevel serverLevel : this.server.getAllLevels()) {
++            allLevels.add(serverLevel);
+         }
++        this.server.prepareLevels(allLevels);
+     }
+ 
+     private void loadInitialWorld(final LevelStem stem, final boolean hasWorldData) {
