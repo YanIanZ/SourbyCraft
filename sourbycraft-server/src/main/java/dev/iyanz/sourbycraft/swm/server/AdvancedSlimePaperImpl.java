@@ -88,7 +88,20 @@ public class AdvancedSlimePaperImpl implements AdvancedSlimePaperAPI {
         }
 
         MinecraftServer server = MinecraftServer.getServer();
-        ResourceKey<Level> dimensionKey = Level.OVERWORLD;
+        // CRITICAL: derive a unique ResourceKey<Level> from the world name.
+        // Previously hardcoded to Level.OVERWORLD which meant every SWM-backed
+        // world (every SS2 island, every Bukkit-created SWM world) registered
+        // under the same dimension key. MinecraftServer.addLevel uses
+        // newLevels.put(level.dimension(), level) — same key = overwrite,
+        // wiping the previous level from the global lookup map. This is why
+        // server-side code that resolves worlds via dimension key (chunk
+        // system routing, mob spawn target lookup, NMS block-place handler,
+        // weather updates, etc.) silently misbehaved or no-op'd on SWM worlds.
+        // ASP dev/26.2 parity (SlimeNMSBridgeImpl.java line 193).
+        String worldName = world.getName();
+        ResourceKey<Level> dimensionKey = ResourceKey.create(
+            net.minecraft.core.registries.Registries.DIMENSION,
+            net.minecraft.resources.Identifier.parse(worldName.toLowerCase(java.util.Locale.ROOT)));
 
         // Operator diagnostic at debug level only. New SS2 islands legitimately
         // load with 0 persisted chunks — the schematic paste runs AFTER loadWorld
