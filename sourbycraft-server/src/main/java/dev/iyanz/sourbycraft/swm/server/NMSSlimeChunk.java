@@ -161,6 +161,16 @@ public class NMSSlimeChunk implements SlimeChunk {
         return SlimeChunkConverter.toSlimeSections(poiChunk);
     }
 
+    /**
+     * ASP dev/26.2 parity. Used from the patched NewChunkHolder unload path
+     * where the entity slices + POI chunk handles are already in scope; this
+     * avoids the chunk-system lookup race in the no-arg overload.
+     */
+    public CompoundTag getPoiChunkSections(PoiChunk poiChunk) {
+        if (poiChunk == null) return null;
+        return SlimeChunkConverter.toSlimeSections(poiChunk);
+    }
+
     public LevelChunk getChunk() {
         return chunk;
     }
