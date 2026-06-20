@@ -105,6 +105,7 @@ public class SWPlugin extends JavaPlugin {
         // listener itself stays registered so toggling the config takes effect
         // on the next chat message rather than requiring a server restart.
         Bukkit.getPluginManager().registerEvents(new dev.iyanz.sourbycraft.chat.EmojiChatListener(), this);
+        dev.iyanz.sourbycraft.chat.SignSanitizer.register(this);
 
         // SourbyCraft - entity stacker. Merges same-type living mob spawns
         // within a configured radius into a stacked representative with PDC
