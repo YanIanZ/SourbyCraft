@@ -259,27 +259,55 @@ public class SWPlugin extends JavaPlugin {
         if (loader == null) return erroredWorlds;
 
         try {
-            for (String worldName : loader.listWorlds()) {
-                try {
-                    SlimePropertyMap propertyMap = new SlimePropertyMap();
-                    SlimeWorld world = ASP.readWorld(loader, worldName, false, propertyMap);
-                    worldsToLoad.put(worldName, world);
-                } catch (IllegalArgumentException | UnknownWorldException | NewerFormatException |
-                         CorruptedWorldException | IOException ex) {
-                    String message;
-                    if (ex instanceof UnknownWorldException) {
-                        message = "world does not exist";
-                    } else if (ex instanceof NewerFormatException) {
-                        message = "world is serialized in a newer Slime Format version";
-                    } else if (ex instanceof CorruptedWorldException) {
-                        message = "world seems to be corrupted";
-                    } else {
-                        message = ex.getMessage();
-                    }
-
-                    getSLF4JLogger().error("Failed to load world {}{}", worldName, message.isEmpty() ? "." : ": " + message);
-                    erroredWorlds.add(worldName);
+            // SourbyCraft - parallel SWM world read at boot. Previously each
+            // listWorlds() entry was readWorld'd sequentially on main thread —
+            // disk/db latency × N worlds. Now: virtual-thread pool reads all
+            // worlds concurrently; main thread waits for all + collects into
+            // worldsToLoad. Read itself is pure IO + deserialize, no Bukkit
+            // API → thread-safe.
+            java.util.List<String> names = loader.listWorlds();
+            java.util.Map<String, SlimeWorld> readResults =
+                    new java.util.concurrent.ConcurrentHashMap<>();
+            java.util.Map<String, Throwable> readErrors =
+                    new java.util.concurrent.ConcurrentHashMap<>();
+            try (java.util.concurrent.ExecutorService pool =
+                    java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+                java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+                for (String worldName : names) {
+                    futures.add(pool.submit(() -> {
+                        try {
+                            SlimePropertyMap pm = new SlimePropertyMap();
+                            SlimeWorld w = ASP.readWorld(loader, worldName, false, pm);
+                            readResults.put(worldName, w);
+                        } catch (Throwable t) {
+                            readErrors.put(worldName, t);
+                        }
+                    }));
                 }
+                for (java.util.concurrent.Future<?> f : futures) {
+                    try { f.get(); } catch (Throwable ignored) {}
+                }
+            }
+            for (java.util.Map.Entry<String, SlimeWorld> e : readResults.entrySet()) {
+                worldsToLoad.put(e.getKey(), e.getValue());
+            }
+            for (java.util.Map.Entry<String, Throwable> e : readErrors.entrySet()) {
+                Throwable ex = e.getValue();
+                String worldName = e.getKey();
+                String message;
+                if (ex instanceof UnknownWorldException) {
+                    message = "world does not exist";
+                } else if (ex instanceof NewerFormatException) {
+                    message = "world is serialized in a newer Slime Format version";
+                } else if (ex instanceof CorruptedWorldException) {
+                    message = "world seems to be corrupted";
+                } else if (ex.getMessage() != null) {
+                    message = ex.getMessage();
+                } else {
+                    message = ex.getClass().getSimpleName();
+                }
+                getSLF4JLogger().error("Failed to load world {}{}", worldName, message.isEmpty() ? "." : ": " + message);
+                erroredWorlds.add(worldName);
             }
         } catch (IOException e) {
             getSLF4JLogger().error("Failed to list worlds", e);

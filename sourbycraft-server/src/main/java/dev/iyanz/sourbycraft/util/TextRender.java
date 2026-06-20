@@ -29,9 +29,34 @@ public final class TextRender {
 
     private TextRender() {}
 
+    /**
+     * Strip Unicode variation selectors (U+FE0E text-style, U+FE0F emoji-style)
+     * + zero-width joiner (U+200D) + tag chars (U+E0020..U+E007F). Vanilla MC
+     * font has no glyph for these → renders as boxes like the `VS16` you'll
+     * see next to `🏝️`. Drops them silently. The underlying base glyph (if
+     * supported) renders unchanged.
+     */
+    public static String stripUnsupportedCombiners(String raw) {
+        if (raw == null || raw.isEmpty()) return raw;
+        StringBuilder out = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); ) {
+            int cp = raw.codePointAt(i);
+            int charCount = Character.charCount(cp);
+            boolean drop =
+                    cp == 0xFE0E || cp == 0xFE0F                      // variation selectors
+                    || cp == 0x200D                                  // ZWJ
+                    || (cp >= 0xE0020 && cp <= 0xE007F)             // tag characters
+                    || (cp >= 0xFE00 && cp <= 0xFE0F);              // variation selector range
+            if (!drop) out.appendCodePoint(cp);
+            i += charCount;
+        }
+        return out.toString();
+    }
+
     /** Parse {@code raw} into a {@link Component}. Never throws. */
     public static Component parse(String raw) {
         if (raw == null || raw.isEmpty()) return Component.empty();
+        raw = stripUnsupportedCombiners(raw);
         // Heuristic: if the string looks like MiniMessage (any '<tag>' pair)
         // try MiniMessage first; otherwise jump straight to legacy. Either
         // path falls back to plain text on failure.

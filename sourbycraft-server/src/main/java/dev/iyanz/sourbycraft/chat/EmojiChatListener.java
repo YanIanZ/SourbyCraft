@@ -21,12 +21,27 @@ public final class EmojiChatListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onChat(AsyncChatEvent event) {
-        if (!EmojiShortcodes.enabled()) return;
         Component before = event.message();
-        Component after = replace(before);
-        if (after != before) {
-            event.message(after);
+        Component after = before;
+        if (EmojiShortcodes.enabled()) {
+            after = replace(after);
         }
+        // Strip unsupported Unicode combiners (VS15/VS16/ZWJ/tags). Vanilla MC
+        // font renders these as missing-glyph boxes (the `VS16` annotation
+        // visible next to 🏝️ in chat / signs). Done after shortcode replace
+        // so glyphs we control are also stripped. Pure pass-through if input
+        // has no combiners — String#equals fast path.
+        Component stripped = stripCombiners(after);
+        if (stripped != after) after = stripped;
+        if (after != before) event.message(after);
+    }
+
+    private static Component stripCombiners(Component in) {
+        TextReplacementConfig cfg = TextReplacementConfig.builder()
+                .match(java.util.regex.Pattern.compile("[\\uFE00-\\uFE0F\\u200D]|[\\uDB40\\uDD00-\\uDB40\\uDDFF]"))
+                .replacement((match, b) -> Component.empty())
+                .build();
+        return in.replaceText(cfg);
     }
 
     /** Public for command output / custom paths that want the same rewrite. */
