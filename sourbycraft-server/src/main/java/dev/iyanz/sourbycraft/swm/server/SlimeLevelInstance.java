@@ -225,6 +225,26 @@ public class SlimeLevelInstance extends ServerLevel {
         slimeInstance.unload(chunk, entitySlices, poiChunk);
     }
 
+    /**
+     * ASP dev/26.2 parity. Wires the patched Moonrise {@code ChunkLoadTask} to
+     * read chunk data from the in-memory {@link SlimeInMemoryWorld} instead of
+     * vanilla region-file storage. Region files don't exist for SWM worlds, so
+     * without this override the vanilla load path silently returns empty chunks
+     * for any coordinate not already promoted into {@code chunkStorage}.
+     */
+    public dev.iyanz.sourbycraft.swm.server.moonrise.ChunkDataLoadTask getLoadTask(
+            ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkLoadTask task,
+            ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler scheduler,
+            ServerLevel world,
+            int chunkX,
+            int chunkZ,
+            ca.spottedleaf.concurrentutil.util.Priority priority,
+            java.util.function.Consumer<ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.GenericDataLoadTask.TaskResult<net.minecraft.world.level.chunk.ChunkAccess, Throwable>> onRun
+    ) {
+        return new dev.iyanz.sourbycraft.swm.server.moonrise.ChunkDataLoadTask(
+                task, scheduler, world, chunkX, chunkZ, priority, onRun);
+    }
+
     public Future<?> saveWorld() {
         if (this.slimeInstance.isReadOnly() || this.slimeInstance.getLoader() == null) {
             return CompletableFuture.completedFuture(null);
