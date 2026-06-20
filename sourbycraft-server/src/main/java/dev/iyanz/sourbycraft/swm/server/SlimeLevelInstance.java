@@ -211,6 +211,20 @@ public class SlimeLevelInstance extends ServerLevel {
         slimeInstance.unload(chunk);
     }
 
+    /**
+     * ASP dev/26.2 parity. Called from the patched Moonrise NewChunkHolder
+     * BEFORE the vanilla {@code world.unload(LevelChunk)} step so we can grab
+     * the entity slices and POI chunk handles before they get nulled out by
+     * unloadStage1. The 1-arg overload still serves Bukkit world-unload paths.
+     */
+    public void unload(@NotNull LevelChunk chunk,
+                       @org.jetbrains.annotations.Nullable
+                       ca.spottedleaf.moonrise.patches.chunk_system.level.entity.ChunkEntitySlices entitySlices,
+                       @org.jetbrains.annotations.Nullable
+                       ca.spottedleaf.moonrise.patches.chunk_system.level.poi.PoiChunk poiChunk) {
+        slimeInstance.unload(chunk, entitySlices, poiChunk);
+    }
+
     public Future<?> saveWorld() {
         if (this.slimeInstance.isReadOnly() || this.slimeInstance.getLoader() == null) {
             return CompletableFuture.completedFuture(null);

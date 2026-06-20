@@ -160,6 +160,19 @@ public class SlimeInMemoryWorld implements SlimeWorld, SlimeWorldInstance {
     }
 
     public void unload(LevelChunk providedChunk) {
+        unload(providedChunk, null, null);
+    }
+
+    /**
+     * ASP dev/26.2 parity. Three-arg overload preserves entity + POI data on
+     * chunk unload by accepting the moonrise-supplied slices and POI chunk
+     * before {@code NewChunkHolder.unloadStage1} nulls them out. The bare
+     * 1-arg form survives for callers (e.g. Bukkit world-unload) that don't
+     * have those handles available.
+     */
+    public void unload(LevelChunk providedChunk,
+                       @Nullable ca.spottedleaf.moonrise.patches.chunk_system.level.entity.ChunkEntitySlices entitySlices,
+                       @Nullable ca.spottedleaf.moonrise.patches.chunk_system.level.poi.PoiChunk poiChunk) {
         final int x = providedChunk.locX;
         final int z = providedChunk.locZ;
 
@@ -175,18 +188,25 @@ public class SlimeInMemoryWorld implements SlimeWorld, SlimeWorldInstance {
             nmsChunk = new NMSSlimeChunk(providedChunk, getChunk(x, z));
         }
 
+        net.minecraft.nbt.ListTag entities = entitySlices != null
+                ? nmsChunk.getEntities(entitySlices)
+                : nmsChunk.getEntities();
+        CompoundTag poiSections = poiChunk != null
+                ? nmsChunk.getPoiChunkSections(poiChunk)
+                : nmsChunk.getPoiChunkSections();
+
         this.chunkStorage.put(key(x, z), new SlimeChunkSkeleton(
                 nmsChunk.getX(),
                 nmsChunk.getZ(),
                 new java.util.ArrayList<>(nmsChunk.getSections()),
                 nmsChunk.getHeightMaps(),
                 nmsChunk.getTileEntities(),
-                nmsChunk.getEntities(),
+                entities,
                 nmsChunk.getExtraData(),
                 nmsChunk.getUpgradeData(),
                 nmsChunk.getBlockTicks(),
                 nmsChunk.getFluidTicks(),
-                nmsChunk.getPoiChunkSections()
+                poiSections
         ));
     }
 

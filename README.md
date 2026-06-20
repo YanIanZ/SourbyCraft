@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r16-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r17-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
@@ -17,7 +17,12 @@
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r16`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r16) — Saturday, 20 June 2026, 12:56 (GMT+7).
+**Latest tag:** [`v26.1.2-r17`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r17) — Saturday, 20 June 2026, 13:21 (GMT+7).
+
+### r17 highlights
+- **3-arg SWM unload + entity-save bypass** — `SlimeInMemoryWorld.unload(LevelChunk, ChunkEntitySlices, PoiChunk)` and `SlimeLevelInstance.unload(...)` overloads accept the moonrise-supplied slices + POI chunk handles BEFORE `NewChunkHolder.unloadStage1` nulls them out. Entities + villager POIs now persist across chunk unload on SWM worlds (previously lost — written from r15 dual-track fix to disk but with empty entity/POI sections).
+- **Paper patch `0048`** patches `ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder` to call the SWM 3-arg unload before vanilla `world.unload(levelChunk)` and to skip `saveEntities` / `canSaveEntities` for SlimeLevelInstance worlds (SWM owns its own entity persistence; double-writing to a non-existent region file was waste).
+- **`NMSSlimeChunk.getPoiChunkSections(PoiChunk)`** new overload accepts the unload's POI chunk handle directly, avoiding the chunk-system holder lookup race in the no-arg form.
 
 ### r16 highlights
 - **SWM Moonrise data controllers** — new `SlimeEntityDataLoader` + `SlimePoiDataLoader` under `dev.iyanz.sourbycraft.swm.server.moonrise` serve entity + POI chunk data straight out of the in-memory `SlimeWorld` instead of trying to read region files that don't exist on SWM-backed worlds. Adapted from `com.infernalsuite.asp.level.moonrise.SlimeEntityDataLoader` / `SlimePoiDataLoader` (AdvancedSlimePaper dev/26.2), using our existing NMS NBT representation (no Adventure NBT conversion step).
