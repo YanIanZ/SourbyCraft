@@ -1,1 +1,1 @@
-f14e7e8fb8e58104f4ef9cd33de49ad36cad18ccd94303e34bba9350c20c3fc1  release/SourbyCraft-26.1.2-REL.jar
+2dfed7866cdc25932de8b31160ff2f3e2e68b9c642cc47aee3c7562b5add699e  release/SourbyCraft-26.1.2-REL.jar
