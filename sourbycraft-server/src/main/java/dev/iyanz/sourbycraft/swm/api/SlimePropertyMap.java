@@ -10,6 +10,14 @@ public class SlimePropertyMap {
     private int spawnX;
     private int spawnY;
     private int spawnZ;
+    // ASP dev/26.2 parity: default true so mob spawning, weather, time tick
+    // work on SWM worlds. Previously SLI hardcoded setSpawnSettings(false,false)
+    // + Difficulty=PEACEFUL — broke `/is` mob spawn, breeding, raids, etc.
+    private boolean allowMonsters = true;
+    private boolean allowAnimals = true;
+    private boolean pvp = true;
+    private String difficulty = ""; // empty = inherit from server
+    private boolean worldType = true; // dragon battle / structure gen flags
 
     public boolean isReadOnly() { return readOnly; }
     public void setReadOnly(boolean readOnly) { this.readOnly = readOnly; }
@@ -37,4 +45,19 @@ public class SlimePropertyMap {
 
     public int getSpawnZ() { return spawnZ; }
     public void setSpawnZ(int spawnZ) { this.spawnZ = spawnZ; }
+
+    public boolean allowMonsters() { return allowMonsters; }
+    public void setAllowMonsters(boolean allowMonsters) { this.allowMonsters = allowMonsters; }
+
+    public boolean allowAnimals() { return allowAnimals; }
+    public void setAllowAnimals(boolean allowAnimals) { this.allowAnimals = allowAnimals; }
+
+    public boolean pvp() { return pvp; }
+    public void setPvp(boolean pvp) { this.pvp = pvp; }
+
+    public String getDifficulty() { return difficulty; }
+    public void setDifficulty(String difficulty) { this.difficulty = difficulty == null ? "" : difficulty; }
+
+    public boolean isWorldType() { return worldType; }
+    public void setWorldType(boolean worldType) { this.worldType = worldType; }
 }

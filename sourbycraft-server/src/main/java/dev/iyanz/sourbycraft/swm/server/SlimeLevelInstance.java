@@ -124,7 +124,24 @@ public class SlimeLevelInstance extends ServerLevel {
 
         SlimePropertyMap propertyMap = slimeBootstrap.initial().getPropertyMap();
 
-        this.serverLevelData.setDifficulty(Difficulty.PEACEFUL);
+        // Difficulty: honour property map if set, otherwise inherit from server.
+        // PEACEFUL was the previous hardcoded default — broke mob spawning, raids,
+        // hunger, etc on every SWM-backed island. ASP dev/26.2 parity.
+        Difficulty initialDifficulty;
+        String propDifficulty = propertyMap.getDifficulty();
+        if (propDifficulty != null && !propDifficulty.isBlank()) {
+            try {
+                initialDifficulty = Difficulty.byName(propDifficulty.toLowerCase(java.util.Locale.ROOT));
+                if (initialDifficulty == null) {
+                    initialDifficulty = MinecraftServer.getServer().getWorldData().getDifficulty();
+                }
+            } catch (Throwable t) {
+                initialDifficulty = MinecraftServer.getServer().getWorldData().getDifficulty();
+            }
+        } else {
+            initialDifficulty = MinecraftServer.getServer().getWorldData().getDifficulty();
+        }
+        this.serverLevelData.setDifficulty(initialDifficulty);
 
         serverLevelData.setSpawn(
                 new LevelData.RespawnData(
@@ -141,7 +158,11 @@ public class SlimeLevelInstance extends ServerLevel {
                 )
         );
 
-        super.chunkSource.setSpawnSettings(false, false);
+        // ASP dev/26.2 parity. Previously hardcoded (false, false) which blocked
+        // every monster + animal spawn on SWM-backed islands — `/is` worlds had
+        // no mobs, no animal breeding, no raid spawns. Read from property map
+        // (default true).
+        super.chunkSource.setSpawnSettings(propertyMap.allowMonsters(), propertyMap.allowAnimals());
 
         // Swap Paper's vanilla EntityDataController + PoiDataController with SWM-backed
         // loaders so the chunk system serves entity + POI data from our in-memory
