@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 20 Jun 2026 15:19:01 +0700
+Subject: [PATCH] SourbyCraft SWM SpigotConfig + SpigotWorldConfig disk-IO
+ opt-out
+
+
+diff --git a/src/main/java/org/spigotmc/SpigotConfig.java b/src/main/java/org/spigotmc/SpigotConfig.java
+index 025ec3f3e84a3367b4d709c8c3ecd98f6dfecab4..47bfd9fc39201789e58f010639b0e0977d28ab13 100644
+--- a/src/main/java/org/spigotmc/SpigotConfig.java
++++ b/src/main/java/org/spigotmc/SpigotConfig.java
+@@ -79,7 +79,14 @@ public class SpigotConfig {
+         }
+     }
+ 
++    // SourbyCraft start - SWM disk-IO opt-out: SpigotWorldConfig.init() saves
++    // spigot.yml on every world load; SS2 island load floods the disk with
++    // identical writes. ASP dev/26.2 parity.
+     public static void readConfig(Class<?> clazz, Object instance) {
++        readConfig(clazz, instance, true);
++    }
++    public static void readConfig(Class<?> clazz, Object instance, boolean save) {
++    // SourbyCraft end
+         for (Method method : clazz.getDeclaredMethods()) {
+             if (Modifier.isPrivate(method.getModifiers())) {
+                 if (method.getParameterTypes().length == 0 && method.getReturnType() == Void.TYPE) {
+@@ -96,7 +103,9 @@ public class SpigotConfig {
+         }
+ 
+         try {
+-            SpigotConfig.config.save(SpigotConfig.CONFIG_FILE);
++            if (save) { // SourbyCraft - SWM disk-IO opt-out
++                SpigotConfig.config.save(SpigotConfig.CONFIG_FILE);
++            } // SourbyCraft
+         } catch (IOException ex) {
+             Bukkit.getLogger().log(Level.SEVERE, "Could not save " + SpigotConfig.CONFIG_FILE, ex);
+         }
+diff --git a/src/main/java/org/spigotmc/SpigotWorldConfig.java b/src/main/java/org/spigotmc/SpigotWorldConfig.java
+index 339832e312578ee385bbf3c9d5c131435abe7d7a..f94a397408c19cbf545c5eea22a1f334f1851691 100644
+--- a/src/main/java/org/spigotmc/SpigotWorldConfig.java
++++ b/src/main/java/org/spigotmc/SpigotWorldConfig.java
+@@ -14,14 +14,26 @@ public class SpigotWorldConfig {
+     private final YamlConfiguration config;
+     private boolean verbose;
+ 
++    // SourbyCraft start - SWM disk-IO opt-out (ASP dev/26.2 parity).
+     public SpigotWorldConfig(String legacyWorldName, Key worldKey) {
++        this(legacyWorldName, worldKey, true);
++    }
++
++    public SpigotWorldConfig(String legacyWorldName, Key worldKey, boolean saveOnLoad) {
++    // SourbyCraft end
+         this.legacyWorldName = legacyWorldName;
+         this.worldName = worldKey.asString();
+         this.config = SpigotConfig.config;
+-        this.init();
++        this.init(saveOnLoad); // SourbyCraft - SWM disk-IO opt-out
+     }
+ 
++    // SourbyCraft start - SWM disk-IO opt-out
+     public void init() {
++        init(true);
++    }
++
++    public void init(boolean saveOnLoad) {
++    // SourbyCraft end
+         this.verbose = this.getBoolean("verbose", false); // Paper
+         if (SpigotConfig.version <= 12) {
+             ConfigurationSection section = this.config.getConfigurationSection("world-settings." + this.legacyWorldName);
+@@ -33,7 +45,7 @@ public class SpigotWorldConfig {
+         }
+ 
+         this.log("-------- World Settings For [" + this.worldName + "] --------");
+-        SpigotConfig.readConfig(SpigotWorldConfig.class, this);
++        SpigotConfig.readConfig(SpigotWorldConfig.class, this, saveOnLoad); // SourbyCraft - SWM disk-IO opt-out
+     }
+ 
+     private void log(String s) {
