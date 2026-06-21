@@ -268,9 +268,3 @@ AdvancedSlimePaperAPI swm = AdvancedSlimePaperAPI.instance();
 SlimeWorld world = swm.readWorld(new FileLoader("slime_worlds"), "myworld", false, new SlimePropertyMap());
 swm.loadWorld(world, true);
 ```
-
----
-
-## License
-
-MIT — see [LICENCE.txt](LICENCE.txt)
