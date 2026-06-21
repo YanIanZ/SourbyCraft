@@ -141,9 +141,26 @@ public final class EntityStacker implements Listener {
         MAX_STACK_MULTIPLIER = Math.max(1, SourbyCraftConfig.stackerMaxStack);
     }
 
-    @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
+    // Diagnostic-only MONITOR listener — fires regardless of cancel state.
+    // If user sees this log but no `[stacker] merged/no-match` lines below
+    // from the LOWEST listener, that means another plugin cancelled the
+    // event before we ran. If even this MONITOR doesn't fire, the event
+    // path itself is blocked (likely Paper plugin manager issue).
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
+    public void onItemSpawnMonitor(ItemSpawnEvent e) {
+        if (!ENABLED || OWNER == null) return;
+        int n = DEBUG_COUNTER.incrementAndGet();
+        if (n <= 20) {
+            ItemStack s = e.getEntity().getItemStack();
+            OWNER.getLogger().info("[stacker:diag] ItemSpawnEvent fired type=" + (s == null ? "?" : s.getType())
+                    + " cancelled=" + e.isCancelled() + " world=" + e.getEntity().getWorld().getName());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = false)
     public void onItemSpawn(ItemSpawnEvent e) {
         if (!ENABLED) return;
+        if (e.isCancelled()) return;
         Item newItem = e.getEntity();
         ItemStack newStack = newItem.getItemStack();
         if (newStack == null || newStack.getType().isAir()) return;
@@ -167,12 +184,20 @@ public final class EntityStacker implements Listener {
             if (!hasLineOfSight(loc, nearItem.getLocation())) continue;
             near.setAmount(sum);
             nearItem.setItemStack(near);
-            updateHologram(nearItem);
-            // Cancel new spawn — merged into existing.
+            // Cancel new spawn FIRST so client doesn't see the new entity.
             e.setCancelled(true);
+            // Defer hologram update by 1 tick — addPassenger on a newly-spawned
+            // item entity mid-event can throw; safer after the spawn settles.
+            if (OWNER != null) {
+                Bukkit.getScheduler().runTask(OWNER, () -> {
+                    try { updateHologram(nearItem); } catch (Throwable t) {
+                        OWNER.getLogger().warning("[stacker] hologram update failed: " + t.getMessage());
+                    }
+                });
+            }
             if (OWNER != null) {
                 int n = DEBUG_COUNTER.incrementAndGet();
-                if (n <= 20) {
+                if (n <= 30) {
                     OWNER.getLogger().info("[stacker] merged " + newStack.getType()
                             + " into nearby item @ " + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ()
                             + " (newAmount=" + sum + " scanned=" + scanned + ")");
@@ -182,7 +207,7 @@ public final class EntityStacker implements Listener {
         }
         if (OWNER != null) {
             int n = DEBUG_COUNTER.incrementAndGet();
-            if (n <= 20) {
+            if (n <= 30) {
                 OWNER.getLogger().info("[stacker] no-match for " + newStack.getType()
                         + " @ " + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ()
                         + " (scanned=" + scanned + " radius=" + RADIUS + ")");
