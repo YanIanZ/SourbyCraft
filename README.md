@@ -6,27 +6,65 @@
   <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r18-blue?style=flat-square">
+  <img src="https://img.shields.io/badge/release-r44-blue?style=flat-square">
   <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
-  <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
+  <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
 </p>
 
-<p align="center"><em>High-performance Paper fork on year-based Minecraft 26.1.2 with self-tuning perf engine, slim jar bootstrap, NMS-level security, anti-xray, and SWM. Fork of <a href="https://github.com/PaperMC/Paper">Paper</a>.</em></p>
+<p align="center"><em>High-performance Paper fork on year-based Minecraft 26.1.2 with self-tuning perf engine, slim jar bootstrap, NMS-level security, anti-xray, ASP-port SWM, item stacker, auto-CDS, and 50-phase OneBlock module. Fork of <a href="https://github.com/PaperMC/Paper">Paper</a>.</em></p>
 
 ---
 
 ## What's New in 26.1.2-REL
 
-**Latest tag:** [`v26.1.2-r18`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r18) — Saturday, 20 June 2026, 13:41 (GMT+7).
+**Latest tag:** [`v26.1.2-r44`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r44) — Sunday, 21 June 2026, 08:55 (GMT+7).
 
-### r18 highlights
-- **Chunk PDC + block/fluid ticks persisted on SWM unload** — `NMSSlimeChunk.updatePersistentDataContainer()` snapshots the live `DirtyCraftPersistentDataContainer` into `extra["ChunkBukkitValues"]` so per-chunk plugin PDC entries (e.g. WorldGuard region cache, slimefun chunk markers) survive a save/load round-trip. `SlimeInMemoryWorld.unload` now also encodes `ChunkAccess.PackedTicks` via the same `SavedTick` codecs vanilla uses and writes them into the SlimeChunk's `block_ticks` / `fluid_ticks` blobs, matching the existing read path in `SlimeChunkConverter.deserializeSlimeChunk`. Block ticks (fire spread, redstone, observers, repeaters) and fluid ticks (water / lava flow) finally persist across SWM chunk unloads instead of vanishing on first save.
-- ASP dev/26.2 parity (all changes compile against 26.1.2 paperweight + Moonrise APIs — no 26.2-only symbols pulled in).
+### r19..r44 milestones (since r18)
 
-### r17 highlights
-- **3-arg SWM unload + entity-save bypass** — `SlimeInMemoryWorld.unload(LevelChunk, ChunkEntitySlices, PoiChunk)` and `SlimeLevelInstance.unload(...)` overloads accept the moonrise-supplied slices + POI chunk handles BEFORE `NewChunkHolder.unloadStage1` nulls them out. Entities + villager POIs now persist across chunk unload on SWM worlds (previously lost — written from r15 dual-track fix to disk but with empty entity/POI sections).
-- **Paper patch `0048`** patches `ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder` to call the SWM 3-arg unload before vanilla `world.unload(levelChunk)` and to skip `saveEntities` / `canSaveEntities` for SlimeLevelInstance worlds (SWM owns its own entity persistence; double-writing to a non-existent region file was waste).
-- **`NMSSlimeChunk.getPoiChunkSections(PoiChunk)`** new overload accepts the unload's POI chunk handle directly, avoiding the chunk-system holder lookup race in the no-arg form.
+**ASP dev/26.2 SWM port** (r19..r23) — all functional gaps closed
+- `r19` Wire ChunkLoadTask to SWM custom load task
+- `r20` Read-only SavedDataStorage + forceNoSave + close save bypass
+- `r21` Temp-dir cleanup on world unload
+- `r22` SpigotConfig + SpigotWorldConfig disk-IO opt-out
+- `r23` Companion jar refresh (SWP 5.2.0 + SSB-SWM + SS2 rebuilt)
+
+**SWM critical fixes** (r24, r30, r31) — three pre-existing hardcoded bugs since r1
+- `r24` `ChunkDataLoadTask.schedule(false)` deadlock — chunks stuck BLOCKING forever
+- `r30` `setSpawnSettings(false, false)` + `Difficulty.PEACEFUL` hardcoded — no mob spawns
+- `r31` `dimensionKey = Level.OVERWORLD` hardcoded — `MinecraftServer.levels` map collision, block place broken
+
+**Boot performance** (r29, r32, r33, r36, r39)
+- `r29` Plugin data folder page-cache warm via virtual-thread pool + per-plugin enable timing
+- `r32` Plugin jar prewarm via virtual-thread pool (~80% load reduction on 200-plugin servers)
+- `r36` Fast-boot triad: bStats kill-switch + update-check property kill + DB driver pre-init
+- `r39` Reverted r33 8s prewarm block — fire-and-forget restored
+
+**Auto-CDS orchestrator** (r34, r35)
+- `r34` SourbyBootstrap forks child JVM with CDS flags — no operator JVM args needed
+- `r35` CDS archive invalidation via size+mtime fingerprint on jar change
+
+**Text rendering + i18n** (r32, r38, r40, r41)
+- `r32` Emoji defaults BMP-only (vanilla MC font has no U+1F### glyphs)
+- `r38` VS16 strip in TextRender + EmojiChatListener (`🏝️` no longer shows `VS16` box)
+- `r40` SignSanitizer strips combiners on edit + right-click re-sanitize for existing signs
+
+**Item stacker** (r37, r42, r43, r44) — WildStacker-style
+- `r37` Initial stacker port (mobs only)
+- `r38` Re-scoped per user direction: items only, no mob stacking
+- `r42` LOS merge gate + TextDisplay hologram (`Carrot x4`) + non-see-through
+- `r43` MONITOR diagnostic listener + LOWEST main handler + deferred hologram update
+- `r44` Periodic merge sweep every 40 ticks (WildStacker parity)
+
+**SSB-OneBlock module** (r27) — paired with SourbyCraft
+- 50 themed phases: Plains → Forest → Cherry Grove → Deepslate Mines → Ancient City → Snow Plains → Coral Reef → Bamboo Jungle → Desert Pyramid → Nether → Crimson Forest → Bastion → End City → Cosmic Apex (finale)
+- Auto-extracts bundled phase + possibility JSONs from module jar
+- Ships separately from `~/Sourby/SSB-OneBlock/target/SSBOneBlock-2026.1.jar` (NOT bundled in SourbyCraft release)
+
+**Other** (r25, r26, r28, r37)
+- `r25` (reverted in r28) Parallel `prepareLevels` initial-chunk load
+- `r26` Full `/swm` subcommand set (inspect/delete/save/unload/help)
+- `r28` SSB-SWM post-paste diagnostic logging
+- `r37` Fix `vv10` double-v version display
 
 ### r16 highlights
 - **SWM Moonrise data controllers** — new `SlimeEntityDataLoader` + `SlimePoiDataLoader` under `dev.iyanz.sourbycraft.swm.server.moonrise` serve entity + POI chunk data straight out of the in-memory `SlimeWorld` instead of trying to read region files that don't exist on SWM-backed worlds. Adapted from `com.infernalsuite.asp.level.moonrise.SlimeEntityDataLoader` / `SlimePoiDataLoader` (AdvancedSlimePaper dev/26.2), using our existing NMS NBT representation (no Adventure NBT conversion step).
