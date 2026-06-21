@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Sat, 20 Jun 2026 12:50:31 +0700
+Subject: [PATCH] SourbyCraft drop final on EntityDataController +
+ PoiDataController for SWM loaders
+
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/io/datacontroller/EntityDataController.java b/ca/spottedleaf/moonrise/patches/chunk_system/io/datacontroller/EntityDataController.java
+index 992d19e1b08fa84325e7bb3c3d7d0b9dff4cdd3b..0b27ecf5fdea466f7cbf7f82b174309ab1c0e866 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/io/datacontroller/EntityDataController.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/io/datacontroller/EntityDataController.java
+@@ -11,7 +11,7 @@ import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+ import java.io.IOException;
+ import java.nio.file.Path;
+ 
+-public final class EntityDataController extends MoonriseRegionFileIO.RegionDataController {
++public class EntityDataController extends MoonriseRegionFileIO.RegionDataController { // SourbyCraft - drop final so SWM loader can subclass
+ 
+     private final EntityRegionFileStorage storage;
+ 
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/io/datacontroller/PoiDataController.java b/ca/spottedleaf/moonrise/patches/chunk_system/io/datacontroller/PoiDataController.java
+index bd0d782852f9cfe5bc0b5339ecf4d82c10332ec9..0022fb7e4d33f65c2325bc76e74137ae791f8082 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/io/datacontroller/PoiDataController.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/io/datacontroller/PoiDataController.java
+@@ -9,7 +9,7 @@ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.world.level.chunk.storage.RegionFileStorage;
+ import java.io.IOException;
+ 
+-public final class PoiDataController extends MoonriseRegionFileIO.RegionDataController {
++public class PoiDataController extends MoonriseRegionFileIO.RegionDataController { // SourbyCraft - drop final so SWM loader can subclass
+ 
+     private final ServerLevel world;
+ 

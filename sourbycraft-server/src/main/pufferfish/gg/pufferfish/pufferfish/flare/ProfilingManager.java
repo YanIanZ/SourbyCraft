@@ -24,11 +24,17 @@ import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
 public class ProfilingManager {
 
     private static Flare currentFlare;
+    private static ScheduledFuture<?> currentTask = null;
+    private static ScheduledExecutorService ses = new ScheduledThreadPoolExecutor(1);
 
     public static synchronized boolean isProfiling() {
         return currentFlare != null && currentFlare.isRunning();
@@ -114,6 +120,7 @@ public class ProfilingManager {
             throw new UserReportableException("Failed to start Flare, check logs for further details.");
         }
 
+        currentTask = ses.schedule(ProfilingManager::stop, 15, TimeUnit.MINUTES);
         PufferfishLogger.LOGGER.log(Level.INFO, "Flare has been started: " + getProfilingUri());
         return true;
     }
@@ -133,6 +140,14 @@ public class ProfilingManager {
             PufferfishLogger.LOGGER.log(Level.WARNING, "Error occurred stopping Flare", e);
         }
         currentFlare = null;
+
+        try {
+            currentTask.cancel(true);
+        } catch (Throwable t) {
+            PufferfishLogger.LOGGER.log(Level.WARNING, "Error occurred stopping Flare", t);
+        }
+
+        currentTask = null;
         return true;
     }
 

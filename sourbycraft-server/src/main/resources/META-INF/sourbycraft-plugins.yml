@@ -1,0 +1,8 @@
+# SourbyCraft v12 — first-boot plugin auto-installer manifest (unified).
+# NOTE: SlimeWorldManager is replaced by SourbyCraftSWM (bundled, auto-installed
+# via dev.iyanz.sourbycraft.swm.installer.PluginInstaller). Do not re-add it here.
+plugins:
+  - name: spark
+    source: jenkins
+    url: "https://ci.lucko.me/job/spark/lastSuccessfulBuild"
+    asset-glob: "spark-*-bukkit.jar"

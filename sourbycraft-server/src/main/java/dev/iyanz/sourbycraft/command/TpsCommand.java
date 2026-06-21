@@ -14,9 +14,11 @@ import java.text.DecimalFormat;
 import static net.kyori.adventure.text.Component.text;
 
 /**
- * Custom /tps with BarUtil progress bar + real-time MSPT.
- * Reads MinecraftServer.getAverageTickTimeNanos() for instantaneous TPS,
- * Bukkit.getTPS() for 1m/5m/15m averages.
+ * Custom /tps. Two-line layout:
+ *   ▰ SourbyCraft TPS
+ *   ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 51%   20.0 TPS   MSPT 12.3ms
+ *   1m / 5m / 15m: 20.0 / 19.8 / 19.5
+ * Optional `mem` sub-command adds a RAM bar line.
  */
 public class TpsCommand extends Command {
 
@@ -29,7 +31,7 @@ public class TpsCommand extends Command {
 
     public TpsCommand(String n) {
         super(n);
-        this.description = "Server TPS and MSPT with BarUtil display";
+        this.description = "Server TPS and MSPT";
         this.usageMessage = "/tps [mem]";
         this.setPermission("bukkit.command.tps");
     }
@@ -44,20 +46,33 @@ public class TpsCommand extends Command {
         double mspt = nanos / 1_000_000.0;
         double[] btps = Bukkit.getTPS();
 
-        // Header line: TPS [██████░░] 20.00  MSPT: 12.3ms
         s.sendMessage(text()
-            .append(text("TPS ", SourbyCraftColors.HEADER))
-            .append(text("[", SourbyCraftColors.DIM))
-            .append(BarUtil.tpsBar(tps, 10))
-            .append(text("] ", SourbyCraftColors.DIM))
-            .append(text(TWO.get().format(tps), tpsColor(tps)))
-            .append(text("  MSPT: ", SourbyCraftColors.LABEL))
-            .append(text(String.format("%.1fms", mspt), msptColor(mspt)))
+            .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
+            .append(text("SourbyCraft", SourbyCraftColors.HEADER))
+            .append(text(" TPS", SourbyCraftColors.LABEL))
             .build());
 
-        // 1m/5m/15m averages
         s.sendMessage(text()
-            .append(text("  1m/5m/15m: ", SourbyCraftColors.DIM))
+            .append(BarUtil.tpsBar(tps, BarUtil.DEFAULT_WIDTH))
+            .append(text("   ", SourbyCraftColors.DIM))
+            .append(text(TWO.get().format(tps) + " TPS", tpsColor(tps)))
+            .append(text("   ", SourbyCraftColors.DIM))
+            .append(text("MSPT ", SourbyCraftColors.LABEL))
+            .append(text(String.format(java.util.Locale.ROOT, "%.1fms", mspt), msptColor(mspt)))
+            .build());
+
+        int warmup = dev.iyanz.sourbycraft.perf.sensor.PerfSensor.warmupRemainingTicks();
+        if (warmup > 0) {
+            int secs = (int) Math.ceil(warmup / 20.0);
+            s.sendMessage(text()
+                .append(text("warmup: ", SourbyCraftColors.DIM))
+                .append(text(secs + "s left", SourbyCraftColors.WARNING))
+                .append(text(" — boot tick averages settling; dips during plugin enable are expected.", SourbyCraftColors.DIM))
+                .build());
+        }
+
+        s.sendMessage(text()
+            .append(text("1m / 5m / 15m: ", SourbyCraftColors.DIM))
             .append(text(ONE.get().format(btps[0]), tpsColor(btps[0])))
             .append(text(" / ", SourbyCraftColors.DIM))
             .append(text(ONE.get().format(btps[1]), tpsColor(btps[1])))
@@ -65,7 +80,6 @@ public class TpsCommand extends Command {
             .append(text(ONE.get().format(btps[2]), tpsColor(btps[2])))
             .build());
 
-        // Optional mem subcommand
         if (args.length > 0 && args[0].equals("mem") && s.hasPermission("bukkit.command.tpsmemory")) {
             Runtime r = Runtime.getRuntime();
             long used = (r.totalMemory() - r.freeMemory()) / (1024 * 1024);
@@ -73,12 +87,11 @@ public class TpsCommand extends Command {
             long max = r.maxMemory() / (1024 * 1024);
             double pct = max > 0 ? (double) used / max * 100 : 0;
             s.sendMessage(text()
+                .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
                 .append(text("RAM ", SourbyCraftColors.HEADER))
-                .append(text("[", SourbyCraftColors.DIM))
-                .append(BarUtil.coloredBar(pct, 10))
-                .append(text("] ", SourbyCraftColors.DIM))
-                .append(text(used + "/" + total + " MB", SourbyCraftColors.VALUE))
-                .append(text(" (Max: " + max + " MB)", SourbyCraftColors.DIM))
+                .append(BarUtil.ramBar(pct, BarUtil.DEFAULT_WIDTH))
+                .append(text("   " + used + "/" + total + " MB", SourbyCraftColors.VALUE))
+                .append(text(" (max " + max + " MB)", SourbyCraftColors.DIM))
                 .build());
             if (!memWarned) {
                 s.sendMessage(text("Modern GC memory usage fluctuates — high usage is normal.", SourbyCraftColors.DIM));

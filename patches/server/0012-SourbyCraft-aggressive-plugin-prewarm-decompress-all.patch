@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 20 Jun 2026 19:00:01 +0700
+Subject: [PATCH] SourbyCraft aggressive plugin-prewarm: decompress all classes
+ + block briefly + log MB stats
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 6ee997e44203df7b0f48fb123f7e923d999c6032..bc838edc5edc3b3a91656cc23ff67ea28a707b0c 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -581,49 +581,59 @@ public final class CraftServer implements Server {
+             if (pluginsFolder != null && pluginsFolder.isDirectory()) {
+                 java.io.File[] jars = pluginsFolder.listFiles((dir, name) -> name.toLowerCase(java.util.Locale.ROOT).endsWith(".jar"));
+                 if (jars != null && jars.length > 0) {
++                    final long prewarmStart = System.nanoTime();
+                     java.util.concurrent.ExecutorService prewarm = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
++                    final java.util.concurrent.atomic.AtomicLong totalBytes = new java.util.concurrent.atomic.AtomicLong();
++                    final java.util.concurrent.atomic.AtomicInteger totalClasses = new java.util.concurrent.atomic.AtomicInteger();
+                     for (java.io.File jar : jars) {
+                         prewarm.submit(() -> {
++                            long jarBytes = 0;
++                            int jarClasses = 0;
+                             try (java.util.jar.JarFile jf = new java.util.jar.JarFile(jar)) {
+-                                // Force central directory + manifest read.
+-                                java.util.jar.JarEntry manifest = jf.getJarEntry("META-INF/MANIFEST.MF");
+-                                if (manifest != null) {
+-                                    try (java.io.InputStream is = jf.getInputStream(manifest)) {
+-                                        is.readAllBytes();
+-                                    }
+-                                }
+-                                // Plugin descriptor — Paper reads one of these on load.
+-                                String[] descriptors = {"paper-plugin.yml", "plugin.yml", "bungee.yml"};
+-                                for (String d : descriptors) {
+-                                    java.util.jar.JarEntry e = jf.getJarEntry(d);
+-                                    if (e != null) {
+-                                        try (java.io.InputStream is = jf.getInputStream(e)) {
+-                                            is.readAllBytes();
+-                                        }
+-                                    }
+-                                }
+-                                // Walk first ~50 class entries to seed inflater
+-                                // dictionaries — Paper's classloader will hit
+-                                // these on plugin onLoad/onEnable.
+                                 java.util.Enumeration<java.util.jar.JarEntry> entries = jf.entries();
+-                                int classesRead = 0;
+-                                while (entries.hasMoreElements() && classesRead < 50) {
++                                while (entries.hasMoreElements()) {
+                                     java.util.jar.JarEntry e = entries.nextElement();
+-                                    if (e.getName().endsWith(".class")) {
+-                                        try (java.io.InputStream is = jf.getInputStream(e)) {
+-                                            is.readAllBytes();
+-                                            classesRead++;
+-                                        }
++                                    if (e.isDirectory()) continue;
++                                    String name = e.getName();
++                                    // Decompress every class entry into the OS
++                                    // page cache + JVM zip cache. Skip resources
++                                    // > 256 KB (textures, sounds) — they cost
++                                    // memory + Paper rarely class-loads them.
++                                    boolean isClass = name.endsWith(".class");
++                                    boolean isMetadata = name.equals("META-INF/MANIFEST.MF")
++                                        || name.equals("paper-plugin.yml")
++                                        || name.equals("plugin.yml")
++                                        || name.equals("bungee.yml")
++                                        || name.endsWith(".kotlin_module");
++                                    if (!isClass && !isMetadata) continue;
++                                    if (e.getSize() > 256 * 1024) continue;
++                                    try (java.io.InputStream is = jf.getInputStream(e)) {
++                                        byte[] data = is.readAllBytes();
++                                        jarBytes += data.length;
++                                        if (isClass) jarClasses++;
+                                     }
+                                 }
+                             } catch (Throwable ignored) {}
++                            totalBytes.addAndGet(jarBytes);
++                            totalClasses.addAndGet(jarClasses);
+                         });
+                     }
+                     prewarm.shutdown();
+-                    // Don't await — let prewarm race in background while Paper
+-                    // walks the same files. Cache hits will land naturally.
+-                    org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
+-                        "[plugin-prewarm] dispatched " + jars.length + " jar(s) to virtual-thread pool (warming OS page cache + zip central dirs)");
++                    // BLOCK briefly until prewarm finishes so Paper's subsequent
++                    // sequential jar scan hits warm caches. 8s cap so a slow
++                    // disk doesn't block boot indefinitely; in practice 200
++                    // jars finish in 1-3s on virtual threads.
++                    try {
++                        boolean done = prewarm.awaitTermination(8, java.util.concurrent.TimeUnit.SECONDS);
++                        long elapsed = (System.nanoTime() - prewarmStart) / 1_000_000L;
++                        long mb = totalBytes.get() / (1024 * 1024);
++                        org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
++                            "[plugin-prewarm] " + jars.length + " jars, " + totalClasses.get() + " classes, "
++                                + mb + " MB decompressed in " + elapsed + "ms"
++                                + (done ? "" : " (timeout — continuing without full warm)"));
++                    } catch (InterruptedException ie) {
++                        Thread.currentThread().interrupt();
++                    }
+                 }
+             }
+         } catch (Throwable t) {

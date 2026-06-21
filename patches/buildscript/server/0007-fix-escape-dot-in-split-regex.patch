@@ -5,10 +5,10 @@ Subject: [PATCH] fix: escape dot in split regex
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 2946f93bede93e5b4a08846abbbdb57516e73e2e..6f6575ec9ccb96834a9471446a473b29edae10ee 100644
+index db6fbf56f2d57e48429889ee0403aca9bf788d97..b56c68c50b8bd13551eef08c0c4c232694f3bd43 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
-@@ -251,7 +251,7 @@ tasks.jar {
+@@ -224,7 +224,7 @@ tasks.jar {
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
          val releaseVersionFull = rootProject.providers.gradleProperty("releaseVersion").get()

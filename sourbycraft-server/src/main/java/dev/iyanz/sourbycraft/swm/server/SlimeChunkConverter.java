@@ -248,6 +248,29 @@ public class SlimeChunkConverter {
         return save.getCompound("Sections").orElse(null);
     }
 
+    // ASP dev/26.2 parity: codecs for SavedTick<Block> / SavedTick<Fluid>.
+    // Reuses the BLOCK_TICKS_CODEC / FLUID_TICKS_CODEC fields declared above
+    // for the read path. Vanilla chunk save uses the same codec instances so
+    // the on-disk format stays compatible with data version 4790.
+
+    /**
+     * Serialise the per-chunk packed block-tick list into a {@link ListTag}
+     * suitable for storing in {@link SlimeChunk#getBlockTicks()}. Encodes via
+     * the same codec vanilla uses so the data version stays at 4790.
+     */
+    public static ListTag convertSavedBlockTicks(List<SavedTick<Block>> ticks) {
+        if (ticks == null || ticks.isEmpty()) return new ListTag();
+        return (ListTag) BLOCK_TICKS_CODEC.encodeStart(NbtOps.INSTANCE, ticks).getOrThrow();
+    }
+
+    /**
+     * Companion to {@link #convertSavedBlockTicks} for fluid ticks.
+     */
+    public static ListTag convertSavedFluidTicks(List<SavedTick<Fluid>> ticks) {
+        if (ticks == null || ticks.isEmpty()) return new ListTag();
+        return (ListTag) FLUID_TICKS_CODEC.encodeStart(NbtOps.INSTANCE, ticks).getOrThrow();
+    }
+
     public static SlimeChunk fromVanilla(CompoundTag chunkNbt) {
         int x = chunkNbt.getIntOr("xPos", 0);
         int z = chunkNbt.getIntOr("zPos", 0);

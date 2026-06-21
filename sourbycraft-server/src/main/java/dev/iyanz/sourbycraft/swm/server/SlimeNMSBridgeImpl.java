@@ -22,8 +22,8 @@ import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.gamerules.GameRuleMap;
 import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.storage.CommandStorage;
-import net.minecraft.world.level.storage.DimensionDataStorage;
 import net.minecraft.world.level.storage.PrimaryLevelData;
+import net.minecraft.world.level.storage.SavedDataStorage;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 
@@ -43,7 +43,7 @@ public class SlimeNMSBridgeImpl implements SlimeNMSBridge {
     public SlimeWorldInstance loadOverworldOverride(MinecraftServer server) {
         if (defaultWorld == null) return null;
         SlimeLevelInstance instance = ((SlimeInMemoryWorld) loadInstance(defaultWorld, server, Level.OVERWORLD)).getInstance();
-        DimensionDataStorage worldpersistentdata = instance.getDataStorage();
+        SavedDataStorage worldpersistentdata = instance.getDataStorage();
         instance.getCraftServer().scoreboardManager = new org.bukkit.craftbukkit.scoreboard.CraftScoreboardManager(instance.getServer(), instance.getScoreboard());
         // commandStorage skipped — private field, minimal impact on SWM worlds
         return instance.getSlimeInstance();
@@ -96,7 +96,9 @@ public class SlimeNMSBridgeImpl implements SlimeNMSBridge {
 
     private void registerWorld(SlimeLevelInstance levelInstance) {
         MinecraftServer mcServer = MinecraftServer.getServer();
-        mcServer.initWorld(levelInstance, levelInstance.serverLevelData, levelInstance.serverLevelData.worldGenOptions());
+        // Paper 26.1.2: initWorld signature collapsed to (ServerLevel, @Nullable WorldCreator);
+        // it now pulls WorldOptions from level.worldGenSettings.options() internally.
+        mcServer.initWorld(levelInstance, null);
         mcServer.addLevel(levelInstance);
     }
 
@@ -142,14 +144,18 @@ public class SlimeNMSBridgeImpl implements SlimeNMSBridge {
         DedicatedServerProperties serverProps = ((DedicatedServer) server).getProperties();
         WorldLoader.DataLoadContext context = server.worldLoaderContext;
 
-        LevelSettings worldsettings = new LevelSettings(worldName, serverProps.gameMode.get(), false,
-                serverProps.difficulty.get(), true,
-                new GameRules(context.dataConfiguration().enabledFeatures(), GameRuleMap.of()),
-                server.worldLoaderContext.dataConfiguration());
+        // Paper 26.1.2: LevelSettings is now a record (String, GameType,
+        // DifficultySettings, boolean, WorldDataConfiguration) — hardcore /
+        // game rules moved out of LevelSettings (gameRules lives on
+        // SavedDataStorage now; hardcore is on DifficultySettings).
+        LevelSettings.DifficultySettings difficulty = new LevelSettings.DifficultySettings(
+                serverProps.difficulty.get(), false, true);
+        LevelSettings worldsettings = new LevelSettings(worldName, serverProps.gameMode.get(),
+                difficulty, false, context.dataConfiguration());
 
-        WorldOptions worldoptions = new WorldOptions(0, false, false);
-
-        PrimaryLevelData data = new PrimaryLevelData(worldsettings, worldoptions,
+        // Paper 26.1.2: PrimaryLevelData constructor no longer takes WorldOptions;
+        // world-gen settings live on the ServerLevel / SavedDataStorage instead.
+        PrimaryLevelData data = new PrimaryLevelData(worldsettings,
                 PrimaryLevelData.SpecialWorldProperty.FLAT, Lifecycle.stable());
         data.checkName(worldName);
         data.setModdedInfo(server.getServerModName(), server.getModdedStatus().shouldReportAsModified());

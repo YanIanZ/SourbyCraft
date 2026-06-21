@@ -18,4 +18,8 @@ listOf("api", "swm-api", "server").forEach {
 // sourbycraft-swm-api doesn't need buildscript submodule
 include("sourbycraft-swm-api")
 
+// SourbyCraft v12 — NMS-compat smoke harness plugin (loaded into TestServer-mojmap/plugins/).
+include("test-harness:sanity-harness-plugin")
+project(":test-harness:sanity-harness-plugin").projectDir = file("test-harness/sanity-harness-plugin")
+
 

@@ -5,10 +5,10 @@ Subject: [PATCH] fix: Specification-Version uses implementationVersion
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 0e32a7f6edb465310583ec0704fb8fa7d6886101..81cf27833b78b210f517d5ca4921c4504403d21f 100644
+index f5b9edc82ec09d0b89b4515e8379d290ff03c1e2..6bc5a31599aacf1a8380360311c6ddd8a0311783 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
-@@ -268,7 +268,7 @@ tasks.jar {
+@@ -241,7 +241,7 @@ tasks.jar {
              "Implementation-Version" to implementationVersion,
              "Implementation-Vendor" to date,
              "Specification-Title" to "SourbyCraft", // SourbyCraft - branding

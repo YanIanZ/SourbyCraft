@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 20 Jun 2026 15:06:18 +0700
+Subject: [PATCH] SourbyCraft: register custom commands - shadowing fix
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index ef2aaba9191ae793e0287d83716694ba881010a1..7bbb69c92590461a5ef182a106d8aeca57bf715f 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1039,14 +1039,33 @@ public final class CraftServer implements Server {
+         io.papermc.paper.command.PaperCommands.registerCommands(this.console); // Paper
+         this.spark.registerCommandBeforePlugins(this); // Paper - spark
+         // SourbyCraft start - register commands
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.RamBarCommand("rambar"));
+-        this.commandMap.register("", new dev.iyanz.sourbycraft.command.VerCommand("ver"));
++        // Paper claims the bare names /tps, /ping, /plugins, /version via its Brigadier
++        // command tree before we reach this point, so a plain commandMap.register("", ...)
++        // gets shadowed and operators see the Paper output even though the SourbyCraft
++        // command was technically registered. We drop any pre-existing entry from the
++        // SimpleCommandMap first, then register with the "sourbycraft" fallback prefix so
++        // /sourbycraft:tps always reaches us (and the bare /tps lands on us too whenever
++        // Paper has not already claimed the slot — which covers /sys, /swm, /tpsbar,
++        // /rambar, /speedtest, /sparkview).
++        {
++            String[] names = {"ping", "sys", "plugins", "tps", "tpsbar", "speedtest", "sparkview", "swm", "rambar", "ver"};
++            java.util.Map<String, org.bukkit.command.Command> known = this.commandMap.getKnownCommands();
++            for (String n : names) {
++                known.remove(n.toLowerCase(java.util.Locale.ROOT));
++                known.remove("bukkit:" + n.toLowerCase(java.util.Locale.ROOT));
++            }
++        }
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.TpsCommand("tps"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SparkviewCommand("sparkview"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.RamBarCommand("rambar"));
++        this.commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.VerCommand("ver"));
++        org.slf4j.LoggerFactory.getLogger("SourbyCraft").info("Registered 10 SourbyCraft commands (fallback prefix 'sourbycraft'). Use /sourbycraft:<name> if a name collides with Paper's built-ins (/tps, /ping, /version, /plugins).");
+         // SourbyCraft end - register commands
+         this.overrideAllCommandBlockCommands = this.commandsConfiguration.getStringList("command-block-overrides").contains("*");
+         this.ignoreVanillaPermissions = this.commandsConfiguration.getBoolean("ignore-vanilla-permissions");

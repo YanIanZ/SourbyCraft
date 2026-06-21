@@ -10,12 +10,15 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.minecraft.server.MinecraftServer;
+import org.apache.logging.log4j.Level;
+import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.util.StringUtil;
 import org.jetbrains.annotations.NotNull;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -25,12 +28,12 @@ public class FlareCommand extends Command {
     private static final String BASE_URL = "https://blog.airplane.gg/flare-tutorial/#setting-the-access-token";
     private static final TextColor HEX = TextColor.fromHexString("#e3eaea");
     private static final Component PREFIX = Component.text()
-            .append(Component.text("Flare ✈")
-                    .color(TextColor.fromHexString("#6a7eda"))
-                    .decoration(TextDecoration.BOLD, true)
-                    .append(Component.text(" ", HEX)
-                            .decoration(TextDecoration.BOLD, false)))
-            .asComponent();
+      .append(Component.text("Flare ✈")
+        .color(TextColor.fromHexString("#6a7eda"))
+        .decoration(TextDecoration.BOLD, true)
+        .append(Component.text(" ", HEX)
+          .decoration(TextDecoration.BOLD, false)))
+      .asComponent();
 
     public FlareCommand() {
         super("flare", "Profile your server with Flare", "/flare", Collections.singletonList("profile"));
@@ -40,7 +43,7 @@ public class FlareCommand extends Command {
     @Override
     public boolean execute(@NotNull CommandSender sender, @NotNull String commandLabel, String @NotNull [] args) {
         if (!testPermission(sender)) return true;
-        if (PufferfishConfig.accessToken.isEmpty()) {
+        if (PufferfishConfig.accessToken.length() == 0) {
             Component clickable = Component.text(BASE_URL, HEX, TextDecoration.UNDERLINED).clickEvent(ClickEvent.clickEvent(ClickEvent.Action.OPEN_URL, BASE_URL));
 
             sender.sendMessage(PREFIX.append(Component.text("Flare currently requires an access token to use. To learn more, visit ").color(HEX).append(clickable)));
@@ -49,7 +52,7 @@ public class FlareCommand extends Command {
 
         if (!FlareSetup.isSupported()) {
             sender.sendMessage(PREFIX.append(
-                    Component.text("Profiling is not supported in this environment, check your startup logs for the error.", NamedTextColor.RED)));
+              Component.text("Profiling is not supported in this environment, check your startup logs for the error.", NamedTextColor.RED)));
             return true;
         }
         if (ProfilingManager.isProfiling()) {
@@ -71,9 +74,9 @@ public class FlareCommand extends Command {
                     profileType = ProfileType.valueOf(args[0].toUpperCase());
                 } catch (Exception e) {
                     sender.sendMessage(PREFIX.append(Component
-                            .text("Invalid profile type ", HEX)
-                            .append(Component.text(args[0], HEX, TextDecoration.BOLD)
-                                    .append(Component.text("!", HEX)))
+                      .text("Invalid profile type ", HEX)
+                      .append(Component.text(args[0], HEX, TextDecoration.BOLD)
+                        .append(Component.text("!", HEX)))
                     ));
                 }
             }
@@ -83,15 +86,15 @@ public class FlareCommand extends Command {
                     if (ProfilingManager.start(finalProfileType)) {
                         if (!(sender instanceof ConsoleCommandSender)) {
                             sender.sendMessage(PREFIX.append(Component
-                                    .text("Flare has been started: " + ProfilingManager.getProfilingUri(), HEX)
-                                    .clickEvent(ClickEvent.openUrl(ProfilingManager.getProfilingUri()))
+                              .text("Flare has been started: " + ProfilingManager.getProfilingUri(), HEX)
+                              .clickEvent(ClickEvent.openUrl(ProfilingManager.getProfilingUri()))
                             ));
                             sender.sendMessage(PREFIX.append(Component.text("  Run /" + commandLabel + " to stop the Flare.", HEX)));
                         }
                     } else {
                         sender.sendMessage(PREFIX.append(Component
-                                .text("Flare has already been started: " + ProfilingManager.getProfilingUri(), HEX)
-                                .clickEvent(ClickEvent.openUrl(ProfilingManager.getProfilingUri()))
+                          .text("Flare has already been started: " + ProfilingManager.getProfilingUri(), HEX)
+                          .clickEvent(ClickEvent.openUrl(ProfilingManager.getProfilingUri()))
                         ));
                     }
                 } catch (UserReportableException e) {

@@ -68,8 +68,22 @@ public class PufferfishConfig {
         // Attempt to detect vectorization
         try {
             SIMDDetection.isEnabled = SIMDDetection.canEnable(PufferfishLogger.LOGGER);
-            SIMDDetection.versionLimited = SIMDDetection.getJavaVersion() < 17;
+            SIMDDetection.versionLimited = SIMDDetection.getJavaVersion() < 17 || SIMDDetection.getJavaVersion() > 25;
         } catch (NoClassDefFoundError | Exception ignored) {}
+
+        // SourbyCraft start - operator opt-out for SIMD
+        // Some CPUs (notably aarch64 NEON 128-bit, or AVX2-only CPUs forced into emulated AVX-512 lanes)
+        // are SLOWER with the vector API than with the scalar fallback. Operator can flip this knob
+        // to disable SIMD even when --add-modules=jdk.incubator.vector is loaded.
+        boolean simdForceDisable = getBoolean("simd.force-disable", false,
+            "Disable SIMD optimisations even when --add-modules=jdk.incubator.vector is loaded.",
+            "Set true if chunk rendering / noise generation is SLOWER with the vector flag than without.",
+            "Common cause: aarch64 NEON or non-AVX-512 CPU running emulated wide lanes.");
+        if (simdForceDisable && SIMDDetection.isEnabled) {
+            SIMDDetection.isEnabled = false;
+            PufferfishLogger.LOGGER.warning("SIMD force-disabled via simd.force-disable=true. Falling back to scalar paths.");
+        }
+        // SourbyCraft end
 
         if (!SIMDDetection.isEnabled) {
             if (SIMDDetection.versionLimited) {
@@ -226,11 +240,11 @@ public class PufferfishConfig {
                 "If you want further away entities to tick more often, try 9.");
 
         for (EntityType<?> entityType : BuiltInRegistries.ENTITY_TYPE) {
-            entityType.dabEnabled = true; // reset all, before setting the ones to true
+            DabState.setEnabled(entityType, true); // reset all, before setting the ones to true
         }
         getStringList("dab.blacklisted-entities", "activation-range.blacklisted-entities", Collections.emptyList(), "A list of entities to ignore for activation")
                 .forEach(name -> EntityType.byString(name).ifPresentOrElse(entityType -> {
-                    entityType.dabEnabled = false;
+                    DabState.setEnabled(entityType, false);
                 }, () -> MinecraftServer.LOGGER.warn("Unknown entity \"" + name + "\"")));
 
         setComment("dab", "Optimizes entity brains when", "they're far away from the player");

@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 14 Jun 2026 20:59:56 +0700
+Subject: [PATCH] Fix children copying when filling missing command redirects
+
+
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index 01a9a01db6908c2f6c511be4628f518ce6a16de7..ff6d6ec6271dcf7b5056b152397b004051d64d18 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -537,6 +537,14 @@ public class Commands {
+     private static <S> void fillUsableCommands(
+         final java.util.Collection<CommandNode<S>> children, final CommandNode<S> target, final S commandFilter, final Map<CommandNode<S>, CommandNode<S>> converted // Paper - Perf: Async command map building; pass copy of children
+     ) {
++        // SourbyCraft start - support filling builders
++        fillUsableCommands(children, target::addChild, commandFilter, converted);
++    }
++
++    private static <S> void fillUsableCommands(
++        final java.util.Collection<CommandNode<S>> children, final java.util.function.Consumer<CommandNode<S>> target, final S commandFilter, final Map<CommandNode<S>, CommandNode<S>> converted // Paper - Perf: Async command map building; pass copy of children
++    ) {
++        // SourbyCraft end - support filling builders
+         for (CommandNode<S> child : children) { // Paper - Perf: Async command map building; pass copy of children
+             // Paper start - Brigadier API
+             if (child.clientNode != null) {
+@@ -573,10 +581,9 @@ public class Commands {
+                     if (redirect.getCommand() != null) {
+                         redirectBuilder.executes(redirect.getCommand());
+                     }
+-                    // Diff copied from LiteralCommand#createBuilder
+-                    for (final CommandNode<S> redirectChild : redirect.getChildren()) {
+-                        redirectBuilder.then(redirectChild);
+-                    }
++                    // SourbyCraft start - don't blindly copy children over
++                    fillUsableCommands(redirect.getChildren(), redirectBuilder::then, commandFilter, converted);
++                    // SourbyCraft end - don't blindly copy children over
+ 
+                     builder = redirectBuilder;
+                 }
+@@ -587,7 +594,7 @@ public class Commands {
+ 
+                 CommandNode<S> node = builder.build();
+                 converted.put(child, node);
+-                target.addChild(node);
++                target.accept(node); // SourbyCraft - support filling builders
+                 if (!child.getChildren().isEmpty()) {
+                     fillUsableCommands(child.getChildren(), node, commandFilter, converted); // Paper - Perf: Async command map building; pass copy of children
+                 }
