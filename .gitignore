@@ -424,3 +424,23 @@ test-harness/test-plugins/*.jar
 test-harness/TestServer-mojmap/
 test-harness/TestServer-particle-smoke/
 test-harness/sanity-harness-plugin/build/
+
+# Build + release artifacts — published via GH releases, not tracked in repo
+release/
+build/
+**/build/
+TestServer/
+cache/
+libraries/
+versions/
+eula.txt
+server.properties
+banned-*.json
+ops.json
+whitelist.json
+usercache.json
+world*/
+logs/
+crash-reports/
+*.log
+*.log.gz
