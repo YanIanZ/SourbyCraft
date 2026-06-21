@@ -60,6 +60,67 @@ public final class EntityStacker implements Listener {
         plugin.getLogger().info("[stacker] item stacker " + (ENABLED ? "ENABLED" : "disabled")
                 + " (stacker.enabled=" + ENABLED + " radius=" + RADIUS
                 + " maxStackMultiplier=" + MAX_STACK_MULTIPLIER + ")");
+
+        // WildStacker parity: periodic merge sweep over loaded items.
+        // ItemSpawnEvent only catches the *spawning* item, but two existing
+        // items can drift within radius later (water push, piston, dispenser).
+        // Every 40 ticks (~2s) walk loaded worlds, group items within radius,
+        // collapse same-ItemStack groups into one entity.
+        if (ENABLED) {
+            Bukkit.getScheduler().runTaskTimer(plugin, EntityStacker::periodicMergeSweep, 80L, 40L);
+            plugin.getLogger().info("[stacker] periodic merge sweep scheduled every 40 ticks");
+        }
+    }
+
+    /** Periodic sweep: scan every loaded Item, merge clusters in-place. */
+    private static void periodicMergeSweep() {
+        if (!ENABLED) return;
+        try {
+            for (org.bukkit.World world : Bukkit.getWorlds()) {
+                java.util.List<Item> items = new java.util.ArrayList<>();
+                for (Entity ent : world.getEntities()) {
+                    if (ent instanceof Item it && !it.isDead()) items.add(it);
+                }
+                if (items.size() < 2) continue;
+                // O(n²) cluster pass — fine for typical drop counts < a few hundred.
+                java.util.Set<Item> consumed = new java.util.HashSet<>();
+                for (int i = 0; i < items.size(); i++) {
+                    Item a = items.get(i);
+                    if (consumed.contains(a) || a.isDead()) continue;
+                    ItemStack sa = a.getItemStack();
+                    if (sa == null || sa.getType().isAir()) continue;
+                    int capA = sa.getMaxStackSize() * MAX_STACK_MULTIPLIER;
+                    if (capA <= 0) capA = Integer.MAX_VALUE;
+                    Location la = a.getLocation();
+                    for (int j = i + 1; j < items.size(); j++) {
+                        Item b = items.get(j);
+                        if (consumed.contains(b) || b.isDead()) continue;
+                        if (b == a) continue;
+                        ItemStack sb = b.getItemStack();
+                        if (sb == null || !sb.isSimilar(sa)) continue;
+                        Location lb = b.getLocation();
+                        if (la.distanceSquared(lb) > RADIUS * RADIUS) continue;
+                        if (!hasLineOfSight(la, lb)) continue;
+                        int sum = sa.getAmount() + sb.getAmount();
+                        if (sum > capA) continue;
+                        sa.setAmount(sum);
+                        a.setItemStack(sa);
+                        // Source dies; its passenger hologram (if any) goes with it.
+                        try { removeHologram(b); } catch (Throwable ignored) {}
+                        b.remove();
+                        consumed.add(b);
+                    }
+                    // Refresh hologram on representative.
+                    if (sa.getAmount() > 1) {
+                        try { updateHologram(a); } catch (Throwable ignored) {}
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            if (OWNER != null) {
+                OWNER.getLogger().warning("[stacker] periodic sweep error: " + t.getMessage());
+            }
+        }
     }
 
     /**
