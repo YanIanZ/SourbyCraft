@@ -3,8 +3,8 @@ plugins {
 }
 
 group = "dev.iyanz.sourbycraft"
-version = "5.0.0"
-description = "SourbyCraft SlimeWorldManager Plugin"
+version = "5.2.0"
+description = "SourbyCraft SlimeWorldManager Plugin (ASP dev/26.2 parity)"
 
 repositories {
     mavenCentral()
@@ -23,5 +23,6 @@ java {
 
 tasks.withType<JavaCompile> {
     options.encoding = "UTF-8"
-    options.release.set(25)
+    // SourbyCraft v10.3 — Java 21 bytecode for dual JRE 21/25 support
+    options.release.set(21)
 }

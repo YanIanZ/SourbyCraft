@@ -27,28 +27,40 @@ tasks.processResources {
     enabled = false
 }
 
-val extractApi by tasks.registering(Jar::class) {
-    dependsOn(":sourbycraft-server:jar")
-    archiveFileName.set("sourbycraft-swm-api-${project.version}.jar")
+// SourbyCraft v10.6 — guard against missing sourbycraft-server during CI fresh-clone
+// (applyAllPatches must run first to materialize the server module). Skip extractApi
+// when the server project is not registered yet; assemble becomes a no-op for the
+// patch-apply phase, and the real build phase has the server module available.
+val serverProject = rootProject.findProject(":sourbycraft-server")
 
-    from(zipTree(file("../sourbycraft-server/build/libs/sourbycraft-server-v7-REL.jar"))) {
-        include("dev/iyanz/sourbycraft/swm/api/**")
+if (serverProject != null) {
+    val serverJarProvider = serverProject.tasks.named<Jar>("jar").flatMap { it.archiveFile }
+
+    val extractApi by tasks.registering(Jar::class) {
+        archiveFileName.set("sourbycraft-swm-api-${project.version}.jar")
+        from(zipTree(serverJarProvider)) {
+            include("dev/iyanz/sourbycraft/swm/api/**")
+        }
     }
-}
 
-tasks.jar {
-    enabled = false
-}
+    tasks.jar {
+        enabled = false
+    }
 
-tasks.assemble {
-    dependsOn(extractApi)
-}
+    tasks.assemble {
+        dependsOn(extractApi)
+    }
 
-publishing {
-    publications.create<MavenPublication>("maven") {
-        artifact(extractApi.get())
-        groupId = "dev.iyanz.sourbycraft"
-        artifactId = "sourbycraft-swm-api"
-        version = project.version.toString()
+    publishing {
+        publications.create<MavenPublication>("maven") {
+            artifact(extractApi.get())
+            groupId = "dev.iyanz.sourbycraft"
+            artifactId = "sourbycraft-swm-api"
+            version = project.version.toString()
+        }
+    }
+} else {
+    tasks.jar {
+        enabled = false
     }
 }

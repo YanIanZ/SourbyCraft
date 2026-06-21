@@ -1,0 +1,29 @@
+# SourbyCraft v12 NMS-compat test plugin manifest.
+# Versions are pinned for reproducibility. To bump a version:
+#   1. Update version + url here.
+#   2. Run scripts/download-test-plugins.sh; copy the printed sha256 into this file.
+#   3. Re-run the smoke harness; record the result in the matrix note.
+plugins:
+  - name: Citizens
+    version: "2.0.39-b3811"
+    url: "https://ci.citizensnpcs.co/job/Citizens2/3811/artifact/dist/target/Citizens-2.0.39-b3811.jar"
+    sha256: ""  # filled by download-test-plugins.sh on first run
+    main-class: net.citizensnpcs.Citizens
+
+  - name: NBTAPI
+    version: "2.13.2"
+    url: "https://github.com/tr7zw/Item-NBT-API/releases/download/2.13.2/item-nbt-api-bukkit-2.13.2.jar"
+    sha256: ""
+    main-class: de.tr7zw.nbtapi.NBTAPI
+
+  - name: DecentHolograms
+    version: "2.8.10"
+    url: "https://github.com/DecentSoftware-eu/DecentHolograms/releases/download/2.8.10/DecentHolograms-2.8.10.jar"
+    sha256: ""
+    main-class: eu.decentsoftware.holograms.plugin.DecentHologramsPlugin
+
+  - name: FastAsyncWorldEdit
+    version: "2.13.3"
+    url: "https://ci.athion.net/job/FastAsyncWorldEdit/lastSuccessfulBuild/artifact/artifacts/FastAsyncWorldEdit-Bukkit-2.13.3-SNAPSHOT-1056.jar"
+    sha256: ""
+    main-class: com.fastasyncworldedit.bukkit.FaweBukkit

@@ -37,13 +37,19 @@ public class APILoader implements SlimeLoader {
     public APILoader(String apiUrl, String username, String token, boolean ignoreSslCertificate) {
         this.gson = new Gson();
         this.ignoreSslCertificate = ignoreSslCertificate;
+        if (ignoreSslCertificate) {
+            logger.warn("APILoader configured with ignoreSslCertificate=true for {}; "
+                + "TLS certificate validation is disabled and the connection is vulnerable to MITM. "
+                + "Only safe on a trusted private network.", apiUrl);
+        }
 
         if (!apiUrl.endsWith("/")) apiUrl += "/";
         this.apiUrl = apiUrl;
 
         if (username != null && !username.isEmpty() && token != null && !token.isEmpty()) {
             String auth = username + ":" + token;
-            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
+            // UTF-8 charset (Base64 expects raw bytes; platform default would break on non-ASCII tokens)
+            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             this.authorizationHeader = "Basic " + encodedAuth;
         } else {
             this.authorizationHeader = null;

@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Sat, 20 Jun 2026 13:19:09 +0700
+Subject: [PATCH] SourbyCraft NewChunkHolder SWM unload + entity-save bypass
+ (ASP dev/26.2)
+
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/NewChunkHolder.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/NewChunkHolder.java
+index 9a9a599ef178f851ee5c783631a724013a693586..a449e87293b96275f3c90f0da46df84172bf64ae 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/NewChunkHolder.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/NewChunkHolder.java
+@@ -887,6 +887,13 @@ public final class NewChunkHolder {
+             }
+ 
+             if (chunk instanceof LevelChunk levelChunk) {
++                // SourbyCraft start - SWM unload path. entitySlices is nulled later in
++                // unloadStage1 so we cannot recover them afterwards; capture them now
++                // before vanilla unload removes block entities. ASP dev/26.2 parity.
++                if (this.world instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance slimeLevelInstance) {
++                    slimeLevelInstance.unload(levelChunk, entityChunk, poiChunk);
++                }
++                // SourbyCraft end
+                 this.world.unload(levelChunk);
+             }
+ 
+@@ -896,7 +903,13 @@ public final class NewChunkHolder {
+         // unload entity data
+         if (entityChunk != null) {
+             final Completable<CompoundTag>[] entityWrite = new Completable[1];
+-            this.saveEntities(entityChunk, true, entityWrite);
++            // SourbyCraft start - SWM owns its own entity persistence (in-memory). Avoid
++            // double-writing the same data into a region file that doesn't exist for
++            // SWM worlds. ASP dev/26.2 parity.
++            if (!(this.world instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance)) {
++                this.saveEntities(entityChunk, true, entityWrite);
++            }
++            // SourbyCraft end
+ 
+             if (entityChunk.unload()) {
+                 final ReentrantAreaLock.Node schedulingLock = this.scheduler.schedulingLockArea.lock(this.chunkX, this.chunkZ);
+@@ -1683,6 +1696,13 @@ public final class NewChunkHolder {
+         boolean canSavePOI = !forceNoSaveChunk && (poi != null && poi.isDirty());
+         boolean canSaveEntities = entities != null;
+ 
++        // SourbyCraft start - SWM owns entity persistence; skip the region-file save
++        // path so we don't double-write to a path that doesn't exist. ASP dev/26.2.
++        if (this.world instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance) {
++            canSaveEntities = false;
++        }
++        // SourbyCraft end
++
+         if (canSaveChunk) {
+             canSaveChunk = this.saveChunk(chunk, false, null);
+         }

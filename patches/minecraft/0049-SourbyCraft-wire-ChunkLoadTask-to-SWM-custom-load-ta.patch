@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 20 Jun 2026 14:01:36 +0700
+Subject: [PATCH] SourbyCraft wire ChunkLoadTask to SWM custom load task
+
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkLoadTask.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkLoadTask.java
+index 7463cf5bf871033a0e5f6d54dd0d427c474d7cd4..2729ec1ca9b44c9e217e80a159ebd8611cdf62fc 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkLoadTask.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkLoadTask.java
+@@ -33,7 +33,7 @@ public final class ChunkLoadTask extends ChunkProgressionTask {
+     private static final Logger LOGGER = LoggerFactory.getLogger(ChunkLoadTask.class);
+ 
+     private final NewChunkHolder chunkHolder;
+-    private final ChunkDataLoadTask loadTask;
++    private final dev.iyanz.sourbycraft.swm.server.moonrise.CommonLoadTask loadTask; // SourbyCraft - SWM custom load task
+ 
+     private volatile boolean cancelled;
+     private NewChunkHolder.GenericDataLoadTaskCallback entityLoadTask;
+@@ -45,11 +45,24 @@ public final class ChunkLoadTask extends ChunkProgressionTask {
+                          final NewChunkHolder chunkHolder, final Priority priority) {
+         super(scheduler, world, chunkX, chunkZ);
+         this.chunkHolder = chunkHolder;
+-        this.loadTask = new ChunkDataLoadTask(scheduler, world, chunkX, chunkZ, priority);
+-        this.loadTask.addCallback((final GenericDataLoadTask.TaskResult<ChunkAccess, Throwable> result) -> {
+-            ChunkLoadTask.this.loadResult = result; // must be before getAndDecrement
+-            ChunkLoadTask.this.tryCompleteLoad();
+-        });
++        // SourbyCraft start - SWM custom load task (ASP dev/26.2 parity). For
++        // SlimeLevelInstance worlds, route chunk loading through the in-memory
++        // SlimeWorld instead of vanilla region-file IO (region files don't
++        // exist for SWM worlds and the read would return an empty chunk).
++        if (world instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance levelInstance) {
++            this.loadTask = levelInstance.getLoadTask(this, scheduler, world, chunkX, chunkZ, priority, result -> {
++                ChunkLoadTask.this.loadResult = result; // must be before getAndDecrement
++                ChunkLoadTask.this.tryCompleteLoad();
++            });
++        } else {
++            ChunkDataLoadTask vanillaTask = new ChunkDataLoadTask(scheduler, world, chunkX, chunkZ, priority);
++            vanillaTask.addCallback((final GenericDataLoadTask.TaskResult<ChunkAccess, Throwable> result) -> {
++                ChunkLoadTask.this.loadResult = result; // must be before getAndDecrement
++                ChunkLoadTask.this.tryCompleteLoad();
++            });
++            this.loadTask = vanillaTask;
++        }
++        // SourbyCraft end
+     }
+ 
+     private void tryCompleteLoad() {
+@@ -276,7 +289,7 @@ public final class ChunkLoadTask extends ChunkProgressionTask {
+ 
+     private static record ReadChunk(ProtoChunk protoChunk, SerializableChunkData chunkData) {}
+ 
+-    private static final class ChunkDataLoadTask extends CallbackDataLoadTask<ReadChunk, ChunkAccess> {
++    private static final class ChunkDataLoadTask extends CallbackDataLoadTask<ReadChunk, ChunkAccess> implements dev.iyanz.sourbycraft.swm.server.moonrise.CommonLoadTask { // SourbyCraft - SWM CommonLoadTask
+         private ChunkDataLoadTask(final ChunkTaskScheduler scheduler, final ServerLevel world, final int chunkX,
+                                   final int chunkZ, final Priority priority) {
+             super(scheduler, world, chunkX, chunkZ, MoonriseRegionFileIO.RegionFileType.CHUNK_DATA, priority);

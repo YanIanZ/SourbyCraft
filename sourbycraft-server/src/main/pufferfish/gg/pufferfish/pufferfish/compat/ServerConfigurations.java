@@ -9,6 +9,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -19,11 +20,11 @@ import java.util.stream.Collectors;
 public class ServerConfigurations {
 
     public static final String[] configurationFiles = new String[]{
-            "server.properties",
-            "bukkit.yml",
-            "spigot.yml",
-            // "paper.yml", // TODO: Figure out what to do with this.
-            "pufferfish.yml"
+      "server.properties",
+      "bukkit.yml",
+      "spigot.yml",
+      // "paper.yml", // TODO: Figure out what to do with this.
+      "pufferfish.yml"
     };
 
     public static Map<String, String> getCleanCopies() throws IOException {
@@ -50,9 +51,9 @@ public class ServerConfigurations {
                 ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
                 properties.store(outputStream, "");
                 return Arrays.stream(outputStream.toString()
-                                .split("\n"))
-                        .filter(line -> !line.startsWith("#"))
-                        .collect(Collectors.joining("\n"));
+                  .split("\n"))
+                  .filter(line -> !line.startsWith("#"))
+                  .collect(Collectors.joining("\n"));
             }
             case "yml": {
                 YamlConfiguration configuration = new YamlConfiguration();
@@ -61,7 +62,7 @@ public class ServerConfigurations {
                 } catch (InvalidConfigurationException e) {
                     throw new IOException(e);
                 }
-                configuration.options().setHeader(null);
+                configuration.options().header(null);
                 for (String key : configuration.getKeys(true)) {
                     if (hiddenConfigs.contains(key)) {
                         configuration.set(key, null);

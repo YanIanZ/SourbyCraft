@@ -1,0 +1,90 @@
+# SourbyCraft 12-EXP
+
+**Tagline:** Lightning Fast Performance · Feature Rich
+
+## Two JARs
+
+- `SourbyCraft-12-EXP.jar` — general-purpose SMP (default)
+- `SourbyCraft-PVP-12-REL.jar` — PvP arena backend (Velocity-tuned, 1.8-style KB, allow-nether=false)
+
+Both built from same codebase via `-Pvariant=normal|pvp`. PVP variant adds 5 PvP-only NMS patches (9001–9005), proxy backend defaults, plugin auto-installer manifest tuned for PvP, and distinct branding.
+
+## Highlights
+
+- Build-time variant split (`-Pvariant=pvp`)
+- New PVP patches:
+  - `9001-PVP-netty-tuning` — Netty event-loop + buffer sizes + max-packets-per-tick
+  - `9002-PVP-entity-tracker-tightening` — tighter mob/item/xp ranges, faster player update
+  - `9003-PVP-cpu-pin-gc-banner` — JVM advisory banner (ZGC/G1, Xms=Xmx, AlwaysPreTouch)
+  - `9004-PVP-combat-completion` — sweep gate, hit-delay, /reach, fishing-rod KB
+  - `9005-PVP-proxy-kick` — proxy-aware shutdown transfer-out + strict IP-forward
+- Plugin auto-installer (variant-specific manifest)
+- Reformatted `/plugins` + `/pl` — boxed, categorized, colored
+- Compact startup plugin log
+- Velocity/Bungee backend pre-tuning (PVP only)
+- All config keys documented in baseline `sourbycraft.yml`
+
+## New config keys (baseline)
+
+```yaml
+pvp:                       # extends v11.0 PvP block
+  knockback:
+    friction-divisor, vertical, extra-horizontal
+network:
+  proxy-mode, netty.{threads, snd-buf-kb, rcv-buf-kb, max-packets-per-tick}
+  proxy-kick-grace-seconds, proxy-kick-fallback
+entity-tracker:
+  mob-range, item-range, xp-orb-range, player-update-interval
+combat:
+  sweep-enabled, hit-delay-ticks, hit-window-ms,
+  fishing-rod-knockback, reach-debug-command
+branding:
+  motd-suffix, compact-plugin-list, compact-plugin-log,
+  gc-advisor.enabled
+auto-install:
+  enabled
+```
+
+## Migration v11 → v12
+
+- Single-jar v11 users: download `SourbyCraft-12-EXP.jar` (normal variant).
+  Existing `sourbycraft.yml` preserved — variant overlay seeds only on fresh install.
+- PvP-tuned v11 users: download `SourbyCraft-PVP-v12-REL.jar`. Operator may
+  merge new defaults manually.
+
+## Smoke checklist
+
+See `docs/superpowers/specs/2026-06-02-sourbycraft-v12-smoke-checklist.md`.
+
+## Build
+
+```bash
+./gradlew createMojmapPaperclipJar -Pvariant=normal
+./gradlew createMojmapPaperclipJar -Pvariant=pvp
+```
+
+JAR outputs in `sourbycraft-server/build/libs/`.
+
+## Sourby Bootstrap (NEW)
+
+The release jar is now slim (~33M, was ~57M, -42%). First boot downloads optional
+libraries into `libraries/` with SHA-256 verification:
+
+- `sqlite-jdbc-3.49.1.0.jar` (~14M) — Maven Central
+- `mysql-connector-j-9.2.0.jar` (~2.6M) — Maven Central
+- `spark-paper-1.10.152.jar` (~3M) — PaperMC Maven
+- `Flare-34637f3f87.jar` (~2M) — Jitpack
+- `protobuf-java-4.29.0.jar` (~1.9M) — Maven Central
+- `sentry-7.15.0.jar` (~918K) — Maven Central
+- Ookla `speedtest` CLI (~2.5M) — `install.speedtest.net`, lazy on first `/speedtest`
+
+Subsequent boots are silent cache-hit (zero downloads, baseline boot time).
+
+**Offline first-boot:** the `[SourbyBootstrap] FATAL` log lists every URL +
+destination path under `libraries/`. Side-load the files manually and restart.
+
+**Operators upgrading:** if you already have a `libraries/` directory from a
+prior boot, mismatched SHA-256 triggers re-download. Matching files are reused.
+
+`parchment-data` remains bundled (~988K, IDE mappings only, pinned version
+returns 404 from upstream Maven).

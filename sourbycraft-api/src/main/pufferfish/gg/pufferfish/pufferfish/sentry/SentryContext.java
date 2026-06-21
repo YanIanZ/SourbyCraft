@@ -13,6 +13,7 @@ import org.bukkit.event.Event;
 import org.bukkit.event.player.PlayerEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredListener;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public class SentryContext {
@@ -45,7 +46,7 @@ public class SentryContext {
 		ThreadContext.remove("pufferfishsentry_playerid");
 	}
 	
-	public static void setEventContext(Event event, RegisteredListener registration) {
+	public static void setEventContext(@NotNull Event event, @NotNull RegisteredListener registration) {
 		setPluginContext(registration.getPlugin());
 		
 		try {
@@ -118,43 +119,43 @@ public class SentryContext {
 		private Event event;
 		private RegisteredListener registeredListener;
 		
-		public Plugin getPlugin() {
+		public @Nullable Plugin getPlugin() {
 			return plugin;
 		}
-		
-		public void setPlugin(Plugin plugin) {
+
+		public void setPlugin(@Nullable Plugin plugin) {
 			this.plugin = plugin;
 		}
-		
-		public Command getCommand() {
+
+		public @Nullable Command getCommand() {
 			return command;
 		}
-		
-		public void setCommand(Command command) {
+
+		public void setCommand(@Nullable Command command) {
 			this.command = command;
 		}
-		
-		public String getCommandLine() {
+
+		public @Nullable String getCommandLine() {
 			return commandLine;
 		}
-		
-		public void setCommandLine(String commandLine) {
+
+		public void setCommandLine(@Nullable String commandLine) {
 			this.commandLine = commandLine;
 		}
-		
-		public Event getEvent() {
+
+		public @Nullable Event getEvent() {
 			return event;
 		}
-		
-		public void setEvent(Event event) {
+
+		public void setEvent(@Nullable Event event) {
 			this.event = event;
 		}
-		
-		public RegisteredListener getRegisteredListener() {
+
+		public @Nullable RegisteredListener getRegisteredListener() {
 			return registeredListener;
 		}
-		
-		public void setRegisteredListener(RegisteredListener registeredListener) {
+
+		public void setRegisteredListener(@Nullable RegisteredListener registeredListener) {
 			this.registeredListener = registeredListener;
 		}
 	}

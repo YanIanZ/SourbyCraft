@@ -44,7 +44,8 @@ public class SourbyCraftSecurityConfig {
         if (CONFIG_FILE == null || !CONFIG_FILE.exists()) return;
 
         try (InputStream in = new FileInputStream(CONFIG_FILE)) {
-            Yaml yaml = new Yaml();
+            // SourbyCraft - SnakeYAML SafeConstructor blocks gadget RCE via !!tags
+            Yaml yaml = new Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(new org.yaml.snakeyaml.LoaderOptions()));
             Map<String, Object> root = yaml.load(in);
             if (root == null) return;
 

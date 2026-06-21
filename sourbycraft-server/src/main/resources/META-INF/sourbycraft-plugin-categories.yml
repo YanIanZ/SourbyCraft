@@ -1,0 +1,17 @@
+categories:
+  Core:
+    - LuckPerms
+    - EssentialsX
+    - Vault
+    - PlaceholderAPI
+  World:
+    - WorldEdit
+    - WorldGuard
+    - SlimeWorldManager
+    - FastAsyncWorldEdit
+  Util:
+    - spark
+    - Multiverse-Core
+  Economy:
+    - EconomyAPI
+    - CMI

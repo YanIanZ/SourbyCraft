@@ -20,12 +20,12 @@ public final class LoaderManager {
     }
 
     public void register(String key, SlimeLoader loader) {
-        loaders.put(key.toLowerCase(), loader);
+        loaders.put(key.toLowerCase(java.util.Locale.ROOT), loader);
         if (defaultLoader == null) defaultLoader = loader;
     }
 
     public SlimeLoader getLoader(String key) {
-        return loaders.getOrDefault(key.toLowerCase(), defaultLoader);
+        return loaders.getOrDefault(key.toLowerCase(java.util.Locale.ROOT), defaultLoader);
     }
 
     public SlimeLoader getDefault() {

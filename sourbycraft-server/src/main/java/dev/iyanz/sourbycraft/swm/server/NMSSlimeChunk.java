@@ -43,12 +43,12 @@ public class NMSSlimeChunk implements SlimeChunk {
 
     @Override
     public int getX() {
-        return chunk.getPos().x;
+        return chunk.getPos().x();
     }
 
     @Override
     public int getZ() {
-        return chunk.getPos().z;
+        return chunk.getPos().z();
     }
 
     @Override
@@ -85,7 +85,7 @@ public class NMSSlimeChunk implements SlimeChunk {
         CompoundTag heightMaps = new CompoundTag();
         for (Heightmap.Types type : Heightmap.Types.values()) {
             if (!type.keepAfterWorldgen()) continue;
-            Heightmap heightmap = this.chunk.heightmaps[type.ordinal()];
+            Heightmap heightmap = this.chunk.heightmaps.get(type);
             if (heightmap != null) {
                 heightMaps.putLongArray(type.getSerializedName(), heightmap.getRawData());
             }
@@ -106,7 +106,7 @@ public class NMSSlimeChunk implements SlimeChunk {
 
     @Override
     public ListTag getEntities() {
-        NewChunkHolder chunkHolder = ((ChunkSystemServerLevel) chunk.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunk.getPos().x, chunk.getPos().z);
+        NewChunkHolder chunkHolder = ((ChunkSystemServerLevel) chunk.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunk.getPos().x(), chunk.getPos().z());
         if (chunkHolder == null) return new ListTag();
         ChunkEntitySlices slices = chunkHolder.getEntityChunk();
         return getEntities(slices);
@@ -154,11 +154,38 @@ public class NMSSlimeChunk implements SlimeChunk {
 
     @Override
     public CompoundTag getPoiChunkSections() {
-        NewChunkHolder chunkHolder = ((ChunkSystemServerLevel) chunk.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunk.getPos().x, chunk.getPos().z);
+        NewChunkHolder chunkHolder = ((ChunkSystemServerLevel) chunk.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunk.getPos().x(), chunk.getPos().z());
         if (chunkHolder == null) return null;
         PoiChunk poiChunk = chunkHolder.getPoiChunk();
         if (poiChunk == null) return null;
         return SlimeChunkConverter.toSlimeSections(poiChunk);
+    }
+
+    /**
+     * ASP dev/26.2 parity. Used from the patched NewChunkHolder unload path
+     * where the entity slices + POI chunk handles are already in scope; this
+     * avoids the chunk-system lookup race in the no-arg overload.
+     */
+    public CompoundTag getPoiChunkSections(PoiChunk poiChunk) {
+        if (poiChunk == null) return null;
+        return SlimeChunkConverter.toSlimeSections(poiChunk);
+    }
+
+    /**
+     * ASP dev/26.2 parity. Copies the chunk's PersistentDataContainer into the
+     * extra blob under {@code "ChunkBukkitValues"} so per-chunk PDC entries
+     * survive the unload → serialize → reload round-trip. Without this the
+     * Bukkit chunk PDC silently empties on every save.
+     */
+    public void updatePersistentDataContainer() {
+        if (this.chunk == null || this.chunk.persistentDataContainer == null) return;
+        try {
+            CompoundTag pdcTag = this.chunk.persistentDataContainer.toTagCompound();
+            if (pdcTag != null) this.extra.put("ChunkBukkitValues", pdcTag);
+        } catch (Throwable ignored) {
+            // Defensive: PDC serialization can throw on entries with a stale
+            // type registry; drop the entry rather than break the unload path.
+        }
     }
 
     public LevelChunk getChunk() {

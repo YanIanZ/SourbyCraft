@@ -45,7 +45,17 @@ public class v13SlimeWorldReader implements VersionedByteSlimeWorldReader<SlimeW
         in.readFully(compressedExtra);
         byte[] extraRaw = decompress(compressedExtra, uncompressedExtraLen);
 
-        CompoundTag extraData = NbtIo.read(new DataInputStream(new ByteArrayInputStream(extraRaw)));
+        // Backward compatibility: pre-r9 worlds wrote extra data via
+        // NbtIo.writeCompressed (gzip) inside the outer zlib pass. The reader
+        // expected uncompressed NBT and threw "Invalid tag id: 31" because byte 0
+        // of a gzip stream is 0x1F. Detect the gzip magic and dispatch
+        // accordingly; fresh writes from r9 onwards use plain NbtIo.write.
+        CompoundTag extraData;
+        if (extraRaw.length >= 2 && (extraRaw[0] & 0xFF) == 0x1F && (extraRaw[1] & 0xFF) == 0x8B) {
+            extraData = NbtIo.readCompressed(new ByteArrayInputStream(extraRaw), NbtAccounter.unlimitedHeap());
+        } else {
+            extraData = NbtIo.read(new DataInputStream(new ByteArrayInputStream(extraRaw)));
+        }
         SlimePropertyMap resolvedProps = mergeProperties(propertyMap, extraData);
 
         return new SkeletonSlimeWorld(worldName, loader, chunks, extraData, resolvedProps, worldDataVersion, readOnly);

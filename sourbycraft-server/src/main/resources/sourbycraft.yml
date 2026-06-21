@@ -1,0 +1,148 @@
+# SourbyCraft configuration (baseline, bundled in jar resources).
+# Values here are read by patches via SourbyCraftConfig.ymlGet(...).
+
+network:
+  proxy-mode: velocity-modern
+  netty:
+    threads: auto-doubled
+    snd-buf-kb: 64
+    rcv-buf-kb: 64
+    max-packets-per-tick: 100
+  proxy-kick-grace-seconds: 5
+  proxy-kick-fallback: lobby
+
+entity-tracker:
+  mob-range: 32
+  item-range: 16
+  xp-orb-range: 16
+  player-update-interval: 1
+
+branding:
+  motd-suffix: false
+  compact-plugin-list: true
+  compact-plugin-log: true
+  gc-advisor:
+    enabled: true
+
+auto-install:
+  enabled: true
+
+# UniverseSpigot config import — particles category (sub-project 00 Foundation reference impl).
+# All toggles default to false → vanilla Paper behavior preserved.
+# Changes to this file require a server restart; SourbyCraft does not support hot-reload.
+particles:
+  # Disable entity fall particles (UniverseSpigot: particles.disableFallParticles).
+  disableFallParticles: false
+  # Disable entity death particles (UniverseSpigot: particles.disableDeathParticles).
+  disableDeathParticles: false
+  # Disable block-break particles when a block is destroyed (UniverseSpigot: particles.disableBlockBreakParticles).
+  disableBlockBreakParticles: false
+  # Disable potion / status-effect ambient particles (UniverseSpigot: particles.disableEffectParticles).
+  disableEffectParticles: false
+  # Disable water-splash particles when an entity enters water (UniverseSpigot: particles.disableWaterSplashParticles).
+  disableWaterSplashParticles: false
+  # Disable sweep-attack and other 1.21+ combat particles (UniverseSpigot: particles.disableNewCombatParticles).
+  disableNewCombatParticles: false
+
+# UniverseSpigot config import — sounds category (sub-project 01).
+# All toggles default to false → vanilla Paper behavior preserved.
+sounds:
+  # Disable parrot shoulder-perched ambient mimicry (UniverseSpigot: sounds.disableShoulderEntityAmbientSound).
+  disableShoulderEntityAmbientSound: false
+  # Suppress only the piglin anger ambient variant (other piglin ambient sounds unaffected) (UniverseSpigot: sounds.disablePiglinAngerSound).
+  disablePiglinAngerSound: false
+  # Disable entity footstep sounds across step + swim-step variants (UniverseSpigot: sounds.disableFootStepSounds).
+  disableFootStepSounds: false
+  # Disable PLAYER_ATTACK_* sound family from 1.9+ combat (UniverseSpigot: sounds.disableNewCombatSounds).
+  disableNewCombatSounds: false
+  # Disable shield-block impact sound (UniverseSpigot: sounds.disableShieldSounds).
+  disableShieldSounds: false
+  # Disable piston extend / retract sounds (UniverseSpigot: sounds.disablePistonSounds).
+  disablePistonSounds: false
+
+perf:
+  # Skip-rate for entity ticking. 1 = tick every server tick (vanilla);
+  # higher = skip ticks (less smooth movement, lower CPU).
+  # Range 1..20. Default 20 (SourbyCraft historical default).
+  # Operator sourbycraft.yml `entity.tick-rate` bridges into this knob at boot.
+  # P7 SelfTuneController may override at runtime per PerfSensor tier.
+  entity-tick-rate: 20
+  sensor:
+    # Multi-signal load sensor feeding the 5-tier state machine
+    # (GREEN/YELLOW/ORANGE/RED/EMERGENCY). Runs on the main thread every
+    # cadence-ticks ticks. P7 controller will read PerfSensor.currentTier().
+    enabled: true
+    cadence-ticks: 20                # 1s at 20 TPS
+    dwell-samples: 3                 # samples in candidate tier required before escalation
+    recovery-dwell-multiplier: 2.0   # recovery requires dwell-samples * multiplier samples
+    warmup-ticks: 600                # ticks to skip at startup before sampling (30s at 20 TPS) — covers heavy plugin-enable phase on servers running 50+ plugins
+    thresholds:
+      # TPS: lower value escalates worse. yellow=19.5 means TPS<19.5 -> at-least YELLOW.
+      tps:           { yellow: 19.5, orange: 18.0, red: 15.0, emergency: 10.0 }
+      # MSPT / mem / GC: higher value escalates worse.
+      mspt:          { yellow: 30,   orange: 40,   red: 60,   emergency: 100 }
+      mem:           { yellow: 75,   orange: 85,   red: 92,   emergency: 97 }
+      gc-ms-per-min: { yellow: 20,   orange: 50,   red: 100,  emergency: 300 }
+  lag-machine:
+    # P2 lag-machine protection toggles. Each wraps a single NMS call site.
+    # Operator sourbycraft.yml `perf.lag-machine.*` overrides these at boot.
+    # Save-fixes (snowballs, fireworks) ON by default — saved entities of these types
+    # are a known lag-machine vector and the gameplay cost of dropping their NBT save is zero.
+    # Excess-vehicle removal OFF by default — could surprise minecart-art servers.
+    disable-saving-snowballs: true
+    disable-saving-fireworks: true
+    max-projectile-loads-per-tick: 10           # 0 = unlimited
+    max-projectile-loads-per-projectile: 10     # 0 = unlimited
+    remove-excess-minecarts: false
+    excess-minecarts-limit: 10
+    remove-excess-boats: false
+    excess-boats-limit: 10
+  ai:
+    # P3 adaptive AI throttle. Default OFF (every mob ticks AI every server tick).
+    # When throttle-beyond-distance > 0, Mob.aiStep returns early on non-multiple-
+    # of-N ticks for mobs whose nearest player is beyond N blocks. P7
+    # SelfTuneController escalates these on tier transitions:
+    #   ORANGE     distance=64, interval=2
+    #   RED        distance=48, interval=4
+    #   EMERGENCY  distance=32, interval=8
+    throttle-beyond-distance: 0
+    throttle-tick-interval: 4
+
+# SourbyCraft Spark integration. SourbyCraft ships spark-paper at runtime
+# so the SparkProvider singleton is available once the spark plugin loads
+# (during the normal Bukkit enable phase). Setting `spark.enabled: false`
+# short-circuits the SparkBridge so /sparkview never touches the spark
+# API — useful for paranoid setups that pin the spark plugin off.
+spark:
+  enabled: true
+
+antixray:
+  raytrace:
+    # SourbyCraft port of stonar96/RayTraceAntiXray. When enabled the
+    # RayTraceWorker submits per-(player, ore) line-of-sight checks on the
+    # VirtualExecutor pool; results land in a per-player VisibilityCache so
+    # the chunk-packet obfuscator can hide ores that are not currently
+    # visible to the player even though Paper's engine-mode 1 alone would
+    # leak them (cave-exposed ores). Disabled by default; integration with
+    # the chunk-packet send path is operator-wired.
+    enabled: false
+  # Entity-level occlusion (mobs, item drops, holograms via TextDisplay or
+  # custom-named armor stands). When enabled the entity tracker
+  # (ChunkMap.TrackedEntity#updatePlayer NMS patch) calls
+  # EntityVisibilityCheck.isVisibleSync(player, entity) before adding the
+  # player to the tracked set, so entities behind walls stay client-invisible.
+  # Sync line-of-sight check on the tracker tick. Off by default; gameplay
+  # impact: any entity not visible to the player will not appear on their
+  # client until they regain a clear line-of-sight.
+  entity-raytrace:
+    enabled: false
+  # Particle line-of-sight gate. When enabled the per-player
+  # ServerLevel.sendParticles overload drops the packet if the particle
+  # origin is occluded from the receiver's eye. Closes the wallhack
+  # signal that ore-pillar / fire / door-frame particles would otherwise
+  # leak. Off by default; vanilla feel preserved when off.
+  particle-raytrace:
+    enabled: false
+  # Liquid surface obfuscation is delegated to Paper's existing
+  # anticheat.anti-xray.fluid-obscures + replacement-blocks list in
+  # paper-world.yml; SourbyCraft adds no NMS patch for liquids.
