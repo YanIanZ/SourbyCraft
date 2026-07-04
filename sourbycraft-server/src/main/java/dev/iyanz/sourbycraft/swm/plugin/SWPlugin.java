@@ -112,6 +112,7 @@ public class SWPlugin extends JavaPlugin {
         // count + on-death drops/xp multiplication. Off by default; enable via
         // `stacker.enabled: true` in sourbycraft.yml.
         dev.iyanz.sourbycraft.wildstacker.EntityStacker.register(this);
+        dev.iyanz.sourbycraft.antixray.OreReveal.register(this);
 
         worldsToLoad.values().stream()
                 .filter(slimeWorld -> Objects.isNull(Bukkit.getWorld(slimeWorld.getName())))
