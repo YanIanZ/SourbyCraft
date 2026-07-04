@@ -68,6 +68,11 @@ public final class EntityVisibilityCheck {
         if (!ENABLED.get()) return true;
         if (player.level() != entity.level()) return true;
 
+        // SourbyCraft S4 - per-world gate + range (world-settings.<world>.anticheat.anti-xray)
+        final dev.iyanz.sourbycraft.SourbyCraftWorldConfig wc =
+            dev.iyanz.sourbycraft.SourbyCraftWorldConfig.get((net.minecraft.server.level.ServerLevel) player.level());
+        if (!wc.entityObfuscation) return true;
+
         // Exempt entity classes whose gameplay role is broken by occlusion hiding.
         if (entity instanceof Player) return true;
         if (entity instanceof Display) return true;
@@ -80,6 +85,10 @@ public final class EntityVisibilityCheck {
 
         // Near-distance bypass: avoid edge cases on join / dimension / SWM load.
         if (eye.distanceToSqr(centre) <= NEAR_DISTANCE_SQUARED) return true;
+
+        // Beyond the configured range the tracker's own range governs; skip the clip cost.
+        final double range = wc.entityObfuscationRange;
+        if (eye.distanceToSqr(centre) > range * range) return true;
 
         // 3 sample points — centre + top + feet — gives a cheap approximation
         // of full-AABB visibility without 8-corner ray tracing.

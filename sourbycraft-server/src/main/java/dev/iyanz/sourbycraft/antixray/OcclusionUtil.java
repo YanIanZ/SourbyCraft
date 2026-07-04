@@ -31,8 +31,14 @@ public final class OcclusionUtil {
      * accepts a MISS or a hit at the ore's own block.
      */
     public static boolean isVisible(final Level level, final Vec3 from, final Vec3 to) {
+        return isVisible(level, from, to, false);
+    }
+
+    /** @param fluidObscures when true the ray also collides with fluids (water hides ores). */
+    public static boolean isVisible(final Level level, final Vec3 from, final Vec3 to, final boolean fluidObscures) {
         if (level == null) return false;
-        ClipContext ctx = new ClipContext(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE,
+        ClipContext ctx = new ClipContext(from, to, ClipContext.Block.COLLIDER,
+            fluidObscures ? ClipContext.Fluid.ANY : ClipContext.Fluid.NONE,
             (net.minecraft.world.entity.Entity) null);
         HitResult hit = level.clip(ctx);
         return hit == null || hit.getType() == HitResult.Type.MISS;

@@ -20,6 +20,16 @@ public class SourbyCraftWorldConfig {
         this.init();
     }
 
+    // SourbyCraft S4 - lazy per-world holder. Main-thread call sites only
+    // (chunk send, entity tracker, scheduler); ConcurrentHashMap is defensive.
+    private static final java.util.concurrent.ConcurrentHashMap<String, SourbyCraftWorldConfig> BY_WORLD =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static SourbyCraftWorldConfig get(net.minecraft.server.level.ServerLevel level) {
+        org.bukkit.World w = level.getWorld();
+        return BY_WORLD.computeIfAbsent(w.getName(), n -> new SourbyCraftWorldConfig(n, w.getEnvironment()));
+    }
+
     public void init() {
         log("-------- World Settings For [" + worldName + "] --------");
         SourbyCraftConfig.readConfig(SourbyCraftWorldConfig.class, this);

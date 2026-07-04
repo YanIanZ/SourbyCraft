@@ -238,6 +238,10 @@ public class SourbyCraftConfig {
     // SourbyCraft end
     // SourbyCraft start - antixray
     public static boolean fluidObscures = true;
+    public static int raytraceIntervalTicks = 10;
+    public static int raytraceDistance = 48;
+    public static int raytraceMaxChecksPerCycle = 192;
+    public static int raytraceMaxPendingPerPlayer = 8192;
     // SourbyCraft end
     // SourbyCraft start - disable vanilla commands
     public static boolean disableCommunicationCommands = false;
@@ -321,6 +325,10 @@ public class SourbyCraftConfig {
                 getBoolean("antixray.entity-raytrace.enabled", false));
             dev.iyanz.sourbycraft.antixray.ParticleVisibilityCheck.ENABLED.set(
                 getBoolean("antixray.particle-raytrace.enabled", false));
+            raytraceIntervalTicks = Math.max(1, getInt("antixray.raytrace.interval-ticks", raytraceIntervalTicks));
+            raytraceDistance = Math.max(8, Math.min(128, getInt("antixray.raytrace.distance", raytraceDistance)));
+            raytraceMaxChecksPerCycle = Math.max(16, Math.min(2048, getInt("antixray.raytrace.max-checks-per-cycle", raytraceMaxChecksPerCycle)));
+            raytraceMaxPendingPerPlayer = Math.max(512, Math.min(65536, getInt("antixray.raytrace.max-pending-per-player", raytraceMaxPendingPerPlayer)));
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("RayTrace antixray toggle bridge failed", t);
         }
