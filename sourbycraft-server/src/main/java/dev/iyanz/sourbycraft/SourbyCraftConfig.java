@@ -210,6 +210,8 @@ public class SourbyCraftConfig {
     public static double stackerRadius = 10.0;
     public static int stackerMaxStack = 100;
     public static java.util.List<String> stackerBlacklist = java.util.List.of("PLAYER", "ARMOR_STAND", "ENDER_DRAGON", "WITHER");
+    public static boolean stackerHologram = true;
+    public static boolean stackerLosCheck = true;
     public static boolean swmAutoInstall = true;       // SourbyCraft v9.22 — default ON
     public static boolean swmAutoUpdate = true;        // SourbyCraft v9.22 — check GitHub for updates on startup
     public static String swmLoader = "file";
@@ -364,9 +366,23 @@ public class SourbyCraftConfig {
         swmEnabled = getBoolean("swm.enabled", swmEnabled);
         swmVersion = getString("swm.version", swmVersion);
         // Entity stacker config (re-port era v10+)
+        // S3: legacy performance.wildstacker.* keys (pre-26.1.2 operator files) seed the
+        // canonical stacker.* keys when those are absent. Explicit stacker.* always wins.
+        // Legacy keys stay in the file as documented aliases — never deleted.
+        if (!config.isSet("stacker.enabled") && config.getBoolean("performance.wildstacker.enabled", false)) {
+            config.set("stacker.enabled", true);
+        }
+        if (!config.isSet("stacker.hologram") && config.isSet("performance.wildstacker.hologram")) {
+            config.set("stacker.hologram", config.getBoolean("performance.wildstacker.hologram", true));
+        }
+        if (!config.isSet("stacker.los-check") && config.isSet("performance.wildstacker.los-check")) {
+            config.set("stacker.los-check", config.getBoolean("performance.wildstacker.los-check", true));
+        }
         stackerEnabled = getBoolean("stacker.enabled", stackerEnabled);
         stackerRadius = getDouble("stacker.radius", stackerRadius);
         stackerMaxStack = getInt("stacker.max-stack", stackerMaxStack);
+        stackerHologram = getBoolean("stacker.hologram", stackerHologram);
+        stackerLosCheck = getBoolean("stacker.los-check", stackerLosCheck);
         try {
             java.util.List<?> raw = config.getList("stacker.blacklist");
             if (raw == null) {

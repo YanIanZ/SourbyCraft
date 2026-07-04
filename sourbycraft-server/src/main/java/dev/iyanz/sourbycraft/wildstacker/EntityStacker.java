@@ -46,6 +46,9 @@ public final class EntityStacker implements Listener {
     private static volatile boolean ENABLED = false;
     private static volatile double RADIUS = 10.0;
     private static volatile int MAX_STACK_MULTIPLIER = 100;
+    private static volatile boolean HOLOGRAM = true;
+    private static volatile boolean LOS_CHECK = true;
+    private static volatile java.util.Set<org.bukkit.Material> BLACKLIST = java.util.Set.of();
     private static volatile Plugin OWNER;
     private static NamespacedKey HOLOGRAM_KEY;
     private static final java.util.concurrent.atomic.AtomicInteger DEBUG_COUNTER = new java.util.concurrent.atomic.AtomicInteger();
@@ -59,7 +62,7 @@ public final class EntityStacker implements Listener {
         Bukkit.getPluginManager().registerEvents(new EntityStacker(), plugin);
         plugin.getLogger().info("[stacker] item stacker " + (ENABLED ? "ENABLED" : "disabled")
                 + " (stacker.enabled=" + ENABLED + " radius=" + RADIUS
-                + " maxStackMultiplier=" + MAX_STACK_MULTIPLIER + ")");
+                + " maxStackMultiplier=" + MAX_STACK_MULTIPLIER + " hologram=" + HOLOGRAM + " losCheck=" + LOS_CHECK + " blacklist=" + BLACKLIST.size() + ")");
 
         // WildStacker parity: periodic merge sweep over loaded items.
         // ItemSpawnEvent only catches the *spawning* item, but two existing
@@ -89,6 +92,7 @@ public final class EntityStacker implements Listener {
                     if (consumed.contains(a) || a.isDead()) continue;
                     ItemStack sa = a.getItemStack();
                     if (sa == null || sa.getType().isAir()) continue;
+                    if (BLACKLIST.contains(sa.getType())) continue;
                     int capA = sa.getMaxStackSize() * MAX_STACK_MULTIPLIER;
                     if (capA <= 0) capA = Integer.MAX_VALUE;
                     Location la = a.getLocation();
@@ -100,7 +104,7 @@ public final class EntityStacker implements Listener {
                         if (sb == null || !sb.isSimilar(sa)) continue;
                         Location lb = b.getLocation();
                         if (la.distanceSquared(lb) > RADIUS * RADIUS) continue;
-                        if (!hasLineOfSight(la, lb)) continue;
+                        if (LOS_CHECK && !hasLineOfSight(la, lb)) continue;
                         int sum = sa.getAmount() + sb.getAmount();
                         if (sum > capA) continue;
                         sa.setAmount(sum);
@@ -151,6 +155,7 @@ public final class EntityStacker implements Listener {
     }
 
     private static void updateHologram(Item item) {
+        if (!HOLOGRAM) { removeHologram(item); return; }
         if (OWNER == null || HOLOGRAM_KEY == null) return;
         ItemStack stack = item.getItemStack();
         if (stack == null || stack.getAmount() <= 1) {
@@ -200,6 +205,17 @@ public final class EntityStacker implements Listener {
         ENABLED = SourbyCraftConfig.stackerEnabled;
         RADIUS = Math.max(0.5, SourbyCraftConfig.stackerRadius);
         MAX_STACK_MULTIPLIER = Math.max(1, SourbyCraftConfig.stackerMaxStack);
+        HOLOGRAM = SourbyCraftConfig.stackerHologram;
+        LOS_CHECK = SourbyCraftConfig.stackerLosCheck;
+        // Blacklist semantic: item materials excluded from stacking. Legacy
+        // EntityType names (PLAYER, WITHER, ...) don't resolve to materials
+        // and are ignored harmlessly.
+        java.util.Set<org.bukkit.Material> parsed = new java.util.HashSet<>();
+        for (String name : SourbyCraftConfig.stackerBlacklist) {
+            org.bukkit.Material m = org.bukkit.Material.matchMaterial(name);
+            if (m != null) parsed.add(m);
+        }
+        BLACKLIST = java.util.Set.copyOf(parsed);
     }
 
     // Diagnostic-only MONITOR listener — fires regardless of cancel state.
@@ -225,6 +241,7 @@ public final class EntityStacker implements Listener {
         Item newItem = e.getEntity();
         ItemStack newStack = newItem.getItemStack();
         if (newStack == null || newStack.getType().isAir()) return;
+        if (BLACKLIST.contains(newStack.getType())) return;
         int cap = newStack.getMaxStackSize() * MAX_STACK_MULTIPLIER;
         if (cap <= 0) cap = Integer.MAX_VALUE;
 
@@ -242,7 +259,7 @@ public final class EntityStacker implements Listener {
             if (sum > cap) continue;
             // LOS: solid block between drops blocks merge — players can't
             // siphon adjacent farms by tossing items at walls.
-            if (!hasLineOfSight(loc, nearItem.getLocation())) continue;
+            if (LOS_CHECK && !hasLineOfSight(loc, nearItem.getLocation())) continue;
             near.setAmount(sum);
             nearItem.setItemStack(near);
             // Cancel new spawn FIRST so client doesn't see the new entity.
@@ -283,6 +300,8 @@ public final class EntityStacker implements Listener {
         // ensure the merged amount respects our extended cap. Then update
         // hologram on the surviving target entity.
         ItemStack merged = e.getTarget().getItemStack();
+        if (merged == null) return;
+        if (BLACKLIST.contains(merged.getType())) return;
         int cap = merged.getMaxStackSize() * MAX_STACK_MULTIPLIER;
         if (cap > 0 && merged.getAmount() > cap) {
             merged.setAmount(cap);
