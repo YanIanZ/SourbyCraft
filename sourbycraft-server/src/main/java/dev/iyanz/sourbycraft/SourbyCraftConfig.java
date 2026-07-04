@@ -491,7 +491,6 @@ public class SourbyCraftConfig {
                 + "(removed for the levitation bug; keys reserved for pool v2). No pooling occurs.");
         }
         itemMaxPerChunk = getInt("item.max-per-chunk", itemMaxPerChunk);
-        noDurabilityExcept = getBoolean("item.no-durability-except", noDurabilityExcept);
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
         mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
