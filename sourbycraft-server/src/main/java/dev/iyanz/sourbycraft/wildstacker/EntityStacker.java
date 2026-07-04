@@ -93,7 +93,7 @@ public final class EntityStacker implements Listener {
                     ItemStack sa = a.getItemStack();
                     if (sa == null || sa.getType().isAir()) continue;
                     if (BLACKLIST.contains(sa.getType())) continue;
-                    int capA = sa.getMaxStackSize() * MAX_STACK_MULTIPLIER;
+                    int capA = effectiveCap(sa);
                     if (capA <= 0) capA = Integer.MAX_VALUE;
                     Location la = a.getLocation();
                     for (int j = i + 1; j < items.size(); j++) {
@@ -201,6 +201,15 @@ public final class EntityStacker implements Listener {
         item.getPersistentDataContainer().remove(HOLOGRAM_KEY);
     }
 
+    /** Effective per-entity amount cap: stacker multiplier bounded by item.drop-stack-cap unless unlimited. */
+    private static int effectiveCap(final ItemStack stack) {
+        long cap = (long) stack.getMaxStackSize() * MAX_STACK_MULTIPLIER;
+        if (!SourbyCraftConfig.unlimitedDropStack) {
+            cap = Math.min(cap, Math.max(1, SourbyCraftConfig.dropStackCap));
+        }
+        return (int) Math.min(Integer.MAX_VALUE, cap);
+    }
+
     public static void reload() {
         ENABLED = SourbyCraftConfig.stackerEnabled;
         RADIUS = Math.max(0.5, SourbyCraftConfig.stackerRadius);
@@ -242,7 +251,7 @@ public final class EntityStacker implements Listener {
         ItemStack newStack = newItem.getItemStack();
         if (newStack == null || newStack.getType().isAir()) return;
         if (BLACKLIST.contains(newStack.getType())) return;
-        int cap = newStack.getMaxStackSize() * MAX_STACK_MULTIPLIER;
+        int cap = effectiveCap(newStack);
         if (cap <= 0) cap = Integer.MAX_VALUE;
 
         Location loc = newItem.getLocation();
@@ -302,7 +311,7 @@ public final class EntityStacker implements Listener {
         ItemStack merged = e.getTarget().getItemStack();
         if (merged == null) return;
         if (BLACKLIST.contains(merged.getType())) return;
-        int cap = merged.getMaxStackSize() * MAX_STACK_MULTIPLIER;
+        int cap = effectiveCap(merged);
         if (cap > 0 && merged.getAmount() > cap) {
             merged.setAmount(cap);
             e.getTarget().setItemStack(merged);
