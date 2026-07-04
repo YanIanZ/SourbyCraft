@@ -68,16 +68,17 @@ public final class EntityVisibilityCheck {
         if (!ENABLED.get()) return true;
         if (player.level() != entity.level()) return true;
 
-        // SourbyCraft S4 - per-world gate + range (world-settings.<world>.anticheat.anti-xray)
-        final dev.iyanz.sourbycraft.SourbyCraftWorldConfig wc =
-            dev.iyanz.sourbycraft.SourbyCraftWorldConfig.get((net.minecraft.server.level.ServerLevel) player.level());
-        if (!wc.entityObfuscation) return true;
-
         // Exempt entity classes whose gameplay role is broken by occlusion hiding.
+        // Cheap instanceof checks stay ahead of the world-config map lookup.
         if (entity instanceof Player) return true;
         if (entity instanceof Display) return true;
         if (entity instanceof ArmorStand) return true;
         if (entity instanceof HangingEntity) return true;
+
+        // SourbyCraft S4 - per-world gate + range (world-settings.<world>.anticheat.anti-xray)
+        final dev.iyanz.sourbycraft.SourbyCraftWorldConfig wc =
+            dev.iyanz.sourbycraft.SourbyCraftWorldConfig.get((net.minecraft.server.level.ServerLevel) player.level());
+        if (!wc.entityObfuscation) return true;
 
         Vec3 eye = player.getEyePosition();
         AABB bb = entity.getBoundingBox();
