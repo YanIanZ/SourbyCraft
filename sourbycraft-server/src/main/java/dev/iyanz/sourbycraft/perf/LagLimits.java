@@ -89,6 +89,12 @@ public final class LagLimits implements Listener {
         if (chunkCount(e.getLocation().getChunk(), Item.class) >= cap) e.setCancelled(true);
     }
 
+    @EventHandler
+    public void onWorldUnload(org.bukkit.event.world.WorldUnloadEvent e) {
+        // High-churn SWM island servers unload worlds constantly — drop the stale count.
+        ARROW_COUNT.remove(e.getWorld().getName());
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onProjectileLaunch(ProjectileLaunchEvent e) {
         int cap = SourbyCraftConfig.maxArrowsPerWorld;

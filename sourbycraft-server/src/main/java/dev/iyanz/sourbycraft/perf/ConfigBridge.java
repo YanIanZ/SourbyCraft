@@ -75,8 +75,11 @@ public final class ConfigBridge implements Listener {
                 applied.append(" redstone=alternate-current");
             }
         } else {
-            paper.misc.redstoneImplementation = io.papermc.paper.configuration.WorldConfiguration.Misc.RedstoneImplementation.VANILLA;
-            applied.append(" redstone=vanilla");
+            // Only step ALTERNATE_CURRENT back down; an explicit EIGENCRAFT choice in paper config is respected.
+            if (paper.misc.redstoneImplementation == io.papermc.paper.configuration.WorldConfiguration.Misc.RedstoneImplementation.ALTERNATE_CURRENT) {
+                paper.misc.redstoneImplementation = io.papermc.paper.configuration.WorldConfiguration.Misc.RedstoneImplementation.VANILLA;
+                applied.append(" redstone=vanilla");
+            }
         }
         if (applied.length() > 0) {
             dev.iyanz.sourbycraft.util.SourbyLogger.info("[bridge] " + world.getName() + ":" + applied);

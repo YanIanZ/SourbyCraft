@@ -72,14 +72,14 @@ index 6a79944b040307acef3d1c66bd0dacaba514c708..60bff5c7d6db02042730155a71f5f65f
                                  Entity entity = source.getEntityOrException();
                                  PlayerTeam team = entity.getTeam();
 diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 1eb0afab932c3828a1f19861994b63b247df0fbb..fb9cad1a74649f78a67d609195a5b960f31b8c3e 100644
+index 1eb0afab932c3828a1f19861994b63b247df0fbb..8818df3b69575dfa94e5c769ec2018225b8efe05 100644
 --- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 +++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 @@ -55,6 +55,7 @@ public abstract class PathNavigation {
      public final PathFinder pathFinder;
      private boolean isStuck;
      private float requiredPathLength = 16.0F;
-+    private int sourbyLastRecompute = Integer.MIN_VALUE;
++    private int sourbyLastRecompute = Integer.MIN_VALUE / 2; // half-min: `tick - last` must never overflow int (MIN_VALUE would wrap negative and jam the gate shut)
  
      public PathNavigation(final Mob mob, final Level level) {
          this.mob = mob;
