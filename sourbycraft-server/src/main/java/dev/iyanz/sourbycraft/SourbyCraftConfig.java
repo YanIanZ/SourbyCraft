@@ -231,7 +231,7 @@ public class SourbyCraftConfig {
     public static boolean redstoneOptimize = true;
     public static int maxEntityPerChunk = 10;
     // SourbyCraft start - lag prevention
-    public static int maxRedstoneUpdatesPerTick = 2000;
+    public static int maxRedstoneUpdatesPerTick = 10_000; // caps the vanilla chained neighbor-update budget (1M); 10k spares legit contraptions, 2000 broke big doors/storage tech
     public static int maxSpecialsPerChunk = 15;
     public static int maxFallingBlockPerChunk = 20;
     public static int maxArrowsPerWorld = 5000;
