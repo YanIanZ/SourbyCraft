@@ -48,28 +48,40 @@ public final class OreReveal implements Listener {
     /** Per-player pending hidden-ore positions (BlockPos.asLong). Main-thread only. */
     private static final Map<UUID, LongOpenHashSet> PENDING = new ConcurrentHashMap<>();
 
-    private static Plugin OWNER;
-
     private OreReveal() {}
 
     public static void register(Plugin plugin) {
-        OWNER = plugin;
         Bukkit.getPluginManager().registerEvents(new OreReveal(), plugin);
         long interval = Math.max(1, SourbyCraftConfig.raytraceIntervalTicks);
         Bukkit.getScheduler().runTaskTimer(plugin, OreReveal::tickCycle, interval, interval);
         plugin.getLogger().info("[antixray] ore reveal " + (RayTraceWorker.ENABLED.get() ? "ENABLED" : "disabled")
             + " (interval=" + interval + "t distance=" + SourbyCraftConfig.raytraceDistance
             + " checks/cycle=" + SourbyCraftConfig.raytraceMaxChecksPerCycle + ")");
+        if (RayTraceWorker.ENABLED.get()) {
+            boolean anyPaperAntiXray = false;
+            for (org.bukkit.World w : Bukkit.getWorlds()) {
+                if (((org.bukkit.craftbukkit.CraftWorld) w).getHandle().paperConfig().anticheat.antiXray.enabled) {
+                    anyPaperAntiXray = true;
+                    break;
+                }
+            }
+            if (!anyPaperAntiXray) {
+                plugin.getLogger().warning("[antixray] raytrace enabled but no world has paper anti-xray enabled — "
+                    + "ore reveal is a complementary layer and stays inert until anticheat.anti-xray.enabled: true "
+                    + "in paper-world-defaults.yml (buried ores would leak anyway without the Paper engine).");
+            }
+        }
     }
 
     /** NMS hook (PlayerChunkSender.sendChunk, main thread, after the chunk packet went out). */
     public static void onChunkSent(final ServerPlayer player, final LevelChunk chunk) {
         if (!RayTraceWorker.ENABLED.get() || player == null || chunk == null) return;
         final ServerLevel level = (ServerLevel) chunk.getLevel();
+        if (!level.chunkPacketBlockController.shouldModify(player, chunk)) return; // respect paper.antixray.bypass
         final SourbyCraftWorldConfig wc = SourbyCraftWorldConfig.get(level);
         final boolean fluidObscures = SourbyCraftConfig.fluidObscures && wc.fluidObscures;
-        final java.util.List<Block> extraHidden = wc.allBlocks
-            ? level.paperConfig().anticheat.antiXray.hiddenBlocks : java.util.List.of();
+        final java.util.Set<Block> extraHidden = wc.allBlocks
+            ? java.util.Set.copyOf(level.paperConfig().anticheat.antiXray.hiddenBlocks) : java.util.Set.of();
 
         final LongOpenHashSet pending = PENDING.computeIfAbsent(player.getUUID(), id -> new LongOpenHashSet());
         final int maxPending = SourbyCraftConfig.raytraceMaxPendingPerPlayer;
@@ -102,20 +114,14 @@ public final class OreReveal implements Listener {
         }
     }
 
-    private static boolean isCandidate(final BlockState state, final java.util.List<Block> extraHidden) {
+    private static boolean isCandidate(final BlockState state, final java.util.Set<Block> extraHidden) {
         if (state.is(BlockTags.COAL_ORES) || state.is(BlockTags.IRON_ORES) || state.is(BlockTags.COPPER_ORES)
             || state.is(BlockTags.GOLD_ORES) || state.is(BlockTags.REDSTONE_ORES) || state.is(BlockTags.EMERALD_ORES)
             || state.is(BlockTags.LAPIS_ORES) || state.is(BlockTags.DIAMOND_ORES)
             || state.is(Blocks.NETHER_QUARTZ_ORE) || state.is(Blocks.ANCIENT_DEBRIS)) {
             return true;
         }
-        if (!extraHidden.isEmpty()) {
-            final Block block = state.getBlock();
-            for (int i = 0; i < extraHidden.size(); i++) {
-                if (extraHidden.get(i) == block) return true;
-            }
-        }
-        return false;
+        return !extraHidden.isEmpty() && extraHidden.contains(state.getBlock());
     }
 
     /** Exposed = any of the 6 neighbours is non-occluding (and, with fluid-obscures, not a fluid). */
