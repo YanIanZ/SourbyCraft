@@ -28,8 +28,9 @@ public class SourbyCraftSecurityConfig {
     // Recipe book limits
     public static int recipeBookMaxPacketSize = 20_480;
 
-    // Creative mode limits
-    public static int creativeMaxItemNbtSize = 2_048;
+    // Creative mode limits. Default 16384: filled shulker boxes / bundles / signed books encode at 2-10KB;
+    // lower values silently revert creative container cloning.
+    public static int creativeMaxItemNbtSize = 16_384;
 
     // Packet guard limits (packet-guard: section)
     public static int bookEditMaxTotalChars = 65_536;
@@ -129,8 +130,9 @@ public class SourbyCraftSecurityConfig {
         creativeMaxItemNbtSize = Math.max(256, creativeMaxItemNbtSize);
         bookEditMaxTotalChars = Math.max(1_024, bookEditMaxTotalChars);
         customPayloadMaxBytes = Math.max(1_024, Math.min(32_767, customPayloadMaxBytes));
-        containerClickMaxPerTick = Math.max(4, containerClickMaxPerTick);
-        recipeBookMaxPerTick = Math.max(4, recipeBookMaxPerTick);
+        // floor 10: quickcraft single-slot path re-enters handleContainerClick (double-count); lower floors would throttle legit drag-crafting
+        containerClickMaxPerTick = Math.max(10, containerClickMaxPerTick);
+        recipeBookMaxPerTick = Math.max(10, recipeBookMaxPerTick);
     }
 
     public static boolean isLoaded() {
@@ -154,8 +156,10 @@ public class SourbyCraftSecurityConfig {
             w.println("  anvil:");
             w.println("    max-item-name-length: " + anvilMaxItemNameLength);
             w.println("  recipe-book:");
+            w.println("    # reserved: 26.x recipe packets are fixed-size at the codec level; guards future protocol drift only");
             w.println("    max-packet-size: " + recipeBookMaxPacketSize);
             w.println("  creative-item:");
+            w.println("    # encoded item size cap for creative slot packets; values below ~16384 silently block cloning filled shulkers/bundles");
             w.println("    max-nbt-size: " + creativeMaxItemNbtSize);
             w.println("packet-guard:");
             w.println("  book-edit:");
