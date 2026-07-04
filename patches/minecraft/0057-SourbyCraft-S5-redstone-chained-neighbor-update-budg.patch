@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 5 Jul 2026 05:44:50 +0700
+Subject: [PATCH] SourbyCraft S5: redstone chained-neighbor-update budget from
+ entity.max-redstone-updates-per-tick
+
+
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index 1ce2889f191f23ac46159a145e2cd510e736b12a..4ed9e558b12b4bd36015a0564913021b2dbd6659 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -871,7 +871,11 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         this.thread = Thread.currentThread();
+         this.biomeManager = new BiomeManager(this, biomeZoomSeed);
+         this.isDebug = isDebug;
+-        this.neighborUpdater = new CollectingNeighborUpdater(this, maxChainedNeighborUpdates);
++        // SourbyCraft S5 - entity.max-redstone-updates-per-tick caps the chained neighbor-update budget
++        this.neighborUpdater = new CollectingNeighborUpdater(this,
++            dev.iyanz.sourbycraft.SourbyCraftConfig.maxRedstoneUpdatesPerTick > 0
++                ? Math.min(maxChainedNeighborUpdates, dev.iyanz.sourbycraft.SourbyCraftConfig.maxRedstoneUpdatesPerTick)
++                : maxChainedNeighborUpdates);
+         this.registryAccess = registryAccess;
+         this.palettedContainerFactory = PalettedContainerFactory.create(registryAccess);
+         this.damageSources = new DamageSources(registryAccess);
