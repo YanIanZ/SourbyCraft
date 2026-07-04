@@ -113,6 +113,9 @@ public class SWPlugin extends JavaPlugin {
         // `stacker.enabled: true` in sourbycraft.yml.
         dev.iyanz.sourbycraft.wildstacker.EntityStacker.register(this);
         dev.iyanz.sourbycraft.antixray.OreReveal.register(this);
+        dev.iyanz.sourbycraft.perf.ConfigBridge.register(this);
+        dev.iyanz.sourbycraft.perf.LagLimits.register(this);
+        dev.iyanz.sourbycraft.perf.OwnerProtection.register(this);
 
         worldsToLoad.values().stream()
                 .filter(slimeWorld -> Objects.isNull(Bukkit.getWorld(slimeWorld.getName())))

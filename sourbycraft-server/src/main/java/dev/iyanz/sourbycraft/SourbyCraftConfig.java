@@ -486,6 +486,10 @@ public class SourbyCraftConfig {
         itemPoolSize = getInt("item.pool-size", itemPoolSize);
         itemPoolMaxGrowth = getInt("item.pool-max-growth", itemPoolMaxGrowth);
         itemPoolShrinkThreshold = (float) getDouble("item.pool-shrink-threshold", itemPoolShrinkThreshold);
+        if (itemPoolEnabled) {
+            Bukkit.getLogger().warning("[SourbyCraft] item.pool-enabled: true but the ItemEntityPool engine is offline "
+                + "(removed for the levitation bug; keys reserved for pool v2). No pooling occurs.");
+        }
         itemMaxPerChunk = getInt("item.max-per-chunk", itemMaxPerChunk);
         noDurabilityExcept = getBoolean("item.no-durability-except", noDurabilityExcept);
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
