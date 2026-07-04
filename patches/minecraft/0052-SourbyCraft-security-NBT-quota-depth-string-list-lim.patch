@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 4 Jul 2026 17:43:12 +0700
+Subject: [PATCH] SourbyCraft security: NBT quota/depth/string/list limits from
+ sourbycraft-security.yml
+
+
+diff --git a/net/minecraft/nbt/ListTag.java b/net/minecraft/nbt/ListTag.java
+index a97b6e85682bdcf6cc613c72c160a682f885fa9f..a476178b2741a4b6bd38601b9dc4af6d31165b0a 100644
+--- a/net/minecraft/nbt/ListTag.java
++++ b/net/minecraft/nbt/ListTag.java
+@@ -37,6 +37,7 @@ public final class ListTag extends AbstractList<Tag> implements CollectionTag {
+             }
+ 
+             accounter.accountBytes(4L, count);
++            accounter.checkListSize(count); // SourbyCraft - list size limit
+             TagType<?> type = TagTypes.getType(typeId);
+             ListTag list = new ListTag(new ArrayList<>(count));
+ 
+@@ -66,10 +67,12 @@ public final class ListTag extends AbstractList<Tag> implements CollectionTag {
+                 case HALT:
+                     return StreamTagVisitor.ValueResult.HALT;
+                 case BREAK:
++                    accounter.checkListSize(count); // SourbyCraft - list size limit (skip path)
+                     elementType.skip(input, count, accounter);
+                     return output.visitContainerEnd();
+                 default:
+                     accounter.accountBytes(4L, count);
++                    accounter.checkListSize(count); // SourbyCraft - list size limit
+                     int i = 0;
+ 
+                     while (true) {
+diff --git a/net/minecraft/nbt/NbtAccounter.java b/net/minecraft/nbt/NbtAccounter.java
+index 47628e375ae9e1004a74f3e19247139973c7e4cb..11fe502f5888501ff15a960bf075a9fe62bce678 100644
+--- a/net/minecraft/nbt/NbtAccounter.java
++++ b/net/minecraft/nbt/NbtAccounter.java
+@@ -11,17 +11,31 @@ public class NbtAccounter {
+     private final int maxDepth;
+     private int depth;
+ 
++    // SourbyCraft start - content-limit flag: string/list caps apply only to network-default reads
++    private final boolean contentLimits;
++
+     public NbtAccounter(final long quota, final int maxDepth) {
++        this(quota, maxDepth, false);
++    }
++
++    public NbtAccounter(final long quota, final int maxDepth, final boolean contentLimits) {
+         this.quota = quota;
+         this.maxDepth = maxDepth;
++        this.contentLimits = contentLimits;
+     }
++    // SourbyCraft end
+ 
+     public static NbtAccounter create(final long quota) {
+-        return new NbtAccounter(quota, MAX_STACK_DEPTH);
++        return new NbtAccounter(quota, Math.min(MAX_STACK_DEPTH, dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.nbtMaxDepth)); // SourbyCraft - config depth
+     }
+ 
+     public static NbtAccounter defaultQuota() {
+-        return new NbtAccounter(DEFAULT_NBT_QUOTA, MAX_STACK_DEPTH);
++        // SourbyCraft start - network default quota/depth from sourbycraft-security.yml, with content limits
++        return new NbtAccounter(
++            dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.nbtMaxBytes,
++            Math.min(MAX_STACK_DEPTH, dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.nbtMaxDepth),
++            true);
++        // SourbyCraft end
+     }
+ 
+     public static NbtAccounter uncompressedQuota() {
+@@ -76,6 +90,20 @@ public class NbtAccounter {
+         this.depth--;
+     }
+ 
++    // SourbyCraft start - string/list content limits (network reads only)
++    public void checkStringLength(final int length) {
++        if (this.contentLimits && length > dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.nbtMaxStringLength) {
++            throw new NbtAccounterException("NBT string too long: " + length + " > " + dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.nbtMaxStringLength);
++        }
++    }
++
++    public void checkListSize(final long count) {
++        if (this.contentLimits && count > dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.nbtMaxListSize) {
++            throw new NbtAccounterException("NBT list too large: " + count + " > " + dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.nbtMaxListSize);
++        }
++    }
++    // SourbyCraft end
++
+     @VisibleForTesting
+     public long getUsage() {
+         return this.usage;
+diff --git a/net/minecraft/nbt/StringTag.java b/net/minecraft/nbt/StringTag.java
+index c4aa87a9ae15e6f169977644e4ccf379e845f32b..cbb487add40a2d94736ecacbc720cd3e337fd83e 100644
+--- a/net/minecraft/nbt/StringTag.java
++++ b/net/minecraft/nbt/StringTag.java
+@@ -21,6 +21,7 @@ public record StringTag(String value) implements PrimitiveTag {
+         private static String readAccounted(final DataInput input, final NbtAccounter accounter) throws IOException {
+             accounter.accountBytes(36L);
+             String data = input.readUTF();
++            accounter.checkStringLength(data.length()); // SourbyCraft - string length limit
+             accounter.accountBytes(2L, data.length());
+             return data;
+         }
+diff --git a/net/minecraft/util/filefix/FileFixerUpper.java b/net/minecraft/util/filefix/FileFixerUpper.java
+index fba7e79da5ebe85b507af8ac1e8432284183fc32..1021eb4f1f99545592ffe1023c38f658139b3aee 100644
+--- a/net/minecraft/util/filefix/FileFixerUpper.java
++++ b/net/minecraft/util/filefix/FileFixerUpper.java
+@@ -239,7 +239,7 @@ public class FileFixerUpper {
+ 
+     private void writeUpdatedLevelData(final Path worldFolder, final int toVersion) throws IOException {
+         Path levelDatPath = worldFolder.resolve(LevelResource.LEVEL_DATA_FILE.id());
+-        CompoundTag unfixedLevelDat = NbtIo.readCompressed(levelDatPath, NbtAccounter.defaultQuota());
++        CompoundTag unfixedLevelDat = NbtIo.readCompressed(levelDatPath, NbtAccounter.create(NbtAccounter.DEFAULT_NBT_QUOTA)); // SourbyCraft - disk read: vanilla 2MB quota, no network content limits
+         CompoundTag unfixedDataTag = unfixedLevelDat.getCompoundOrEmpty("Data");
+         int dataVersion = NbtUtils.getDataVersion(unfixedDataTag);
+         Dynamic<?> fixed = DataFixTypes.LEVEL.update(this.dataFixer.fixer(), new Dynamic<>(NbtOps.INSTANCE, unfixedDataTag), dataVersion, toVersion);
