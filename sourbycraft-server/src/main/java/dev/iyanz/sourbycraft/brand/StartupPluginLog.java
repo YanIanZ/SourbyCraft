@@ -20,8 +20,12 @@ public final class StartupPluginLog {
      * Bukkit's POSTWORLD plugin-enable phase completes.
      */
     public static void printSummary(long bootStartNanos) {
+        // S5: branding.compact-plugin-list is an alias-OR-input for branding.compact-plugin-log.
+        // Both are baked-only keys; either being true enables the compact summary.
         boolean enabled = Boolean.TRUE.equals(
-            dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("branding.compact-plugin-log", Boolean.TRUE));
+            dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("branding.compact-plugin-log", Boolean.TRUE))
+            || Boolean.TRUE.equals(
+            dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet("branding.compact-plugin-list", Boolean.TRUE));
         if (!enabled) return;
 
         PluginCategoryMap cats = PluginCategoryMap.loadDefault();

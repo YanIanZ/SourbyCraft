@@ -340,6 +340,18 @@ public class SourbyCraftConfig {
         virtualThreads = getBoolean("performance.virtual-threads", virtualThreads);
         structuredConcurrency = getBoolean("performance.structured-concurrency", structuredConcurrency);
         maxPlatformThreads = getInt("performance.max-platform-threads", maxPlatformThreads);
+        // SourbyCraft S5: set max.bg.threads system property for Util's background executor pool.
+        // Property name confirmed as "max.bg.threads" (net.minecraft.util.Util:98 MAX_THREADS_SYSTEM_PROPERTY).
+        // NOTE: Util.BACKGROUND_EXECUTOR is a static field created at Util class-load time (before
+        // SourbyCraftConfig.init() runs), so this property influences only subsequent EXPLICIT
+        // calls to Util.makeExecutor if any; the main background pool is already built. Still set it
+        // for completeness and forward compat (sub-pools, tool reloads).
+        if (maxPlatformThreads != 4 && System.getProperty("max.bg.threads") == null) {
+            System.setProperty("max.bg.threads", String.valueOf(maxPlatformThreads));
+            dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                "[SourbyCraft] set max.bg.threads=" + maxPlatformThreads
+                + " from performance.max-platform-threads (note: Util.BACKGROUND_EXECUTOR already created)");
+        }
 
         skipEmptySections = getBoolean("memory.skip-empty-sections", skipEmptySections);
         poolEntityData = getBoolean("memory.pool-entity-data", poolEntityData);
@@ -401,6 +413,11 @@ public class SourbyCraftConfig {
                 stackerBlacklist = parsed;
             }
         } catch (Throwable ignored) {}
+        // SourbyCraft S5: auto-install.enabled (baked yml) seeds swm.auto-install when operator key absent.
+        // Follows the S3 wildstacker alias-seed pattern: explicit swm.auto-install always wins.
+        if (!config.isSet("swm.auto-install")) {
+            config.set("swm.auto-install", ymlBool("auto-install.enabled", true));
+        }
         swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
         swmAutoUpdate = getBoolean("swm.auto-update", swmAutoUpdate);
         swmFileDir = getString("swm.file-dir", swmFileDir);
@@ -444,6 +461,22 @@ public class SourbyCraftConfig {
         autoThrottleView = getBoolean("network.auto-throttle-view", autoThrottleView);
         minViewDistance = getInt("network.min-view-distance", minViewDistance);
         compressionLevel = getInt("network.compression-level", compressionLevel);
+        // SourbyCraft S5: clamp and bridge compression level to Paper's live engine
+        compressionLevel = Math.max(0, Math.min(9, compressionLevel));
+        if (compressionLevel != 4) {
+            try {
+                io.papermc.paper.configuration.GlobalConfiguration.get().misc.compressionLevel =
+                    new io.papermc.paper.configuration.type.number.IntOr.Default(
+                        java.util.OptionalInt.of(compressionLevel));
+                dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                    "[SourbyCraft] network.compression-level=" + compressionLevel
+                    + " bridged to Paper GlobalConfiguration.misc.compressionLevel");
+            } catch (Throwable t) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn(
+                    "[SourbyCraft] compression bridge failed (GlobalConfiguration not ready?): "
+                    + t.getMessage());
+            }
+        }
         entityTickRateLimit = getBoolean("entity.tick-rate-limit", entityTickRateLimit);
         dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.set(
             getInt("entity.tick-rate", dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get())
@@ -455,6 +488,8 @@ public class SourbyCraftConfig {
         maxSpecialsPerChunk = getInt("entity.max-specials-per-chunk", maxSpecialsPerChunk);
         maxFallingBlockPerChunk = getInt("entity.max-falling-block-per-chunk", maxFallingBlockPerChunk);
         maxArrowsPerWorld = getInt("entity.max-arrows-per-world", maxArrowsPerWorld);
+        // SourbyCraft S5: field existed but yml read was missing (survey confirmed)
+        maxRedstoneUpdatesPerTick = getInt("entity.max-redstone-updates-per-tick", maxRedstoneUpdatesPerTick);
         // SourbyCraft end
         // SourbyCraft start - antixray
         fluidObscures = getBoolean("antixray.fluid-obscures", fluidObscures);
@@ -567,6 +602,13 @@ public class SourbyCraftConfig {
         dev.iyanz.sourbycraft.perf.knob.Knobs.logLoaded();
 
         dev.iyanz.sourbycraft.util.VirtualExecutor.init();
+
+        // SourbyCraft S5: superseded-keys audit — one INFO line + per-key WARN when non-default
+        try {
+            dev.iyanz.sourbycraft.perf.SupersededKeys.report(config);
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("SupersededKeys.report failed", t);
+        }
 
         // SourbyCraft - final save: readConfig() saves after its reflective field walk but every
         // post-readConfig getBoolean/getInt/getString call (antixray, particle, perf-sensor bridge,

@@ -117,6 +117,21 @@ public class SWPlugin extends JavaPlugin {
         dev.iyanz.sourbycraft.perf.LagLimits.register(this);
         dev.iyanz.sourbycraft.perf.OwnerProtection.register(this);
 
+        // SourbyCraft S5: ViewThrottle engine (auto-throttle-view gating inside register)
+        dev.iyanz.sourbycraft.perf.ViewThrottle.register(this);
+
+        // SourbyCraft S5: motd-suffix — append " | SourbyCraft" (gray) when baked key is true
+        if (dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("branding.motd-suffix", false)) {
+            Bukkit.getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+                @org.bukkit.event.EventHandler
+                public void onPing(com.destroystokyo.paper.event.server.PaperServerListPingEvent event) {
+                    event.motd(event.motd().append(
+                        net.kyori.adventure.text.Component.text(" | SourbyCraft",
+                            net.kyori.adventure.text.format.NamedTextColor.GRAY)));
+                }
+            }, this);
+        }
+
         worldsToLoad.values().stream()
                 .filter(slimeWorld -> Objects.isNull(Bukkit.getWorld(slimeWorld.getName())))
                 .forEach(slimeWorld -> {
