@@ -9,14 +9,32 @@ import java.util.List;
  *
  * <p>Inspects the running JVM at startup and warns operators about GC choices and
  * flag combinations known to cause unpredictable server latency.
+ *
+ * <p>Gated by baked key {@code branding.gc-advisor.enabled} (default {@code true}).
+ * When disabled the advisor short-circuits and returns an "acceptable" result with no
+ * warnings so callers need no changes. (S5 binding.)
  */
 public final class GcAdvisor {
 
     public record Result(boolean acceptable, List<String> warnings) {}
 
+    /**
+     * S5: loaded from JAR-baked sourbycraft.yml {@code branding.gc-advisor.enabled}.
+     * Safe to read at class-init time — SourbyCraftConfig.sourbycraftYmlBaseline is a
+     * static field loaded immediately when SourbyCraftConfig class is first referenced.
+     */
+    public static final boolean ENABLED =
+        dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("branding.gc-advisor.enabled", true);
+
     private GcAdvisor() {}
 
     public static Result run() {
+        // S5: gate — if operator disabled gc-advisor in baked yml, skip.
+        if (!ENABLED) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                "[SourbyCraft] gc-advisor disabled via branding.gc-advisor.enabled=false");
+            return new Result(true, List.of());
+        }
         List<String> gcNames = ManagementFactory.getGarbageCollectorMXBeans().stream()
             .map(b -> b.getName()).toList();
         List<String> jvmArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
