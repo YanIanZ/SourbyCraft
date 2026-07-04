@@ -13,3 +13,12 @@ crash-prevention:
     max-packet-size: 20480
   creative-item:
     max-nbt-size: 2048
+packet-guard:
+  book-edit:
+    max-total-chars: 65536
+  custom-payload:
+    max-bytes: 8192
+  container-click:
+    max-per-tick: 20
+  recipe-book:
+    max-per-tick: 16
