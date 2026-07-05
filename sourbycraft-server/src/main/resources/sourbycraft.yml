@@ -116,15 +116,17 @@ perf:
     remove-excess-boats: false
     excess-boats-limit: 10
   ai:
-    # P3 adaptive AI throttle. Default OFF (every mob ticks AI every server tick).
-    # When throttle-beyond-distance > 0, Mob.aiStep returns early on non-multiple-
-    # of-N ticks for mobs whose nearest player is beyond N blocks. P7
+    # P3 adaptive AI throttle. When throttle-beyond-distance > 0, Mob.aiStep returns early on
+    # non-multiple-of-N ticks for mobs whose nearest player is beyond N blocks. P7
     # SelfTuneController escalates these on tier transitions:
     #   ORANGE     distance=64, interval=2
     #   RED        distance=48, interval=4
     #   EMERGENCY  distance=32, interval=8
-    throttle-beyond-distance: 0
-    throttle-tick-interval: 4
+    # SourbyCraft 26.2 high-pop default: mild baseline throttle (mobs >80 blocks from any player
+    # tick AI every 2nd tick). Near-zero gameplay impact (far mobs), meaningful CPU headroom at
+    # 100+ players. SelfTune escalates further under load; set distance 0 to disable entirely.
+    throttle-beyond-distance: 80
+    throttle-tick-interval: 2
 
 # SourbyCraft Spark integration. SourbyCraft ships spark-paper at runtime
 # so the SparkProvider singleton is available once the spark plugin loads
@@ -143,7 +145,10 @@ antixray:
     # visible to the player even though Paper's engine-mode 1 alone would
     # leak them (cave-exposed ores). Disabled by default; integration with
     # the chunk-packet send path is operator-wired.
-    enabled: false
+    # SourbyCraft 26.2: ON by default — complements Paper's HIDE engine (which hides ENCLOSED ores
+    # in-packet) by hiding CAVE-EXPOSED ores until the player has real line-of-sight. Together they
+    # make the server resource-pack-proof: no real ore data reaches a client that can't legitimately see it.
+    enabled: true
   # Entity-level occlusion (mobs, item drops, holograms via TextDisplay or
   # custom-named armor stands). When enabled the entity tracker
   # (ChunkMap.TrackedEntity#updatePlayer NMS patch) calls

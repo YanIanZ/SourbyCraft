@@ -102,6 +102,7 @@ public final class EntityStacker implements Listener {
                         if (b == a) continue;
                         ItemStack sb = b.getItemStack();
                         if (sb == null || !sb.isSimilar(sa)) continue;
+                        if (differentOwners(a, b)) continue; // never merge across distinct pickup-owners (anti-siphon)
                         Location lb = b.getLocation();
                         if (la.distanceSquared(lb) > RADIUS * RADIUS) continue;
                         if (LOS_CHECK && !hasLineOfSight(la, lb)) continue;
@@ -132,6 +133,17 @@ public final class EntityStacker implements Listener {
      * Prevents items in adjacent rooms / through walls from collapsing into
      * one stack — that'd let players siphon farms remotely.
      */
+    /**
+     * True when both items are pickup-locked to distinct players (S2 owner-protection).
+     * Merging across owners would let one player siphon another's protected drops.
+     * Unowned (null) items merge freely.
+     */
+    private static boolean differentOwners(Item a, Item b) {
+        UUID oa = a.getOwner();
+        UUID ob = b.getOwner();
+        return oa != null && ob != null && !oa.equals(ob);
+    }
+
     private static boolean hasLineOfSight(Location from, Location to) {
         if (from.getWorld() != to.getWorld()) return false;
         Vector dir = to.toVector().subtract(from.toVector());
@@ -176,7 +188,12 @@ public final class EntityStacker implements Listener {
             Location loc = item.getLocation().clone().add(0, 0.55, 0);
             TextDisplay td = item.getWorld().spawn(loc, TextDisplay.class, ent -> {
                 ent.setBillboard(Billboard.CENTER);
-                ent.setSeeThrough(false);  // hologram hidden behind solid blocks
+                ent.setSeeThrough(false);  // hologram text occluded behind solid blocks (client-side)
+                // Security: Display entities bypass the anti-xray entity-occlusion gate, so setSeeThrough
+                // alone still lets a distant client read stack contents through walls (item-xray). Clamp the
+                // render range so the count is only legible up close (~13 blocks) — stops through-wall
+                // stack-scouting while keeping legit pickup UX. 64 blocks * viewRange = render distance.
+                ent.setViewRange(0.2f);
                 ent.setShadowed(true);
                 ent.setPersistent(false);
                 ent.setInvulnerable(true);
@@ -264,6 +281,10 @@ public final class EntityStacker implements Listener {
             ItemStack near = nearItem.getItemStack();
             if (near == null || near.getType().isAir()) continue;
             if (!near.isSimilar(newStack)) continue;
+            // Security: never merge across distinct pickup-owners (S2 owner-protection). Otherwise a
+            // player could drop an item next to another player's owner-locked drop and have the merged
+            // stack become pickup-able, siphoning the protected items.
+            if (differentOwners(newItem, nearItem)) continue;
             int sum = near.getAmount() + newStack.getAmount();
             if (sum > cap) continue;
             // LOS: solid block between drops blocks merge — players can't
@@ -300,6 +321,13 @@ public final class EntityStacker implements Listener {
                         + " (scanned=" + scanned + " radius=" + RADIUS + ")");
             }
         }
+    }
+
+    // Security gate (runs before the MONITOR observer): block vanilla item-merges across
+    // distinct pickup-owners so owner-protected drops can't be siphoned via a merge.
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onItemMergeSecurity(ItemMergeEvent e) {
+        if (differentOwners(e.getEntity(), e.getTarget())) e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

@@ -6,10 +6,10 @@ Subject: [PATCH] SourbyCraft fast-boot triad: bStats kill-switch +
 
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index bc838edc5edc3b3a91656cc23ff67ea28a707b0c..73b7a92ae743dd6d39b1052b1dd528b365e9fa0c 100644
+index 02e4271f40874086b3f42ac99358610047e4c5e4..3581ef153b1678d39a8cf02dd718c4230934dbc6 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -550,6 +550,86 @@ public final class CraftServer implements Server {
+@@ -546,6 +546,86 @@ public final class CraftServer implements Server {
      }
  
      public void loadPlugins() {
