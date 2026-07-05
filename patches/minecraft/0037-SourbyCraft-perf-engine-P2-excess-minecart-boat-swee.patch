@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Wed, 17 Jun 2026 17:25:00 +0700
+Subject: [PATCH] SourbyCraft perf-engine P2 excess minecart/boat sweeper
+
+Wires the LAG_MACHINE_REMOVE_EXCESS_MINECARTS + _LIMIT and
+LAG_MACHINE_REMOVE_EXCESS_BOATS + _LIMIT knobs that were defined in
+Knobs.java but never read. Every 200 ticks (10s), each vehicle counts
+siblings of its own type in its chunk via getEntitiesOfClass(class,
+AABB). Only the (count - limit) highest-ID (= newest) vehicles get
+culled, so a legit train/fleet of up to `limit` carts/boats is never
+touched and only the post-limit overflow is removed deterministically.
+
+Cheap because:
+  - Fires once every 10s per entity (low amortized cost).
+  - AABB is chunk-sized; getEntitiesOfClass uses the chunk-system
+    entity index, not a full-world scan.
+  - Highest-ID-first ranking is deterministic: every cart in the
+    chunk reaches the same conclusion about which subset is excess.
+
+Blocks the classic minecart/boat hopper-feeder lag-machine pattern
+where thousands of stacked vehicles in one chunk burn ticks on
+collision + movement updates.
+
+diff --git a/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java b/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
+index 3fcd534cee1f605a710ffc43eff4b5106c7dd40c..934cc1a09ccc0af7f0cc4f48982b560af8a1181e 100644
+--- a/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
++++ b/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
+@@ -236,6 +236,37 @@ public abstract class AbstractBoat extends VehicleEntity implements Leashable {
+ 
+     @Override
+     public void tick() {
++        // SourbyCraft start - perf-engine P2 lag-machine: excess boat sweeper.
++        // Only the (count - limit) highest-ID boats (= newest) get culled,
++        // so legit boat fleets up to `limit` are never touched and only the
++        // post-limit overflow gets removed deterministically.
++        if (!this.level().isClientSide()
++            && this.tickCount > 0
++            && this.tickCount % 200 == 0
++            && dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.get()) {
++            int limit = dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.get();
++            if (limit > 0) {
++                net.minecraft.world.level.ChunkPos cp = this.chunkPosition();
++                net.minecraft.world.phys.AABB chunkBox = new net.minecraft.world.phys.AABB(
++                    cp.getMinBlockX(), this.level().getMinY(), cp.getMinBlockZ(),
++                    cp.getMaxBlockX() + 1, this.level().getMaxY() + 1, cp.getMaxBlockZ() + 1);
++                java.util.List<AbstractBoat> siblings = this.level().getEntitiesOfClass(AbstractBoat.class, chunkBox, e -> true);
++                if (siblings.size() > limit) {
++                    int myId = this.getId();
++                    int rank = 0;
++                    for (AbstractBoat other : siblings) {
++                        if (other.getId() > myId) {
++                            rank++;
++                        }
++                    }
++                    if (rank < siblings.size() - limit) {
++                        this.discard();
++                        return;
++                    }
++                }
++            }
++        }
++        // SourbyCraft end - perf-engine P2 lag-machine
+         this.oldStatus = this.status;
+         this.status = this.getStatus();
+         if (this.status != AbstractBoat.Status.UNDER_WATER && this.status != AbstractBoat.Status.UNDER_FLOWING_WATER) {
+diff --git a/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java b/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
+index 5ad77636d0681d1f0341cff4482ba6ad52f3583b..fbb49322621ed0889cb747bcd17cb5dca8679b8a 100644
+--- a/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
++++ b/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
+@@ -289,6 +289,37 @@ public abstract class AbstractMinecart extends VehicleEntity {
+ 
+     @Override
+     public void tick() {
++        // SourbyCraft start - perf-engine P2 lag-machine: excess minecart sweeper.
++        // Only the (count - limit) highest-ID minecarts (= newest) get culled,
++        // so a legit train of <=limit carts is never touched and only the
++        // post-limit overflow gets removed deterministically.
++        if (!this.level().isClientSide()
++            && this.tickCount > 0
++            && this.tickCount % 200 == 0
++            && dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_REMOVE_EXCESS_MINECARTS.get()) {
++            int limit = dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.get();
++            if (limit > 0) {
++                net.minecraft.world.level.ChunkPos cp = this.chunkPosition();
++                net.minecraft.world.phys.AABB chunkBox = new net.minecraft.world.phys.AABB(
++                    cp.getMinBlockX(), this.level().getMinY(), cp.getMinBlockZ(),
++                    cp.getMaxBlockX() + 1, this.level().getMaxY() + 1, cp.getMaxBlockZ() + 1);
++                java.util.List<AbstractMinecart> siblings = this.level().getEntitiesOfClass(AbstractMinecart.class, chunkBox, e -> true);
++                if (siblings.size() > limit) {
++                    int myId = this.getId();
++                    int rank = 0;
++                    for (AbstractMinecart other : siblings) {
++                        if (other.getId() > myId) {
++                            rank++;
++                        }
++                    }
++                    if (rank < siblings.size() - limit) {
++                        this.discard();
++                        return;
++                    }
++                }
++            }
++        }
++        // SourbyCraft end - perf-engine P2 lag-machine
+         // CraftBukkit start
+         double prevX = this.getX();
+         double prevY = this.getY();

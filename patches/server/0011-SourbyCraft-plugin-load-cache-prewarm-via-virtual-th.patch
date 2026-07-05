@@ -5,10 +5,10 @@ Subject: [PATCH] SourbyCraft plugin load cache prewarm via virtual-thread pool
 
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index ddda2578cfca824aa99fc057ab6a33487b533542..6ee997e44203df7b0f48fb123f7e923d999c6032 100644
+index 368af2e4db09f47ccc9a36f4299a447d66367395..a5b77a049f68db61476585f8a7b156deac0b03de 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -566,6 +566,70 @@ public final class CraftServer implements Server {
+@@ -562,6 +562,70 @@ public final class CraftServer implements Server {
              org.slf4j.LoggerFactory.getLogger("SourbyCraft").warn(
                  "[install] auto-installer error (continuing boot): " + t.getMessage());
          }

@@ -5,10 +5,10 @@ Subject: [PATCH] SourbyCraft: register custom commands - shadowing fix
 
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index ef2aaba9191ae793e0287d83716694ba881010a1..7bbb69c92590461a5ef182a106d8aeca57bf715f 100644
+index cf6e4d50d5b4040b3d07bd33fa4808cfeb1bdeae..1b86f41c35feb14d9e26fb09a5cbf73cba894e7f 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -1039,14 +1039,33 @@ public final class CraftServer implements Server {
+@@ -1034,14 +1034,33 @@ public final class CraftServer implements Server {
          io.papermc.paper.command.PaperCommands.registerCommands(this.console); // Paper
          this.spark.registerCommandBeforePlugins(this); // Paper - spark
          // SourbyCraft start - register commands

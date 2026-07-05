@@ -5,10 +5,10 @@ Subject: [PATCH] SourbyCraft SWM temp-dir cleanup on world unload
 
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index 7bbb69c92590461a5ef182a106d8aeca57bf715f..1514057708d6df2a5177fc3de0ef90788c2fbcd8 100644
+index 1b86f41c35feb14d9e26fb09a5cbf73cba894e7f..6723f19d14c9d5e9b8f0dfb65bde81f66ffd60e3 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -1395,6 +1395,15 @@ public final class CraftServer implements Server {
+@@ -1398,6 +1398,15 @@ public final class CraftServer implements Server {
  
              handle.getChunkSource().close(save);
              io.papermc.paper.FeatureHooks.closeEntityManager(handle, save); // SPIGOT-6722: close entityManager // Paper - chunk system

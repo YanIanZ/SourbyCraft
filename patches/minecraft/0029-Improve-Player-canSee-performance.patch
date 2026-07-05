@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Mon, 15 Jun 2026 15:45:16 +0700
+Subject: [PATCH] Improve Player#canSee performance
+
+
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index b42bf0ecd381c07ff7c42dea3970f598ec426e98..4f98afe61de1a16ba6ab13cb507e7eba984eca62 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -1379,7 +1379,7 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+                     && ChunkMap.this.isChunkTracked(player, this.entity.chunkPosition().x(), this.entity.chunkPosition().z());
+                 // Paper end - Configurable entity tracking range by Y
+                 // CraftBukkit start - respect vanish API
+-                if (visibleToPlayer && !player.getBukkitEntity().canSee(this.entity.getBukkitEntity())) { // Paper - only consider hits
++                if (visibleToPlayer && !player.getBukkitEntity().canSee(this.entity)) { // Paper - only consider hits // SourbyCraft - improve Player#canSee performance
+                     visibleToPlayer = false;
+                 }
+                 // CraftBukkit end

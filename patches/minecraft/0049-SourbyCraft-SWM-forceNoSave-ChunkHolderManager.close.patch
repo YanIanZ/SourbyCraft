@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 20 Jun 2026 14:37:44 +0700
+Subject: [PATCH] SourbyCraft SWM forceNoSave + ChunkHolderManager.close save
+ bypass
+
+
+diff --git a/ca/spottedleaf/moonrise/paper/PaperHooks.java b/ca/spottedleaf/moonrise/paper/PaperHooks.java
+index 277bc96efefed4525864f6afb2294d677ff038c7..9a5357f5ed3be183fd805b7860b8869d5b90f8fb 100644
+--- a/ca/spottedleaf/moonrise/paper/PaperHooks.java
++++ b/ca/spottedleaf/moonrise/paper/PaperHooks.java
+@@ -224,6 +224,12 @@ public final class PaperHooks extends BaseChunkSystemHooks implements PlatformHo
+ 
+     @Override
+     public boolean forceNoSave(final ChunkAccess chunk) {
++        // SourbyCraft - SWM worlds own persistence via the SlimeWorld round-trip; skip
++        // the vanilla region-file save path entirely. ASP dev/26.2 parity.
++        if (chunk instanceof LevelChunk levelChunk
++                && levelChunk.level instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance) {
++            return true;
++        }
+         return chunk instanceof LevelChunk levelChunk && levelChunk.mustNotSave;
+     }
+ 
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
+index 05d374f679919d082064e8f2bb363a419bc9648e..8e01c5b2765b61bf1ff3035309a2b9b078f8ceb8 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
+@@ -191,7 +191,12 @@ public final class ChunkHolderManager {
+         };
+     }
+ 
+-    public void close(final boolean save, final boolean halt) {
++    public void close(boolean save, final boolean halt) { // SourbyCraft - drop final on save for SWM override
++        // SourbyCraft - SWM worlds own persistence; never funnel through the
++        // vanilla region-file save path on shutdown. ASP dev/26.2 parity.
++        if (this.world instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance) {
++            save = false;
++        }
+         TickThread.ensureTickThread("Closing world off-main");
+         if (halt) {
+             LOGGER.info("Waiting 60s for chunk system to halt for world '" + WorldUtil.getWorldName(this.world) + "'");

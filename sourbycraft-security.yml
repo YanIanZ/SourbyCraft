@@ -10,6 +10,17 @@ crash-prevention:
   anvil:
     max-item-name-length: 128
   recipe-book:
+    # reserved: 26.x recipe packets are fixed-size at the codec level; guards future protocol drift only
     max-packet-size: 20480
   creative-item:
-    max-nbt-size: 2048
+    # encoded item size cap for creative slot packets; values below ~16384 silently block cloning filled shulkers/bundles
+    max-nbt-size: 16384
+packet-guard:
+  book-edit:
+    max-total-chars: 65536
+  custom-payload:
+    max-bytes: 8192
+  container-click:
+    max-per-tick: 20
+  recipe-book:
+    max-per-tick: 16

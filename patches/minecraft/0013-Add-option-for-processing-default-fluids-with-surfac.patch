@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 14 Jun 2026 18:56:59 +0700
+Subject: [PATCH] Add option for processing default fluids with surface rules
+
+
+diff --git a/net/minecraft/world/level/levelgen/SurfaceSystem.java b/net/minecraft/world/level/levelgen/SurfaceSystem.java
+index cb078856e2942907750ca2d5e7a16abb7e053b65..6265d73752d17ad11f36a678d9fa97572924231b 100644
+--- a/net/minecraft/world/level/levelgen/SurfaceSystem.java
++++ b/net/minecraft/world/level/levelgen/SurfaceSystem.java
+@@ -128,7 +128,8 @@ public class SurfaceSystem {
+                     if (old.isAir()) {
+                         stoneAboveDepth = 0;
+                         waterHeight = Integer.MIN_VALUE;
+-                    } else if (!old.getFluidState().isEmpty()) {
++                    } else if (!old.getFluidState().isEmpty() // SourbyCraft - allow processing fluids through surface rules
++                            && (!dev.iyanz.sourbycraft.SourbyCraftConfig.srPlaceInDefaultFluid || old != this.defaultBlock)) { // SourbyCraft - allow processing fluids through surface rules
+                         if (waterHeight == Integer.MIN_VALUE) {
+                             waterHeight = y + 1;
+                         }
