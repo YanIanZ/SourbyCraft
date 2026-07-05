@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Fri, 19 Jun 2026 03:51:37 +0700
+Subject: [PATCH] fixup! sourbycraft File Patches
+
+
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index a560c87f423601a2a78670f4d876dbedea8ffdf1..8faf41d48c5127a068cdaa4f95458520f49af6a0 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -253,6 +253,28 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+         com.destroystokyo.paper.VersionHistoryManager.INSTANCE.getClass(); // Paper - load version history now
+         dev.iyanz.sourbycraft.SourbyCraftConfig.init(new java.io.File("sourbycraft.yml")); // SourbyCraft - config
+         dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.init(new java.io.File("sourbycraft-security.yml")); // SourbyCraft - security config
++        // SourbyCraft start - register custom commands at server boot (CraftServer#reload also registers, for /reload paths)
++        {
++            org.bukkit.command.CommandMap commandMap = this.server.getCommandMap();
++            String[] sourbycraftCommandNames = {"ping", "sys", "plugins", "tps", "tpsbar", "speedtest", "sparkview", "swm", "rambar", "ver"};
++            java.util.Map<String, org.bukkit.command.Command> known = ((org.bukkit.command.SimpleCommandMap) commandMap).getKnownCommands();
++            for (String n : sourbycraftCommandNames) {
++                known.remove(n.toLowerCase(java.util.Locale.ROOT));
++                known.remove("bukkit:" + n.toLowerCase(java.util.Locale.ROOT));
++            }
++            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.PingCommand("ping"));
++            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SysCommand("sys"));
++            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.PluginsCommand("plugins"));
++            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.TpsCommand("tps"));
++            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
++            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
++            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SparkviewCommand("sparkview"));
++            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));
++            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.RamBarCommand("rambar"));
++            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.VerCommand("ver"));
++            org.slf4j.LoggerFactory.getLogger("SourbyCraft").info("Registered 10 SourbyCraft commands (fallback prefix 'sourbycraft'). Use /sourbycraft:<name> if a name collides with Paper's built-ins.");
++        }
++        // SourbyCraft end - register custom commands at server boot
+ 
+         // this.worldData.setGameType(properties.gameMode.get()); // CraftBukkit - moved to world loading
+         LOGGER.info("Default game type: {}", properties.gameMode.get());

@@ -1,10 +1,6 @@
-name: SourbyCraftSWM
-version: "2.0.0"
-main: dev.iyanz.sourbycraft.swm.plugin.SWPlugin
+name: SourbyCraftCore
+version: "26.2"
+main: dev.iyanz.sourbycraft.core.SourbyCorePlugin
 api-version: "1.21"
-description: Built-in SlimeWorldManager for SourbyCraft — SRF v13, in-memory worlds, async saves
+description: SourbyCraft 26.2 survival core — MT1 module lifecycle + ML1 native mod loader (no SWM)
 author: SourbyCraft
-dependencies:
-  - name: SourbyCraft
-    required: true
-    bootstrap: true

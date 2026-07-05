@@ -115,9 +115,10 @@ public final class OreReveal implements Listener {
     }
 
     private static boolean isCandidate(final BlockState state, final java.util.Set<Block> extraHidden) {
-        if (state.is(BlockTags.COAL_ORES) || state.is(BlockTags.IRON_ORES) || state.is(BlockTags.COPPER_ORES)
-            || state.is(BlockTags.GOLD_ORES) || state.is(BlockTags.REDSTONE_ORES) || state.is(BlockTags.EMERALD_ORES)
-            || state.is(BlockTags.LAPIS_ORES) || state.is(BlockTags.DIAMOND_ORES)
+        // MC 26.2: only GOLD/IRON/COPPER_ORES remain BlockTags fields; the rest moved to BlockItemTags.<x>.block()
+        if (state.is(net.minecraft.tags.BlockItemTags.COAL_ORES.block()) || state.is(BlockTags.IRON_ORES) || state.is(BlockTags.COPPER_ORES)
+            || state.is(BlockTags.GOLD_ORES) || state.is(net.minecraft.tags.BlockItemTags.REDSTONE_ORES.block()) || state.is(net.minecraft.tags.BlockItemTags.EMERALD_ORES.block())
+            || state.is(net.minecraft.tags.BlockItemTags.LAPIS_ORES.block()) || state.is(net.minecraft.tags.BlockItemTags.DIAMOND_ORES.block())
             || state.is(Blocks.NETHER_QUARTZ_ORE) || state.is(Blocks.ANCIENT_DEBRIS)) {
             return true;
         }

@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 14 Jun 2026 18:56:46 +0700
+Subject: [PATCH] Split item lore lines on newline characters
+
+
+diff --git a/net/minecraft/core/component/DataComponents.java b/net/minecraft/core/component/DataComponents.java
+index 2cf51da6efed87071a32510817adc335707cd61f..4dc5839751c520566bafdeb4dc12f29b5053287f 100644
+--- a/net/minecraft/core/component/DataComponents.java
++++ b/net/minecraft/core/component/DataComponents.java
+@@ -136,7 +136,7 @@ public class DataComponents {
+         "item_model", b -> b.persistent(Identifier.CODEC).networkSynchronized(Identifier.STREAM_CODEC).cacheEncoding()
+     );
+     public static final DataComponentType<ItemLore> LORE = register(
+-        "lore", b -> b.persistent(ItemLore.CODEC).networkSynchronized(ItemLore.STREAM_CODEC).cacheEncoding()
++        "lore", b -> b.persistent(ItemLore.CODEC).networkSynchronized(ItemLore.SPLITTING_STREAM_CODEC).cacheEncoding() // SourbyCraft - split lore lines on newline characters
+     );
+     public static final DataComponentType<Rarity> RARITY = register("rarity", b -> b.persistent(Rarity.CODEC).networkSynchronized(Rarity.STREAM_CODEC));
+     public static final DataComponentType<ItemEnchantments> ENCHANTMENTS = register(
+diff --git a/net/minecraft/world/item/component/ItemLore.java b/net/minecraft/world/item/component/ItemLore.java
+index 406985f7b38cf5f78ee01b427a756af0ffdbc94c..492502ec26b93ebd70d20c9200b3ec7e9e3755a6 100644
+--- a/net/minecraft/world/item/component/ItemLore.java
++++ b/net/minecraft/world/item/component/ItemLore.java
+@@ -26,6 +26,25 @@ public record ItemLore(List<Component> lines, List<Component> styledLines) imple
+         .apply(ByteBufCodecs.list(256))
+         .map(ItemLore::new, ItemLore::lines);
+ 
++    // SourbyCraft start - split lore lines on newline characters
++    public static final StreamCodec<RegistryFriendlyByteBuf, ItemLore> SPLITTING_STREAM_CODEC = ComponentSerialization.STREAM_CODEC
++            .apply(ByteBufCodecs.list(256))
++            .map(java.util.function.Function.identity(), lines -> {
++                if (lines.isEmpty()) {
++                    return lines;
++                }
++                List<Component> realLines = new java.util.ArrayList<>(lines.size() * 2);
++                for (Component line : lines) {
++                    net.kyori.adventure.text.Component advLine = io.papermc.paper.adventure.PaperAdventure.asAdventure(line);
++                    for (net.kyori.adventure.text.Component realLine : dev.iyanz.sourbycraft.ItemUtil.getLines(advLine)) {
++                        realLines.add(io.papermc.paper.adventure.PaperAdventure.asVanilla(realLine));
++                    }
++                }
++                return realLines;
++            })
++            .map(ItemLore::new, ItemLore::lines);
++    // SourbyCraft end - split lore lines on newline characters
++
+     public ItemLore(final List<Component> lines) {
+         this(lines, Lists.transform(lines, component -> ComponentUtils.mergeStyles(component, LORE_STYLE)));
+     }

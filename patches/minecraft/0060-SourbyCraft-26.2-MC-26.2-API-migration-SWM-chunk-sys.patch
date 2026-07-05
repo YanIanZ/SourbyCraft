@@ -1,0 +1,204 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Mon, 6 Jul 2026 03:27:52 +0700
+Subject: [PATCH] SourbyCraft 26.2: MC 26.2 API migration + SWM chunk-system
+ reverts (survival fork)
+
+
+diff --git a/ca/spottedleaf/moonrise/paper/PaperHooks.java b/ca/spottedleaf/moonrise/paper/PaperHooks.java
+index 9a5357f5ed3be183fd805b7860b8869d5b90f8fb..7d8eaa2120dfa4b7c2ebade4234e56f3c9353678 100644
+--- a/ca/spottedleaf/moonrise/paper/PaperHooks.java
++++ b/ca/spottedleaf/moonrise/paper/PaperHooks.java
+@@ -224,12 +224,7 @@ public final class PaperHooks extends BaseChunkSystemHooks implements PlatformHo
+ 
+     @Override
+     public boolean forceNoSave(final ChunkAccess chunk) {
+-        // SourbyCraft - SWM worlds own persistence via the SlimeWorld round-trip; skip
+-        // the vanilla region-file save path entirely. ASP dev/26.2 parity.
+-        if (chunk instanceof LevelChunk levelChunk
+-                && levelChunk.level instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance) {
+-            return true;
+-        }
++        // SourbyCraft - 26.2 survival: SWM removed, vanilla save path only.
+         return chunk instanceof LevelChunk levelChunk && levelChunk.mustNotSave;
+     }
+ 
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
+index 8e01c5b2765b61bf1ff3035309a2b9b078f8ceb8..5bdf584da1d77e42d635536e9ea9caa586e70313 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
+@@ -191,12 +191,7 @@ public final class ChunkHolderManager {
+         };
+     }
+ 
+-    public void close(boolean save, final boolean halt) { // SourbyCraft - drop final on save for SWM override
+-        // SourbyCraft - SWM worlds own persistence; never funnel through the
+-        // vanilla region-file save path on shutdown. ASP dev/26.2 parity.
+-        if (this.world instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance) {
+-            save = false;
+-        }
++    public void close(final boolean save, final boolean halt) { // SourbyCraft - 26.2 survival: SWM removed, vanilla save on shutdown
+         TickThread.ensureTickThread("Closing world off-main");
+         if (halt) {
+             LOGGER.info("Waiting 60s for chunk system to halt for world '" + WorldUtil.getWorldName(this.world) + "'");
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/NewChunkHolder.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/NewChunkHolder.java
+index a449e87293b96275f3c90f0da46df84172bf64ae..98e1103ad061b2a164722abc09478b59877c6de6 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/NewChunkHolder.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/NewChunkHolder.java
+@@ -887,14 +887,7 @@ public final class NewChunkHolder {
+             }
+ 
+             if (chunk instanceof LevelChunk levelChunk) {
+-                // SourbyCraft start - SWM unload path. entitySlices is nulled later in
+-                // unloadStage1 so we cannot recover them afterwards; capture them now
+-                // before vanilla unload removes block entities. ASP dev/26.2 parity.
+-                if (this.world instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance slimeLevelInstance) {
+-                    slimeLevelInstance.unload(levelChunk, entityChunk, poiChunk);
+-                }
+-                // SourbyCraft end
+-                this.world.unload(levelChunk);
++                this.world.unload(levelChunk); // SourbyCraft - 26.2 survival: SWM removed, vanilla unload only
+             }
+ 
+             this.asyncCompleteUnloadTask(MoonriseRegionFileIO.RegionFileType.CHUNK_DATA, chunkWrite[0]);
+@@ -903,13 +896,7 @@ public final class NewChunkHolder {
+         // unload entity data
+         if (entityChunk != null) {
+             final Completable<CompoundTag>[] entityWrite = new Completable[1];
+-            // SourbyCraft start - SWM owns its own entity persistence (in-memory). Avoid
+-            // double-writing the same data into a region file that doesn't exist for
+-            // SWM worlds. ASP dev/26.2 parity.
+-            if (!(this.world instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance)) {
+-                this.saveEntities(entityChunk, true, entityWrite);
+-            }
+-            // SourbyCraft end
++            this.saveEntities(entityChunk, true, entityWrite); // SourbyCraft - 26.2 survival: SWM removed, vanilla entity save
+ 
+             if (entityChunk.unload()) {
+                 final ReentrantAreaLock.Node schedulingLock = this.scheduler.schedulingLockArea.lock(this.chunkX, this.chunkZ);
+@@ -1696,13 +1683,7 @@ public final class NewChunkHolder {
+         boolean canSavePOI = !forceNoSaveChunk && (poi != null && poi.isDirty());
+         boolean canSaveEntities = entities != null;
+ 
+-        // SourbyCraft start - SWM owns entity persistence; skip the region-file save
+-        // path so we don't double-write to a path that doesn't exist. ASP dev/26.2.
+-        if (this.world instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance) {
+-            canSaveEntities = false;
+-        }
+-        // SourbyCraft end
+-
++        // SourbyCraft - 26.2 survival: SWM removed, vanilla region-file entity save.
+         if (canSaveChunk) {
+             canSaveChunk = this.saveChunk(chunk, false, null);
+         }
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkLoadTask.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkLoadTask.java
+index 2729ec1ca9b44c9e217e80a159ebd8611cdf62fc..4aec923f16f21964cfeda73c1c066e429fce7f73 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkLoadTask.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkLoadTask.java
+@@ -33,7 +33,7 @@ public final class ChunkLoadTask extends ChunkProgressionTask {
+     private static final Logger LOGGER = LoggerFactory.getLogger(ChunkLoadTask.class);
+ 
+     private final NewChunkHolder chunkHolder;
+-    private final dev.iyanz.sourbycraft.swm.server.moonrise.CommonLoadTask loadTask; // SourbyCraft - SWM custom load task
++    private final ChunkDataLoadTask loadTask; // SourbyCraft - 26.2 survival: SWM removed, vanilla load task only
+ 
+     private volatile boolean cancelled;
+     private NewChunkHolder.GenericDataLoadTaskCallback entityLoadTask;
+@@ -45,24 +45,13 @@ public final class ChunkLoadTask extends ChunkProgressionTask {
+                          final NewChunkHolder chunkHolder, final Priority priority) {
+         super(scheduler, world, chunkX, chunkZ);
+         this.chunkHolder = chunkHolder;
+-        // SourbyCraft start - SWM custom load task (ASP dev/26.2 parity). For
+-        // SlimeLevelInstance worlds, route chunk loading through the in-memory
+-        // SlimeWorld instead of vanilla region-file IO (region files don't
+-        // exist for SWM worlds and the read would return an empty chunk).
+-        if (world instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance levelInstance) {
+-            this.loadTask = levelInstance.getLoadTask(this, scheduler, world, chunkX, chunkZ, priority, result -> {
+-                ChunkLoadTask.this.loadResult = result; // must be before getAndDecrement
+-                ChunkLoadTask.this.tryCompleteLoad();
+-            });
+-        } else {
+-            ChunkDataLoadTask vanillaTask = new ChunkDataLoadTask(scheduler, world, chunkX, chunkZ, priority);
+-            vanillaTask.addCallback((final GenericDataLoadTask.TaskResult<ChunkAccess, Throwable> result) -> {
+-                ChunkLoadTask.this.loadResult = result; // must be before getAndDecrement
+-                ChunkLoadTask.this.tryCompleteLoad();
+-            });
+-            this.loadTask = vanillaTask;
+-        }
+-        // SourbyCraft end
++        // SourbyCraft - 26.2 survival: SWM removed, vanilla region-file chunk load only.
++        final ChunkDataLoadTask vanillaTask = new ChunkDataLoadTask(scheduler, world, chunkX, chunkZ, priority);
++        vanillaTask.addCallback((final GenericDataLoadTask.TaskResult<ChunkAccess, Throwable> result) -> {
++            ChunkLoadTask.this.loadResult = result; // must be before getAndDecrement
++            ChunkLoadTask.this.tryCompleteLoad();
++        });
++        this.loadTask = vanillaTask;
+     }
+ 
+     private void tryCompleteLoad() {
+@@ -289,7 +278,7 @@ public final class ChunkLoadTask extends ChunkProgressionTask {
+ 
+     private static record ReadChunk(ProtoChunk protoChunk, SerializableChunkData chunkData) {}
+ 
+-    private static final class ChunkDataLoadTask extends CallbackDataLoadTask<ReadChunk, ChunkAccess> implements dev.iyanz.sourbycraft.swm.server.moonrise.CommonLoadTask { // SourbyCraft - SWM CommonLoadTask
++    private static final class ChunkDataLoadTask extends CallbackDataLoadTask<ReadChunk, ChunkAccess> { // SourbyCraft - 26.2 survival: SWM CommonLoadTask removed
+         private ChunkDataLoadTask(final ChunkTaskScheduler scheduler, final ServerLevel world, final int chunkX,
+                                   final int chunkZ, final Priority priority) {
+             super(scheduler, world, chunkX, chunkZ, MoonriseRegionFileIO.RegionFileType.CHUNK_DATA, priority);
+diff --git a/io/papermc/paper/entity/activation/ActivationRange.java b/io/papermc/paper/entity/activation/ActivationRange.java
+index 537d0a968c644b09a753d4670e90f5ad5e371a51..09d9f3f225b5f304e8acd4d88dce7cd711eceac5 100644
+--- a/io/papermc/paper/entity/activation/ActivationRange.java
++++ b/io/papermc/paper/entity/activation/ActivationRange.java
+@@ -205,7 +205,8 @@ public final class ActivationRange {
+         if (map == null) {
+             final java.util.HashMap<EntityType<?>, int[]> built = new java.util.HashMap<>();
+             for (final java.util.Map.Entry<String, int[]> e : dev.iyanz.sourbycraft.SourbyCraftConfig.dabEntityOverrides.entrySet()) {
+-                final java.util.Optional<EntityType<?>> type = EntityType.byString(e.getKey());
++                // MC 26.2: EntityType.byString removed — resolve via the entity-type registry by identifier
++                final java.util.Optional<EntityType<?>> type = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getOptional(net.minecraft.resources.Identifier.tryParse(e.getKey()));
+                 if (type.isPresent()) {
+                     built.put(type.get(), e.getValue());
+                 } else {
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index bb1654b7dc4289cd3a3c70d73b4493629ccee67e..a32993c0926ff432601523464c53a1ad789410bc 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -271,7 +271,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+             commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.TpsBarCommand("tpsbar"));
+             commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SpeedtestCommand("speedtest"));
+             commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SparkviewCommand("sparkview"));
+-            commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.SwmCommand("swm"));
++            // SourbyCraft - 26.2 survival: /swm command removed with SWM
+             commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.RamBarCommand("rambar"));
+             commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.VerCommand("ver"));
+             commandMap.register("sourbycraft", new dev.iyanz.sourbycraft.command.PerfCommand("perf"));
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 4ca250167ac413047cee644532a72833d7941945..986cf23f77dc6316267f36d91e83cc3376161c7a 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -2491,10 +2491,9 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                     }
+                     if (entity instanceof net.minecraft.world.entity.Display.TextDisplay) {
+                         entity.getEntityData().markDirty(net.minecraft.world.entity.Display.TextDisplay.DATA_TEXT_ID);
+-                    } else if (entity instanceof net.minecraft.world.entity.decoration.ItemFrame
+-                            && !((net.minecraft.world.entity.decoration.ItemFrame) entity).getItem().isEmpty()) {
+-                        entity.getEntityData().markDirty(net.minecraft.world.entity.decoration.ItemFrame.DATA_ITEM);
+                     }
++                    // SourbyCraft - MC 26.2: ItemFrame.DATA_ITEM is now private with no public marker;
++                    // the framed item resyncs via the normal entity tracker (full data sent on tracking start), so the branch is dropped.
+                 }
+             }
+             // SourbyCraft end - refresh data on locale change
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index 24d6a99230ecfd94bfd5dec522b2ad75325de246..a85f1aacda9833a8c1cfd9bd40c81c07c621ca25 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -854,7 +854,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         // SourbyCraft - SWM disk-IO opt-out: SpigotWorldConfig.init() saves
+         // spigot.yml on every world load; flag SLI worlds so the save is skipped.
+         // ASP dev/26.2 parity.
+-        this.spigotConfig = new org.spigotmc.SpigotWorldConfig(bukkitName, worldKey, !(this instanceof dev.iyanz.sourbycraft.swm.server.SlimeLevelInstance)); // Spigot // SourbyCraft
++        this.spigotConfig = new org.spigotmc.SpigotWorldConfig(bukkitName, worldKey, true); // Spigot // SourbyCraft - 26.2 survival: SWM removed, saveOnLoad always on (vanilla)
+         this.paperConfig = paperWorldConfigCreator.apply(this.spigotConfig); // Paper - create paper world config
+         this.generator = generator;
+         this.world = new CraftWorld((ServerLevel) this, worldKey, biomeProvider, environment);
