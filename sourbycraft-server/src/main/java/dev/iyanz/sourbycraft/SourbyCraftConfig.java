@@ -516,19 +516,26 @@ public class SourbyCraftConfig {
         // Paper's GlobalConfiguration.ChunkSystem.postProcess already called this once; a second call
         // via adjustThreadCount is safe (BalancedPrioritisedThreadPool supports runtime resize).
         // Wrapped in try/catch so a pool-resize failure never crashes boot.
+        String appliedWorkers;
         try {
             if (chunkWorkers > 0) {
                 // Explicit operator override: set exact chunk-worker and io-worker counts.
                 ca.spottedleaf.moonrise.common.util.MoonriseCommon.adjustWorkerThreads(chunkWorkers, ioWorkers);
+                appliedWorkers = String.valueOf(chunkWorkers);
             } else {
                 // Smart auto (-1): only engage when Paper is also using auto-detect (workerThreads == -1),
                 // so we don't fight an operator who explicitly tuned Paper's chunk-system.workerThreads.
-                if (io.papermc.paper.configuration.GlobalConfiguration.get().chunkSystem.workerThreads == -1) {
+                int paperWorkers = io.papermc.paper.configuration.GlobalConfiguration.get().chunkSystem.workerThreads;
+                if (paperWorkers == -1) {
                     int smart = Math.min(8, Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
                     ca.spottedleaf.moonrise.common.util.MoonriseCommon.adjustWorkerThreads(smart, -1);
+                    appliedWorkers = smart + " (smart-auto)";
+                } else {
+                    appliedWorkers = "auto skipped (Paper explicit workerThreads=" + paperWorkers + ")";
                 }
             }
         } catch (Throwable t) {
+            appliedWorkers = "bridge failed";
             dev.iyanz.sourbycraft.util.SourbyLogger.warn(
                 "[SourbyCraft] MT1 chunk-worker bridge failed (pool resize unsafe or not ready): " + t.getMessage());
         }
@@ -544,9 +551,9 @@ public class SourbyCraftConfig {
                     "[SourbyCraft] MT1 max-chunk-send-rate bridge failed: " + t.getMessage());
             }
         }
-        // Boot INFO: log final requested thread values (MoonriseCommon exposes no pool-size getters).
+        // Boot INFO: applied chunk-worker outcome + requested io/send-rate values.
         dev.iyanz.sourbycraft.util.SourbyLogger.info(
-            "[SourbyCraft] threads: chunk-workers=" + chunkWorkers
+            "[SourbyCraft] threads: chunk-workers=" + appliedWorkers
             + " io=" + ioWorkers
             + " send-rate=" + maxChunkSendRate
             + " async-spawning=" + asyncSpawning);
