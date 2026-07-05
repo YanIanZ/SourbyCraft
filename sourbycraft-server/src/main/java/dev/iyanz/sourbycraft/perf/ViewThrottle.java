@@ -8,8 +8,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.plugin.Plugin;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.Map;
+import dev.iyanz.sourbycraft.core.PerWorldHolder;
 
 /**
  * SourbyCraft S5 — lightweight view-distance throttle engine.
@@ -31,8 +30,10 @@ public final class ViewThrottle {
     /**
      * Per-world original view distance captured the first time we encounter a world.
      * Used as the recovery ceiling when the server returns to a healthy tier.
+     * MT1: backed by PerWorldHolder — eviction on WorldUnloadEvent is centralized in
+     * PerWorldHolder.registerCleanup (called from SWPlugin.onEnable).
      */
-    private static final Map<String, Integer> originalViewDistance = new ConcurrentHashMap<>();
+    private static final PerWorldHolder<Integer> originalViewDistance = new PerWorldHolder<>();
 
     private ViewThrottle() {}
 
@@ -47,14 +48,7 @@ public final class ViewThrottle {
         }
         int minDist = Math.max(2, Math.min(32, SourbyCraftConfig.minViewDistance));
         Bukkit.getScheduler().runTaskTimer(plugin, ViewThrottle::tick, 100L, 100L);
-        // SWM island servers reuse world names after resets — a stale entry would cap the
-        // recreated world's recovery ceiling at the old degraded distance.
-        Bukkit.getPluginManager().registerEvents(new org.bukkit.event.Listener() {
-            @org.bukkit.event.EventHandler
-            public void onWorldUnload(org.bukkit.event.world.WorldUnloadEvent e) {
-                originalViewDistance.remove(e.getWorld().getName());
-            }
-        }, plugin);
+        // MT1: world-unload eviction delegated to PerWorldHolder.registerCleanup (SWPlugin.onEnable).
         SourbyLogger.info("[SourbyCraft] ViewThrottle: registered — min-view-distance=" + minDist);
     }
 

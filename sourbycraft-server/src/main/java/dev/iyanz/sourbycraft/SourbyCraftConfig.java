@@ -271,6 +271,15 @@ public class SourbyCraftConfig {
     public static int mobPathfindInterval = 20;
     public static boolean asyncSaveBatch = true;
 
+    // SourbyCraft MT1: thread-bridge fields.
+    // -1 = smart auto (chunk-workers) / use Paper default (io-workers, max-chunk-send-rate).
+    public static int chunkWorkers = -1;
+    public static int ioWorkers = -1;
+    public static double maxChunkSendRate = -1.0;
+    // asyncSpawning: MT1 async mob-spawn density state (pufferfish semantics).
+    // May be forced false by PufferfishConfig.enableAsyncMobSpawning during init().
+    public static boolean asyncSpawning = true;
+
     // DAB entity overrides: key = "minecraft:zombie", value = [maxTickFreq, activationDistMod]
     public static final java.util.Map<String, int[]> dabEntityOverrides = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -484,6 +493,64 @@ public class SourbyCraftConfig {
                     + t.getMessage());
             }
         }
+        // SourbyCraft MT1: thread bridges — chunk-workers, io-workers, max-chunk-send-rate, async-spawning.
+        chunkWorkers = getInt("performance.threads.chunk-workers", chunkWorkers);
+        ioWorkers = getInt("performance.threads.io-workers", ioWorkers);
+        maxChunkSendRate = getDouble("network.max-chunk-send-rate", maxChunkSendRate);
+        asyncSpawning = getBoolean("performance.async-spawning", asyncSpawning);
+        // Pufferfish alias: if PufferfishConfig.enableAsyncMobSpawning is initialized and false,
+        // force asyncSpawning false. Wrapped in try/catch — class may not be initialized at this
+        // point in boot (it is usually initialized during server setup, but not guaranteed before
+        // SourbyCraftConfig.init runs in DedicatedServer#initServer).
+        try {
+            if (gg.pufferfish.pufferfish.PufferfishConfig.asyncMobSpawningInitialized
+                    && !gg.pufferfish.pufferfish.PufferfishConfig.enableAsyncMobSpawning) {
+                asyncSpawning = false;
+                dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                    "[SourbyCraft] MT1 async-spawning forced false by PufferfishConfig.enableAsyncMobSpawning=false");
+            }
+        } catch (Throwable ignored) {
+            // PufferfishConfig not yet initialized — skip alias; asyncSpawning keeps its yml value.
+        }
+        // Chunk-worker bridge: call MoonriseCommon.adjustWorkerThreads to resize the Moonrise pool.
+        // Paper's GlobalConfiguration.ChunkSystem.postProcess already called this once; a second call
+        // via adjustThreadCount is safe (BalancedPrioritisedThreadPool supports runtime resize).
+        // Wrapped in try/catch so a pool-resize failure never crashes boot.
+        try {
+            if (chunkWorkers > 0) {
+                // Explicit operator override: set exact chunk-worker and io-worker counts.
+                ca.spottedleaf.moonrise.common.util.MoonriseCommon.adjustWorkerThreads(chunkWorkers, ioWorkers);
+            } else {
+                // Smart auto (-1): only engage when Paper is also using auto-detect (workerThreads == -1),
+                // so we don't fight an operator who explicitly tuned Paper's chunk-system.workerThreads.
+                if (io.papermc.paper.configuration.GlobalConfiguration.get().chunkSystem.workerThreads == -1) {
+                    int smart = Math.min(8, Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
+                    ca.spottedleaf.moonrise.common.util.MoonriseCommon.adjustWorkerThreads(smart, -1);
+                }
+            }
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn(
+                "[SourbyCraft] MT1 chunk-worker bridge failed (pool resize unsafe or not ready): " + t.getMessage());
+        }
+        // max-chunk-send-rate bridge: override Paper's playerMaxChunkSendRate.
+        if (maxChunkSendRate > 0.0) {
+            try {
+                io.papermc.paper.configuration.GlobalConfiguration.get().chunkLoadingBasic.playerMaxChunkSendRate = maxChunkSendRate;
+                dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                    "[SourbyCraft] MT1 network.max-chunk-send-rate=" + maxChunkSendRate
+                    + " bridged to Paper GlobalConfiguration.chunkLoadingBasic.playerMaxChunkSendRate");
+            } catch (Throwable t) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn(
+                    "[SourbyCraft] MT1 max-chunk-send-rate bridge failed: " + t.getMessage());
+            }
+        }
+        // Boot INFO: log final requested thread values (MoonriseCommon exposes no pool-size getters).
+        dev.iyanz.sourbycraft.util.SourbyLogger.info(
+            "[SourbyCraft] threads: chunk-workers=" + chunkWorkers
+            + " io=" + ioWorkers
+            + " send-rate=" + maxChunkSendRate
+            + " async-spawning=" + asyncSpawning);
+
         entityTickRateLimit = getBoolean("entity.tick-rate-limit", entityTickRateLimit);
         dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.set(
             getInt("entity.tick-rate", dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get())

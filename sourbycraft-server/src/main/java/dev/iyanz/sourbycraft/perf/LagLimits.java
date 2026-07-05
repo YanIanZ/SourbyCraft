@@ -21,10 +21,10 @@ import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.plugin.Plugin;
 
+import dev.iyanz.sourbycraft.core.PerWorldHolder;
+
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Event-gated per-chunk / per-world entity caps (entity.max-per-chunk,
@@ -35,8 +35,11 @@ import java.util.Map;
  */
 public final class LagLimits implements Listener {
 
-    /** Arrow counts per world, refreshed by the 1 Hz sweeper. */
-    private static final Map<String, Integer> ARROW_COUNT = new HashMap<>();
+    /**
+     * Arrow counts per world, refreshed by the 1 Hz sweeper.
+     * MT1: PerWorldHolder centralized eviction replaces the inline onWorldUnload handler.
+     */
+    private static final PerWorldHolder<Integer> ARROW_COUNT = new PerWorldHolder<>();
 
     private LagLimits() {}
 
@@ -89,13 +92,9 @@ public final class LagLimits implements Listener {
         if (chunkCount(e.getLocation().getChunk(), Item.class) >= cap) e.setCancelled(true);
     }
 
-    @EventHandler
-    public void onWorldUnload(org.bukkit.event.world.WorldUnloadEvent e) {
-        // High-churn SWM island servers unload worlds constantly — drop the stale count.
-        ARROW_COUNT.remove(e.getWorld().getName());
-        // Island resets reuse world names; a stale per-world config would survive the reset.
-        dev.iyanz.sourbycraft.SourbyCraftWorldConfig.invalidate(e.getWorld().getName());
-    }
+    // MT1: onWorldUnload removed — PerWorldHolder.registerCleanup evicts both ARROW_COUNT
+    // and SourbyCraftWorldConfig.BY_WORLD centrally. SourbyCraftWorldConfig.invalidate
+    // also remains as a delegate for external callers.
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onProjectileLaunch(ProjectileLaunchEvent e) {

@@ -9,6 +9,8 @@ import dev.iyanz.sourbycraft.swm.api.exceptions.UnknownWorldException;
 import dev.iyanz.sourbycraft.swm.api.SlimeLoader;
 import dev.iyanz.sourbycraft.swm.api.SlimePropertyMap;
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
+import dev.iyanz.sourbycraft.core.ModuleRegistry;
+import dev.iyanz.sourbycraft.core.PerWorldHolder;
 import dev.iyanz.sourbycraft.swm.server.AdvancedSlimePaperImpl;
 import dev.iyanz.sourbycraft.swm.server.SwmIoExecutor;
 import net.kyori.adventure.text.Component;
@@ -105,34 +107,32 @@ public class SWPlugin extends JavaPlugin {
         // listener itself stays registered so toggling the config takes effect
         // on the next chat message rather than requiring a server restart.
         Bukkit.getPluginManager().registerEvents(new dev.iyanz.sourbycraft.chat.EmojiChatListener(), this);
-        dev.iyanz.sourbycraft.chat.SignSanitizer.register(this);
 
-        // SourbyCraft - entity stacker. Merges same-type living mob spawns
-        // within a configured radius into a stacked representative with PDC
-        // count + on-death drops/xp multiplication. Off by default; enable via
-        // `stacker.enabled: true` in sourbycraft.yml.
-        // Each registration individually guarded: a failure here must never abort onEnable
-        // before the SWM worldsToLoad stream below (unloaded default world = server shutdown).
-        safeRegister("EntityStacker", () -> dev.iyanz.sourbycraft.wildstacker.EntityStacker.register(this));
-        safeRegister("OreReveal", () -> dev.iyanz.sourbycraft.antixray.OreReveal.register(this));
-        safeRegister("ConfigBridge", () -> dev.iyanz.sourbycraft.perf.ConfigBridge.register(this));
-        safeRegister("LagLimits", () -> dev.iyanz.sourbycraft.perf.LagLimits.register(this));
-        safeRegister("OwnerProtection", () -> dev.iyanz.sourbycraft.perf.OwnerProtection.register(this));
+        // SourbyCraft MT1: centralized per-world cleanup — one listener evicts all
+        // PerWorldHolder maps (world config, arrow counts, view distances) on WorldUnloadEvent.
+        PerWorldHolder.registerCleanup(this);
 
-        // SourbyCraft S5: ViewThrottle engine (auto-throttle-view gating inside register)
-        safeRegister("ViewThrottle", () -> dev.iyanz.sourbycraft.perf.ViewThrottle.register(this));
-
-        // SourbyCraft S5: motd-suffix — append " | SourbyCraft" (gray) when baked key is true
+        // SourbyCraft MT1: enroll features as isolated SourbyModules.
+        // Failures during enableAll never abort onEnable before the worldsToLoad stream.
+        ModuleRegistry.add("SignSanitizer", p -> dev.iyanz.sourbycraft.chat.SignSanitizer.register(p));
+        ModuleRegistry.add("EntityStacker", p -> dev.iyanz.sourbycraft.wildstacker.EntityStacker.register(p));
+        ModuleRegistry.add("OreReveal", p -> dev.iyanz.sourbycraft.antixray.OreReveal.register(p));
+        ModuleRegistry.add("ConfigBridge", p -> dev.iyanz.sourbycraft.perf.ConfigBridge.register(p));
+        ModuleRegistry.add("LagLimits", p -> dev.iyanz.sourbycraft.perf.LagLimits.register(p));
+        ModuleRegistry.add("OwnerProtection", p -> dev.iyanz.sourbycraft.perf.OwnerProtection.register(p));
+        ModuleRegistry.add("ViewThrottle", p -> dev.iyanz.sourbycraft.perf.ViewThrottle.register(p));
+        // motd-suffix is conditional on the baked yml key (checked once at enable).
         if (dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("branding.motd-suffix", false)) {
-            safeRegister("motd-suffix", () -> Bukkit.getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+            ModuleRegistry.add("motd-suffix", p -> Bukkit.getPluginManager().registerEvents(new org.bukkit.event.Listener() {
                 @org.bukkit.event.EventHandler
                 public void onPing(com.destroystokyo.paper.event.server.PaperServerListPingEvent event) {
                     event.motd(event.motd().append(
                         net.kyori.adventure.text.Component.text(" | SourbyCraft",
                             net.kyori.adventure.text.format.NamedTextColor.GRAY)));
                 }
-            }, this));
+            }, p));
         }
+        ModuleRegistry.enableAll(this);
 
         worldsToLoad.values().stream()
                 .filter(slimeWorld -> Objects.isNull(Bukkit.getWorld(slimeWorld.getName())))
@@ -147,16 +147,10 @@ public class SWPlugin extends JavaPlugin {
         worldsToLoad.clear();
     }
 
-    private void safeRegister(String name, Runnable registration) {
-        try {
-            registration.run();
-        } catch (Throwable t) {
-            getSLF4JLogger().error("Failed to register {} — continuing boot without it", name, t);
-        }
-    }
-
     @Override
     public void onDisable() {
+        // MT1: disable modules in reverse registration order before saving worlds.
+        ModuleRegistry.disableAll();
         List<CompletableFuture<Void>> saves = new ArrayList<>();
         for (SlimeWorld world : ASP.getLoadedWorlds()) {
             if (!world.isReadOnly()) {

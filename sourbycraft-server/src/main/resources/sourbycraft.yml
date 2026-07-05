@@ -3,6 +3,9 @@
 
 network:
   proxy-mode: velocity-modern
+  # SourbyCraft MT1: override Paper's playerMaxChunkSendRate (default 75.0 chunks/s).
+  # -1.0 = use Paper default. > 0 = set to this value.
+  max-chunk-send-rate: -1.0
   netty:
     threads: auto-doubled
     snd-buf-kb: 64
@@ -59,6 +62,21 @@ sounds:
   disableShieldSounds: false
   # Disable piston extend / retract sounds (UniverseSpigot: sounds.disablePistonSounds).
   disablePistonSounds: false
+
+performance:
+  threads:
+    # SourbyCraft MT1: Moonrise chunk-worker thread count.
+    # -1 = smart auto: min(8, max(2, cpus/2)), only when Paper chunk-system.worker-threads is also -1.
+    # > 0 = exact count passed to MoonriseCommon.adjustWorkerThreads.
+    chunk-workers: -1
+    # SourbyCraft MT1: Moonrise I/O thread count.
+    # -1 = use Paper default (Math.max(1, -1) = 1 in adjustWorkerThreads).
+    io-workers: -1
+  # SourbyCraft MT1: async mob-spawn density-state pipeline (pufferfish semantics).
+  # When true, NaturalSpawner.createState runs off-main via VirtualExecutor;
+  # actual spawns + Bukkit events always stay on main. Forced false if
+  # PufferfishConfig.enableAsyncMobSpawning is initialized and false.
+  async-spawning: true
 
 perf:
   # Skip-rate for entity ticking. 1 = tick every server tick (vanilla);
