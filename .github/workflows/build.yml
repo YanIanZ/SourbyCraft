@@ -114,3 +114,28 @@ jobs:
             echo "❌ Server did not reach Done within 240s."
             exit 1
           fi
+
+  docker-build:
+    name: Docker image builds
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download jar
+        uses: actions/download-artifact@v4
+        with:
+          name: SourbyCraft-26.2
+          path: release
+
+      - name: Build image (Dockerfile + entrypoint COPY paths)
+        run: |
+          jar=$(ls release/SourbyCraft-*-REL.jar | head -1)
+          echo "Building image with $jar"
+          docker build --build-arg JAR="$jar" -t sourbycraft:ci .
+
+      - name: Inspect image (non-root user + entrypoint present)
+        run: |
+          docker run --rm --entrypoint sh sourbycraft:ci -c \
+            'id -un; test -x /app/entrypoint.sh && echo entrypoint-ok; test -f /app/server.jar && echo jar-ok'
