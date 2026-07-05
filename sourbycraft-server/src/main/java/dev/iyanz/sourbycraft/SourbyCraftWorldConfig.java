@@ -30,9 +30,16 @@ public class SourbyCraftWorldConfig {
         return BY_WORLD.computeIfAbsent(w.getName(), n -> new SourbyCraftWorldConfig(n, w.getEnvironment()));
     }
 
+    /** Drop the cached config on world unload — SWM island resets reuse world names. */
+    public static void invalidate(String worldName) {
+        BY_WORLD.remove(worldName);
+    }
+
     public void init() {
         log("-------- World Settings For [" + worldName + "] --------");
-        SourbyCraftConfig.readConfig(SourbyCraftWorldConfig.class, this);
+        // saveAfter=false: this runs lazily from the chunk-send / entity-tracker hot path (S4) —
+        // never pay a main-thread YAML disk write there.
+        SourbyCraftConfig.readConfig(SourbyCraftWorldConfig.class, this, false);
     }
 
     private void set(String path, Object val) {

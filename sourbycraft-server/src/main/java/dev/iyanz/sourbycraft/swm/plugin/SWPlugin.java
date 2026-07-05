@@ -111,25 +111,27 @@ public class SWPlugin extends JavaPlugin {
         // within a configured radius into a stacked representative with PDC
         // count + on-death drops/xp multiplication. Off by default; enable via
         // `stacker.enabled: true` in sourbycraft.yml.
-        dev.iyanz.sourbycraft.wildstacker.EntityStacker.register(this);
-        dev.iyanz.sourbycraft.antixray.OreReveal.register(this);
-        dev.iyanz.sourbycraft.perf.ConfigBridge.register(this);
-        dev.iyanz.sourbycraft.perf.LagLimits.register(this);
-        dev.iyanz.sourbycraft.perf.OwnerProtection.register(this);
+        // Each registration individually guarded: a failure here must never abort onEnable
+        // before the SWM worldsToLoad stream below (unloaded default world = server shutdown).
+        safeRegister("EntityStacker", () -> dev.iyanz.sourbycraft.wildstacker.EntityStacker.register(this));
+        safeRegister("OreReveal", () -> dev.iyanz.sourbycraft.antixray.OreReveal.register(this));
+        safeRegister("ConfigBridge", () -> dev.iyanz.sourbycraft.perf.ConfigBridge.register(this));
+        safeRegister("LagLimits", () -> dev.iyanz.sourbycraft.perf.LagLimits.register(this));
+        safeRegister("OwnerProtection", () -> dev.iyanz.sourbycraft.perf.OwnerProtection.register(this));
 
         // SourbyCraft S5: ViewThrottle engine (auto-throttle-view gating inside register)
-        dev.iyanz.sourbycraft.perf.ViewThrottle.register(this);
+        safeRegister("ViewThrottle", () -> dev.iyanz.sourbycraft.perf.ViewThrottle.register(this));
 
         // SourbyCraft S5: motd-suffix — append " | SourbyCraft" (gray) when baked key is true
         if (dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("branding.motd-suffix", false)) {
-            Bukkit.getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+            safeRegister("motd-suffix", () -> Bukkit.getPluginManager().registerEvents(new org.bukkit.event.Listener() {
                 @org.bukkit.event.EventHandler
                 public void onPing(com.destroystokyo.paper.event.server.PaperServerListPingEvent event) {
                     event.motd(event.motd().append(
                         net.kyori.adventure.text.Component.text(" | SourbyCraft",
                             net.kyori.adventure.text.format.NamedTextColor.GRAY)));
                 }
-            }, this);
+            }, this));
         }
 
         worldsToLoad.values().stream()
@@ -143,6 +145,14 @@ public class SWPlugin extends JavaPlugin {
                 });
 
         worldsToLoad.clear();
+    }
+
+    private void safeRegister(String name, Runnable registration) {
+        try {
+            registration.run();
+        } catch (Throwable t) {
+            getSLF4JLogger().error("Failed to register {} — continuing boot without it", name, t);
+        }
     }
 
     @Override

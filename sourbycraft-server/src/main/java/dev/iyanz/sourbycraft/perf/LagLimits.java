@@ -93,6 +93,8 @@ public final class LagLimits implements Listener {
     public void onWorldUnload(org.bukkit.event.world.WorldUnloadEvent e) {
         // High-churn SWM island servers unload worlds constantly — drop the stale count.
         ARROW_COUNT.remove(e.getWorld().getName());
+        // Island resets reuse world names; a stale per-world config would survive the reset.
+        dev.iyanz.sourbycraft.SourbyCraftWorldConfig.invalidate(e.getWorld().getName());
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)

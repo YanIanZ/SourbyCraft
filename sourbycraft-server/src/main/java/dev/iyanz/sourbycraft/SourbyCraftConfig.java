@@ -643,6 +643,11 @@ public class SourbyCraftConfig {
     }
 
     public static void readConfig(Class<?> clazz, Object instance) {
+        readConfig(clazz, instance, true);
+    }
+
+    /** @param saveAfter false for hot-path lazy loads (per-world config on chunk send) — no main-thread disk write. */
+    public static void readConfig(Class<?> clazz, Object instance, boolean saveAfter) {
         for (Method method : clazz.getDeclaredMethods()) {
             if (!Modifier.isPrivate(method.getModifiers())) continue;
             if (method.getParameterTypes().length != 0 || method.getReturnType() != Void.TYPE) continue;
@@ -657,6 +662,7 @@ public class SourbyCraftConfig {
             }
         }
 
+        if (!saveAfter) return;
         try {
             config.save(CONFIG_FILE);
         } catch (IOException exception) {
