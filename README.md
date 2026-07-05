@@ -1,501 +1,117 @@
-<h1 align="center">⚡ SourbyCraft</h1>
+<h1 align="center">⚡ SourbyCraft — 26.2 Survival</h1>
 
-<p align="center"><strong>Lightning Fast Performance · Feature Rich · Self-Tuning</strong></p>
+<p align="center"><strong>Maximum performance · Resource-efficient · Self-tuning · Built for 150+ players</strong></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/minecraft-26.1.2-brightgreen?style=flat-square">
+  <img src="https://img.shields.io/badge/minecraft-26.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/version-26.1.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/release-r44-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/jar%20size-31M-green?style=flat-square">
+  <img src="https://img.shields.io/badge/line-survival-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/version-26.2--REL-brightgreen?style=flat-square">
+  <img src="https://img.shields.io/badge/players-150%2B-blueviolet?style=flat-square">
   <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
 </p>
 
-<p align="center"><em>High-performance Paper fork on year-based Minecraft 26.1.2 with self-tuning perf engine, slim jar bootstrap, NMS-level security, anti-xray, ASP-port SWM, item stacker, auto-CDS, and 50-phase OneBlock module. Fork of <a href="https://github.com/PaperMC/Paper">Paper</a>.</em></p>
+<p align="center"><em>High-performance <a href="https://github.com/PaperMC/Paper">Paper</a> fork on Minecraft 26.2, tuned for large survival servers. Vanilla region worlds (no SWM), a self-tuning performance engine, resource-pack-proof anti-xray, hardened item stacker, native mod loader, and async multithreading — all kept lean on RAM and CPU.</em></p>
 
 ---
 
-## What's New in 26.1.2-REL
+## Two release lines
 
-**Latest tag:** [`v26.1.2-r44`](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.1.2-r44) — Sunday, 21 June 2026, 08:55 (GMT+7).
+SourbyCraft ships as two parallel tracks:
 
-### r19..r44 milestones (since r18)
+| Line | Focus | Worlds | Branch |
+|---|---|---|---|
+| **26.1.2** | Skyblock / minigames | SWM (Slime World Manager) in-memory worlds | `release/26.1.2` |
+| **26.2** *(this branch)* | **Survival** | Vanilla region storage, no SWM | `release/26.2` |
 
-**ASP dev/26.2 SWM port** (r19..r23) — all functional gaps closed
-- `r19` Wire ChunkLoadTask to SWM custom load task
-- `r20` Read-only SavedDataStorage + forceNoSave + close save bypass
-- `r21` Temp-dir cleanup on world unload
-- `r22` SpigotConfig + SpigotWorldConfig disk-IO opt-out
-- `r23` Companion jar refresh (SWP 5.2.0 + SSB-SWM + SS2 rebuilt)
-
-**SWM critical fixes** (r24, r30, r31) — three pre-existing hardcoded bugs since r1
-- `r24` `ChunkDataLoadTask.schedule(false)` deadlock — chunks stuck BLOCKING forever
-- `r30` `setSpawnSettings(false, false)` + `Difficulty.PEACEFUL` hardcoded — no mob spawns
-- `r31` `dimensionKey = Level.OVERWORLD` hardcoded — `MinecraftServer.levels` map collision, block place broken
-
-**Boot performance** (r29, r32, r33, r36, r39)
-- `r29` Plugin data folder page-cache warm via virtual-thread pool + per-plugin enable timing
-- `r32` Plugin jar prewarm via virtual-thread pool (~80% load reduction on 200-plugin servers)
-- `r36` Fast-boot triad: bStats kill-switch + update-check property kill + DB driver pre-init
-- `r39` Reverted r33 8s prewarm block — fire-and-forget restored
-
-**Auto-CDS orchestrator** (r34, r35)
-- `r34` SourbyBootstrap forks child JVM with CDS flags — no operator JVM args needed
-- `r35` CDS archive invalidation via size+mtime fingerprint on jar change
-
-**Text rendering + i18n** (r32, r38, r40, r41)
-- `r32` Emoji defaults BMP-only (vanilla MC font has no U+1F### glyphs)
-- `r38` VS16 strip in TextRender + EmojiChatListener (`🏝️` no longer shows `VS16` box)
-- `r40` SignSanitizer strips combiners on edit + right-click re-sanitize for existing signs
-
-**Item stacker** (r37, r42, r43, r44) — WildStacker-style
-- `r37` Initial stacker port (mobs only)
-- `r38` Re-scoped per user direction: items only, no mob stacking
-- `r42` LOS merge gate + TextDisplay hologram (`Carrot x4`) + non-see-through
-- `r43` MONITOR diagnostic listener + LOWEST main handler + deferred hologram update
-- `r44` Periodic merge sweep every 40 ticks (WildStacker parity)
-
-**SSB-OneBlock module** (r27) — paired with SourbyCraft
-- 50 themed phases: Plains → Forest → Cherry Grove → Deepslate Mines → Ancient City → Snow Plains → Coral Reef → Bamboo Jungle → Desert Pyramid → Nether → Crimson Forest → Bastion → End City → Cosmic Apex (finale)
-- Auto-extracts bundled phase + possibility JSONs from module jar
-- Ships separately from `~/Sourby/SSB-OneBlock/target/SSBOneBlock-2026.1.jar` (NOT bundled in SourbyCraft release)
-
-**Other** (r25, r26, r28, r37)
-- `r25` (reverted in r28) Parallel `prepareLevels` initial-chunk load
-- `r26` Full `/swm` subcommand set (inspect/delete/save/unload/help)
-- `r28` SSB-SWM post-paste diagnostic logging
-- `r37` Fix `vv10` double-v version display
-
-### r16 highlights
-- **SWM Moonrise data controllers** — new `SlimeEntityDataLoader` + `SlimePoiDataLoader` under `dev.iyanz.sourbycraft.swm.server.moonrise` serve entity + POI chunk data straight out of the in-memory `SlimeWorld` instead of trying to read region files that don't exist on SWM-backed worlds. Adapted from `com.infernalsuite.asp.level.moonrise.SlimeEntityDataLoader` / `SlimePoiDataLoader` (AdvancedSlimePaper dev/26.2), using our existing NMS NBT representation (no Adventure NBT conversion step).
-- **`SlimeLevelInstance` ctor** swaps Paper's vanilla data controllers with the SWM loaders post-`super()` so the chunk task scheduler picks them up the first time it reads a chunk.
-- **Paper patches `0046` + `0047`** drop `final` on `EntityDataController` / `PoiDataController` and on `ServerLevel.entityDataController` / `ServerLevel.poiDataController` so the SWM subclass can replace them. Vanilla worlds still get the default controllers — only SWM levels see the swap.
-
-### r15 highlights
-- **SWM chunk dual-track removed** — `SlimeChunkLevel` no longer holds a `slimeReference` field, the `SafeNmsChunkWrapper` class is gone, and `SlimeInMemoryWorld.promoteInChunkStorage` always stores the live `NMSSlimeChunk` instead of the dual-track wrapper. ASP dev/26.2 parity. Fixes the silent block-loss on chunk unload that was eating SS2's schematic-paste output the moment the island world unloaded after `/is create` — the bug where `/swm inspect island_<uuid>_normal` reported 0 persisted chunks on what should have been a freshly-pasted island.
-
-### r14 highlights
-- **Companion bundle release** — bundles the SSB-SlimeWorldManager 2026.1 + SuperiorSkyblock2 2026.1 jars that fix the SS2 island-create + /spawn issues reported against r9..r13. SourbyCraft jar itself is unchanged from r13 (rebuilt for fresh build timestamp).
-- **Spawn-routing fix (SSB-SWM)** — `SlimeWorldsProvider#getIslandsWorld` short-circuits for `island.isSpawn()` and returns the host world via `island.getCenter(dim).getWorld()` instead of synthesising an empty SWM world. `/spawn` and void-fallback teleports now land in the operator-configured spawn world.
-- **Post-paste safety net (SSB-SWM)** — `SlimeWorldsCreationAlgorithm` schedules a 40-tick check after SS2 paste completes; if the island center is still empty (paste failed silently / chunk-section race), drops a 5×5 grass platform automatically + clears 3-block headspace so the spawn point passes SS2's safe-block check.
-- **Relaxed safe-spot fallback (SS2)** — `EntityTeleports#findNewSafeSpotOnIsland` retries with `NO_EMPTY_CHUNKS` off when the strict scan returns nothing. Finds the bedrock anchor / safety platform on fresh SWM islands.
-- **Pre-paste chunk primer + anchor (SSB-SWM)** — `SlimeWorldsProvider#primeSpawnChunks` force-loads 3×3 chunks around (0,0) of new island world + drops bedrock at `(0, islandHeight-1, 0)` if void. Stops the chunk-creation race against schematic paste.
-
-### r13 highlights
-- **SWP multi-loader bootstrap** — `SWPlugin#onLoad` now reads `sourbycraft.yml swm.loader.{mysql,mongo,api,redis}.*` and registers each backing `SlimeLoader` with `LoaderManager` when credentials are present. `swm.loader.type` (with `mongodb` alias for `mongo`) sets the default. Bridge plugins like SSB-SlimeWorldManager can now route SWM requests to non-file backends via `LoaderManager#getLoader(type)`. Redis stays a warn-only stub for now (no Redis impl shipped yet — type=redis falls back to the default loader).
-
-### r12 highlights
-- **`/swm platform` emergency builder** — operators stuck on empty spawn / island worlds (post-r1..r8 data loss) can now place a safe-block slab without WorldEdit. Defaults to a 9×9 grass platform under the running player; clears the 3-block headspace above so SS2's safe-block check passes. Console form: `/swm platform <world> <x> <y> <z> [radius] [material]`. Op + `sourbycraft.swm.platform` permission gated; radius clamped to 32.
-
-### r11 highlights
-- **SWM admin diagnostics** — operators reporting "It seems like this island has no safe blocks" after the r9 NBT fix were hitting on-disk islands persisted with zero chunks (the r1..r8 SafeExecutor failure aborted before the schematic-paste save ever ran). Two new `/swm` subcommands surface the issue and clear stale state:
-  - `/swm inspect <world>` reports the persisted-chunk count for a world on the loader, plus a warning when the count is 0.
-  - `/swm delete <world>` removes a stale-empty world from the loader so the originating plugin (SS2's `/is admin schematic <player>` etc.) can rebuild it on the next access. Refuses to operate on currently-loaded worlds.
-- **Startup empty-world warning** — `loadWorld()` now logs a WARN line on every load that finds zero persisted chunks, pointing operators at the `/swm inspect` / `/swm delete` recovery flow instead of waiting for a teleport failure to expose the problem.
-
-### r10 highlights
-- **Emoji shortcode chat translator** — `dev.iyanz.sourbycraft.chat.EmojiShortcodes` ships with 50+ built-in `:name: → glyph` mappings (`:smile: :heart: :+1: :fire: :rocket: :100:` etc). `EmojiChatListener` hooks `AsyncChatEvent` at `HIGH` priority + cancel-aware, rewrites every matching token via Adventure `Component#replaceText` so emoji works across MiniMessage, legacy `&` codes, and raw text. Toggle via `emoji.shortcodes.enabled` in `sourbycraft.yml`; the full map is written back to disk on first boot under `emoji.shortcodes.codes` so operators can add / override codes without touching code.
-
-### r9 highlights
-- **SWM v13 NBT mismatch fix** — `SlimeSerializer` previously wrote extra data via `NbtIo.writeCompressed` (gzip) then wrapped the result in the outer zlib pass, while `v13SlimeWorldReader` decompressed only the zlib layer and called `NbtIo.read` on raw gzip bytes — first byte `0x1F` got parsed as a tag id, blowing up every SS2 island join with `Invalid tag id: 31`. Writer now emits uncompressed NBT (canonical), reader detects the legacy gzip magic and falls back to `NbtIo.readCompressed` so existing on-disk islands keep loading.
-
-### r8 highlights
-- **Unified text-rendering helper** — new `dev.iyanz.sourbycraft.util.TextRender` accepts any mix of MiniMessage tags (`<red>`, `<gradient:#A:#B>`, `<rainbow>`), legacy `&` colour codes, Adventure-style `&#RRGGBB` hex, classic `§x§R§R§G§G§B§B`, and raw unicode emoji glyphs. Malformed input never throws — it falls through to legacy parsing and finally to a plain text component, so a typo in `sourbycraft.yml` cannot crash the boot path.
-- **`SourbyCraftConfig.getComponent` + world-config getComponent** swapped to TextRender. Previously a single bad MiniMessage tag in an operator's config would surface as a `ParsingException` on boot.
-
-### r7 highlights
-- **SWM heap-leak fix** — `AdvancedSlimePaperImpl#onWorldUnload` was defined but never called, so every unloaded SS2 island world stayed pinned in heap (full `chunkStorage` retained). `SWPlugin#onEnable` now registers a `WorldUnloadEvent` listener that bridges to `onWorldUnload(name)`. Operators reporting 90 %+ RAM with steady island generation will see flat memory after r7.
-- **`/ver` banner format** — Replaces Paper's `VERSION_FULL` (`26.1.2-DEV-<hash>`) with the SourbyCraft build identity from `META-INF/sourbycraft-build.properties` plus the GMT+7 day-name build timestamp (e.g. `26.1.2-REL  Friday, 19 June 2026 11:10`).
-- **`/perf` command now registered** — Was defined but missing from the boot registration array, so the Brigadier root shadowed it. Added `perf`, `perfengine`, `tuner` to `sourbycraftCommandNames` + the register-loop in `DedicatedServer#initServer` (new patch `0045`).
-- **`/sys plugins` rewrite** — Reports `<active> active / <loaded> loaded / <errored> errored`. Disabled-but-registered plugins and load-time failures (captured by the new `PluginLoadDiagnostics` JUL handler) are each listed with their name + first deep-cause line so operators see "X failed, last message: Y" without grepping the log.
-
-### r6 highlights
-- **Banner version sync** — the in-jar `META-INF/sourbycraft-build.properties` is now derived from the current git branch (REL on `release/*`, EXP on `experimental/feat*`, DEV elsewhere) via `sourbycraftSuffixProvider`. The hardcoded `internalVersion` in `gradle.properties` is gone — the banner always matches the jar filename and manifest.
-- **`ChunkMap#getChunkDataFixContextTag` null-guard** — SWM-backed levels (and any plugin that calls `runActionOnUnloadedChunks` on a level without a registered `LevelStem` typeKey) used to NPE on every chunk upgrade. New feature patch `0044` wraps the `stemKey.identifier()` deref in a null check, killing the stack-trace spam during SS2 island generation.
-- **Release-task config-cache safety** — `writeBuildInfo` + `assembleReleaseArtifacts` now opt out of the configuration cache (they shell out to git at task time). Other tasks keep caching.
-
-### r4 highlights
-- **REL artifact naming** — `release/*` branches stamp the manifest as `Implementation-Version: 26.1.2-REL`. Canonical jar is `SourbyCraft-26.1.2-REL.jar`.
-- **Persistent `/tpsbar` + `/rambar` toggle** — `BarToggleManager` owns per-player BossBars with 1s live refresh. First invocation shows, second hides. Replaces the 10-second auto-hide.
-- **`/perf` command** (aliases `/perfengine`, `/tuner`) — branded panel with live `PerfSensor` tier + warmup, six signal lines (TPS 1s/30s/5m, MSPT, Mem%, GC/min), full `KnobRegistry` snapshot.
-- **`/ping` always emits the Location row** — async GeoIP via `VirtualExecutor`, "looking up..." placeholder, "unavailable" fallback when the lookup misses.
-
-Major upgrade from `12-EXP` (1.21.11) to year-based Minecraft 26.1.2:
-
-- **Paper 26.1.2 hard-fork migration** — paperweight-patcher 2.0.0-beta.21, mache 26.1.2+build.3, paperclip 3.0.4. Year-based MC versioning (no more 1.x). Spigot mappings + reobf pipeline dropped.
-- **Java 25 required** — uses unnamed variables, virtual threads, ZGC generational. JDK 21 no longer supported.
-- **Single-variant build** — PVP variant + Pufferfish vendor dropped. Single `SourbyCraft-26.1.2-REL.jar` artifact.
-- **Adventure book force-op exploit blocked** — `BookSanitizer` strips `click_event` + `hover_event` from written-book page components on the creative-slot inject path. Closes the classic rigged-book-clicks-as-op vector.
-- **YAML loaders hardened** — every `new Yaml()` site replaced with `SafeConstructor` to block tag-based gadget RCE (`!!javax.script.ScriptEngineManager` etc.).
-- **Plugin / library downloaders hardened** — `PluginDownloader`, `LibDownloader`, SWM `PluginInstaller`: https-only (manual redirect re-check), 100 MB cap with running byte counter, path-traversal containment.
-- **SWM `FileLoader` path traversal fixed** — `/swm load <name>` rejects slash / `..` / leading-dot, normalizes target, verifies containment inside baseDir.
-- **Perf-engine P2 lag-machine wiring** — projectile chunk-load throttle (per-tick + per-projectile), excess minecart/boat sweeper, excess falling-block sweeper. All gated by `Knobs.LAG_MACHINE_*` (default ON for snowball/firework save fixes, OFF for sweepers).
-- **Sourby Bootstrap (slim jar)** — release jar 31 M (down from 57 M). 6 optional libs + Ookla speedtest CLI lazy-download on first boot into `libraries/` with SHA-256 verification.
-- **Anti-xray extension (stonar96 RayTraceAntiXray port)** — async ore visibility cache + entity LOS gate + particle LOS gate. NMS hooks on `ChunkMap.TrackedEntity#updatePlayer` (patch 0040) and `ServerLevel#sendParticles` (patch 0041). Hides mobs / item drops / `TextDisplay` holograms / particles behind walls. Liquid surface delegated to Paper `anticheat.anti-xray.fluid-obscures`. All toggles default OFF.
-- **Spark profiler integration** — `SparkBridge` lazy-binds to `me.lucko.spark.api.SparkProvider`, `/sparkview` command renders TPS 5s/10s/1m/5m/15m + MSPT 10s/1m/5m mean/max/95th + CPU process/system + per-GC totals through the SourbyCraft hex palette and the same `▰▱` bar style as the rest of /tps /sys /ver. Toggle via `spark.enabled` in sourbycraft.yml.
-
-See `release/RELEASE-NOTES-26.1.2.md` for the full patch list.
+26.2 carries forward everything from the 26.1.2 performance + hardening work **minus SWM**, and adds the survival-scale tuning + security fixes in this release.
 
 ---
 
-## Build
+## What 26.2 delivers
 
-```bash
-./gradlew assembleReleaseArtifacts
-```
+### 🛡️ Resource-pack-proof anti-xray (default ON)
+Anti-xray is enabled out of the box and hardened so a transparent-block ("x-ray") resource pack no longer reveals ores:
+- **Paper HIDE engine (engine-mode 1), `max-block-height: 320`** — enclosed ores are rewritten to stone/deepslate **in the chunk packet**, so the real ore data never reaches the client. An x-ray texture pack sees the replacement stone, not ore, at every altitude (copper → y112, mountain emerald, deepslate → -64).
+- **SourbyCraft raytrace layer** — hides *cave-exposed* ores (the gap Paper's engine leaves) until the player has genuine line-of-sight, then reveals them via an async raytrace on virtual threads. No real ore data for ores a player can't legitimately see.
 
-Output: `release/SourbyCraft-26.1.2-REL.jar` (~31 M slim) + `release/checksums.txt`.
+### 🧱 Hardened item stacker
+- **Anti-siphon:** items are never merged across distinct pickup-owners, so a player can't drop an item beside another player's owner-protected drop to siphon it.
+- **No item-x-ray via holograms:** stack-count holograms are render-range-clamped (≈13 blocks) and occluded behind blocks, so distant players can't scout stack contents through walls.
+- Line-of-sight gate on every merge path (spawn scan, periodic sweep, vanilla merge) — no through-wall merging.
 
----
+### 🚀 Performance for 150+ players
+- **Self-tuning engine** — a multi-signal `PerfSensor` (TPS / MSPT / heap / GC) drives a 5-tier state machine (GREEN→EMERGENCY). `SelfTuneController` escalates entity-tick-rate + adaptive AI throttle automatically under load and relaxes them on recovery: vanilla feel when idle, headroom when full.
+- **Async mob spawning** (pufferfish semantics) — the per-tick density/mob-cap scan runs off-main on virtual threads; spawns + Bukkit events stay on the main thread (plugin-safe).
+- **Multithread chunk generation** — Moonrise workers, exposed + smart-auto-sized (`performance.threads.chunk-workers`).
+- **Baseline adaptive AI throttle** — mobs >80 blocks from any player tick AI every 2nd tick (near-zero gameplay impact, real CPU headroom at high pop).
+- **Lag-machine guards** — projectile-load caps, snowball/firework save skips, per-chunk/world entity + item + arrow caps.
+- No new platform threads: async work rides ~1 KB virtual threads; worker pools park when idle. Design goal: **≥80% resource efficiency vs. naive multithreading.**
 
-## First Boot
+### 🧩 Native mod loader (`mods/`)
+Server-side extension jars via a first-party `SourbyMod` API — `sourbymod.yml` descriptor, per-mod classloader with full NMS visibility, lifecycle managed by the module registry. **Not** a Fabric/Forge bridge (Paper fork); non-SourbyMod jars are warned + ignored. See [`docs/SOURBYMODS.md`](docs/SOURBYMODS.md).
 
-The release jar is slim (~31 M). First boot downloads ~28 M of optional libraries into `libraries/` with SHA-256 verification:
-
-| Lib | Size | Source |
-|---|---|---|
-| `sqlite-jdbc` | ~14M | `repo1.maven.org` |
-| `mysql-connector-j` | ~2.6M | `repo1.maven.org` |
-| `spark-paper` | ~3M | `repo.papermc.io` |
-| `Flare` (profiler engine) | ~2M | `jitpack.io` |
-| `protobuf-java` | ~1.9M | `repo1.maven.org` |
-| `sentry` (opt-in error tracking) | ~918K | `repo1.maven.org` |
-| Ookla `speedtest` CLI (lazy on `/speedtest`) | ~2.5M | `install.speedtest.net` |
-
-**Required outbound HTTPS:** `repo1.maven.org`, `repo.papermc.io`, `jitpack.io`, `install.speedtest.net`.
-
-**Offline first boot:** `[SourbyBootstrap] FATAL` log lists every URL + destination path under `libraries/`. Side-load the files manually and restart. Subsequent boots are silent cache-hit fast path (zero downloads, baseline boot time).
+### Carried forward (from 26.1.2 r48)
+Security enforcement (NBT/sign/anvil/packet guards), entity/item config caps with Spigot/Paper bridges, ViewThrottle, compression bridge, redstone budget, DAB-lite activation overrides, module registry + PerWorldHolder.
 
 ---
 
-## Self-Tuning Perf Engine
+## Tuning for 150+ players
 
-Status across the 9-sub-project roadmap:
+SourbyCraft auto-tunes under load, but the operator config that dominates large-server performance lives in Paper's files. Recommended starting point for ~150 players (adjust to hardware):
 
-| Sub-project | Status | What it ships |
-|---|---|---|
-| **P0** Knob Registry API | ✓ shipped | `BoolKnob`/`IntKnob` abstraction, `Knobs` static holder, `KnobRegistry`, boot-time snapshot line |
-| **P1** Load Sensor + Tier Classifier | ✓ shipped | `PerfSensor` (TPS rolling / MSPT / mem% / GC), 5-tier state machine, NMS hook in `tickChildren` |
-| **P2** Lag-Machine Protection | ✓ shipped | 8 knobs wired across 5 NMS patches: snowball / firework save fix (default ON), projectile chunk-load throttle (10/tick, 10/projectile), excess minecart/boat/falling-block sweeper (default OFF + per-chunk caps) |
-| **P3** Adaptive Entity AI | ✓ shipped | 2 knobs + Mob.aiStep early-return when no live player within distance (0039) |
-| **P4** Combat Profiles | ✓ shipped | `CombatProfile` enum (VANILLA / BALANCED / PVP) applied at boot from `combat.profile` yml key; bundles P0..P3 knob defaults per playstyle |
-| **P5** Async Chunk Pipeline | ✓ shipped (helper) | `AsyncChunkPipeline` routes read-only chunk/tracker work onto `VirtualExecutor`; complements Moonrise's async chunk system |
-| **P6** Async Packet & World | ✓ shipped | non-flush packet (0033) + virtual-thread server pools (0019) + `AsyncDataSaver` helper for off-main IO. Read-side async owned by Moonrise |
-| **P7** Self-Tune Controller | ✓ shipped | `SelfTuneController` subscribes to `PerfSensor` transitions; tier policy escalates lag-machine + AI knobs; restores operator baseline on recovery |
-| **P8** Operator UX | ✓ shipped (BossBar) | `TierBossBar` per-player opt-in; tier-coloured (GREEN/YELLOW/PINK/RED/PURPLE); refresh on transition |
-
-### Knobs config (`sourbycraft.yml`)
-
+**`config/paper-global.yml`**
 ```yaml
-perf:
-  entity-tick-rate: 20                # P0 reference knob (1=vanilla every-tick; 20=1-in-20)
-  sensor:                             # P1
-    enabled: true
-    cadence-ticks: 20                 # 1s at 20 TPS
-    dwell-samples: 3                  # samples in candidate tier required before escalation
-    recovery-dwell-multiplier: 2.0    # recovery needs dwell-samples × multiplier
-    warmup-ticks: 200                 # ticks to skip at startup before sampling (10s at 20 TPS)
-    thresholds:
-      tps:           { yellow: 19.5, orange: 18.0, red: 15.0, emergency: 10.0 }
-      mspt:          { yellow: 30,   orange: 40,   red: 60,   emergency: 100 }
-      mem:           { yellow: 75,   orange: 85,   red: 92,   emergency: 97 }
-      gc-ms-per-min: { yellow: 20,   orange: 50,   red: 100,  emergency: 300 }
-  lag-machine:                        # P2
-    disable-saving-snowballs: true
-    disable-saving-fireworks: true
-    max-projectile-loads-per-tick: 10
-    max-projectile-loads-per-projectile: 10
-    remove-excess-minecarts: false
-    excess-minecarts-limit: 10
-    remove-excess-boats: false
-    excess-boats-limit: 10
+chunk-loading-basic:
+  player-max-chunk-send-rate: 100.0
+  player-max-chunk-load-rate: 120.0
+chunk-loading-advanced:
+  player-max-concurrent-chunk-loads: 0    # auto per-player
 ```
 
----
-
-## Features
-
-### 🔒 Security (NMS-level)
-
-- **BookSanitizer** — strips `click_event` / `hover_event` from any `WRITTEN_BOOK_CONTENT` delivered via `ServerboundSetCreativeModeSlotPacket`. Blocks the force-op book exploit family where a crafted book carries `click_event:run_command` that fires as the opener. Recursion-capped at depth 64 to block component-bomb DOS.
-- **HardeningAdvisor** — boot-time scan of `paper-global.yml` `unsupported-settings`. Logs a per-finding warning if the operator has enabled any of: `allow-headless-pistons`, `allow-permanent-block-break-exploits`, `allow-piston-duplication`, `allow-unsafe-end-portal-teleportation`, `skip-tripwire-hook-placement-validation`, or `book-size.page-max > 4096`. Pure advisory; operator keeps control.
-- **YAML SafeConstructor** — every `Yaml.load` site (`SourbyCraftSecurityConfig`, `SourbyCraftConfig`, `PluginManifest`, `PluginCategoryMap`) uses `SafeConstructor` to block `!!tag`-based gadget RCE.
-- **PluginDownloader / LibDownloader / SWM PluginInstaller** — https-only on initial + every redirect hop, 100 MB cap with running byte counter, path-traversal containment (`startsWith` root check).
-- **SWM FileLoader + SwmCommand + swm.file-dir** — `/swm load <name>` rejects slash/`..`/leading-dot, normalizes and contains within `slime_worlds/`. `swm.file-dir` operator yml rejected if it tries to escape the server root or hit an absolute path.
-- **APILoader (remote SWM)** — startup WARN when `ignoreSslCertificate=true`; UTF-8 charset for basic-auth Base64.
-- **GeoUtil** (`/ping`) — https to `ip-api.com`, bounded 1024-entry IP cache, `InetAddress.isSiteLocalAddress` for RFC1918 detection.
-- **VirtualExecutor** — `init()` synchronized + DCL in `executor()` so a concurrent shutdown cannot return a dead executor.
-- **SWPlugin shutdown** — `saveWorldAsync` wait bounded at 30 s per world so a stuck SWM write cannot hang server shutdown.
-- **Crash Prevention** — NbtAccounter limits (books, skulls, bundles), sign / anvil length limits, recipe book packet size, creative NBT size. Paper's `CountingOps` codec-depth tracker bounds `ItemStack.CODEC` decode.
-- **AntiXray** — Paper engine-mode 1 obfuscator (fluid obscures, all-blocks, entity obfuscation) plus SourbyCraft RayTraceAntiXray port: async ore visibility cache (`RayTraceWorker` on `VirtualExecutor`), sync entity LOS gate (`ChunkMap.TrackedEntity` hook, patch 0040) for mobs / item drops / `TextDisplay` holograms / custom-named armor stands, and per-(player, particle-origin) LOS gate (`ServerLevel.sendParticles` hook, patch 0041). All three toggles default OFF.
-- **Command Security** — RCON rate limiting, RCON brute-force protection.
-- **Locale.ROOT correctness** — every `toLowerCase` + numeric `String.format` site uses `Locale.ROOT`. Prevents Turkish-locale OS detection breakage and avoids comma-vs-period decimal divergence in TPS / RAM / Ping bar text.
-
-### ⚡ Performance NMS
-
-- **Projectile chunk-load throttle** — caps per-tick + per-projectile chunk-load fan-out. Blocks snowball / fish-hook / arrow lag-machines.
-- **Excess vehicle sweeper** — every 10 s each minecart / boat counts siblings in its chunk and discards if over limit. Cascades naturally without coordinated bookkeeping.
-- **Excess falling-block sweeper** — same pattern, 2 s cadence. Blocks sand-cascade lag.
-- **Virtual-thread server pools** — Java 25 virtual threads replace the legacy I/O thread pool (`Util.java` patch).
-- **Improve Player#canSee** — short-circuits NMS-Entity overload to skip the bukkit wrapper; `longUUID` field on `Entity` foundation for future fastutil canSee.
-- **Resend more data on locale change** — `PlayerLocaleChangeEvent` triggers throttled refresh of advancements, inventory, entity custom names, TextDisplay text, ItemFrame items.
-- **Item localization (`localizeItems`)** — pre-renders translatable display names + lore on serialize via `ItemUtil.packPatchSaves` round-trip; fixes merchant-offer de-sync after locale flips.
-- **Optimise non-flush packet sending** (Spottedleaf) — reflectively grabs Netty's `safeExecute` to skip event-loop wakeup on non-flushed packets. ~1.5x entity-tracker tick win.
-- **Moonrise chunk system** — optimized chunk loading/saving/ticking (inherited from Paper 26.1.2).
-
-### 🛠 Commands (hex-colored)
-
-Registered with the `sourbycraft` fallback prefix in `DedicatedServer#initServer` (patch 0030). Use `/sourbycraft:<name>` if Paper has claimed the bare slot.
-
-| Command | Description |
-|---------|-------------|
-| `/tps` | SourbyCraft-colored TPS readout (instant + 1m/5m/15m) with warmup banner |
-| `/sys` | Server specs: uptime, CPU, RAM, Java, worlds, SWM hint |
-| `/ping [player]` | Latency + client brand + GeoIP location (always emits Location row) |
-| `/plugins` | Active plugin list with versions |
-| `/speedtest` | Built-in Ookla network speed test (lazy-downloaded multi-OS binary) |
-| `/sparkview` (`/sparkv`, `/spk`) | Comprehensive Spark profiler view: TPS 5s/10s/1m/5m/15m + MSPT 10s/1m/5m mean/max/95th + CPU process/system + per-GC totals |
-| `/tpsbar` / `/rambar` | Toggle persistent BossBar with 1s live refresh (toggle on/off) |
-| `/perf` (`/perfengine`, `/tuner`) | PerfSensor tier + warmup, six signal lines, full KnobRegistry snapshot |
-| `/ver` | Version info: SourbyCraft + Minecraft + API + uptime + git (aliases: `version`, `about`) |
-| `/swm <list/load/status>` | SlimeWorldManager control |
-
-### 🔬 Profiling
-
-Paper 26.1.2 bundles Spark as a built-in profiler. SourbyCraft adds two integration layers on top:
-
-1. **Auto-install fallback** — if you remove Paper's bundled Spark, the SourbyCraft auto-installer downloads `spark-*-bukkit.jar` from `ci.lucko.me` on first boot.
-2. **SourbyCraft Spark viewer** — `/sparkview` (aliases `/sparkv`, `/spk`) renders the full spark-api statistic set through the SourbyCraft hex palette + `▰▱` bar style: rolling TPS windows, MSPT mean/max/95th, CPU process+system, per-GC totals. Toggle the bridge with `spark.enabled: true|false` in `sourbycraft.yml`.
-
-Manual install (only needed for non-Paper deployments):
-
-```sh
-# Drop spark plugin JAR into your plugins/ directory
-curl -L -o plugins/spark.jar \
-  "https://ci.lucko.me/job/spark/lastSuccessfulBuild/artifact/spark-bukkit/build/libs/spark-1.10.142-bukkit.jar"
-```
-
-After install, use the standard Spark commands:
-
-- `/spark profiler --timeout 120 --thread '*'` — sample all threads for 2 minutes
-- `/spark profiler --timeout 60 --thread 'Server thread'` — main-thread only
-- `/spark profiler stop` — stop and produce shareable URL
-- `/spark health` — live health snapshot
-- `/spark heapsummary` — heap usage snapshot
-
-Profile URLs at `https://spark.lucko.me/<code>`.
-
-### 🌐 Speedtest
-
-`/speedtest` runs the Ookla CLI in `--format=json` mode and renders DL/UL/Ping with hex-colored progress bars. Binary auto-downloads on first invocation from `install.speedtest.net`. Supported OS/arch:
-
-- Linux x86-64, Linux aarch64, Linux armhf
-- macOS universal (x86-64 + arm64)
-- Windows x64, Windows arm64
-
-### 🌍 SlimeWorldManager (SWM v2)
-
-Built-in SlimeWorldManager for `.slime` world format. SRF v13 binary format with Zstd compression.
-
-**Two deployment modes:**
-
-| Mode | Description | When to use |
-|------|-------------|------------|
-| **Built-in** | Server-internal `SWPlugin` auto-starts with `swm.enabled: true` | Default — worlds load from `slime_worlds/` at startup |
-| **External plugin** | Standalone `SourbyCraftSWM.jar` plugin for external plugin API access | When third-party plugins need SWM API |
-
-**Commands:**
-- `/swm list` — `.slime` worlds with `[LOADED]` status
-- `/swm load <world>` — load a slime world at runtime (path-containment hardened)
-- `/swm status` — installed status + worlds-found count
-
-**Configuration** (`sourbycraft.yml`):
+**`config/paper-world-defaults.yml`**
 ```yaml
-swm:
-  enabled: true            # Enable built-in SWM bootstrap at startup
-  auto-install: true       # Auto-download external plugin JAR
-  auto-update: true        # Check GitHub for SWM plugin updates on startup
-  version: "v6-REL"
-  file-dir: "slime_worlds"
-```
-
-**API usage** (plugin developers):
-```java
-AdvancedSlimePaperAPI swm = AdvancedSlimePaperAPI.instance();
-SlimeWorld world = swm.readWorld(new FileLoader("slime_worlds"), "myworld", false, new SlimePropertyMap());
-swm.loadWorld(world, true);
-```
-
-### ⚙️ Infrastructure
-- **Dual JRE 21/25** — Java 21 bytecode target, runs on JDK 21+ (build toolchain JDK 25)
-- **ZGC generational** — recommended GC on JDK 21+ with heap ≥ 8 GB (sub-ms pauses)
-- **NUMA + Virtual Threads + CDS** — max hardware utilization
-- **StartupOptimizer** — detects JVM args at boot, prints GC/heap/Java summary + tuning recommendations
-- **MemoryOptimizer** — object pool + soft-reference cache
-
----
-
-## Configuration
-
-`sourbycraft.yml` lives at the server root (NOT `plugins/SourbyCraft/`). Operator overrides JAR-baked defaults.
-
-```yaml
-# sourbycraft.yml — main config (operator-edited)
-
-perf:
-  entity-tick-rate: 20            # P0 — 1=vanilla every-tick, 20=1-in-20
-  sensor:                         # P1 — multi-signal load sensor
-    enabled: true
-    cadence-ticks: 20
-    dwell-samples: 3
-    recovery-dwell-multiplier: 2.0
-    warmup-ticks: 200
-  lag-machine:                    # P2 — see Self-Tuning Perf Engine section
-    disable-saving-snowballs: true
-    disable-saving-fireworks: true
-    max-projectile-loads-per-tick: 10
-    max-projectile-loads-per-projectile: 10
-    remove-excess-minecarts: false
-    excess-minecarts-limit: 10
-    remove-excess-boats: false
-    excess-boats-limit: 10
-
-entity:
-  max-falling-block-per-chunk: 20  # P2 sweep gate
-
-memory:
-  skip-empty-sections: true
-  pool-entity-data: true
-
-network:
-  auto-throttle-view: true
-  min-view-distance: 4
-
-settings:
-  detailed-brand-info: true
-  translate-items: true            # item localization round-trip
-
-swm:
-  enabled: true
-  auto-install: true
-  auto-update: true
-  version: "v6-REL"
-  file-dir: "slime_worlds"
-
-# anti-xray (per-world)
+chunks:
+  max-auto-save-chunks-per-tick: 12
+entities:
+  spawning:
+    per-player-mob-spawns: true           # fair caps, avoids one area starving spawns
 anticheat:
   anti-xray:
-    fluid-obscures: true
-    all-blocks: false
-    entity-obfuscation: true
-    entity-obfuscation-range: 64
+    enabled: true                          # SourbyCraft default; keep it on
+    engine-mode: 1
+    max-block-height: 320
 ```
 
-```yaml
-# sourbycraft.yml — anti-xray ray-trace extension (stonar96/RayTraceAntiXray port)
-antixray:
-  raytrace:
-    # Per-(player, ore) line-of-sight gate on top of Paper's engine-mode 1
-    # block obfuscator. Hides cave-exposed ores that vanilla Paper would
-    # otherwise leak. Async on VirtualExecutor, results cached per-player.
-    enabled: false
-  entity-raytrace:
-    # Hides mobs, item drops, holograms (TextDisplay / custom-named armor
-    # stands) when they sit behind solid blocks from the player's POV.
-    # Sync check on the entity tracker tick. Liquid surface obfuscation is
-    # delegated to Paper's anticheat.anti-xray.fluid-obscures above.
-    enabled: false
-  particle-raytrace:
-    # Drops particle packets whose origin is occluded from the receiver's
-    # eye. Closes the wallhack signal from ore-pillar / fire / door-frame
-    # particles.
-    enabled: false
+**`server.properties`**
+```properties
+view-distance=7
+simulation-distance=5
 ```
 
-```yaml
-# sourbycraft-security.yml — crash prevention
-crash-prevention:
-  nbt:
-    max-bytes: 2097152             # 2MB
-    max-depth: 64
-    max-string-length: 4096
-    max-list-size: 65536
-  sign:
-    max-line-length: 256
-    max-total-chars: 1024
-  anvil:
-    max-item-name-length: 128
-  recipe-book:
-    max-packet-size: 20480
-  creative-item:
-    max-nbt-size: 2048
+**JVM** (Aikar-style flags, sized to host RAM):
+```
+-Xms<half RAM> -Xmx<half RAM> -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions
 ```
 
----
-
-## Startup
-
-No tuner scripts. Run paperclip directly with recommended flags. StartupOptimizer reads your JVM args and prints recommendations at boot if missing.
-
-**Recommended: JDK 21+, heap ≥ 8 GB (ZGC generational)**
-
-```bash
-java \
-  -Xms8G -Xmx8G \
-  -XX:+UseZGC -XX:+ZGenerational \
-  -XX:+AlwaysPreTouch -XX:+UseTransparentHugePages \
-  -XX:+UseNUMA \
-  -jar sourbycraft-paperclip-mojmap.jar --nogui
-```
-
-**Small heap (< 8 GB): G1**
-
-```bash
-java \
-  -Xms4G -Xmx4G \
-  -XX:+UseG1GC -XX:+ParallelRefProcEnabled \
-  -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8M \
-  -XX:+AlwaysPreTouch -XX:+UseTransparentHugePages \
-  -jar sourbycraft-paperclip-mojmap.jar --nogui
-```
-
-At boot, look for `--- SourbyCraft Performance ---`. If your GC choice is suboptimal, recommended flags are printed.
+Run a proxy (Velocity, `network.proxy-mode: velocity-modern`) and split load across backends for the smoothest 150+ experience.
 
 ---
 
 ## Building
 
+Requires **Java 25** and git history (paperweight applies patches as commits).
+
 ```bash
-git clone https://github.com/YanIanZ/SourbyCraft.git
-cd SourbyCraft
-git checkout release/26.1.2
-./gradlew applyAllPatches
-./gradlew assembleReleaseArtifacts
+./gradlew applyAllPatches          # rebase feature patches onto Paper/MC 26.2
+./gradlew :sourbycraft-server:compileJava
+./gradlew assembleReleaseArtifacts # → release/SourbyCraft-26.2-REL.jar
 ```
 
-Output: `release/SourbyCraft-26.1.2-REL.jar` (slim, ~31 M) + `release/checksums.txt`.
-
-Active patch counts:
-- 41 minecraft NMS patches (`patches/minecraft/`)
-- 6 paper-server patches (`patches/server/`)
-- 14 buildscript-server patches + 2 api patches (`patches/buildscript/`)
-- 4 api patches (`patches/api/`)
+CI (`.github/workflows/build.yml`) applies patches, compiles, assembles the jar, and **boots the server to `Done` then stops it** on every push/PR.
 
 ---
 
-## API
+## License
 
-```kotlin
-repositories { maven("https://jitpack.io") }
-dependencies {
-    compileOnly("com.github.YanIanZ.SourbyCraft:sourbycraft-api:26.1.2-REL")
-}
-```
-
-### SWM API
-
-```java
-AdvancedSlimePaperAPI swm = AdvancedSlimePaperAPI.instance();
-SlimeWorld world = swm.readWorld(new FileLoader("slime_worlds"), "myworld", false, new SlimePropertyMap());
-swm.loadWorld(world, true);
-```
+[PolyForm Noncommercial 1.0.0](LICENSE). Fork of [PaperMC/Paper](https://github.com/PaperMC/Paper).

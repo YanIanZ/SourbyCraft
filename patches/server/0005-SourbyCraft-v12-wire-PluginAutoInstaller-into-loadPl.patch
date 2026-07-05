@@ -5,10 +5,10 @@ Subject: [PATCH] SourbyCraft v12: wire PluginAutoInstaller into loadPlugins
 
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index ab2224ecebc5ea185472b418f0bde6eddfa4f287..c5fb64b6d61e04ce6fa08ddf7e7bccdb67c349a4 100644
+index 83b8d44c7c8fc3cabb371c4e6ab9e1a9320ead35..187885f20e709cad2b23f4a60ec57f6c278cdcb2 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -550,6 +550,22 @@ public final class CraftServer implements Server {
+@@ -546,6 +546,22 @@ public final class CraftServer implements Server {
      }
  
      public void loadPlugins() {
