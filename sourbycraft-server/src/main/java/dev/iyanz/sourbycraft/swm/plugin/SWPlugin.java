@@ -133,6 +133,9 @@ public class SWPlugin extends JavaPlugin {
                 }
             }, p));
         }
+        // SourbyCraft ML1 — enroll native mods (loaded by ModLoader.bootstrap at DedicatedServer.initServer)
+        // AFTER first-party adds and BEFORE enableAll, so they survive the clear() above.
+        dev.iyanz.sourbycraft.mod.ModLoader.enrollInto();
         ModuleRegistry.enableAll(this);
 
         worldsToLoad.values().stream()

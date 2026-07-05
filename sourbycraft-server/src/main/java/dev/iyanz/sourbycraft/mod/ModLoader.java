@@ -26,20 +26,30 @@ import java.util.jar.JarFile;
  * giving mods full NMS + Bukkit + dev.iyanz API visibility). Called once from
  * {@code DedicatedServer.initServer} after SourbyCraftSecurityConfig/SourbyCraftConfig init.
  *
- * <p>Mods are automatically enrolled into the MT1 {@link ModuleRegistry} as persistent
- * modules ({@code mod:<id>}) so their {@link SourbyMod#onEnable}/{@link SourbyMod#onDisable}
- * ride the existing lifecycle. Persistent modules survive {@link ModuleRegistry#clear()}
- * (which guards against double-enroll on same-classloader plugin reloads).
+ * <p><b>Lifecycle sequencing:</b> {@link #bootstrap} only performs scan → load →
+ * {@link SourbyMod#onLoad}. It does NOT enroll mods into {@link ModuleRegistry} directly,
+ * because {@code SWPlugin.onEnable} calls {@link ModuleRegistry#clear()} at the top as a
+ * same-classloader reload guard — a direct enroll at bootstrap would be wiped before
+ * {@code enableAll} runs. Instead, {@link #enrollInto()} is called from
+ * {@code SWPlugin.onEnable} AFTER all first-party {@code ModuleRegistry.add} calls and
+ * BEFORE {@code ModuleRegistry.enableAll}, enrolling each loaded mod as a full
+ * {@link SourbyModule} ({@code mod:<id>}) so {@code onEnable}/{@code onDisable} ride
+ * the existing lifecycle.
  *
- * <p>Security: mods run in-process with full server privileges — same trust level as plugins.
- * The loader adds no sandbox (none is possible in-JVM). Descriptor parsing uses
- * {@code SafeConstructor} (no YAML gadget RCE). Jars are loaded only when the operator
- * placed them in {@code mods/}.
+ * <p><b>Security:</b> Mods run in-process with full server privileges — same trust level
+ * as plugins. The loader adds no sandbox (none is possible in-JVM). Descriptor parsing
+ * uses {@code SafeConstructor} (no YAML gadget RCE). Jars are loaded only when the
+ * operator placed them in {@code mods/}.
  */
 public final class ModLoader {
 
-    /** SourbyMod API generation that this build of the loader understands. Reject {@code api > API_GENERATION}. */
+    /** SourbyMod API generation that this build supports. Mods declaring {@code api > API_GENERATION} are rejected. */
     public static final int API_GENERATION = 1;
+
+    private record LoadedMod(ModDescriptor desc, SourbyMod instance, ModContext ctx) {}
+
+    /** Mods loaded by bootstrap(), consumed by enrollInto(). */
+    private static final List<LoadedMod> LOADED = new ArrayList<>();
 
     /** Strong references to mod classloaders so GC cannot unload mod classes at runtime. */
     private static final List<URLClassLoader> MOD_CLASSLOADERS = new ArrayList<>();
@@ -47,11 +57,15 @@ public final class ModLoader {
     private ModLoader() {}
 
     /**
-     * Entry point — scan {@code mods/}, load valid SourbyMods, emit boot summary.
-     * Called from {@code DedicatedServer.initServer} after config init.
+     * Scan {@code mods/}, load valid SourbyMods, call {@link SourbyMod#onLoad}.
+     * Does NOT enroll into {@link ModuleRegistry} — see class-level javadoc.
+     * Called once from {@code DedicatedServer.initServer} after config init.
      * Zero mods → zero cost beyond one directory listing.
      */
     public static void bootstrap() {
+        LOADED.clear();
+        MOD_CLASSLOADERS.clear();
+
         Path modsDir = Path.of("mods");
         try {
             Files.createDirectories(modsDir);
@@ -65,11 +79,12 @@ public final class ModLoader {
             return;
         }
 
-        // First pass: parse + validate descriptors, resolve duplicates
-        record Entry(File file, ModDescriptor desc) {}
-        List<Entry> toLoad = new ArrayList<>();
         Set<String> seenIds = new LinkedHashSet<>();
         int skipped = 0;
+
+        // First pass: parse + validate descriptors
+        record Entry(File file, ModDescriptor desc) {}
+        List<Entry> toLoad = new ArrayList<>();
 
         for (File jarFile : jarFiles) {
             String jarName = jarFile.getName();
@@ -78,10 +93,10 @@ public final class ModLoader {
             try (JarFile jar = new JarFile(jarFile)) {
                 JarEntry entry = jar.getJarEntry("sourbymod.yml");
                 if (entry == null) {
-                    // Non-SourbyMod jar — honesty WARN explaining why it is ignored
+                    // Non-SourbyMod jar — honesty WARN (one per jar)
                     SourbyLogger.warn("[SourbyCraft] mods/" + jarName
                         + ": no sourbymod.yml — Fabric/Forge mods are not supported;"
-                        + " SourbyMod format: docs/SOURBYMODS.md");
+                        + " SourbyMod format: docs/SOURBYMODS.md. Ignored.");
                     skipped++;
                     continue;
                 }
@@ -95,7 +110,7 @@ public final class ModLoader {
             }
 
             if (descriptor == null) {
-                // parse already logged the reason
+                // parse() already logged the reason
                 skipped++;
                 continue;
             }
@@ -119,7 +134,7 @@ public final class ModLoader {
             toLoad.add(new Entry(jarFile, descriptor));
         }
 
-        // Second pass: instantiate, call onLoad, enroll into ModuleRegistry
+        // Second pass: URLClassLoader + instantiate + onLoad
         int loaded = 0;
         StringBuilder sb = new StringBuilder("[SourbyCraft] mods:");
         ClassLoader parent = ModLoader.class.getClassLoader();
@@ -132,42 +147,32 @@ public final class ModLoader {
             try {
                 cl = new URLClassLoader(new URL[]{jarFile.toURI().toURL()}, parent);
 
-                Class<?> mainClass = cl.loadClass(desc.main);
+                Class<?> mainClass = Class.forName(desc.main, true, cl);
                 if (!SourbyMod.class.isAssignableFrom(mainClass)) {
                     SourbyLogger.warn("[SourbyCraft] mods/" + jarFile.getName()
                         + ": main class " + desc.main + " does not implement SourbyMod — skipped");
                     skipped++;
-                    cl.close();
+                    try { cl.close(); } catch (Exception ignored) {}
                     continue;
                 }
 
                 SourbyMod mod = (SourbyMod) mainClass.getDeclaredConstructor().newInstance();
-                ModContext ctx = new ModContext(desc.id, desc.version);
+                ModContext ctx = new ModContext(desc.id, desc.name, desc.version);
 
                 // onLoad — isolated; a broken mod never kills the server
                 try {
                     mod.onLoad(ctx);
                 } catch (Throwable t) {
-                    SourbyLogger.warn("[SourbyCraft] mod:" + desc.id
-                        + " onLoad threw " + t.getClass().getSimpleName() + ": " + t.getMessage() + " — mod disabled");
+                    SourbyLogger.warn("[SourbyCraft] mod:" + desc.id + " onLoad threw "
+                        + t.getClass().getSimpleName() + ": " + t.getMessage() + " — mod disabled");
                     skipped++;
-                    cl.close();
+                    try { cl.close(); } catch (Exception ignored) {}
                     continue;
                 }
 
-                // Persist classloader reference so GC cannot unload mod classes
+                // Persist classloader reference — GC must not unload mod classes
                 MOD_CLASSLOADERS.add(cl);
-
-                // Enroll as persistent module — survives ModuleRegistry.clear() so onEnable/onDisable
-                // are called by SWPlugin's existing enableAll/disableAll without any SWPlugin changes
-                final SourbyMod finalMod = mod;
-                final String modId = desc.id;
-                ModuleRegistry.addPersistent(new SourbyModule() {
-                    @Override public String name() { return "mod:" + modId; }
-                    @Override public void enable(Plugin plugin) { finalMod.onEnable(); }
-                    @Override public void disable() { finalMod.onDisable(); }
-                });
-
+                LOADED.add(new LoadedMod(desc, mod, ctx));
                 sb.append(' ').append(desc.id).append('@').append(desc.version);
                 loaded++;
 
@@ -176,20 +181,42 @@ public final class ModLoader {
                     + " (" + desc.id + "): failed to load: "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
                 skipped++;
-                if (cl != null) {
-                    try { cl.close(); } catch (Exception ignored) {}
-                }
+                if (cl != null) try { cl.close(); } catch (Exception ignored) {}
             }
         }
 
-        if (loaded == 0 && skipped == 0) {
-            // All were non-SourbyMod jars; individual WARNs already emitted above
-            sb.append(" (0 loaded)");
-        } else {
-            sb.append(" (").append(loaded).append(" loaded");
-            if (skipped > 0) sb.append(", ").append(skipped).append(" skipped");
-            sb.append(')');
-        }
+        // Boot summary INFO
+        sb.append(" (").append(loaded).append(" loaded");
+        if (skipped > 0) sb.append(", ").append(skipped).append(" skipped");
+        sb.append(')');
         SourbyLogger.info(sb.toString());
+    }
+
+    /**
+     * Enroll all loaded mods into {@link ModuleRegistry} as full {@link SourbyModule} instances.
+     * Each mod is registered as {@code mod:<id>} with enable→{@link SourbyMod#onEnable} and
+     * disable→{@link SourbyMod#onDisable}. Any extra modules buffered via
+     * {@link ModContext#registerModule} during onLoad are flushed here too.
+     *
+     * <p>Called from {@code SWPlugin.onEnable} AFTER all first-party
+     * {@code ModuleRegistry.add} calls and BEFORE {@code ModuleRegistry.enableAll}, so mods
+     * are enrolled after the reload-guard {@link ModuleRegistry#clear()} that runs at the
+     * top of onEnable.
+     */
+    public static void enrollInto() {
+        for (LoadedMod m : LOADED) {
+            final SourbyMod mod = m.instance();
+            final String id = m.desc().id;
+            // Enroll the mod itself as a named SourbyModule covering the full lifecycle
+            ModuleRegistry.add(new SourbyModule() {
+                @Override public String name() { return "mod:" + id; }
+                @Override public void enable(Plugin plugin) { mod.onEnable(); }
+                @Override public void disable() { mod.onDisable(); }
+            });
+            // Flush any additional modules registered via ctx.registerModule() during onLoad
+            for (SourbyModule extra : m.ctx().drainPendingModules()) {
+                ModuleRegistry.add(extra);
+            }
+        }
     }
 }
