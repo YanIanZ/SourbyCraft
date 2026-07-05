@@ -114,6 +114,7 @@ public class SWPlugin extends JavaPlugin {
 
         // SourbyCraft MT1: enroll features as isolated SourbyModules.
         // Failures during enableAll never abort onEnable before the worldsToLoad stream.
+        ModuleRegistry.clear(); // same-classloader reload guard: never double-enroll
         ModuleRegistry.add("SignSanitizer", p -> dev.iyanz.sourbycraft.chat.SignSanitizer.register(p));
         ModuleRegistry.add("EntityStacker", p -> dev.iyanz.sourbycraft.wildstacker.EntityStacker.register(p));
         ModuleRegistry.add("OreReveal", p -> dev.iyanz.sourbycraft.antixray.OreReveal.register(p));

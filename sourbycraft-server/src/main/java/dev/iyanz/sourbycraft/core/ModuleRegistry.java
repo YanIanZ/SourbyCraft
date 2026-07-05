@@ -45,6 +45,15 @@ public final class ModuleRegistry {
      * try/catch(Throwable); failures log {@code Failed to enable module <name> — continuing}.
      * One summary INFO line is emitted after all attempts.
      */
+    /**
+     * Clear enrolled modules. Called at the top of {@code SWPlugin.onEnable} so a
+     * same-classloader reload (third-party reload plugins) cannot double-enroll —
+     * two schedulers/listeners per module would result otherwise.
+     */
+    public static void clear() {
+        MODULES.clear();
+    }
+
     public static void enableAll(Plugin plugin) {
         int enabled = 0, failed = 0;
         StringBuilder sb = new StringBuilder("[SourbyCraft] modules:");
