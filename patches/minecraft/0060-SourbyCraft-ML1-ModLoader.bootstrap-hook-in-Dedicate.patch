@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 5 Jul 2026 17:56:29 +0700
+Subject: [PATCH] SourbyCraft ML1: ModLoader.bootstrap hook in
+ DedicatedServer.initServer
+
+
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index 077f0f3f90b1b7726c5667df279972cd6dfde25c..e069bcb59373e2914276f1e0ec7309a2064b96fc 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -292,6 +292,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+         com.destroystokyo.paper.VersionHistoryManager.INSTANCE.getClass(); // Paper - load version history now
+         dev.iyanz.sourbycraft.SourbyCraftConfig.init(new java.io.File("sourbycraft.yml")); // SourbyCraft - config
+         dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.init(new java.io.File("sourbycraft-security.yml")); // SourbyCraft - security config
++        dev.iyanz.sourbycraft.mod.ModLoader.bootstrap(); // SourbyCraft - native mod loader (mods/)
+         dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics.install(); // SourbyCraft - capture plugin load failures for /sys
+         // SourbyCraft start - register custom commands at server boot (CraftServer#reload also registers, for /reload paths)
+         {
