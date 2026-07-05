@@ -456,21 +456,9 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.swm.installer.PluginInstaller.install("plugins/");
         }
 
-        // SourbyCraft start - mods/ folder: RESERVED, no loader exists. SourbyCraft is a Paper fork —
-        // Fabric/Forge mods are not and will not be loaded from here. Kept for forward-compat storage;
-        // warn when operators drop jars in expecting them to load.
-        try {
-            java.nio.file.Path modsDir = java.nio.file.Path.of("mods");
-            java.nio.file.Files.createDirectories(modsDir);
-            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(modsDir)) {
-                long jars = files.filter(p -> p.getFileName().toString().endsWith(".jar")).count();
-                if (jars > 0) {
-                    Bukkit.getLogger().warning("[SourbyCraft] mods/ contains " + jars + " jar(s) but SourbyCraft has no mod loader "
-                        + "(Paper fork — Fabric/Forge mods are not supported). These jars are IGNORED; plugins go in plugins/.");
-                }
-            }
-        } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create mods directory: " + e.getMessage()); }
-        // SourbyCraft end
+        // SourbyCraft ML1 — mods/ scanning and SourbyMod lifecycle are handled by
+        // dev.iyanz.sourbycraft.mod.ModLoader.bootstrap(), called from DedicatedServer.initServer
+        // after this config init completes. No pre-scan or "no loader" warn here.
 
         if (version < currentVersion) {
             // SourbyCraft start - migration: update SWM version tag
