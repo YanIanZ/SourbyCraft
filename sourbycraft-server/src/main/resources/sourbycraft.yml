@@ -149,6 +149,12 @@ antixray:
     # in-packet) by hiding CAVE-EXPOSED ores until the player has real line-of-sight. Together they
     # make the server resource-pack-proof: no real ore data reaches a client that can't legitimately see it.
     enabled: true
+    # The exposed-ore scan (which ores in a chunk are cave-exposed) is player-independent, so it is
+    # computed ONCE per chunk and cached, then reused for every player + every chunk send instead of
+    # re-scanning ~4096 blocks/section on the main thread per send. Block-change + chunk-unload events
+    # invalidate precisely; this TTL (ticks) only bounds staleness from non-event changes (worldgen
+    # finalize, fluid flow). Lower = fresher but more re-scans; higher = fewer re-scans. 600t = 30s.
+    cache-ttl-ticks: 600
   # Entity-level occlusion (mobs, item drops, holograms via TextDisplay or
   # custom-named armor stands). When enabled the entity tracker
   # (ChunkMap.TrackedEntity#updatePlayer NMS patch) calls

@@ -242,6 +242,11 @@ public class SourbyCraftConfig {
     public static int raytraceDistance = 48;
     public static int raytraceMaxChecksPerCycle = 192;
     public static int raytraceMaxPendingPerPlayer = 8192;
+    // Per-chunk exposed-ore scan cache TTL (ticks). The scan is player-independent, so it is
+    // computed once per chunk and reused for every player/send instead of re-scanning on each
+    // chunk send. Block-change + chunk-unload events invalidate precisely; this TTL bounds
+    // staleness from non-event changes (worldgen finalize, fluid flow). 600t = 30s.
+    public static int raytraceCacheTtlTicks = 600;
     // SourbyCraft end
     // SourbyCraft start - disable vanilla commands
     public static boolean disableCommunicationCommands = false;
@@ -338,6 +343,7 @@ public class SourbyCraftConfig {
             raytraceDistance = Math.max(8, Math.min(128, getInt("antixray.raytrace.distance", raytraceDistance)));
             raytraceMaxChecksPerCycle = Math.max(16, Math.min(2048, getInt("antixray.raytrace.max-checks-per-cycle", raytraceMaxChecksPerCycle)));
             raytraceMaxPendingPerPlayer = Math.max(512, Math.min(65536, getInt("antixray.raytrace.max-pending-per-player", raytraceMaxPendingPerPlayer)));
+            raytraceCacheTtlTicks = Math.max(20, Math.min(12000, getInt("antixray.raytrace.cache-ttl-ticks", raytraceCacheTtlTicks)));
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("RayTrace antixray toggle bridge failed", t);
         }
