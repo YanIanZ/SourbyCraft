@@ -142,7 +142,8 @@ public class SourbyCraftSecurityConfig {
     private static void saveDefault() {
         try {
             if (CONFIG_FILE == null) return;
-            CONFIG_FILE.getParentFile().mkdirs();
+            File parent = CONFIG_FILE.getParentFile();
+            if (parent != null) parent.mkdirs(); // null when CONFIG_FILE is a bare name in the cwd
             java.io.PrintWriter w = new java.io.PrintWriter(CONFIG_FILE);
             w.println("crash-prevention:");
             w.println("  nbt:");
