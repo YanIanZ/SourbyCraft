@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 5 Jul 2026 17:12:08 +0700
+Subject: [PATCH] SourbyCraft MT1: async mob-spawn density state (pufferfish
+ semantics) behind performance.async-spawning
+
+
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index 396ab3cdcf6f726ce7133395bb39594ef4b1c011..4b94478ec1cb2ed58e2d22bbabbab9f1c8ba4296 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -8,6 +8,7 @@ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+ import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
+ import java.io.IOException;
+ import java.nio.file.Path;
++import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.List;
+ import java.util.Objects;
+@@ -75,6 +76,11 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+     private final Set<ChunkHolder> chunkHoldersToBroadcast = new ReferenceOpenHashSet<>();
+     @VisibleForDebug
+     private NaturalSpawner.@Nullable SpawnState lastSpawnState;
++    // SourbyCraft MT1 - async mob spawning (pufferfish semantics): the density/mob-cap scan
++    // (NaturalSpawner.createState) runs off-main; spawns + events stay on main.
++    private volatile NaturalSpawner.SpawnState sourbyAsyncSpawnState;
++    private CompletableFuture<Void> sourbyAsyncSpawnTask;
++    private long sourbyAsyncSpawnFailLog;
+     // Paper start
+     public final ca.spottedleaf.concurrentutil.map.concurrent.longs.ConcurrentChainedLong2ReferenceHashTable<net.minecraft.world.level.chunk.LevelChunk> fullChunks = new ca.spottedleaf.concurrentutil.map.concurrent.longs.ConcurrentChainedLong2ReferenceHashTable<>();
+     public int getFullChunksCount() {
+@@ -536,8 +542,10 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         profiler.push("naturalSpawnCount");
+         int chunkCount = this.distanceManager.getNaturalSpawnChunkCount();
+         // Paper start - Optional per player mob spawns
++        // SourbyCraft MT1 start - async mob-spawn density state (pufferfish semantics)
++        boolean sourbyUsePerPlayer = (this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns;
+         NaturalSpawner.SpawnState spawnCookie;
+-        if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) { // don't count mobs when animals and monsters are disabled
++        if (sourbyUsePerPlayer) { // don't count mobs when animals and monsters are disabled
+             // re-set mob counts
+             for (ServerPlayer player : this.level.players()) {
+                 // Paper start - per player mob spawning backoff
+@@ -552,10 +560,22 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+                 }
+                 // Paper end - per player mob spawning backoff
+             }
++            // perPlayerMobSpawns: createState calls updatePlayerMobTypeMap which writes player.mobCounts[] — main-thread only; no async here.
+             spawnCookie = NaturalSpawner.createState(chunkCount, this.level.getAllEntities(), this::getFullChunk, null, true);
+-        } else {
++        } else if (!dev.iyanz.sourbycraft.SourbyCraftConfig.asyncSpawning) {
++            // async-spawning disabled: vanilla sync path unchanged
+             spawnCookie = NaturalSpawner.createState(chunkCount, this.level.getAllEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
++        } else {
++            // async-spawning enabled: use one-tick-stale state from previous async task if available;
++            // fall back to sync on first tick or after a failure so spawning is never skipped.
++            NaturalSpawner.SpawnState asyncState = this.sourbyAsyncSpawnState;
++            if (asyncState != null) {
++                spawnCookie = asyncState;
++            } else {
++                spawnCookie = NaturalSpawner.createState(chunkCount, this.level.getAllEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
++            }
+         }
++        // SourbyCraft MT1 end - async mob-spawn density state
+         // Paper end - Optional per player mob spawns
+         this.lastSpawnState = spawnCookie;
+         boolean doMobSpawning = this.level.getGameRules().get(GameRules.SPAWN_MOBS) && !this.level.players().isEmpty(); // CraftBukkit
+@@ -595,6 +615,55 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             spawningChunks.clear();
+         }
+ 
++        // SourbyCraft MT1 start - submit next createState off-main (pufferfish async spawning semantics)
++        // Only for non-perPlayer path: perPlayerMobSpawns writes player.mobCounts[] during createState and must stay on main.
++        if (!sourbyUsePerPlayer && dev.iyanz.sourbycraft.SourbyCraftConfig.asyncSpawning) {
++            CompletableFuture<Void> existingTask = this.sourbyAsyncSpawnTask;
++            if (existingTask == null || existingTask.isDone()) {
++                // Snapshot entity list on main thread (the accepted cost: entity copy is far cheaper than the full createState scan).
++                // Entity reads (blockPosition, type, spawnReason) from off-thread are mildly racy with main-thread mutation,
++                // but one-tick-stale mob density is the accepted pufferfish trade-off.
++                final ArrayList<Entity> entitySnapshot = new ArrayList<>();
++                for (Entity e : this.level.getAllEntities()) {
++                    entitySnapshot.add(e);
++                }
++                final int capturedChunkCount = chunkCount;
++                // Capture perPlayerMobSpawns so LocalMobCapCalculator construction is decided on main.
++                // getPlayersCloseForSpawning (called from LocalMobCapCalculator.addMob during createState) reads
++                // NearbyPlayers; this is a READ-only operation against a moonrise structure and is accepted as
++                // mildly racy (same trade-off pufferfish makes) — worst case: one-tick-stale per-player spawn counts.
++                final boolean capturedNotPerPlayer = !this.level.paperConfig().entities.spawning.perPlayerMobSpawns;
++                final ChunkMap capturedChunkMap = this.chunkMap;
++                // getFullChunk reads ConcurrentChainedLong2ReferenceHashTable — thread-safe.
++                final NaturalSpawner.ChunkGetter capturedChunkGetter = this::getFullChunk;
++                final CompletableFuture<Void> task = new CompletableFuture<>();
++                this.sourbyAsyncSpawnTask = task;
++                dev.iyanz.sourbycraft.util.VirtualExecutor.run(() -> {
++                    try {
++                        NaturalSpawner.SpawnState computed = NaturalSpawner.createState(
++                            capturedChunkCount,
++                            entitySnapshot,
++                            capturedChunkGetter,
++                            capturedNotPerPlayer ? new LocalMobCapCalculator(capturedChunkMap) : null,
++                            false
++                        );
++                        this.sourbyAsyncSpawnState = computed;
++                    } catch (Throwable t) {
++                        this.sourbyAsyncSpawnState = null;
++                        long now = System.nanoTime();
++                        if (now - this.sourbyAsyncSpawnFailLog >= 60_000_000_000L) {
++                            this.sourbyAsyncSpawnFailLog = now;
++                            LOGGER.warn("[SourbyCraft] async mob-spawn state computation failed; reverting to sync next tick", t);
++                        }
++                    } finally {
++                        task.complete(null);
++                    }
++                });
++            }
++            // previous task still in flight → keep last state (backpressure, silent)
++        }
++        // SourbyCraft MT1 end - submit next createState off-main
++
+         profiler.popPush("tickTickingChunks");
+         this.iterateTickingChunksFaster(); // Paper - chunk tick iteration optimizations
+         if (doMobSpawning) {
