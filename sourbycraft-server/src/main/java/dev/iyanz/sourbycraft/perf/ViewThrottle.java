@@ -47,6 +47,14 @@ public final class ViewThrottle {
         }
         int minDist = Math.max(2, Math.min(32, SourbyCraftConfig.minViewDistance));
         Bukkit.getScheduler().runTaskTimer(plugin, ViewThrottle::tick, 100L, 100L);
+        // SWM island servers reuse world names after resets — a stale entry would cap the
+        // recreated world's recovery ceiling at the old degraded distance.
+        Bukkit.getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+            @org.bukkit.event.EventHandler
+            public void onWorldUnload(org.bukkit.event.world.WorldUnloadEvent e) {
+                originalViewDistance.remove(e.getWorld().getName());
+            }
+        }, plugin);
         SourbyLogger.info("[SourbyCraft] ViewThrottle: registered — min-view-distance=" + minDist);
     }
 
