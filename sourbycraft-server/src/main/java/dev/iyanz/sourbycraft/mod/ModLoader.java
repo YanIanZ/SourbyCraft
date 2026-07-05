@@ -213,8 +213,9 @@ public final class ModLoader {
                 @Override public void enable(Plugin plugin) { mod.onEnable(); }
                 @Override public void disable() { mod.onDisable(); }
             });
-            // Flush any additional modules registered via ctx.registerModule() during onLoad
-            for (SourbyModule extra : m.ctx().drainPendingModules()) {
+            // Enroll any additional modules registered via ctx.registerModule() during onLoad.
+            // pendingModules() is non-destructive so these re-enroll on a plugin reload too.
+            for (SourbyModule extra : m.ctx().pendingModules()) {
                 ModuleRegistry.add(extra);
             }
         }

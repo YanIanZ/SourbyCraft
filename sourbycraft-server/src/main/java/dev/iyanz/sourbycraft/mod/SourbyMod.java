@@ -6,7 +6,9 @@ package dev.iyanz.sourbycraft.mod;
  * <p>Lifecycle:
  * <ul>
  *   <li>{@link #onLoad} — called at bootstrap, BEFORE world load and Bukkit plugin loading.
- *       Safe to access: SourbyCraft config, Knobs, ModuleRegistry. NOT safe: Bukkit API, worlds.</li>
+ *       Safe to access: SourbyCraft config, Knobs. To register runtime features use
+ *       {@code ctx.registerModule(...)} — do NOT call {@code ModuleRegistry.add} directly here,
+ *       it is wiped by SWPlugin's reload-guard clear before mods enroll. NOT safe: Bukkit API, worlds.</li>
  *   <li>{@link #onEnable} — called when SourbyCraft's SWPlugin enables (Bukkit API is safe).</li>
  *   <li>{@link #onDisable} — called during server shutdown in reverse enable order.</li>
  * </ul>
@@ -18,7 +20,8 @@ public interface SourbyMod {
 
     /**
      * Bootstrap phase: after SourbyCraft config init, BEFORE world load and plugin load.
-     * Safe: config/Knobs/ModuleRegistry access, class init. NOT safe: Bukkit API, worlds.
+     * Safe: config/Knobs access, class init, {@code ctx.registerModule(...)}. NOT safe:
+     * Bukkit API, worlds, and direct {@code ModuleRegistry.add} (use ctx.registerModule instead).
      */
     void onLoad(ModContext ctx);
 

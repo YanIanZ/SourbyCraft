@@ -82,6 +82,10 @@ public final class ModDescriptor {
                 return null;
             }
             int api = ((Number) apiRaw).intValue();
+            if (api < 1) {
+                SourbyLogger.warn("[SourbyCraft] mods/" + jarName + ": invalid 'api' " + api + " (must be >= 1)");
+                return null;
+            }
 
             return new ModDescriptor(id, name, version, main, api);
         } catch (Exception e) {
