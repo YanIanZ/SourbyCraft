@@ -119,7 +119,7 @@ public final class OreReveal implements Listener {
     /** Player-independent exposed-ore scan, cached per chunk with a TTL. Main thread only. */
     private static long[] getOrComputeExposed(final ServerLevel level, final LevelChunk chunk,
                                               final java.util.Set<Block> extraHidden, final boolean fluidObscures) {
-        final long chunkKey = chunk.getPos().toLong();
+        final long chunkKey = chunk.getPos().pack();
         final Long2ObjectOpenHashMap<CacheEntry> perLevel =
             SCAN_CACHE.computeIfAbsent(level, l -> new Long2ObjectOpenHashMap<>());
         final long now = level.getGameTime();
@@ -165,7 +165,7 @@ public final class OreReveal implements Listener {
 
     private static void invalidateChunk(final ServerLevel level, final int chunkX, final int chunkZ) {
         final Long2ObjectOpenHashMap<CacheEntry> perLevel = SCAN_CACHE.get(level);
-        if (perLevel != null) perLevel.remove(net.minecraft.world.level.ChunkPos.asLong(chunkX, chunkZ));
+        if (perLevel != null) perLevel.remove(net.minecraft.world.level.ChunkPos.pack(chunkX, chunkZ));
     }
 
     /** A block change can alter exposure of ores up to 1 block away, so also drop bordering chunks. */
