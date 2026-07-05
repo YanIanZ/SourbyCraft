@@ -86,12 +86,12 @@ public final class ModContext {
     }
 
     /**
-     * Package-private: called by {@link ModLoader#enrollInto()} to flush modules registered
-     * via {@link #registerModule} during onLoad into the live ModuleRegistry. Clears the buffer.
+     * Package-private: called by {@link ModLoader#enrollInto()} to enroll modules registered
+     * via {@link #registerModule} during onLoad. NON-destructive — the buffer persists so a
+     * same-classloader plugin reload (which re-runs enrollInto without re-running onLoad)
+     * re-enrolls the same sub-modules.
      */
-    List<SourbyModule> drainPendingModules() {
-        List<SourbyModule> copy = new ArrayList<>(pendingModules);
-        pendingModules.clear();
-        return copy;
+    List<SourbyModule> pendingModules() {
+        return new ArrayList<>(pendingModules);
     }
 }

@@ -49,8 +49,9 @@ public class ExampleMod implements SourbyMod {
     @Override
     public void onLoad(ModContext ctx) {
         // Called at bootstrap — BEFORE world load and Bukkit plugin enabling.
-        // Safe: SourbyCraft config, Knobs, ModuleRegistry, class init.
-        // NOT safe: Bukkit API, worlds, schedulers.
+        // Safe: SourbyCraft config, Knobs, class init, ctx.registerModule(...).
+        // NOT safe: Bukkit API, worlds, schedulers, or direct ModuleRegistry.add
+        //           (it is cleared by SWPlugin's reload guard — use ctx.registerModule).
         ctx.logger().info("ExampleMod loading (data dir: " + ctx.dataDirectory() + ")");
     }
 
@@ -92,12 +93,19 @@ DedicatedServer.initServer
        (before world load, before Bukkit plugins)
 
 SWPlugin.onEnable
+  └─ ModuleRegistry.clear()         ← reload guard (wipes any direct add from onLoad)
+  └─ ModuleRegistry.add(...)        ← first-party SourbyCraft modules
+  └─ ModLoader.enrollInto()         ← enrolls each loaded mod + its ctx.registerModule() sub-modules
   └─ ModuleRegistry.enableAll()     ← mod onEnable() + first-party modules
        (Bukkit API fully available)
 
 Server shutdown
   └─ ModuleRegistry.disableAll()    ← mod onDisable() in reverse order
 ```
+
+On a same-classloader plugin reload, `onEnable` runs again: `clear()` +
+re-`add()` + `enrollInto()` re-enroll everything (mods keep their one-time
+`onLoad`; `onEnable`/`onDisable` fire once per reload cycle).
 
 ---
 
