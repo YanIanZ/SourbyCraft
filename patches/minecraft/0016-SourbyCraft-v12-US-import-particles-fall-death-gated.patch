@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 14 Jun 2026 21:05:55 +0700
+Subject: [PATCH] SourbyCraft v12 US import particles fall+death gated emit
+
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 3a4da514c163e7565fc241835db52c464a5c4734..828381a121ed8c07612bfddd7cf4f19315b21e78 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -410,11 +410,17 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                 double scale = Math.min(0.2F + power / 15.0, 2.5);
+                 int particles = (int)(150.0 * scale);
+                 // CraftBukkit start - visibility api
++                // SourbyCraft start - US import - gated fall particle emit
++                if (!dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("particles.disableFallParticles", false)) { // SourbyCraft - US import
+                 if (this instanceof ServerPlayer) {
+                     level.sendParticlesSource((ServerPlayer)this, new BlockParticleOption(ParticleTypes.BLOCK, onState), false, false, x, y, z, particles, 0.0, 0.0, 0.0, 0.15F);
+                 } else {
+                 level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, onState), x, y, z, particles, 0.0, 0.0, 0.0, 0.15F);
+                 }
++                } else if (Boolean.getBoolean("dev.iyanz.sourbycraft.particle.debug")) { // SourbyCraft - US import
++                    dev.iyanz.sourbycraft.util.SourbyLogger.info("[SourbyCraft] particle gated:fall"); // SourbyCraft - US import
++                }
++                // SourbyCraft end - US import
+                 // CraftBukkit end
+             }
+         }
+@@ -603,7 +609,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     protected void tickDeath() {
+         this.deathTime++;
+         if (this.deathTime >= 20 && !this.level().isClientSide() && !this.isRemoved()) {
+-            this.level().broadcastEntityEvent(this, EntityEvent.POOF);
++            // SourbyCraft start - US import - gated death particle emit
++            if (!dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("particles.disableDeathParticles", false)) { // SourbyCraft - US import
++                this.level().broadcastEntityEvent(this, EntityEvent.POOF);
++            } else if (Boolean.getBoolean("dev.iyanz.sourbycraft.particle.debug")) { // SourbyCraft - US import
++                dev.iyanz.sourbycraft.util.SourbyLogger.info("[SourbyCraft] particle gated:death"); // SourbyCraft - US import
++            }
++            // SourbyCraft end - US import
+             this.remove(Entity.RemovalReason.KILLED, org.bukkit.event.entity.EntityRemoveEvent.Cause.DEATH); // CraftBukkit - add Bukkit remove cause
+         }
+     }

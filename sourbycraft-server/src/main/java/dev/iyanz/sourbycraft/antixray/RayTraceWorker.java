@@ -42,10 +42,12 @@ public final class RayTraceWorker {
         final java.util.UUID playerId = player.getUUID();
         final Vec3 eye = player.getEyePosition();
         final Vec3 ore = Vec3.atCenterOf(orePos);
+        final boolean fluidObscures = dev.iyanz.sourbycraft.SourbyCraftConfig.fluidObscures
+            && dev.iyanz.sourbycraft.SourbyCraftWorldConfig.get(level).fluidObscures;
         final long key = orePos.asLong();
         VirtualExecutor.run(() -> {
             try {
-                if (OcclusionUtil.isVisible(level, eye, ore)) {
+                if (OcclusionUtil.isVisible(level, eye, ore, fluidObscures)) {
                     VisibilityCache.markVisible(playerId, key);
                 }
             } catch (Throwable t) {

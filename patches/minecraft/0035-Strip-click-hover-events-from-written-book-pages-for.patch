@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Wed, 17 Jun 2026 16:00:00 +0700
+Subject: [PATCH] Strip click/hover events from written book pages (force-op
+ exploit fix)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Blocks the "force op book" exploit family where a crafted
+WrittenBookContent is delivered via creative-mode slot packets with
+{@code click_event:run_command} payloads embedded in its Component
+pages. When an op opens the book and clicks the rigged link, the
+click_event executes its command with the clicker's permissions —
+trivially yielding /op as admin.
+
+Sanitizes incoming creative-slot ItemStacks by walking any
+WRITTEN_BOOK_CONTENT page Component tree and rebuilding Styles with
+clickEvent + hoverEvent cleared. Vanilla server-built books use
+Component#literal and never carry these style fields, so legitimate
+loot/quest books are untouched.
+
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index 583efe4bd6076060610d6476096045f5b3510e90..6d9edffeedb02dc39acc8646d9627e0d6d785140 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -3483,6 +3483,8 @@ public class ServerGamePacketListenerImpl
+         if (this.player.hasInfiniteMaterials()) {
+             boolean drop = packet.slotNum() < 0;
+             ItemStack itemStack = packet.itemStack();
++            // SourbyCraft - strip click/hover events from written book pages (force-op exploit fix)
++            dev.iyanz.sourbycraft.security.BookSanitizer.sanitize(itemStack);
+             if (!itemStack.isItemEnabled(this.player.level().enabledFeatures())) {
+                 return;
+             }

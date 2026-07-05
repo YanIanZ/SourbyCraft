@@ -44,7 +44,7 @@ public class FlareCommand extends Command {
     public boolean execute(@NotNull CommandSender sender, @NotNull String commandLabel, String @NotNull [] args) {
         if (!testPermission(sender)) return true;
         if (PufferfishConfig.accessToken.length() == 0) {
-            Component clickable = Component.text(BASE_URL, HEX, TextDecoration.UNDERLINED).clickEvent(ClickEvent.clickEvent(ClickEvent.Action.OPEN_URL, BASE_URL));
+            Component clickable = Component.text(BASE_URL, HEX, TextDecoration.UNDERLINED).clickEvent(ClickEvent.openUrl(BASE_URL)); // SourbyCraft - MC 26.2 adventure ClickEvent.clickEvent(Action,String) removed
 
             sender.sendMessage(PREFIX.append(Component.text("Flare currently requires an access token to use. To learn more, visit ").color(HEX).append(clickable)));
             return true;

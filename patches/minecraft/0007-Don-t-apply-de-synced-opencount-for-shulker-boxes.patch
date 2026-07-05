@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 14 Jun 2026 18:43:21 +0700
+Subject: [PATCH] Don't apply de-synced opencount for shulker boxes
+
+
+diff --git a/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java b/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
+index 174e39fb109bef3dd27ebc14aa13f6faabb10547..8af3f0194e2b55de74d3a715eca6c25eea35baae 100644
+--- a/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
+@@ -175,7 +175,8 @@ public class ShulkerBoxBlockEntity extends RandomizableContainerBlockEntity impl
+     @Override
+     public boolean triggerEvent(final int b0, final int b1) {
+         if (b0 == EVENT_SET_OPEN_COUNT) {
+-            this.openCount = b1;
++            // this.openCount = b1; // SourbyCraft - skip; desyncs if multiple opens triggered in same tick
++
+             if (b1 == 0) {
+                 this.animationStatus = ShulkerBoxBlockEntity.AnimationStatus.CLOSING;
+             }

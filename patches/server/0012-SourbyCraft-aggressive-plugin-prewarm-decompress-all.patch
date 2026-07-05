@@ -6,10 +6,10 @@ Subject: [PATCH] SourbyCraft aggressive plugin-prewarm: decompress all classes
 
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index 6ee997e44203df7b0f48fb123f7e923d999c6032..bc838edc5edc3b3a91656cc23ff67ea28a707b0c 100644
+index a5b77a049f68db61476585f8a7b156deac0b03de..02e4271f40874086b3f42ac99358610047e4c5e4 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -581,49 +581,59 @@ public final class CraftServer implements Server {
+@@ -577,49 +577,59 @@ public final class CraftServer implements Server {
              if (pluginsFolder != null && pluginsFolder.isDirectory()) {
                  java.io.File[] jars = pluginsFolder.listFiles((dir, name) -> name.toLowerCase(java.util.Locale.ROOT).endsWith(".jar"));
                  if (jars != null && jars.length > 0) {

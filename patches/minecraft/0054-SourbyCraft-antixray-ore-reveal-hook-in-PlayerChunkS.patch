@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sun, 5 Jul 2026 05:04:58 +0700
+Subject: [PATCH] SourbyCraft antixray: ore-reveal hook in
+ PlayerChunkSender.sendChunk
+
+
+diff --git a/net/minecraft/server/network/PlayerChunkSender.java b/net/minecraft/server/network/PlayerChunkSender.java
+index 196c01fe5f200ed57e6f23e0939cac616305571a..f622b334faebaa20a3754f8d4b249ac9c0d188e6 100644
+--- a/net/minecraft/server/network/PlayerChunkSender.java
++++ b/net/minecraft/server/network/PlayerChunkSender.java
+@@ -88,6 +88,8 @@ public class PlayerChunkSender {
+             new io.papermc.paper.event.packet.PlayerChunkLoadEvent(new org.bukkit.craftbukkit.CraftChunk(chunk), connection.getPlayer().getBukkitEntity()).callEvent();
+         }
+         // Paper end - PlayerChunkLoadEvent
++        // SourbyCraft - antixray ore raytrace: hide exposed ores post-send, reveal via raytrace (S4)
++        dev.iyanz.sourbycraft.antixray.OreReveal.onChunkSent(connection.player, chunk);
+         ChunkPos pos = chunk.getPos();
+         if (SharedConstants.DEBUG_VERBOSE_SERVER_EVENTS) {
+             LOGGER.debug("SEN {}", pos);

@@ -210,6 +210,8 @@ public class SourbyCraftConfig {
     public static double stackerRadius = 10.0;
     public static int stackerMaxStack = 100;
     public static java.util.List<String> stackerBlacklist = java.util.List.of("PLAYER", "ARMOR_STAND", "ENDER_DRAGON", "WITHER");
+    public static boolean stackerHologram = true;
+    public static boolean stackerLosCheck = true;
     public static boolean swmAutoInstall = true;       // SourbyCraft v9.22 — default ON
     public static boolean swmAutoUpdate = true;        // SourbyCraft v9.22 — check GitHub for updates on startup
     public static String swmLoader = "file";
@@ -229,13 +231,17 @@ public class SourbyCraftConfig {
     public static boolean redstoneOptimize = true;
     public static int maxEntityPerChunk = 10;
     // SourbyCraft start - lag prevention
-    public static int maxRedstoneUpdatesPerTick = 2000;
+    public static int maxRedstoneUpdatesPerTick = 10_000; // caps the vanilla chained neighbor-update budget (1M); 10k spares legit contraptions, 2000 broke big doors/storage tech
     public static int maxSpecialsPerChunk = 15;
     public static int maxFallingBlockPerChunk = 20;
     public static int maxArrowsPerWorld = 5000;
     // SourbyCraft end
     // SourbyCraft start - antixray
     public static boolean fluidObscures = true;
+    public static int raytraceIntervalTicks = 10;
+    public static int raytraceDistance = 48;
+    public static int raytraceMaxChecksPerCycle = 192;
+    public static int raytraceMaxPendingPerPlayer = 8192;
     // SourbyCraft end
     // SourbyCraft start - disable vanilla commands
     public static boolean disableCommunicationCommands = false;
@@ -264,6 +270,15 @@ public class SourbyCraftConfig {
     public static int mobTickDistance = 32;
     public static int mobPathfindInterval = 20;
     public static boolean asyncSaveBatch = true;
+
+    // SourbyCraft MT1: thread-bridge fields.
+    // -1 = smart auto (chunk-workers) / use Paper default (io-workers, max-chunk-send-rate).
+    public static int chunkWorkers = -1;
+    public static int ioWorkers = -1;
+    public static double maxChunkSendRate = -1.0;
+    // asyncSpawning: MT1 async mob-spawn density state (pufferfish semantics).
+    // May be forced false by PufferfishConfig.enableAsyncMobSpawning during init().
+    public static boolean asyncSpawning = true;
 
     // DAB entity overrides: key = "minecraft:zombie", value = [maxTickFreq, activationDistMod]
     public static final java.util.Map<String, int[]> dabEntityOverrides = new java.util.concurrent.ConcurrentHashMap<>();
@@ -319,6 +334,10 @@ public class SourbyCraftConfig {
                 getBoolean("antixray.entity-raytrace.enabled", false));
             dev.iyanz.sourbycraft.antixray.ParticleVisibilityCheck.ENABLED.set(
                 getBoolean("antixray.particle-raytrace.enabled", false));
+            raytraceIntervalTicks = Math.max(1, getInt("antixray.raytrace.interval-ticks", raytraceIntervalTicks));
+            raytraceDistance = Math.max(8, Math.min(128, getInt("antixray.raytrace.distance", raytraceDistance)));
+            raytraceMaxChecksPerCycle = Math.max(16, Math.min(2048, getInt("antixray.raytrace.max-checks-per-cycle", raytraceMaxChecksPerCycle)));
+            raytraceMaxPendingPerPlayer = Math.max(512, Math.min(65536, getInt("antixray.raytrace.max-pending-per-player", raytraceMaxPendingPerPlayer)));
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("RayTrace antixray toggle bridge failed", t);
         }
@@ -330,6 +349,18 @@ public class SourbyCraftConfig {
         virtualThreads = getBoolean("performance.virtual-threads", virtualThreads);
         structuredConcurrency = getBoolean("performance.structured-concurrency", structuredConcurrency);
         maxPlatformThreads = getInt("performance.max-platform-threads", maxPlatformThreads);
+        // SourbyCraft S5: set max.bg.threads system property for Util's background executor pool.
+        // Property name confirmed as "max.bg.threads" (net.minecraft.util.Util:98 MAX_THREADS_SYSTEM_PROPERTY).
+        // NOTE: Util.BACKGROUND_EXECUTOR is a static field created at Util class-load time (before
+        // SourbyCraftConfig.init() runs), so this property influences only subsequent EXPLICIT
+        // calls to Util.makeExecutor if any; the main background pool is already built. Still set it
+        // for completeness and forward compat (sub-pools, tool reloads).
+        if (maxPlatformThreads != 4 && System.getProperty("max.bg.threads") == null) {
+            System.setProperty("max.bg.threads", String.valueOf(maxPlatformThreads));
+            dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                "[SourbyCraft] set max.bg.threads=" + maxPlatformThreads
+                + " from performance.max-platform-threads (note: Util.BACKGROUND_EXECUTOR already created)");
+        }
 
         skipEmptySections = getBoolean("memory.skip-empty-sections", skipEmptySections);
         poolEntityData = getBoolean("memory.pool-entity-data", poolEntityData);
@@ -361,12 +392,25 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("EmojiShortcodes init failed; defaults still active", t);
         }
 
-        swmEnabled = getBoolean("swm.enabled", swmEnabled);
-        swmVersion = getString("swm.version", swmVersion);
+        // SourbyCraft - 26.2 survival: SWM removed. swm.* keys ignored (skyblock line only).
         // Entity stacker config (re-port era v10+)
+        // S3: legacy performance.wildstacker.* keys (pre-26.1.2 operator files) seed the
+        // canonical stacker.* keys when those are absent. Explicit stacker.* always wins.
+        // Legacy keys stay in the file as documented aliases — never deleted.
+        if (!config.isSet("stacker.enabled") && config.getBoolean("performance.wildstacker.enabled", false)) {
+            config.set("stacker.enabled", true);
+        }
+        if (!config.isSet("stacker.hologram") && config.isSet("performance.wildstacker.hologram")) {
+            config.set("stacker.hologram", config.getBoolean("performance.wildstacker.hologram", true));
+        }
+        if (!config.isSet("stacker.los-check") && config.isSet("performance.wildstacker.los-check")) {
+            config.set("stacker.los-check", config.getBoolean("performance.wildstacker.los-check", true));
+        }
         stackerEnabled = getBoolean("stacker.enabled", stackerEnabled);
         stackerRadius = getDouble("stacker.radius", stackerRadius);
         stackerMaxStack = getInt("stacker.max-stack", stackerMaxStack);
+        stackerHologram = getBoolean("stacker.hologram", stackerHologram);
+        stackerLosCheck = getBoolean("stacker.los-check", stackerLosCheck);
         try {
             java.util.List<?> raw = config.getList("stacker.blacklist");
             if (raw == null) {
@@ -377,49 +421,100 @@ public class SourbyCraftConfig {
                 stackerBlacklist = parsed;
             }
         } catch (Throwable ignored) {}
-        swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
-        swmAutoUpdate = getBoolean("swm.auto-update", swmAutoUpdate);
-        swmFileDir = getString("swm.file-dir", swmFileDir);
-        // SourbyCraft - reject swm.file-dir that escapes the server root or hits the FS root
-        if (swmFileDir.contains("..") || swmFileDir.startsWith("/") || swmFileDir.startsWith("\\")
-            || (swmFileDir.length() > 1 && swmFileDir.charAt(1) == ':')) {
-            Bukkit.getLogger().warning("Ignoring unsafe swm.file-dir='" + swmFileDir + "', falling back to slime_worlds");
-            swmFileDir = "slime_worlds";
-        }
 
-        // Auto-install SWM plugin from GitHub releases
-        if (swmEnabled && swmAutoInstall) {
-        // SourbyCraft start - auto-create required folders
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of(swmFileDir)); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create " + swmFileDir + ": " + e.getMessage()); }
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create mods directory: " + e.getMessage()); }
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create plugins directory: " + e.getMessage()); }
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins/SourbyCraft")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create plugins/SourbyCraft directory: " + e.getMessage()); }
+        // SourbyCraft - 26.2 survival: SWM auto-install removed. Create the speedtest dir the /speedtest command uses.
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins/SourbyCraft/speedtest")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create speedtest directory: " + e.getMessage()); }
-        // SourbyCraft end
-            dev.iyanz.sourbycraft.swm.installer.PluginInstaller.install("plugins/");
-        }
 
-        // SourbyCraft start - auto-create mods folder
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("mods")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create mods directory: " + e.getMessage()); }
-        // SourbyCraft end
+        // SourbyCraft ML1 — mods/ scanning and SourbyMod lifecycle are handled by
+        // dev.iyanz.sourbycraft.mod.ModLoader.bootstrap(), called from DedicatedServer.initServer
+        // after this config init completes. No pre-scan or "no loader" warn here.
 
-        if (version < currentVersion) {
-            // SourbyCraft start - migration: update SWM version tag
-            String oldSwmVer = swmVersion;
-            if ("v4-REL".equals(swmVersion) || "v5-REL".equals(swmVersion) || "1.21.11".equals(swmVersion)) {
-                swmVersion = "v6-REL";
-                set("swm.version", swmVersion);
-            }
-            // SourbyCraft end
-            if ("v6-REL".equals(swmVersion)) {
-                swmVersion = "v7-REL";
-                set("swm.version", swmVersion);
-            }
-        }
+        // SourbyCraft - 26.2 survival: SWM version-tag migration removed with SWM.
 
         autoThrottleView = getBoolean("network.auto-throttle-view", autoThrottleView);
         minViewDistance = getInt("network.min-view-distance", minViewDistance);
         compressionLevel = getInt("network.compression-level", compressionLevel);
+        // SourbyCraft S5: clamp and bridge compression level to Paper's live engine
+        compressionLevel = Math.max(0, Math.min(9, compressionLevel));
+        if (compressionLevel != 4) {
+            try {
+                io.papermc.paper.configuration.GlobalConfiguration.get().misc.compressionLevel =
+                    new io.papermc.paper.configuration.type.number.IntOr.Default(
+                        java.util.OptionalInt.of(compressionLevel));
+                dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                    "[SourbyCraft] network.compression-level=" + compressionLevel
+                    + " bridged to Paper GlobalConfiguration.misc.compressionLevel");
+            } catch (Throwable t) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn(
+                    "[SourbyCraft] compression bridge failed (GlobalConfiguration not ready?): "
+                    + t.getMessage());
+            }
+        }
+        // SourbyCraft MT1: thread bridges — chunk-workers, io-workers, max-chunk-send-rate, async-spawning.
+        chunkWorkers = getInt("performance.threads.chunk-workers", chunkWorkers);
+        ioWorkers = getInt("performance.threads.io-workers", ioWorkers);
+        maxChunkSendRate = getDouble("network.max-chunk-send-rate", maxChunkSendRate);
+        asyncSpawning = getBoolean("performance.async-spawning", asyncSpawning);
+        // Pufferfish alias: if PufferfishConfig.enableAsyncMobSpawning is initialized and false,
+        // force asyncSpawning false. Wrapped in try/catch — class may not be initialized at this
+        // point in boot (it is usually initialized during server setup, but not guaranteed before
+        // SourbyCraftConfig.init runs in DedicatedServer#initServer).
+        try {
+            if (gg.pufferfish.pufferfish.PufferfishConfig.asyncMobSpawningInitialized
+                    && !gg.pufferfish.pufferfish.PufferfishConfig.enableAsyncMobSpawning) {
+                asyncSpawning = false;
+                dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                    "[SourbyCraft] MT1 async-spawning forced false by PufferfishConfig.enableAsyncMobSpawning=false");
+            }
+        } catch (Throwable ignored) {
+            // PufferfishConfig not yet initialized — skip alias; asyncSpawning keeps its yml value.
+        }
+        // Chunk-worker bridge: call MoonriseCommon.adjustWorkerThreads to resize the Moonrise pool.
+        // Paper's GlobalConfiguration.ChunkSystem.postProcess already called this once; a second call
+        // via adjustThreadCount is safe (BalancedPrioritisedThreadPool supports runtime resize).
+        // Wrapped in try/catch so a pool-resize failure never crashes boot.
+        String appliedWorkers;
+        try {
+            if (chunkWorkers > 0) {
+                // Explicit operator override: set exact chunk-worker and io-worker counts.
+                ca.spottedleaf.moonrise.common.util.MoonriseCommon.adjustWorkerThreads(chunkWorkers, ioWorkers);
+                appliedWorkers = String.valueOf(chunkWorkers);
+            } else {
+                // Smart auto (-1): only engage when Paper is also using auto-detect (workerThreads == -1),
+                // so we don't fight an operator who explicitly tuned Paper's chunk-system.workerThreads.
+                int paperWorkers = io.papermc.paper.configuration.GlobalConfiguration.get().chunkSystem.workerThreads;
+                if (paperWorkers == -1) {
+                    int smart = Math.min(8, Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
+                    ca.spottedleaf.moonrise.common.util.MoonriseCommon.adjustWorkerThreads(smart, -1);
+                    appliedWorkers = smart + " (smart-auto)";
+                } else {
+                    appliedWorkers = "auto skipped (Paper explicit workerThreads=" + paperWorkers + ")";
+                }
+            }
+        } catch (Throwable t) {
+            appliedWorkers = "bridge failed";
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn(
+                "[SourbyCraft] MT1 chunk-worker bridge failed (pool resize unsafe or not ready): " + t.getMessage());
+        }
+        // max-chunk-send-rate bridge: override Paper's playerMaxChunkSendRate.
+        if (maxChunkSendRate > 0.0) {
+            try {
+                io.papermc.paper.configuration.GlobalConfiguration.get().chunkLoadingBasic.playerMaxChunkSendRate = maxChunkSendRate;
+                dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                    "[SourbyCraft] MT1 network.max-chunk-send-rate=" + maxChunkSendRate
+                    + " bridged to Paper GlobalConfiguration.chunkLoadingBasic.playerMaxChunkSendRate");
+            } catch (Throwable t) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn(
+                    "[SourbyCraft] MT1 max-chunk-send-rate bridge failed: " + t.getMessage());
+            }
+        }
+        // Boot INFO: applied chunk-worker outcome + requested io/send-rate values.
+        dev.iyanz.sourbycraft.util.SourbyLogger.info(
+            "[SourbyCraft] threads: chunk-workers=" + appliedWorkers
+            + " io=" + ioWorkers
+            + " send-rate=" + maxChunkSendRate
+            + " async-spawning=" + asyncSpawning);
+
         entityTickRateLimit = getBoolean("entity.tick-rate-limit", entityTickRateLimit);
         dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.set(
             getInt("entity.tick-rate", dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get())
@@ -431,6 +526,8 @@ public class SourbyCraftConfig {
         maxSpecialsPerChunk = getInt("entity.max-specials-per-chunk", maxSpecialsPerChunk);
         maxFallingBlockPerChunk = getInt("entity.max-falling-block-per-chunk", maxFallingBlockPerChunk);
         maxArrowsPerWorld = getInt("entity.max-arrows-per-world", maxArrowsPerWorld);
+        // SourbyCraft S5: field existed but yml read was missing (survey confirmed)
+        maxRedstoneUpdatesPerTick = getInt("entity.max-redstone-updates-per-tick", maxRedstoneUpdatesPerTick);
         // SourbyCraft end
         // SourbyCraft start - antixray
         fluidObscures = getBoolean("antixray.fluid-obscures", fluidObscures);
@@ -462,8 +559,11 @@ public class SourbyCraftConfig {
         itemPoolSize = getInt("item.pool-size", itemPoolSize);
         itemPoolMaxGrowth = getInt("item.pool-max-growth", itemPoolMaxGrowth);
         itemPoolShrinkThreshold = (float) getDouble("item.pool-shrink-threshold", itemPoolShrinkThreshold);
+        if (itemPoolEnabled) {
+            Bukkit.getLogger().warning("[SourbyCraft] item.pool-enabled: true but the ItemEntityPool engine is offline "
+                + "(removed for the levitation bug; keys reserved for pool v2). No pooling occurs.");
+        }
         itemMaxPerChunk = getInt("item.max-per-chunk", itemMaxPerChunk);
-        noDurabilityExcept = getBoolean("item.no-durability-except", noDurabilityExcept);
         mobTickDistance = getInt("entity.mob-tick-distance", mobTickDistance);
         mobPathfindInterval = getInt("entity.mob-pathfind-interval", mobPathfindInterval);
         asyncSaveBatch = getBoolean("chunk.async-save-batch", asyncSaveBatch);
@@ -478,9 +578,14 @@ public class SourbyCraftConfig {
             }
         }
 
-        if (idleTimeout > 0) {
-            // Idle timeout will be implemented via scheduler
+        // SourbyCraft S6 - pvp.* fossil notice: the PvP variant was removed in the 26.1.2
+        // migration; operator files may still carry the section. Keys are never deleted.
+        if (config.contains("pvp")) {
+            Bukkit.getLogger().info("[SourbyCraft] pvp.* keys in sourbycraft.yml are from the removed PvP variant "
+                + "and are ignored; combat tuning now lives in combat.profile (vanilla|balanced|pvp).");
         }
+
+        // idle-timeout is applied by dev.iyanz.sourbycraft.perf.ConfigBridge at plugin enable (S2).
 
 
         // SourbyCraft - perf-engine P1: operator sourbycraft.yml bridge for sensor settings.
@@ -541,6 +646,13 @@ public class SourbyCraftConfig {
 
         dev.iyanz.sourbycraft.util.VirtualExecutor.init();
 
+        // SourbyCraft S5: superseded-keys audit — one INFO line + per-key WARN when non-default
+        try {
+            dev.iyanz.sourbycraft.perf.SupersededKeys.report(config);
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("SupersededKeys.report failed", t);
+        }
+
         // SourbyCraft - final save: readConfig() saves after its reflective field walk but every
         // post-readConfig getBoolean/getInt/getString call (antixray, particle, perf-sensor bridge,
         // combat profile etc) writes new defaults to the in-memory config that the early save
@@ -562,6 +674,11 @@ public class SourbyCraftConfig {
     }
 
     public static void readConfig(Class<?> clazz, Object instance) {
+        readConfig(clazz, instance, true);
+    }
+
+    /** @param saveAfter false for hot-path lazy loads (per-world config on chunk send) — no main-thread disk write. */
+    public static void readConfig(Class<?> clazz, Object instance, boolean saveAfter) {
         for (Method method : clazz.getDeclaredMethods()) {
             if (!Modifier.isPrivate(method.getModifiers())) continue;
             if (method.getParameterTypes().length != 0 || method.getReturnType() != Void.TYPE) continue;
@@ -576,6 +693,7 @@ public class SourbyCraftConfig {
             }
         }
 
+        if (!saveAfter) return;
         try {
             config.save(CONFIG_FILE);
         } catch (IOException exception) {

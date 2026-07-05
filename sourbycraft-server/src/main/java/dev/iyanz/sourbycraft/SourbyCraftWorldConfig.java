@@ -20,9 +20,26 @@ public class SourbyCraftWorldConfig {
         this.init();
     }
 
+    // SourbyCraft MT1 - PerWorldHolder replaces raw ConcurrentHashMap so world-unload
+    // eviction is centralized in PerWorldHolder.registerCleanup (one shared listener).
+    private static final dev.iyanz.sourbycraft.core.PerWorldHolder<SourbyCraftWorldConfig> BY_WORLD =
+        new dev.iyanz.sourbycraft.core.PerWorldHolder<>();
+
+    public static SourbyCraftWorldConfig get(net.minecraft.server.level.ServerLevel level) {
+        org.bukkit.World w = level.getWorld();
+        return BY_WORLD.computeIfAbsent(w.getName(), n -> new SourbyCraftWorldConfig(n, w.getEnvironment()));
+    }
+
+    /** Drop the cached config on world unload — SWM island resets reuse world names. Delegate kept for API stability. */
+    public static void invalidate(String worldName) {
+        BY_WORLD.remove(worldName);
+    }
+
     public void init() {
         log("-------- World Settings For [" + worldName + "] --------");
-        SourbyCraftConfig.readConfig(SourbyCraftWorldConfig.class, this);
+        // saveAfter=false: this runs lazily from the chunk-send / entity-tracker hot path (S4) —
+        // never pay a main-thread YAML disk write there.
+        SourbyCraftConfig.readConfig(SourbyCraftWorldConfig.class, this, false);
     }
 
     private void set(String path, Object val) {

@@ -32,7 +32,12 @@ public final class VisibilityCache {
 
     public static boolean isVisible(final UUID playerId, final long blockKey) {
         LongOpenHashSet set = CACHE.get(playerId);
-        return set != null && set.contains(blockKey);
+        if (set == null) return false;
+        // Same monitor as markVisible: virtual-thread writes must happen-before main-thread reads,
+        // and contains() during a backing-array resize is not safe unsynchronized.
+        synchronized (set) {
+            return set.contains(blockKey);
+        }
     }
 
     public static void markVisible(final UUID playerId, final long blockKey) {

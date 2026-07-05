@@ -5,10 +5,10 @@ Subject: [PATCH] Fix paper relative teleport flag changes
 
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
-index 2f40476da..a7a837dc0 100644
+index e45f9514e4b593111e827a2fc083381aa8072f67..aec321b2fdad6c1e4007ad627a6fb90cb80b10f1 100644
 --- a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
 +++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
-@@ -306,22 +306,54 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
+@@ -304,22 +304,54 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
          final Set<net.minecraft.world.entity.Relative> relativeFlags = EnumSet.noneOf(net.minecraft.world.entity.Relative.class);
          for (final TeleportFlag flag : flags) {
              if (flag instanceof TeleportFlag.Relative relativeFlag) {
@@ -67,7 +67,7 @@ index 2f40476da..a7a837dc0 100644
      public static net.minecraft.world.entity.Relative deltaRelativeToNMS(TeleportFlag.Relative apiFlag) {
          return switch (apiFlag) {
              case VELOCITY_X -> net.minecraft.world.entity.Relative.DELTA_X;
-@@ -333,11 +365,12 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
+@@ -331,11 +363,12 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
  
      public static TeleportFlag.@Nullable Relative deltaRelativeToAPI(net.minecraft.world.entity.Relative nmsFlag) {
          return switch (nmsFlag) {
