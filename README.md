@@ -9,6 +9,7 @@
   <img src="https://img.shields.io/badge/version-26.2--REL-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/players-200%2B-blueviolet?style=flat-square">
   <img src="https://img.shields.io/badge/jar-31M%20(SourbyLoader)-green?style=flat-square">
+  <img src="https://img.shields.io/badge/deploy-Docker%20·%20Pterodactyl%20·%20Pelican-2496ed?style=flat-square">
   <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
 </p>
 
@@ -54,6 +55,12 @@ Server-side extension jars via a first-party `SourbyMod` API — `sourbymod.yml`
 
 ### 📦 SourbyLoader — slim jar (~31M)
 Heavy optional libraries (zstd, adventure, configurate, snakeyaml, jline, JDBC drivers, spark, flare, protobuf, sentry) are stripped from the shipped jar and fetched on first boot into the paperclip library cache. The download list is SHA-256-verified. The Paper 26.2 server patch (~21.7M) is the hard floor — it can't be externalized — so the jar lands at ~31M rather than smaller. First boot needs internet once; after that it runs fully offline.
+
+### ⚡ Auto-CDS — 30–50% faster startup, container-safe
+Class Data Sharing memory-maps the JVM's class metadata (`cache/sourbycraft.jsa`, self-healing on jar/JDK change) instead of re-parsing it every boot. Unlike a naive fork-a-helper-JVM approach, the bootstrap is **environment-aware**:
+- **Docker / Pterodactyl / Pelican, or any committed `-Xms`** → it does **not** fork. A second JVM there double-commits the heap (OOM-kill under a cgroup limit) and hides the real server behind an orchestrator PID (breaks panel memory graphs + stop signals). Instead it boots inline and prints the one flag to add for single-JVM CDS.
+- **Bare metal, no committed heap** → it forks one child with `-XX:+AutoCreateSharedArchive` (JDK 19+ single-pass) and forwards console + stop.
+- Tunable via `sourbycraft.cds.mode = auto|flag|fork|off`. Full matrix + per-panel flags in [`docs/CDS.md`](docs/CDS.md).
 
 ### Carried forward (from 26.1.2 r48)
 Security enforcement (NBT/sign/anvil/packet guards), entity/item config caps with Spigot/Paper bridges, ViewThrottle, compression bridge, redstone budget, DAB-lite activation overrides, module registry + PerWorldHolder.
@@ -110,6 +117,27 @@ Folia reaches its throughput by **regionizing world ticking across threads**, wh
 - Every result is **applied back on the main thread**, and **all Bukkit events + plugin callbacks still fire on the main thread.** A plugin never observes off-thread world state, so the entire plugin ecosystem stays compatible.
 
 This is the "safer, exclusive" path: you get real multi-core parallelism for the expensive parts (which dominate large-server CPU) while keeping 100% plugin compatibility. It is **not** Folia-level region parallelism for gameplay ticking — that cannot be done without breaking plugins. On strong hardware (8+ fast cores, NVMe, a proxy splitting load) this design holds a stable tick for 150–200 players.
+
+---
+
+## Running in Docker / Pterodactyl / Pelican
+
+A reference `Dockerfile` + `docker/entrypoint.sh` + `docker-compose.yml` ship in the repo. The container runs the server as **PID 1** (`exec java …`, so `SIGTERM` = a clean world-saving `/stop`), as a **non-root** user, with single-JVM Auto-CDS and Aikar G1 flags baked in. The `/data` volume persists worlds, the SourbyLoader lib cache, and the CDS archive.
+
+```bash
+./gradlew applyAllPatches :sourbycraft-server:compileJava assembleReleaseArtifacts
+docker compose up -d --build     # set EULA=true + MEMORY in docker-compose.yml first
+```
+
+Heap is sized from `MEMORY` (MiB) or auto-derived from the container's cgroup limit. First boot needs internet once for SourbyLoader; after that it runs offline.
+
+**Pterodactyl / Pelican:** add one flag to the Startup command in front of `-jar` for zero-overhead single-JVM CDS — the wings/daemon then tracks the real `java` PID, so the memory graph and Stop button behave:
+
+```
+-XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=cache/sourbycraft.jsa
+```
+
+SourbyCraft detects a panel/container and reminds you once in the console if it's missing. Full per-environment setup (incl. the JDK 24+ AOT cache) is in [`docs/CDS.md`](docs/CDS.md).
 
 ---
 

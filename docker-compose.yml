@@ -1,0 +1,25 @@
+# SourbyCraft 26.2 — docker compose reference.
+#   docker compose up -d --build
+#   docker attach sourbycraft         # console (Ctrl-P Ctrl-Q to detach)
+services:
+  sourbycraft:
+    build:
+      context: .
+      args:
+        JAR: release/SourbyCraft-26.2-REL.jar
+    # Or pull a published image instead of building:
+    # image: ghcr.io/OWNER/sourbycraft:26.2
+    container_name: sourbycraft
+    tty: true          # allocate a TTY so the server console renders
+    stdin_open: true   # keep stdin open so `stop` and commands reach the server
+    restart: unless-stopped
+    stop_grace_period: 60s   # let the world save before SIGKILL
+    environment:
+      EULA: "true"
+      MEMORY: "6144"   # heap MiB; omit to auto-size from mem_limit below
+      JVM_OPTS: ""
+    ports:
+      - "25565:25565"
+    volumes:
+      - ./data:/data
+    mem_limit: 8g      # keep MEMORY comfortably under this (heap + off-heap + CDS)
