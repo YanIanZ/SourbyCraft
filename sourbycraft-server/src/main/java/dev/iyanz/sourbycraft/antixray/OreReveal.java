@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.antixray;
 
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.SourbyCraftWorldConfig;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
@@ -48,6 +49,20 @@ public final class OreReveal implements Listener {
     /** Per-player pending hidden-ore positions (BlockPos.asLong). Main-thread only. */
     private static final Map<UUID, LongOpenHashSet> PENDING = new ConcurrentHashMap<>();
 
+    /**
+     * Per-chunk exposed-ore scan cache. Which ores in a chunk are cave-exposed is
+     * player-independent, so the ~4096-block/section scan runs ONCE per chunk and every
+     * player/send reuses the result — instead of re-scanning on the main thread for every
+     * chunk send (the pre-cache behaviour that collapsed TPS at high player counts).
+     * Invalidated precisely on block-change + chunk-unload; a TTL bounds staleness from
+     * non-event changes. Main-thread only (onChunkSent + all invalidation events).
+     */
+    private static final Map<ServerLevel, Long2ObjectOpenHashMap<CacheEntry>> SCAN_CACHE = new java.util.IdentityHashMap<>();
+    private record CacheEntry(long[] exposed, long tick) {}
+    private static final long[] EMPTY = new long[0];
+    /** Safety cap so a missed unload event can't grow a level's cache unbounded. */
+    private static final int MAX_CACHED_CHUNKS_PER_LEVEL = 16384;
+
     private OreReveal() {}
 
     public static void register(Plugin plugin) {
@@ -83,13 +98,49 @@ public final class OreReveal implements Listener {
         final java.util.Set<Block> extraHidden = wc.allBlocks
             ? java.util.Set.copyOf(level.paperConfig().anticheat.antiXray.hiddenBlocks) : java.util.Set.of();
 
-        final LongOpenHashSet pending = PENDING.computeIfAbsent(player.getUUID(), id -> new LongOpenHashSet());
+        // Player-independent scan, computed once per chunk and cached. Per-send work is now
+        // just iterating the (small) exposed-ore list + a per-player pending/visibility check.
+        final long[] exposed = getOrComputeExposed(level, chunk, extraHidden, fluidObscures);
+        if (exposed.length == 0) return;
+
+        final UUID pid = player.getUUID();
+        final LongOpenHashSet pending = PENDING.computeIfAbsent(pid, id -> new LongOpenHashSet());
         final int maxPending = SourbyCraftConfig.raytraceMaxPendingPerPlayer;
+        final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (final long key : exposed) {
+            if (pending.size() >= maxPending) break;   // budget full: remaining ores stay visible (fail-open)
+            if (VisibilityCache.isVisible(pid, key)) continue; // already confirmed visible
+            if (!pending.add(key)) continue;           // already hidden + pending for this player
+            pos.set(key);
+            player.connection.send(new ClientboundBlockUpdatePacket(pos.immutable(), fakeState(level, pos.getY())));
+        }
+    }
+
+    /** Player-independent exposed-ore scan, cached per chunk with a TTL. Main thread only. */
+    private static long[] getOrComputeExposed(final ServerLevel level, final LevelChunk chunk,
+                                              final java.util.Set<Block> extraHidden, final boolean fluidObscures) {
+        final long chunkKey = chunk.getPos().toLong();
+        final Long2ObjectOpenHashMap<CacheEntry> perLevel =
+            SCAN_CACHE.computeIfAbsent(level, l -> new Long2ObjectOpenHashMap<>());
+        final long now = level.getGameTime();
+        final CacheEntry cached = perLevel.get(chunkKey);
+        if (cached != null && (now - cached.tick()) < SourbyCraftConfig.raytraceCacheTtlTicks) {
+            return cached.exposed();
+        }
+        if (perLevel.size() > MAX_CACHED_CHUNKS_PER_LEVEL) perLevel.clear(); // bound memory; forces cheap re-scan
+        final long[] exposed = scanExposed(level, chunk, extraHidden, fluidObscures);
+        perLevel.put(chunkKey, new CacheEntry(exposed, now));
+        return exposed;
+    }
+
+    /** Full one-shot scan: every cave-exposed hidden-ore position in the chunk (BlockPos.asLong). */
+    private static long[] scanExposed(final ServerLevel level, final LevelChunk chunk,
+                                      final java.util.Set<Block> extraHidden, final boolean fluidObscures) {
         final int chunkX = chunk.getPos().x() << 4;
         final int chunkZ = chunk.getPos().z() << 4;
         final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         final LevelChunkSection[] sections = chunk.getSections();
-
+        final it.unimi.dsi.fastutil.longs.LongArrayList out = new it.unimi.dsi.fastutil.longs.LongArrayList();
         for (int idx = 0; idx < sections.length; idx++) {
             final LevelChunkSection section = sections[idx];
             if (section == null || section.hasOnlyAir()) continue;
@@ -102,16 +153,32 @@ public final class OreReveal implements Listener {
                         if (!isCandidate(state, extraHidden)) continue;
                         final int wx = chunkX + x, wy = yBase + y, wz = chunkZ + z;
                         if (!isExposed(level, chunk, wx, wy, wz, fluidObscures, pos)) continue;
-                        if (pending.size() >= maxPending) return; // budget full: remaining ores stay visible (fail-open)
-                        pos.set(wx, wy, wz);
-                        final long key = pos.asLong();
-                        if (VisibilityCache.isVisible(player.getUUID(), key)) continue; // already confirmed visible
-                        player.connection.send(new ClientboundBlockUpdatePacket(pos.immutable(), fakeState(level, wy)));
-                        pending.add(key);
+                        out.add(BlockPos.asLong(wx, wy, wz));
                     }
                 }
             }
         }
+        return out.isEmpty() ? EMPTY : out.toLongArray();
+    }
+
+    // --- cache invalidation (all main thread) ---
+
+    private static void invalidateChunk(final ServerLevel level, final int chunkX, final int chunkZ) {
+        final Long2ObjectOpenHashMap<CacheEntry> perLevel = SCAN_CACHE.get(level);
+        if (perLevel != null) perLevel.remove(net.minecraft.world.level.ChunkPos.asLong(chunkX, chunkZ));
+    }
+
+    /** A block change can alter exposure of ores up to 1 block away, so also drop bordering chunks. */
+    private static void invalidateAt(final org.bukkit.block.Block b) {
+        if (!RayTraceWorker.ENABLED.get()) return;
+        final ServerLevel level = ((org.bukkit.craftbukkit.CraftWorld) b.getWorld()).getHandle();
+        final int bx = b.getX(), bz = b.getZ();
+        final int cx = bx >> 4, cz = bz >> 4;
+        invalidateChunk(level, cx, cz);
+        if ((bx & 15) == 0)  invalidateChunk(level, cx - 1, cz);
+        if ((bx & 15) == 15) invalidateChunk(level, cx + 1, cz);
+        if ((bz & 15) == 0)  invalidateChunk(level, cx, cz - 1);
+        if ((bz & 15) == 15) invalidateChunk(level, cx, cz + 1);
     }
 
     private static boolean isCandidate(final BlockState state, final java.util.Set<Block> extraHidden) {
@@ -189,6 +256,30 @@ public final class OreReveal implements Listener {
                 }
             }
         }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockBreak(org.bukkit.event.block.BlockBreakEvent e) { invalidateAt(e.getBlock()); }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockPlace(org.bukkit.event.block.BlockPlaceEvent e) { invalidateAt(e.getBlock()); }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockExplode(org.bukkit.event.block.BlockExplodeEvent e) {
+        if (!RayTraceWorker.ENABLED.get()) return;
+        for (org.bukkit.block.Block b : e.blockList()) invalidateAt(b);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEntityExplode(org.bukkit.event.entity.EntityExplodeEvent e) {
+        if (!RayTraceWorker.ENABLED.get()) return;
+        for (org.bukkit.block.Block b : e.blockList()) invalidateAt(b);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onChunkUnload(org.bukkit.event.world.ChunkUnloadEvent e) {
+        final ServerLevel level = ((org.bukkit.craftbukkit.CraftWorld) e.getWorld()).getHandle();
+        invalidateChunk(level, e.getChunk().getX(), e.getChunk().getZ());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
