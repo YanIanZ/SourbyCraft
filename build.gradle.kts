@@ -38,6 +38,46 @@ val externalLibs = listOf(
     LibSpec(
         "io/sentry/sentry/7.15.0/sentry-7.15.0.jar",
         "https://repo1.maven.org/maven2/io/sentry/sentry/7.15.0/sentry-7.15.0.jar"
+    ),
+    // SourbyCraft 26.2 aggressive slim: externalize the biggest independent runtime libs (on Maven Central,
+    // NOT part of paperclip's own download machinery — maven-resolver/sisu/httpclient/commons-codec stay
+    // bundled so paperclip can still fetch the vanilla server). SourbyBootstrap downloads these before the
+    // server starts. Offline first-boot needs internet once; CI boot-test validates the online path.
+    LibSpec(
+        "com/github/luben/zstd-jni/1.5.7-11/zstd-jni-1.5.7-11.jar",
+        "https://repo1.maven.org/maven2/com/github/luben/zstd-jni/1.5.7-11/zstd-jni-1.5.7-11.jar"
+    ),
+    LibSpec(
+        "net/kyori/adventure-api/5.2.0/adventure-api-5.2.0.jar",
+        "https://repo1.maven.org/maven2/net/kyori/adventure-api/5.2.0/adventure-api-5.2.0.jar"
+    ),
+    LibSpec(
+        "net/kyori/adventure-text-minimessage/5.2.0/adventure-text-minimessage-5.2.0.jar",
+        "https://repo1.maven.org/maven2/net/kyori/adventure-text-minimessage/5.2.0/adventure-text-minimessage-5.2.0.jar"
+    ),
+    LibSpec(
+        "org/spongepowered/configurate-yaml/4.2.0/configurate-yaml-4.2.0.jar",
+        "https://repo1.maven.org/maven2/org/spongepowered/configurate-yaml/4.2.0/configurate-yaml-4.2.0.jar"
+    ),
+    LibSpec(
+        "org/spongepowered/configurate-core/4.2.0/configurate-core-4.2.0.jar",
+        "https://repo1.maven.org/maven2/org/spongepowered/configurate-core/4.2.0/configurate-core-4.2.0.jar"
+    ),
+    LibSpec(
+        "org/yaml/snakeyaml/2.6/snakeyaml-2.6.jar",
+        "https://repo1.maven.org/maven2/org/yaml/snakeyaml/2.6/snakeyaml-2.6.jar"
+    ),
+    LibSpec(
+        "commons-lang/commons-lang/2.6/commons-lang-2.6.jar",
+        "https://repo1.maven.org/maven2/commons-lang/commons-lang/2.6/commons-lang-2.6.jar"
+    ),
+    LibSpec(
+        "org/jline/jline-terminal/3.27.1/jline-terminal-3.27.1.jar",
+        "https://repo1.maven.org/maven2/org/jline/jline-terminal/3.27.1/jline-terminal-3.27.1.jar"
+    ),
+    LibSpec(
+        "org/jline/jline-reader/3.20.0/jline-reader-3.20.0.jar",
+        "https://repo1.maven.org/maven2/org/jline/jline-reader/3.20.0/jline-reader-3.20.0.jar"
     )
     // parchment-data omitted — 988K, only used for IDE mappings, upstream 404 on the
     // pinned version. Stays bundled.

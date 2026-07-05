@@ -1,13 +1,14 @@
 <h1 align="center">⚡ SourbyCraft — 26.2 Survival</h1>
 
-<p align="center"><strong>Maximum performance · Resource-efficient · Self-tuning · Built for 150+ players</strong></p>
+<p align="center"><strong>Maximum performance · Resource-efficient · Self-tuning · Built for 200+ players</strong></p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/minecraft-26.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/line-survival-orange?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/players-150%2B-blueviolet?style=flat-square">
+  <img src="https://img.shields.io/badge/players-200%2B-blueviolet?style=flat-square">
+  <img src="https://img.shields.io/badge/jar-31M%20(SourbyLoader)-green?style=flat-square">
   <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
 </p>
 
@@ -50,6 +51,9 @@ Anti-xray is enabled out of the box and hardened so a transparent-block ("x-ray"
 
 ### 🧩 Native mod loader (`mods/`)
 Server-side extension jars via a first-party `SourbyMod` API — `sourbymod.yml` descriptor, per-mod classloader with full NMS visibility, lifecycle managed by the module registry. **Not** a Fabric/Forge bridge (Paper fork); non-SourbyMod jars are warned + ignored. See [`docs/SOURBYMODS.md`](docs/SOURBYMODS.md).
+
+### 📦 SourbyLoader — slim jar (~31M)
+Heavy optional libraries (zstd, adventure, configurate, snakeyaml, jline, JDBC drivers, spark, flare, protobuf, sentry) are stripped from the shipped jar and fetched on first boot into the paperclip library cache. The download list is SHA-256-verified. The Paper 26.2 server patch (~21.7M) is the hard floor — it can't be externalized — so the jar lands at ~31M rather than smaller. First boot needs internet once; after that it runs fully offline.
 
 ### Carried forward (from 26.1.2 r48)
 Security enforcement (NBT/sign/anvil/packet guards), entity/item config caps with Spigot/Paper bridges, ViewThrottle, compression bridge, redstone budget, DAB-lite activation overrides, module registry + PerWorldHolder.
@@ -95,6 +99,17 @@ simulation-distance=5
 ```
 
 Run a proxy (Velocity, `network.proxy-mode: velocity-modern`) and split load across backends for the smoothest 150+ experience.
+
+---
+
+## Concurrency model — parallelism without breaking plugins
+
+Folia reaches its throughput by **regionizing world ticking across threads**, which breaks the single-main-thread contract every Bukkit plugin relies on. SourbyCraft takes the opposite trade: **async *compute*, main-thread *apply*.**
+
+- Heavy read-only work runs off the main thread — chunk generation, chunk I/O and lighting (Moonrise), mob-spawn density scans (async spawning), anti-xray raytraces — on virtual threads or the Moonrise worker pool.
+- Every result is **applied back on the main thread**, and **all Bukkit events + plugin callbacks still fire on the main thread.** A plugin never observes off-thread world state, so the entire plugin ecosystem stays compatible.
+
+This is the "safer, exclusive" path: you get real multi-core parallelism for the expensive parts (which dominate large-server CPU) while keeping 100% plugin compatibility. It is **not** Folia-level region parallelism for gameplay ticking — that cannot be done without breaking plugins. On strong hardware (8+ fast cores, NVMe, a proxy splitting load) this design holds a stable tick for 150–200 players.
 
 ---
 
