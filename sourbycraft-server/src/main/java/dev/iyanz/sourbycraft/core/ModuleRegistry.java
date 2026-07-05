@@ -24,14 +24,7 @@ public final class ModuleRegistry {
         void enable(Plugin plugin) throws Exception;
     }
 
-    /** Plugin-lifecycle modules — cleared on same-classloader reload by {@link #clear()}. */
     private static final List<SourbyModule> MODULES = new ArrayList<>();
-    /**
-     * Bootstrap-persistent modules (ML1 mods) — never cleared by {@link #clear()} so mod
-     * {@code onEnable}/{@code onDisable} survive same-classloader plugin reloads. Iterated
-     * first in enable order, last in disable order (same effective position as if registered first).
-     */
-    private static final List<SourbyModule> PERSISTENT_MODULES = new ArrayList<>();
     private static final org.slf4j.Logger LOG = LoggerFactory.getLogger("SourbyCraft");
 
     /** Convenience: enroll a named enable function as a module. */
@@ -42,24 +35,20 @@ public final class ModuleRegistry {
         });
     }
 
-    /** Enroll a full {@link SourbyModule} instance (cleared on plugin reload via {@link #clear()}). */
+    /** Enroll a full {@link SourbyModule} instance. */
     public static void add(SourbyModule module) {
         MODULES.add(module);
     }
 
     /**
-     * Enroll a bootstrap-persistent module (ML1 mods). Persistent modules are NOT cleared
-     * by {@link #clear()} and are iterated before regular modules in {@link #enableAll}.
+     * Enable all enrolled modules in registration order. Each module is wrapped in
+     * try/catch(Throwable); failures log {@code Failed to enable module <name> — continuing}.
+     * One summary INFO line is emitted after all attempts.
      */
-    public static void addPersistent(SourbyModule module) {
-        PERSISTENT_MODULES.add(module);
-    }
-
     /**
-     * Clear plugin-lifecycle modules. Called at the top of {@code SWPlugin.onEnable} so a
+     * Clear enrolled modules. Called at the top of {@code SWPlugin.onEnable} so a
      * same-classloader reload (third-party reload plugins) cannot double-enroll —
      * two schedulers/listeners per module would result otherwise.
-     * Persistent modules (ML1 mods) are NOT cleared.
      */
     public static void clear() {
         MODULES.clear();
@@ -68,11 +57,7 @@ public final class ModuleRegistry {
     public static void enableAll(Plugin plugin) {
         int enabled = 0, failed = 0;
         StringBuilder sb = new StringBuilder("[SourbyCraft] modules:");
-        // Persistent first (ML1 mods), then plugin-lifecycle modules
-        List<SourbyModule> all = new ArrayList<>(PERSISTENT_MODULES.size() + MODULES.size());
-        all.addAll(PERSISTENT_MODULES);
-        all.addAll(MODULES);
-        for (SourbyModule m : all) {
+        for (SourbyModule m : MODULES) {
             try {
                 m.enable(plugin);
                 sb.append(' ').append(m.name()).append('✓');
@@ -88,16 +73,13 @@ public final class ModuleRegistry {
     }
 
     /**
-     * Disable all enrolled modules in reverse registration order (persistent first reversed,
-     * then regular reversed — mirror of enable order). Each module is wrapped in
-     * try/catch(Throwable) so failures never interrupt the shutdown sequence.
+     * Disable all enrolled modules in reverse registration order. Each module is
+     * wrapped in try/catch(Throwable) so failures never interrupt the shutdown sequence.
      */
     public static void disableAll() {
-        List<SourbyModule> all = new ArrayList<>(PERSISTENT_MODULES.size() + MODULES.size());
-        all.addAll(PERSISTENT_MODULES);
-        all.addAll(MODULES);
-        Collections.reverse(all);
-        for (SourbyModule m : all) {
+        List<SourbyModule> reversed = new ArrayList<>(MODULES);
+        Collections.reverse(reversed);
+        for (SourbyModule m : reversed) {
             try {
                 m.disable();
             } catch (Throwable t) {
