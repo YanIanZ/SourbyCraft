@@ -385,6 +385,13 @@ public class SourbyCraftConfig {
 
         swmEnabled = getBoolean("swm.enabled", swmEnabled);
         swmVersion = getString("swm.version", swmVersion);
+        // SourbyCraft S6 - swm.loader: only the file loader ships; key reserved for future loaders.
+        swmLoader = getString("swm.loader", swmLoader);
+        if (!"file".equalsIgnoreCase(swmLoader)) {
+            Bukkit.getLogger().warning("[SourbyCraft] swm.loader='" + swmLoader
+                + "' but only the file loader ships in this build; using file. Key reserved for future loaders.");
+            swmLoader = "file";
+        }
         // Entity stacker config (re-port era v10+)
         // S3: legacy performance.wildstacker.* keys (pre-26.1.2 operator files) seed the
         // canonical stacker.* keys when those are absent. Explicit stacker.* always wins.
@@ -540,9 +547,14 @@ public class SourbyCraftConfig {
             }
         }
 
-        if (idleTimeout > 0) {
-            // Idle timeout will be implemented via scheduler
+        // SourbyCraft S6 - pvp.* fossil notice: the PvP variant was removed in the 26.1.2
+        // migration; operator files may still carry the section. Keys are never deleted.
+        if (config.contains("pvp")) {
+            Bukkit.getLogger().info("[SourbyCraft] pvp.* keys in sourbycraft.yml are from the removed PvP variant "
+                + "and are ignored; combat tuning now lives in combat.profile (vanilla|balanced|pvp).");
         }
+
+        // idle-timeout is applied by dev.iyanz.sourbycraft.perf.ConfigBridge at plugin enable (S2).
 
 
         // SourbyCraft - perf-engine P1: operator sourbycraft.yml bridge for sensor settings.
