@@ -243,7 +243,7 @@ public class PufferfishConfig {
             DabState.setEnabled(entityType, true); // reset all, before setting the ones to true
         }
         getStringList("dab.blacklisted-entities", "activation-range.blacklisted-entities", Collections.emptyList(), "A list of entities to ignore for activation")
-                .forEach(name -> EntityType.byString(name).ifPresentOrElse(entityType -> {
+                .forEach(name -> net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getOptional(net.minecraft.resources.Identifier.tryParse(name)).ifPresentOrElse(entityType -> { // SourbyCraft - MC 26.2 EntityType.byString removed
                     DabState.setEnabled(entityType, false);
                 }, () -> MinecraftServer.LOGGER.warn("Unknown entity \"" + name + "\"")));
 

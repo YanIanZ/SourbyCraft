@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 4 Jul 2026 17:55:06 +0700
+Subject: [PATCH] SourbyCraft security: sign truncation caps + configurable
+ anvil rename length
+
+
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index 6d9edffeedb02dc39acc8646d9627e0d6d785140..f67b8e8b11d4ef00321dca6fd30dd475a8c62472 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -3546,19 +3546,32 @@ public class ServerGamePacketListenerImpl
+ 
+     @Override
+     public void handleSignUpdate(final ServerboundSignUpdatePacket packet) {
+-        // Paper start - Limit client sign length
+         String[] linesArray = packet.getLines();
++        // SourbyCraft start - sign line + total caps from sourbycraft-security.yml (layered under Paper's MAX_SIGN_LINE_LENGTH)
++        final int lineCap = Math.min(MAX_SIGN_LINE_LENGTH > 0 ? MAX_SIGN_LINE_LENGTH : Integer.MAX_VALUE,
++            dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.signMaxLineLength);
++        int totalBudget = dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.signMaxTotalChars;
++        boolean sourbyTruncated = false;
+         for (int i = 0; i < linesArray.length; ++i) {
+-            if (MAX_SIGN_LINE_LENGTH > 0 && linesArray[i].length() > MAX_SIGN_LINE_LENGTH) {
++            if (linesArray[i].length() > lineCap) {
+                 // This handles multibyte characters as 1
+-                int offset = linesArray[i].codePoints().limit(MAX_SIGN_LINE_LENGTH).map(Character::charCount).sum();
++                int offset = linesArray[i].codePoints().limit(lineCap).map(Character::charCount).sum();
+                 if (offset < linesArray[i].length()) {
+                     linesArray[i] = linesArray[i].substring(0, offset); // this will break any filtering, but filtering is NYI as of 1.17
++                    sourbyTruncated = true;
+                 }
+             }
++            if (linesArray[i].length() > totalBudget) {
++                linesArray[i] = linesArray[i].substring(0, Math.max(0, totalBudget));
++                sourbyTruncated = true;
++            }
++            totalBudget -= linesArray[i].length();
++        }
++        if (sourbyTruncated) {
++            dev.iyanz.sourbycraft.security.SecurityGuard.violation("sign", this.player.getPlainTextName(), "sign text truncated to configured limits");
+         }
++        // SourbyCraft end
+         List<String> lines = Stream.of(linesArray).map(ChatFormatting::stripFormatting).collect(Collectors.toList());
+-        // Paper end - Limit client sign length
+         this.filterTextPacket(lines).thenAcceptAsync(filteredLines -> this.updateSignText(packet, (List<FilteredText>)filteredLines), this.server);
+     }
+ 
+diff --git a/net/minecraft/world/inventory/AnvilMenu.java b/net/minecraft/world/inventory/AnvilMenu.java
+index a577225f59bb562b860cb90db72b4d658a69956f..fa2e7f12c3be2dfa4eae3e92808aaaffb679ddbd 100644
+--- a/net/minecraft/world/inventory/AnvilMenu.java
++++ b/net/minecraft/world/inventory/AnvilMenu.java
+@@ -29,7 +29,7 @@ public class AnvilMenu extends ItemCombinerMenu {
+     public static final int RESULT_SLOT = 2;
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private static final boolean DEBUG_COST = false;
+-    public static final int MAX_NAME_LENGTH = 50;
++    public static final int MAX_NAME_LENGTH = 50; // SourbyCraft - vanilla reference only; actual cap = SourbyCraftSecurityConfig.anvilMaxItemNameLength (see validateName)
+     public int repairItemCountCost;
+     public @Nullable String itemName;
+     public final DataSlot cost = DataSlot.standalone();
+@@ -321,7 +321,7 @@ public class AnvilMenu extends ItemCombinerMenu {
+ 
+     private static @Nullable String validateName(final String name) {
+         String filteredName = StringUtil.filterText(name);
+-        return filteredName.length() <= 50 ? filteredName : null;
++        return filteredName.length() <= dev.iyanz.sourbycraft.security.SourbyCraftSecurityConfig.anvilMaxItemNameLength ? filteredName : null; // SourbyCraft - configurable anvil name length (raise-cap: default 128 > vanilla 50)
+     }
+ 
+     public int getCost() {

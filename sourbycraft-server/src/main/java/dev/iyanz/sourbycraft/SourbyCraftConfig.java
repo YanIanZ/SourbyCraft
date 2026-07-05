@@ -392,15 +392,7 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("EmojiShortcodes init failed; defaults still active", t);
         }
 
-        swmEnabled = getBoolean("swm.enabled", swmEnabled);
-        swmVersion = getString("swm.version", swmVersion);
-        // SourbyCraft S6 - swm.loader: only the file loader ships; key reserved for future loaders.
-        swmLoader = getString("swm.loader", swmLoader);
-        if (!"file".equalsIgnoreCase(swmLoader)) {
-            Bukkit.getLogger().warning("[SourbyCraft] swm.loader='" + swmLoader
-                + "' but only the file loader ships in this build; using file. Key reserved for future loaders.");
-            swmLoader = "file";
-        }
+        // SourbyCraft - 26.2 survival: SWM removed. swm.* keys ignored (skyblock line only).
         // Entity stacker config (re-port era v10+)
         // S3: legacy performance.wildstacker.* keys (pre-26.1.2 operator files) seed the
         // canonical stacker.* keys when those are absent. Explicit stacker.* always wins.
@@ -429,49 +421,15 @@ public class SourbyCraftConfig {
                 stackerBlacklist = parsed;
             }
         } catch (Throwable ignored) {}
-        // SourbyCraft S5: auto-install.enabled (baked yml) seeds swm.auto-install when operator key absent.
-        // Follows the S3 wildstacker alias-seed pattern: explicit swm.auto-install always wins.
-        if (!config.isSet("swm.auto-install")) {
-            config.set("swm.auto-install", ymlBool("auto-install.enabled", true));
-        }
-        swmAutoInstall = getBoolean("swm.auto-install", swmAutoInstall);
-        swmAutoUpdate = getBoolean("swm.auto-update", swmAutoUpdate);
-        swmFileDir = getString("swm.file-dir", swmFileDir);
-        // SourbyCraft - reject swm.file-dir that escapes the server root or hits the FS root
-        if (swmFileDir.contains("..") || swmFileDir.startsWith("/") || swmFileDir.startsWith("\\")
-            || (swmFileDir.length() > 1 && swmFileDir.charAt(1) == ':')) {
-            Bukkit.getLogger().warning("Ignoring unsafe swm.file-dir='" + swmFileDir + "', falling back to slime_worlds");
-            swmFileDir = "slime_worlds";
-        }
 
-        // Auto-install SWM plugin from GitHub releases
-        if (swmEnabled && swmAutoInstall) {
-        // SourbyCraft start - auto-create required folders
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of(swmFileDir)); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create " + swmFileDir + ": " + e.getMessage()); }
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create plugins directory: " + e.getMessage()); }
-        try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins/SourbyCraft")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create plugins/SourbyCraft directory: " + e.getMessage()); }
+        // SourbyCraft - 26.2 survival: SWM auto-install removed. Create the speedtest dir the /speedtest command uses.
         try { java.nio.file.Files.createDirectories(java.nio.file.Path.of("plugins/SourbyCraft/speedtest")); } catch (java.io.IOException e) { Bukkit.getLogger().warning("Could not create speedtest directory: " + e.getMessage()); }
-        // SourbyCraft end
-            dev.iyanz.sourbycraft.swm.installer.PluginInstaller.install("plugins/");
-        }
 
         // SourbyCraft ML1 — mods/ scanning and SourbyMod lifecycle are handled by
         // dev.iyanz.sourbycraft.mod.ModLoader.bootstrap(), called from DedicatedServer.initServer
         // after this config init completes. No pre-scan or "no loader" warn here.
 
-        if (version < currentVersion) {
-            // SourbyCraft start - migration: update SWM version tag
-            String oldSwmVer = swmVersion;
-            if ("v4-REL".equals(swmVersion) || "v5-REL".equals(swmVersion) || "1.21.11".equals(swmVersion)) {
-                swmVersion = "v6-REL";
-                set("swm.version", swmVersion);
-            }
-            // SourbyCraft end
-            if ("v6-REL".equals(swmVersion)) {
-                swmVersion = "v7-REL";
-                set("swm.version", swmVersion);
-            }
-        }
+        // SourbyCraft - 26.2 survival: SWM version-tag migration removed with SWM.
 
         autoThrottleView = getBoolean("network.auto-throttle-view", autoThrottleView);
         minViewDistance = getInt("network.min-view-distance", minViewDistance);

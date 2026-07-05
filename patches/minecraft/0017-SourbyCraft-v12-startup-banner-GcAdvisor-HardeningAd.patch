@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Tue, 2 Jun 2026 19:55:08 +0700
+Subject: [PATCH] SourbyCraft v12 startup banner + GcAdvisor + HardeningAdvisor
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 3da3c760f626d8fb3a66883dedf38895f177e355..3ae59fbf5d1caf26cff93f42b64ebcfb3f7e868b 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1264,9 +1264,21 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+     protected void runServer() {
+         try {
++            // SourbyCraft v12 — startup banner
++            System.out.print(dev.iyanz.sourbycraft.brand.SourbyCraftBanner.render(
++                dev.iyanz.sourbycraft.brand.BuildInfo.load()
++            ));
++            // SourbyCraft - GC + JVM-arg advisor (warn-only)
++            String __gcWarn = dev.iyanz.sourbycraft.brand.GcAdvisor.renderWarningBanner(
++                dev.iyanz.sourbycraft.brand.GcAdvisor.run()
++            );
++            if (!__gcWarn.isEmpty()) System.out.print(__gcWarn);
++            // SourbyCraft v12 end
+             if (!this.initServer()) {
+                 throw new IllegalStateException("Failed to initialize server");
+             }
++            // SourbyCraft - paper-global hardening advisor (warn-only, after Paper config loaded)
++            dev.iyanz.sourbycraft.security.HardeningAdvisor.run();
+ 
+             this.nextTickTimeNanos = Util.getNanos();
+             this.initTickSchedule(); // Paper - improve tick loop
