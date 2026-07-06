@@ -44,7 +44,7 @@
 - Consumes: existing `KnobRegistry.register(PerfKnob)`, `KnobRegistry.warnOnce(String,int,int)`, `SourbyCraftConfig.ymlBool/ymlInt` (unchanged this task).
 - Produces (later tasks rely on these exact signatures):
   - `KeyStatus` enum: `ACTIVE`, `SUPERSEDED`, `RESERVED`
-  - `KnobMeta` record with static factories `KnobMeta.active(String... comment)`, `KnobMeta.superseded(String paperEquivalent, String... comment)`, `KnobMeta.reserved(String... comment)` and wither `meta.aliases(String... a)`
+  - `KnobMeta` record with static factories `KnobMeta.active(String... comment)`, `KnobMeta.superseded(String paperEquivalent, String... comment)`, `KnobMeta.reserved(String... comment)` and withers `meta.aliases(String... a)`, `meta.withReloadable()` (record component `reloadable` keeps the auto accessor `reloadable()`)
   - `PerfKnob.meta()` → `KnobMeta`; `PerfKnob.applyRaw(Object raw)` → `boolean` (false = type mismatch, default kept)
   - New knobs: `DoubleKnob(String key, double def, KnobMeta)` with `double get()`; `StringKnob(String key, String def, KnobMeta)` with `String get()`; `EnumKnob<E extends Enum<E>>(String key, Class<E> type, E def, KnobMeta)` with `E get()`; `StringListKnob(String key, List<String> def, KnobMeta)` with `List<String> get()`; `MapKnob(String key, Map<String,Object> def, KnobMeta)` with `Map<String,Object> get()`
   - New metadata ctor overloads: `BoolKnob(String key, boolean def, KnobMeta meta)`, `IntKnob(String key, int def, int min, int max, KnobMeta meta)`
@@ -117,7 +117,8 @@ public record KnobMeta(
         return new KnobMeta(status, reloadable, List.of(a), comment, supersededBy);
     }
 
-    public KnobMeta reloadable() {
+    /** Named withReloadable: a record's boolean component already owns the reloadable() accessor. */
+    public KnobMeta withReloadable() {
         return new KnobMeta(status, true, aliases, comment, supersededBy);
     }
 
