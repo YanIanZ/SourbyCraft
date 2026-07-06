@@ -10,7 +10,11 @@ public final class IntKnob extends PerfKnob {
     private volatile int value;
 
     public IntKnob(String key, int defaultValue, int min, int max) {
-        super(key);
+        this(key, defaultValue, min, max, KnobMeta.legacy());
+    }
+
+    public IntKnob(String key, int defaultValue, int min, int max, KnobMeta meta) {
+        super(key, meta);
         if (min > max) throw new IllegalArgumentException("min > max for " + key);
         this.min = min;
         this.max = max;
@@ -30,6 +34,15 @@ public final class IntKnob extends PerfKnob {
     public int max() { return max; }
 
     @Override public Object snapshot() { return value; }
+
+    @Override public Object defaultValue() { return defaultValue; }
+
+    @Override public String typeName() { return "int"; }
+
+    @Override public boolean applyRaw(Object raw) {
+        if (raw instanceof Number n) { set(n.intValue()); return true; }
+        return false;
+    }
 
     @Override void loadFrom() {
         set(SourbyCraftConfig.ymlInt(key, defaultValue));
