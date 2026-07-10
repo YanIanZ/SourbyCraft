@@ -49,6 +49,11 @@ public final class PerfSensor {
 
     private PerfSensor() {}
 
+    // Cached tier ladder. Enum.values() clones its backing array on every call; classifySignal
+    // runs up to 4× per sample (once per signal, once per second) so caching the clone here
+    // removes 4 Tier[] allocations per sample from the sensor hot path. Never mutated.
+    private static final Tier[] TIERS = Tier.values();
+
     // --- Configuration (yml-overridable; written once at boot before start()) ---
     private static volatile boolean enabled = true;
     private static volatile int cadenceTicks = 20;
@@ -255,9 +260,12 @@ public final class PerfSensor {
         }
         if (warmupSamplesRemaining > 0) { warmupSamplesRemaining--; return; }
 
-        double[] tps = aggregateTps();          // Folia-aggregate {1m, 5m, 15m}
-        double tps1m  = tps[0];
-        double tps5m  = tps[1];
+        double[] tps  = aggregateTps();         // Folia-aggregate {1m, 5m, 15m} (may be null on error)
+        // Read only the two windows the sensor consumes (1m, 5m); the 15m slot is unused. Reading
+        // scalars off the API array here avoids allocating an intermediate defensive double[3] every
+        // sample (once per second, forever) — the array copy carried no information the classifier used.
+        double tps1m  = tpsAt(tps, 0);
+        double tps5m  = tpsAt(tps, 1);
         double mspt   = aggregateMspt();        // Folia-aggregate MSPT (millis)
         double memPct = memUsagePercent();
         double gcMs   = gcMsLastMinute();
@@ -307,7 +315,7 @@ public final class PerfSensor {
         if (Double.isNaN(value)) return Tier.GREEN;
         for (int i = 4; i >= 1; i--) {
             boolean exceed = lowerIsWorse ? (value < thresholds[i]) : (value > thresholds[i]);
-            if (exceed) return Tier.values()[i];
+            if (exceed) return TIERS[i];
         }
         return Tier.GREEN;
     }
@@ -338,18 +346,28 @@ public final class PerfSensor {
     // --- Signal readers (Folia-aggregate Bukkit API) ---
 
     /**
-     * Folia-aggregate rolling TPS {1m, 5m, 15m} from {@link Bukkit#getTPS()}. On Folia this
-     * is the server-wide aggregate across all region threads. Returns {20,20,20} defensively
-     * if the API returns an unexpected shape (e.g. very early boot).
+     * Raw Folia-aggregate rolling TPS {1m, 5m, 15m} from {@link Bukkit#getTPS()} (server-wide
+     * across all region threads). Returns the API's own array — no defensive copy — or {@code null}
+     * if the call throws; {@link #tpsAt(double[], int)} applies the null/shape/value defenses at the
+     * read site. Formerly allocated a fresh clamped {@code double[3]} every sample; that copy is
+     * gone because only the 1m and 5m windows are ever consumed and the classifier clamps per-read.
      */
     private static double[] aggregateTps() {
         try {
-            double[] r = Bukkit.getTPS();
-            if (r == null || r.length < 3) return new double[]{20.0, 20.0, 20.0};
-            return new double[]{clampTps(r[0]), clampTps(r[1]), clampTps(r[2])};
+            return Bukkit.getTPS();
         } catch (Throwable ignored) {
-            return new double[]{20.0, 20.0, 20.0};
+            return null;
         }
+    }
+
+    /**
+     * Clamped read of one window from an {@link #aggregateTps()} result. Returns 20.0 defensively
+     * when the array is absent or the wrong shape (null / too short, e.g. very early boot) or the
+     * value is bad — exactly the fallback the former array-building {@code aggregateTps()} produced.
+     */
+    private static double tpsAt(double[] tps, int idx) {
+        if (tps == null || tps.length < 3) return 20.0;
+        return clampTps(tps[idx]);
     }
 
     private static double clampTps(double v) {
