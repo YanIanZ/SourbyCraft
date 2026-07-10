@@ -325,7 +325,14 @@ public final class PerfSensor {
         } catch (Throwable t) {
             SourbyLogger.error("SelfTuneController.onTierChange failed", t);
         }
-        // TierBossBar (P8 telemetry) is an actuator-layer concern — not ported to Folia yet (F2c).
+        // SourbyCraft perf-engine — TierBossBar (P8 telemetry) actuator hook (F2c).
+        // Refreshes each subscribed operator's bossbar; each refresh hops to the player's
+        // own region scheduler (Folia). No-op fast path when nobody is subscribed.
+        try {
+            dev.iyanz.sourbycraft.perf.TierBossBar.onTierChange(newTier);
+        } catch (Throwable t) {
+            SourbyLogger.error("TierBossBar.onTierChange failed", t);
+        }
     }
 
     // --- Signal readers (Folia-aggregate Bukkit API) ---
