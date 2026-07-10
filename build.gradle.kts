@@ -3,7 +3,7 @@ import org.gradle.api.tasks.testing.logging.TestLogEvent
 
 plugins {
     java // TODO java launcher tasks
-    id("moe.luminolmc.hyacinthusweight.patcher")
+    id("dev.iyanz.sourbypatcher.patcher")
 }
 
 paperweight {
@@ -16,30 +16,29 @@ paperweight {
 
         patchFile {
             path = "folia-server/build.gradle.kts"
-            outputFile = file("luminol-server/build.gradle.kts")
-            patchFile = file("luminol-server/build.gradle.kts.patch")
+            outputFile = file("sourbycraft-server/build.gradle.kts")
+            patchFile = file("sourbycraft-server/build.gradle.kts.patch")
         }
         patchFile {
             path = "folia-api/build.gradle.kts"
-            outputFile = file("luminol-api/build.gradle.kts")
-            patchFile = file("luminol-api/build.gradle.kts.patch")
+            outputFile = file("sourbycraft-api/build.gradle.kts")
+            patchFile = file("sourbycraft-api/build.gradle.kts.patch")
         }
         patchRepo("paperApi") {
             upstreamPath = "paper-api"
-            patchesDir = file("luminol-api/paper-patches")
+            patchesDir = file("sourbycraft-api/paper-patches")
             outputDir = file("paper-api")
         }
         patchDir("foliaApi") {
             upstreamPath = "folia-api"
             excludes = listOf("build.gradle.kts", "build.gradle.kts.patch", "paper-patches")
-            patchesDir = file("luminol-api/folia-patches")
+            patchesDir = file("sourbycraft-api/folia-patches")
             outputDir = file("folia-api")
         }
     }
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
-val bacteriawaMavenPublicUrl = "https://repo.bacteriawa.com/repository/maven-public/";
 
 subprojects {
     apply(plugin = "java-library")
@@ -54,7 +53,7 @@ subprojects {
     repositories {
         mavenCentral()
         maven(paperMavenPublicUrl)
-        maven(bacteriawaMavenPublicUrl)
+        maven { url = uri("${rootDir}/sourby-maven") }
     }
 
     dependencies {
@@ -81,18 +80,6 @@ subprojects {
             showStackTraces = true
             exceptionFormat = TestExceptionFormat.FULL
             events(TestLogEvent.STANDARD_OUT)
-        }
-    }
-
-    extensions.configure<PublishingExtension> {
-        repositories {
-            maven("https://repo.bacteriawa.com/repository/maven-releases/") {
-                name = "Bacteriawa"
-                credentials(PasswordCredentials::class) {
-                    username = System.getenv("PRIVATE_MAVEN_REPO_USERNAME")
-                    password = System.getenv("PRIVATE_MAVEN_REPO_PASSWORD")
-                }
-            }
         }
     }
 
