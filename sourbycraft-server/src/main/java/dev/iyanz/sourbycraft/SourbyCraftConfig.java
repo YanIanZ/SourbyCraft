@@ -351,7 +351,12 @@ public class SourbyCraftConfig {
 
         readConfig(SourbyCraftConfig.class, null);
 
-        // F2c: dev.iyanz.sourbycraft.perf.JvmHeapAdvisor (boot-time JVM heap advisory) not ported yet.
+        // SourbyCraft - perf-engine F2c: boot-time JVM heap configuration advisory (pure log advisory).
+        try {
+            dev.iyanz.sourbycraft.perf.JvmHeapAdvisor.init();
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("JvmHeapAdvisor.init failed", t);
+        }
 
         // SourbyCraft - perf-engine P0: load JAR-baked perf knobs BEFORE Bukkit-config block
         dev.iyanz.sourbycraft.perf.knob.Knobs.loadFromYml();
@@ -361,7 +366,16 @@ public class SourbyCraftConfig {
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("PerfSensor.loadFromYml failed; using defaults", t);
         }
-        // F2c: dev.iyanz.sourbycraft.perf.CombatProfile preset application not ported yet (actuator layer).
+        // SourbyCraft - perf-engine F2c: apply combat-profile preset on top of P0 defaults.
+        // A profile only sets the operator-baseline knob values; SelfTuneController still owns
+        // runtime tier-escalation on top of this baseline.
+        try {
+            String profileName = getString("combat.profile", "vanilla");
+            dev.iyanz.sourbycraft.perf.CombatProfile.parse(profileName,
+                dev.iyanz.sourbycraft.perf.CombatProfile.VANILLA).apply();
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("CombatProfile.apply failed; using P0 defaults", t);
+        }
         // out-of-scope: dev.iyanz.sourbycraft.antixray.* ray-trace toggles not ported to Folia yet.
 
         asyncChunkLoad = getBoolean("performance.async-chunk-load", asyncChunkLoad);
