@@ -1,23 +1,59 @@
-enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+pluginManagement {
+    val weightVersion: String by settings
 
-rootProject.name = "SourbyCraft"
+    repositories {
+        gradlePluginPortal()
+        mavenLocal()
+        maven("https://repo.papermc.io/repository/maven-public/")
+        maven("https://repo.bacteriawa.com/repository/maven-public/")
+    }
+
+    plugins {
+        id("moe.luminolmc.hyacinthusweight.patcher") version weightVersion
+        id("moe.luminolmc.hyacinthusweight.core") version weightVersion
+    }
+}
 
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
-include("test-plugin")
+rootProject.name = "luminol"
 
-// SourbyCraft 26.2 survival: swm-api module dropped with SWM.
-listOf("api", "server").forEach {
-    // only include subprojects if buildscript can be resolved
-    if (file("sourbycraft-$it/buildscript").exists()) {
-        include("sourbycraft-$it")
+for (name in listOf("luminol-api", "luminol-server")) {
+    include(name)
+    file(name).mkdirs()
+}
+
+optionalInclude("test-plugin")
+optionalInclude("luminol-generator")
+
+fun optionalInclude(name: String, op: (ProjectDescriptor.() -> Unit)? = null) {
+    val settingsFile = file("$name.settings.gradle.kts")
+    if (settingsFile.exists()) {
+        apply(from = settingsFile)
+        findProject(":$name")?.let { op?.invoke(it) }
+    } else {
+        settingsFile.writeText(
+            """
+            // Uncomment to enable the '$name' project
+            // include(":$name")
+
+            """.trimIndent()
+        )
     }
 }
 
-// SourbyCraft v12 — NMS-compat smoke harness plugin (loaded into TestServer-mojmap/plugins/).
-include("test-harness:sanity-harness-plugin")
-project(":test-harness:sanity-harness-plugin").projectDir = file("test-harness/sanity-harness-plugin")
+gradle.lifecycle.beforeProject {
+    val mcVersion = providers.gradleProperty("mcVersion").get().trim()
+    val luminolVersionChannel = providers.gradleProperty("channel").get().trim()
+    val luminolBuildNumber = providers.environmentVariable("BUILD_NUMBER").orNull?.trim()?.toInt()
+    val versionString = if (luminolBuildNumber == null) {
+        "$mcVersion.local-SNAPSHOT"
+    } else {
+        "$mcVersion.build.$luminolBuildNumber-${luminolVersionChannel.lowercase()}"
+    }
+    version = versionString
+}
 
-
+include("MaplePile")
