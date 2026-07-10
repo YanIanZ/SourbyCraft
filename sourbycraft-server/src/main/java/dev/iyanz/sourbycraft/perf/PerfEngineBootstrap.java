@@ -32,12 +32,12 @@ import java.io.File;
  *       <ul>
  *         <li>{@link PerWorldHolder#registerCleanup} — one shared WorldUnloadEvent listener for
  *             every per-world map (LagLimits arrow counts, ViewThrottle originals).</li>
+ *         <li>{@link ConfigBridge} — pushes SourbyCraft entity/item/server.idle-timeout
+ *             overrides into the per-world Spigot/Paper config engines (WorldLoadEvent listener).</li>
  *         <li>{@link OwnerProtection} — dropped-item pickup lock (event listener).</li>
  *         <li>{@link LagLimits} — per-chunk/per-world entity caps (event listeners) plus the
  *             1 Hz arrow sweeper, driven here on the global-region scheduler.</li>
  *         <li>{@link ViewThrottle} — per-world view-distance throttle (global-region scheduler).</li>
- *         <li>{@link LagMachineCounters#resetTickCounters()} — per-tick projectile-load counter
- *             reset, driven every tick from the global-region scheduler (no NMS tick hook on Folia).</li>
  *       </ul>
  *   </li>
  * </ol>
@@ -58,8 +58,9 @@ import java.io.File;
  * with no equivalent base mechanism — {@code perf.entity-tick-rate}, the excess minecart/boat
  * collision sweepers, and the transient-projectile save suppression
  * ({@code perf.lag-machine.disable-saving-{snowballs,fireworks}}) — remain documented in the F2e
- * report rather than forcing a churn-prone patch. The {@link LagMachineCounters} scaffold is
- * retained (unused for projectiles now that the base enforces them) for any future need.
+ * report rather than forcing a churn-prone patch. (The earlier {@code LagMachineCounters}
+ * per-tick counter scaffold was removed: the base config now enforces the projectile caps, so
+ * nothing read the counter and its permanent per-tick reset task was dead weight.)
  *
  * <p><b>Double-start guard.</b> {@link #start()} is guarded by {@link #started} so a second
  * invocation of the boot hook is a no-op. {@link PerfSensor#start()} carries its own guard too.
@@ -154,6 +155,20 @@ public final class PerfEngineBootstrap {
             SourbyLogger.error("perf-engine: PerWorldHolder.registerCleanup failed", t);
         }
 
+        // ConfigBridge — pushes SourbyCraft entity/item/server.idle-timeout master values into
+        // the per-world Spigot/Paper config engines (only where the operator changed a value from the
+        // SourbyCraft default). Was wired via the deleted SourbyCorePlugin on the Paper line; without
+        // this registration those operator settings are silently ignored on Folia. Always registered:
+        // it is a WorldLoadEvent listener (near-zero cost, no-op when nothing was overridden). The
+        // server-global setPlayerIdleTimeout is dispatched onto the global-region thread inside
+        // register(); per-world mutations run on each world's own region via the WorldLoadEvent.
+        try {
+            ConfigBridge.register(owner);
+            SourbyLogger.info("perf-engine: ConfigBridge registered (entity/item config bridge + idle-timeout)");
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: ConfigBridge.register failed", t);
+        }
+
         // OwnerProtection — dropped-item pickup lock. Guard: item.owner-protection-enabled.
         if (SourbyCraftConfig.ownerProtectionEnabled) {
             try {
@@ -208,17 +223,6 @@ public final class PerfEngineBootstrap {
             SourbyLogger.info("perf-engine: SourbyCraft join/leave message listener registered (F1-7)");
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: SourbyJoinLeaveListener.register failed", t);
-        }
-
-        // LagMachineCounters — per-tick projectile-load counter reset. On Folia there is no NMS
-        // tick hook; drive the reset once per server tick from the global-region scheduler so the
-        // per-tick cap semantics are preserved for the deferred F2e in-tick enforcement.
-        try {
-            Bukkit.getGlobalRegionScheduler().runAtFixedRate(
-                owner, task -> LagMachineCounters.resetTickCounters(), 1L, 1L);
-            SourbyLogger.info("perf-engine: LagMachineCounters per-tick reset driver started (Folia)");
-        } catch (Throwable t) {
-            SourbyLogger.error("perf-engine: LagMachineCounters reset driver failed to start", t);
         }
     }
 }
