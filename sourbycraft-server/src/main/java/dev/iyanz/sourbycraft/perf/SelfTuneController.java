@@ -69,8 +69,38 @@ public final class SelfTuneController {
         // base's already-Folia-safe tick code actually enforces them in-tick (projectile chunk-load
         // caps, inactive-goal-selector throttle). Runs on the global-region scheduler thread.
         KnobEnforcer.enforceAll();
-        // Log the resulting knob snapshot so operators can see exactly what changed.
-        Knobs.logLoaded("tier-" + newTier);
+        // Log the resulting knob snapshot, honestly split into ENFORCED vs set-only. A blanket
+        // Knobs.logLoaded() dump would advertise every knob as if applied — but only the projectile
+        // caps and the AI-throttle gate are actually enforced by KnobEnforcer; the rest
+        // (entity-tick-rate, snowball/firework save-suppression, excess minecart/boat sweepers) are
+        // set here but have no in-tick actuator on the current base (see KnobEnforcer's "NOT bridged"
+        // note), so we mark them plainly rather than claim enforcement that never happens.
+        logTierPolicy(newTier);
+    }
+
+    /**
+     * Honest per-tier knob log: reports the ENFORCED knobs (real in-tick effect via
+     * {@link KnobEnforcer}) separately from the set-only knobs (mutated on tier change but with no
+     * actuator on the current base — documented in {@link KnobEnforcer}). Keeps operators from
+     * reading the tier line as "all of these are now applied".
+     */
+    private static void logTierPolicy(final Tier tier) {
+        boolean aiThrottled = Knobs.AI_THROTTLE_BEYOND_DISTANCE.get() > 0
+            && Knobs.AI_THROTTLE_TICK_INTERVAL.get() > 1;
+        SourbyLogger.info("self-tune [tier-" + tier + "] ENFORCED:"
+            + " projectile-loads/tick=" + Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.get()
+            + " projectile-loads/projectile=" + Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.get()
+            + " ai-inactive-throttle=" + (aiThrottled ? "on" : "off")
+            + " (dist=" + Knobs.AI_THROTTLE_BEYOND_DISTANCE.get()
+            + " interval=" + Knobs.AI_THROTTLE_TICK_INTERVAL.get() + ")");
+        SourbyLogger.info("self-tune [tier-" + tier + "] set-only (no in-tick actuator on this base):"
+            + " entity-tick-rate=" + Knobs.ENTITY_TICK_RATE.get()
+            + " disable-saving-snowballs=" + Knobs.LAG_MACHINE_DISABLE_SAVING_SNOWBALLS.get()
+            + " disable-saving-fireworks=" + Knobs.LAG_MACHINE_DISABLE_SAVING_FIREWORKS.get()
+            + " remove-excess-minecarts=" + Knobs.LAG_MACHINE_REMOVE_EXCESS_MINECARTS.get()
+            + " (limit=" + Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.get() + ")"
+            + " remove-excess-boats=" + Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.get()
+            + " (limit=" + Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.get() + ")");
     }
 
     private static synchronized void captureBaselineIfNeeded() {
