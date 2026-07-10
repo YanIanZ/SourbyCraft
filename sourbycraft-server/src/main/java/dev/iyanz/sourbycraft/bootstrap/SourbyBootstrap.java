@@ -124,20 +124,25 @@ public final class SourbyBootstrap {
      * Decides how to apply Class Data Sharing and returns the child exit code
      * when it re-execs, or {@code null} when the caller should boot inline.
      *
-     * <p>Strategy matrix (mode {@code auto}, the default):
+     * <p>Strategy matrix (mode {@code auto}, the default). Environment classification is
+     * delegated to {@link CdsEnvironment}, an ordered detector chain covering panels
+     * (Pterodactyl / Pelican / generic), containers (Docker / Podman / LXC / OpenVZ /
+     * containerd), orchestrators (Kubernetes / Nomad), service managers (systemd), CI
+     * runners, and cgroup v1/v2 memory caps — with WSL and uncapped cloud VMs classified
+     * as fork-permitted:
      * <ul>
      *   <li>Operator already passed a CDS/AOT flag → inline, respect it.</li>
-     *   <li>Docker / Pterodactyl / Pelican, <em>or</em> a large committed heap
-     *       ({@code -Xms} &ge; 256M) → <b>do not fork</b>. Forking a second JVM
-     *       there double-commits the heap (OOM-kill risk under a cgroup limit)
-     *       and hides the real server behind an orchestrator PID (panel memory
-     *       graphs + stop signals target the wrong process). Boot inline and
-     *       print a one-time, copy-paste flag hint for zero-overhead single-JVM
-     *       CDS instead.</li>
-     *   <li>Otherwise (bare metal, small/absent {@code -Xms}) → fork one child
-     *       with {@code -XX:+AutoCreateSharedArchive} (JDK 19+, single pass:
-     *       creates the archive on first clean shutdown, uses + self-heals it
-     *       afterwards).</li>
+     *   <li>An environment whose policy is {@code INLINE} (any capped/managed/ephemeral
+     *       case above), <em>or</em> a large committed heap ({@code -Xms} &ge; 256M) →
+     *       <b>do not fork</b>. Forking a second JVM there double-commits the heap
+     *       (OOM-kill risk under a cgroup limit) and/or hides the real server behind a
+     *       wrapper PID (panel/systemd/orchestrator memory graphs + stop signals target
+     *       the wrong process). Boot inline and print a one-time, copy-paste flag hint
+     *       for zero-overhead single-JVM CDS instead.</li>
+     *   <li>Otherwise (bare metal, WSL, uncapped cloud VM — all with small/absent
+     *       {@code -Xms}) → fork one child with {@code -XX:+AutoCreateSharedArchive}
+     *       (JDK 19+, single pass: creates the archive on first clean shutdown, uses +
+     *       self-heals it afterwards).</li>
      * </ul>
      *
      * <p>Modes via {@code -Dsourbycraft.cds.mode} / {@code $SOURBYCRAFT_CDS_MODE}:
@@ -169,29 +174,39 @@ public final class SourbyBootstrap {
         if (archiveDir != null && !Files.exists(archiveDir)) Files.createDirectories(archiveDir);
 
         if (mode.equals("flag")) {
-            printFlagHint(archivePath, detectEnvLabel());
+            printFlagHint(archivePath, CdsEnvironment.label());
             return null;
         }
 
         boolean forceFork = mode.equals("fork");
-        String env = detectEnvLabel();
+        java.util.Optional<CdsEnvironment.Detection> detected = CdsEnvironment.classify();
         long xms = committedInitialHeapBytes(jvmArgs);
         boolean bigCommittedHeap = xms >= FORK_SAFE_XMS_BYTES;
 
-        if (!forceFork && (env != null || bigCommittedHeap)) {
+        // A detected environment forbids forking when its policy is INLINE (capped container,
+        // panel, orchestrator, service manager, CI). Environments that permit forking
+        // (bare metal, WSL, uncapped cloud VM) still fall through to the -Xms headroom check.
+        boolean envForbidsFork = detected.isPresent() && !detected.get().canFork();
+
+        if (!forceFork && (envForbidsFork || bigCommittedHeap)) {
             // Unsafe/wasteful to fork here — hint the single-JVM flag instead.
-            String why = env != null
-                    ? (env + " detected")
-                    : ("committed heap -Xms=" + human(xms) + " (fork would double it)");
+            String why;
+            if (envForbidsFork) {
+                why = detected.get().label() + " detected";
+            } else {
+                // Fork-permitted env (or bare metal) but a large committed heap would be doubled.
+                String envNote = detected.map(d -> d.label() + ", ").orElse("");
+                why = envNote + "committed heap -Xms=" + human(xms) + " (fork would double it)";
+            }
             printFlagHintOnce(archivePath, why);
             return null;
         }
 
-        return fork(args, archivePath, jvmArgs);
+        return fork(args, archivePath, jvmArgs, detected.map(CdsEnvironment.Detection::label).orElse(null));
     }
 
     /** Forks one child JVM with single-pass AutoCreateSharedArchive; returns its exit code. */
-    private static Integer fork(String[] args, Path archivePath, List<String> jvmArgs) throws Throwable {
+    private static Integer fork(String[] args, Path archivePath, List<String> jvmArgs, String envLabel) throws Throwable {
         String javaCmd = ProcessHandle.current().info().command()
                 .orElse(System.getProperty("java.home") + "/bin/java");
         String ownJar = SourbyBootstrap.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath();
@@ -231,8 +246,9 @@ public final class SourbyBootstrap {
         cmd.addAll(java.util.Arrays.asList(args));
 
         boolean have = Files.isRegularFile(archivePath) && Files.size(archivePath) > 0;
+        String forkCtx = envLabel != null ? envLabel + " fork, headroom" : "bare-metal fork";
         System.out.println("[SourbyBootstrap] Auto-CDS " + (have ? "using" : "creating")
-                + " archive " + archivePath + " (bare-metal fork)");
+                + " archive " + archivePath + " (" + forkCtx + ")");
         if (!have) {
             System.out.println("[SourbyBootstrap] first boot writes the archive on clean /stop; "
                 + "later boots start ~30-50% faster.");
@@ -300,7 +316,7 @@ public final class SourbyBootstrap {
 
         Path marker = Paths.get(SIMD_HINT_MARKER);
         if (Files.isRegularFile(marker)) return; // already hinted once
-        String env = detectEnvLabel();
+        String env = CdsEnvironment.label();
         System.out.println("[SourbyBootstrap] SIMD: the jdk.incubator.vector module is not loaded"
                 + (env != null ? " (" + env + ")" : "") + " — Luminol's vectorized optimizations are off.");
         System.out.println("[SourbyBootstrap] To enable them, add this to your JVM flags, BEFORE \"-jar\":");
@@ -312,27 +328,6 @@ public final class SourbyBootstrap {
             if (p != null && !Files.exists(p)) Files.createDirectories(p);
             Files.writeString(marker, (env != null ? env : "inline") + System.lineSeparator());
         } catch (Throwable ignored) {}
-    }
-
-    /** Returns "Docker"/"Pterodactyl"/"Pelican"/"container" if detected, else null. */
-    private static String detectEnvLabel() {
-        if (System.getenv("P_SERVER_UUID") != null || System.getenv("P_SERVER_LOCATION") != null) {
-            return System.getenv("PELICAN") != null ? "Pelican panel" : "Pterodactyl panel";
-        }
-        if (System.getenv("PELICAN") != null) return "Pelican panel";
-        if (System.getenv("SERVER_MEMORY") != null && System.getenv("SERVER_IP") != null) return "game panel";
-        if (Files.exists(Paths.get("/.dockerenv"))) return "Docker";
-        String c = System.getenv("container");
-        if (c != null && !c.isBlank()) return "container (" + c + ")";
-        try {
-            // cgroup v2 with a hard memory limit → almost certainly a container.
-            Path max = Paths.get("/sys/fs/cgroup/memory.max");
-            if (Files.isReadable(max)) {
-                String v = Files.readString(max).trim();
-                if (!v.equals("max") && !v.isEmpty()) return "container (cgroup memory limit)";
-            }
-        } catch (Throwable ignored) {}
-        return null;
     }
 
     private static Path resolveArchivePath() {
