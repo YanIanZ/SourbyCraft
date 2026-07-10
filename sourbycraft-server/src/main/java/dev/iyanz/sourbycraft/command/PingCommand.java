@@ -70,9 +70,9 @@ public class PingCommand extends Command {
         // Always emit a Location row so the panel layout is consistent regardless of geo
         // outcome. Show a "looking up..." placeholder synchronously, then the async path
         // either rewrites by sending the resolved row (city / country / ISP) or — on a
-        // miss (null address, proxy-stripped IP, ip-api offline, RFC1918) — appends a
-        // labelled "unavailable" line so operators can tell at a glance whether the geo
-        // signal was empty vs the lookup never ran.
+        // miss (null address, proxy-stripped IP, RFC1918, or the local db-ip.com mmdb
+        // absent/unreadable) — appends a labelled "unavailable" line so operators can tell
+        // at a glance whether the geo signal was empty vs the lookup never ran.
         s.sendMessage(text()
             .append(text("  Location: ", SourbyCraftColors.LABEL))
             .append(text("looking up...", SourbyCraftColors.DIM))
@@ -96,7 +96,7 @@ public class PingCommand extends Command {
                     s.sendMessage(text()
                         .append(text("  Location: ", SourbyCraftColors.LABEL))
                         .append(text("unavailable", SourbyCraftColors.DIM))
-                        .append(text("  (proxy-stripped IP, RFC1918, or ip-api offline)", SourbyCraftColors.DIM))
+                        .append(text("  (proxy-stripped IP, RFC1918, or local geo db unavailable)", SourbyCraftColors.DIM))
                         .build());
                 }
             });
