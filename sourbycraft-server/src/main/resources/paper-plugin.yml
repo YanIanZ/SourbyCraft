@@ -1,6 +1,0 @@
-name: SourbyCraftCore
-version: "26.2"
-main: dev.iyanz.sourbycraft.core.SourbyCorePlugin
-api-version: "1.21"
-description: SourbyCraft 26.2 survival core — MT1 module lifecycle + ML1 native mod loader (no SWM)
-author: SourbyCraft
