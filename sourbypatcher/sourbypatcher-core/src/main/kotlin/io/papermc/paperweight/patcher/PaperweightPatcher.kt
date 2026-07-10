@@ -37,7 +37,7 @@ abstract class PaperweightPatcher : Plugin<Project> {
 
     override fun apply(target: Project) {
         Git.checkForGit(target.providers)
-        printId<PaperweightPatcher>("hyacinthusweight-patcher", target.gradle)
+        printId<PaperweightPatcher>("sourbypatcher-patcher", target.gradle)
 
         val patcher = target.extensions.create(PAPERWEIGHT_EXTENSION, PaperweightPatcherExtension::class)
 

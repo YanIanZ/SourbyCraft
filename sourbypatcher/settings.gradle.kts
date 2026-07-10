@@ -2,8 +2,8 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
-rootProject.name = "hyacinthusweight"
+rootProject.name = "sourbypatcher"
 
-include("hyacinthusweight-core", "paperweight-lib", "hyacinthusweight-userdev")
+include("sourbypatcher-core", "paperweight-lib", "sourbypatcher-userdev")
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
