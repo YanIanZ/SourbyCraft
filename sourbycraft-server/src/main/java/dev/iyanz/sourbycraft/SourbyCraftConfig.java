@@ -355,7 +355,12 @@ public class SourbyCraftConfig {
 
         // SourbyCraft - perf-engine P0: load JAR-baked perf knobs BEFORE Bukkit-config block
         dev.iyanz.sourbycraft.perf.knob.Knobs.loadFromYml();
-        // F2b: dev.iyanz.sourbycraft.perf.sensor.PerfSensor.loadFromYml() not ported yet (sensor is a forward stub).
+        // SourbyCraft - perf-engine F2b: load JAR-baked sensor config right after the knobs.
+        try {
+            dev.iyanz.sourbycraft.perf.sensor.PerfSensor.loadFromYml();
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("PerfSensor.loadFromYml failed; using defaults", t);
+        }
         // F2c: dev.iyanz.sourbycraft.perf.CombatProfile preset application not ported yet (actuator layer).
         // out-of-scope: dev.iyanz.sourbycraft.antixray.* ray-trace toggles not ported to Folia yet.
 
@@ -552,7 +557,37 @@ public class SourbyCraftConfig {
 
         // idle-timeout is applied by dev.iyanz.sourbycraft.perf.ConfigBridge at plugin enable (S2).
 
-        // F2b: perf-engine P1 operator sensor-config bridge (PerfSensor.applyOperatorConfig) not ported yet.
+        // SourbyCraft - perf-engine F2b: operator sourbycraft.yml bridge for sensor settings.
+        // Uses cfg*() (config.get(), no addDefault) so the operator yml is NOT polluted with
+        // sensor keys on first boot. Only keys explicitly present in the operator yml override
+        // the JAR-baked defaults loaded by PerfSensor.loadFromYml() above.
+        try {
+            dev.iyanz.sourbycraft.perf.sensor.PerfSensor.applyOperatorConfig(
+                cfgBool("perf.sensor.enabled", true),
+                cfgInt("perf.sensor.warmup-ticks", 600),
+                cfgInt("perf.sensor.cadence-ticks", 20),
+                cfgInt("perf.sensor.dwell-samples", 3),
+                cfgDouble("perf.sensor.recovery-dwell-multiplier", 2.0),
+                cfgDouble("perf.sensor.thresholds.mspt.yellow",   30.0),
+                cfgDouble("perf.sensor.thresholds.mspt.orange",   40.0),
+                cfgDouble("perf.sensor.thresholds.mspt.red",      60.0),
+                cfgDouble("perf.sensor.thresholds.mspt.emergency",100.0),
+                cfgDouble("perf.sensor.thresholds.tps.yellow",    19.5),
+                cfgDouble("perf.sensor.thresholds.tps.orange",    18.0),
+                cfgDouble("perf.sensor.thresholds.tps.red",       15.0),
+                cfgDouble("perf.sensor.thresholds.tps.emergency", 10.0),
+                cfgDouble("perf.sensor.thresholds.mem.yellow",    75.0),
+                cfgDouble("perf.sensor.thresholds.mem.orange",    85.0),
+                cfgDouble("perf.sensor.thresholds.mem.red",       92.0),
+                cfgDouble("perf.sensor.thresholds.mem.emergency", 97.0),
+                cfgDouble("perf.sensor.thresholds.gc-ms-per-min.yellow",    20.0),
+                cfgDouble("perf.sensor.thresholds.gc-ms-per-min.orange",    50.0),
+                cfgDouble("perf.sensor.thresholds.gc-ms-per-min.red",      100.0),
+                cfgDouble("perf.sensor.thresholds.gc-ms-per-min.emergency",300.0)
+            );
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("PerfSensor.applyOperatorConfig failed; using yml defaults", t);
+        }
 
         // SourbyCraft - perf-engine P2: operator sourbycraft.yml bridge for lag-machine knobs.
         try {

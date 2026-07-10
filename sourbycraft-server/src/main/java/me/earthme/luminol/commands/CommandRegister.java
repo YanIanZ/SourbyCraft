@@ -23,5 +23,14 @@ public class CommandRegister {
         // post-config hook instead — Paper's GlobalConfiguration is loaded by now (needed by
         // HardeningAdvisor) and we avoid churning the net/minecraft patch series.
         dev.iyanz.sourbycraft.brand.StartupBanner.printOnce();
+
+        // SourbyCraft - perf-engine F2b: initialise the config registry + start the self-tune loop.
+        // The Paper tag wired SourbyCraftConfig.init() into a DedicatedServer NMS patch and drove
+        // the sensor from MinecraftServer.tickChildren. Folia has no global tick loop, so on this
+        // base we (1) init the config registry here (CraftServer + Bukkit API are already live at
+        // this post-config hook — SourbyCraftCommands.registerAll above proves that) and (2) start
+        // the sensor's Folia global-region-scheduler sampler. Both are idempotent / double-start
+        // guarded. Wrapped so a failure here cannot abort the boot sequence.
+        dev.iyanz.sourbycraft.perf.PerfEngineBootstrap.start();
     }
 }
