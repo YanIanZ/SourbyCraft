@@ -117,7 +117,7 @@ Luminol patch set, Folia upstream config, gradle wrapper as needed).
   (align with existing SourbyCraft module names).
 - Plugin application `hyacinthusweight.*` → `sourbypatcher.*` (from F0a).
 - Group `dev.iyanz.sourbycraft`, version coordinates 26.2 (reuse existing `gradle.properties` scheme:
-  `mcVersion` / `apiVersion` / `releaseVersion` = 26.2, `codename` TBD — propose `folia`).
+  `mcVersion` / `apiVersion` / `releaseVersion` = 26.2, `codename` = `metal`).
 - Branding strings / brand-info patch (server list, `/version`, startup) → SourbyCraft.
 
 **Pin refs (all frozen):**
