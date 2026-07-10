@@ -10,5 +10,11 @@ public class CommandRegister {
      */
     public static void register() {
         new BarCommand().register();
+        // SourbyCraft - register custom console commands (shadowing fix). Runs from the
+        // Luminol post-config hook (ConfigManager#loadConfigFiles, invoked in
+        // DedicatedServer#initServer) — the CraftServer + its SimpleCommandMap already
+        // exist at this point, and this precedes syncCommands() so our entries get merged
+        // into the Brigadier tree. See SourbyCraftCommands for the full rationale.
+        dev.iyanz.sourbycraft.command.SourbyCraftCommands.registerAll();
     }
 }
