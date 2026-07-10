@@ -43,11 +43,14 @@ import java.util.List;
  *   <li><b>Arrow sweeper.</b> The Paper tag drove {@code sweepArrows} from
  *       {@code Bukkit.getScheduler().runTaskTimer(...)} (global main-thread scheduler,
  *       absent on Folia). On Folia the sweep is driven by the perf-engine bootstrap's
- *       global-region scheduler; each arrow's {@code remove()} is a cross-region entity
- *       mutation, so it is re-dispatched onto that arrow's own region scheduler via
- *       {@code arrow.getScheduler().run(...)} rather than being called from the sweep
- *       thread. The count map is a {@link PerWorldHolder} ({@link java.util.concurrent.ConcurrentHashMap}
- *       backed) so it is safe to publish from the sweep thread and read from region threads.</li>
+ *       global-region scheduler. That thread does not own the regionized per-entity state,
+ *       so it must not read an arrow's fields or remove it directly — both the field reads
+ *       ({@code isInBlock/getShooter/getTicksLived}) and the {@code remove()} are re-dispatched
+ *       together onto that arrow's own region scheduler via {@code arrow.getScheduler().run(...)}
+ *       (a copied snapshot of the world's arrow list is safe to hold; only the arrow's live
+ *       fields are region-owned). The count map is a {@link PerWorldHolder}
+ *       ({@link java.util.concurrent.ConcurrentHashMap} backed) so it is safe to publish from
+ *       the sweep thread and read from region threads.</li>
  * </ul>
  */
 public final class LagLimits implements Listener {
@@ -123,9 +126,23 @@ public final class LagLimits implements Listener {
     /**
      * 1 Hz: refresh arrow counts; cull oldest grounded arrows beyond cap.
      *
-     * <p>Folia: invoked from the bootstrap's global-region scheduler. World/entity
-     * enumeration is read-only; each {@code arrow.remove()} is re-dispatched onto the
-     * arrow's own region scheduler because entity removal must run on the owning region.
+     * <p><b>Folia (region-safe).</b> Invoked from the bootstrap's global-region scheduler.
+     * That thread does NOT own the regionized per-entity state, so it must not read arrow
+     * fields ({@code isInBlock()} / {@code getShooter()} / {@code getTicksLived()}) nor iterate
+     * the region's live entity list from here — doing so races the arrow's own region tick
+     * (torn reads) and the entity-list mutation (intermittent
+     * {@link java.util.ConcurrentModificationException}).
+     *
+     * <p>Instead we take a cheap snapshot of the world's arrow list ({@code getEntitiesByClass}
+     * copies into a new collection, so the returned list itself is safe to hold), publish the
+     * count, sort by id (id is immutable after spawn), then hop to <em>each</em> arrow's own
+     * region via {@code arrow.getScheduler().run(...)} — matching {@link OwnerProtection} and
+     * {@link TierBossBar}. Every field read AND the {@code remove()} run together on the owning
+     * region thread. Because the per-arrow decision now happens off this thread, the cull budget
+     * is enforced with an {@link java.util.concurrent.atomic.AtomicInteger} the region callbacks
+     * decrement, preserving the "remove only the oldest {@code size-cap}" behaviour and the 1 Hz
+     * cadence. A retired arrow (already gone) fires the scheduler's retired-callback and is a
+     * no-op, freeing no budget — same best-effort semantics as before.
      */
     public static void sweepArrows() {
         int cap = SourbyCraftConfig.maxArrowsPerWorld;
@@ -133,19 +150,25 @@ public final class LagLimits implements Listener {
             List<AbstractArrow> arrows = new ArrayList<>(world.getEntitiesByClass(AbstractArrow.class));
             ARROW_COUNT.put(world.getName(), arrows.size());
             if (cap <= 0 || arrows.size() <= cap) continue;
-            arrows.sort((a, b) -> Integer.compare(a.getEntityId(), b.getEntityId())); // oldest first
-            int toRemove = arrows.size() - cap;
+            arrows.sort((a, b) -> Integer.compare(a.getEntityId(), b.getEntityId())); // oldest first (id immutable)
+            // Shared cull budget: region callbacks decrement it and only remove while it lasts, so
+            // at most (size - cap) grounded arrows are culled even though decisions run off-thread.
+            java.util.concurrent.atomic.AtomicInteger budget =
+                new java.util.concurrent.atomic.AtomicInteger(arrows.size() - cap);
             for (AbstractArrow arrow : arrows) {
-                if (toRemove <= 0) break;
-                if (arrow.isInBlock() && !(arrow.getShooter() instanceof org.bukkit.entity.Player p && p.isOnline() && arrow.getTicksLived() < 100)) {
-                    // Folia: hop to the arrow's owning region to remove it.
-                    arrow.getScheduler().run(
-                        org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
-                        task -> { if (arrow.isValid()) arrow.remove(); },
-                        null
-                    );
-                    toRemove--;
-                }
+                // Hop to the arrow's OWNING region BEFORE touching any of its fields. All reads
+                // (isInBlock/getShooter/getTicksLived) and the remove() run on that region thread.
+                arrow.getScheduler().run(
+                    org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
+                    task -> {
+                        if (budget.get() <= 0 || !arrow.isValid()) return;
+                        if (arrow.isInBlock() && !(arrow.getShooter() instanceof org.bukkit.entity.Player p
+                                && p.isOnline() && arrow.getTicksLived() < 100)) {
+                            if (budget.getAndDecrement() > 0) arrow.remove();
+                        }
+                    },
+                    null
+                );
             }
         }
     }
