@@ -67,5 +67,9 @@ public enum CombatProfile {
             }
         }
         SourbyLogger.info("combat profile applied: " + this);
+        // F2e: enforce the profile's knob baseline onto the base config immediately, so the
+        // operator-selected combat profile has real in-tick effect from boot (before any tier
+        // escalation). SelfTuneController re-enforces on every subsequent tier transition.
+        KnobEnforcer.enforceAll();
     }
 }

@@ -65,6 +65,10 @@ public final class SelfTuneController {
         captureBaselineIfNeeded();
         applyTier(newTier);
         SourbyLogger.info("self-tune: applied policy for tier " + newTier);
+        // F2e: push the freshly-set knob values into the Luminol/Pufferfish base config so the
+        // base's already-Folia-safe tick code actually enforces them in-tick (projectile chunk-load
+        // caps, inactive-goal-selector throttle). Runs on the global-region scheduler thread.
+        KnobEnforcer.enforceAll();
         // Log the resulting knob snapshot so operators can see exactly what changed.
         Knobs.logLoaded("tier-" + newTier);
     }
