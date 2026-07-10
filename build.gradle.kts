@@ -61,6 +61,13 @@ paperweight {
     externalLib("org/jline/jline-terminal/3.27.1/jline-terminal-3.27.1.jar", mavenCentral)
     externalLib("org/jline/jline-native/3.27.1/jline-native-3.27.1.jar", mavenCentral)
     externalLib("org/jline/jline-reader/3.20.0/jline-reader-3.20.0.jar", mavenCentral)
+    // Offline geoip for /ping (com.maxmind.geoip2:geoip2 + its runtime closure).
+    externalLib("com/maxmind/geoip2/geoip2/5.1.0/geoip2-5.1.0.jar", mavenCentral)
+    externalLib("com/maxmind/db/maxmind-db/4.1.0/maxmind-db-4.1.0.jar", mavenCentral)
+    externalLib("com/fasterxml/jackson/core/jackson-databind/2.21.3/jackson-databind-2.21.3.jar", mavenCentral)
+    externalLib("com/fasterxml/jackson/core/jackson-core/2.21.3/jackson-core-2.21.3.jar", mavenCentral)
+    externalLib("com/fasterxml/jackson/core/jackson-annotations/2.21/jackson-annotations-2.21.jar", mavenCentral)
+    externalLib("com/fasterxml/jackson/datatype/jackson-datatype-jsr310/2.21.3/jackson-datatype-jsr310-2.21.3.jar", mavenCentral)
 }
 
 // Wire the SourbyPatcher slim task to this build's server paperclip + server jars.
