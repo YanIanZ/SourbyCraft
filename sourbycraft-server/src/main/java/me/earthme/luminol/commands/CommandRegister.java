@@ -16,5 +16,12 @@ public class CommandRegister {
         // exist at this point, and this precedes syncCommands() so our entries get merged
         // into the Brigadier tree. See SourbyCraftCommands for the full rationale.
         dev.iyanz.sourbycraft.command.SourbyCraftCommands.registerAll();
+
+        // SourbyCraft - branded startup banner + advisors (the "logs pakai hexcolor" ask).
+        // Ported from the Paper tag paper-26.2-pre-folia, where these lived in an NMS patch
+        // to MinecraftServer#runServer. On the Folia base we emit them from this authored
+        // post-config hook instead — Paper's GlobalConfiguration is loaded by now (needed by
+        // HardeningAdvisor) and we avoid churning the net/minecraft patch series.
+        dev.iyanz.sourbycraft.brand.StartupBanner.printOnce();
     }
 }
