@@ -96,6 +96,15 @@ public final class PerfEngineBootstrap {
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: PerfSensor.start failed", t);
         }
+        // SourbyCraft F1-8 (advanced auto-updater): start the SourbyCraft updater now that the
+        // unified config is loaded AND the internal plugin handle + Folia async scheduler are ready.
+        // No-op unless misc.auto_update.enabled=true. Channel-aware, verify-before-stage, safe apply
+        // modes (default notify), hex op-notification; checks run on Bukkit.getAsyncScheduler().
+        try {
+            me.earthme.luminol.config.modules.misc.AutoUpdateConfig.startUpdater();
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: SourbyCraft auto-updater start failed", t);
+        }
         try {
             startActuators();
         } catch (Throwable t) {
