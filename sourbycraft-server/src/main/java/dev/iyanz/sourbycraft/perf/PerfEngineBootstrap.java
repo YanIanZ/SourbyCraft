@@ -48,11 +48,18 @@ import java.io.File;
  * loop and this port keeps the patch series untouched (authored source only), so every concern is
  * driven from this authored bootstrap using the internal Minecraft plugin handle instead.
  *
- * <p><b>Deferred to F2e.</b> The deepest knob effects that require NMS tick-loop hooks — actually
- * skipping entity-AI ticks ({@code perf.ai.throttle-*}), applying {@code perf.entity-tick-rate},
- * and the in-tick projectile-load cap ({@link LagMachineCounters#incrementProjectileChunkLoad()} /
- * {@link LagMachineCounters#projectileChunkLoadsThisTick()}) — need minecraft-patches and are NOT
- * wired here. The knobs are still set/read; only their in-tick enforcement is deferred.
+ * <p><b>F2e (knob enforcement).</b> The mappable knobs are now enforced in-tick by bridging them
+ * onto the Luminol/Pufferfish/Kaiiju base config rather than adding NMS minecraft-patches: the
+ * projectile chunk-load caps ({@code perf.lag-machine.max-projectile-loads-per-*}) drive
+ * {@code ProjectileChunkReduceConfig} (enforced in {@code Projectile.setPosRaw}), and the AI
+ * throttle gate ({@code perf.ai.throttle-*}) drives {@code EntityGoalSelectorInactiveTickConfig}
+ * (enforced in {@code Mob.serverAiStep}). See {@link KnobEnforcer}; it runs once at boot (below,
+ * after config init) and again on every tier transition from {@link SelfTuneController}. Knobs
+ * with no equivalent base mechanism — {@code perf.entity-tick-rate}, the excess minecart/boat
+ * collision sweepers, and the transient-projectile save suppression
+ * ({@code perf.lag-machine.disable-saving-{snowballs,fireworks}}) — remain documented in the F2e
+ * report rather than forcing a churn-prone patch. The {@link LagMachineCounters} scaffold is
+ * retained (unused for projectiles now that the base enforces them) for any future need.
  *
  * <p><b>Double-start guard.</b> {@link #start()} is guarded by {@link #started} so a second
  * invocation of the boot hook is a no-op. {@link PerfSensor#start()} carries its own guard too.
@@ -74,6 +81,15 @@ public final class PerfEngineBootstrap {
             SourbyCraftConfig.init(new File("sourbycraft.yml"));
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: SourbyCraftConfig.init failed", t);
+        }
+        // SourbyCraft F2e: enforce the loaded knob baseline onto the Luminol/Pufferfish base config
+        // now that init() has applied every yml override (combat profile + explicit knob keys). This
+        // is the boot-time bridge so the base actually enforces the SourbyCraft baseline in-tick;
+        // SelfTuneController re-enforces on every subsequent tier transition.
+        try {
+            KnobEnforcer.enforceAll();
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: KnobEnforcer boot enforcement failed", t);
         }
         // SourbyCraft F1-6: re-apply the persisted /maxp value AFTER init() has loaded the unified
         // config, so an operator's stored sourbycraft.max-players wins over server.properties on
