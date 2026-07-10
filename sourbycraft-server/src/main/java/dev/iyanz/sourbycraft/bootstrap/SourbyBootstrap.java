@@ -187,10 +187,22 @@ public final class SourbyBootstrap {
 
         List<String> cmd = new ArrayList<>();
         cmd.add(javaCmd);
+        boolean haveStdoutEnc = false, haveStderrEnc = false, haveFileEnc = false;
         for (String a : jvmArgs) {
             if (a.startsWith("-agentlib:jdwp")) continue; // port re-use on re-exec
+            if (a.startsWith("-Dstdout.encoding=")) haveStdoutEnc = true;
+            else if (a.startsWith("-Dstderr.encoding=")) haveStderrEnc = true;
+            else if (a.startsWith("-Dfile.encoding=")) haveFileEnc = true;
             cmd.add(a);
         }
+        // Force UTF-8 console + file encoding in the forked child. The child is launched from
+        // this rebuilt arg list (RuntimeMXBean input args), which omits JVM defaults — so when
+        // the parent runs under a C / POSIX locale, stdout.encoding would otherwise fall back to
+        // US-ASCII and the branded box-drawing chars (U+2550 ═, …) print as ? / �. Only add each
+        // flag if the operator did not already set it, so an explicit choice always wins.
+        if (!haveStdoutEnc) cmd.add("-Dstdout.encoding=UTF-8");
+        if (!haveStderrEnc) cmd.add("-Dstderr.encoding=UTF-8");
+        if (!haveFileEnc) cmd.add("-Dfile.encoding=UTF-8");
         // JDK 19+: create-on-miss, use-on-hit, and recreate automatically when the
         // archive is stale (jar/JDK changed). No manual fingerprint bookkeeping.
         cmd.add("-XX:+AutoCreateSharedArchive");
