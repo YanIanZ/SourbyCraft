@@ -180,8 +180,8 @@ index 217e4fb33d2707c5e50c7ec2dd2aaee410154254..e904dedd1444044fdafdb2a42b4a9e4c
  
 -public final class PatchedDataComponentMap implements DataComponentMap {
 +public final class PatchedDataComponentMap implements DataComponentMap, org.leavesmc.leaves.lithium.common.util.change_tracking.ChangePublisher<net.minecraft.core.component.PatchedDataComponentMap> { // Leaves - Lithium Sleeping Block Entity
-     private final DataComponentMap prototype;
-     private Reference2ObjectMap<DataComponentType<?>, Optional<?>> patch;
+     public final DataComponentMap prototype;
+     public Reference2ObjectMap<DataComponentType<?>, Optional<?>> patch;
      private boolean copyOnWrite;
 @@ -137,6 +137,7 @@ public final class PatchedDataComponentMap implements DataComponentMap {
      }

@@ -5,12 +5,12 @@ pluginManagement {
         gradlePluginPortal()
         mavenLocal()
         maven("https://repo.papermc.io/repository/maven-public/")
-        maven("https://repo.bacteriawa.com/repository/maven-public/")
+        maven { url = uri("${rootDir}/sourby-maven") }
     }
 
     plugins {
-        id("moe.luminolmc.hyacinthusweight.patcher") version weightVersion
-        id("moe.luminolmc.hyacinthusweight.core") version weightVersion
+        id("dev.iyanz.sourbypatcher.patcher") version weightVersion
+        id("dev.iyanz.sourbypatcher.core") version weightVersion
     }
 }
 
@@ -18,9 +18,9 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
-rootProject.name = "luminol"
+rootProject.name = "sourbycraft"
 
-for (name in listOf("luminol-api", "luminol-server")) {
+for (name in listOf("sourbycraft-api", "sourbycraft-server")) {
     include(name)
     file(name).mkdirs()
 }
