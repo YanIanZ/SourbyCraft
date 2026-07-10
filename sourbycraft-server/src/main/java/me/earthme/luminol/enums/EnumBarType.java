@@ -49,7 +49,10 @@ public enum EnumBarType {
     }
 
     EnumBarType(Class<? extends TickableStatusBar> clazz, String name, String commandName, String configPath, Supplier<Map<String, Object>> settingsProvider) {
-        this(clazz, name, commandName, new Pair<>("luminol", configPath), settingsProvider);
+        // SourbyCraft F3-2: config-origin must match the registered config instance name
+        // ("sourbycraft" — see ConfigManager.initConfigs). "luminol" here resolved to a null
+        // ConfigsInstance in ConfigEditCommand, breaking `/bar ... config` edits.
+        this(clazz, name, commandName, new Pair<>("sourbycraft", configPath), settingsProvider);
     }
 
     EnumBarType(Class<? extends TickableStatusBar> clazz, String name, String commandName, @NonNull Pair<String, String> configPath, Supplier<Map<String, Object>> settingsProvider) {
