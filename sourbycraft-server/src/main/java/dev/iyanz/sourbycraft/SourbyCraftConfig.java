@@ -797,6 +797,13 @@ public class SourbyCraftConfig {
         seed(f, changed, "spark.enabled", true, "Enable the bundled spark profiler bridge.");
         seed(f, changed, "branding.gc-advisor.enabled", true, "Enable the startup GC/JVM-flags advisory log.");
 
+        // --- Max players (F1-6) ---
+        // Server max-player slot count set by /maxp. Seeded as 0 (= use server.properties) so the
+        // key is discoverable; MaxPlayersConfig.applyAtBoot only re-applies when it is > 0, i.e.
+        // after an operator runs /maxp. Written under the SourbyCraft-owned "sourbycraft.*" tree.
+        seed(f, changed, dev.iyanz.sourbycraft.perf.MaxPlayersConfig.KEY, 0,
+            "Server max-player slot count set by /maxp. Re-applied at boot so it wins over server.properties. 0 = use server.properties.");
+
         if (changed[0]) {
             try {
                 f.save();

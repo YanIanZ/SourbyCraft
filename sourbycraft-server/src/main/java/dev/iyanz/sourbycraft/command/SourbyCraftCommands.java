@@ -44,7 +44,7 @@ public final class SourbyCraftCommands {
 
         // Drop any pre-existing SimpleCommandMap entries so our fallback registration
         // is not shadowed by an earlier bukkit/vanilla entry under the same name.
-        String[] names = {"ping", "sys", "plugins", "speedtest", "sparkview", "ver", "perf"};
+        String[] names = {"ping", "sys", "plugins", "speedtest", "sparkview", "ver", "perf", "maxp"};
         Map<String, Command> known = commandMap.getKnownCommands();
         for (String n : names) {
             String lower = n.toLowerCase(Locale.ROOT);
@@ -59,10 +59,11 @@ public final class SourbyCraftCommands {
         commandMap.register("sourbycraft", new SparkviewCommand("sparkview"));
         commandMap.register("sourbycraft", new VerCommand("ver"));
         commandMap.register("sourbycraft", new PerfCommand("perf"));
+        commandMap.register("sourbycraft", new MaxpCommand("maxp"));
 
         registered = true;
         org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
-            "Registered 7 SourbyCraft commands (fallback prefix 'sourbycraft'). "
+            "Registered 8 SourbyCraft commands (fallback prefix 'sourbycraft'). "
             + "Use /sourbycraft:<name> if a name collides with Paper's built-ins "
             + "(/ping, /version, /plugins).");
     }
