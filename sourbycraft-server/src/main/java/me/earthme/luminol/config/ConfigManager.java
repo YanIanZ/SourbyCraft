@@ -24,7 +24,7 @@ public class ConfigManager {
     // 3 -> target full path
 
     public static void initConfigs() {
-        registerConfig("luminol", builder.of("luminol", "me.earthme.luminol.config.modules"));
+        registerConfig("sourbycraft", builder.of("sourbycraft", "me.earthme.luminol.config.modules"));
         preLoad();
     }
 

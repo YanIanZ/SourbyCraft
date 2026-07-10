@@ -5,23 +5,23 @@ Subject: [PATCH] Rebrand to Luminol
 
 
 diff --git a/src/main/java/io/papermc/paper/ServerBuildInfo.java b/src/main/java/io/papermc/paper/ServerBuildInfo.java
-index 652ff54e7c50412503725d628bfe72ed03059790..db5e2f10278c20286779362cfdfadb2f42c724e0 100644
+index 652ff54e7c50412503725d628bfe72ed03059790..3cb00df3f455c18b3c75b7401a58472888ace7b4 100644
 --- a/src/main/java/io/papermc/paper/ServerBuildInfo.java
 +++ b/src/main/java/io/papermc/paper/ServerBuildInfo.java
 @@ -19,6 +19,17 @@ public interface ServerBuildInfo {
       */
      Key BRAND_PAPER_ID = Key.key("papermc", "paper");
  
-+    // Luminol start
++    // SourbyCraft start
 +    /**
 +     * The brand id for folia
 +     */
 +    Key BRAND_FOLIA_ID = Key.key("papermc", "folia");
 +    /**
-+     * The brand id for Luminol.
++     * The brand id for SourbyCraft.
 +     */
-+    Key BRAND_LUMINOL_ID = Key.key("luminolmc", "luminol");
-+    // Luminol end
++    Key BRAND_SOURBYCRAFT_ID = Key.key("sourbycraft", "sourbycraft");
++    // SourbyCraft end
 +
      /**
       * Gets the {@code ServerBuildInfo}.
