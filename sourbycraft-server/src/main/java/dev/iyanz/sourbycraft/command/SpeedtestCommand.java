@@ -28,6 +28,22 @@ public class SpeedtestCommand extends Command {
     private static final String OS_NAME = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT);
     private static final String OS_ARCH = System.getProperty("os.arch").toLowerCase(java.util.Locale.ROOT);
 
+    /**
+     * SHA-256 pins for every supported Ookla CLI 1.2.0 archive (the exact bytes served by
+     * {@link #OOKLA_BASE_URL} on 2026-07-11). The downloaded archive is verified against its pin
+     * BEFORE the binary is ever extracted/executed — matching the download-integrity discipline of
+     * {@code SourbyUpdater} / {@code LibDownloader}. A platform with no published binary (e.g. Windows
+     * ARM64: Ookla ships no {@code winarm64} build for 1.2.0) is deliberately absent, so
+     * {@link #resolveBinaryName()} reports it unsupported rather than executing an unpinned download.
+     */
+    private static final Map<String, String> OOKLA_SHA256 = Map.of(
+        "ookla-speedtest-1.2.0-linux-x86_64.tgz",     "5690596c54ff9bed63fa3732f818a05dbc2db19ad36ed68f21ca5f64d5cfeeb7",
+        "ookla-speedtest-1.2.0-linux-aarch64.tgz",    "3953d231da3783e2bf8904b6dd72767c5c6e533e163d3742fd0437affa431bd3",
+        "ookla-speedtest-1.2.0-linux-armhf.tgz",      "e45fcdebbd8a185553535533dd032d6b10bc8c64eee4139b1147b9c09835d08d",
+        "ookla-speedtest-1.2.0-macosx-universal.tgz", "c9f8192149ebc88f8699998cecab1ce144144045907ece6f53cf50877f4de66f",
+        "ookla-speedtest-1.2.0-win64.zip",            "13e3d888b845d301a556419e31f14ab9bff57e3f06089ef2fd3bdc9ba6841efa"
+    );
+
     private static String resolveBinaryName() {
         if (OS_NAME.contains("linux")) {
             if (OS_ARCH.equals("x86_64") || OS_ARCH.equals("amd64")) {
@@ -43,9 +59,8 @@ public class SpeedtestCommand extends Command {
         } else if (OS_NAME.contains("windows")) {
             if (OS_ARCH.equals("x86_64") || OS_ARCH.equals("amd64")) {
                 return "ookla-speedtest-1.2.0-win64.zip";
-            } else if (OS_ARCH.equals("aarch64") || OS_ARCH.equals("arm64")) {
-                return "ookla-speedtest-1.2.0-winarm64.zip";
             }
+            // No Windows-ARM64 build is published for Ookla CLI 1.2.0 (unpinnable) -> unsupported.
         }
         return null;
     }
@@ -198,6 +213,20 @@ public class SpeedtestCommand extends Command {
             Files.deleteIfExists(tarball);
             throw new IOException("HTTP " + resp.statusCode() + " from " + OOKLA_URL);
         }
+        // SHA-256 integrity gate: verify the downloaded archive against its pin BEFORE extracting or
+        // executing anything. A MITM'd/tampered mirror would otherwise yield an unpinned executable.
+        String expected = OOKLA_SHA256.get(BINARY_NAME);
+        if (expected == null) {
+            Files.deleteIfExists(tarball);
+            throw new IOException("no SHA-256 pin for " + BINARY_NAME + "; refusing to execute unverified binary");
+        }
+        String actual = sha256(tarball);
+        if (!expected.equalsIgnoreCase(actual)) {
+            Files.deleteIfExists(tarball);
+            throw new IOException("SHA-256 mismatch for " + BINARY_NAME
+                + ": got " + actual + ", expected " + expected + " (refusing to execute)");
+        }
+        LOG.info("Speedtest archive SHA-256 verified for {}", BINARY_NAME);
         try (InputStream raw = Files.newInputStream(tarball)) {
             if (OOKLA_URL.endsWith(".zip")) {
                 extractSpeedtestFromZip(raw, BIN);
@@ -266,6 +295,21 @@ public class SpeedtestCommand extends Command {
                     return;
                 }
             }
+        }
+    }
+
+    /** Hex-encoded SHA-256 of a file, for the download-integrity gate. */
+    private static String sha256(Path file) throws IOException {
+        try (InputStream in = Files.newInputStream(file)) {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+            StringBuilder sb = new StringBuilder(64);
+            for (byte b : md.digest()) sb.append(String.format("%02x", b & 0xff));
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 unavailable in this JDK", e);
         }
     }
 
