@@ -1,0 +1,78 @@
+{
+  "minecraftVersion": "fake",
+  "macheVersion": "fake",
+  "dependencies": {
+    "codebook": [
+      {
+        "group": "io.papermc.codebook",
+        "name": "codebook-cli",
+        "version": "2.0.0-SNAPSHOT",
+        "classifier": "all"
+      }
+    ],
+    "constants": [
+    ],
+    "decompiler": [
+      {
+        "group": "org.vineflower",
+        "name": "vineflower",
+        "version": "1.11.2"
+      }
+    ]
+  },
+  "repositories": [
+    {
+      "url": "https://repo.papermc.io/repository/maven-public/",
+      "name": "PaperMC",
+      "groups": [
+        "io.papermc",
+        "org.vineflower"
+      ]
+    }
+  ],
+  "decompilerArgs": [
+    "--synthetic-not-set=true",
+    "--ternary-constant-simplification=true",
+    "--include-runtime=current",
+    "--decompile-complex-constant-dynamic=true",
+    "--indent-string=    ",
+    "--decompile-inner=true",
+    "--remove-bridge=true",
+    "--decompile-generics=true",
+    "--ascii-strings=false",
+    "--remove-synthetic=true",
+    "--include-classpath=true",
+    "--inline-simple-lambdas=true",
+    "--ignore-invalid-bytecode=false",
+    "--bytecode-source-mapping=true",
+    "--dump-code-lines=true",
+    "--override-annotation=false",
+    "--skip-extra-files=true"
+  ],
+  "remapperArgs": [
+    "--temp-dir={tempDir}",
+    "--output={output}",
+    "--input={input}",
+    "--input-classpath={inputClasspath}",
+    "--hypo-parallelism=1"
+  ],
+  "additionalCompileDependencies": {
+    "compileOnly": [
+      {
+        "group": "org.jetbrains",
+        "name": "annotations",
+        "version": "24.0.1"
+      },
+      {
+        "group": "com.google.code.findbugs",
+        "name": "jsr305",
+        "version": "3.0.2"
+      },
+      {
+        "group": "org.checkerframework",
+        "name": "checker-qual",
+        "version": "3.49.0"
+      }
+    ]
+  }
+}
