@@ -2,8 +2,11 @@ package dev.iyanz.sourbycraft.perf;
 
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.core.PerWorldHolder;
+import dev.iyanz.sourbycraft.lang.SourbyJoinLeaveListener;
+import dev.iyanz.sourbycraft.lang.SourbyMessages;
 import dev.iyanz.sourbycraft.perf.sensor.PerfSensor;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
+import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.leavesmc.leaves.plugin.MinecraftInternalPlugin;
@@ -80,6 +83,14 @@ public final class PerfEngineBootstrap {
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: MaxPlayersConfig.applyAtBoot failed", t);
         }
+        // SourbyCraft F1-7 (varied lang): apply a random SourbyCraft MOTD variant at startup, now
+        // that init() has loaded/seeded the unified config's messages.* section. One MiniMessage
+        // parse + Bukkit.motd(Component) — no scheduling, safe on the boot thread.
+        try {
+            applyMotd();
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: SourbyCraft MOTD apply failed", t);
+        }
         try {
             PerfSensor.start();
         } catch (Throwable t) {
@@ -90,6 +101,15 @@ public final class PerfEngineBootstrap {
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: actuator startup failed", t);
         }
+    }
+
+    /** Apply one random SourbyCraft MOTD variant (F1-7). Skipped silently if the variant is empty. */
+    private static void applyMotd() {
+        Component motd = SourbyMessages.get(SourbyMessages.MOTD);
+        if (motd == Component.empty()) return;
+        Bukkit.motd(motd);
+        SourbyLogger.info("perf-engine: applied a random SourbyCraft MOTD variant ("
+            + SourbyMessages.variantCount(SourbyMessages.MOTD) + " configured)");
     }
 
     /**
@@ -147,12 +167,22 @@ public final class PerfEngineBootstrap {
 
         // MaxPlayersBypass — let sourbycraft.maxplayers.bypass holders (+ ops) join a full server.
         // Always registered (login-time, region-free, Folia-safe). Zero cost unless a full-server
-        // KICK_FULL login actually occurs.
+        // KICK_FULL login actually occurs. Also carries the F1-7 varied server-full kick message.
         try {
             MaxPlayersBypass.register(owner);
             SourbyLogger.info("perf-engine: MaxPlayersBypass login listener registered (sourbycraft.maxplayers.bypass)");
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: MaxPlayersBypass.register failed", t);
+        }
+
+        // SourbyCraft F1-7 (varied lang): varied SourbyCraft join/leave broadcast messages.
+        // Region-safe (name read + Component swap only). Always registered — a message layer with
+        // no consumer is dead weight, and the operator can blank the variants to disable output.
+        try {
+            SourbyJoinLeaveListener.register(owner);
+            SourbyLogger.info("perf-engine: SourbyCraft join/leave message listener registered (F1-7)");
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: SourbyJoinLeaveListener.register failed", t);
         }
 
         // LagMachineCounters — per-tick projectile-load counter reset. On Folia there is no NMS

@@ -1,5 +1,7 @@
 package dev.iyanz.sourbycraft.perf;
 
+import dev.iyanz.sourbycraft.lang.SourbyMessages;
+import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -28,6 +30,11 @@ import org.bukkit.plugin.Plugin;
  * <p>Runs at {@link EventPriority#HIGH} so it observes the fullness decision made
  * by the server / lower-priority plugins, but still leaves {@code MONITOR}
  * observers an accurate final result.
+ *
+ * <p><b>F1-7 (varied lang).</b> When the player is NOT bypassing and the kick stands,
+ * the vanilla "Server is full" kick message is replaced with a random SourbyCraft-flavored,
+ * hex-colored variant from {@link SourbyMessages#SERVER_FULL} via {@code kickMessage(...)}.
+ * MiniMessage parse only — Folia-safe (still just enum/String/Component work, no entity/world).
  */
 public final class MaxPlayersBypass implements Listener {
 
@@ -45,6 +52,13 @@ public final class MaxPlayersBypass implements Listener {
         // Folia-safe: permission read + isOp() only; no entity/world access.
         if (e.getPlayer().hasPermission(BYPASS_PERMISSION) || e.getPlayer().isOp()) {
             e.setResult(PlayerLoginEvent.Result.ALLOWED);
+            return;
+        }
+        // Non-bypass player stays kicked: swap vanilla "Server is full" for a random SourbyCraft
+        // server-full variant. MiniMessage parse only — no off-thread entity/world access.
+        Component msg = SourbyMessages.get(SourbyMessages.SERVER_FULL);
+        if (msg != Component.empty()) {
+            e.kickMessage(msg);
         }
     }
 }
