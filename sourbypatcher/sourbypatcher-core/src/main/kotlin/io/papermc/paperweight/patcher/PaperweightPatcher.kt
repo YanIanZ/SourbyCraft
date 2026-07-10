@@ -26,6 +26,7 @@ import io.papermc.paperweight.core.taskcontainers.UpstreamConfigTasks
 import io.papermc.paperweight.core.tasks.CheckoutRepo
 import io.papermc.paperweight.core.tasks.RunNestedBuild
 import io.papermc.paperweight.patcher.extension.PaperweightPatcherExtension
+import io.papermc.paperweight.tasks.SlimPaperclipJar
 import io.papermc.paperweight.util.*
 import io.papermc.paperweight.util.constants.*
 import org.gradle.api.Plugin
@@ -45,6 +46,19 @@ abstract class PaperweightPatcher : Plugin<Project> {
             group = GENERAL_TASK_GROUP
             description = "Delete the project setup cache and task outputs."
             delete(target.layout.cache)
+        }
+
+        // SourbyLoader — strip externalized libs from the fat paperclip jar, inject the
+        // first-boot manifest + bootstrap, and rewrite Main-Class. The fat/server jars are
+        // wired in afterEvaluate so the consuming build's serverProject is known.
+        target.tasks.register<SlimPaperclipJar>("slimPaperclipJar") {
+            group = GENERAL_TASK_GROUP
+            description = "Strip externalized libs from the paperclip jar + generate the SourbyLoader bootstrap manifest."
+            mainClass.set(patcher.slimJarMainClass)
+            bootstrapClassPrefix.set(patcher.slimBootstrapClassPrefix)
+            libPaths.set(patcher.externalLibs.map { list -> list.map { it.paperclipPath } })
+            libUrls.set(patcher.externalLibs.map { list -> list.map { it.baseUrl } })
+            outputJar.convention(target.layout.buildDirectory.file("libs/SourbyCraft-slim.jar"))
         }
 
         target.afterEvaluate { afterEvaluate(patcher) }
