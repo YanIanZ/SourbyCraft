@@ -797,6 +797,13 @@ public class SourbyCraftConfig {
         seed(f, changed, "spark.enabled", true, "Enable the bundled spark profiler bridge.");
         seed(f, changed, "branding.gc-advisor.enabled", true, "Enable the startup GC/JVM-flags advisory log.");
 
+        // --- Varied server messages (F1-7) ---
+        // Seed the varied SourbyCraft message/lang defaults under messages.* (list of MiniMessage
+        // variants per key). The message layer (dev.iyanz.sourbycraft.lang.SourbyMessages) owns the
+        // key set + built-in variants; it seeds only when a key is absent (never clobbers operator
+        // edits). Kept OUT of the perf tree — this is the SourbyCraft-owned "messages.*" surface.
+        dev.iyanz.sourbycraft.lang.SourbyMessages.seedDefaults(f, changed);
+
         // --- Max players (F1-6) ---
         // Server max-player slot count set by /maxp. Seeded as 0 (= use server.properties) so the
         // key is discoverable; MaxPlayersConfig.applyAtBoot only re-applies when it is > 0, i.e.
