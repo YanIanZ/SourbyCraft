@@ -1,6 +1,13 @@
 --- a/folia-server/build.gradle.kts
 +++ b/folia-server/build.gradle.kts
-@@ -7,7 +_,7 @@
+@@ -2,12 +_,14 @@
+ import io.papermc.paperweight.attribute.DevBundleOutput
+ import io.papermc.paperweight.util.*
+ import java.time.Instant
++import java.time.ZoneId // SourbyCraft - GMT+7 build time
++import java.time.ZonedDateTime // SourbyCraft - GMT+7 build time
+ 
+ plugins {
      `java-library`
      `maven-publish`
      idea
@@ -113,16 +120,38 @@
  }
  
  tasks.jar {
-@@ -189,21 +_,21 @@
+@@ -189,21 +_,42 @@
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
 -        val buildTime = providers.environmentVariable("BUILD_STARTED_AT").map(Instant::parse).orElse(Instant.EPOCH).get()
-+        val buildTime = Instant.now() // Always use current as build time
++        // SourbyCraft - build time in GMT+7 (Asia/Jakarta), matching the previous SourbyCraft
++        // convention (paper-26.2-pre-folia). /ver + startup render this in the day-name format.
++        val buildTime = ZonedDateTime.now(ZoneId.of("Asia/Jakarta")).toInstant()
          val gitHash = git.exec(providers, "rev-parse", "--short=7", "HEAD").get().trim()
-         val implementationVersion = "$mcVersion-${build ?: "DEV"}-$gitHash"
+-        val implementationVersion = "$mcVersion-${build ?: "DEV"}-$gitHash"
          val date = git.exec(providers, "show", "-s", "--format=%ci", gitHash).get().trim()
          val gitBranch = git.exec(providers, "rev-parse", "--abbrev-ref", "HEAD").get().trim()
++        // SourbyCraft - version suffix derived from the git branch, matching the previous
++        // SourbyCraft convention (paper-26.2-pre-folia patches 0004/0006/0007): vN-DEV / vN-REL /
++        // vN-EXP. Kept in lockstep with META-INF/sourbycraft-build.properties (writeBuildInfo /
++        // sourbycraftSuffixProvider in the root build) so the JAR manifest, /ver and the startup
++        // banner all report the same string (e.g. "26.2-REL" on a release/* branch).
++        val releaseVersionFull = rootProject.providers.gradleProperty("releaseVersion").getOrElse("dev")
++        val releaseMajor = releaseVersionFull.substringBefore('-')
++        val codename = rootProject.providers.gradleProperty("codename").getOrElse("dev")
++        val suffix = when {
++            gitBranch.contains("experimental") || gitBranch.contains("feat") -> "EXP"
++            gitBranch.startsWith("release/") -> "REL"
++            gitBranch.contains("-dev") || gitBranch.contains("develop") -> "DEV"
++            codename == "dev" -> "DEV"
++            else -> "REL"
++        }
++        val implementationVersion = when (suffix) {
++            "EXP" -> "$releaseMajor-EXP"
++            "REL" -> "$releaseMajor-REL"
++            else -> "$releaseVersionFull-DEV"
++        }
          attributes(
              "Main-Class" to "org.bukkit.craftbukkit.Main",
 -            "Implementation-Title" to "Folia",
@@ -130,11 +159,12 @@
              "Implementation-Version" to implementationVersion,
              "Implementation-Vendor" to date,
 -            "Specification-Title" to "Folia",
-+            "Specification-Title" to "SourbyCraft", // SourbyCraft - Rebrand
-             "Specification-Version" to project.version,
+-            "Specification-Version" to project.version,
 -            "Specification-Vendor" to "Paper Team",
 -            "Brand-Id" to "papermc:folia",
 -            "Brand-Name" to "Folia",
++            "Specification-Title" to "SourbyCraft", // SourbyCraft - Rebrand
++            "Specification-Version" to implementationVersion, // SourbyCraft - Rebrand: match Impl-Version
 +            "Specification-Vendor" to "dev.iyanz", // SourbyCraft - Rebrand
 +            "Brand-Id" to "sourbycraft:sourbycraft", // SourbyCraft - Rebrand
 +            "Brand-Name" to "SourbyCraft", // SourbyCraft - Rebrand
