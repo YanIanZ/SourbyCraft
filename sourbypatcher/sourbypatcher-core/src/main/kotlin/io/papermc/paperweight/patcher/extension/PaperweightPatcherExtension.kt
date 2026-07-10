@@ -28,6 +28,7 @@ import org.gradle.api.Action
 import org.gradle.api.NamedDomainObjectContainer
 import org.gradle.api.NamedDomainObjectProvider
 import org.gradle.api.model.ObjectFactory
+import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.kotlin.dsl.*
 
@@ -39,6 +40,33 @@ abstract class PaperweightPatcherExtension @Inject constructor(private val objec
 
     val upstreams: NamedDomainObjectContainer<UpstreamConfig> = objects.domainObjectContainer(UpstreamConfig::class) {
         objects.newInstance(it, true)
+    }
+
+    /**
+     * One externalizable runtime library: [paperclipPath] is the path relative to
+     * `META-INF/libraries/` inside the fat paperclip jar; [baseUrl] is the repo
+     * root to fetch it from on first boot (the full download URL is baseUrl + path).
+     */
+    data class LibSpec(val paperclipPath: String, val baseUrl: String)
+
+    /**
+     * Libraries the SourbyLoader slim task ([io.papermc.paperweight.tasks.SlimPaperclipJar])
+     * strips from the fat paperclip jar and downloads on first boot. Populate via
+     * [externalLib] in the consuming build's `paperweight { }` block.
+     */
+    val externalLibs: ListProperty<LibSpec> = objects.listProperty(LibSpec::class.java)
+
+    /** Fully-qualified Main-Class the slim jar delegates first-boot through. */
+    val slimJarMainClass: Property<String> =
+        objects.property<String>().convention("dev.iyanz.sourbycraft.bootstrap.SourbyBootstrap")
+
+    /** Slash-form package prefix whose `.class` files are copied to the slim jar root. */
+    val slimBootstrapClassPrefix: Property<String> =
+        objects.property<String>().convention("dev/iyanz/sourbycraft/bootstrap/")
+
+    /** Register an externalized library by its paperclip-relative path and repo base URL. */
+    fun externalLib(paperclipPath: String, baseUrl: String) {
+        externalLibs.add(LibSpec(paperclipPath, baseUrl))
     }
 
     fun NamedDomainObjectContainer<UpstreamConfig>.paper(
