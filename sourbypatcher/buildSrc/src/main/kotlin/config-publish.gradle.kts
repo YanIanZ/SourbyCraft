@@ -52,8 +52,8 @@ val sourcesJar by tasks.existing(AbstractArchiveTask::class) {
 }
 
 gradlePlugin {
-    website.set("https://github.com/LuminolMC/hyacinthusweight")
-    vcsUrl.set("https://github.com/LuminolMC/hyacinthusweight")
+    website.set("https://github.com/iyanz/sourbycraft")
+    vcsUrl.set("https://github.com/iyanz/sourbycraft")
 }
 
 val shadowJar by tasks.existing(ShadowJar::class) {
@@ -99,22 +99,8 @@ val shadowJar by tasks.existing(ShadowJar::class) {
 val isSnapshot = project.version.toString().endsWith("-SNAPSHOT")
 
 publishing {
-    repositories {
-            val url = if (isSnapshot) {
-                "https://repo.bacteriawa.com/repository/maven-snapshots/"
-            } else {
-                "https://repo.bacteriawa.com/repository/maven-releases/"
-            }
-
-            maven(url) {
-                name = "Bacteriawa"
-                credentials(PasswordCredentials::class) {
-                    username = System.getenv("PRIVATE_MAVEN_REPO_USERNAME")
-                    password = System.getenv("PRIVATE_MAVEN_REPO_PASSWORD")
-            }
-        }
-    }
-
+    // Remote publish (Bacteriawa) dropped for SourbyPatcher — mavenLocal only.
+    // Use `publishToMavenLocal`; `publish` is a no-op (no repositories declared).
     publications {
         withType(MavenPublication::class).configureEach {
             pom {
@@ -125,11 +111,11 @@ publishing {
 }
 
 fun MavenPom.pomConfig() {
-    val repoPath = "LuminolMC/hyacinthusweight"
+    val repoPath = "iyanz/sourbycraft"
     val repoUrl = "https://github.com/$repoPath"
 
-    name.set("hyacinthusweight")
-    description.set("Gradle plugin for the LuminolMC project")
+    name.set("sourbypatcher")
+    description.set("Gradle plugin for the SourbyCraft project")
     url.set(repoUrl)
     inceptionYear.set("2020")
 
