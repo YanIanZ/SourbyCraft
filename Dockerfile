@@ -28,6 +28,10 @@ WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 25565
 
+# UTF-8 locale so the JVM's stdout.encoding resolves to UTF-8 (the jre base image sets none,
+# which would default to US-ASCII and garble the branded box-drawing console output).
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+
 # MEMORY: heap in MiB (omit to auto-size from the container's memory limit).
 # EULA:   set "true" to accept the Minecraft EULA. JVM_OPTS: extra flags.
 ENV MEMORY="" JVM_OPTS="" EULA="false" SERVER_JAR=/app/server.jar DATA_DIR=/data
