@@ -52,7 +52,7 @@
  
  
      updatingMinecraft {
-@@ -103,10 +_,14 @@
+@@ -103,14 +_,23 @@
      main {
          java { srcDir("../paper-server/src/main/java"); srcDir("../paper-server/src/generated/java") }
          resources { srcDir("../paper-server/src/main/resources") }
@@ -67,6 +67,15 @@
      }
  }
  val log4jPlugins = sourceSets.create("log4jPlugins") {
+     java { srcDir("../paper-server/src/log4jPlugins/java") }
++    // SourbyCraft - authored log4j2 pattern plugins (e.g. %scLogger, the branded logger-name
++    // converter). Kept in the sourbycraft-server module (tracked in git) rather than the
++    // regenerated paper-server working copy, so no patch churn. Compiled + shaded into the jar
++    // alongside Paper's own log4j plugins; the annotation processor writes Log4j2Plugins.dat.
++    java { srcDir("src/log4jPlugins/java") }
+ }
+ configurations.named(log4jPlugins.compileClasspathConfigurationName) {
+     extendsFrom(configurations.compileClasspath.get())
 @@ -134,8 +_,23 @@
  }
  
