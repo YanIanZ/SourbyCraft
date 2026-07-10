@@ -35,6 +35,11 @@ public final class SourbyBootstrap {
     private static final String CDS_PATH_ENV = "SOURBYCRAFT_CDS_PATH";
     private static final String DEFAULT_CDS_ARCHIVE_PATH = "cache/sourbycraft.jsa";
     private static final String HINT_MARKER = "cache/.sourby-cds-hint";
+    private static final String SIMD_HINT_MARKER = "cache/.sourby-simd-hint";
+
+    /** The JDK incubator module Luminol's SIMDConfig auto-uses for vectorized ops (map colors, mob AI, etc.). */
+    private static final String SIMD_MODULE = "jdk.incubator.vector";
+    private static final String SIMD_ADD_MODULES_FLAG = "--add-modules=" + SIMD_MODULE;
 
     /** Below this committed initial heap (-Xms) a fork double-commit is negligible. */
     private static final long FORK_SAFE_XMS_BYTES = 256L * 1024 * 1024;
@@ -54,6 +59,12 @@ public final class SourbyBootstrap {
             } catch (Throwable t) {
                 System.err.println("[SourbyBootstrap] CDS layer failed (booting inline without CDS): " + t.getMessage());
             }
+            // Reaching here means we boot inline in this JVM (container/panel/flag mode). We
+            // cannot add --add-modules to a running JVM, so if the SIMD incubator module was
+            // not resolved at launch, print a one-time copy-paste hint (mirrors the CDS hint).
+            try {
+                maybeHintSimd();
+            } catch (Throwable ignored) {}
         }
 
         Path librariesDir = Paths.get("libraries");
@@ -187,12 +198,13 @@ public final class SourbyBootstrap {
 
         List<String> cmd = new ArrayList<>();
         cmd.add(javaCmd);
-        boolean haveStdoutEnc = false, haveStderrEnc = false, haveFileEnc = false;
+        boolean haveStdoutEnc = false, haveStderrEnc = false, haveFileEnc = false, haveSimdModule = false;
         for (String a : jvmArgs) {
             if (a.startsWith("-agentlib:jdwp")) continue; // port re-use on re-exec
             if (a.startsWith("-Dstdout.encoding=")) haveStdoutEnc = true;
             else if (a.startsWith("-Dstderr.encoding=")) haveStderrEnc = true;
             else if (a.startsWith("-Dfile.encoding=")) haveFileEnc = true;
+            else if (mentionsSimdModule(a)) haveSimdModule = true;
             cmd.add(a);
         }
         // Force UTF-8 console + file encoding in the forked child. The child is launched from
@@ -203,6 +215,12 @@ public final class SourbyBootstrap {
         if (!haveStdoutEnc) cmd.add("-Dstdout.encoding=UTF-8");
         if (!haveStderrEnc) cmd.add("-Dstderr.encoding=UTF-8");
         if (!haveFileEnc) cmd.add("-Dfile.encoding=UTF-8");
+        // Resolve the SIMD incubator module in the forked child so Luminol's SIMDConfig
+        // auto-uses vectorized ops (map colors, mob AI). The module ships with the JDK; it
+        // is only unavailable to code until --add-modules makes it resolvable. Fork boots
+        // (bare metal) thus get SIMD for free, silencing the "not configured" warning. Only
+        // add it when the operator did not already pass an --add-modules for it.
+        if (!haveSimdModule) cmd.add(SIMD_ADD_MODULES_FLAG);
         // JDK 19+: create-on-miss, use-on-hit, and recreate automatically when the
         // archive is stale (jar/JDK changed). No manual fingerprint bookkeeping.
         cmd.add("-XX:+AutoCreateSharedArchive");
@@ -255,6 +273,45 @@ public final class SourbyBootstrap {
         System.out.println("[SourbyBootstrap]     " + flags);
         System.out.println("[SourbyBootstrap] (Pterodactyl/Pelican: prepend to the Startup command's JAVA flags; "
                 + "Docker: already baked into the reference Dockerfile. See docs/CDS.md.)");
+    }
+
+    // ------------------------------------------------------------------
+    // SIMD (jdk.incubator.vector) hint — inline boot only
+    // ------------------------------------------------------------------
+
+    /** True when the arg is an {@code --add-modules} that already lists the SIMD incubator module. */
+    private static boolean mentionsSimdModule(String arg) {
+        if (arg == null) return false;
+        // Forms: "--add-modules=a,jdk.incubator.vector,b" or "--add-modules a,..." (space form
+        // is two tokens; the value token is then a bare "jdk.incubator.vector"-containing string).
+        if (arg.startsWith("--add-modules")) return arg.contains(SIMD_MODULE) || arg.equals("--add-modules");
+        return arg.equals(SIMD_MODULE) || arg.startsWith(SIMD_MODULE + ",") || arg.contains("," + SIMD_MODULE);
+    }
+
+    /**
+     * On the inline boot path we cannot self-add {@code --add-modules} to a running JVM. If the
+     * SIMD incubator module is not resolved, print a one-time copy-paste hint so operators on
+     * containers/panels can enable Luminol's vectorized optimizations. No-op (silent) when the
+     * module is already present — the boot then resolves SIMD and Luminol logs it as functional.
+     */
+    private static void maybeHintSimd() {
+        boolean present = ModuleLayer.boot().findModule(SIMD_MODULE).isPresent();
+        if (present) return; // SIMDConfig will detect + enable it; nothing to hint.
+
+        Path marker = Paths.get(SIMD_HINT_MARKER);
+        if (Files.isRegularFile(marker)) return; // already hinted once
+        String env = detectEnvLabel();
+        System.out.println("[SourbyBootstrap] SIMD: the jdk.incubator.vector module is not loaded"
+                + (env != null ? " (" + env + ")" : "") + " — Luminol's vectorized optimizations are off.");
+        System.out.println("[SourbyBootstrap] To enable them, add this to your JVM flags, BEFORE \"-jar\":");
+        System.out.println("[SourbyBootstrap]     " + SIMD_ADD_MODULES_FLAG);
+        System.out.println("[SourbyBootstrap] (Pterodactyl/Pelican: prepend to the Startup command's JAVA flags; "
+                + "Docker: already baked into the reference Dockerfile.)");
+        try {
+            Path p = marker.getParent();
+            if (p != null && !Files.exists(p)) Files.createDirectories(p);
+            Files.writeString(marker, (env != null ? env : "inline") + System.lineSeparator());
+        } catch (Throwable ignored) {}
     }
 
     /** Returns "Docker"/"Pterodactyl"/"Pelican"/"container" if detected, else null. */
