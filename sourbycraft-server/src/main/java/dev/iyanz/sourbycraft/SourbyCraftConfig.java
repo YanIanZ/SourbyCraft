@@ -50,6 +50,58 @@ public class SourbyCraftConfig {
     // behaviour as the F1-1 stub, but backed by the real lookup machinery.
     private static final Map<String, Object> sourbycraftYmlBaseline = loadYmlResource("/sourbycraft.yml");
 
+    // SourbyCraft F3-2 (config unification) — the perf-engine (knobs, sensor, spark, gc-advisor)
+    // reads its keys through the ymlGet/ymlBool/ymlInt/ymlDouble accessors below. Historically
+    // those read ONLY the classpath /sourbycraft.yml baseline (empty on Folia => always default).
+    // F3-2 unifies the operator surface onto the single Luminol config file
+    // (sourbycraft_config/sourbycraft_global_config.toml): the accessors now consult that file
+    // FIRST (by identical dotted path — perf.sensor.cadence-ticks, perf.lag-machine.*, spark.*,
+    // branding.*, perf.entity-tick-rate, perf.ai.*), then fall back to the classpath baseline,
+    // then to the supplied default. There is no separate mandatory sourbycraft.yml. The Luminol
+    // config instance is fully loaded by the time SourbyCraftConfig.init() runs (Main.initConfigs
+    // preloads it, DedicatedServer.loadConfigFiles finalizes it, then the post-config hook calls
+    // PerfEngineBootstrap.start -> init), so this lookup is always populated at read time.
+    //
+    // Resolved reflectively/lazily so this class carries no hard compile/init dependency on the
+    // me.earthme.luminol config package init order. Cached once resolved.
+    private static volatile Object unifiedFileInstance; // com.electronwill.nightconfig.core.file.CommentedFileConfig
+    private static volatile boolean unifiedResolveTried;
+
+    private static Object unifiedFile() {
+        Object cached = unifiedFileInstance;
+        if (cached != null) return cached;
+        if (unifiedResolveTried) return null;
+        try {
+            me.earthme.luminol.config.ConfigsInstance inst =
+                me.earthme.luminol.config.ConfigManager.getConfigs("sourbycraft");
+            if (inst != null) {
+                Object file = inst.getFileInstance();
+                unifiedFileInstance = file;
+                unifiedResolveTried = true;
+                return file;
+            }
+        } catch (Throwable ignored) {
+            // Luminol config not available (e.g. unit test context) — fall back to classpath baseline.
+        }
+        return null;
+    }
+
+    /**
+     * Look up a dotted path in the unified Luminol config file. Returns {@code null} when the
+     * config instance is not yet available or the key is absent. nightconfig's
+     * {@code CommentedFileConfig#get(String)} treats {@code .} as a path separator, matching the
+     * dotted keys the perf-engine uses, so {@code perf.sensor.cadence-ticks} resolves directly.
+     */
+    private static Object lookupUnified(String dottedPath) {
+        Object file = unifiedFile();
+        if (file == null) return null;
+        try {
+            return ((com.electronwill.nightconfig.core.file.CommentedFileConfig) file).get(dottedPath);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     private static Map<String, Object> loadYmlResource(String resource) {
         try (InputStream in = SourbyCraftConfig.class.getResourceAsStream(resource)) {
             if (in == null) return Map.of();
@@ -68,6 +120,10 @@ public class SourbyCraftConfig {
      */
     @SuppressWarnings("unchecked")
     public static <T> T ymlGet(String dottedPath, T defaultValue) {
+        Object unified = lookupUnified(dottedPath); // F3-2: unified Luminol TOML first
+        if (unified != null) {
+            try { return (T) unified; } catch (ClassCastException ignored) {}
+        }
         Object baseVal = lookupYml(sourbycraftYmlBaseline, dottedPath);
         if (baseVal != null) {
             try { return (T) baseVal; } catch (ClassCastException ignored) {}
@@ -80,6 +136,8 @@ public class SourbyCraftConfig {
      * key is missing or the value cannot be cast to Boolean.
      */
     public static boolean ymlBool(String dottedPath, boolean defaultValue) {
+        Object u = lookupUnified(dottedPath); // F3-2: unified Luminol TOML first
+        if (u instanceof Boolean ub) return ub;
         Object v = lookupYml(sourbycraftYmlBaseline, dottedPath);
         if (v instanceof Boolean b) return b;
         if (v != null) warnOnce(dottedPath, v, "boolean");
@@ -92,6 +150,8 @@ public class SourbyCraftConfig {
      * or the value is not numeric.
      */
     public static int ymlInt(String dottedPath, int defaultValue) {
+        Object u = lookupUnified(dottedPath); // F3-2: unified Luminol TOML first
+        if (u instanceof Number un) return un.intValue();
         Object v = lookupYml(sourbycraftYmlBaseline, dottedPath);
         if (v instanceof Number n) return n.intValue();
         if (v != null) warnOnce(dottedPath, v, "int");
@@ -104,6 +164,8 @@ public class SourbyCraftConfig {
      * or the value is not numeric.
      */
     public static double ymlDouble(String dottedPath, double defaultValue) {
+        Object u = lookupUnified(dottedPath); // F3-2: unified Luminol TOML first
+        if (u instanceof Number un) return un.doubleValue();
         Object v = lookupYml(sourbycraftYmlBaseline, dottedPath);
         if (v instanceof Number n) return n.doubleValue();
         if (v != null) warnOnce(dottedPath, v, "double");
@@ -334,13 +396,23 @@ public class SourbyCraftConfig {
         CONFIG_FILE = configFile;
         config = new YamlConfiguration();
 
-        try {
-            config.load(CONFIG_FILE);
-        } catch (IOException e) {
-            Bukkit.getLogger().warning("Could not load " + configFile.getName() + ", starting with defaults: " + e.getMessage());
-        } catch (InvalidConfigurationException exception) {
-            Bukkit.getLogger().log(Level.SEVERE, "Could not load " + configFile.getName() + ", please correct your syntax errors", exception);
-            throw new RuntimeException(exception);
+        // SourbyCraft F3-2 (config unification): sourbycraft.yml is now an OPTIONAL, legacy
+        // secondary source only. The single operator-facing config is the Luminol TOML
+        // (sourbycraft_config/sourbycraft_global_config.toml). We load sourbycraft.yml when it
+        // already exists (so an operator who migrated one from a Paper-line install is honoured
+        // as an override), but we no longer materialise/require it. When absent, the in-memory
+        // Bukkit config stays empty and every read falls through to the unified TOML then to the
+        // hardcoded default — see the cfg*() / yml*() unified-lookup bridge.
+        final boolean legacyYmlPresent = CONFIG_FILE.isFile();
+        if (legacyYmlPresent) {
+            try {
+                config.load(CONFIG_FILE);
+            } catch (IOException e) {
+                Bukkit.getLogger().warning("Could not load " + configFile.getName() + ", starting with defaults: " + e.getMessage());
+            } catch (InvalidConfigurationException exception) {
+                Bukkit.getLogger().log(Level.SEVERE, "Could not load " + configFile.getName() + ", please correct your syntax errors", exception);
+                throw new RuntimeException(exception);
+            }
         }
 
         config.options().copyDefaults(true);
@@ -349,7 +421,18 @@ public class SourbyCraftConfig {
         version = getInt("config-version", currentVersion);
         set("config-version", currentVersion);
 
-        readConfig(SourbyCraftConfig.class, null);
+        // SourbyCraft F3-2: only persist the reflective field-walk back to sourbycraft.yml when a
+        // legacy file already exists; otherwise run the walk in-memory only (no second file).
+        readConfig(SourbyCraftConfig.class, null, legacyYmlPresent);
+
+        // SourbyCraft F3-2: seed the perf-engine keys into the single unified Luminol config
+        // BEFORE the knob/sensor loaders read them, so the operator-facing file materialises the
+        // full perf surface on first boot and every subsequent read is sourced from that one file.
+        try {
+            seedUnifiedPerfDefaults(CONFIG_FILE);
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("seedUnifiedPerfDefaults failed; perf-engine will use hardcoded defaults", t);
+        }
 
         // SourbyCraft - perf-engine F2c: boot-time JVM heap configuration advisory (pure log advisory).
         try {
@@ -637,12 +720,111 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("SupersededKeys.report failed", t);
         }
 
-        // SourbyCraft - final save so sourbycraft.yml is a complete materialisation of the baseline.
-        try {
-            config.save(CONFIG_FILE);
-        } catch (IOException exception) {
-            Bukkit.getLogger().log(Level.SEVERE, "Could not save final " + CONFIG_FILE, exception);
+        // SourbyCraft F3-2: only re-materialise sourbycraft.yml when the operator already has one
+        // (legacy/migrated file). We do NOT create a second mandatory config file — the single
+        // operator surface is the unified Luminol TOML.
+        if (legacyYmlPresent) {
+            try {
+                config.save(CONFIG_FILE);
+            } catch (IOException exception) {
+                Bukkit.getLogger().log(Level.SEVERE, "Could not save final " + CONFIG_FILE, exception);
+            }
         }
+    }
+
+    /**
+     * F3-2 config unification — seed the perf-engine's operator keys into the single Luminol
+     * config file ({@code sourbycraft_config/sourbycraft_global_config.toml}) so the operator
+     * edits ONE file for everything. Only writes a key when it is absent (never clobbers an
+     * operator edit), attaches a one-line comment, and saves the unified file once at the end.
+     *
+     * <p>This is the write-side complement to the read-side bridge in {@code ymlGet}/{@code cfg*}:
+     * the perf-engine keeps its exact dotted keys and its knob/sensor logic untouched; only the
+     * SOURCE of those values is now the one unified file. Luminol's own 60 {@code @ConfigInfo}
+     * modules are not touched — this method never writes under their category keys
+     * (optimizations/fixes/misc/function/experiment), only under the SourbyCraft-owned
+     * {@code perf.*}, {@code spark.*} and {@code branding.*} trees.
+     *
+     * <p>Extensible: a future SourbyCraft config surface = one more {@code seed(...)} line here
+     * (or a full Luminol {@code @ConfigInfo} module), no new file.
+     *
+     * <p>The {@code File} parameter is unused but deliberate: it keeps this method OUT of the
+     * reflective no-arg field-walk in {@link #readConfig(Class, Object, boolean)} (which invokes
+     * every private zero-arg void method) so seeding runs exactly once, from {@link #init(File)}.
+     */
+    private static void seedUnifiedPerfDefaults(File unusedMarker) {
+        Object fileObj = unifiedFile();
+        if (fileObj == null) {
+            // Luminol config not resolved (e.g. init() called outside a booted server). The
+            // perf-engine still works off its hardcoded defaults; nothing to seed.
+            return;
+        }
+        com.electronwill.nightconfig.core.file.CommentedFileConfig f =
+            (com.electronwill.nightconfig.core.file.CommentedFileConfig) fileObj;
+        boolean[] changed = {false};
+
+        // Section header comment on the perf tree (only if the tree is empty of a comment).
+        if (f.getComment("perf") == null) {
+            f.setComment("perf", "SourbyCraft self-tuning performance engine (knobs, sensor, AI + lag-machine caps).");
+        }
+
+        // --- Knobs (dev.iyanz.sourbycraft.perf.knob.Knobs) ---
+        seed(f, changed, "perf.entity-tick-rate", 20, "Skip-rate for entity ticking. 1 = every tick (vanilla), 20 = once/sec.");
+        seed(f, changed, "perf.ai.throttle-beyond-distance", 0, "Distance (blocks) past nearest player to throttle mob AI. 0 = disabled.");
+        seed(f, changed, "perf.ai.throttle-tick-interval", 4, "When AI is throttled, run aiStep only every N ticks.");
+        seed(f, changed, "perf.lag-machine.disable-saving-snowballs", true, "Skip NBT save for snowballs (known lag-machine vector).");
+        seed(f, changed, "perf.lag-machine.disable-saving-fireworks", true, "Skip NBT save for firework rockets.");
+        seed(f, changed, "perf.lag-machine.max-projectile-loads-per-tick", 10, "Max projectile-triggered chunk loads per tick. 0 = unlimited.");
+        seed(f, changed, "perf.lag-machine.max-projectile-loads-per-projectile", 10, "Max chunk loads a single projectile may trigger. 0 = unlimited.");
+        seed(f, changed, "perf.lag-machine.remove-excess-minecarts", false, "Remove excess minecarts on collision.");
+        seed(f, changed, "perf.lag-machine.excess-minecarts-limit", 10, "Threshold for excess minecarts at a collision point.");
+        seed(f, changed, "perf.lag-machine.remove-excess-boats", false, "Remove excess boats on collision.");
+        seed(f, changed, "perf.lag-machine.excess-boats-limit", 10, "Threshold for excess boats at a collision point.");
+
+        // --- Sensor (dev.iyanz.sourbycraft.perf.sensor.PerfSensor) ---
+        seed(f, changed, "perf.sensor.enabled", true, "Master switch for the multi-signal load sensor + self-tune loop.");
+        seed(f, changed, "perf.sensor.warmup-ticks", 600, "Ticks to skip at boot before sampling (avoids false escalation).");
+        seed(f, changed, "perf.sensor.cadence-ticks", 20, "Sample cadence in server ticks (20 = 1s at 20 TPS).");
+        seed(f, changed, "perf.sensor.dwell-samples", 3, "Consecutive samples in a worse band before escalating a tier.");
+        seed(f, changed, "perf.sensor.recovery-dwell-multiplier", 2.0, "Dwell multiplier when recovering to a better tier (>= 1.0).");
+        // Thresholds (indexed yellow/orange/red/emergency).
+        seedThresholds(f, changed, "mspt", 30.0, 40.0, 60.0, 100.0, "MSPT tier thresholds (higher = worse).");
+        seedThresholds(f, changed, "tps", 19.5, 18.0, 15.0, 10.0, "TPS tier thresholds (lower = worse).");
+        seedThresholds(f, changed, "mem", 75.0, 85.0, 92.0, 97.0, "Heap % tier thresholds (higher = worse).");
+        seedThresholds(f, changed, "gc-ms-per-min", 20.0, 50.0, 100.0, 300.0, "GC pause ms/min tier thresholds (higher = worse).");
+
+        // --- Spark bridge + GC advisor ---
+        seed(f, changed, "spark.enabled", true, "Enable the bundled spark profiler bridge.");
+        seed(f, changed, "branding.gc-advisor.enabled", true, "Enable the startup GC/JVM-flags advisory log.");
+
+        if (changed[0]) {
+            try {
+                f.save();
+                dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                    "[SourbyCraft] seeded perf-engine keys into unified config (sourbycraft_config/sourbycraft_global_config.toml)");
+            } catch (Throwable t) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[SourbyCraft] could not save unified config after seeding perf keys: " + t.getMessage());
+            }
+        }
+    }
+
+    private static void seed(com.electronwill.nightconfig.core.file.CommentedFileConfig f,
+                             boolean[] changed, String path, Object def, String comment) {
+        if (!f.contains(path)) {
+            f.add(path, def);
+            if (comment != null) f.setComment(path, comment);
+            changed[0] = true;
+        }
+    }
+
+    private static void seedThresholds(com.electronwill.nightconfig.core.file.CommentedFileConfig f,
+                                       boolean[] changed, String signal,
+                                       double yellow, double orange, double red, double emergency, String comment) {
+        String base = "perf.sensor.thresholds." + signal;
+        seed(f, changed, base + ".yellow", yellow, comment);
+        seed(f, changed, base + ".orange", orange, null);
+        seed(f, changed, base + ".red", red, null);
+        seed(f, changed, base + ".emergency", emergency, null);
     }
 
     protected static void log(String string) {
@@ -740,18 +922,26 @@ public class SourbyCraftConfig {
     private static boolean cfgBool(String path, boolean def) {
         Object v = config.get(path);
         if (v instanceof Boolean b) return b;
+        // F3-2: unified Luminol TOML is the operator surface — consult it when the (legacy,
+        // usually absent) sourbycraft.yml has no value for this key.
+        Object u = lookupUnified(path);
+        if (u instanceof Boolean ub) return ub;
         return def;
     }
 
     private static int cfgInt(String path, int def) {
         Object v = config.get(path);
         if (v instanceof Number n) return n.intValue();
+        Object u = lookupUnified(path); // F3-2: unified Luminol TOML fallback
+        if (u instanceof Number un) return un.intValue();
         return def;
     }
 
     private static double cfgDouble(String path, double def) {
         Object v = config.get(path);
         if (v instanceof Number n) return n.doubleValue();
+        Object u = lookupUnified(path); // F3-2: unified Luminol TOML fallback
+        if (u instanceof Number un) return un.doubleValue();
         return def;
     }
 
