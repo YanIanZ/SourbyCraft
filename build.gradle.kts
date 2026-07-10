@@ -1,3 +1,4 @@
+import java.time.Instant
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 
@@ -89,6 +90,33 @@ tasks.named<io.papermc.paperweight.tasks.SlimPaperclipJar>("slimPaperclipJar") {
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 
+// SourbyCraft — resolve the human-facing suffix version once (banner + /ver read this
+// through META-INF/sourbycraft-build.properties). Branch is read via providers.exec so
+// the value is correct on CI and locally; the writeBuildInfo task opts itself out of the
+// config cache because the branch provider cannot be serialised into a doLast closure.
+val sourbycraftBranchProvider: Provider<String> = providers.exec {
+    commandLine("git", "rev-parse", "--abbrev-ref", "HEAD")
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { it.trim() }
+
+val sourbycraftSuffixProvider: Provider<String> = sourbycraftBranchProvider.map { branch ->
+    val releaseVersionFull = providers.gradleProperty("releaseVersion").getOrElse("dev")
+    val releaseMajor = releaseVersionFull.substringBefore('-')
+    val codename = providers.gradleProperty("codename").getOrElse("dev")
+    val suffix = when {
+        branch.contains("experimental") || branch.contains("feat") -> "EXP"
+        branch.startsWith("release/") -> "REL"
+        branch.contains("-dev") || branch.contains("develop") -> "DEV"
+        codename == "dev" -> "DEV"
+        else -> "REL"
+    }
+    when (suffix) {
+        "EXP" -> "$releaseMajor-EXP"
+        "REL" -> "$releaseMajor-REL"
+        else -> "$releaseVersionFull-DEV"
+    }
+}
+
 subprojects {
     apply(plugin = "java-library")
     apply(plugin = "maven-publish")
@@ -124,6 +152,51 @@ subprojects {
     tasks.withType<ProcessResources>().configureEach {
         filteringCharset = Charsets.UTF_8.name()
     }
+
+    // SourbyCraft — emit META-INF/sourbycraft-build.properties so BuildInfo.load()
+    // (banner + /ver) reports the real version, MC version and build timestamp instead
+    // of the "unknown"/"dev" fallbacks. Only sourbycraft-server bundles it.
+    val thisProjectName = project.name
+    val internalVersionProvider = sourbycraftSuffixProvider
+    val writeBuildInfoTask = tasks.register("writeBuildInfo") {
+        val mcVersion = providers.gradleProperty("mcVersion").getOrElse("unknown")
+        val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
+
+        inputs.property("internalVersion", internalVersionProvider)
+        inputs.property("mcVersion", mcVersion)
+        outputs.file(outFile)
+        // The branch provider is captured into the doLast closure below, which the
+        // config-cache layer cannot serialise. Opting THIS task out is cheap and does
+        // not affect the rest of the build.
+        notCompatibleWithConfigurationCache("Reads git branch via providers.exec at task execution time.")
+
+        doLast {
+            val f = outFile.get().asFile
+            f.parentFile.mkdirs()
+            val timestamp = Instant.now().toString()
+            val resolved = internalVersionProvider.get()
+            f.writeText(
+                """
+                version=$resolved
+                mcVersion=$mcVersion
+                tagline=Lightning Fast Performance Feature Rich
+                buildTimestamp=$timestamp
+                """.trimIndent()
+            )
+        }
+    }
+
+    if (thisProjectName == "sourbycraft-server") {
+        tasks.withType<ProcessResources>().configureEach {
+            dependsOn(writeBuildInfoTask)
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+            from(layout.buildDirectory.dir("generated-resources"))
+        }
+        tasks.withType<Jar>().configureEach {
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        }
+    }
+
     tasks.withType<Test> {
         testLogging {
             showStackTraces = true
