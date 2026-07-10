@@ -287,9 +287,12 @@ public final class SourbyUpdater {
     }
 
     /**
-     * Verify a downloaded jar. Order: non-empty -> declared size (when known) -> SHA-256 (when the
-     * release asset exposed a digest) -> always a valid-ZIP/JAR open. Any failure deletes the file
-     * and throws so it is never staged.
+     * Verify a downloaded jar before it is staged for execution. Order: non-empty -> declared size
+     * (when known) -> <b>mandatory SHA-256</b> against the release asset digest -> valid-ZIP/JAR open.
+     * A staged jar is executed on the next restart, so integrity verification is REQUIRED: an asset
+     * whose release publishes no SHA-256 digest is refused (size + zip-validity alone do not prove the
+     * bytes are the genuine release — a MITM or tampered mirror can forge both). Any failure deletes
+     * the file and throws so it is never staged.
      */
     private void verifyOrThrow(Path file, ReleaseInfo info) throws IOException {
         long actualSize = Files.size(file);
@@ -299,16 +302,16 @@ public final class SourbyUpdater {
         if (info.declaredSize > 0 && actualSize != info.declaredSize) {
             fail(file, "size mismatch: expected " + info.declaredSize + " got " + actualSize);
         }
-        if (info.sha256 != null) {
-            String actual = sha256(file);
-            if (actual == null || !actual.equalsIgnoreCase(info.sha256)) {
-                fail(file, "SHA-256 mismatch for " + info.assetName);
-            }
-            SourbyLogger.info("[SourbyCraft] auto-updater: SHA-256 verified for " + info.assetName);
-        } else {
-            SourbyLogger.info("[SourbyCraft] auto-updater: no digest published; relying on size + zip validity for "
-                + info.assetName);
+        // Mandatory integrity check: never stage executable code without a verified digest.
+        if (info.sha256 == null) {
+            fail(file, "refusing to stage " + info.assetName + ": release publishes no SHA-256 digest "
+                + "(integrity cannot be verified; set the update to a release that publishes asset digests)");
         }
+        String actual = sha256(file);
+        if (actual == null || !actual.equalsIgnoreCase(info.sha256)) {
+            fail(file, "SHA-256 mismatch for " + info.assetName);
+        }
+        SourbyLogger.info("[SourbyCraft] auto-updater: SHA-256 verified for " + info.assetName);
         if (!isValidZip(file)) {
             fail(file, "not a valid zip/jar: " + info.assetName);
         }
