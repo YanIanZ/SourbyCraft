@@ -72,6 +72,14 @@ public final class PerfEngineBootstrap {
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: SourbyCraftConfig.init failed", t);
         }
+        // SourbyCraft F1-6: re-apply the persisted /maxp value AFTER init() has loaded the unified
+        // config, so an operator's stored sourbycraft.max-players wins over server.properties on
+        // every restart. No-op when unset. Runs before actuators so the cap is correct pre-login.
+        try {
+            MaxPlayersConfig.applyAtBoot();
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: MaxPlayersConfig.applyAtBoot failed", t);
+        }
         try {
             PerfSensor.start();
         } catch (Throwable t) {
@@ -135,6 +143,16 @@ public final class PerfEngineBootstrap {
             } catch (Throwable t) {
                 SourbyLogger.error("perf-engine: ViewThrottle.register failed", t);
             }
+        }
+
+        // MaxPlayersBypass — let sourbycraft.maxplayers.bypass holders (+ ops) join a full server.
+        // Always registered (login-time, region-free, Folia-safe). Zero cost unless a full-server
+        // KICK_FULL login actually occurs.
+        try {
+            MaxPlayersBypass.register(owner);
+            SourbyLogger.info("perf-engine: MaxPlayersBypass login listener registered (sourbycraft.maxplayers.bypass)");
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: MaxPlayersBypass.register failed", t);
         }
 
         // LagMachineCounters — per-tick projectile-load counter reset. On Folia there is no NMS
