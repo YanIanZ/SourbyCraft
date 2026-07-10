@@ -5,7 +5,7 @@ Subject: [PATCH] Rebrand to Luminol
 
 
 diff --git a/src/main/java/com/destroystokyo/paper/Metrics.java b/src/main/java/com/destroystokyo/paper/Metrics.java
-index 08745a35b1ce8cc56d970472088de3cd17b9e43a..fcdfd4f6de5e1c2d5e80c7f3d8cb0b33a62d257d 100644
+index 08745a35b1ce8cc56d970472088de3cd17b9e43a..85745d5353e4d9889dac4a607393db1ebda1d0ea 100644
 --- a/src/main/java/com/destroystokyo/paper/Metrics.java
 +++ b/src/main/java/com/destroystokyo/paper/Metrics.java
 @@ -593,7 +593,7 @@ public class Metrics {
@@ -13,7 +13,7 @@ index 08745a35b1ce8cc56d970472088de3cd17b9e43a..fcdfd4f6de5e1c2d5e80c7f3d8cb0b33
              // Only start Metrics, if it's enabled in the config
              if (config.getBoolean("enabled", true)) {
 -                Metrics metrics = new Metrics("Folia", serverUUID, logFailedRequests, Bukkit.getLogger()); // Folia - we have our own bstats page
-+                Metrics metrics = new Metrics("Luminol", serverUUID, logFailedRequests, Bukkit.getLogger()); // Folia - we have our own bstats page // Luminol
++                Metrics metrics = new Metrics("SourbyCraft", serverUUID, logFailedRequests, Bukkit.getLogger()); // Folia - we have our own bstats page // SourbyCraft
  
                  metrics.addCustomChart(new Metrics.SimplePie("minecraft_version", () -> {
                      String minecraftVersion = Bukkit.getVersion();
@@ -22,17 +22,17 @@ index 08745a35b1ce8cc56d970472088de3cd17b9e43a..fcdfd4f6de5e1c2d5e80c7f3d8cb0b33
                  if (implVersion != null) {
                      final String buildOrHash = implVersion.substring(implVersion.lastIndexOf('-') + 1);
 -                    paperVersion = "git-Folia-%s-%s".formatted(Bukkit.getServer().getMinecraftVersion(), buildOrHash); // Folia - we have our own bstats page
-+                    paperVersion = "git-Luminol-%s-%s".formatted(Bukkit.getServer().getMinecraftVersion(), buildOrHash); // Folia - we have our own bstats page // Luminol - Rebrand to Luminol
++                    paperVersion = "git-SourbyCraft-%s-%s".formatted(Bukkit.getServer().getMinecraftVersion(), buildOrHash); // Folia - we have our own bstats page // SourbyCraft - Rebrand to SourbyCraft
                  } else {
                      paperVersion = "unknown";
                  }
 -                metrics.addCustomChart(new Metrics.SimplePie("folia_version", () -> paperVersion)); // Folia - we have our own bstats page
-+                metrics.addCustomChart(new Metrics.SimplePie("luminol_version", () -> paperVersion)); // Folia - we have our own bstats page // Luminol
++                metrics.addCustomChart(new Metrics.SimplePie("sourbycraft_version", () -> paperVersion)); // Folia - we have our own bstats page // SourbyCraft
  
                  metrics.addCustomChart(new Metrics.DrilldownPie("java_version", () -> {
                      Map<String, Map<String, Integer>> map = new HashMap<>();
 diff --git a/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java b/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
-index 30815c8970b1f1c88a3c7bb5fd36efd915f1687d..fd7cd6f72390c71d036ebfc0e4c67dad51eb2e9c 100644
+index 30815c8970b1f1c88a3c7bb5fd36efd915f1687d..ed558be6ab203f2d57f2acca169e03e877e15d9b 100644
 --- a/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
 +++ b/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
 @@ -40,8 +40,8 @@ public class PaperVersionFetcher implements VersionFetcher {
@@ -41,8 +41,8 @@ index 30815c8970b1f1c88a3c7bb5fd36efd915f1687d..fd7cd6f72390c71d036ebfc0e4c67dad
      private static final int DISTANCE_UNKNOWN = -2;
 -    private static final String DOWNLOAD_PAGE = "https://papermc.io/downloads/folia"; // Folia
 -    private static final String REPOSITORY = "PaperMC/Folia"; // Folia
-+    private static final String DOWNLOAD_PAGE = "https://github.com/LuminolMC/Luminol"; // Luminol
-+    private static final String REPOSITORY = "LuminolMC/Luminol"; // Luminol
++    private static final String DOWNLOAD_PAGE = "https://github.com/YanIanZ/SourbyCraft"; // SourbyCraft
++    private static final String REPOSITORY = "YanIanZ/SourbyCraft"; // SourbyCraft
      private static final ServerBuildInfo BUILD_INFO = ServerBuildInfo.buildInfo();
      private static final String USER_AGENT = BUILD_INFO.brandName() + "/" + BUILD_INFO.asString(VERSION_SIMPLE) + " (https://papermc.io)";
      private static final Gson GSON = new Gson();
@@ -65,14 +65,14 @@ index 30815c8970b1f1c88a3c7bb5fd36efd915f1687d..fd7cd6f72390c71d036ebfc0e4c67dad
          } else {
              final Optional<String> gitBranch = PaperVersionFetcher.BUILD_INFO.gitBranch();
 diff --git a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
-index 10a0be7a4db1a51579d113d279af7a9effe7f438..4ada790812957657d580cb748077c4961987d0cb 100644
+index 10a0be7a4db1a51579d113d279af7a9effe7f438..f17b13613fb80e61705de4607e60f03d9d784931 100644
 --- a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
 +++ b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
 @@ -31,6 +31,7 @@ public record ServerBuildInfoImpl(
      private static final String ATTRIBUTE_GIT_COMMIT = "Git-Commit";
  
      private static final String BRAND_PAPER_NAME = "Paper";
-+    private static final String BRAND_LUMINOL_NAME = "Luminol";
++    private static final String BRAND_SOURBYCRAFT_NAME = "SourbyCraft";
  
      private static final String BUILD_DEV = "DEV";
  
@@ -81,10 +81,10 @@ index 10a0be7a4db1a51579d113d279af7a9effe7f438..4ada790812957657d580cb748077c496
              getManifestAttribute(manifest, ATTRIBUTE_BRAND_ID)
                  .map(Key::key)
 -                .orElse(Key.key("papermc", "folia")), // Folia
-+                .orElse(BRAND_LUMINOL_ID), // Folia // Luminol
++                .orElse(BRAND_SOURBYCRAFT_ID), // Folia // SourbyCraft
              getManifestAttribute(manifest, ATTRIBUTE_BRAND_NAME)
 -                .orElse("Folia"), // Folia
-+                .orElse(BRAND_LUMINOL_NAME), // Folia // Luminol
++                .orElse(BRAND_SOURBYCRAFT_NAME), // Folia // SourbyCraft
              SharedConstants.getCurrentVersion().id(),
              SharedConstants.getCurrentVersion().name(),
              getManifestAttribute(manifest, ATTRIBUTE_BUILD_NUMBER)
@@ -98,7 +98,7 @@ index 10a0be7a4db1a51579d113d279af7a9effe7f438..4ada790812957657d580cb748077c496
  
      @Override
 diff --git a/src/main/java/org/spigotmc/WatchdogThread.java b/src/main/java/org/spigotmc/WatchdogThread.java
-index 5607f4cc8ca2f620461eb5e97d01d9db0d6b2303..1f8eba1a93d6844bc2e1ddf8c1e261fbf7caa925 100644
+index 5607f4cc8ca2f620461eb5e97d01d9db0d6b2303..f46c40a26776780f27d654a7140b91fe9acd7fb4 100644
 --- a/src/main/java/org/spigotmc/WatchdogThread.java
 +++ b/src/main/java/org/spigotmc/WatchdogThread.java
 @@ -80,9 +80,10 @@ public class WatchdogThread extends ca.spottedleaf.moonrise.common.util.TickThre
@@ -107,7 +107,7 @@ index 5607f4cc8ca2f620461eb5e97d01d9db0d6b2303..1f8eba1a93d6844bc2e1ddf8c1e261fb
                      logger.log(Level.SEVERE, "\t If this is the case, consider increasing timeout-time in spigot.yml but note that this will replace the crash with LARGE lag spikes");
 -                    logger.log(Level.SEVERE, "If you are unsure or still think this is a Paper bug, please report this to https://github.com/PaperMC/Paper/issues");
 +                    logger.log(Level.SEVERE, "DO NOT REPORT THIS TO PAPER!");
-+                    logger.log(Level.SEVERE, "If you are unsure or still think this is a Luminol bug, please report this to https://github.com/LuminolMC/Luminol/issues");
++                    logger.log(Level.SEVERE, "If you are unsure or still think this is a SourbyCraft bug, please report this to https://github.com/YanIanZ/SourbyCraft/issues");
                      logger.log(Level.SEVERE, "Be sure to include ALL relevant console errors and Minecraft crash reports");
 -                    logger.log(Level.SEVERE, "Paper version: " + Bukkit.getServer().getVersion());
 +                    logger.log(Level.SEVERE, "Server version: " + Bukkit.getServer().getVersion());
