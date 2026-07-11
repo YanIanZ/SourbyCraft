@@ -12,13 +12,15 @@ public record BuildInfo(
     String buildTimestamp
 ) {
     /**
-     * Human-facing version + Folia build id, e.g. {@code "26.2-REL (build 1f)"}.
-     * Falls back to the bare channel version when no build id is present.
+     * Human-facing Folia build id, e.g. {@code "build 1f"} — the channel version
+     * ({@code 26.2-REL}) is deliberately NOT shown here (it stays on the
+     * "Implementing API version" line as the protocol version). Falls back to the
+     * bare channel version only when no build id is present.
      */
     public String displayVersion() {
         return (build == null || build.isEmpty())
             ? version
-            : version + " (build " + build + ")";
+            : "build " + build;
     }
 
     private static final String RESOURCE = "/META-INF/sourbycraft-build.properties";

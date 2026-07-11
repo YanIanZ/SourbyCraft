@@ -1,11 +1,13 @@
 --- a/folia-server/build.gradle.kts
 +++ b/folia-server/build.gradle.kts
-@@ -2,12 +_,14 @@
+@@ -2,12 +_,16 @@
  import io.papermc.paperweight.attribute.DevBundleOutput
  import io.papermc.paperweight.util.*
  import java.time.Instant
 +import java.time.ZoneId // SourbyCraft - GMT+7 build time
 +import java.time.ZonedDateTime // SourbyCraft - GMT+7 build time
++import java.time.format.DateTimeFormatter // SourbyCraft - GMT+7 day-name Build-Time-Display
++import java.util.Locale // SourbyCraft - GMT+7 day-name Build-Time-Display
  
  plugins {
      `java-library`
@@ -120,7 +122,7 @@
  }
  
  tasks.jar {
-@@ -189,21 +_,49 @@
+@@ -189,23 +_,59 @@
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
@@ -152,13 +154,20 @@
 +            "REL" -> "$releaseMajor-REL"
 +            else -> "$releaseVersionFull-DEV"
 +        }
-+        // SourbyCraft — append the Folia build id so ServerBuildInfoImpl.asString() (which returns
-+        // this manifest Implementation-Version) makes the "[bootstrap] Loading" + "This server is
-+        // running SourbyCraft version" boot lines show "26.2-REL (build 1f)". Kept in lockstep with
-+        // META-INF/sourbycraft-build.properties `build=1f` (writeBuildInfo). Bump gradle.properties
-+        // sourbyBuild per release -> 2f, 3f, ...
++        // SourbyCraft — the Folia build id is the human-facing VERSION. ServerBuildInfoImpl.asString()
++        // returns this manifest Implementation-Version verbatim, so the "[bootstrap] Loading" + "This
++        // server is running SourbyCraft version" boot lines show just "build 1f" (the channel version
++        // 26.2-REL is deliberately NOT shown — it stays on the "Implementing API version" line as the
++        // protocol version). Kept in lockstep with META-INF/sourbycraft-build.properties `build=1f`
++        // (writeBuildInfo) which the banner + /ver read. Bump gradle.properties sourbyBuild -> 2f, 3f...
 +        val sourbyBuild = rootProject.providers.gradleProperty("sourbyBuild").getOrElse("1").trim() + "f"
-+        val implementationVersion = "$channelVersion (build $sourbyBuild)"
++        val implementationVersion = "build $sourbyBuild"
++        // SourbyCraft — pre-formatted GMT+7 (Asia/Jakarta) day-name build timestamp, matching the
++        // previous-version / GH-release convention and the /ver formatter (EEEE, d MMMM yyyy, HH:mm).
++        // ServerBuildInfoImpl.asString(VERSION_FULL) appends this verbatim as "(<display> GMT+7)" on
++        // the boot lines instead of the raw ISO Build-Time instant.
++        val buildTimeDisplay = ZonedDateTime.ofInstant(buildTime, ZoneId.of("Asia/Jakarta"))
++            .format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy, HH:mm", Locale.ENGLISH))
          attributes(
              "Main-Class" to "org.bukkit.craftbukkit.Main",
 -            "Implementation-Title" to "Folia",
@@ -177,7 +186,10 @@
 +            "Brand-Name" to "SourbyCraft", // SourbyCraft - Rebrand
              "Build-Number" to (build ?: ""),
              "Build-Time" to buildTime.toString(),
++            "Build-Time-Display" to buildTimeDisplay, // SourbyCraft - GMT+7 day-name boot-line timestamp
              "Git-Branch" to gitBranch,
+             "Git-Commit" to gitHash,
+         )
 @@ -214,6 +_,20 @@
          }
      }
