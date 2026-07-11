@@ -415,7 +415,7 @@ public final class StealingScheduledThreadPool extends Scheduler {
                     return false;
                 }
 
-                final long scheduledStart = this.tick.scheduledStart;
+                final long scheduledStart = this.tick.getScheduledStart(); // Sourby - use virtual getter: delegating wrappers never write the raw field
                 if (scheduledStart == TimeUtil.DEADLINE_NOT_SET) {
                     throw new IllegalStateException("Start must be set when scheduling");
                 }
@@ -590,7 +590,7 @@ public final class StealingScheduledThreadPool extends Scheduler {
 
         // holds schedule lock
         private void reschedule(final boolean stolen) {
-            final long scheduledStart = this.tick.scheduledStart;
+            final long scheduledStart = this.tick.getScheduledStart(); // Sourby - use virtual getter: delegating wrappers never write the raw field
             if (scheduledStart == TimeUtil.DEADLINE_NOT_SET) {
                 throw new IllegalStateException("Start must be set when scheduling");
             }
