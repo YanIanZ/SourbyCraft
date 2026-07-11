@@ -120,7 +120,15 @@ public final class OreReveal implements Listener {
         // just iterating the (small) exposed-ore list + a per-player pending/visibility check.
         final long[] exposed = getOrComputeExposed(level, chunk, extraHidden, fluidObscures);
         if (exposed.length == 0) return;
+        hideExposedFor(player, level, exposed);
+    }
 
+    /**
+     * Hide the given exposed-ore positions for one player (fake block updates), skipping ores already
+     * confirmed visible or already pending. Shared by {@link #onChunkSent} and the block-change re-hide
+     * path so both use identical semantics and the same per-player pending budget.
+     */
+    private static void hideExposedFor(final ServerPlayer player, final ServerLevel level, final long[] exposed) {
         final UUID pid = player.getUUID();
         final LongOpenHashSet pending = PENDING.computeIfAbsent(pid, id -> new LongOpenHashSet());
         final int maxPending = SourbyCraftConfig.raytraceMaxPendingPerPlayer;
@@ -217,6 +225,37 @@ public final class OreReveal implements Listener {
         if ((bx & 15) == 15) invalidateChunk(level, cx + 1, cz);
         if ((bz & 15) == 0)  invalidateChunk(level, cx, cz - 1);
         if ((bz & 15) == 15) invalidateChunk(level, cx, cz + 1);
+        // Anti-bypass: breaking a wall next to a buried ore FRESHLY EXPOSES it. Vanilla already sent the
+        // real block-update for the broken block, and the newly-exposed ore is now visible to every client
+        // that has the chunk — but nothing re-sends the chunk, so without this the ore would leak until the
+        // player leaves and returns. Re-scan the affected chunk (cache was just invalidated above) and
+        // re-hide any now-exposed ore for nearby tracking players that have not confirmed line-of-sight.
+        reHideAround(level, cx, cz);
+    }
+
+    /**
+     * Re-hide freshly-exposed ores in one chunk for the players tracking it. Runs on the region thread of
+     * the block change (the event thread). Cost: one exposed-scan (cache-invalidated, so recomputed once)
+     * plus, per nearby player, the same cheap pending/visibility loop {@link #onChunkSent} runs — no
+     * raytrace here. Players who have genuine line-of-sight will re-reveal it on the next {@link #tickCycle}.
+     */
+    private static void reHideAround(final ServerLevel level, final int chunkX, final int chunkZ) {
+        final net.minecraft.world.level.chunk.LevelChunk chunk = level.getChunkIfLoaded(chunkX, chunkZ);
+        if (chunk == null) return;
+        final SourbyCraftWorldConfig wc = SourbyCraftWorldConfig.get(level);
+        final boolean fluidObscures = SourbyCraftConfig.fluidObscures && wc.fluidObscures;
+        final java.util.Set<Block> extraHidden = wc.allBlocks
+            ? java.util.Set.copyOf(level.paperConfig().anticheat.antiXray.hiddenBlocks) : java.util.Set.of();
+        final long[] exposed = getOrComputeExposed(level, chunk, extraHidden, fluidObscures);
+        if (exposed.length == 0) return;
+        for (final ServerPlayer player : level.players()) {
+            if (!level.chunkPacketBlockController.shouldModify(player, chunk)) continue; // respect paper.antixray.bypass
+            // Only players who actually have this chunk loaded on their client can leak it.
+            final int pcx = player.chunkPosition().x(), pcz = player.chunkPosition().z();
+            if (Math.abs(pcx - chunkX) > player.getBukkitEntity().getViewDistance()
+                || Math.abs(pcz - chunkZ) > player.getBukkitEntity().getViewDistance()) continue;
+            hideExposedFor(player, level, exposed);
+        }
     }
 
     private static boolean isCandidate(final BlockState state, final java.util.Set<Block> extraHidden) {
@@ -332,6 +371,26 @@ public final class OreReveal implements Listener {
         invalidateChunk(level, e.getChunk().getX(), e.getChunk().getZ());
     }
 
+    /**
+     * Anti-bypass (chunk-border): {@link #isExposed} treats an UNLOADED neighbour chunk as obscuring, so
+     * a border ore whose only opening faces a not-yet-loaded neighbour is scanned as buried and never
+     * hidden. When that neighbour finally loads, the ore becomes exposed to a cave the player can already
+     * see from the adjacent chunk they hold — an xray leak. The newly-loaded chunk's OWN scan is fresh,
+     * but its four cardinal neighbours were scanned earlier against a then-missing chunk, so invalidate
+     * their border-affected caches. The cheap re-scan + re-hide happens on those neighbours' next send /
+     * next block-change; we invalidate only (no eager re-hide) to keep chunk-load cost near zero.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onChunkLoad(org.bukkit.event.world.ChunkLoadEvent e) {
+        if (!RayTraceWorker.ENABLED.get()) return;
+        final ServerLevel level = ((org.bukkit.craftbukkit.CraftWorld) e.getWorld()).getHandle();
+        final int cx = e.getChunk().getX(), cz = e.getChunk().getZ();
+        invalidateChunk(level, cx - 1, cz);
+        invalidateChunk(level, cx + 1, cz);
+        invalidateChunk(level, cx, cz - 1);
+        invalidateChunk(level, cx, cz + 1);
+    }
+
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent e) {
         final UUID id = e.getPlayer().getUniqueId();
@@ -342,6 +401,28 @@ public final class OreReveal implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onWorldChange(PlayerChangedWorldEvent e) {
         // BlockPos long keys are world-agnostic — never leak across dimensions.
+        final UUID id = e.getPlayer().getUniqueId();
+        PENDING.remove(id);
+        VisibilityCache.clear(id);
+    }
+
+    /**
+     * Anti-bypass: a same-world teleport (/tp across the map, ender pearl, plugin warp) moves the eye
+     * without a dimension change, so {@link #onWorldChange} never fires. {@link VisibilityCache} still
+     * holds positions confirmed visible from the OLD eye — and {@link #onChunkSent} SKIPS re-hiding any
+     * ore still in that cache, so an ore that was visible from the old spot but is occluded from the new
+     * spot would stay revealed = xray leak. Clear the player's confirmed-visible cache + pending on any
+     * non-trivial teleport so every ore must be re-confirmed from the new eye. Gated on distance so
+     * micro-teleports (mount dismount, tiny plugin nudges) don't thrash the cache for no security gain.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(org.bukkit.event.player.PlayerTeleportEvent e) {
+        if (!RayTraceWorker.ENABLED.get()) return;
+        final org.bukkit.Location from = e.getFrom(), to = e.getTo();
+        if (to == null) return;
+        // Cross-world teleports are handled by onWorldChange; only same-world moves matter here.
+        if (from.getWorld() != null && !from.getWorld().equals(to.getWorld())) return;
+        if (from.distanceSquared(to) < NEAR_DISTANCE_SQUARED) return; // trivial move -> occlusion unchanged
         final UUID id = e.getPlayer().getUniqueId();
         PENDING.remove(id);
         VisibilityCache.clear(id);
