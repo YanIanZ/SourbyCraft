@@ -46,7 +46,7 @@ paperweight {
     val paperRepo = "https://repo.papermc.io/repository/maven-public"
     externalLib("org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar", mavenCentral)
     externalLib("com/github/luben/zstd-jni/1.5.7-11/zstd-jni-1.5.7-11.jar", mavenCentral)
-    externalLib("me/lucko/spark-paper/1.10.152/spark-paper-1.10.152.jar", paperRepo)
+    externalLib("me/lucko/spark-paper/1.10.172/spark-paper-1.10.172.jar", paperRepo)
     externalLib("com/mysql/mysql-connector-j/9.2.0/mysql-connector-j-9.2.0.jar", mavenCentral)
     externalLib("com/google/protobuf/protobuf-java/4.29.0/protobuf-java-4.29.0.jar", mavenCentral)
     externalLib("io/sentry/sentry/8.0.0-rc.2/sentry-8.0.0-rc.2.jar", mavenCentral)
