@@ -401,7 +401,11 @@ public class SourbyCraftConfig {
             + "allowed client (1.20) is set in plugins/ViaVersion/config.yml -> block-versions.");
 
         // --- Spark bridge + GC advisor ---
-        seed(f, changed, "spark.enabled", true, "Enable the bundled spark profiler bridge.");
+        seed(f, changed, "spark.enabled", true,
+            "Enable the spark profiler bridge (used by /spark and /sparkview). The bundled spark is "
+            + "disabled on this Folia build; for FULL spark drop a standalone spark plugin jar into "
+            + "plugins/ (it is honoured — the server prefers an external spark plugin) and restart. "
+            + "That registers the real /spark and lights up /sparkview. false = never touch spark.");
         seed(f, changed, "branding.gc-advisor.enabled", true, "Enable the startup GC/JVM-flags advisory log.");
 
         // --- Varied server messages (F1-7): the message layer owns the key set + built-in variants. ---
