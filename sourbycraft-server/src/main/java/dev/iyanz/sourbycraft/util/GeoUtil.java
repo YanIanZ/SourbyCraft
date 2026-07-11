@@ -57,6 +57,9 @@ public final class GeoUtil {
     private static volatile DatabaseReader reader;
     /** True once init has been attempted and failed, so we don't retry the download every call. */
     private static volatile boolean initFailed;
+    /** Set once a per-lookup DB read error has been logged, so a corrupt DB doesn't spam WARN per IP. */
+    private static final java.util.concurrent.atomic.AtomicBoolean dbErrorWarned =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
 
     private GeoUtil() {}
 
@@ -96,6 +99,16 @@ public final class GeoUtil {
             } catch (AddressNotFoundException notFound) {
                 // IP is valid but absent from the (free/lite) DB — cache the miss cheaply.
                 loc = "";
+            } catch (Exception dbErr) {
+                // Any other per-lookup DB error (corrupt/truncated mmdb -> GeoIp2Exception, an I/O
+                // read fault, etc). Previously this fell through to the outer catch, which WARNs
+                // once PER lookup — i.e. once for every distinct player IP on every /ping — spamming
+                // the console indefinitely on a bad DB file. Log at most once and degrade to "no
+                // location" (return null) so /ping keeps working.
+                if (dbErrorWarned.compareAndSet(false, true)) {
+                    SourbyLogger.warn("GeoIP lookup error (further errors suppressed): " + dbErr.getMessage());
+                }
+                return null;
             }
             if (loc.isEmpty()) return null;
 
