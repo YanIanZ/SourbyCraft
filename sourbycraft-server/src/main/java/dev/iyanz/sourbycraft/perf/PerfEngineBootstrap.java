@@ -229,6 +229,19 @@ public final class PerfEngineBootstrap {
             SourbyLogger.error("perf-engine: MaxPlayersBypass.register failed", t);
         }
 
+        // SourbyCraft anti-xray raytrace ore/liquid reveal (Folia core). Guard on antixray.enabled so
+        // a disabled engine registers no listeners / scheduler (zero cost — onChunkSent is then a single
+        // volatile read). Registers the OreReveal listener + starts the tickCycle on the global-region
+        // scheduler; onChunkSent is driven by the PlayerChunkSender NMS hook. Logs its own ENABLED line.
+        if (SourbyCraftConfig.antixrayEnabled) {
+            try {
+                dev.iyanz.sourbycraft.antixray.OreReveal.register(owner);
+                registered.add("antixray-ore-reveal");
+            } catch (Throwable t) {
+                SourbyLogger.error("perf-engine: OreReveal.register failed", t);
+            }
+        }
+
         // SourbyCraft F1-7 (varied lang): varied SourbyCraft join/leave broadcast messages.
         // Region-safe (name read + Component swap only). Always registered.
         try {
