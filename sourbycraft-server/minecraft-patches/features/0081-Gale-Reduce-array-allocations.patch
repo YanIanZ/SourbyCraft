@@ -300,7 +300,7 @@ index a4bc767b799c050ce07a3685f655b4ba947d2466..a447b9fbb579591c62b3d8f8e2527796
              Equippable equippable = itemStack.get(DataComponents.EQUIPPABLE);
              if (itemStack.is(item) && equippable != null && equippable.slot() == slot) {
 diff --git a/net/minecraft/world/item/ItemStack.java b/net/minecraft/world/item/ItemStack.java
-index 88a5453ac9e3415b5b5c5e81899b9b13627ca817..a6805d436fd3675e385cbf8a3e5b262ae694ed90 100644
+index 71e3f1f1e71e85875b01e5e4d28b99837bb0b447..9b99dbfe954c3c63e5dfae5fbe779d69aa72b46b 100644
 --- a/net/minecraft/world/item/ItemStack.java
 +++ b/net/minecraft/world/item/ItemStack.java
 @@ -1182,7 +1182,7 @@ public final class ItemStack implements DataComponentHolder, ItemInstance, Chang
