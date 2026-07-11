@@ -386,6 +386,21 @@ public final class OreReveal implements Listener {
     }
 
     /**
+     * Drop this world's entire {@link #SCAN_CACHE} entry on world unload. {@link ChunkUnloadEvent}
+     * only removes per-chunk entries; a full world unload (e.g. an SWM island reset — world names are
+     * reused, but each reload is a NEW {@link ServerLevel} instance) would otherwise leave the old
+     * level's key + its per-level chunk map strongly referenced by this static map forever, since the
+     * stale key is never looked up again. That is a per-unload memory leak that grows unbounded on a
+     * server doing frequent world load/unload cycles. Evict the whole level entry here so an unloaded
+     * world's scan cache is freed with the world.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onWorldUnload(org.bukkit.event.world.WorldUnloadEvent e) {
+        final ServerLevel level = ((org.bukkit.craftbukkit.CraftWorld) e.getWorld()).getHandle();
+        SCAN_CACHE.remove(level);
+    }
+
+    /**
      * Anti-bypass (chunk-border): {@link #isExposed} treats an UNLOADED neighbour chunk as obscuring, so
      * a border ore whose only opening faces a not-yet-loaded neighbour is scanned as buried and never
      * hidden. When that neighbour finally loads, the ore becomes exposed to a cave the player can already
