@@ -25,12 +25,10 @@ public final class GcAdvisor {
     public record Result(boolean acceptable, List<String> warnings) {}
 
     /**
-     * Loaded from JAR-baked sourbycraft.yml {@code branding.gc-advisor.enabled}.
-     * Until the YAML config engine is ported to Folia, {@link dev.iyanz.sourbycraft.SourbyCraftConfig#ymlBool}
-     * returns the supplied default ({@code true}), so the advisor is on by default.
+     * Read from the unified TOML key {@code branding.gc-advisor.enabled} (default {@code true}).
      */
     public static final boolean ENABLED =
-        dev.iyanz.sourbycraft.SourbyCraftConfig.ymlBool("branding.gc-advisor.enabled", true);
+        dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool("branding.gc-advisor.enabled", true);
 
     private static final String ESC = "\u001B";
     private static final String RESET = ESC + "[0m";

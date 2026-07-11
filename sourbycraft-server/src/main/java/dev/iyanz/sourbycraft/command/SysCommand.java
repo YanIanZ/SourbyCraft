@@ -1,7 +1,6 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
-import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics;
 import dev.iyanz.sourbycraft.util.BarUtil;
 import org.bukkit.Bukkit;
@@ -125,12 +124,6 @@ public class SysCommand extends Command {
                 .append(text("  " + entry.reason(), SourbyCraftColors.DIM))
                 .build());
         }
-
-        s.sendMessage(text()
-            .append(text("  SWM: ", SourbyCraftColors.LABEL))
-            .append(text(SourbyCraftConfig.swmEnabled ? "enabled" : "disabled",
-                SourbyCraftConfig.swmEnabled ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DIM))
-            .build());
 
         s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
         return true;

@@ -33,7 +33,7 @@ public final class StringKnob extends PerfKnob {
     }
 
     @Override void loadFrom() {
-        Object v = dev.iyanz.sourbycraft.SourbyCraftConfig.ymlGet(key, (Object) defaultValue);
+        Object v = dev.iyanz.sourbycraft.SourbyCraftConfig.cfgGet(key, (Object) defaultValue);
         this.value = v instanceof String s ? s : defaultValue;
     }
 }

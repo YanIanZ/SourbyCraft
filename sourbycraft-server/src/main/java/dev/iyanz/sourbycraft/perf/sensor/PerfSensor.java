@@ -98,16 +98,16 @@ public final class PerfSensor {
     private static int gcPauseRingIdx = 0;
 
     /**
-     * Load configuration from JAR-baked sourbycraft.yml. Sets defaults before the
+     * Load configuration from the unified config. Sets defaults before the
      * operator-yml bridge ({@link #applyOperatorConfig}) runs. Called from
      * SourbyCraftConfig.init() immediately after P0 Knobs.loadFromYml().
      */
     public static void loadFromYml() {
-        enabled      = SourbyCraftConfig.ymlBool("perf.sensor.enabled", true);
-        cadenceTicks = clampInt(SourbyCraftConfig.ymlInt("perf.sensor.cadence-ticks", 20), 1, "cadence-ticks");
-        dwellSamples = clampInt(SourbyCraftConfig.ymlInt("perf.sensor.dwell-samples", 3), 1, "dwell-samples");
-        warmupTicks  = clampInt(SourbyCraftConfig.ymlInt("perf.sensor.warmup-ticks", 600), 0, "warmup-ticks");
-        double mult  = SourbyCraftConfig.ymlDouble("perf.sensor.recovery-dwell-multiplier", 2.0);
+        enabled      = SourbyCraftConfig.cfgBool("perf.sensor.enabled", true);
+        cadenceTicks = clampInt(SourbyCraftConfig.cfgInt("perf.sensor.cadence-ticks", 20), 1, "cadence-ticks");
+        dwellSamples = clampInt(SourbyCraftConfig.cfgInt("perf.sensor.dwell-samples", 3), 1, "dwell-samples");
+        warmupTicks  = clampInt(SourbyCraftConfig.cfgInt("perf.sensor.warmup-ticks", 600), 0, "warmup-ticks");
+        double mult  = SourbyCraftConfig.cfgDouble("perf.sensor.recovery-dwell-multiplier", 2.0);
         if (Double.isNaN(mult) || mult < 1.0) {
             SourbyLogger.warn("perf sensor recovery-dwell-multiplier " + mult + " < 1.0, clamping to 1.0");
             mult = 1.0;
@@ -134,7 +134,7 @@ public final class PerfSensor {
         double[] candidate = dst.clone();
         for (int i = 1; i < 5; i++) {
             String path = "perf.sensor.thresholds." + signal + "." + tierKeys[i];
-            candidate[i] = SourbyCraftConfig.ymlDouble(path, candidate[i]);
+            candidate[i] = SourbyCraftConfig.cfgDouble(path, candidate[i]);
         }
         if (!isMonotonic(candidate, lowerIsWorse)) {
             SourbyLogger.warn("sensor threshold '" + signal + "' non-monotonic, reverting to defaults");
@@ -158,10 +158,9 @@ public final class PerfSensor {
     }
 
     /**
-     * Operator-yml bridge: called from SourbyCraftConfig.init() AFTER loadFromYml() and
-     * AFTER all Bukkit-config reads, so operator sourbycraft.yml values override JAR defaults.
-     * Parameters that match the JAR default (no operator key present) are effectively no-ops.
-     * Non-monotonic threshold sets are rejected with a WARN; other settings are applied directly.
+     * Operator-config bridge: called from SourbyCraftConfig.init() AFTER loadFromYml(), so operator
+     * TOML values override the JAR defaults. Parameters that match the JAR default (no operator key
+     * present) are effectively no-ops. Non-monotonic threshold sets are rejected with a WARN.
      */
     public static void applyOperatorConfig(
         boolean operatorEnabled, int operatorWarmupTicks, int operatorCadenceTicks,

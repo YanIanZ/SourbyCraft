@@ -29,6 +29,6 @@ public final class DoubleKnob extends PerfKnob {
     }
 
     @Override void loadFrom() {
-        this.value = SourbyCraftConfig.ymlDouble(key, defaultValue);
+        this.value = SourbyCraftConfig.cfgDouble(key, defaultValue);
     }
 }

@@ -37,7 +37,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * join        = [ "&lt;uses &lt;player&gt; placeholder&gt;", ... ]
  * leave       = [ ... ]
  * </pre>
- * Keys are read through {@link SourbyCraftConfig#ymlGet} which already consults the unified
+ * Keys are read through {@link SourbyCraftConfig#cfgGet} which already consults the unified
  * TOML first. When a key is absent/empty (or every entry is blank), {@link #get(String)}
  * falls back to a sane built-in default variant registered in {@link #DEFAULTS} — the server
  * never renders an empty message and boot never depends on the operator having seeded the file.
@@ -159,7 +159,7 @@ public final class SourbyMessages {
      * selection time in {@link #pickFromList}).
      */
     private static List<String> readVariants(String key) {
-        Object v = SourbyCraftConfig.ymlGet(SECTION + "." + key, null);
+        Object v = SourbyCraftConfig.cfgGet(SECTION + "." + key, null);
         if (!(v instanceof List<?> raw) || raw.isEmpty()) return null;
         java.util.ArrayList<String> out = new java.util.ArrayList<>(raw.size());
         for (Object o : raw) {

@@ -38,6 +38,6 @@ public sealed abstract class PerfKnob
      */
     public abstract boolean applyRaw(Object raw);
 
-    /** Read from sourbycraft.yml (jar-baked) and apply. Legacy boot path; removed in Task 4. */
+    /** Read from the unified config and apply. Legacy boot path; removed in Task 4. */
     abstract void loadFrom();
 }

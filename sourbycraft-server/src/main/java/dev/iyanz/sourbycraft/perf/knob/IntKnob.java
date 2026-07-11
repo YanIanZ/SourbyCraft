@@ -45,7 +45,7 @@ public final class IntKnob extends PerfKnob {
     }
 
     @Override void loadFrom() {
-        set(SourbyCraftConfig.ymlInt(key, defaultValue));
+        set(SourbyCraftConfig.cfgInt(key, defaultValue));
     }
 
     private static int clamp(int v, int lo, int hi) {
