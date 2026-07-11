@@ -25,8 +25,9 @@ import java.util.Map;
  * pre-existing SimpleCommandMap entry first, then register with the
  * "sourbycraft" fallback prefix, so {@code /sourbycraft:<name>} always reaches us
  * (and the bare {@code /<name>} lands on us too whenever Paper has not already
- * claimed the slot). SWM / tps / tpsbar / rambar are intentionally omitted — the
- * bars are handled by Luminol and SWM is gone on this Folia line.
+ * claimed the slot). SWM / tpsbar / rambar are intentionally omitted — the bars
+ * are handled by Luminol and SWM is gone on this Folia line. {@code /tps} is
+ * registered here as a hex TPS panel.
  */
 public final class SourbyCraftCommands {
 
@@ -44,7 +45,7 @@ public final class SourbyCraftCommands {
 
         // Drop any pre-existing SimpleCommandMap entries so our fallback registration
         // is not shadowed by an earlier bukkit/vanilla entry under the same name.
-        String[] names = {"ping", "sys", "plugins", "speedtest", "sparkview", "ver", "perf", "maxp"};
+        String[] names = {"ping", "sys", "plugins", "speedtest", "sparkview", "ver", "perf", "maxp", "tps"};
         Map<String, Command> known = commandMap.getKnownCommands();
         for (String n : names) {
             String lower = n.toLowerCase(Locale.ROOT);
@@ -60,10 +61,11 @@ public final class SourbyCraftCommands {
         commandMap.register("sourbycraft", new VerCommand("ver"));
         commandMap.register("sourbycraft", new PerfCommand("perf"));
         commandMap.register("sourbycraft", new MaxpCommand("maxp"));
+        commandMap.register("sourbycraft", new TpsCommand("tps"));
 
         registered = true;
         org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
-            "Registered 8 SourbyCraft commands (fallback prefix 'sourbycraft'). "
+            "Registered 9 SourbyCraft commands (fallback prefix 'sourbycraft'). "
             + "Use /sourbycraft:<name> if a name collides with Paper's built-ins "
             + "(/ping, /version, /plugins).");
     }
