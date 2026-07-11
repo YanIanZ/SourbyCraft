@@ -253,7 +253,7 @@ public final class PluginProvisioner {
                 ensureConfig(pin, pluginsDir);
             } catch (IOException e) {
                 dev.iyanz.sourbycraft.util.SourbyLogger.warn(
-                    "[SourbyCraft] ViaVersion auto-provision: could not write default config for "
+                    "ViaVersion auto-provision: could not write default config for "
                         + pin.plugin() + ": " + e.getMessage());
             }
         }
@@ -268,7 +268,7 @@ public final class PluginProvisioner {
         try (InputStream in = PluginProvisioner.class.getResourceAsStream(pin.configResource())) {
             if (in == null) {
                 dev.iyanz.sourbycraft.util.SourbyLogger.warn(
-                    "[SourbyCraft] ViaVersion auto-provision: default config resource "
+                    "ViaVersion auto-provision: default config resource "
                         + pin.configResource() + " missing from jar — " + pin.plugin()
                         + " will generate its own default (no 1.20 floor pre-set).");
                 return;
@@ -278,7 +278,7 @@ public final class PluginProvisioner {
         Files.createDirectories(cfgDir);
         Files.write(cfg, data);
         dev.iyanz.sourbycraft.util.SourbyLogger.info(
-            "[SourbyCraft] ViaVersion auto-provision: wrote default plugins/" + pin.plugin() + "/config.yml"
+            "ViaVersion auto-provision: wrote default plugins/" + pin.plugin() + "/config.yml"
                 + ("ViaVersion".equals(pin.plugin()) ? " (oldest client floor pinned to 1.20)." : "."));
     }
 }
