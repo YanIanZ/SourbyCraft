@@ -67,7 +67,7 @@ public final class MaxPlayersConfig {
         if (n <= 0 || n > MAX_ALLOWED) return false;
         com.electronwill.nightconfig.core.file.CommentedFileConfig f = unifiedFile();
         if (f == null) {
-            SourbyLogger.warn("[SourbyCraft] /maxp could not persist: unified config unavailable");
+            SourbyLogger.warn("/maxp could not persist: unified config unavailable");
             return false;
         }
         try {
@@ -79,7 +79,7 @@ public final class MaxPlayersConfig {
             f.save();
             return true;
         } catch (Throwable t) {
-            SourbyLogger.warn("[SourbyCraft] /maxp could not persist max-players: " + t.getMessage());
+            SourbyLogger.warn("/maxp could not persist max-players: " + t.getMessage());
             return false;
         }
     }
@@ -103,10 +103,10 @@ public final class MaxPlayersConfig {
         if (n <= 0 || n > MAX_ALLOWED) return;
         try {
             Bukkit.getServer().setMaxPlayers(n);
-            SourbyLogger.info("[SourbyCraft] applied persisted " + KEY + "=" + n
+            SourbyLogger.info("applied persisted " + KEY + "=" + n
                 + " (overrides server.properties)");
         } catch (Throwable t) {
-            SourbyLogger.warn("[SourbyCraft] could not apply persisted max-players: " + t.getMessage());
+            SourbyLogger.warn("could not apply persisted max-players: " + t.getMessage());
         }
     }
 }

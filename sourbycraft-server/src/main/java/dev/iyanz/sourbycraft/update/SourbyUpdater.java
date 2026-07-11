@@ -86,25 +86,25 @@ public final class SourbyUpdater {
         stop();
         ApplyMode mode = ApplyMode.parse(Config.mode());
         if (mode == ApplyMode.OFF) {
-            SourbyLogger.info("[SourbyCraft] auto-updater: mode=off, no checks scheduled.");
+            SourbyLogger.info("auto-updater: mode=off, no checks scheduled.");
             return;
         }
 
         try {
             Files.createDirectories(stageDir);
         } catch (IOException e) {
-            SourbyLogger.warn("[SourbyCraft] auto-updater: could not create stage dir " + stageDir + ": " + e.getMessage());
+            SourbyLogger.warn("auto-updater: could not create stage dir " + stageDir + ": " + e.getMessage());
         }
 
         Plugin owner = MinecraftInternalPlugin.INSTANCE;
         if (owner == null) {
-            SourbyLogger.warn("[SourbyCraft] auto-updater: no plugin handle; checks not scheduled.");
+            SourbyLogger.warn("auto-updater: no plugin handle; checks not scheduled.");
             return;
         }
 
         java.util.List<String> times = Config.checkTimes();
         if (times.isEmpty()) {
-            SourbyLogger.warn("[SourbyCraft] auto-updater enabled but misc.auto_update.check_times is empty; no checks scheduled.");
+            SourbyLogger.warn("auto-updater enabled but misc.auto_update.check_times is empty; no checks scheduled.");
             return;
         }
 
@@ -125,12 +125,12 @@ public final class SourbyUpdater {
                 );
                 scheduled++;
             } catch (Exception e) {
-                SourbyLogger.warn("[SourbyCraft] auto-updater: ignoring illegal check time '" + time + "'");
+                SourbyLogger.warn("auto-updater: ignoring illegal check time '" + time + "'");
             }
         }
 
         started = true;
-        SourbyLogger.info("[SourbyCraft] auto-updater started: repo=" + Config.repo()
+        SourbyLogger.info("auto-updater started: repo=" + Config.repo()
             + " channel=" + resolveChannel().suffix()
             + " mode=" + mode.name().toLowerCase(Locale.ROOT)
             + " times=" + times + " (Folia async scheduler)");
@@ -154,13 +154,13 @@ public final class SourbyUpdater {
 
     private void checkSafely() {
         if (!checkRunning.compareAndSet(false, true)) {
-            SourbyLogger.info("[SourbyCraft] auto-updater: a check is already running, skipping.");
+            SourbyLogger.info("auto-updater: a check is already running, skipping.");
             return;
         }
         try {
             check();
         } catch (Throwable t) {
-            SourbyLogger.warn("[SourbyCraft] auto-updater check failed (non-fatal): " + t.getMessage());
+            SourbyLogger.warn("auto-updater check failed (non-fatal): " + t.getMessage());
         } finally {
             checkRunning.set(false);
         }
@@ -176,13 +176,13 @@ public final class SourbyUpdater {
 
         ReleaseInfo latest = fetchLatestForChannel(channel);
         if (latest == null) {
-            SourbyLogger.info("[SourbyCraft] auto-updater: no matching " + channel.suffix()
+            SourbyLogger.info("auto-updater: no matching " + channel.suffix()
                 + " release found for repo " + Config.repo() + " (up to date, or none published yet).");
             return Outcome.NO_RELEASE;
         }
 
         if (!SemVer.isNewer(latest.tagName, currentVersion)) {
-            SourbyLogger.info("[SourbyCraft] auto-updater: already up to date on channel "
+            SourbyLogger.info("auto-updater: already up to date on channel "
                 + channel.suffix() + " (current " + currentVersion + ", latest " + latest.tagName + ").");
             return Outcome.UP_TO_DATE;
         }
@@ -199,11 +199,11 @@ public final class SourbyUpdater {
             Path staged = downloadAndStage(latest);
             writePath(corePathFile, staged);
             writePath(latestPathFile, staged);
-            SourbyLogger.info("[SourbyCraft] auto-updater: staged " + latest.tagName + " at "
+            SourbyLogger.info("auto-updater: staged " + latest.tagName + " at "
                 + staged.toAbsolutePath() + " and updated auto_update/core.path. Restart to apply.");
             return Outcome.STAGED;
         } catch (Exception e) {
-            SourbyLogger.warn("[SourbyCraft] auto-updater: failed to stage " + latest.tagName + ": " + e.getMessage());
+            SourbyLogger.warn("auto-updater: failed to stage " + latest.tagName + ": " + e.getMessage());
             return Outcome.STAGE_FAILED;
         }
     }
@@ -311,7 +311,7 @@ public final class SourbyUpdater {
         if (actual == null || !actual.equalsIgnoreCase(info.sha256)) {
             fail(file, "SHA-256 mismatch for " + info.assetName);
         }
-        SourbyLogger.info("[SourbyCraft] auto-updater: SHA-256 verified for " + info.assetName);
+        SourbyLogger.info("auto-updater: SHA-256 verified for " + info.assetName);
         if (!isValidZip(file)) {
             fail(file, "not a valid zip/jar: " + info.assetName);
         }
@@ -355,7 +355,7 @@ public final class SourbyUpdater {
             Files.createDirectories(pathFile.getParent());
             Files.writeString(pathFile, value.toAbsolutePath().normalize().toString(), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            SourbyLogger.warn("[SourbyCraft] auto-updater: failed to write " + pathFile + ": " + e.getMessage());
+            SourbyLogger.warn("auto-updater: failed to write " + pathFile + ": " + e.getMessage());
         }
     }
 
@@ -371,22 +371,22 @@ public final class SourbyUpdater {
             HttpURLConnection conn = openConnection(url);
             int code = conn.getResponseCode();
             if (code == 404) {
-                SourbyLogger.info("[SourbyCraft] auto-updater: repo/releases not found (404) for " + url
+                SourbyLogger.info("auto-updater: repo/releases not found (404) for " + url
                     + " — no releases yet, or check misc.auto_update.repo.");
                 return null;
             }
             if (code >= 400) {
-                SourbyLogger.warn("[SourbyCraft] auto-updater: GitHub API returned " + code + " for " + url);
+                SourbyLogger.warn("auto-updater: GitHub API returned " + code + " for " + url);
                 return null;
             }
             try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
                 return GSON.fromJson(r, JsonElement.class);
             }
         } catch (JsonSyntaxException e) {
-            SourbyLogger.warn("[SourbyCraft] auto-updater: failed to parse GitHub response from " + url);
+            SourbyLogger.warn("auto-updater: failed to parse GitHub response from " + url);
             return null;
         } catch (Exception e) {
-            SourbyLogger.warn("[SourbyCraft] auto-updater: request to " + url + " failed: " + e.getMessage());
+            SourbyLogger.warn("auto-updater: request to " + url + " failed: " + e.getMessage());
             return null;
         }
     }

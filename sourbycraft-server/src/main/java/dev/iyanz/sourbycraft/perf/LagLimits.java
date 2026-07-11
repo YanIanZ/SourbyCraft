@@ -69,7 +69,7 @@ public final class LagLimits implements Listener {
      */
     public static void register(Plugin plugin) {
         Bukkit.getPluginManager().registerEvents(new LagLimits(), plugin);
-        plugin.getLogger().info("[lag-limits] active: entity/chunk=" + SourbyCraftConfig.maxEntityPerChunk
+        dev.iyanz.sourbycraft.util.SourbyLogger.info("lag-limits active: entity/chunk=" + SourbyCraftConfig.maxEntityPerChunk
             + " specials/chunk=" + SourbyCraftConfig.maxSpecialsPerChunk
             + " items/chunk=" + SourbyCraftConfig.itemMaxPerChunk
             + " arrows/world=" + SourbyCraftConfig.maxArrowsPerWorld);

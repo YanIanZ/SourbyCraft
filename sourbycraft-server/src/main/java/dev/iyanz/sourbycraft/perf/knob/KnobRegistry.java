@@ -42,9 +42,12 @@ public final class KnobRegistry {
     }
 
     static void logLoaded(String context) {
-        StringBuilder sb = new StringBuilder("perf knobs loaded [")
-            .append(context).append("]:");
-        KNOBS.forEach((key, knob) -> sb.append(" ").append(key).append("=").append(knob.snapshot()));
-        SourbyLogger.info(sb.toString());
+        SourbyLogger.info("perf knobs loaded [" + context + "]: " + KNOBS.size() + " knobs"
+            + (SourbyLogger.DEBUG ? "" : " (-Dsourbycraft.debug=true for the full list)"));
+        if (SourbyLogger.DEBUG) {
+            StringBuilder sb = new StringBuilder("perf knobs [" + context + "]:");
+            KNOBS.forEach((key, knob) -> sb.append(" ").append(key).append("=").append(knob.snapshot()));
+            SourbyLogger.debug(sb.toString());
+        }
     }
 }

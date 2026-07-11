@@ -72,7 +72,6 @@ public final class SelfTuneController {
         if (!enabled) return;
         captureBaselineIfNeeded();
         applyTier(newTier);
-        SourbyLogger.info("self-tune: applied policy for tier " + newTier);
         // F2e: push the freshly-set knob values into the Luminol/Pufferfish base config so the
         // base's already-Folia-safe tick code actually enforces them in-tick (projectile chunk-load
         // caps, inactive-goal-selector throttle). Runs on the global-region scheduler thread.
@@ -106,7 +105,7 @@ public final class SelfTuneController {
             + " goal-selector-interval=" + Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.get()
             + " entity-limiter=" + (Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.get() ? "on" : "off")
             + " entity-limiter-scale=" + Knobs.KAIIJU_ENTITY_LIMITER_SCALE.get());
-        SourbyLogger.info("self-tune [tier-" + tier + "] set-only (no in-tick actuator on this base):"
+        SourbyLogger.debug("self-tune [tier-" + tier + "] set-only (no in-tick actuator on this base):"
             + " entity-tick-rate=" + Knobs.ENTITY_TICK_RATE.get()
             + " disable-saving-snowballs=" + Knobs.LAG_MACHINE_DISABLE_SAVING_SNOWBALLS.get()
             + " disable-saving-fireworks=" + Knobs.LAG_MACHINE_DISABLE_SAVING_FIREWORKS.get()

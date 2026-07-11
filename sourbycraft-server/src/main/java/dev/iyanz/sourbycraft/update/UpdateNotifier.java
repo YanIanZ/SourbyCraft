@@ -45,9 +45,9 @@ public final class UpdateNotifier {
         try {
             Bukkit.getConsoleSender().sendMessage(banner);
         } catch (Throwable t) {
-            SourbyLogger.warn("[SourbyCraft] update notify: console send failed: " + t.getMessage());
+            SourbyLogger.warn("update notify: console send failed: " + t.getMessage());
         }
-        SourbyLogger.info("[SourbyCraft] update available: " + current + " -> " + latest
+        SourbyLogger.info("update available: " + current + " -> " + latest
             + " (" + channel.suffix() + ")  " + (releaseUrl == null ? "" : releaseUrl));
 
         // Online operators / permission holders.
@@ -58,7 +58,7 @@ public final class UpdateNotifier {
                 }
             }
         } catch (Throwable t) {
-            SourbyLogger.warn("[SourbyCraft] update notify: player broadcast failed: " + t.getMessage());
+            SourbyLogger.warn("update notify: player broadcast failed: " + t.getMessage());
         }
     }
 

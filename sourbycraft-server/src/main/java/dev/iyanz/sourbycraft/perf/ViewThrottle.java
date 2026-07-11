@@ -54,7 +54,7 @@ public final class ViewThrottle {
      */
     public static void register(Plugin plugin) {
         if (!SourbyCraftConfig.autoThrottleView) {
-            SourbyLogger.info("[SourbyCraft] ViewThrottle: disabled (network.auto-throttle-view=false)");
+            SourbyLogger.info("ViewThrottle: disabled (network.auto-throttle-view=false)");
             return;
         }
         int minDist = Math.max(2, Math.min(32, SourbyCraftConfig.minViewDistance));
@@ -64,7 +64,7 @@ public final class ViewThrottle {
             100L, // initial delay (ticks)
             100L  // period (ticks)
         );
-        SourbyLogger.info("[SourbyCraft] ViewThrottle: registered (Folia global-region) — min-view-distance=" + minDist);
+        SourbyLogger.info("ViewThrottle: registered (Folia global-region) — min-view-distance=" + minDist);
     }
 
     private static void tick() {
@@ -83,14 +83,14 @@ public final class ViewThrottle {
                 int target = Math.max(minDist, current - 1);
                 if (target != current) {
                     world.setViewDistance(target);
-                    SourbyLogger.info("[SourbyCraft] view distance world=" + name
+                    SourbyLogger.debug("view distance world=" + name
                         + " " + current + "->" + target + " (tier=" + tier + ")");
                 }
             } else if (current < original) {
                 // Healthy tier → step +1 toward original.
                 int target = Math.min(original, current + 1);
                 world.setViewDistance(target);
-                SourbyLogger.info("[SourbyCraft] view distance world=" + name
+                SourbyLogger.debug("view distance world=" + name
                     + " " + current + "->" + target + " (tier=" + tier + ", recovering)");
                 if (target >= original) {
                     // Fully recovered — forget the saved original so a manual /view change is respected.
