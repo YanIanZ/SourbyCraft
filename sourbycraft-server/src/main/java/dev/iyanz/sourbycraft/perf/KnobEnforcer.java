@@ -70,6 +70,8 @@ public final class KnobEnforcer {
     private static volatile int lastProjPerProjectile = Integer.MIN_VALUE;
     private static volatile int lastGoalSelectorGate = Integer.MIN_VALUE; // 0/1, MIN_VALUE = never enforced
     private static volatile int lastEntityLimiterGate = Integer.MIN_VALUE; // 0/1, MIN_VALUE = never enforced
+    private static volatile double lastEntityLimiterScale = Double.NaN;    // NaN = never enforced
+    private static volatile int lastGoalSelectorInterval = Integer.MIN_VALUE; // MIN_VALUE = never enforced
 
     private KnobEnforcer() {}
 
@@ -82,6 +84,8 @@ public final class KnobEnforcer {
         enforceProjectileCaps();
         enforceAiThrottleGate();
         enforceEntityLimiterGate();
+        enforceEntityLimiterScale();
+        enforceGoalSelectorInterval();
     }
 
     private static void enforceProjectileCaps() {
@@ -147,6 +151,40 @@ public final class KnobEnforcer {
             lastEntityLimiterGate = gateBit;
             SourbyLogger.info("enforced perf.entity-limiter.enabled=" + gate
                 + " -> KaiijuEntityLimits.enabled");
+        }
+    }
+
+    /**
+     * Push the SourbyCraft entity-limiter scale knob onto Kaiiju's global per-type cap multiplier
+     * ({@code KaiijuEntityLimits.limitScale}), consumed in-tick by {@code KaiijuEntityThrottler}.
+     * Default 1.0 = base behaviour (per-type caps used as-is; GREEN, no regression). Under load the
+     * perf-engine scales it DOWN so every per-type tick cap shrinks together — fewer entities tick
+     * per tick while the server struggles. Only has effect while the limiter gate itself is on.
+     */
+    private static void enforceEntityLimiterScale() {
+        final double scale = Knobs.KAIIJU_ENTITY_LIMITER_SCALE.get();
+        if (scale != lastEntityLimiterScale) {
+            KaiijuEntityLimits.limitScale = scale;
+            lastEntityLimiterScale = scale;
+            SourbyLogger.info("enforced perf.entity-limiter.scale=" + scale
+                + " -> KaiijuEntityLimits.limitScale");
+        }
+    }
+
+    /**
+     * Push the SourbyCraft goal-selector interval knob onto the Pufferfish inactive-tick cadence
+     * ({@code EntityGoalSelectorInactiveTickConfig.inactiveTickInterval}), consumed in-tick by
+     * {@code Mob.inactiveTick}. Default 20 = the exact base behaviour (1-in-20 cadence; GREEN, no
+     * regression). Under load the perf-engine WIDENS it so the goal selector ticks even less often.
+     * Only has effect while the throttle gate itself is on.
+     */
+    private static void enforceGoalSelectorInterval() {
+        final int interval = Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.get();
+        if (interval != lastGoalSelectorInterval) {
+            EntityGoalSelectorInactiveTickConfig.inactiveTickInterval = interval;
+            lastGoalSelectorInterval = interval;
+            SourbyLogger.info("enforced perf.ai.goal-selector-interval=" + interval
+                + " -> EntityGoalSelectorInactiveTickConfig.inactiveTickInterval");
         }
     }
 }

@@ -51,6 +51,10 @@ public final class SelfTuneController {
     // restores the operator/base default exactly (no regression); ORANGE and below tighten.
     private static volatile boolean baselineEntityLimiterEnabled;
     private static volatile boolean baselineGoalSelectorInactive = true;
+    // NMS-scalar deep-enforcement: base magnitudes captured on first tier change so GREEN/YELLOW
+    // restore them exactly (scale 1.0, interval 20 = no regression); ORANGE and below tighten.
+    private static volatile double baselineEntityLimiterScale = 1.0D;
+    private static volatile int baselineGoalSelectorInterval = -1;
     private static volatile boolean enabled = true;
 
     private SelfTuneController() {}
@@ -99,7 +103,9 @@ public final class SelfTuneController {
             + " (dist=" + Knobs.AI_THROTTLE_BEYOND_DISTANCE.get()
             + " interval=" + Knobs.AI_THROTTLE_TICK_INTERVAL.get() + ")"
             + " goal-selector-inactive-throttle=" + (goalSelector ? "on" : "off")
-            + " entity-limiter=" + (Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.get() ? "on" : "off"));
+            + " goal-selector-interval=" + Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.get()
+            + " entity-limiter=" + (Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.get() ? "on" : "off")
+            + " entity-limiter-scale=" + Knobs.KAIIJU_ENTITY_LIMITER_SCALE.get());
         SourbyLogger.info("self-tune [tier-" + tier + "] set-only (no in-tick actuator on this base):"
             + " entity-tick-rate=" + Knobs.ENTITY_TICK_RATE.get()
             + " disable-saving-snowballs=" + Knobs.LAG_MACHINE_DISABLE_SAVING_SNOWBALLS.get()
@@ -123,6 +129,9 @@ public final class SelfTuneController {
         // F-perfup: snapshot the operator/base defaults so GREEN/YELLOW restore them exactly.
         baselineEntityLimiterEnabled = Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.get();
         baselineGoalSelectorInactive = Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.get();
+        // NMS-scalar deep-enforcement: snapshot the base magnitudes (scale 1.0, interval 20).
+        baselineEntityLimiterScale = Knobs.KAIIJU_ENTITY_LIMITER_SCALE.get();
+        baselineGoalSelectorInterval = Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.get();
     }
 
     private static void applyTier(final Tier tier) {
@@ -141,6 +150,9 @@ public final class SelfTuneController {
                 // F-perfup: engage per-region entity caps + force the inactive goal-selector throttle on.
                 Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(true);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
+                // NMS-scalar deep-enforcement: gently scale down entity caps + widen goal-selector cadence.
+                Knobs.KAIIJU_ENTITY_LIMITER_SCALE.set(0.85D);
+                Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(30);
             }
             case RED -> {
                 Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(Math.max(1, baselineProjectilePerTick / 4));
@@ -153,6 +165,9 @@ public final class SelfTuneController {
                 Knobs.AI_THROTTLE_TICK_INTERVAL.set(4);
                 Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(true);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
+                // NMS-scalar deep-enforcement: scale entity caps to 0.75, widen goal-selector cadence to 40.
+                Knobs.KAIIJU_ENTITY_LIMITER_SCALE.set(0.75D);
+                Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(40);
             }
             case EMERGENCY -> {
                 Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(1);
@@ -165,6 +180,9 @@ public final class SelfTuneController {
                 Knobs.AI_THROTTLE_TICK_INTERVAL.set(8);
                 Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(true);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
+                // NMS-scalar deep-enforcement: halve entity caps, widen goal-selector cadence to 60.
+                Knobs.KAIIJU_ENTITY_LIMITER_SCALE.set(0.5D);
+                Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(60);
             }
         }
     }
@@ -182,5 +200,8 @@ public final class SelfTuneController {
         // F-perfup: GREEN/YELLOW restore the operator/base defaults exactly — no regression.
         Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(baselineEntityLimiterEnabled);
         Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(baselineGoalSelectorInactive);
+        // NMS-scalar deep-enforcement: GREEN/YELLOW restore the base magnitudes (scale 1.0, interval 20).
+        Knobs.KAIIJU_ENTITY_LIMITER_SCALE.set(baselineEntityLimiterScale);
+        if (baselineGoalSelectorInterval != -1) Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(baselineGoalSelectorInterval);
     }
 }
