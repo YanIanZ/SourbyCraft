@@ -51,7 +51,7 @@ import org.gradle.kotlin.dsl.*
  *
  * The bootstrap (SourbyLoader) downloads the externalized libs into the paperclip
  * `libraries/` dir on first boot with SHA-256 verification, then delegates to the
- * paperclip fork's real Main-Class (hyacinthusclip on Folia). This ports the
+ * paperclip fork's real Main-Class (sourbyclip on Folia). This ports the
  * legacy Paper `createSlimPaperclipJar` logic into a reusable SourbyPatcher task.
  *
  * The libraries.list file is preserved UNCHANGED: paperclip's loader uses it to
