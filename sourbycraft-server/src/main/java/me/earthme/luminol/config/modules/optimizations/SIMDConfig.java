@@ -17,6 +17,12 @@ import java.util.Set;
 public class SIMDConfig implements IConfigModule {
     @DoNotLoad
     private static final Logger LOGGER = LogUtils.getLogger();
+    // SourbyCraft: kept enabled as a SourbyCraft default (upstream Luminol default; documented here
+    // as intentional). Pure-efficiency, behavior-neutral: SIMD only substitutes vectorized versions
+    // of existing scalar math (map-color averaging, some mob-AI vector ops) that produce identical
+    // numeric results — faster, not different. It self-detects support and no-ops when the CPU/JVM
+    // can't vectorize (SourbyBootstrap adds --add-modules=jdk.incubator.vector on fork/Docker so it
+    // is actually available). Disable via optimizations.use_simd.enabled=false.
     @ConfigInfo(name = "enabled")
     public static boolean enabled = true;
 
