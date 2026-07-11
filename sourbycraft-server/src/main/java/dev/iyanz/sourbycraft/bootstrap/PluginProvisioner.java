@@ -49,19 +49,17 @@ import java.util.List;
  *
  * <p><b>Toggle-off actively quarantines.</b> Flipping {@code viaversion.auto-provision} to
  * {@code false} must actually remove Via from the pipeline, not just stop future downloads: the
- * plugin scan loads every {@code plugins/*.jar}, so a previously-provisioned jar left behind keeps
- * the ViaVersion#4666 native-join stall alive. On an OFF boot we therefore move any pinned jar
+ * plugin scan loads every {@code plugins/*.jar}, so a previously-provisioned jar left behind would
+ * keep running against the operator's intent. On an OFF boot we therefore move any pinned jar
  * whose SHA-256 proves WE provisioned it to {@code <name>.jar.disabled} (reversible; restored —
  * not re-downloaded — when the toggle is turned back on). A same-prefix jar with a different hash
- * is operator-installed: never touched, loud warning instead.
+ * is operator-installed: never touched, warning instead.
  *
  * <p><b>Toggle.</b> Gated by {@code viaversion.auto-provision} in the unified SourbyCraft config
- * (default {@code false} since 2026-07-12). A native 26.2/1.21.9 (protocol 776) client needs no
- * translation, and ViaVersion injects into EVERY client's pipeline — the current 1.21.9 play-phase
- * translation has a confirmed native-join stall (ViaVersion#4666), so we do not provision Via by
- * default. Operators bridging pre-1.21.9 clients opt in with {@code viaversion.auto-provision=true}.
- * Phase 1 reads it with a tiny on-disk TOML scan (the Luminol config engine is not up yet at
- * bootstrap time); phase 2 reads the fully-parsed value.
+ * (default {@code true} — old clients down to 1.20 can join out of the box). Operators who manage
+ * Via themselves opt out with {@code viaversion.auto-provision=false}; an OFF boot quarantines the
+ * jars WE provisioned earlier (see below). Phase 1 reads the toggle with a tiny on-disk TOML scan
+ * (the Luminol config engine is not up yet at bootstrap time); phase 2 reads the fully-parsed value.
  */
 public final class PluginProvisioner {
 
@@ -120,9 +118,8 @@ public final class PluginProvisioner {
      * <p>When the toggle is {@code false} this is NOT a plain no-op: any pinned jar that WE
      * provisioned on an earlier boot (exact SHA-256 match) is quarantined to
      * {@code <name>.jar.disabled}. The plugin scan loads every {@code plugins/*.jar}, so a jar left
-     * behind would keep ViaVersion in every client's pipeline — and keep the native 1.21.9 join
-     * stall (ViaVersion#4666) alive — even though the operator turned the feature off.
-     * Operator-installed Via jars (same prefix, different hash) are never touched; we warn instead.
+     * behind would keep loading against the operator's intent. Operator-installed Via jars (same
+     * prefix, different hash) are never touched; we warn instead.
      */
     public static void provisionJars() {
         Path pluginsDir = Paths.get("plugins");
@@ -132,11 +129,6 @@ public final class PluginProvisioner {
             quarantineProvisionedJars(pluginsDir);
             return;
         }
-        System.out.println("[SourbyBootstrap] WARNING: ViaVersion auto-provision is ENABLED "
-            + "(viaversion.auto-provision=true). ViaVersion injects into EVERY client's netty pipeline "
-            + "and the current 1.21.9 translation has a confirmed native-join stall (ViaVersion#4666): "
-            + "native 1.21.9 clients can hang on 'Joining world'. Set viaversion.auto-provision=false "
-            + "unless you must bridge pre-1.21.9 clients.");
         try {
             Files.createDirectories(pluginsDir);
         } catch (IOException e) {
@@ -175,14 +167,12 @@ public final class PluginProvisioner {
                         + "Set viaversion.auto-provision=true to restore it, or delete the .disabled file.");
                 } else if (anyPrefixJarPresent(pluginsDir, pin.jarPrefix())) {
                     System.err.println("[SourbyBootstrap] WARNING: viaversion.auto-provision=false, but a "
-                        + pin.jarPrefix() + "*.jar we did NOT provision is in plugins/ — it still loads, "
-                        + "and ViaVersion in the pipeline can stall native 1.21.9 joins (ViaVersion#4666: "
-                        + "clients hang on 'Joining world'). Remove it manually if native players cannot join.");
+                        + pin.jarPrefix() + "*.jar we did NOT provision is in plugins/ — it still loads. "
+                        + "Remove it manually if you intended to run without Via.");
                 }
             } catch (IOException e) {
                 System.err.println("[SourbyBootstrap] ViaVersion auto-provision: could not quarantine "
-                    + pin.fileName() + ": " + e.getMessage()
-                    + " — remove it from plugins/ manually; it can stall native 1.21.9 joins (ViaVersion#4666).");
+                    + pin.fileName() + ": " + e.getMessage() + " — remove it from plugins/ manually.");
             }
         }
     }
@@ -272,31 +262,29 @@ public final class PluginProvisioner {
     /**
      * Tiny, dependency-free TOML scan for {@code viaversion.auto-provision}. The Luminol config
      * engine is not initialised at bootstrap time, so we read the on-disk unified file directly.
-     * Returns the default ({@code false}) when the file or key is absent/unreadable — provisioning
-     * is opt-in (a native 776 client needs no Via, and Via can stall a native 1.21.9 join —
-     * ViaVersion#4666), and a first boot has no file yet. Explicit
-     * {@code auto-provision = true} opts in.
+     * Returns the default ({@code true}) when the file or key is absent/unreadable — provisioning
+     * is opt-out, and a first boot has no file yet. Explicit {@code auto-provision = false} opts out.
      */
     private static boolean autoProvisionEnabledFromDisk() {
-        if (!Files.isRegularFile(UNIFIED_CONFIG)) return false; // first boot / no file -> default OFF
+        if (!Files.isRegularFile(UNIFIED_CONFIG)) return true; // first boot / no file -> default ON
         try {
             for (String raw : Files.readAllLines(UNIFIED_CONFIG)) {
                 String line = raw.trim();
                 if (line.isEmpty() || line.startsWith("#")) continue;
-                // Match "auto-provision = true" under [viaversion], OR a dotted "viaversion.auto-provision".
+                // Match "auto-provision = false" under [viaversion], OR a dotted "viaversion.auto-provision".
                 int eq = line.indexOf('=');
                 if (eq <= 0) continue;
                 String key = line.substring(0, eq).trim();
                 String val = line.substring(eq + 1).trim().toLowerCase(java.util.Locale.ROOT);
                 if (key.equals("auto-provision") || key.equals("viaversion.auto-provision")
                         || key.equals("\"auto-provision\"")) {
-                    return val.startsWith("true");
+                    return !val.startsWith("false");
                 }
             }
         } catch (IOException ignored) {
-            // Unreadable -> default OFF.
+            // Unreadable -> default ON.
         }
-        return false;
+        return true;
     }
 
     // ---------------------------------------------------------------------------------------------

@@ -123,18 +123,16 @@ public class SourbyCraftConfig {
     // MT1 thread bridges. -1 = smart auto (chunk-workers) / use Paper default (io-workers, send-rate).
     public static int maxPlatformThreads = 4;
 
-    // SourbyCraft — built-in ViaVersion/ViaBackwards auto-provisioning (default OFF). When true,
+    // SourbyCraft — built-in ViaVersion/ViaBackwards auto-provisioning (default ON). When true,
     // the server downloads + SHA-256-verifies the pinned ViaVersion + ViaBackwards jars into
     // plugins/ on first boot so old clients (>=1.20) can join the native 26.2/1.21.9 server.
     //
-    // DEFAULT OFF (join-bug fix, 2026-07-12): ViaVersion injects into the netty pipeline for EVERY
-    // client — including a native 26.2/1.21.9 (protocol 776) client that needs no translation — and
-    // the freshly-released 1.21.9 play-phase translation has a confirmed join-stall regression
-    // (ViaVersion#4666: a native 1.21.9 client cannot finish "Joining world" on a 1.21.9 server that
-    // has ViaVersion installed). A native client is our primary/default audience, so we no longer
-    // provision Via by default. Operators who actually need to bridge <1.21.9 clients can opt in via
-    // viaversion.auto-provision=true and accept the current 1.21.9 Via limitation.
-    public static boolean viaVersionAutoProvision = false;
+    // Note (2026-07-12): the "native 1.21.9 join stall" once blamed on ViaVersion was actually the
+    // EDF region-scheduler starvation bug in vendored Metal (fixed in EDFSchedulerThreadPool) — Via
+    // was never the cause, so the default is back to ON. Operators who manage Via themselves (or
+    // run without it) opt out with viaversion.auto-provision=false; the next boot then quarantines
+    // the auto-provisioned jars to *.jar.disabled (operator-installed Via jars are never touched).
+    public static boolean viaVersionAutoProvision = true;
 
     public static boolean autoThrottleView = true;
     public static int minViewDistance = 4;
@@ -245,20 +243,9 @@ public class SourbyCraftConfig {
             System.setProperty("max.bg.threads", String.valueOf(maxPlatformThreads));
         }
 
-        // Via auto-provision toggle (unified TOML; default OFF — native 776 client needs no Via and
-        // Via can stall a native 1.21.9 join, ViaVersion#4666. Operator opts in with true).
+        // Via auto-provision toggle (unified TOML; default ON — bridges clients down to 1.20.
+        // Operator opts out with false; the provisioner then quarantines our jars next boot).
         viaVersionAutoProvision = cfgBool("viaversion.auto-provision", viaVersionAutoProvision);
-        if (viaVersionAutoProvision) {
-            // Pre-fix builds seeded auto-provision=true into every existing TOML, so an explicit true
-            // is NOT proof the operator chose it — warn loudly every boot while it stays on.
-            dev.iyanz.sourbycraft.util.SourbyLogger.warn(
-                "viaversion.auto-provision=true — ViaVersion injects into EVERY client's netty pipeline "
-                    + "and its current 1.21.9 translation has a confirmed native-join stall "
-                    + "(ViaVersion#4666: native 1.21.9 clients hang on 'Joining world', then disconnect). "
-                    + "If players cannot join, set viaversion.auto-provision=false in "
-                    + "sourbycraft_config/sourbycraft_global_config.toml — the next boot quarantines the "
-                    + "auto-provisioned Via jars automatically.");
-        }
 
         autoThrottleView = cfgBool("network.auto-throttle-view", autoThrottleView);
         minViewDistance = cfgInt("network.min-view-distance", minViewDistance);
@@ -478,16 +465,13 @@ public class SourbyCraftConfig {
         seedThresholds(f, changed, "mem", 75.0, 85.0, 92.0, 97.0, "Heap % tier thresholds (higher = worse).");
         seedThresholds(f, changed, "gc-ms-per-min", 20.0, 50.0, 100.0, 300.0, "GC pause ms/min tier thresholds (higher = worse).");
 
-        // --- Built-in ViaVersion/ViaBackwards auto-provision (DEFAULT OFF) ---
-        seed(f, changed, "viaversion.auto-provision", false,
+        // --- Built-in ViaVersion/ViaBackwards auto-provision (default ON) ---
+        seed(f, changed, "viaversion.auto-provision", true,
             "Auto-download + SHA-256-verify the pinned ViaVersion + ViaBackwards into plugins/ on first "
-            + "boot so old clients (>=1.20) can join. DEFAULT false: a native 26.2/1.21.9 (protocol 776) "
-            + "client needs no translation, and ViaVersion injects into EVERY client's netty pipeline — "
-            + "the current 1.21.9 play-phase translation has a confirmed native-join stall regression "
-            + "(ViaVersion#4666: a native 1.21.9 client can hang on 'Joining world' when Via is present). "
-            + "Leave false unless you actually need to bridge pre-1.21.9 clients; set true to opt in and "
-            + "accept that limitation. When true, the oldest allowed client (1.20) is set in "
-            + "plugins/ViaVersion/config.yml -> block-versions.");
+            + "boot so old clients (>=1.20) can join the native 26.2/1.21.9 server. false = manage Via "
+            + "yourself / run offline; the next boot then quarantines the auto-provisioned jars to "
+            + "*.jar.disabled (your own Via jars are never touched). The oldest allowed client (1.20) "
+            + "is set in plugins/ViaVersion/config.yml -> block-versions.");
 
         // --- Anti-xray raytrace ore/liquid reveal (Folia core) ---
         // Complementary layer ABOVE Paper's built-in anti-xray engine (seeded to engine-mode 1 / HIDE
