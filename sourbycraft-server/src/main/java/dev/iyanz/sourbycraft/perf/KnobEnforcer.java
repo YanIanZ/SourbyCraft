@@ -93,14 +93,14 @@ public final class KnobEnforcer {
         if (perTick != lastProjPerTick) {
             ProjectileChunkReduceConfig.maxProjectileLoadsPerTick = perTick;
             lastProjPerTick = perTick;
-            SourbyLogger.info("enforced perf.lag-machine.max-projectile-loads-per-tick=" + perTick
+            SourbyLogger.debug("enforced perf.lag-machine.max-projectile-loads-per-tick=" + perTick
                 + " -> ProjectileChunkReduceConfig.maxProjectileLoadsPerTick");
         }
         final int perProjectile = Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.get();
         if (perProjectile != lastProjPerProjectile) {
             ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile = perProjectile;
             lastProjPerProjectile = perProjectile;
-            SourbyLogger.info("enforced perf.lag-machine.max-projectile-loads-per-projectile=" + perProjectile
+            SourbyLogger.debug("enforced perf.lag-machine.max-projectile-loads-per-projectile=" + perProjectile
                 + " -> ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile");
         }
     }
@@ -128,7 +128,7 @@ public final class KnobEnforcer {
         if (gateBit != lastGoalSelectorGate) {
             EntityGoalSelectorInactiveTickConfig.enabled = gate;
             lastGoalSelectorGate = gateBit;
-            SourbyLogger.info("enforced goal-selector inactive-throttle gate (ai-throttle interval="
+            SourbyLogger.debug("enforced goal-selector inactive-throttle gate (ai-throttle interval="
                 + interval + " distance=" + distance + ", goal-selector-knob=" + goalSelectorKnob
                 + ") -> EntityGoalSelectorInactiveTickConfig.enabled=" + gate);
         }
@@ -149,7 +149,7 @@ public final class KnobEnforcer {
         if (gateBit != lastEntityLimiterGate) {
             KaiijuEntityLimits.enabled = gate;
             lastEntityLimiterGate = gateBit;
-            SourbyLogger.info("enforced perf.entity-limiter.enabled=" + gate
+            SourbyLogger.debug("enforced perf.entity-limiter.enabled=" + gate
                 + " -> KaiijuEntityLimits.enabled");
         }
     }
@@ -166,7 +166,7 @@ public final class KnobEnforcer {
         if (scale != lastEntityLimiterScale) {
             KaiijuEntityLimits.limitScale = scale;
             lastEntityLimiterScale = scale;
-            SourbyLogger.info("enforced perf.entity-limiter.scale=" + scale
+            SourbyLogger.debug("enforced perf.entity-limiter.scale=" + scale
                 + " -> KaiijuEntityLimits.limitScale");
         }
     }
@@ -183,7 +183,7 @@ public final class KnobEnforcer {
         if (interval != lastGoalSelectorInterval) {
             EntityGoalSelectorInactiveTickConfig.inactiveTickInterval = interval;
             lastGoalSelectorInterval = interval;
-            SourbyLogger.info("enforced perf.ai.goal-selector-interval=" + interval
+            SourbyLogger.debug("enforced perf.ai.goal-selector-interval=" + interval
                 + " -> EntityGoalSelectorInactiveTickConfig.inactiveTickInterval");
         }
     }

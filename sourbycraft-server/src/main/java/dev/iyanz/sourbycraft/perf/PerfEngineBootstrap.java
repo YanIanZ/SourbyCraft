@@ -146,7 +146,7 @@ public final class PerfEngineBootstrap {
         Component motd = SourbyMessages.get(SourbyMessages.MOTD);
         if (motd == Component.empty()) return;
         Bukkit.motd(motd);
-        SourbyLogger.info("perf-engine: applied a random SourbyCraft MOTD variant ("
+        SourbyLogger.debug("applied a random MOTD variant ("
             + SourbyMessages.variantCount(SourbyMessages.MOTD) + " configured)");
     }
 
@@ -158,6 +158,9 @@ public final class PerfEngineBootstrap {
      */
     private static void startActuators() {
         final Plugin owner = MinecraftInternalPlugin.INSTANCE;
+        // Collect the actuators that registered cleanly and log them in ONE tidy summary line rather
+        // than one INFO per actuator. Failures still log individually (they matter).
+        final java.util.List<String> registered = new java.util.ArrayList<>();
 
         // Shared per-world cleanup listener (must precede any PerWorldHolder use; holders created
         // earlier still evict). Cheap and always needed by LagLimits/ViewThrottle.
@@ -167,16 +170,12 @@ public final class PerfEngineBootstrap {
             SourbyLogger.error("perf-engine: PerWorldHolder.registerCleanup failed", t);
         }
 
-        // ConfigBridge — pushes SourbyCraft entity/item/server.idle-timeout master values into
-        // the per-world Spigot/Paper config engines (only where the operator changed a value from the
-        // SourbyCraft default). Was wired via the deleted SourbyCorePlugin on the Paper line; without
-        // this registration those operator settings are silently ignored on Folia. Always registered:
-        // it is a WorldLoadEvent listener (near-zero cost, no-op when nothing was overridden). The
-        // server-global setPlayerIdleTimeout is dispatched onto the global-region thread inside
-        // register(); per-world mutations run on each world's own region via the WorldLoadEvent.
+        // ConfigBridge — pushes SourbyCraft entity/item/server.idle-timeout master values into the
+        // per-world Spigot/Paper config engines. Always registered (WorldLoadEvent listener, no-op
+        // when nothing was overridden). Its own per-world "[bridge] world: ..." lines report applied keys.
         try {
             ConfigBridge.register(owner);
-            SourbyLogger.info("perf-engine: ConfigBridge registered (entity/item config bridge + idle-timeout)");
+            registered.add("config-bridge");
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: ConfigBridge.register failed", t);
         }
@@ -185,7 +184,7 @@ public final class PerfEngineBootstrap {
         if (SourbyCraftConfig.ownerProtectionEnabled) {
             try {
                 OwnerProtection.register(owner);
-                SourbyLogger.info("perf-engine: OwnerProtection actuator registered");
+                registered.add("owner-protection");
             } catch (Throwable t) {
                 SourbyLogger.error("perf-engine: OwnerProtection.register failed", t);
             }
@@ -201,17 +200,18 @@ public final class PerfEngineBootstrap {
                 // main-thread scheduler exists). First sweep after 100t, then every 20t.
                 Bukkit.getGlobalRegionScheduler().runAtFixedRate(
                     owner, task -> LagLimits.sweepArrows(), 100L, 20L);
-                SourbyLogger.info("perf-engine: LagLimits actuator registered (+ Folia arrow sweeper)");
+                registered.add("lag-limits");
             } catch (Throwable t) {
                 SourbyLogger.error("perf-engine: LagLimits.register failed", t);
             }
         }
 
         // ViewThrottle — per-world view-distance throttle. Self-guards on autoThrottleView, but we
-        // also short-circuit here for zero cost when disabled.
+        // also short-circuit here for zero cost when disabled. (Logs its own "ViewThrottle: registered" line.)
         if (SourbyCraftConfig.autoThrottleView) {
             try {
                 ViewThrottle.register(owner);
+                registered.add("view-throttle");
             } catch (Throwable t) {
                 SourbyLogger.error("perf-engine: ViewThrottle.register failed", t);
             }
@@ -222,19 +222,20 @@ public final class PerfEngineBootstrap {
         // KICK_FULL login actually occurs. Also carries the F1-7 varied server-full kick message.
         try {
             MaxPlayersBypass.register(owner);
-            SourbyLogger.info("perf-engine: MaxPlayersBypass login listener registered (sourbycraft.maxplayers.bypass)");
+            registered.add("maxplayers-bypass");
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: MaxPlayersBypass.register failed", t);
         }
 
         // SourbyCraft F1-7 (varied lang): varied SourbyCraft join/leave broadcast messages.
-        // Region-safe (name read + Component swap only). Always registered — a message layer with
-        // no consumer is dead weight, and the operator can blank the variants to disable output.
+        // Region-safe (name read + Component swap only). Always registered.
         try {
             SourbyJoinLeaveListener.register(owner);
-            SourbyLogger.info("perf-engine: SourbyCraft join/leave message listener registered (F1-7)");
+            registered.add("join-leave-messages");
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: SourbyJoinLeaveListener.register failed", t);
         }
+
+        SourbyLogger.info("actuators registered: " + String.join(", ", registered));
     }
 }

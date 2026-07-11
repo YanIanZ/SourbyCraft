@@ -50,7 +50,7 @@ public final class ConfigBridge implements Listener {
             final int idle = SourbyCraftConfig.idleTimeout;
             Bukkit.getGlobalRegionScheduler().run(plugin, task -> {
                 net.minecraft.server.MinecraftServer.getServer().setPlayerIdleTimeout(idle);
-                plugin.getLogger().info("[bridge] server.idle-timeout -> " + idle + " min");
+                dev.iyanz.sourbycraft.util.SourbyLogger.info("[bridge] server.idle-timeout -> " + idle + " min");
             });
         }
     }
