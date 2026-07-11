@@ -20,7 +20,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # paperweight needs git history for patch application
+          fetch-depth: 0        # paperweight needs git history for patch application
+          submodules: recursive # MaplePile (Folia leafpile dep) — required by applyAllPatches
 
       - name: Validate gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
@@ -38,24 +39,28 @@ jobs:
           git config --global user.name "Github Actions"
           git config --global --add safe.directory '*'
 
-      - name: Verify patch parity
-        run: bash scripts/verify-patch-parity.sh
-        continue-on-error: true
+      - name: Publish SourbyPatcher to mavenLocal (build plugin for the Folia patcher)
+        run: cd sourbypatcher && ./gradlew publishToMavenLocal --no-daemon --stacktrace -x test
 
-      - name: Apply all patches (rebase onto Paper/MC 26.2)
+      - name: Setup MaplePile (submodule + deps patch + gen sources)
+        run: bash scripts/setup_maple_pile.sh
+
+      - name: Apply all patches (Luminol 26.2 -> Folia)
         run: ./gradlew applyAllPatches --no-daemon --stacktrace
 
       - name: Compile server
-        run: ./gradlew :sourbycraft-server:compileJava --no-daemon
+        run: ./gradlew :sourbycraft-server:compileJava --no-daemon --stacktrace
 
-      - name: Assemble release jar
-        run: ./gradlew assembleReleaseArtifacts --no-daemon
+      - name: Build slim release jar (SourbyLoader)
+        run: |
+          ./gradlew slimPaperclipJar --no-daemon --stacktrace
+          mkdir -p release
+          cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-REL.jar
 
       - name: Show build info
         run: |
           jar=$(ls release/SourbyCraft-*-REL.jar 2>/dev/null | head -1)
           echo "Built: $jar ($(du -h "$jar" | cut -f1))"
-          unzip -p "$jar" META-INF/sourbycraft-build.properties 2>/dev/null || true
 
       - name: Upload jar
         uses: actions/upload-artifact@v4
