@@ -18,7 +18,7 @@ index 0fa14f60310b063f419620539fd40898627b46b9..9800ae1d3c49800b0c7342d43d696109
          WorldBorderCommand.register(this.dispatcher);
          if (JvmProfiler.INSTANCE.isAvailable()) {
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index ef496055e470094b2899028dddc04586594a596b..badafb7769e99afe6e53ad547f77e5f26f13f1a6 100644
+index 720c465d354a24842ecbc6711fe5cb6c74b6f3cd..197e84118067c501dcb3509157fc5b18e8ae7a10 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -3107,8 +3107,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
