@@ -254,6 +254,14 @@ public final class PerfEngineBootstrap {
             } catch (Throwable t) {
                 SourbyLogger.error("perf-engine: OreReveal.register failed", t);
             }
+            // Baritone/anti-raid defense: per-world confirmation log of the LIVE Paper anti-xray engine
+            // each world builds (proof the fake-ore engine is active, not inert). No-op when baritone-
+            // defense is off. One log line per world at load — no hot path.
+            try {
+                dev.iyanz.sourbycraft.antixray.PaperAntiXrayDefense.registerConfirmationLog(owner);
+            } catch (Throwable t) {
+                SourbyLogger.error("perf-engine: PaperAntiXrayDefense.registerConfirmationLog failed", t);
+            }
             // SourbyCraft anti-ESP sub-layers: entity/hologram + particle occlusion. No listener or
             // scheduler to register — the checks are driven synchronously from the NMS packet hooks
             // (ChunkMap.TrackedEntity#updatePlayer / ServerLevel#sendParticles) on the owning region
