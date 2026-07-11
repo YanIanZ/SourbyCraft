@@ -238,6 +238,11 @@ public final class OreReveal implements Listener {
      * the block change (the event thread). Cost: one exposed-scan (cache-invalidated, so recomputed once)
      * plus, per nearby player, the same cheap pending/visibility loop {@link #onChunkSent} runs — no
      * raytrace here. Players who have genuine line-of-sight will re-reveal it on the next {@link #tickCycle}.
+     *
+     * <p><b>Folia:</b> iterate the SERVER player-list snapshot (an immutable list, same source
+     * {@link #tickCycle} uses) rather than {@code level.players()} — the latter is a live list mutated by
+     * other region threads and unsafe to iterate here. Each candidate is filtered to this world + a chunk
+     * radius before the send; packet sends are thread-safe.
      */
     private static void reHideAround(final ServerLevel level, final int chunkX, final int chunkZ) {
         final net.minecraft.world.level.chunk.LevelChunk chunk = level.getChunkIfLoaded(chunkX, chunkZ);
@@ -248,12 +253,13 @@ public final class OreReveal implements Listener {
             ? java.util.Set.copyOf(level.paperConfig().anticheat.antiXray.hiddenBlocks) : java.util.Set.of();
         final long[] exposed = getOrComputeExposed(level, chunk, extraHidden, fluidObscures);
         if (exposed.length == 0) return;
-        for (final ServerPlayer player : level.players()) {
+        for (final ServerPlayer player : net.minecraft.server.MinecraftServer.getServer().getPlayerList().getPlayers()) {
+            if (player.level() != level) continue; // different world
             if (!level.chunkPacketBlockController.shouldModify(player, chunk)) continue; // respect paper.antixray.bypass
             // Only players who actually have this chunk loaded on their client can leak it.
             final int pcx = player.chunkPosition().x(), pcz = player.chunkPosition().z();
-            if (Math.abs(pcx - chunkX) > player.getBukkitEntity().getViewDistance()
-                || Math.abs(pcz - chunkZ) > player.getBukkitEntity().getViewDistance()) continue;
+            final int vd = player.getBukkitEntity().getViewDistance();
+            if (Math.abs(pcx - chunkX) > vd || Math.abs(pcz - chunkZ) > vd) continue;
             hideExposedFor(player, level, exposed);
         }
     }
