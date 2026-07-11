@@ -5,7 +5,7 @@ Subject: [PATCH] Force disable builtin spark plugin
 
 
 diff --git a/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java b/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
-index 9661f033bbb2c00073f1c891e1411c2a9943a37a..4ecd9fe2f9ab4c7b456345665703256a6a0b37d0 100644
+index 9661f033bbb2c00073f1c891e1411c2a9943a37a..b6443e4b16e90fa18a38d8492d8a553c394203de 100644
 --- a/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
 +++ b/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
 @@ -76,7 +76,7 @@ public class FileProviderSource implements ProviderSource<Path, Path> {
@@ -13,12 +13,12 @@ index 9661f033bbb2c00073f1c891e1411c2a9943a37a..4ecd9fe2f9ab4c7b456345665703256a
  
          final PluginMeta config = type.getConfig(file);
 -        if ((config.getName().equals("spark") && config.getMainClass().equals("me.lucko.spark.bukkit.BukkitSparkPlugin")) && !SparksFly.isPluginPreferred()) {
-+        if ((config.getName().equals("spark") && config.getMainClass().equals("me.lucko.spark.bukkit.BukkitSparkPlugin")) && !SparksFly.isPluginPreferred() && false) { // Luminol - Force disable builtin spark
++        if ((config.getName().equals("spark") && config.getMainClass().equals("me.lucko.spark.bukkit.BukkitSparkPlugin")) && !SparksFly.isPluginPreferred()) { // SourbyCraft - re-enable bundled spark; still let an operator-supplied spark plugin win
              LOGGER.info("The spark plugin will not be loaded as this server bundles the spark profiler.");
              return;
          }
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index 2f5a73ac33fbb47cc025fe2d7ad16a5c34c06944..407191ad9a7f31cc3317a7747ec3489804807b8e 100644
+index 2f5a73ac33fbb47cc025fe2d7ad16a5c34c06944..5bf41832b3f9a00c5815c1404b0ff925a08592db 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 @@ -302,7 +302,7 @@ public final class CraftServer implements Server {
@@ -26,7 +26,7 @@ index 2f5a73ac33fbb47cc025fe2d7ad16a5c34c06944..407191ad9a7f31cc3317a7747ec34898
      private final io.papermc.paper.logging.SysoutCatcher sysoutCatcher = new io.papermc.paper.logging.SysoutCatcher();
      private final io.papermc.paper.potion.PaperPotionBrewer potionBrewer;
 -    public final io.papermc.paper.SparksFly spark;
-+    public io.papermc.paper.SparksFly spark; // Paper - spark // Luminol - Force disable builtin spark
++    public final io.papermc.paper.SparksFly spark; // Paper - spark // SourbyCraft - re-enable bundled spark
      private final ServerConfiguration serverConfig = new PaperServerConfiguration();
  
      // Paper start - Folia region threading API
@@ -35,7 +35,7 @@ index 2f5a73ac33fbb47cc025fe2d7ad16a5c34c06944..407191ad9a7f31cc3317a7747ec34898
          this.potionBrewer = new io.papermc.paper.potion.PaperPotionBrewer(console); // Paper - custom potion mixes
          datapackManager = new io.papermc.paper.datapack.PaperDatapackManager(console.getPackRepository()); // Paper
 -        this.spark = new io.papermc.paper.SparksFly(this); // Paper - spark
-+        if (false) this.spark = new io.papermc.paper.SparksFly(this); // Paper - spark // Luminol - Force disable builtin spark
++        this.spark = new io.papermc.paper.SparksFly(this); // Paper - spark // SourbyCraft - re-enable bundled spark
      }
  
      public boolean getCommandBlockOverride(String command) {
@@ -44,7 +44,7 @@ index 2f5a73ac33fbb47cc025fe2d7ad16a5c34c06944..407191ad9a7f31cc3317a7747ec34898
          org.spigotmc.SpigotConfig.registerCommands(); // Spigot
          io.papermc.paper.command.PaperCommands.registerCommands(this.console); // Paper
 -        this.spark.registerCommandBeforePlugins(this); // Paper - spark
-+        if (false) this.spark.registerCommandBeforePlugins(this); // Paper - spark // Luminol - Force disable builtin spark
++        this.spark.registerCommandBeforePlugins(this); // Paper - spark // SourbyCraft - re-enable bundled spark
          this.overrideAllCommandBlockCommands = this.commandsConfiguration.getStringList("command-block-overrides").contains("*");
          this.ignoreVanillaPermissions = this.commandsConfiguration.getBoolean("ignore-vanilla-permissions");
  
@@ -53,7 +53,7 @@ index 2f5a73ac33fbb47cc025fe2d7ad16a5c34c06944..407191ad9a7f31cc3317a7747ec34898
          this.enablePlugins(PluginLoadOrder.STARTUP);
          this.enablePlugins(PluginLoadOrder.POSTWORLD);
 -        this.spark.registerCommandAfterPlugins(this); // Paper - spark
-+        if (false) this.spark.registerCommandAfterPlugins(this); // Paper - spark // Luminol - Force disable builtin spark
++        this.spark.registerCommandAfterPlugins(this); // Paper - spark // SourbyCraft - re-enable bundled spark
          // Paper start - brigadier command API
          io.papermc.paper.command.brigadier.PaperCommands.INSTANCE.setValid(); // to clear invalid state for event fire below
          io.papermc.paper.plugin.lifecycle.event.LifecycleEventRunner.INSTANCE.callReloadableRegistrarEvent(io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, io.papermc.paper.command.brigadier.PaperCommands.INSTANCE, org.bukkit.plugin.Plugin.class, io.papermc.paper.plugin.lifecycle.event.registrar.ReloadableRegistrarEvent.Cause.RELOAD); // call commands event for regular plugins
