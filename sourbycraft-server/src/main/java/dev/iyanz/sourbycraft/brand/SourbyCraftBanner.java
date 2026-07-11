@@ -39,9 +39,10 @@ public final class SourbyCraftBanner {
         final int cores = Runtime.getRuntime().availableProcessors();
         StringBuilder sb = new StringBuilder();
         sb.append('\n');
+        final String shownVersion = info.displayVersion();
         sb.append(FRAME).append("   ┌─ ").append(TITLE).append("SOURBYCRAFT ").append(FRAME)
-          .append("─".repeat(Math.max(0, 44 - info.version().length())))
-          .append(' ').append(OK).append(info.version()).append(' ').append(FRAME).append("─┐").append(RESET).append('\n');
+          .append("─".repeat(Math.max(0, 44 - shownVersion.length())))
+          .append(' ').append(OK).append(shownVersion).append(' ').append(FRAME).append("─┐").append(RESET).append('\n');
         sb.append(FRAME).append("   │  ").append(BODY).append(pad(info.tagline(), 58)).append(FRAME).append("│").append(RESET).append('\n');
         sb.append(FRAME).append("   │  ").append(BODY).append(pad("survival · self-tuning perf · anti-xray · 150+ ready", 58)).append(FRAME).append("│").append(RESET).append('\n');
         sb.append(FRAME).append("   │  ").append(BODY).append(pad("Folia " + info.mcVersion() + "  ·  Java " + java + "  ·  " + cores + " cores", 58)).append(FRAME).append("│").append(RESET).append('\n');
