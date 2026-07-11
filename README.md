@@ -105,6 +105,45 @@ Old clients join with **zero manual install**. On first boot SourbyCraft downloa
 - **Toggle:** `[viaversion] auto-provision` in the unified TOML (default `true`). Set `false` if you manage Via yourself or run fully offline.
 - **Idempotent:** never re-downloads a present/verified jar and never overwrites your config edits; an existing `ViaVersion-*.jar` / `ViaBackwards-*.jar` (yours or ours) is left untouched.
 
+### Behind a proxy (Velocity / XCord / FlameCord / BungeeCord / Waterfall)
+
+SourbyCraft uses Paper/Folia's **native** IP forwarding — nothing is reimplemented. The unified TOML adds a clean `proxy.*` surface over it, applies your choice to the underlying Paper/Spigot settings **at boot, before the network binds**, validates the result, and logs the active mode as one hex line (`[SourbyCraft] proxy: velocity (modern forwarding)` / `bungeecord (legacy forwarding)` / `direct (no proxy)`).
+
+Set `proxy.mode` in `sourbycraft_config/sourbycraft_global_config.toml`, then **`online-mode=false`** in `server.properties` (the proxy authenticates), then **restrict the backend port to your proxy** (see anti-bypass below).
+
+**Velocity (modern, secure — recommended):**
+
+```toml
+[proxy]
+mode = "velocity"
+[proxy.velocity]
+secret = ""          # leave blank here; set PAPER_VELOCITY_SECRET instead (never commit a secret)
+online-mode = true
+```
+
+The secret must **exactly** match your proxy's `forwarding.secret`. Prefer the `PAPER_VELOCITY_SECRET` env var over storing it in the file. If the mode is `velocity` but no secret is found, boot warns and Paper drops proxied logins.
+
+**XCord / FlameCord / BungeeCord / Waterfall (legacy):** XCord and FlameCord are BungeeCord *forks*, so all four use the **same legacy path**:
+
+```toml
+[proxy]
+mode = "bungeecord"
+[proxy.bungeecord]
+online-mode = true
+```
+
+(Equivalent to `settings.bungeecord: true` in `spigot.yml` + `proxies.bungee-cord.online-mode` in `paper-global.yml` — SourbyCraft sets both for you at boot.)
+
+**Anti-bypass (required when proxied):** a direct connection to the backend can spoof any identity. The **primary defense is a firewall** — bind the backend port to the proxy IP only (iptables / security-group / `server-ip=127.0.0.1` for a same-host proxy). As a fallback for hosts where you can't firewall, an **opt-in** allowlist listener rejects any direct (non-proxy) source IP:
+
+```toml
+[proxy]
+anti-bypass-enabled = true
+allowed-ips = ["127.0.0.1", "10.0.0.5"]   # your proxy IP(s)
+```
+
+It is **off by default** — enabling it registers a `PlayerLoginEvent` listener, which disables the config-phase fast join path and slows every join. Leave it off and firewall instead where you can. Detected misconfigurations (velocity without a secret, both modes enabled, proxy active while `online-mode=true`, empty allowlist) are warned at boot.
+
 ---
 
 ## Deploy
