@@ -87,6 +87,16 @@ public final class SourbyBootstrap {
     };
 
     public static void main(String[] args) throws Throwable {
+        // Auto-accept the Mojang EULA. SourbyCraft accepts it on the operator's behalf so first
+        // boot is not blocked on hand-editing eula.txt. Idempotent: an existing eula=true is left
+        // untouched; only a missing file or an explicit eula=false is rewritten to eula=true. Runs
+        // before the CDS fork so the (possibly re-exec'd) child inherits an already-accepted EULA.
+        try {
+            autoAcceptEula();
+        } catch (Throwable t) {
+            System.err.println("[SourbyBootstrap] could not auto-accept EULA: " + t.getMessage());
+        }
+
         // The child (post re-exec) carries the bypass flag and drops straight to boot.
         if (System.getProperty(ORCHESTRATOR_BYPASS) == null
                 && System.getenv("SOURBYCRAFT_ORCHESTRATOR_BYPASS") == null) {
@@ -170,6 +180,51 @@ public final class SourbyBootstrap {
         // Folia base uses hyacinthusclip (paperclip fork), not Paper's paperclip.
         Class<?> clipMain = Class.forName("moe.luminolmc.hyacinthusclip.Main");
         clipMain.getMethod("main", String[].class).invoke(null, (Object) args);
+    }
+
+    // ------------------------------------------------------------------
+    // EULA auto-accept
+    // ------------------------------------------------------------------
+
+    /**
+     * Auto-accept the Mojang EULA in {@code eula.txt} on the operator's behalf.
+     *
+     * <p>Idempotent and conservative: if the file already contains {@code eula=true} (any
+     * whitespace/case), it is left byte-for-byte untouched. Otherwise — the file is absent, or
+     * present with {@code eula=false} / no {@code eula=} line — it is (re)written with
+     * {@code eula=true}, a one-line comment noting SourbyCraft auto-accepted the Mojang EULA, and a
+     * pointer to the EULA URL. JDK-only (runs during the bootstrap phase before any library load).
+     */
+    private static void autoAcceptEula() throws IOException {
+        Path eula = Paths.get("eula.txt");
+        if (Files.isRegularFile(eula)) {
+            String body = Files.readString(eula, StandardCharsets.UTF_8);
+            if (alreadyAccepted(body)) {
+                return; // respect an existing eula=true — do not rewrite.
+            }
+        }
+        String content = "# SourbyCraft auto-accepted the Mojang EULA (https://aka.ms/MinecraftEULA)."
+            + System.lineSeparator()
+            + "eula=true" + System.lineSeparator();
+        Files.writeString(eula, content, StandardCharsets.UTF_8);
+        System.out.println("[SourbyBootstrap] auto-accepted the Mojang EULA (eula=true written to eula.txt; "
+            + "https://aka.ms/MinecraftEULA).");
+    }
+
+    /** True if the eula.txt body already has an active {@code eula=true} line (ignoring comments/case/ws). */
+    private static boolean alreadyAccepted(String body) {
+        for (String raw : body.split("\\R")) {
+            String line = raw.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            int eq = line.indexOf('=');
+            if (eq < 0) continue;
+            String key = line.substring(0, eq).trim().toLowerCase(Locale.ROOT);
+            String val = line.substring(eq + 1).trim().toLowerCase(Locale.ROOT);
+            if (key.equals("eula")) {
+                return val.equals("true");
+            }
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------
