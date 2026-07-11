@@ -153,6 +153,20 @@ public final class SourbyBootstrap {
                 + (totalBytes / 1024 / 1024) + "M) in " + secs + "s");
         }
 
+        // SourbyCraft — built-in ViaVersion/ViaBackwards. Provision the pinned, SHA-256-verified
+        // jars into plugins/ NOW, before we hand control to the clip -> net.minecraft.server.Main,
+        // whose PluginInitializerManager.load(options) scans plugins/ exactly once, very early. A
+        // jar dropped in after that scan would be invisible until the next restart, so this must run
+        // here (bootstrap phase, JDK-only) rather than from the later post-config hook. Idempotent
+        // and toggle-gated (viaversion.auto-provision); wrapped so a failure never blocks boot. The
+        // matching default configs (with the 1.20 client floor) are seeded from PerfEngineBootstrap
+        // at the post-config hook, before Via reads its config in onEnable.
+        try {
+            PluginProvisioner.provisionJars();
+        } catch (Throwable t) {
+            System.err.println("[SourbyBootstrap] ViaVersion auto-provision (jars) failed: " + t.getMessage());
+        }
+
         // Folia base uses hyacinthusclip (paperclip fork), not Paper's paperclip.
         Class<?> clipMain = Class.forName("moe.luminolmc.hyacinthusclip.Main");
         clipMain.getMethod("main", String[].class).invoke(null, (Object) args);
