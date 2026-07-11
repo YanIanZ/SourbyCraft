@@ -40,16 +40,33 @@ public final class ParticleVisibilityCheck {
     /** Particles closer than 8 blocks to the player's eye are always shown. */
     private static final double NEAR_DISTANCE_SQUARED = 8.0 * 8.0;
 
+    /**
+     * Logged-once guard. The particle gate runs synchronously in {@code ServerLevel#sendParticles};
+     * a throw must never break particle broadcast. Fails open to "can see" (send the particle),
+     * logging only the first failure.
+     */
+    private static final AtomicBoolean FAILED_LOGGED = new AtomicBoolean(false);
+
     public static boolean canSee(final ServerPlayer player, final double x, final double y, final double z) {
-        if (player == null) return true;
-        if (!ENABLED.get()) return true;
-        if (player.level() == null) return true;
-        Vec3 eye = player.getEyePosition();
-        // Near-distance bypass keeps the player's own footstep / breath / interact particles
-        // visible even when the camera momentarily sits "behind" a wall as the chunk packets
-        // stream in (e.g. join / dimension transition / SWM world load).
-        if (eye.distanceToSqr(x, y, z) <= NEAR_DISTANCE_SQUARED) return true;
-        Vec3 target = new Vec3(x, y, z);
-        return OcclusionUtil.isVisible(player.level(), eye, target);
+        // Defensive: fail-open to "visible" on any error — a bug in the particle occlusion gate must
+        // never drop a legitimate particle or break the particle-send path. Logged once.
+        try {
+            if (player == null) return true;
+            if (!ENABLED.get()) return true;
+            if (player.level() == null) return true;
+            Vec3 eye = player.getEyePosition();
+            // Near-distance bypass keeps the player's own footstep / breath / interact particles
+            // visible even when the camera momentarily sits "behind" a wall as the chunk packets
+            // stream in (e.g. join / dimension transition / SWM world load).
+            if (eye.distanceToSqr(x, y, z) <= NEAR_DISTANCE_SQUARED) return true;
+            Vec3 target = new Vec3(x, y, z);
+            return OcclusionUtil.isVisible(player.level(), eye, target);
+        } catch (Throwable t) {
+            if (FAILED_LOGGED.compareAndSet(false, true)) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[antixray] particle-visibility check failed — "
+                    + "sending particle (fail-open); further occurrences suppressed. Cause: " + t);
+            }
+            return true;
+        }
     }
 }

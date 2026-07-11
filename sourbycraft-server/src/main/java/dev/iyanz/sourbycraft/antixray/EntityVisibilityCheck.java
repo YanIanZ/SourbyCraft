@@ -89,41 +89,60 @@ public final class EntityVisibilityCheck {
 
     private EntityVisibilityCheck() {}
 
+    /**
+     * Logged-once guard. The tracker gate runs synchronously in {@code ChunkMap.TrackedEntity#updatePlayer}
+     * on the entity-spawn/track path (which the client also drives while finishing a join). A throw here
+     * must never break entity tracking — it fails open to "visible" (show the entity), logging only the
+     * first failure so a recurring bug does not spam the console per tracked entity.
+     */
+    private static final AtomicBoolean FAILED_LOGGED = new AtomicBoolean(false);
+
     public static boolean isVisibleSync(final ServerPlayer player, final Entity entity) {
-        if (player == null || entity == null) return true;
-        if (player == entity) return true;
-        if (!ENABLED.get()) return true;
-        if (player.level() != entity.level()) return true;
+        // Defensive: fail-open to "visible" on any error — a bug in the occlusion gate must never hide an
+        // entity that should be shown or break the entity tracker / spawn path (which also runs during a
+        // client join). The safe default is to show the entity. Logged once.
+        try {
+            if (player == null || entity == null) return true;
+            if (player == entity) return true;
+            if (!ENABLED.get()) return true;
+            if (player.level() != entity.level()) return true;
 
-        // Exempt entity classes whose gameplay role is broken by occlusion hiding.
-        // Cheap instanceof checks stay ahead of the world-config map lookup.
-        if (entity instanceof Player) return true;
-        if (entity instanceof Display) return true;
-        if (entity instanceof ArmorStand) return true;
-        if (entity instanceof HangingEntity) return true;
+            // Exempt entity classes whose gameplay role is broken by occlusion hiding.
+            // Cheap instanceof checks stay ahead of the world-config map lookup.
+            if (entity instanceof Player) return true;
+            if (entity instanceof Display) return true;
+            if (entity instanceof ArmorStand) return true;
+            if (entity instanceof HangingEntity) return true;
 
-        // SourbyCraft S4 - per-world gate + range (world-settings.<world>.anticheat.anti-xray)
-        final dev.iyanz.sourbycraft.SourbyCraftWorldConfig wc =
-            dev.iyanz.sourbycraft.SourbyCraftWorldConfig.get((net.minecraft.server.level.ServerLevel) player.level());
-        if (!wc.entityObfuscation) return true;
+            // SourbyCraft S4 - per-world gate + range (world-settings.<world>.anticheat.anti-xray)
+            final dev.iyanz.sourbycraft.SourbyCraftWorldConfig wc =
+                dev.iyanz.sourbycraft.SourbyCraftWorldConfig.get((net.minecraft.server.level.ServerLevel) player.level());
+            if (!wc.entityObfuscation) return true;
 
-        Vec3 eye = player.getEyePosition();
-        AABB bb = entity.getBoundingBox();
-        Vec3 centre = new Vec3((bb.minX + bb.maxX) * 0.5, (bb.minY + bb.maxY) * 0.5, (bb.minZ + bb.maxZ) * 0.5);
+            Vec3 eye = player.getEyePosition();
+            AABB bb = entity.getBoundingBox();
+            Vec3 centre = new Vec3((bb.minX + bb.maxX) * 0.5, (bb.minY + bb.maxY) * 0.5, (bb.minZ + bb.maxZ) * 0.5);
 
-        // Near-distance bypass: avoid edge cases on join / dimension / SWM load.
-        if (eye.distanceToSqr(centre) <= NEAR_DISTANCE_SQUARED) return true;
+            // Near-distance bypass: avoid edge cases on join / dimension / SWM load.
+            if (eye.distanceToSqr(centre) <= NEAR_DISTANCE_SQUARED) return true;
 
-        // Beyond the configured range the tracker's own range governs; skip the clip cost.
-        final double range = wc.entityObfuscationRange;
-        if (eye.distanceToSqr(centre) > range * range) return true;
+            // Beyond the configured range the tracker's own range governs; skip the clip cost.
+            final double range = wc.entityObfuscationRange;
+            if (eye.distanceToSqr(centre) > range * range) return true;
 
-        // 3 sample points — centre + top + feet — gives a cheap approximation
-        // of full-AABB visibility without 8-corner ray tracing.
-        if (OcclusionUtil.isVisible(player.level(), eye, centre)) return true;
-        Vec3 top = new Vec3(centre.x, bb.maxY - 0.05, centre.z);
-        if (OcclusionUtil.isVisible(player.level(), eye, top)) return true;
-        Vec3 feet = new Vec3(centre.x, bb.minY + 0.05, centre.z);
-        return OcclusionUtil.isVisible(player.level(), eye, feet);
+            // 3 sample points — centre + top + feet — gives a cheap approximation
+            // of full-AABB visibility without 8-corner ray tracing.
+            if (OcclusionUtil.isVisible(player.level(), eye, centre)) return true;
+            Vec3 top = new Vec3(centre.x, bb.maxY - 0.05, centre.z);
+            if (OcclusionUtil.isVisible(player.level(), eye, top)) return true;
+            Vec3 feet = new Vec3(centre.x, bb.minY + 0.05, centre.z);
+            return OcclusionUtil.isVisible(player.level(), eye, feet);
+        } catch (Throwable t) {
+            if (FAILED_LOGGED.compareAndSet(false, true)) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[antixray] entity-visibility check failed — "
+                    + "showing entity (fail-open); further occurrences suppressed. Cause: " + t);
+            }
+            return true;
+        }
     }
 }
