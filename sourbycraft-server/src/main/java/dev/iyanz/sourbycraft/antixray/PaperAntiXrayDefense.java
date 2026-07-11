@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.antixray;
 
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
+import org.bukkit.event.world.WorldLoadEvent;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -256,6 +257,30 @@ public final class PaperAntiXrayDefense {
         } catch (IOException e) {
             SourbyLogger.warn("[antixray] baritone-defense: could not write " + WORLD_DEFAULTS + ": " + e.getMessage());
         }
+    }
+
+    /**
+     * Register a per-world confirmation log so the boot log shows the LIVE anti-xray engine each world
+     * actually built its chunk-packet controller with (definitive proof the fake-ore engine is active,
+     * not inert). Reuses a single {@link WorldLoadEvent} listener (worlds load after this actuator hook,
+     * so {@code Bukkit.getWorlds()} is empty here); cost is one log line per world at load — no hot path.
+     * Only meaningful/registered when baritone-defense is on (else there is nothing to confirm).
+     */
+    public static void registerConfirmationLog(org.bukkit.plugin.Plugin plugin) {
+        if (!SourbyCraftConfig.cfgBool("antixray.baritone-defense", true)) return;
+        org.bukkit.Bukkit.getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+            @org.bukkit.event.EventHandler(priority = org.bukkit.event.EventPriority.MONITOR)
+            public void onWorldLoad(WorldLoadEvent e) {
+                try {
+                    var ax = ((org.bukkit.craftbukkit.CraftWorld) e.getWorld()).getHandle()
+                        .paperConfig().anticheat.antiXray;
+                    plugin.getLogger().info("[antixray] world '" + e.getWorld().getName()
+                        + "': Paper anti-xray " + (ax.enabled ? "ACTIVE engine-mode " + ax.engineMode.getId()
+                        + " (" + ax.engineMode.getDescription() + "), " + ax.hiddenBlocks.size()
+                        + " hidden blocks, max-y " + ax.maxBlockHeight : "disabled"));
+                } catch (Throwable ignored) { /* never break world load for a log line */ }
+            }
+        }, plugin);
     }
 
     /**
