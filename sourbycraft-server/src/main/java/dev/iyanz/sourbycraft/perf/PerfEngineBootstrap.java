@@ -240,6 +240,21 @@ public final class PerfEngineBootstrap {
             } catch (Throwable t) {
                 SourbyLogger.error("perf-engine: OreReveal.register failed", t);
             }
+            // SourbyCraft anti-ESP sub-layers: entity/hologram + particle occlusion. No listener or
+            // scheduler to register — the checks are driven synchronously from the NMS packet hooks
+            // (ChunkMap.TrackedEntity#updatePlayer / ServerLevel#sendParticles) on the owning region
+            // thread, gated by their own AtomicBoolean seeded in SourbyCraftConfig.init. This just
+            // reports which anti-ESP sub-layers are live so the boot log shows them (zero cost when off).
+            if (dev.iyanz.sourbycraft.antixray.EntityVisibilityCheck.ENABLED.get()) {
+                registered.add("antixray-hide-entities");
+            }
+            if (dev.iyanz.sourbycraft.antixray.ParticleVisibilityCheck.ENABLED.get()) {
+                registered.add("antixray-hide-particles");
+            }
+            owner.getLogger().info("[antixray] anti-ESP: entities "
+                + (dev.iyanz.sourbycraft.antixray.EntityVisibilityCheck.ENABLED.get() ? "ENABLED" : "disabled")
+                + ", particles "
+                + (dev.iyanz.sourbycraft.antixray.ParticleVisibilityCheck.ENABLED.get() ? "ENABLED" : "disabled"));
         }
 
         // SourbyCraft F1-7 (varied lang): varied SourbyCraft join/leave broadcast messages.

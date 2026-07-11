@@ -167,6 +167,10 @@ public class SourbyCraftConfig {
     public static boolean fluidObscures = true;
     /** Also hide cave-exposed LIQUID (water/lava source+flowing) blocks, not just ores. Default ON. */
     public static boolean hideLiquids = true;
+    /** Anti-ESP: hide occluded mobs / item drops (holograms exempt). Seeds EntityVisibilityCheck.ENABLED. */
+    public static boolean hideEntities = true;
+    /** Anti-ESP: drop particle packets the receiver has no line-of-sight to. Seeds ParticleVisibilityCheck.ENABLED. */
+    public static boolean hideParticles = true;
     /** tickCycle cadence in server ticks (reveal-confirmed + submit near-pending raytraces). */
     public static int raytraceIntervalTicks = 2;
     /** Max distance (blocks) a player eye may be from an ore for a raytrace to be submitted. */
@@ -286,12 +290,18 @@ public class SourbyCraftConfig {
         antixrayEnabled = cfgBool("antixray.enabled", antixrayEnabled);
         fluidObscures = cfgBool("antixray.fluid-obscures", fluidObscures);
         hideLiquids = cfgBool("antixray.hide-liquids", hideLiquids);
+        hideEntities = cfgBool("antixray.hide-entities", hideEntities);
+        hideParticles = cfgBool("antixray.hide-particles", hideParticles);
         raytraceIntervalTicks = Math.max(1, cfgInt("antixray.raytrace.interval-ticks", raytraceIntervalTicks));
         raytraceDistance = Math.max(1.0, cfgDouble("antixray.raytrace.distance", raytraceDistance));
         raytraceMaxChecksPerCycle = Math.max(0, cfgInt("antixray.raytrace.max-checks-per-cycle", raytraceMaxChecksPerCycle));
         raytraceMaxPendingPerPlayer = Math.max(0, cfgInt("antixray.raytrace.max-pending-per-player", raytraceMaxPendingPerPlayer));
         raytraceCacheTtlTicks = Math.max(1, cfgInt("antixray.raytrace.cache-ttl-ticks", raytraceCacheTtlTicks));
         dev.iyanz.sourbycraft.antixray.RayTraceWorker.ENABLED.set(antixrayEnabled);
+        // Anti-ESP sub-layers: entity/hologram + particle occlusion. ANDed with the master so a disabled
+        // engine can never leave a sub-check live. Each is the single volatile its hot packet path reads.
+        dev.iyanz.sourbycraft.antixray.EntityVisibilityCheck.ENABLED.set(antixrayEnabled && hideEntities);
+        dev.iyanz.sourbycraft.antixray.ParticleVisibilityCheck.ENABLED.set(antixrayEnabled && hideParticles);
 
         dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.set(
             cfgInt("perf.entity-tick-rate", dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get())
@@ -447,6 +457,13 @@ public class SourbyCraftConfig {
             "A fluid (water/lava) between the player eye and an ore obscures it (ore stays hidden). ANDed with the per-world override.");
         seed(f, changed, "antixray.hide-liquids", true,
             "Also hide cave-exposed LIQUID (water/lava, source + flowing) blocks the same way as ores. Reveals on real line-of-sight.");
+        seed(f, changed, "antixray.hide-entities", true,
+            "Anti-ESP: hide occluded mobs / item drops from a player's client (behind blocks, out of line-of-sight). "
+            + "Players, holograms (Display / armor-stand), and hanging entities (frames/paintings) are always shown; "
+            + "entities within 8 blocks are always shown. Per-world gate: antixray.world-overrides.<world>.entity-obfuscation. AND-ed with antixray.enabled.");
+        seed(f, changed, "antixray.hide-particles", true,
+            "Anti-ESP: drop particle packets a player has no line-of-sight to (particles emitted behind walls from their POV). "
+            + "Particles within 8 blocks are always shown so the player's own effects survive chunk streaming. AND-ed with antixray.enabled.");
         seed(f, changed, "antixray.all-blocks", false,
             "Gate ALL Paper anti-xray hidden-blocks (not just ores) through the raytrace, not only the ore tags. Off = ores only.");
         seed(f, changed, "antixray.raytrace.interval-ticks", 2,
