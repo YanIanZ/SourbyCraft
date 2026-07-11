@@ -229,6 +229,20 @@ public final class PerfEngineBootstrap {
             SourbyLogger.error("perf-engine: MaxPlayersBypass.register failed", t);
         }
 
+        // Proxy anti-bypass allowlist (F-proxy). OPT-IN, default OFF: refuses direct (non-proxy)
+        // connections whose real source IP is not in proxy.allowed-ips. Only registers when
+        // proxy.anti-bypass-enabled=true AND a proxy mode is active AND the allowlist is non-empty —
+        // registering a PlayerLoginEvent listener disables the config-phase fast join path
+        // (HorriblePlayerLoginEventHack). When off, no listener → fast joins. Firewalling the backend
+        // port to the proxy IP remains the documented primary defense.
+        try {
+            if (dev.iyanz.sourbycraft.security.ProxyAllowlistListener.register(owner)) {
+                registered.add("proxy-anti-bypass");
+            }
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: ProxyAllowlistListener.register failed", t);
+        }
+
         // SourbyCraft anti-xray raytrace ore/liquid reveal (Folia core). Guard on antixray.enabled so
         // a disabled engine registers no listeners / scheduler (zero cost — onChunkSent is then a single
         // volatile read). Registers the OreReveal listener + starts the tickCycle on the global-region

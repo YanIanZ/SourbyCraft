@@ -199,6 +199,16 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("seedUnifiedPerfDefaults failed; perf-engine will use hardcoded defaults", t);
         }
 
+        // Proxy forwarding (F-proxy): resolve proxy.mode, apply it to Paper's native forwarding
+        // settings (Folia-safe — init() runs from CommandRegister.register, strictly BEFORE the
+        // network binds), validate, and log the active mode as one hex line. Must run before the
+        // TCP listener so SpigotConfig.bungee / proxies.velocity are authoritative pre-handshake.
+        try {
+            dev.iyanz.sourbycraft.security.ProxyForwarding.run();
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("ProxyForwarding.run failed; native proxy config left untouched", t);
+        }
+
         // Boot-time JVM heap configuration advisory (pure log advisory).
         try {
             dev.iyanz.sourbycraft.perf.JvmHeapAdvisor.init();
@@ -531,6 +541,44 @@ public class SourbyCraftConfig {
                 + "     into the final DedicatedServerProperties field; left in server.properties.");
             changed[0] = true;
         }
+
+        // --- Proxy forwarding (F-proxy) ---
+        // Paper/Folia implements both forwarding schemes natively; this SourbyCraft section is a
+        // clean surface over them. proxy.mode drives the effective native settings at boot (applied
+        // pre-bind by ProxyForwarding.run, which is Folia-safe). 'none' (default) = never override,
+        // just detect + validate + log whatever the operator set in paper-global.yml / spigot.yml.
+        if (f.getComment("proxy") == null) {
+            f.setComment("proxy", "SourbyCraft proxy-forwarding surface over Paper's native forwarding "
+                + "(Velocity modern / legacy BungeeCord). Behind a proxy: set the backend to online-mode=false "
+                + "in server.properties and FIREWALL the backend port to the proxy IP (or use proxy.allowed-ips).");
+        }
+        seed(f, changed, "proxy.mode", "none",
+            "Proxy forwarding mode: none | velocity | bungeecord. 'none' = direct/no override (the server "
+            + "still honours native paper-global.yml/spigot.yml forwarding if you set it there). 'velocity' = "
+            + "Velocity modern (secure, secret-based). 'bungeecord' = legacy BungeeCord forwarding — also used "
+            + "by Waterfall and the BungeeCord forks XCord + FlameCord. Applied to Paper's native settings at "
+            + "boot before the network binds.");
+        seed(f, changed, "proxy.velocity.secret", "",
+            "Velocity modern-forwarding secret. Must EXACTLY match the 'secret' in your proxy's "
+            + "velocity forwarding.secret file. Only used when proxy.mode=velocity. Leave blank and set "
+            + "the PAPER_VELOCITY_SECRET env var instead if you prefer not to store it in this file. "
+            + "NEVER commit a real secret to version control.");
+        seed(f, changed, "proxy.velocity.online-mode", true,
+            "Whether the proxy tells the backend the player is online-mode (has a real Mojang UUID/skin). "
+            + "Almost always true. Only used when proxy.mode=velocity.");
+        seed(f, changed, "proxy.bungeecord.online-mode", true,
+            "Whether legacy BungeeCord forwarding passes through online-mode player data (real UUID/skin). "
+            + "Almost always true. Only used when proxy.mode=bungeecord.");
+        seed(f, changed, "proxy.anti-bypass-enabled", false,
+            "OPT-IN (default false): when a proxy mode is active, register a login listener that REFUSES any "
+            + "direct (non-proxy) connection whose source IP is not in proxy.allowed-ips, so players cannot "
+            + "skip the proxy and spoof their identity. PRIMARY defense is a firewall (restrict the backend "
+            + "port to the proxy IP) — this listener is a fallback. Enabling it disables the config-phase fast "
+            + "join path (HorriblePlayerLoginEventHack) and slows every join, so it is off by default.");
+        seed(f, changed, "proxy.allowed-ips", new java.util.ArrayList<String>(),
+            "IP allowlist for proxy.anti-bypass-enabled. List your proxy server IP(s) here (e.g. "
+            + "[\"127.0.0.1\", \"10.0.0.5\"]). Checked against the connection's real (un-spoofable) source IP. "
+            + "Empty = the listener is NOT registered (an empty allowlist would reject everyone).");
 
         // --- Spark bridge + GC advisor ---
         seed(f, changed, "spark.enabled", true,
