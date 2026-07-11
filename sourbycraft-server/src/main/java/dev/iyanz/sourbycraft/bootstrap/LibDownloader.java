@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.bootstrap;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -67,7 +68,19 @@ final class LibDownloader {
             throw new IOException("SHA-256 mismatch for " + entry.paperclipPath()
                 + ": got " + actual + ", expected " + entry.sha256());
         }
-        Files.move(tmp, dest, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        // Prefer an atomic move, but some filesystems (overlay/container/network mounts) reject
+        // ATOMIC_MOVE even within the same directory and throw AtomicMoveNotSupportedException — on
+        // the first-boot bootstrap path that would abort server start with a verified jar sitting in
+        // a .tmp. Fall back to a plain replace so boot proceeds; always clean up the temp on failure
+        // so an orphan .tmp is not left behind (the cache-hit check tests `dest`, not `tmp`).
+        try {
+            Files.move(tmp, dest, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException atomicUnsupported) {
+            Files.move(tmp, dest, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException moveErr) {
+            Files.deleteIfExists(tmp);
+            throw moveErr;
+        }
         return true;
     }
 }
