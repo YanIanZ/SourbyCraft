@@ -65,21 +65,22 @@ index 30815c8970b1f1c88a3c7bb5fd36efd915f1687d..ed558be6ab203f2d57f2acca169e03e8
          } else {
              final Optional<String> gitBranch = PaperVersionFetcher.BUILD_INFO.gitBranch();
 diff --git a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
-index 10a0be7a4db1a51579d113d279af7a9effe7f438..44ffe0b4949d790677c130768326006431188965 100644
+index 10a0be7a4db1a51579d113d279af7a9effe7f438..868d7146cf3e041cf07360dc2fc46510cb1175e9 100644
 --- a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
 +++ b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
-@@ -29,8 +29,10 @@ public record ServerBuildInfoImpl(
+@@ -29,8 +29,11 @@ public record ServerBuildInfoImpl(
      private static final String ATTRIBUTE_BUILD_NUMBER = "Build-Number";
      private static final String ATTRIBUTE_GIT_BRANCH = "Git-Branch";
      private static final String ATTRIBUTE_GIT_COMMIT = "Git-Commit";
 +    private static final String ATTRIBUTE_IMPLEMENTATION_VERSION = "Implementation-Version"; // SourbyCraft - clean channel version
++    private static final String ATTRIBUTE_BUILD_TIME_DISPLAY = "Build-Time-Display"; // SourbyCraft - pre-formatted GMT+7 day-name timestamp
  
      private static final String BRAND_PAPER_NAME = "Paper";
 +    private static final String BRAND_SOURBYCRAFT_NAME = "SourbyCraft";
  
      private static final String BUILD_DEV = "DEV";
  
-@@ -42,9 +44,9 @@ public record ServerBuildInfoImpl(
+@@ -42,9 +45,9 @@ public record ServerBuildInfoImpl(
          this(
              getManifestAttribute(manifest, ATTRIBUTE_BRAND_ID)
                  .map(Key::key)
@@ -91,7 +92,7 @@ index 10a0be7a4db1a51579d113d279af7a9effe7f438..44ffe0b4949d790677c1307683260064
              SharedConstants.getCurrentVersion().id(),
              SharedConstants.getCurrentVersion().name(),
              getManifestAttribute(manifest, ATTRIBUTE_BUILD_NUMBER)
-@@ -61,12 +63,29 @@ public record ServerBuildInfoImpl(
+@@ -61,12 +64,39 @@ public record ServerBuildInfoImpl(
  
      @Override
      public boolean isBrandCompatible(final @NotNull Key brandId) {
@@ -111,9 +112,19 @@ index 10a0be7a4db1a51579d113d279af7a9effe7f438..44ffe0b4949d790677c1307683260064
 +        if (cleanVersion.isPresent()) {
 +            sb.append(cleanVersion.get());
 +            if (representation == StringRepresentation.VERSION_FULL) {
++                // SourbyCraft - append the pre-formatted GMT+7 (Asia/Jakarta) day-name build
++                // timestamp from the manifest (Build-Time-Display, written by the build script to
++                // match the /ver + GH-release convention) instead of the raw ISO Build-Time instant.
++                final Optional<String> displayTime = getManifestAttribute(
++                    JarManifests.manifest(CraftServer.class), ATTRIBUTE_BUILD_TIME_DISPLAY);
 +                sb.append(' ');
 +                sb.append('(');
-+                sb.append(this.buildTime.truncatedTo(ChronoUnit.SECONDS));
++                if (displayTime.isPresent()) {
++                    sb.append(displayTime.get());
++                    sb.append(" GMT+7");
++                } else {
++                    sb.append(this.buildTime.truncatedTo(ChronoUnit.SECONDS));
++                }
 +                sb.append(')');
 +            }
 +            return sb.toString();
