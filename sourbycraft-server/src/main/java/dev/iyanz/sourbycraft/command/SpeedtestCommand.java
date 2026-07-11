@@ -14,6 +14,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.Duration;
 import java.util.Map;
@@ -126,7 +127,7 @@ public class SpeedtestCommand extends Command {
                 Process proc = new ProcessBuilder(BIN.toString(),
                         "--format=json", "--accept-license", "--accept-gdpr")
                     .redirectErrorStream(true).start();
-                String output = new String(proc.getInputStream().readAllBytes());
+                String output = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
                 proc.waitFor();
 
                 if (output == null || output.trim().isEmpty()) {
