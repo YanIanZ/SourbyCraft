@@ -258,6 +258,38 @@ public final class PaperAntiXrayDefense {
         }
     }
 
+    /**
+     * Whether Paper's anti-xray will be enabled for freshly-loaded worlds, read from the world-defaults
+     * file's {@code anticheat.anti-xray.enabled} state. Used by {@link OreReveal#register} to decide
+     * whether to warn that the raytrace layer would be inert — the actuator hook runs BEFORE
+     * {@code DedicatedServer#loadLevel}, so {@code Bukkit.getWorlds()} is still empty there and cannot be
+     * consulted; this reads the on-disk defaults that every world's controller is about to be built from
+     * (already reflecting {@link #apply()} if baritone-defense seeded it). Returns {@code true} on read
+     * failure so a transient IO problem never produces a spurious "inert" warning.
+     */
+    public static boolean willPaperAntiXrayBeEnabled() {
+        if (!Files.isRegularFile(WORLD_DEFAULTS)) return false;
+        try {
+            final List<String> lines = Files.readAllLines(WORLD_DEFAULTS, StandardCharsets.UTF_8);
+            boolean inAntiXray = false;
+            boolean sawAnticheat = false;
+            for (String ln : lines) {
+                if (ln.equals("anticheat:")) { sawAnticheat = true; continue; }
+                if (sawAnticheat && ln.equals("  anti-xray:")) { inAntiXray = true; continue; }
+                if (inAntiXray) {
+                    final String t = ln.trim();
+                    if (t.equals("enabled: true")) return true;
+                    if (t.equals("enabled: false")) return false;
+                    // Left the anti-xray block (a new key at <= 2-space indent) without finding enabled.
+                    if (!ln.isEmpty() && indentOf(ln) <= 2 && !ln.startsWith("    ")) break;
+                }
+            }
+        } catch (IOException e) {
+            return true; // fail-open: don't warn on a read error
+        }
+        return false;
+    }
+
     private static int indentOf(String s) {
         int n = 0;
         while (n < s.length() && s.charAt(n) == ' ') n++;

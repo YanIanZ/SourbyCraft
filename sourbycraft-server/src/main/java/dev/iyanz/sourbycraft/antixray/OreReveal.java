@@ -91,17 +91,25 @@ public final class OreReveal implements Listener {
             + " (interval=" + interval + "t distance=" + SourbyCraftConfig.raytraceDistance
             + " checks/cycle=" + SourbyCraftConfig.raytraceMaxChecksPerCycle + ")");
         if (RayTraceWorker.ENABLED.get()) {
-            boolean anyPaperAntiXray = false;
-            for (org.bukkit.World w : Bukkit.getWorlds()) {
-                if (((org.bukkit.craftbukkit.CraftWorld) w).getHandle().paperConfig().anticheat.antiXray.enabled) {
-                    anyPaperAntiXray = true;
-                    break;
+            // This runs from the post-config actuator hook, which fires BEFORE DedicatedServer#loadLevel
+            // builds any world — so Bukkit.getWorlds() is (almost) always empty here and a live
+            // paperConfig() check would be a false negative. Consult the on-disk paper-world-defaults.yml
+            // that every world's controller is about to be built from (already reflecting the
+            // baritone-defense engine-mode-2 seed if it ran); fall back to any already-loaded world.
+            boolean anyPaperAntiXray = PaperAntiXrayDefense.willPaperAntiXrayBeEnabled();
+            if (!anyPaperAntiXray) {
+                for (org.bukkit.World w : Bukkit.getWorlds()) {
+                    if (((org.bukkit.craftbukkit.CraftWorld) w).getHandle().paperConfig().anticheat.antiXray.enabled) {
+                        anyPaperAntiXray = true;
+                        break;
+                    }
                 }
             }
             if (!anyPaperAntiXray) {
                 plugin.getLogger().warning("[antixray] raytrace enabled but no world has paper anti-xray enabled — "
                     + "ore reveal is a complementary layer and stays inert until anticheat.anti-xray.enabled: true "
-                    + "in paper-world-defaults.yml (buried ores would leak anyway without the Paper engine).");
+                    + "in paper-world-defaults.yml (enable antixray.baritone-defense to seed it automatically; "
+                    + "buried ores would leak anyway without the Paper engine).");
             }
         }
     }
