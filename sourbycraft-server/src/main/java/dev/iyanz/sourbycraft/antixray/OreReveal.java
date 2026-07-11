@@ -114,21 +114,44 @@ public final class OreReveal implements Listener {
         }
     }
 
+    /**
+     * Logged-once guard: a bug in this anti-xray layer must NEVER break the chunk send it hooks
+     * (the join chunk-burst runs through here for every spawn chunk). {@link #onChunkSent} catches
+     * everything and returns the SAFE default (the real chunk was already sent by the NMS caller
+     * before this hook — we simply skip the ore-hide overlay), logging the first failure only so a
+     * recurring bug does not spam the console once per chunk during a join.
+     */
+    private static final java.util.concurrent.atomic.AtomicBoolean CHUNK_SENT_FAILED_LOGGED =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+
     /** NMS hook (PlayerChunkSender.sendChunk, main thread, after the chunk packet went out). */
     public static void onChunkSent(final ServerPlayer player, final LevelChunk chunk) {
-        if (!RayTraceWorker.ENABLED.get() || player == null || chunk == null) return;
-        final ServerLevel level = (ServerLevel) chunk.getLevel();
-        if (!level.chunkPacketBlockController.shouldModify(player, chunk)) return; // respect paper.antixray.bypass
-        final SourbyCraftWorldConfig wc = SourbyCraftWorldConfig.get(level);
-        final boolean fluidObscures = SourbyCraftConfig.fluidObscures && wc.fluidObscures;
-        final java.util.Set<Block> extraHidden = wc.allBlocks
-            ? java.util.Set.copyOf(level.paperConfig().anticheat.antiXray.hiddenBlocks) : java.util.Set.of();
+        // Defensive: this runs synchronously in the chunk-send path for EVERY chunk (incl. the spawn
+        // chunks a client needs to finish "Joining world"). A throw here would propagate into the NMS
+        // sender and stall/abort the join chunk-burst — the real chunk was already sent, so anything
+        // going wrong in the ore-hide overlay must fail-open (leave the chunk unmodified), never break
+        // the send. Logged once.
+        try {
+            if (!RayTraceWorker.ENABLED.get() || player == null || chunk == null) return;
+            final ServerLevel level = (ServerLevel) chunk.getLevel();
+            if (!level.chunkPacketBlockController.shouldModify(player, chunk)) return; // respect paper.antixray.bypass
+            final SourbyCraftWorldConfig wc = SourbyCraftWorldConfig.get(level);
+            final boolean fluidObscures = SourbyCraftConfig.fluidObscures && wc.fluidObscures;
+            final java.util.Set<Block> extraHidden = wc.allBlocks
+                ? java.util.Set.copyOf(level.paperConfig().anticheat.antiXray.hiddenBlocks) : java.util.Set.of();
 
-        // Player-independent scan, computed once per chunk and cached. Per-send work is now
-        // just iterating the (small) exposed-ore list + a per-player pending/visibility check.
-        final long[] exposed = getOrComputeExposed(level, chunk, extraHidden, fluidObscures);
-        if (exposed.length == 0) return;
-        hideExposedFor(player, level, exposed);
+            // Player-independent scan, computed once per chunk and cached. Per-send work is now
+            // just iterating the (small) exposed-ore list + a per-player pending/visibility check.
+            final long[] exposed = getOrComputeExposed(level, chunk, extraHidden, fluidObscures);
+            if (exposed.length == 0) return;
+            hideExposedFor(player, level, exposed);
+        } catch (Throwable t) {
+            if (CHUNK_SENT_FAILED_LOGGED.compareAndSet(false, true)) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[antixray] onChunkSent failed — leaving chunk "
+                    + "unmodified (ores not hidden this send); anti-xray overlay disabled for this failure "
+                    + "mode. Further occurrences are suppressed. Cause: " + t);
+            }
+        }
     }
 
     /**
