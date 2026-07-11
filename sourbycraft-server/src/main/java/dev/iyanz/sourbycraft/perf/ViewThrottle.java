@@ -22,8 +22,11 @@ import dev.iyanz.sourbycraft.core.PerWorldHolder;
  *       view distance (captured on first touch).</li>
  * </ul>
  *
- * <p>One INFO line is emitted per actual change to avoid log spam.
- * Zero scheduler cost when {@link SourbyCraftConfig#autoThrottleView} is false.
+ * <p>Logging is collapsed to one debug summary line per tier change (e.g.
+ * {@code view distance -> 4 (tier=RED) [3 worlds]}) rather than one line per world per step,
+ * so a multi-world tier transition no longer floods the console. Lines are debug-level (surface
+ * with {@code -Dsourbycraft.debug=true}); zero scheduler cost when
+ * {@link SourbyCraftConfig#autoThrottleView} is false.
  *
  * <p><b>Folia adaptation (F2c).</b> The Paper tag scheduled {@link #tick()} via
  * {@code Bukkit.getScheduler().runTaskTimer(...)} — the global main-thread scheduler,
@@ -45,6 +48,13 @@ public final class ViewThrottle {
     private static final PerWorldHolder<Integer> originalViewDistance = new PerWorldHolder<>();
 
     private static volatile Object schedulerTask; // io.papermc.paper.threadedregions.scheduler.ScheduledTask
+
+    /**
+     * Tier for which we last emitted a collapsed summary line. A cycle only logs when the live tier
+     * differs from this, so a steady tier (including a steady EMERGENCY) never re-logs per step —
+     * one line per tier change, not one per world per step.
+     */
+    private static Tier lastLoggedTier = null;
 
     private ViewThrottle() {}
 
@@ -71,6 +81,14 @@ public final class ViewThrottle {
         Tier tier = PerfSensor.currentTier();
         int minDist = Math.max(2, Math.min(32, SourbyCraftConfig.minViewDistance));
 
+        // Collapse logging: aggregate this cycle's adjustments and emit at most ONE summary line,
+        // and only when the tier changed since we last logged. This turns a per-world-per-step
+        // flood into a single "view distance -> N (tier=X) [K worlds]" line per tier change.
+        int changedWorlds = 0;
+        int minTarget = Integer.MAX_VALUE;
+        int maxTarget = Integer.MIN_VALUE;
+        boolean recovering = false;
+
         for (World world : Bukkit.getWorlds()) {
             String name = world.getName();
             int current = world.getViewDistance();
@@ -83,20 +101,32 @@ public final class ViewThrottle {
                 int target = Math.max(minDist, current - 1);
                 if (target != current) {
                     world.setViewDistance(target);
-                    SourbyLogger.debug("view distance world=" + name
-                        + " " + current + "->" + target + " (tier=" + tier + ")");
+                    changedWorlds++;
+                    minTarget = Math.min(minTarget, target);
+                    maxTarget = Math.max(maxTarget, target);
                 }
             } else if (current < original) {
                 // Healthy tier → step +1 toward original.
                 int target = Math.min(original, current + 1);
                 world.setViewDistance(target);
-                SourbyLogger.debug("view distance world=" + name
-                    + " " + current + "->" + target + " (tier=" + tier + ", recovering)");
+                changedWorlds++;
+                recovering = true;
+                minTarget = Math.min(minTarget, target);
+                maxTarget = Math.max(maxTarget, target);
                 if (target >= original) {
                     // Fully recovered — forget the saved original so a manual /view change is respected.
                     originalViewDistance.remove(name);
                 }
             }
+        }
+
+        // One collapsed summary per tier change (debug-level, so quiet by default).
+        if (changedWorlds > 0 && tier != lastLoggedTier) {
+            String target = (minTarget == maxTarget) ? Integer.toString(minTarget) : (minTarget + "-" + maxTarget);
+            SourbyLogger.debug("view distance -> " + target + " (tier=" + tier
+                + (recovering ? ", recovering" : "") + ") [" + changedWorlds + " world"
+                + (changedWorlds == 1 ? "" : "s") + "]");
+            lastLoggedTier = tier;
         }
     }
 }

@@ -43,7 +43,7 @@ public final class GcAdvisor {
         // gate — if operator disabled gc-advisor in baked yml, skip.
         if (!ENABLED) {
             dev.iyanz.sourbycraft.util.SourbyLogger.info(
-                "[SourbyCraft] gc-advisor disabled via branding.gc-advisor.enabled=false");
+                "gc-advisor disabled via branding.gc-advisor.enabled=false");
             return new Result(true, List.of());
         }
         List<String> gcNames = ManagementFactory.getGarbageCollectorMXBeans().stream()

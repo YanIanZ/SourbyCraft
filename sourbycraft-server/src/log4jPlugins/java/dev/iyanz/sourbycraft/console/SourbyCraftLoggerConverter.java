@@ -85,7 +85,16 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
             return;
         }
 
-        if (isInternal(logger)) {
+        if (logger.equals(BRAND)) {
+            // dev.iyanz.sourbycraft.util.SourbyLogger logs under the literal "SourbyCraft" logger
+            // name. simpleName() would yield "SourbyCraft" too, rendering the doubled
+            // [SourbyCraft/SourbyCraft] tag the boot log showed — so collapse it to a single clean
+            // [SourbyCraft] tag (no "/SourbyCraft" suffix).
+            toAppendTo.append('[')
+                      .append(PRIMARY).append(BRAND)
+                      .append(RESET)
+                      .append(']');
+        } else if (isInternal(logger)) {
             // [SourbyCraft/SimpleName] with brand + dim coloring, then a hard reset so the
             // surrounding %highlightError / %msg picks up its own color cleanly.
             toAppendTo.append('[')
