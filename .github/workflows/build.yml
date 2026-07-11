@@ -41,8 +41,8 @@ jobs:
       - name: Publish SourbyPatcher to mavenLocal (build plugin for the Folia patcher)
         run: cd sourbypatcher && ./gradlew publishToMavenLocal --no-daemon --stacktrace -x test
 
-      - name: Setup MaplePile (vendored — gen sources)
-        run: bash scripts/setup_maple_pile.sh
+      - name: Setup Metal (vendored — gen sources)
+        run: bash scripts/setup_metal.sh
 
       - name: Apply all patches (Luminol 26.2 -> Folia)
         run: ./gradlew applyAllPatches --no-daemon --stacktrace
