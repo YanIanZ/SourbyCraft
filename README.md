@@ -40,6 +40,7 @@ On top of that base it adds a **self-tuning per-region performance engine**, a f
 | 🎨 **Hex UI everywhere** | Truecolor banner, advisors, command output, and rebranded log prefixes |
 | 🗺️ **Varied messages** | Configurable, multi-variant server-full / MOTD / join-leave lang |
 | 🔄 **Advanced auto-updater** | Channel-aware (REL/DEV/EXP), SHA-256-verified, safe staged apply |
+| 🕰️ **Built-in ViaVersion** | Old clients (**1.20 → server's 26.2 / 1.21.9**) join out of the box — ViaVersion + ViaBackwards auto-provisioned (pinned, SHA-256-verified) on first boot |
 | 🚀 **Auto-CDS** | Class-Data-Sharing that adapts to bare-metal / Docker / k8s / systemd / panels |
 | 🧵 **SIMD + Pufferfish** | Vectorized ops (`jdk.incubator.vector`) + Pufferfish optimizations enabled |
 
@@ -94,6 +95,15 @@ All Folia-native (region/async schedulers, no legacy Bukkit global scheduler), 0
 ## Configuration
 
 One unified file: **`sourbycraft_config/sourbycraft_global_config.toml`**. It carries Luminol's ~60 optimization modules **and** SourbyCraft's `perf.*`, `messages.*`, `misc.auto_update.*`, and `max-players` keys — a single place to tune everything, with room for more.
+
+### Built-in ViaVersion / ViaBackwards (old-client support)
+
+Old clients join with **zero manual install**. On first boot SourbyCraft downloads the pinned **ViaVersion 5.10.0** + **ViaBackwards 5.10.0** jars into `plugins/` (each **SHA-256-verified**, https-only, exactly like the slim-jar libraries) *before* the plugin manager scans — so they load and enable the same boot. Both are Folia builds (`folia-supported: true`).
+
+- **Supported client range:** oldest **1.20** → the server's native **26.2 (MC 1.21.9, protocol 776)**. Clients older than 1.20 are refused with a clean message.
+- **Change the floor:** `plugins/ViaVersion/config.yml` → `block-versions` (default `["<1.20"]`). Lower it (e.g. `["<1.16.5"]`) to allow older clients.
+- **Toggle:** `[viaversion] auto-provision` in the unified TOML (default `true`). Set `false` if you manage Via yourself or run fully offline.
+- **Idempotent:** never re-downloads a present/verified jar and never overwrites your config edits; an existing `ViaVersion-*.jar` / `ViaBackwards-*.jar` (yours or ours) is left untouched.
 
 ---
 

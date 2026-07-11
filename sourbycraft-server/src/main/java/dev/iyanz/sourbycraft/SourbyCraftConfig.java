@@ -307,6 +307,12 @@ public class SourbyCraftConfig {
     public static String swmLoader = "file";
     public static String swmFileDir = "slime_worlds";
 
+    // SourbyCraft — built-in ViaVersion/ViaBackwards auto-provisioning (default ON). When true,
+    // the server downloads + SHA-256-verifies the pinned ViaVersion + ViaBackwards jars into
+    // plugins/ on first boot (before the plugin manager loads plugins) so old clients (>=1.20)
+    // can join the native 26.2/1.21.9 server. Set false if you manage Via yourself or run offline.
+    public static boolean viaVersionAutoProvision = true;
+
     public static boolean autoThrottleView = true;
     public static int minViewDistance = 4;
     public static int compressionLevel = 4;
@@ -517,6 +523,10 @@ public class SourbyCraftConfig {
 
         // SourbyCraft ML1 — mods/ scanning and SourbyMod lifecycle are handled by
         // dev.iyanz.sourbycraft.mod.ModLoader.bootstrap() (out-of-scope: not on Folia yet).
+
+        // SourbyCraft — Via auto-provision toggle. cfgBool so it reads the unified TOML (operator
+        // surface) without polluting the legacy sourbycraft.yml; default keeps it ON.
+        viaVersionAutoProvision = cfgBool("viaversion.auto-provision", viaVersionAutoProvision);
 
         autoThrottleView = getBoolean("network.auto-throttle-view", autoThrottleView);
         minViewDistance = getInt("network.min-view-distance", minViewDistance);
@@ -813,6 +823,12 @@ public class SourbyCraftConfig {
         seedThresholds(f, changed, "tps", 19.5, 18.0, 15.0, 10.0, "TPS tier thresholds (lower = worse).");
         seedThresholds(f, changed, "mem", 75.0, 85.0, 92.0, 97.0, "Heap % tier thresholds (higher = worse).");
         seedThresholds(f, changed, "gc-ms-per-min", 20.0, 50.0, 100.0, 300.0, "GC pause ms/min tier thresholds (higher = worse).");
+
+        // --- Built-in ViaVersion/ViaBackwards auto-provision ---
+        seed(f, changed, "viaversion.auto-provision", true,
+            "Auto-download + SHA-256-verify the pinned ViaVersion + ViaBackwards into plugins/ on first "
+            + "boot so old clients (>=1.20) can join. false = manage Via yourself / run offline. The oldest "
+            + "allowed client (1.20) is set in plugins/ViaVersion/config.yml -> block-versions.");
 
         // --- Spark bridge + GC advisor ---
         seed(f, changed, "spark.enabled", true, "Enable the bundled spark profiler bridge.");

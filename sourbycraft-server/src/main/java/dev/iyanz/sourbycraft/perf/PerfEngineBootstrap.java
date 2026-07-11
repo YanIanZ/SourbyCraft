@@ -83,6 +83,18 @@ public final class PerfEngineBootstrap {
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: SourbyCraftConfig.init failed", t);
         }
+        // SourbyCraft — built-in ViaVersion/ViaBackwards, phase 2: seed the default config.yml
+        // (with the 1.20 client floor) for each provisioned plugin. The jars themselves are
+        // downloaded far earlier, in SourbyBootstrap.main, before the plugin scan — see that class.
+        // This hook precedes CraftServer.enablePlugins(), where a legacy Bukkit plugin reads its
+        // config in onEnable, so the floor is in place before Via reads it. Idempotent (absent-only),
+        // gated by the now-parsed viaversion.auto-provision toggle; wrapped so it cannot abort boot.
+        try {
+            dev.iyanz.sourbycraft.bootstrap.PluginProvisioner.provisionConfigs(
+                SourbyCraftConfig.viaVersionAutoProvision);
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: ViaVersion default-config seeding failed", t);
+        }
         // SourbyCraft F2e: enforce the loaded knob baseline onto the Luminol/Pufferfish base config
         // now that init() has applied every yml override (combat profile + explicit knob keys). This
         // is the boot-time bridge so the base actually enforces the SourbyCraft baseline in-tick;
