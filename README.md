@@ -157,22 +157,6 @@ Override with `-Dsourbycraft.cds.mode=auto|flag|fork|off`. SIMD is auto-enabled 
 
 ---
 
-## Behind a proxy
-
-SourbyCraft runs behind any Minecraft proxy — the base has native player-info forwarding; SourbyCraft adds a clean config surface, boot-time detection (`[SourbyCraft] proxy: …`), and misconfig warnings. Set `proxy.mode` in the unified config (or the native keys directly).
-
-| Proxy | Forwarding | How |
-|---|---|---|
-| **Velocity** | Modern (secure, secret-based) | `proxy.mode = velocity` + `proxy.velocity.secret` (matches the proxy's `forwarding.secret`) |
-| **XCord · FlameCord · BungeeCord · Waterfall** | Legacy (BungeeCord) | `proxy.mode = bungeecord` — XCord/FlameCord are BungeeCord forks, so they use the legacy path |
-| *(none)* | Direct | `proxy.mode = none` (default) |
-
-- **Online-mode:** behind a proxy the server runs `online-mode: false` (the proxy authenticates) — Velocity modern forwarding keeps it secure; legacy BungeeCord does **not**, so you MUST prevent direct connections.
-- **Anti-bypass (security):** **firewall the server port to the proxy's IP** so players can't skip the proxy (IP-spoof / auth bypass). SourbyCraft also offers an opt-in `proxy.allowed-ips` allowlist listener — **default off** (enabling it registers a login listener that slightly slows joins), the firewall is the recommended primary defense.
-- **Premium proxies** (e.g. XCord) run on your proxy host with their own jar + license — nothing about them is bundled in or committed to SourbyCraft.
-
----
-
 ## Build from source
 
 Requires **JDK 25** and git.
