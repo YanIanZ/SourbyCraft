@@ -248,6 +248,17 @@ public class SourbyCraftConfig {
         // Via auto-provision toggle (unified TOML; default OFF — native 776 client needs no Via and
         // Via can stall a native 1.21.9 join, ViaVersion#4666. Operator opts in with true).
         viaVersionAutoProvision = cfgBool("viaversion.auto-provision", viaVersionAutoProvision);
+        if (viaVersionAutoProvision) {
+            // Pre-fix builds seeded auto-provision=true into every existing TOML, so an explicit true
+            // is NOT proof the operator chose it — warn loudly every boot while it stays on.
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn(
+                "viaversion.auto-provision=true — ViaVersion injects into EVERY client's netty pipeline "
+                    + "and its current 1.21.9 translation has a confirmed native-join stall "
+                    + "(ViaVersion#4666: native 1.21.9 clients hang on 'Joining world', then disconnect). "
+                    + "If players cannot join, set viaversion.auto-provision=false in "
+                    + "sourbycraft_config/sourbycraft_global_config.toml — the next boot quarantines the "
+                    + "auto-provisioned Via jars automatically.");
+        }
 
         autoThrottleView = cfgBool("network.auto-throttle-view", autoThrottleView);
         minViewDistance = cfgInt("network.min-view-distance", minViewDistance);
