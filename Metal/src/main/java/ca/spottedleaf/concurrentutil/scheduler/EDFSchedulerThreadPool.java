@@ -31,7 +31,13 @@ public final class EDFSchedulerThreadPool extends Scheduler {
         final SchedulableTick t1 = s1.tick;
         final SchedulableTick t2 = s2.tick;
 
-        final int timeCompare = TimeUtil.compareTimes(t1.scheduledStart, t2.scheduledStart);
+        // Use the virtual getter, NOT the raw field: delegating wrappers (Luminol's
+        // LevelAwareRegionScheduler.WrappedTask) forward get/setScheduledStart to an inner handle
+        // and never write their own field, which stays DEADLINE_NOT_SET (Long.MIN_VALUE). Under
+        // the wrap-around comparator that value sorts as "later than everything", so a wrapped
+        // region task in `queued` is never polled ahead of the self-rescheduling global tick task
+        // and starves forever (players hang at "Joining world" because no region ever ticks).
+        final int timeCompare = TimeUtil.compareTimes(t1.getScheduledStart(), t2.getScheduledStart());
         if (timeCompare != 0) {
             return timeCompare;
         }
