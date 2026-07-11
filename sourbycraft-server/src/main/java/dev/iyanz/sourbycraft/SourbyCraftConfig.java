@@ -158,6 +158,26 @@ public class SourbyCraftConfig {
     // asyncSpawning: MT1 async mob-spawn density state (pufferfish semantics).
     public static boolean asyncSpawning = true;
 
+    // --- Anti-xray raytrace ore/liquid reveal (Folia port of the pre-folia core). Global master
+    // knobs read once at boot from the unified TOML antixray.* section; per-world fluid-obscures /
+    // all-blocks live in SourbyCraftWorldConfig. RayTraceWorker.ENABLED mirrors antixray.enabled. ---
+    /** Master enable for the ore/liquid raytrace reveal layer. Seeds RayTraceWorker.ENABLED. */
+    public static boolean antixrayEnabled = true;
+    /** Global master for fluid-obscures; ANDed with the per-world SourbyCraftWorldConfig.fluidObscures. */
+    public static boolean fluidObscures = true;
+    /** Also hide cave-exposed LIQUID (water/lava source+flowing) blocks, not just ores. Default ON. */
+    public static boolean hideLiquids = true;
+    /** tickCycle cadence in server ticks (reveal-confirmed + submit near-pending raytraces). */
+    public static int raytraceIntervalTicks = 2;
+    /** Max distance (blocks) a player eye may be from an ore for a raytrace to be submitted. */
+    public static double raytraceDistance = 64.0;
+    /** Per tickCycle, the max number of async raytrace checks submitted per player. */
+    public static int raytraceMaxChecksPerCycle = 10;
+    /** Per player, the max number of hidden-and-pending ore positions held at once (budget). */
+    public static int raytraceMaxPendingPerPlayer = 512;
+    /** TTL (ticks) for the per-chunk exposed-ore scan cache before a non-event re-scan. */
+    public static int raytraceCacheTtlTicks = 100;
+
     /**
      * Seed the SourbyCraft TOML defaults, wire the Folia-available subsystems, and read the live
      * config fields from the unified TOML.
@@ -259,6 +279,19 @@ public class SourbyCraftConfig {
         dev.iyanz.sourbycraft.util.SourbyLogger.info(
             "threads: chunk-workers=" + appliedWorkers + " io=" + ioWorkers
             + " send-rate=" + maxChunkSendRate + " async-spawning=" + asyncSpawning);
+
+        // Anti-xray raytrace ore/liquid reveal (Folia core). Read the global master knobs and mirror
+        // the enable flag into RayTraceWorker.ENABLED (the single volatile the hot path reads). The
+        // per-world fluid-obscures / all-blocks are read lazily in SourbyCraftWorldConfig.
+        antixrayEnabled = cfgBool("antixray.enabled", antixrayEnabled);
+        fluidObscures = cfgBool("antixray.fluid-obscures", fluidObscures);
+        hideLiquids = cfgBool("antixray.hide-liquids", hideLiquids);
+        raytraceIntervalTicks = Math.max(1, cfgInt("antixray.raytrace.interval-ticks", raytraceIntervalTicks));
+        raytraceDistance = Math.max(1.0, cfgDouble("antixray.raytrace.distance", raytraceDistance));
+        raytraceMaxChecksPerCycle = Math.max(0, cfgInt("antixray.raytrace.max-checks-per-cycle", raytraceMaxChecksPerCycle));
+        raytraceMaxPendingPerPlayer = Math.max(0, cfgInt("antixray.raytrace.max-pending-per-player", raytraceMaxPendingPerPlayer));
+        raytraceCacheTtlTicks = Math.max(1, cfgInt("antixray.raytrace.cache-ttl-ticks", raytraceCacheTtlTicks));
+        dev.iyanz.sourbycraft.antixray.RayTraceWorker.ENABLED.set(antixrayEnabled);
 
         dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.set(
             cfgInt("perf.entity-tick-rate", dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get())
@@ -399,6 +432,33 @@ public class SourbyCraftConfig {
             "Auto-download + SHA-256-verify the pinned ViaVersion + ViaBackwards into plugins/ on first "
             + "boot so old clients (>=1.20) can join. false = manage Via yourself / run offline. The oldest "
             + "allowed client (1.20) is set in plugins/ViaVersion/config.yml -> block-versions.");
+
+        // --- Anti-xray raytrace ore/liquid reveal (Folia core) ---
+        // Complementary layer ABOVE Paper's engine-mode 1 anti-xray: hides cave-EXPOSED ores (which
+        // Paper still leaks through walls) on chunk send, then reveals each one when an async raytrace
+        // confirms real line-of-sight (or instantly within 8 blocks for mining UX). Stays inert unless
+        // a world also has Paper anticheat.anti-xray.enabled: true in paper-world-defaults.yml.
+        if (f.getComment("antixray") == null) {
+            f.setComment("antixray", "SourbyCraft raytrace ore/liquid anti-xray (layer above Paper engine-mode 1; needs Paper anti-xray ON per world).");
+        }
+        seed(f, changed, "antixray.enabled", true,
+            "Master switch for the raytrace ore/liquid reveal layer. false = onChunkSent is a single volatile read (zero cost).");
+        seed(f, changed, "antixray.fluid-obscures", true,
+            "A fluid (water/lava) between the player eye and an ore obscures it (ore stays hidden). ANDed with the per-world override.");
+        seed(f, changed, "antixray.hide-liquids", true,
+            "Also hide cave-exposed LIQUID (water/lava, source + flowing) blocks the same way as ores. Reveals on real line-of-sight.");
+        seed(f, changed, "antixray.all-blocks", false,
+            "Gate ALL Paper anti-xray hidden-blocks (not just ores) through the raytrace, not only the ore tags. Off = ores only.");
+        seed(f, changed, "antixray.raytrace.interval-ticks", 2,
+            "tickCycle cadence in server ticks: reveal confirmed ores + submit near-pending raytraces. Higher = cheaper, laggier reveal.");
+        seed(f, changed, "antixray.raytrace.distance", 64.0,
+            "Max distance (blocks) from the player eye an ore may be for a line-of-sight raytrace to be submitted.");
+        seed(f, changed, "antixray.raytrace.max-checks-per-cycle", 10,
+            "Per tickCycle, max async raytrace checks submitted per player (throttle; the async worker runs off-thread).");
+        seed(f, changed, "antixray.raytrace.max-pending-per-player", 512,
+            "Per player, max hidden-and-pending ore positions held at once. Budget full = remaining ores stay visible (fail-open).");
+        seed(f, changed, "antixray.raytrace.cache-ttl-ticks", 100,
+            "TTL (ticks) for the per-chunk exposed-ore scan cache before a non-event re-scan. Precise event invalidation still applies.");
 
         // --- Network / client latency (documented latency-relevant knobs) ---
         // These keys are read in init() but were previously unseeded, so they never surfaced in the
