@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 11 Jul 2026 22:04:06 +0700
+Subject: [PATCH] SourbyCraft antixray: entity / hologram / drop occlusion hook
+
+
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index 849ad46b2941ebba91b428846b3b20d11ee5e1c9..448df9e026fdc25d12c1ae9dab78fcfc229334b9 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -1372,6 +1372,14 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+                     visibleToPlayer = false;
+                 }
+                 // CraftBukkit end
++                // SourbyCraft start - RayTraceAntiXray entity / hologram / drop occlusion (anti-ESP).
++                // Runs on the owning region thread (guaranteed by the TickThread.isTickThreadFor(player)
++                // check above); the level.clip ray reads region-local block state only. Zero cost when off.
++                if (visibleToPlayer && dev.iyanz.sourbycraft.antixray.EntityVisibilityCheck.ENABLED.get()
++                    && !dev.iyanz.sourbycraft.antixray.EntityVisibilityCheck.isVisibleSync(player, this.entity)) {
++                    visibleToPlayer = false;
++                }
++                // SourbyCraft end - RayTraceAntiXray entity / hologram / drop occlusion
+                 if (visibleToPlayer) {
+                     if (this.seenBy.add(player.connection)) {
+                         // Paper start - entity tracking events
