@@ -313,6 +313,17 @@ public class SourbyCraftConfig {
         dev.iyanz.sourbycraft.antixray.EntityVisibilityCheck.ENABLED.set(antixrayEnabled && hideEntities);
         dev.iyanz.sourbycraft.antixray.ParticleVisibilityCheck.ENABLED.set(antixrayEnabled && hideParticles);
 
+        // Baritone / anti-raid defense: seed Paper's built-in anti-xray to engine-mode 2 (fake ores)
+        // with the strong palette + base-indicator set. Runs HERE (post-config hook, before
+        // DedicatedServer#loadLevel builds each world's chunkPacketBlockController from
+        // config/paper-world-defaults.yml) so every world comes up already defended. Idempotent +
+        // gated on antixray.baritone-defense; wrapped so a config-write failure never aborts boot.
+        try {
+            dev.iyanz.sourbycraft.antixray.PaperAntiXrayDefense.apply();
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("PaperAntiXrayDefense.apply failed; Paper anti-xray left as-is", t);
+        }
+
         dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.set(
             cfgInt("perf.entity-tick-rate", dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get())
         );
@@ -486,6 +497,12 @@ public class SourbyCraftConfig {
             "Per player, max hidden-and-pending ore positions held at once. Budget full = remaining ores stay visible (fail-open).");
         seed(f, changed, "antixray.raytrace.cache-ttl-ticks", 100,
             "TTL (ticks) for the per-chunk exposed-ore scan cache before a non-event re-scan. Precise event invalidation still applies.");
+
+        // --- Baritone / anti-raid defense: seed Paper's built-in engine to engine-mode 2 (fake ores)
+        // with a strong phantom-ore palette + base-indicator hidden set. This is a boot-time CONFIG
+        // seed of config/paper-world-defaults.yml (applied in init(), before worlds build their
+        // chunk-packet controller); the keys below are the SourbyCraft toggles that drive it. ---
+        dev.iyanz.sourbycraft.antixray.PaperAntiXrayDefense.seedDefaults(f, changed);
 
         // --- Network / client latency (documented latency-relevant knobs) ---
         // These keys are read in init() but were previously unseeded, so they never surfaced in the
