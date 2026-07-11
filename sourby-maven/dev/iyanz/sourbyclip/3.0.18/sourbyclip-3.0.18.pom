@@ -7,20 +7,24 @@
   <!-- that they should prefer consuming it instead. -->
   <!-- do_not_remove: published-with-gradle-metadata -->
   <modelVersion>4.0.0</modelVersion>
-  <groupId>moe.luminolmc</groupId>
-  <artifactId>hyacinthusclip</artifactId>
+  <groupId>dev.iyanz</groupId>
+  <artifactId>sourbyclip</artifactId>
   <version>3.0.18</version>
-  <name>Hyacinthusclip</name>
-  <description>Launcher for the Luminol Minecraft server</description>
-  <url>https://github.com/LuminolMC/Hyacinthusclip</url>
+  <name>Sourbyclip</name>
+  <description>Launcher for the SourbyCraft Minecraft server</description>
+  <url>https://github.com/iyanz/SourbyCraft</url>
   <licenses>
     <license>
       <name>MIT</name>
-      <url>https://github.com/LuminolMC/Hyacinthusclip/blob/main/license.txt</url>
+      <url>https://github.com/iyanz/SourbyCraft/blob/main/sourbyclip/license.txt</url>
       <distribution>repo</distribution>
     </license>
   </licenses>
   <developers>
+    <developer>
+      <id>iyanz</id>
+      <name>SourbyCraft</name>
+    </developer>
     <developer>
       <id>DemonWav</id>
       <name>Kyle Wood</name>
@@ -35,12 +39,12 @@
     </developer>
   </developers>
   <scm>
-    <connection>scm:git:https://github.com/LuminolMC/Hyacinthusclip.git</connection>
-    <developerConnection>scm:git:git@github.com:LuminolMC/Hyacinthusclip.git</developerConnection>
-    <url>https://github.com/LuminolMC/Hyacinthusclip</url>
+    <connection>scm:git:https://github.com/iyanz/SourbyCraft.git</connection>
+    <developerConnection>scm:git:git@github.com:iyanz/SourbyCraft.git</developerConnection>
+    <url>https://github.com/iyanz/SourbyCraft</url>
   </scm>
   <issueManagement>
     <system>GitHub</system>
-    <url>https://github.com/LuminolMC/Hyacinthusclip/issues</url>
+    <url>https://github.com/iyanz/SourbyCraft/issues</url>
   </issueManagement>
 </project>
