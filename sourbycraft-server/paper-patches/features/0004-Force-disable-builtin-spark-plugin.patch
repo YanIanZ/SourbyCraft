@@ -4,6 +4,28 @@ Date: Fri, 17 Apr 2026 23:31:55 +0800
 Subject: [PATCH] Force disable builtin spark plugin
 
 
+diff --git a/src/main/java/io/papermc/paper/SparksFly.java b/src/main/java/io/papermc/paper/SparksFly.java
+index b332645ed65928100f580221d8a9948bc77e362e..d30a9d032ff40a7dc902eb9db3aa13bcbd7bb0f3 100644
+--- a/src/main/java/io/papermc/paper/SparksFly.java
++++ b/src/main/java/io/papermc/paper/SparksFly.java
+@@ -116,7 +116,7 @@ public final class SparksFly {
+ 
+     private void enable() {
+         if (!this.enabled) {
+-            if (false) { // Folia - disable in-built spark profiler
++            if (GlobalConfiguration.get().spark.enabled) { // SourbyCraft - re-enable bundled spark profiler on Folia (was Folia-forced false)
+                 this.enabled = true;
+                 this.spark.enable();
+             } else {
+@@ -168,7 +168,7 @@ public final class SparksFly {
+     }
+ 
+     public static boolean isPluginPreferred() {
+-        return true; // Folia - disable in-built spark profiler
++        return !GlobalConfiguration.get().spark.enabled; // SourbyCraft - re-enable bundled spark profiler on Folia (was Folia-forced true); prefer external plugin only when bundled spark disabled in config
+     }
+ 
+     private static boolean isPluginEnabled(final Server server) {
 diff --git a/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java b/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
 index 9661f033bbb2c00073f1c891e1411c2a9943a37a..b6443e4b16e90fa18a38d8492d8a553c394203de 100644
 --- a/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
