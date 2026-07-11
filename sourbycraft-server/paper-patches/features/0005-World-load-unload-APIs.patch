@@ -13,7 +13,7 @@ Content-Transfer-Encoding: 8bit
 由于世界卸载可能发生在玩家登录或者传送的过程中,所以我使用了引用计数器来避免这个竟态条件的发生
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index 407191ad9a7f31cc3317a7747ec3489804807b8e..606235c9af5afce55be8bbc963e8af7291a050c5 100644
+index 5bf41832b3f9a00c5815c1404b0ff925a08592db..702ebfa28565c83afde1669c6561010f8e8ca490 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 @@ -276,7 +276,7 @@ public final class CraftServer implements Server {
