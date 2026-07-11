@@ -48,8 +48,12 @@ import java.util.List;
  * plugin. Configs are written only when absent, so operator edits are never clobbered.
  *
  * <p><b>Toggle.</b> Gated by {@code viaversion.auto-provision} in the unified SourbyCraft config
- * (default {@code true}). Phase 1 reads it with a tiny on-disk TOML scan (the Luminol config engine
- * is not up yet at bootstrap time); phase 2 reads the fully-parsed value.
+ * (default {@code false} since 2026-07-12). A native 26.2/1.21.9 (protocol 776) client needs no
+ * translation, and ViaVersion injects into EVERY client's pipeline — the current 1.21.9 play-phase
+ * translation has a confirmed native-join stall (ViaVersion#4666), so we do not provision Via by
+ * default. Operators bridging pre-1.21.9 clients opt in with {@code viaversion.auto-provision=true}.
+ * Phase 1 reads it with a tiny on-disk TOML scan (the Luminol config engine is not up yet at
+ * bootstrap time); phase 2 reads the fully-parsed value.
  */
 public final class PluginProvisioner {
 
@@ -208,29 +212,31 @@ public final class PluginProvisioner {
     /**
      * Tiny, dependency-free TOML scan for {@code viaversion.auto-provision}. The Luminol config
      * engine is not initialised at bootstrap time, so we read the on-disk unified file directly.
-     * Returns the default ({@code true}) when the file or key is absent/unreadable — provisioning
-     * is opt-out, and a first boot has no file yet.
+     * Returns the default ({@code false}) when the file or key is absent/unreadable — provisioning
+     * is opt-in (a native 776 client needs no Via, and Via can stall a native 1.21.9 join —
+     * ViaVersion#4666), and a first boot has no file yet. Explicit
+     * {@code auto-provision = true} opts in.
      */
     private static boolean autoProvisionEnabledFromDisk() {
-        if (!Files.isRegularFile(UNIFIED_CONFIG)) return true; // first boot / no file -> default ON
+        if (!Files.isRegularFile(UNIFIED_CONFIG)) return false; // first boot / no file -> default OFF
         try {
             for (String raw : Files.readAllLines(UNIFIED_CONFIG)) {
                 String line = raw.trim();
                 if (line.isEmpty() || line.startsWith("#")) continue;
-                // Match "auto-provision = false" under [viaversion], OR a dotted "viaversion.auto-provision".
+                // Match "auto-provision = true" under [viaversion], OR a dotted "viaversion.auto-provision".
                 int eq = line.indexOf('=');
                 if (eq <= 0) continue;
                 String key = line.substring(0, eq).trim();
                 String val = line.substring(eq + 1).trim().toLowerCase(java.util.Locale.ROOT);
                 if (key.equals("auto-provision") || key.equals("viaversion.auto-provision")
                         || key.equals("\"auto-provision\"")) {
-                    return !val.startsWith("false");
+                    return val.startsWith("true");
                 }
             }
         } catch (IOException ignored) {
-            // Unreadable -> default ON.
+            // Unreadable -> default OFF.
         }
-        return true;
+        return false;
     }
 
     // ---------------------------------------------------------------------------------------------
