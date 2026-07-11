@@ -82,6 +82,24 @@ public final class Knobs {
     public static final BoolKnob GOAL_SELECTOR_INACTIVE_TICK_ENABLED =
         new BoolKnob("perf.ai.goal-selector-inactive-throttle", true);
 
+    /** Global scale applied to every Kaiiju per-type entity tick cap. Bridged to
+     *  {@code KaiijuEntityLimits.limitScale}. Default 1.0 = base behaviour (caps used as-is, no
+     *  down-scaling; GREEN, no regression). The perf engine scales it DOWN under load (e.g. 0.75 RED,
+     *  0.5 EMERGENCY) so fewer entities tick per tick while the server is struggling. Only takes
+     *  effect while the entity limiter itself is enabled ({@link #KAIIJU_ENTITY_LIMITER_ENABLED}). */
+    public static final DoubleKnob KAIIJU_ENTITY_LIMITER_SCALE =
+        new DoubleKnob("perf.entity-limiter.scale", 1.0D,
+            KnobMeta.active("Global multiplier on every Kaiiju per-type entity tick cap.",
+                "1.0 = base behaviour (no down-scaling); the perf-engine scales it down under load."));
+
+    /** Cadence (in inactive ticks) of the Pufferfish inactive goal-selector throttle. Bridged to
+     *  {@code EntityGoalSelectorInactiveTickConfig.inactiveTickInterval}. Default 20 = the exact base
+     *  behaviour (tick the goal selector once every 20 inactive ticks; GREEN, no regression). The perf
+     *  engine WIDENS it under load (e.g. 30 ORANGE, 40 RED, 60 EMERGENCY) so the selector ticks even
+     *  less often. Only takes effect while the throttle is enabled ({@link #GOAL_SELECTOR_INACTIVE_TICK_ENABLED}). */
+    public static final IntKnob GOAL_SELECTOR_INACTIVE_TICK_INTERVAL =
+        new IntKnob("perf.ai.goal-selector-interval", 20, 1, 200);
+
     public static Map<String, Object> snapshot() {
         return KnobRegistry.snapshot();
     }
