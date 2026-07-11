@@ -218,11 +218,13 @@ public final class PerfEngineBootstrap {
         }
 
         // MaxPlayersBypass — let sourbycraft.maxplayers.bypass holders (+ ops) join a full server.
-        // Always registered (login-time, region-free, Folia-safe). Zero cost unless a full-server
-        // KICK_FULL login actually occurs. Also carries the F1-7 varied server-full kick message.
+        // OPT-IN, default OFF: registering the PlayerLoginEvent listener disables the config-phase
+        // fast join path (HorriblePlayerLoginEventHack) and slows every join, so it only registers
+        // when sourbycraft.maxplayers.bypass-enabled=true. When off, no listener → fast joins.
         try {
-            MaxPlayersBypass.register(owner);
-            registered.add("maxplayers-bypass");
+            if (MaxPlayersBypass.register(owner)) {
+                registered.add("maxplayers-bypass");
+            }
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: MaxPlayersBypass.register failed", t);
         }

@@ -410,6 +410,10 @@ public class SourbyCraftConfig {
         // --- Max players (F1-6): set by /maxp; 0 = use server.properties. ---
         seed(f, changed, dev.iyanz.sourbycraft.perf.MaxPlayersConfig.KEY, 0,
             "Server max-player slot count set by /maxp. Re-applied at boot so it wins over server.properties. 0 = use server.properties.");
+        seed(f, changed, dev.iyanz.sourbycraft.perf.MaxPlayersBypass.ENABLED_KEY, false,
+            "Let sourbycraft.maxplayers.bypass holders (+ ops) join a full server. Default false: OFF keeps"
+            + " the fast config-phase join path; enabling registers a PlayerLoginEvent listener that"
+            + " disables that fast path (HorriblePlayerLoginEventHack) and slows every join.");
 
         if (changed[0]) {
             try {
