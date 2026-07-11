@@ -120,7 +120,7 @@
  }
  
  tasks.jar {
-@@ -189,21 +_,42 @@
+@@ -189,21 +_,49 @@
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
@@ -147,11 +147,18 @@
 +            codename == "dev" -> "DEV"
 +            else -> "REL"
 +        }
-+        val implementationVersion = when (suffix) {
++        val channelVersion = when (suffix) {
 +            "EXP" -> "$releaseMajor-EXP"
 +            "REL" -> "$releaseMajor-REL"
 +            else -> "$releaseVersionFull-DEV"
 +        }
++        // SourbyCraft — append the Folia build id so ServerBuildInfoImpl.asString() (which returns
++        // this manifest Implementation-Version) makes the "[bootstrap] Loading" + "This server is
++        // running SourbyCraft version" boot lines show "26.2-REL (build 1f)". Kept in lockstep with
++        // META-INF/sourbycraft-build.properties `build=1f` (writeBuildInfo). Bump gradle.properties
++        // sourbyBuild per release -> 2f, 3f, ...
++        val sourbyBuild = rootProject.providers.gradleProperty("sourbyBuild").getOrElse("1").trim() + "f"
++        val implementationVersion = "$channelVersion (build $sourbyBuild)"
          attributes(
              "Main-Class" to "org.bukkit.craftbukkit.Main",
 -            "Implementation-Title" to "Folia",

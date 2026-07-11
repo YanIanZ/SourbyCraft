@@ -160,10 +160,15 @@ subprojects {
     val internalVersionProvider = sourbycraftSuffixProvider
     val writeBuildInfoTask = tasks.register("writeBuildInfo") {
         val mcVersion = providers.gradleProperty("mcVersion").getOrElse("unknown")
+        // SourbyCraft — Folia build number: gradle.properties `sourbyBuild=1` -> effective id "1f"
+        // (f = Folia). Surfaced as `build=1f` here so BuildInfo (banner + /ver) can render
+        // "26.2-REL (build 1f)". Bump sourbyBuild per release -> 2f, 3f, ...
+        val sourbyBuild = providers.gradleProperty("sourbyBuild").getOrElse("1").trim() + "f"
         val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
 
         inputs.property("internalVersion", internalVersionProvider)
         inputs.property("mcVersion", mcVersion)
+        inputs.property("sourbyBuild", sourbyBuild)
         outputs.file(outFile)
         // The branch provider is captured into the doLast closure below, which the
         // config-cache layer cannot serialise. Opting THIS task out is cheap and does
@@ -178,6 +183,7 @@ subprojects {
             f.writeText(
                 """
                 version=$resolved
+                build=$sourbyBuild
                 mcVersion=$mcVersion
                 tagline=Lightning Fast Performance Feature Rich
                 buildTimestamp=$timestamp

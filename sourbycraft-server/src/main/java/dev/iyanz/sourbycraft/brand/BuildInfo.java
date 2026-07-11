@@ -6,10 +6,21 @@ import java.util.Properties;
 
 public record BuildInfo(
     String version,
+    String build,
     String mcVersion,
     String tagline,
     String buildTimestamp
 ) {
+    /**
+     * Human-facing version + Folia build id, e.g. {@code "26.2-REL (build 1f)"}.
+     * Falls back to the bare channel version when no build id is present.
+     */
+    public String displayVersion() {
+        return (build == null || build.isEmpty())
+            ? version
+            : version + " (build " + build + ")";
+    }
+
     private static final String RESOURCE = "/META-INF/sourbycraft-build.properties";
 
     public static BuildInfo load() {
@@ -31,6 +42,7 @@ public record BuildInfo(
         }
         return new BuildInfo(
             p.getProperty("version", "dev"),
+            p.getProperty("build", ""),
             p.getProperty("mcVersion", "unknown"),
             p.getProperty("tagline", "Lightning Fast Performance · Feature Rich"),
             p.getProperty("buildTimestamp", "")
