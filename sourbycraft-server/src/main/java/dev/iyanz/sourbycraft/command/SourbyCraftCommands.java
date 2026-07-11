@@ -27,9 +27,10 @@ import java.util.Map;
  * (and the bare {@code /<name>} lands on us too whenever Paper has not already
  * claimed the slot). SWM / tpsbar / rambar are intentionally omitted — the bars
  * are handled by Luminol and SWM is gone on this Folia line. {@code /tps} is
- * registered here as a hex TPS panel; {@code /spark} is registered as a
- * status/entry shim (full spark is provided by dropping the spark plugin jar,
- * and this shim never shadows a real spark plugin's {@code /spark}).
+ * registered here as a hex TPS panel. {@code /spark} is intentionally NOT
+ * registered here: the bundled spark profiler is re-enabled (paper feature
+ * patch 0004), so Paper's own {@code SparksFly} owns the real {@code /spark};
+ * {@code /sparkview} remains the SourbyCraft one-shot quick view.
  */
 public final class SourbyCraftCommands {
 
@@ -65,29 +66,17 @@ public final class SourbyCraftCommands {
         commandMap.register("sourbycraft", new MaxpCommand("maxp"));
         commandMap.register("sourbycraft", new TpsCommand("tps"));
 
-        // /spark: only claim the bare name when no real spark plugin has taken it. The
-        // standalone spark plugin (dropped into plugins/) is honoured — isPluginPreferred()
-        // is true — and registers its own /spark; in that case we register ONLY the
-        // sourbycraft:spark alias so /spark still reaches the real profiler and we never
-        // shadow it. When no spark plugin is present, our shim owns the bare /spark and
-        // points operators at how to enable full spark.
-        int commandCount = 9;
-        Command existingSpark = commandMap.getCommand("spark");
-        boolean realSpark = existingSpark != null && !(existingSpark instanceof SparkCommand);
-        if (!realSpark) {
-            commandMap.register("sourbycraft", new SparkCommand("spark"));
-            commandCount = 10;
-        } else {
-            org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
-                "A spark plugin already owns /spark — leaving it in place; use /sparkview for the "
-                + "SourbyCraft quick view.");
-        }
+        // /spark is intentionally NOT registered here: the bundled spark profiler is
+        // re-enabled on this Folia build (paper feature patch 0004), so Paper's own
+        // io.papermc.paper.SparksFly registers the genuine /spark before plugins. We must
+        // not shadow it. /sparkview remains the SourbyCraft one-shot quick view and reads
+        // the same spark singleton.
 
         registered = true;
         org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
-            "Registered " + commandCount + " SourbyCraft commands (fallback prefix 'sourbycraft'). "
+            "Registered 9 SourbyCraft commands (fallback prefix 'sourbycraft'). "
             + "Use /sourbycraft:<name> if a name collides with Paper's built-ins "
-            + "(/ping, /version, /plugins).");
+            + "(/ping, /version, /plugins). Native /spark is provided by the bundled profiler.");
     }
 
     private SourbyCraftCommands() {}
