@@ -313,8 +313,8 @@ public class SourbyCraftConfig {
         dev.iyanz.sourbycraft.antixray.EntityVisibilityCheck.ENABLED.set(antixrayEnabled && hideEntities);
         dev.iyanz.sourbycraft.antixray.ParticleVisibilityCheck.ENABLED.set(antixrayEnabled && hideParticles);
 
-        // Baritone / anti-raid defense: seed Paper's built-in anti-xray to engine-mode 2 (fake ores)
-        // with the strong palette + base-indicator set. Runs HERE (post-config hook, before
+        // Baritone / anti-raid defense: seed Paper's built-in anti-xray to engine-mode 1 (HIDE —
+        // lightweight) with the ore + base-indicator hidden set. Runs HERE (post-config hook, before
         // DedicatedServer#loadLevel builds each world's chunkPacketBlockController from
         // config/paper-world-defaults.yml) so every world comes up already defended. Idempotent +
         // gated on antixray.baritone-defense; wrapped so a config-write failure never aborts boot.
@@ -465,12 +465,19 @@ public class SourbyCraftConfig {
             + "allowed client (1.20) is set in plugins/ViaVersion/config.yml -> block-versions.");
 
         // --- Anti-xray raytrace ore/liquid reveal (Folia core) ---
-        // Complementary layer ABOVE Paper's engine-mode 1 anti-xray: hides cave-EXPOSED ores (which
-        // Paper still leaks through walls) on chunk send, then reveals each one when an async raytrace
-        // confirms real line-of-sight (or instantly within 8 blocks for mining UX). Stays inert unless
-        // a world also has Paper anticheat.anti-xray.enabled: true in paper-world-defaults.yml.
+        // Complementary layer ABOVE Paper's built-in anti-xray engine (seeded to engine-mode 1 / HIDE
+        // by baritone-defense below): hides cave-EXPOSED ores (which Paper still leaks through walls) on
+        // chunk send, then reveals each one when an async raytrace confirms real line-of-sight (or
+        // instantly within 8 blocks for mining UX). Stays inert unless a world also has Paper
+        // anticheat.anti-xray.enabled: true (baritone-defense seeds exactly that in paper-world-defaults.yml).
         if (f.getComment("antixray") == null) {
-            f.setComment("antixray", "SourbyCraft raytrace ore/liquid anti-xray (layer above Paper engine-mode 1; needs Paper anti-xray ON per world).");
+            f.setComment("antixray", "SourbyCraft anti-xray. Two composed layers: (1) baritone-defense seeds Paper's "
+                + "built-in engine to engine-mode 1 (HIDE — lightweight) so occluded ores + base-indicator blocks "
+                + "(chests/spawners/valuables) are sent to the client as plain stone — xray/Baritone can't see real "
+                + "ores through walls (can't beeline to them) and can't scout underground bases; (2) the raytrace "
+                + "layer below reveals the genuinely line-of-sight-visible ores to legit players. Layer 1 hides the "
+                + "occluded set; layer 2 un-hides the truly-visible subset. (engine-mode 2 = fake-ores is available "
+                + "but heavier — see antixray.engine-mode.)");
         }
         seed(f, changed, "antixray.enabled", true,
             "Master switch for the raytrace ore/liquid reveal layer. false = onChunkSent is a single volatile read (zero cost).");
@@ -498,10 +505,10 @@ public class SourbyCraftConfig {
         seed(f, changed, "antixray.raytrace.cache-ttl-ticks", 100,
             "TTL (ticks) for the per-chunk exposed-ore scan cache before a non-event re-scan. Precise event invalidation still applies.");
 
-        // --- Baritone / anti-raid defense: seed Paper's built-in engine to engine-mode 2 (fake ores)
-        // with a strong phantom-ore palette + base-indicator hidden set. This is a boot-time CONFIG
-        // seed of config/paper-world-defaults.yml (applied in init(), before worlds build their
-        // chunk-packet controller); the keys below are the SourbyCraft toggles that drive it. ---
+        // --- Baritone / anti-raid defense: seed Paper's built-in engine to engine-mode 1 (HIDE —
+        // lightweight) with a broad ore + base-indicator hidden set. This is a boot-time CONFIG seed of
+        // config/paper-world-defaults.yml (applied in init(), before worlds build their chunk-packet
+        // controller); the keys below are the SourbyCraft toggles that drive it. ---
         dev.iyanz.sourbycraft.antixray.PaperAntiXrayDefense.seedDefaults(f, changed);
 
         // --- Network / client latency (documented latency-relevant knobs) ---

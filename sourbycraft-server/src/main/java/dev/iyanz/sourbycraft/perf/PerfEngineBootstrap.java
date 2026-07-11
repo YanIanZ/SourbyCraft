@@ -255,8 +255,8 @@ public final class PerfEngineBootstrap {
                 SourbyLogger.error("perf-engine: OreReveal.register failed", t);
             }
             // Baritone/anti-raid defense: per-world confirmation log of the LIVE Paper anti-xray engine
-            // each world builds (proof the fake-ore engine is active, not inert). No-op when baritone-
-            // defense is off. One log line per world at load — no hot path.
+            // each world builds (proof the engine is active, not inert). No-op when baritone-defense is
+            // off. One log line per world at load — no hot path.
             try {
                 dev.iyanz.sourbycraft.antixray.PaperAntiXrayDefense.registerConfirmationLog(owner);
             } catch (Throwable t) {

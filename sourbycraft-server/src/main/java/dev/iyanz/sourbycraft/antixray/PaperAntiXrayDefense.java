@@ -15,47 +15,48 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Baritone / anti-raid defense: seeds Paper's built-in anti-xray engine to <b>engine-mode 2
- * (OBFUSCATE / fake-ores)</b> with a strong, believable phantom-ore palette, plus a base-indicator
- * hidden-block set, at boot — before any world's chunk-packet controller is constructed.
+ * Baritone / anti-raid defense: seeds Paper's built-in anti-xray engine to <b>engine-mode 1
+ * (HIDE — lightweight)</b> with a broad ore hidden-block set plus a base-indicator hidden set, at
+ * boot — before any world's chunk-packet controller is constructed.
  *
- * <h2>Why this defeats Baritone</h2>
+ * <h2>Why engine-mode 1 (not 2) defeats Baritone — and stays lightweight</h2>
  * Baritone (and every xray client) reads the block data the server sends to the client and beelines
- * to real ores. Paper engine-mode 1 (HIDE) merely replaces occluded ores with plain stone — so an
- * xray/Baritone that reads the client palette sees "no ores here" and can still infer real ore
- * positions from the ones the engine leaks (cave-exposed / above max-block-height). Engine-mode 2
- * (OBFUSCATE) instead FILLS every occluded position with a scattered mix of the {@code hidden-blocks}
- * (the ores) + {@code replacement-blocks} (stone filler) — so the client sees <em>phantom ores
- * everywhere underground</em>. Baritone cannot distinguish a real diamond from one of thousands of
- * fakes, wastes its time mining noise, and its auto-miner heuristics collapse. SourbyCraft's
- * {@link OreReveal} raytrace layer sits on top and re-sends the REAL block for ores the player has
- * genuine line-of-sight to, so a legit player standing in an open cave sees reality while an xray
- * client behind a wall sees the fake field. The two layers compose on disjoint sets: Paper obfuscates
+ * to real ores. Engine-mode 1 (HIDE) replaces every OCCLUDED hidden block with plain stone/deepslate
+ * (per dimension) in the packet the client receives — so an xray/Baritone reading the client palette
+ * sees solid stone where a buried ore actually is and <em>cannot see the real ore through the wall</em>,
+ * so it cannot beeline to it. That is the primary, sufficient defense. It is also bit-level cheap:
+ * Paper's optimized engine writes a single stone id for every hidden position (no scattered per-section
+ * fake fill), which is why HIDE is the lightweight mode. Engine-mode 2 (OBFUSCATE / fake-ores) would
+ * additionally paint phantom ores everywhere to waste the bot's time, but that per-section scatter fill
+ * costs materially more, so it is intentionally NOT used here — hide-only is the correct lightweight
+ * choice. SourbyCraft's {@link OreReveal} raytrace layer sits on top and re-sends the REAL block for
+ * ores the player has genuine line-of-sight to, so a legit player standing in an open cave sees reality
+ * while an xray client behind a wall sees stone. The two layers compose on disjoint sets: Paper hides
  * what it deems occluded; OreReveal reveals the genuinely-visible subset.
  *
  * <h2>Anti-raid (base scouting)</h2>
- * Raiders xray for chests / valuables to find underground bases. The base-indicator blocks are
- * {@code EntityBlock}s; when they are in Paper's {@code hidden-blocks} list under engine-mode 2 they
- * are obfuscated (masked into the same fake ore+stone scatter) but — by Paper's own rule
- * ({@code ChunkPacketBlockControllerAntiXray}: {@code if (!(block instanceof EntityBlock))}) — are
- * NEVER themselves added to the fake palette. So a buried chest reads to an xray client as random
- * stone/ore noise, not "chest here", and the base is invisible to scouting. Standing players still
- * see it (the real block-entity data is sent for loaded, visible chunks as normal).
+ * Raiders xray for chests / valuables to find underground bases. Adding the base-indicator blocks to
+ * Paper's {@code hidden-blocks} set makes every occluded chest/barrel/shulker/spawner/valuable render
+ * as plain stone to an xray client — so a buried base is invisible to scouting. A player standing in
+ * the base still sees it (the block-entity is exposed / in line-of-sight, so it is sent normally and
+ * SourbyCraft's raytrace does not re-hide it once confirmed visible). This reuses the SAME hidden-set
+ * the ore defense already populates — no second scan, no extra engine pass.
  *
  * <h2>Cost</h2>
  * This is a boot-time CONFIG seed, not a hot path. It runs once in {@link SourbyCraftConfig#init}
  * (which fires from the post-config hook, strictly BEFORE {@code DedicatedServer#loadLevel} builds
  * each {@code Level}'s {@code chunkPacketBlockController} from {@code paperConfig().anticheat.antiXray}).
- * The obfuscation itself is Paper's already-optimized C-tier engine code — enabling mode 2 vs mode 1
- * costs the same per-chunk pass (both walk the same sections); mode 2 writes a scattered palette
- * instead of a single stone id, a negligible per-section difference that Paper ships as its
- * recommended anti-xray mode. No new per-tick / per-packet work is added here.
+ * The hide itself is Paper's already-optimized engine code writing one stone id per occluded hidden
+ * block — the cheapest anti-xray mode. Adding base blocks to the hidden set only lengthens the
+ * per-block "is this hidden?" lookup set (a bitset by block-state id, O(1) per block); it does not add
+ * a scan or a per-tick/per-packet path.
  *
  * <p>Gated on {@code antixray.baritone-defense} (default true). When on, the anti-xray block of
- * {@code config/paper-world-defaults.yml} is seeded to engine-mode 2 + the strong palette ONCE — only
+ * {@code config/paper-world-defaults.yml} is seeded to engine-mode 1 + the hidden set ONCE — only
  * while it still holds Paper's stock defaults ({@code enabled: false}). Once seeded (or if the operator
  * has already enabled Paper anti-xray themselves) it is left untouched, so operator edits are never
  * clobbered and reboots are no-ops. Turn {@code baritone-defense} off to manage Paper anti-xray by hand.
+ * {@code antixray.engine-mode} may be set to 2 (fake-ores) by an operator who accepts the extra cost.
  */
 public final class PaperAntiXrayDefense {
 
@@ -65,12 +66,11 @@ public final class PaperAntiXrayDefense {
     private static final Path WORLD_DEFAULTS = Paths.get("config", "paper-world-defaults.yml");
 
     /**
-     * Strong phantom-ore + filler palette written to {@code hidden-blocks}. Under engine-mode 2 every
-     * non-EntityBlock entry here becomes part of the scattered fake palette the client sees for occluded
-     * positions — a rich, believable field of every ore + deepslate variant so Baritone/xray cannot
-     * tell real from fake. Raw metal blocks + glowstone/obsidian/mossy-cobblestone/clay widen the
-     * scatter so the noise looks like a naturally-generated ore-bearing cave wall. All ore-ish blocks;
-     * NOT the base-indicator EntityBlocks (those are added separately, see {@link #BASE_BLOCKS}).
+     * Ore hidden-block set written to {@code hidden-blocks}. Under engine-mode 1 every occluded instance
+     * of these is replaced with plain stone/deepslate in the client packet, so xray/Baritone cannot see
+     * a buried ore through a wall. A broad set (every ore + deepslate variant + nether/end ores + raw
+     * metal blocks) so no valuable leaks. NOT the base-indicator EntityBlocks (added separately, see
+     * {@link #BASE_BLOCKS}).
      */
     private static final List<String> ORE_PALETTE = List.of(
         "coal_ore", "deepslate_coal_ore",
@@ -87,20 +87,18 @@ public final class PaperAntiXrayDefense {
     );
 
     /**
-     * Stone-family filler for {@code replacement-blocks} — the "background" the fake ores are scattered
-     * against. A varied but natural set so the obfuscated wall reads as real cave stone, not a flat
-     * block of one type (which an xray heuristic could fingerprint). Netherrack/end-stone are handled
-     * by the engine per-dimension; these cover the overworld filler.
+     * The single replacement block written to {@code replacement-blocks}. In engine-mode 1 (HIDE) Paper
+     * ignores this list entirely (it substitutes per-dimension stone/deepslate/netherrack/end-stone
+     * automatically), so this is only the file's stored value for readability / for an operator who
+     * later switches to engine-mode 2. Kept minimal (one block) to signal the lightweight intent.
      */
-    private static final List<String> FILLER_PALETTE = List.of(
-        "stone", "deepslate", "andesite", "diorite", "granite", "tuff", "dirt", "gravel"
-    );
+    private static final List<String> FILLER_PALETTE = List.of("stone");
 
     /**
-     * Base-indicator / valuable storage EntityBlocks hidden from xray (anti-raid). Obfuscated into the
-     * fake scatter under engine-mode 2 but never themselves shown as fakes (Paper skips EntityBlocks in
-     * the preset palette), so a base's chests/valuables are invisible to scouting xray yet normal to a
-     * player standing in the base. Config-overridable via {@code antixray.base-blocks}.
+     * Base-indicator / valuable storage EntityBlocks hidden from xray (anti-raid). In engine-mode 1
+     * every occluded instance renders as plain stone to an xray client, so a base's chests/valuables
+     * are invisible to scouting yet normal to a player standing in the base (exposed / line-of-sight
+     * blocks are sent as-is). Config-overridable via {@code antixray.base-blocks}.
      */
     private static final List<String> BASE_BLOCKS = List.of(
         "chest", "trapped_chest", "barrel", "ender_chest",
@@ -119,28 +117,30 @@ public final class PaperAntiXrayDefense {
     /** Seed the SourbyCraft-owned baritone-defense keys into the unified TOML (absent-only). */
     public static void seedDefaults(com.electronwill.nightconfig.core.file.CommentedFileConfig f, boolean[] changed) {
         seed(f, changed, "antixray.baritone-defense", true,
-            "Baritone/xray defense: seed Paper's built-in anti-xray to engine-mode 2 (fake-ores) with a "
-            + "strong phantom-ore palette at boot, so xray/Baritone sees scattered fake ores everywhere "
-            + "underground and cannot find the real ones. SourbyCraft's raytrace layer still reveals the "
-            + "genuinely visible ores to legit players (the layers compose). true = seed config/paper-"
-            + "world-defaults.yml to engine-mode 2 ONCE (only while it holds Paper's stock enabled:false "
-            + "default; operator edits are never clobbered). false = never touch Paper anti-xray; manage "
-            + "it yourself in paper-world-defaults.yml. Heavy on very large servers only if you also raise "
-            + "max-block-height a lot; the mode-2 fill costs ~the same per chunk as mode 1.");
-        seed(f, changed, "antixray.engine-mode", 2,
-            "Paper anti-xray engine mode written when baritone-defense seeds the config. 2 = OBFUSCATE "
-            + "(fake ores, defeats Baritone — recommended). 1 = HIDE (replace occluded ores with plain "
-            + "stone; cheaper but xray can infer real ore from the leaked/exposed ones). 3 = OBFUSCATE_LAYER.");
+            "Baritone/xray defense: seed Paper's built-in anti-xray to engine-mode 1 (HIDE — lightweight) "
+            + "at boot so occluded ores + base blocks are sent to the client as plain stone. xray/Baritone "
+            + "then can't see real ores through walls and can't beeline to them (the primary, sufficient, "
+            + "cheap defense). SourbyCraft's raytrace layer still reveals the genuinely visible ores to legit "
+            + "players (the layers compose). true = seed config/paper-world-defaults.yml ONCE (only while it "
+            + "holds Paper's stock enabled:false default; operator edits are never clobbered). false = never "
+            + "touch Paper anti-xray; manage it yourself in paper-world-defaults.yml.");
+        seed(f, changed, "antixray.engine-mode", 1,
+            "Paper anti-xray engine mode written when baritone-defense seeds the config. 1 = HIDE "
+            + "(occluded ores/base blocks sent as plain stone — LIGHTWEIGHT and defeats Baritone: it can't "
+            + "see ore through walls; recommended). 2 = OBFUSCATE (also paints FAKE ores everywhere to waste "
+            + "a bot's time — stronger but a heavier per-section fill; only enable if you accept the cost). "
+            + "3 = OBFUSCATE_LAYER.");
         seed(f, changed, "antixray.max-block-height", 128,
-            "Paper anti-xray only obfuscates BELOW this Y (rounded to a 16-block section). Paper's stock "
-            + "default is 64; SourbyCraft raises it to 128 so mountain/mesa surface ores and shallow bases "
-            + "are also protected against xray. Higher = a few more chunk sections obfuscated per send "
-            + "(small, bounded cost); set back to 64 for the lightest footprint on huge servers.");
+            "Paper anti-xray only hides BELOW this Y (rounded to a 16-block section). Paper's stock default "
+            + "is 64; SourbyCraft raises it to 128 so mountain/mesa surface ores and shallow bases are also "
+            + "protected. Higher = a few more chunk sections scanned per send (small, bounded cost); set "
+            + "back to 64 for the lightest footprint on huge servers.");
         seed(f, changed, "antixray.hide-base-blocks", true,
             "Anti-raid: add chests/barrels/shulkers/spawners/valuable storage (antixray.base-blocks) to "
-            + "Paper's anti-xray hidden set so an underground base is invisible to xray scouting — the "
-            + "block-entities are masked into the fake ore/stone scatter (Paper never shows an EntityBlock "
-            + "as a fake) and revealed only to a player with actual line-of-sight. false = ores only.");
+            + "Paper's anti-xray hidden set so an underground base is invisible to xray scouting — every "
+            + "occluded base block is sent to the client as plain stone, revealed only to a player with "
+            + "actual line-of-sight. Reuses the same hidden set as the ore defense (no extra scan). "
+            + "false = ores only.");
         seed(f, changed, "antixray.base-blocks", new ArrayList<>(BASE_BLOCKS),
             "Block ids (no minecraft: prefix) treated as base indicators and hidden from xray when "
             + "hide-base-blocks is true. Storage + valuable block-entities. Edit to taste; unknown ids are "
@@ -149,11 +149,12 @@ public final class PaperAntiXrayDefense {
 
     /**
      * If {@code antixray.baritone-defense} is on and Paper's world-defaults still hold the stock
-     * {@code anti-xray.enabled: false}, rewrite the {@code anticheat.anti-xray} block to engine-mode 2
-     * with the strong ore palette (+ base blocks when {@code hide-base-blocks}). Non-destructive: only
-     * the anti-xray block is replaced (a contiguous, comment-free region Paper regenerates each boot);
-     * every other comment / setting in the file is preserved verbatim. Idempotent — once seeded the
-     * block no longer holds {@code enabled: false}, so subsequent boots are no-ops.
+     * {@code anti-xray.enabled: false}, rewrite the {@code anticheat.anti-xray} block to engine-mode 1
+     * (lightweight hide) with the ore hidden set (+ base blocks when {@code hide-base-blocks}).
+     * Non-destructive: only the anti-xray block is replaced (a contiguous, comment-free region Paper
+     * regenerates each boot); every other comment / setting in the file is preserved verbatim.
+     * Idempotent — once seeded the block no longer holds {@code enabled: false}, so subsequent boots are
+     * no-ops.
      *
      * <p>Must run in {@link SourbyCraftConfig#init} (post-config hook) which fires BEFORE
      * {@code DedicatedServer#loadLevel} builds each world's chunk-packet controller from this file.
@@ -165,7 +166,7 @@ public final class PaperAntiXrayDefense {
         }
         if (!Files.isRegularFile(WORLD_DEFAULTS)) {
             SourbyLogger.warn("[antixray] baritone-defense: " + WORLD_DEFAULTS
-                + " not found (non-standard config dir?); skipping engine-mode-2 seed");
+                + " not found (non-standard config dir?); skipping engine-mode seed");
             return;
         }
         final String content;
@@ -189,9 +190,9 @@ public final class PaperAntiXrayDefense {
                 + WORLD_DEFAULTS + " (unexpected Paper layout); skipping");
             return;
         }
-        // End = first line after the anti-xray keys whose indent is <= 4 spaces AND is a new key at the
-        // anti-xray level or shallower. The anti-xray value keys are indented 4 spaces ("    enabled:"),
-        // list items "    - x". The block ends at the next 2-space key ("  something:") or a 0-space key.
+        // End = first non-empty line after the anti-xray keys whose indent is <= 2 spaces (a new key at
+        // the anti-xray level or shallower). The anti-xray value keys are indented 4 spaces
+        // ("    enabled:") or list items "    - x".
         int endIdx = lines.length;
         for (int i = antiXrayIdx + 1; i < lines.length; i++) {
             final String ln = lines[i];
@@ -212,18 +213,17 @@ public final class PaperAntiXrayDefense {
             return;
         }
 
-        final int engineMode = clampEngineMode(SourbyCraftConfig.cfgInt("antixray.engine-mode", 2));
+        final int engineMode = clampEngineMode(SourbyCraftConfig.cfgInt("antixray.engine-mode", 1));
         final int maxBlockHeight = SourbyCraftConfig.cfgInt("antixray.max-block-height", 128);
         final boolean hideBase = SourbyCraftConfig.cfgBool("antixray.hide-base-blocks", true);
 
-        final List<String> hidden = new ArrayList<>();
         // Preserve determinism + de-dupe: LinkedHashSet keeps insertion order, drops accidental dupes.
         final Set<String> hiddenSet = new LinkedHashSet<>(ORE_PALETTE);
         if (hideBase) {
             List<String> baseBlocks = SourbyCraftConfig.cfgStringList("antixray.base-blocks");
             hiddenSet.addAll(baseBlocks.isEmpty() ? BASE_BLOCKS : baseBlocks);
         }
-        hidden.addAll(hiddenSet);
+        final List<String> hidden = new ArrayList<>(hiddenSet);
 
         final StringBuilder block = new StringBuilder();
         block.append("  anti-xray:\n");
@@ -250,10 +250,10 @@ public final class PaperAntiXrayDefense {
         try {
             Files.writeString(WORLD_DEFAULTS, out.toString(), StandardCharsets.UTF_8);
             SourbyLogger.info("[antixray] baritone-defense: seeded Paper anti-xray -> engine-mode "
-                + engineMode + " (fake-ores), " + hidden.size() + " hidden blocks ("
-                + ORE_PALETTE.size() + " ore palette" + (hideBase ? " + base indicators" : "")
-                + "), max-block-height " + maxBlockHeight + ", " + FILLER_PALETTE.size()
-                + " replacement/filler blocks in " + WORLD_DEFAULTS + " — worlds build their controller from it");
+                + engineMode + (engineMode == 1 ? " (HIDE, lightweight)" : engineMode == 2 ? " (OBFUSCATE/fake-ores)" : " (OBFUSCATE_LAYER)")
+                + ", " + hidden.size() + " hidden blocks (" + ORE_PALETTE.size() + " ore set"
+                + (hideBase ? " + base indicators" : "") + "), max-block-height " + maxBlockHeight
+                + " in " + WORLD_DEFAULTS + " — worlds build their controller from it");
         } catch (IOException e) {
             SourbyLogger.warn("[antixray] baritone-defense: could not write " + WORLD_DEFAULTS + ": " + e.getMessage());
         }
@@ -261,9 +261,9 @@ public final class PaperAntiXrayDefense {
 
     /**
      * Register a per-world confirmation log so the boot log shows the LIVE anti-xray engine each world
-     * actually built its chunk-packet controller with (definitive proof the fake-ore engine is active,
-     * not inert). Reuses a single {@link WorldLoadEvent} listener (worlds load after this actuator hook,
-     * so {@code Bukkit.getWorlds()} is empty here); cost is one log line per world at load — no hot path.
+     * actually built its chunk-packet controller with (definitive proof the engine is active, not
+     * inert). Reuses a single {@link WorldLoadEvent} listener (worlds load after this actuator hook, so
+     * {@code Bukkit.getWorlds()} is empty here); cost is one log line per world at load — no hot path.
      * Only meaningful/registered when baritone-defense is on (else there is nothing to confirm).
      */
     public static void registerConfirmationLog(org.bukkit.plugin.Plugin plugin) {
@@ -322,7 +322,7 @@ public final class PaperAntiXrayDefense {
     }
 
     private static int clampEngineMode(int m) {
-        return (m == 1 || m == 2 || m == 3) ? m : 2;
+        return (m == 1 || m == 2 || m == 3) ? m : 1;
     }
 
     private static void seed(com.electronwill.nightconfig.core.file.CommentedFileConfig f,
