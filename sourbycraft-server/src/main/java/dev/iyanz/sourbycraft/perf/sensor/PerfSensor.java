@@ -74,10 +74,29 @@ public final class PerfSensor {
     // Threshold arrays indexed by Tier.ordinal(). Index 0 (GREEN) is a sentinel boundary.
     // tpsThresholds: lower value is worse — entry at index N means "value below this -> at least Tier.values()[N]".
     // msptThresholds / memThresholds / gcMsThresholds: higher value is worse.
-    private static volatile double[] tpsThresholds   = {Double.MAX_VALUE, 19.5, 18.0, 15.0, 10.0};
+    //
+    // TPS ladder (operator floor: self-tune only reacts below 17 TPS). A healthy/idle server runs
+    // ~20 TPS and must stay GREEN; escalation tracks the TPS drop, and the aggressive tiers require
+    // TPS below the 17 floor:
+    //   GREEN    TPS >= 19   (idle/healthy)
+    //   YELLOW   TPS < 19
+    //   ORANGE   TPS < 18
+    //   RED      TPS < 17    (below the operator floor)
+    //   EMERGENCY TPS < 15
+    private static volatile double[] tpsThresholds   = {Double.MAX_VALUE, 19.0, 18.0, 17.0, 15.0};
     private static volatile double[] msptThresholds  = {Double.MIN_VALUE, 30.0, 40.0, 60.0, 100.0};
     private static volatile double[] memThresholds   = {Double.MIN_VALUE, 75.0, 85.0, 92.0, 97.0};
     private static volatile double[] gcMsThresholds  = {Double.MIN_VALUE, 20.0, 50.0, 100.0, 300.0};
+
+    /**
+     * TPS floor below which the aggressive tiers (RED/EMERGENCY) are permitted. The operator
+     * requirement is explicit: self-tune must engage the heavy throttles only when TPS is
+     * genuinely below ~17. On an idle server TPS is 20 but a transient MSPT/GC/mem spike (chunk-gen,
+     * a stop-the-world GC, warmup) can momentarily read high on those other signals — that must NOT
+     * on its own drive the server to RED/EMERGENCY. So {@link #classifyAll} caps the non-TPS-driven
+     * escalation at ORANGE unless the TPS signal itself confirms load below this floor.
+     */
+    private static final double AGGRESSIVE_TPS_FLOOR = 17.0;
 
     // --- Runtime state (scheduler-thread writes only; volatile reads for snapshot publication) ---
     private static int warmupSamplesRemaining = -1; // -1 = not yet initialised (set on first sample)
@@ -301,13 +320,25 @@ public final class PerfSensor {
         return (warmupTicks + cadence - 1) / cadence; // ceil division
     }
 
-    // --- Classifier (ported verbatim from the tag) ---
+    // --- Classifier ---
     private static Tier classifyAll(double tps, double mspt, double memPct, double gcMs) {
-        Tier t = classifySignal(tps,    tpsThresholds,   /*lowerIsWorse*/ true);
-        t = t.worse(classifySignal(mspt,   msptThresholds,  false));
-        t = t.worse(classifySignal(memPct, memThresholds,   false));
-        t = t.worse(classifySignal(gcMs,   gcMsThresholds,  false));
-        return t;
+        Tier tpsTier = classifySignal(tps, tpsThresholds, /*lowerIsWorse*/ true);
+        // Worst of the three non-TPS signals (MSPT / mem% / GC-pause).
+        Tier otherTier = classifySignal(mspt,   msptThresholds, false)
+            .worse(classifySignal(memPct, memThresholds,  false))
+            .worse(classifySignal(gcMs,   gcMsThresholds, false));
+
+        // TPS floor gate (operator requirement: self-tune reacts only below ~17 TPS). The aggressive
+        // tiers (RED/EMERGENCY) apply the heaviest throttles, so they must be TPS-confirmed. On an
+        // idle 20-TPS server a transient MSPT/GC/mem spike (chunk-gen, a full GC, warmup residue)
+        // would otherwise push those signals to RED/EMERGENCY on its own — the exact false idle
+        // escalation seen in the boot log. Unless TPS itself is below the floor, cap the non-TPS
+        // contribution at ORANGE so a spike can warn but never trigger the emergency throttles.
+        boolean tpsBelowFloor = !Double.isNaN(tps) && tps < AGGRESSIVE_TPS_FLOOR;
+        if (!tpsBelowFloor && otherTier.isWorseThan(Tier.ORANGE)) {
+            otherTier = Tier.ORANGE;
+        }
+        return tpsTier.worse(otherTier);
     }
 
     private static Tier classifySignal(double value, double[] thresholds, boolean lowerIsWorse) {
