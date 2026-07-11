@@ -68,7 +68,7 @@ public final class Knobs {
     // fields by KnobEnforcer; set by tier by SelfTuneController.
 
     /** Master gate for the Kaiiju per-region per-entity-type tick/removal limiter
-     *  ({@code kaiiju_entity_limits.yml}). Bridged to {@code KaiijuEntityLimits.enabled}.
+     *  ({@code sourby_entity_limits.yml}). Bridged to {@code KaiijuEntityLimits.enabled}.
      *  Default false = base behaviour (limiter off, vanilla entity ticking). The perf engine
      *  flips it ON under load so per-type entity caps engage only when the server is struggling. */
     public static final BoolKnob KAIIJU_ENTITY_LIMITER_ENABLED =
@@ -89,7 +89,7 @@ public final class Knobs {
      *  effect while the entity limiter itself is enabled ({@link #KAIIJU_ENTITY_LIMITER_ENABLED}). */
     public static final DoubleKnob KAIIJU_ENTITY_LIMITER_SCALE =
         new DoubleKnob("perf.entity-limiter.scale", 1.0D,
-            KnobMeta.active("Global multiplier on every Kaiiju per-type entity tick cap.",
+            KnobMeta.active("Global multiplier on every per-type entity tick cap.",
                 "1.0 = base behaviour (no down-scaling); the perf-engine scales it down under load."));
 
     /** Cadence (in inactive ticks) of the Pufferfish inactive goal-selector throttle. Bridged to

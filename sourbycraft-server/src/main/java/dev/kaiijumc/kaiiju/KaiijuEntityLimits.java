@@ -41,8 +41,8 @@ public class KaiijuEntityLimits {
     private static final File CONFIG_FOLDER = new File("sourbycraft_config");
 
     protected static final String HEADER =
-            "Per region entity limits for Kaiiju.\n"
-                    + "If there are more of particular entity type in a region than limit, entity ticking will be throttled.\n"
+            "Per-region entity limits for SourbyCraft.\n"
+                    + "If there are more of a particular entity type in a region than limit, entity ticking will be throttled.\n"
                     + "Example: for Wither limit 100 & 300 Withers in a region -> 100 Withers tick every tick & every Wither ticks every 3 ticks.\n"
                     + "Available entities: GlowSquid, Ambient, Bat, Animal, Bee, Cat, Chicken, Cod, Cow, Dolphin, Fish, FishSchool, Fox, Golem, IronGolem, "
                     + "MushroomCow, Ocelot, Panda, Parrot, Perchable, Pig, PolarBear, PufferFish, Rabbit, Salmon, Sheep, Snowman, Squid, TropicalFish, Turtle, "
@@ -56,12 +56,12 @@ public class KaiijuEntityLimits {
                     + "LargeFireball, LlamaSpit, Potion, Projectile, ProjectileThrowable, ShulkerBullet, SmallFireball, Snowball, SpectralArrow, ThrownExpBottle, "
                     + "ThrownTrident, TippedArrow, WitherSkull, Raider, ChestBoat, Boat, MinecartAbstract, MinecartChest, MinecartCommandBlock, MinecartContainer, "
                     + "MinecartFurnace, MinecartHopper, MinecartMobSpawner, MinecartRideable, MinecartTNT\n";
-    protected static final File ENTITY_LIMITS_FILE = new File(CONFIG_FOLDER, "kaiiju_entity_limits.yml");
+    protected static final File ENTITY_LIMITS_FILE = new File(CONFIG_FOLDER, "sourby_entity_limits.yml");
     public static YamlConfiguration entityLimitsConfig;
     public static boolean enabled = false;
 
     // SourbyCraft: runtime-tunable global scale applied to every per-type tick cap. The base uses
-    // the raw per-type `limit` from kaiiju_entity_limits.yml; this multiplier lets the SourbyCraft
+    // the raw per-type `limit` from sourby_entity_limits.yml; this multiplier lets the SourbyCraft
     // perf-engine scale ALL caps down together per-tier under load (fewer entities tick per tick =>
     // cheaper) without the operator editing the yml. Default 1.0 == the exact base behaviour, so at
     // rest / GREEN there is ZERO change. Only YELLOW+ tiers push a smaller value (e.g. 0.75 RED,
@@ -91,7 +91,7 @@ public class KaiijuEntityLimits {
             try {
                 entityLimitsConfig.load(ENTITY_LIMITS_FILE);
             } catch (InvalidConfigurationException ex) {
-                Bukkit.getLogger().log(Level.SEVERE, "Could not load kaiiju_entity_limits.yml, please correct your syntax errors", ex);
+                Bukkit.getLogger().log(Level.SEVERE, "Could not load sourby_entity_limits.yml, please correct your syntax errors", ex);
                 throw Throwables.propagate(ex);
             } catch (IOException ignore) {
             }
@@ -129,7 +129,7 @@ public class KaiijuEntityLimits {
                 }
 
                 if (!entityClasses.containsKey(key)) {
-                    LOGGER.error("Unknown entity '" + key + "' in kaiiju-entity-limits.yml, skipping");
+                    LOGGER.error("Unknown entity '" + key + "' in sourby_entity_limits.yml, skipping");
                     continue;
                 }
                 int limit = entityLimitsConfig.getInt(key + ".limit");

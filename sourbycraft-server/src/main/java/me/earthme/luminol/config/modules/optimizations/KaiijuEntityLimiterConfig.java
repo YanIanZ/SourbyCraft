@@ -9,7 +9,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Set;
 
-@ConfigClassInfo(category = EnumConfigCategory.OPTIMIZATIONS, name = "kaiiju_entity_limiter")
+@ConfigClassInfo(category = EnumConfigCategory.OPTIMIZATIONS, name = "sourby_entity_limiter")
 public class KaiijuEntityLimiterConfig implements IConfigModule {
     @Override
     public void onLoaded(CommentedFileConfig configInstance, @Nullable Set<Exception> e) {
