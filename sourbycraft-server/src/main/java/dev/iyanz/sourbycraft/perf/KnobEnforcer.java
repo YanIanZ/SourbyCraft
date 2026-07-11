@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.perf;
 
 import dev.iyanz.sourbycraft.perf.knob.Knobs;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
+import dev.kaiijumc.kaiiju.KaiijuEntityLimits;
 import me.earthme.luminol.config.modules.optimizations.EntityGoalSelectorInactiveTickConfig;
 import me.earthme.luminol.config.modules.optimizations.ProjectileChunkReduceConfig;
 
@@ -25,21 +26,31 @@ import me.earthme.luminol.config.modules.optimizations.ProjectileChunkReduceConf
  *   <li>{@code perf.lag-machine.max-projectile-loads-per-projectile} →
  *       {@link ProjectileChunkReduceConfig#maxProjectileLoadsPerProjectile}
  *       (same enforcement point; discards a projectile that exceeds its lifetime cap).</li>
- *   <li>{@code perf.ai.throttle-*} → {@link EntityGoalSelectorInactiveTickConfig#enabled}
- *       (Pufferfish inactive-goal-selector throttle in {@code Mob.serverAiStep}). The base
+ *   <li>{@code perf.ai.throttle-*} + {@code perf.ai.goal-selector-inactive-throttle} →
+ *       {@link EntityGoalSelectorInactiveTickConfig#enabled}
+ *       (Pufferfish inactive-goal-selector throttle in {@code Mob.inactiveTick}). The base
  *       exposes only an on/off toggle plus a hardcoded 1-in-20 cadence — it has no
- *       distance/interval fields — so we bridge the <em>gate</em>: AI throttling is turned on
- *       whenever the SourbyCraft policy asks for any throttling (a positive tick-interval),
- *       and off when the policy wants vanilla every-tick AI.</li>
+ *       distance/interval fields — so we bridge the <em>gate</em> as the OR of the two policies:
+ *       the AI-throttle policy asking for any throttling (a positive tick-interval beyond a
+ *       distance) OR the dedicated goal-selector gate knob. The goal-selector knob's SourbyCraft
+ *       base default is {@code true} (F3-5, behaviour-neutral), and the perf-engine also forces it
+ *       on under load; OR keeps GREEN at the base default while a load tier can only turn it ON.</li>
+ *   <li>{@code perf.entity-limiter.enabled} → {@link KaiijuEntityLimits#enabled}
+ *       (Kaiiju per-region per-entity-type tick/removal limiter, read in {@code ServerLevel}
+ *       entity ticking). SourbyCraft base default {@code false} = no throttling (GREEN, no
+ *       regression); the perf-engine flips it on at ORANGE/RED/EMERGENCY so the per-type caps in
+ *       {@code kaiiju_entity_limits.yml} engage only under load. The per-type limits are operator
+ *       YAML (not a scalar), so we bridge the master gate.</li>
  * </ul>
  *
  * <p><b>NOT bridged (no equivalent base mechanism — documented as remaining, see the F2e
- * report):</b> {@code perf.entity-tick-rate} (Kaiiju's limiter is per-entity-type counts in
- * {@code kaiiju_entity_limits.yml}, not a single scalar tick-rate), the excess
- * minecart/boat collision sweepers ({@code perf.lag-machine.excess-*} / {@code remove-excess-*}
- * — the base has no collision-point vehicle cap), and the transient-projectile save
- * suppression ({@code perf.lag-machine.disable-saving-{snowballs,fireworks}} — no base config
- * and no patch in the current 82-patch series).
+ * report):</b> {@code perf.entity-tick-rate} (the scalar skip-rate has no single base field —
+ * Kaiiju's limiter is per-entity-type counts in {@code kaiiju_entity_limits.yml}, now gated via
+ * {@code perf.entity-limiter.enabled} above), the excess minecart/boat collision sweepers
+ * ({@code perf.lag-machine.excess-*} / {@code remove-excess-*} — the base has no collision-point
+ * vehicle cap), and the transient-projectile save suppression
+ * ({@code perf.lag-machine.disable-saving-{snowballs,fireworks}} — no base config and no patch in
+ * the current 82-patch series).
  *
  * <p><b>Rest defaults.</b> This enforcer only writes the base fields when SourbyCraft's tier
  * logic / combat profile has decided a value. It never mutates the base's compiled defaults at
@@ -58,6 +69,7 @@ public final class KnobEnforcer {
     private static volatile int lastProjPerTick = Integer.MIN_VALUE;
     private static volatile int lastProjPerProjectile = Integer.MIN_VALUE;
     private static volatile int lastGoalSelectorGate = Integer.MIN_VALUE; // 0/1, MIN_VALUE = never enforced
+    private static volatile int lastEntityLimiterGate = Integer.MIN_VALUE; // 0/1, MIN_VALUE = never enforced
 
     private KnobEnforcer() {}
 
@@ -69,6 +81,7 @@ public final class KnobEnforcer {
     public static void enforceAll() {
         enforceProjectileCaps();
         enforceAiThrottleGate();
+        enforceEntityLimiterGate();
     }
 
     private static void enforceProjectileCaps() {
@@ -98,14 +111,42 @@ public final class KnobEnforcer {
     private static void enforceAiThrottleGate() {
         final int interval = Knobs.AI_THROTTLE_TICK_INTERVAL.get();
         final int distance = Knobs.AI_THROTTLE_BEYOND_DISTANCE.get();
-        // Throttle is "active" when the policy asks to slow AI beyond a distance every N>1 ticks.
-        final boolean gate = distance > 0 && interval > 1;
+        // The base's inactive-goal-selector throttle (EntityGoalSelectorInactiveTickConfig.enabled)
+        // is driven by TWO SourbyCraft policies, OR'd together:
+        //   (a) the AI-throttle policy asks to slow AI beyond a distance every N>1 ticks, OR
+        //   (b) the dedicated goal-selector gate knob is on (its SourbyCraft base default is true;
+        //       the perf-engine also forces it on under load — see SelfTuneController).
+        // OR keeps GREEN honouring the base default (true) while a load tier can only ever turn it ON.
+        final boolean aiThrottle = distance > 0 && interval > 1;
+        final boolean goalSelectorKnob = Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.get();
+        final boolean gate = aiThrottle || goalSelectorKnob;
         final int gateBit = gate ? 1 : 0;
         if (gateBit != lastGoalSelectorGate) {
             EntityGoalSelectorInactiveTickConfig.enabled = gate;
             lastGoalSelectorGate = gateBit;
-            SourbyLogger.info("enforced perf.ai.throttle (interval=" + interval + ", distance=" + distance
+            SourbyLogger.info("enforced goal-selector inactive-throttle gate (ai-throttle interval="
+                + interval + " distance=" + distance + ", goal-selector-knob=" + goalSelectorKnob
                 + ") -> EntityGoalSelectorInactiveTickConfig.enabled=" + gate);
+        }
+    }
+
+    /**
+     * Map the SourbyCraft entity-limiter gate knob onto Kaiiju's master switch
+     * ({@code KaiijuEntityLimits.enabled}), read in-tick by the Kaiiju per-region entity throttler.
+     * When off (SourbyCraft base default), Kaiiju does no throttling — vanilla entity ticking, no
+     * regression. The perf-engine flips the knob ON at ORANGE/RED/EMERGENCY so the per-type caps in
+     * {@code kaiiju_entity_limits.yml} engage only while the server is under load. The per-type
+     * limits themselves are operator YAML (not a scalar), so we bridge the master gate; an operator
+     * who wants caps active tunes the per-type limits and the gate turns them on under load.
+     */
+    private static void enforceEntityLimiterGate() {
+        final boolean gate = Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.get();
+        final int gateBit = gate ? 1 : 0;
+        if (gateBit != lastEntityLimiterGate) {
+            KaiijuEntityLimits.enabled = gate;
+            lastEntityLimiterGate = gateBit;
+            SourbyLogger.info("enforced perf.entity-limiter.enabled=" + gate
+                + " -> KaiijuEntityLimits.enabled");
         }
     }
 }

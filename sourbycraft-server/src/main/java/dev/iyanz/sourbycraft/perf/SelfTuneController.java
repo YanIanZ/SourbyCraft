@@ -47,6 +47,10 @@ public final class SelfTuneController {
     private static volatile int baselineBoatsLimit = -1;
     private static volatile int baselineAiThrottleDistance = -1;
     private static volatile int baselineAiThrottleInterval = -1;
+    // F-perfup: load-gated behavior-affecting knobs. Baseline captured on first tier change so GREEN
+    // restores the operator/base default exactly (no regression); ORANGE and below tighten.
+    private static volatile boolean baselineEntityLimiterEnabled;
+    private static volatile boolean baselineGoalSelectorInactive = true;
     private static volatile boolean enabled = true;
 
     private SelfTuneController() {}
@@ -87,12 +91,15 @@ public final class SelfTuneController {
     private static void logTierPolicy(final Tier tier) {
         boolean aiThrottled = Knobs.AI_THROTTLE_BEYOND_DISTANCE.get() > 0
             && Knobs.AI_THROTTLE_TICK_INTERVAL.get() > 1;
+        boolean goalSelector = aiThrottled || Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.get();
         SourbyLogger.info("self-tune [tier-" + tier + "] ENFORCED:"
             + " projectile-loads/tick=" + Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.get()
             + " projectile-loads/projectile=" + Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.get()
             + " ai-inactive-throttle=" + (aiThrottled ? "on" : "off")
             + " (dist=" + Knobs.AI_THROTTLE_BEYOND_DISTANCE.get()
-            + " interval=" + Knobs.AI_THROTTLE_TICK_INTERVAL.get() + ")");
+            + " interval=" + Knobs.AI_THROTTLE_TICK_INTERVAL.get() + ")"
+            + " goal-selector-inactive-throttle=" + (goalSelector ? "on" : "off")
+            + " entity-limiter=" + (Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.get() ? "on" : "off"));
         SourbyLogger.info("self-tune [tier-" + tier + "] set-only (no in-tick actuator on this base):"
             + " entity-tick-rate=" + Knobs.ENTITY_TICK_RATE.get()
             + " disable-saving-snowballs=" + Knobs.LAG_MACHINE_DISABLE_SAVING_SNOWBALLS.get()
@@ -113,6 +120,9 @@ public final class SelfTuneController {
         baselineBoatsLimit = Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.get();
         baselineAiThrottleDistance = Knobs.AI_THROTTLE_BEYOND_DISTANCE.get();
         baselineAiThrottleInterval = Knobs.AI_THROTTLE_TICK_INTERVAL.get();
+        // F-perfup: snapshot the operator/base defaults so GREEN/YELLOW restore them exactly.
+        baselineEntityLimiterEnabled = Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.get();
+        baselineGoalSelectorInactive = Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.get();
     }
 
     private static void applyTier(final Tier tier) {
@@ -128,6 +138,9 @@ public final class SelfTuneController {
                 Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(baselineBoatsLimit);
                 Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(64);
                 Knobs.AI_THROTTLE_TICK_INTERVAL.set(2);
+                // F-perfup: engage per-region entity caps + force the inactive goal-selector throttle on.
+                Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(true);
+                Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
             }
             case RED -> {
                 Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(Math.max(1, baselineProjectilePerTick / 4));
@@ -138,6 +151,8 @@ public final class SelfTuneController {
                 Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(Math.max(1, baselineBoatsLimit / 2));
                 Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(48);
                 Knobs.AI_THROTTLE_TICK_INTERVAL.set(4);
+                Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(true);
+                Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
             }
             case EMERGENCY -> {
                 Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(1);
@@ -148,6 +163,8 @@ public final class SelfTuneController {
                 Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(2);
                 Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(32);
                 Knobs.AI_THROTTLE_TICK_INTERVAL.set(8);
+                Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(true);
+                Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
             }
         }
     }
@@ -162,5 +179,8 @@ public final class SelfTuneController {
         Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(baselineBoatsLimit);
         Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(baselineAiThrottleDistance);
         Knobs.AI_THROTTLE_TICK_INTERVAL.set(baselineAiThrottleInterval);
+        // F-perfup: GREEN/YELLOW restore the operator/base defaults exactly — no regression.
+        Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(baselineEntityLimiterEnabled);
+        Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(baselineGoalSelectorInactive);
     }
 }

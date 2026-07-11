@@ -708,6 +708,25 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("P2 lag-machine operator-config bridge failed; using yml defaults", t);
         }
 
+        // SourbyCraft F-perfup: load-gated knob operator bridge (entity-limiter + goal-selector).
+        // These are behaviour-affecting-but-load-appropriate: their GREEN/YELLOW baseline must equal
+        // the OPERATOR's chosen base default so the perf-engine never causes a regression at rest.
+        // The Kaiiju limiter's real switch is kaiiju_entity_limits.yml -> KaiijuEntityLimits.enabled,
+        // already loaded by the time this runs (CommandRegister.register runs after config load); seed
+        // the knob from it so an operator who enabled Kaiiju in that file keeps it on at GREEN. The
+        // goal-selector gate seeds from the SourbyCraft base default (true, F3-5). SelfTuneController
+        // captures whatever is set here as the restore-baseline; ORANGE+ tightens on top.
+        try {
+            boolean opEntityLimiter = cfgBool("perf.entity-limiter.enabled",
+                dev.kaiijumc.kaiiju.KaiijuEntityLimits.enabled);
+            dev.iyanz.sourbycraft.perf.knob.Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(opEntityLimiter);
+            dev.iyanz.sourbycraft.perf.knob.Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(
+                cfgBool("perf.ai.goal-selector-inactive-throttle",
+                    me.earthme.luminol.config.modules.optimizations.EntityGoalSelectorInactiveTickConfig.enabled));
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("F-perfup load-gated knob operator bridge failed; using knob defaults", t);
+        }
+
         // SourbyCraft - perf-engine P0: log final knob values AFTER all Bukkit-config bridge overrides
         dev.iyanz.sourbycraft.perf.knob.Knobs.logLoaded();
 
@@ -772,6 +791,8 @@ public class SourbyCraftConfig {
         seed(f, changed, "perf.entity-tick-rate", 20, "Skip-rate for entity ticking. 1 = every tick (vanilla), 20 = once/sec.");
         seed(f, changed, "perf.ai.throttle-beyond-distance", 0, "Distance (blocks) past nearest player to throttle mob AI. 0 = disabled.");
         seed(f, changed, "perf.ai.throttle-tick-interval", 4, "When AI is throttled, run aiStep only every N ticks.");
+        seed(f, changed, "perf.ai.goal-selector-inactive-throttle", true, "Throttle the AI goal-selector to 1-in-20 ticks for inactive mobs (behaviour-neutral). Perf-engine also forces this on under load.");
+        seed(f, changed, "perf.entity-limiter.enabled", false, "Master gate for the per-region per-entity-type tick/removal limiter (kaiiju_entity_limits.yml). Off = no throttling; the perf-engine turns it on under load.");
         seed(f, changed, "perf.lag-machine.disable-saving-snowballs", true, "Skip NBT save for snowballs (known lag-machine vector).");
         seed(f, changed, "perf.lag-machine.disable-saving-fireworks", true, "Skip NBT save for firework rockets.");
         seed(f, changed, "perf.lag-machine.max-projectile-loads-per-tick", 10, "Max projectile-triggered chunk loads per tick. 0 = unlimited.");

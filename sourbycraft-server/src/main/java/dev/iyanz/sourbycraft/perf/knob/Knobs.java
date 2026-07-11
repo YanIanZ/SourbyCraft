@@ -62,6 +62,26 @@ public final class Knobs {
     public static final IntKnob AI_THROTTLE_TICK_INTERVAL =
         new IntKnob("perf.ai.throttle-tick-interval", 4, 1, 40);
 
+    // === F-perfup: load-gated behavior-affecting-but-load-appropriate knobs ===
+    // These tighten ONLY under load. GREEN/YELLOW hold the base default (no regression); the perf
+    // engine engages the tighter value at ORANGE and below. Enforced onto the real base config
+    // fields by KnobEnforcer; set by tier by SelfTuneController.
+
+    /** Master gate for the Kaiiju per-region per-entity-type tick/removal limiter
+     *  ({@code kaiiju_entity_limits.yml}). Bridged to {@code KaiijuEntityLimits.enabled}.
+     *  Default false = base behaviour (limiter off, vanilla entity ticking). The perf engine
+     *  flips it ON under load so per-type entity caps engage only when the server is struggling. */
+    public static final BoolKnob KAIIJU_ENTITY_LIMITER_ENABLED =
+        new BoolKnob("perf.entity-limiter.enabled", false);
+
+    /** Gate for the Pufferfish inactive-goal-selector throttle. Bridged to
+     *  {@code EntityGoalSelectorInactiveTickConfig.enabled}. Default true = the SourbyCraft base
+     *  default (throttle inactive AI goal-selectors to 1-in-20 ticks — behaviour-neutral, see F3-5).
+     *  The perf engine keeps it forced ON under load so an operator who disabled it still gets the
+     *  cheap throttle back while the server is struggling. */
+    public static final BoolKnob GOAL_SELECTOR_INACTIVE_TICK_ENABLED =
+        new BoolKnob("perf.ai.goal-selector-inactive-throttle", true);
+
     public static Map<String, Object> snapshot() {
         return KnobRegistry.snapshot();
     }
