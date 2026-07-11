@@ -44,6 +44,48 @@ public final class SourbyBootstrap {
     /** Below this committed initial heap (-Xms) a fork double-commit is negligible. */
     private static final long FORK_SAFE_XMS_BYTES = 256L * 1024 * 1024;
 
+    /**
+     * At/above this committed initial heap (-Xms) the forked child prefers ZGC generational over
+     * G1 — this is {@link dev.iyanz.sourbycraft.brand.GcAdvisor}'s advice (SourbyCraft is tuned for
+     * ZGC generational). Below it, large-heap-oriented Aikar G1 is the safer default.
+     */
+    private static final long ZGC_PREFER_XMS_BYTES = 8L * 1024 * 1024 * 1024;
+
+    /**
+     * Aikar-style G1 flags — a verbatim mirror of {@code GC_FLAGS} in {@code docker/entrypoint.sh}.
+     * Heap-agnostic, pure-efficiency GC tuning with zero gameplay impact; applied to the forked
+     * bare-metal child when the operator has NOT chosen a GC. Docker already bakes these in at
+     * launch, so this closes the bare-metal parity gap (previously the fork ran an untuned GC).
+     */
+    private static final String[] AIKAR_G1_FLAGS = {
+        "-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis=200",
+        "-XX:+UnlockExperimentalVMOptions", "-XX:+DisableExplicitGC", "-XX:+AlwaysPreTouch",
+        "-XX:G1NewSizePercent=30", "-XX:G1MaxNewSizePercent=40", "-XX:G1HeapRegionSize=8M",
+        "-XX:G1ReservePercent=20", "-XX:G1HeapWastePercent=5", "-XX:G1MixedGCCountTarget=4",
+        "-XX:InitiatingHeapOccupancyPercent=15", "-XX:G1MixedGCLiveThresholdPercent=90",
+        "-XX:G1RSetUpdatingPauseTimePercent=5", "-XX:SurvivorRatio=32",
+        "-XX:+PerfDisableSharedMem", "-XX:MaxTenuringThreshold=1",
+    };
+
+    /**
+     * ZGC generational flags (GcAdvisor's recommended GC). {@code -XX:+ZGenerational} needs
+     * {@code -XX:+UnlockExperimentalVMOptions} on some JDKs; harmless when already unlocked.
+     * Preferred over G1 when the committed heap is large ({@code -Xms >= 8G}).
+     */
+    private static final String[] ZGC_GENERATIONAL_FLAGS = {
+        "-XX:+UnlockExperimentalVMOptions", "-XX:+UseZGC", "-XX:+ZGenerational",
+        "-XX:+AlwaysPreTouch", "-XX:+DisableExplicitGC",
+    };
+
+    /**
+     * Prefixes that mean the operator has already chosen a garbage collector. When ANY is present
+     * in the launch args, the fork inherits it untouched — we never override an explicit GC choice.
+     */
+    private static final String[] OPERATOR_GC_PREFIXES = {
+        "-XX:+UseG1GC", "-XX:+UseZGC", "-XX:+UseZ", "-XX:+UseParallelGC",
+        "-XX:+UseShenandoahGC", "-XX:+UseSerialGC", "-XX:+UseEpsilonGC",
+    };
+
     public static void main(String[] args) throws Throwable {
         // The child (post re-exec) carries the bypass flag and drops straight to boot.
         if (System.getProperty(ORCHESTRATOR_BYPASS) == null
@@ -236,6 +278,12 @@ public final class SourbyBootstrap {
         // (bare metal) thus get SIMD for free, silencing the "not configured" warning. Only
         // add it when the operator did not already pass an --add-modules for it.
         if (!haveSimdModule) cmd.add(SIMD_ADD_MODULES_FLAG);
+        // Bare-metal GC parity with Docker. docker/entrypoint.sh launches java with Aikar G1 flags,
+        // but this bare-metal fork path historically added only CDS + encoding + SIMD, leaving the
+        // child on an untuned default GC (GcAdvisor only *recommended* a better one). Apply GC tuning
+        // to the child ONLY when the operator has not chosen a GC (an explicit choice always wins).
+        // Pure-efficiency, zero gameplay impact.
+        applyGcFlags(cmd, jvmArgs);
         // JDK 19+: create-on-miss, use-on-hit, and recreate automatically when the
         // archive is stale (jar/JDK changed). No manual fingerprint bookkeeping.
         cmd.add("-XX:+AutoCreateSharedArchive");
@@ -265,6 +313,55 @@ public final class SourbyBootstrap {
             } catch (Throwable ignored) {}
         }, "SourbyBootstrap-Shutdown-Forwarder"));
         return child.waitFor();
+    }
+
+    /**
+     * Add GC tuning to the forked child command when the operator has NOT already chosen a GC.
+     *
+     * <p>Bare-metal parity with {@code docker/entrypoint.sh}: Docker ships Aikar G1 at launch, but
+     * the bare-metal fork previously ran an untuned default GC. This appends a real GC to the child:
+     * <ul>
+     *   <li>a large committed heap ({@code -Xms >= 8G}) → <b>ZGC generational</b> (GcAdvisor's
+     *       recommended GC — SourbyCraft is tuned for it, low pause on big heaps);</li>
+     *   <li>otherwise → <b>Aikar-style G1</b>, a verbatim mirror of the Docker {@code GC_FLAGS}
+     *       (heap-agnostic, predictable pauses on typical heaps).</li>
+     * </ul>
+     * Either choice is a pure-efficiency GC change with zero gameplay effect. An operator-provided
+     * GC (any of {@link #OPERATOR_GC_PREFIXES}) is respected untouched — those args are already in
+     * {@code cmd} from the inherited {@code jvmArgs}, so we simply skip adding ours. Logs the choice.
+     */
+    private static void applyGcFlags(List<String> cmd, List<String> jvmArgs) {
+        if (operatorHasGc(jvmArgs)) {
+            System.out.println("[SourbyBootstrap] fork: operator GC flag present — leaving GC tuning to the operator");
+            return;
+        }
+        long xms = committedInitialHeapBytes(jvmArgs);
+        final String[] flags;
+        final String which;
+        if (xms >= ZGC_PREFER_XMS_BYTES) {
+            flags = ZGC_GENERATIONAL_FLAGS;
+            which = "ZGC generational (committed heap -Xms=" + human(xms) + " >= 8G; GcAdvisor's advice)";
+        } else {
+            flags = AIKAR_G1_FLAGS;
+            which = "Aikar-style G1 (mirrors docker/entrypoint.sh GC_FLAGS)";
+        }
+        for (String f : flags) {
+            // -XX:+UnlockExperimentalVMOptions may appear in both the ZGC set and inherited args;
+            // the JVM tolerates the duplicate, but avoid re-adding one already inherited to stay tidy.
+            if (f.equals("-XX:+UnlockExperimentalVMOptions") && cmd.contains(f)) continue;
+            cmd.add(f);
+        }
+        System.out.println("[SourbyBootstrap] fork: applied GC tuning — " + which);
+    }
+
+    /** True when the launch args already select a garbage collector (any {@link #OPERATOR_GC_PREFIXES}). */
+    private static boolean operatorHasGc(List<String> jvmArgs) {
+        for (String a : jvmArgs) {
+            for (String p : OPERATOR_GC_PREFIXES) {
+                if (a.startsWith(p)) return true;
+            }
+        }
+        return false;
     }
 
     /** Prints the copy-paste single-JVM CDS flag exactly once (marker-suppressed). */
