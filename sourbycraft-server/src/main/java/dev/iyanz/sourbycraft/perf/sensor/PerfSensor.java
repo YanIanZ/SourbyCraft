@@ -75,15 +75,14 @@ public final class PerfSensor {
     // tpsThresholds: lower value is worse — entry at index N means "value below this -> at least Tier.values()[N]".
     // msptThresholds / memThresholds / gcMsThresholds: higher value is worse.
     //
-    // TPS ladder (operator floor: self-tune only reacts below 17 TPS). A healthy/idle server runs
-    // ~20 TPS and must stay GREEN; escalation tracks the TPS drop, and the aggressive tiers require
-    // TPS below the 17 floor:
-    //   GREEN    TPS >= 19   (idle/healthy)
-    //   YELLOW   TPS < 19
-    //   ORANGE   TPS < 18
-    //   RED      TPS < 17    (below the operator floor)
-    //   EMERGENCY TPS < 15
-    private static volatile double[] tpsThresholds   = {Double.MAX_VALUE, 19.0, 18.0, 17.0, 15.0};
+    // TPS ladder (operator requirement: self-tune reacts ONLY when TPS drops below 17). A
+    // healthy/idle server runs ~20 TPS and stays GREEN — nothing leaves GREEN until TPS < 17:
+    //   GREEN     TPS >= 17   (idle/healthy — no self-tuning)
+    //   YELLOW    TPS < 17
+    //   ORANGE    TPS < 15
+    //   RED       TPS < 13
+    //   EMERGENCY TPS < 10
+    private static volatile double[] tpsThresholds   = {Double.MAX_VALUE, 17.0, 15.0, 13.0, 10.0};
     private static volatile double[] msptThresholds  = {Double.MIN_VALUE, 30.0, 40.0, 60.0, 100.0};
     private static volatile double[] memThresholds   = {Double.MIN_VALUE, 75.0, 85.0, 92.0, 97.0};
     private static volatile double[] gcMsThresholds  = {Double.MIN_VALUE, 20.0, 50.0, 100.0, 300.0};
@@ -323,24 +322,21 @@ public final class PerfSensor {
     // --- Classifier ---
     private static Tier classifyAll(double tps, double mspt, double memPct, double gcMs) {
         Tier tpsTier = classifySignal(tps, tpsThresholds, /*lowerIsWorse*/ true);
-        // Worst of the three non-TPS signals (MSPT / mem% / GC-pause).
+
+        // Operator requirement: self-tune reacts ONLY when TPS drops below the floor (17). While TPS
+        // is healthy the tier is TPS-driven ALONE — the non-TPS signals (MSPT / mem% / GC-pause) do
+        // NOT change the tier. A JVM sitting at 75%+ heap right before a GC is completely normal, so
+        // letting mem%/GC/MSPT push an idle 20-TPS server to YELLOW produced the GREEN<->YELLOW
+        // flapping ("self-tune masih tuning sendiri") the operator saw. So: TPS >= floor -> stay on
+        // the TPS tier (GREEN on a healthy server), full stop. Only once TPS is genuinely below the
+        // floor do the non-TPS signals refine how severe the drop is (ORANGE/RED/EMERGENCY).
+        boolean tpsBelowFloor = !Double.isNaN(tps) && tps < AGGRESSIVE_TPS_FLOOR;
+        if (!tpsBelowFloor) {
+            return tpsTier;
+        }
         Tier otherTier = classifySignal(mspt,   msptThresholds, false)
             .worse(classifySignal(memPct, memThresholds,  false))
             .worse(classifySignal(gcMs,   gcMsThresholds, false));
-
-        // TPS floor gate (operator requirement: self-tune reacts only below ~17 TPS, and an
-        // idle/healthy server stays GREEN). The escalating tiers (ORANGE/RED/EMERGENCY) are the ones
-        // whose SelfTuneController policy actually tightens the lag-machine throttles, so they must
-        // be TPS-confirmed. On an idle 20-TPS server a transient MSPT/GC/mem spike (chunk-gen, a
-        // full GC, warmup residue) would otherwise drive those signals to ORANGE+ on their own —
-        // the false idle escalation the boot log showed. Unless TPS itself is below the floor, cap
-        // the non-TPS contribution at YELLOW (a warning-only tier — its policy applies no throttles),
-        // so a spike can surface as YELLOW but can never engage the escalating knob throttles while
-        // TPS is healthy. Below the floor, the non-TPS signals contribute their full tier.
-        boolean tpsBelowFloor = !Double.isNaN(tps) && tps < AGGRESSIVE_TPS_FLOOR;
-        if (!tpsBelowFloor && otherTier.isWorseThan(Tier.YELLOW)) {
-            otherTier = Tier.YELLOW;
-        }
         return tpsTier.worse(otherTier);
     }
 
