@@ -328,15 +328,18 @@ public final class PerfSensor {
             .worse(classifySignal(memPct, memThresholds,  false))
             .worse(classifySignal(gcMs,   gcMsThresholds, false));
 
-        // TPS floor gate (operator requirement: self-tune reacts only below ~17 TPS). The aggressive
-        // tiers (RED/EMERGENCY) apply the heaviest throttles, so they must be TPS-confirmed. On an
-        // idle 20-TPS server a transient MSPT/GC/mem spike (chunk-gen, a full GC, warmup residue)
-        // would otherwise push those signals to RED/EMERGENCY on its own — the exact false idle
-        // escalation seen in the boot log. Unless TPS itself is below the floor, cap the non-TPS
-        // contribution at ORANGE so a spike can warn but never trigger the emergency throttles.
+        // TPS floor gate (operator requirement: self-tune reacts only below ~17 TPS, and an
+        // idle/healthy server stays GREEN). The escalating tiers (ORANGE/RED/EMERGENCY) are the ones
+        // whose SelfTuneController policy actually tightens the lag-machine throttles, so they must
+        // be TPS-confirmed. On an idle 20-TPS server a transient MSPT/GC/mem spike (chunk-gen, a
+        // full GC, warmup residue) would otherwise drive those signals to ORANGE+ on their own —
+        // the false idle escalation the boot log showed. Unless TPS itself is below the floor, cap
+        // the non-TPS contribution at YELLOW (a warning-only tier — its policy applies no throttles),
+        // so a spike can surface as YELLOW but can never engage the escalating knob throttles while
+        // TPS is healthy. Below the floor, the non-TPS signals contribute their full tier.
         boolean tpsBelowFloor = !Double.isNaN(tps) && tps < AGGRESSIVE_TPS_FLOOR;
-        if (!tpsBelowFloor && otherTier.isWorseThan(Tier.ORANGE)) {
-            otherTier = Tier.ORANGE;
+        if (!tpsBelowFloor && otherTier.isWorseThan(Tier.YELLOW)) {
+            otherTier = Tier.YELLOW;
         }
         return tpsTier.worse(otherTier);
     }
