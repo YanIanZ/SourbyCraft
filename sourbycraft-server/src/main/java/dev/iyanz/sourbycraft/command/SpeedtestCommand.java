@@ -166,7 +166,10 @@ public class SpeedtestCommand extends Command {
                 double um = ((Number) ul.get("bandwidth")).doubleValue() * 8 / 1_000_000;
                 double pm = ((Number) ping.get("latency")).doubleValue();
 
-                net.minecraft.server.MinecraftServer.getServer().execute(() -> {
+                // Folia-safe reply hop. MinecraftServer.execute() throws UnsupportedOperationException
+                // on Folia (no global main thread) — the crash the boot log showed at line 169. Bounce
+                // the reply onto the sender's own scheduler instead (player region / console direct).
+                SourbyReply.run(sender, () -> {
                     try {
                         sender.sendMessage(text()
                             .append(text("DL: ", SourbyCraftColors.LABEL))
