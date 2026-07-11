@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 /**
  * Entry point for the slim SourbyCraft paperclip jar. Reads its bundled manifest,
  * downloads any missing libraries into the paperclip libraries/ dir with SHA-256
- * verification, then delegates to moe.luminolmc.hyacinthusclip.Main.
+ * verification, then delegates to dev.iyanz.sourbyclip.Main.
  *
  * <p>Also runs the Auto-CDS layer (Class Data Sharing) to cut JVM startup time.
  * See {@link #runCds} for the strategy matrix — it adapts to bare metal, Docker,
@@ -177,8 +177,8 @@ public final class SourbyBootstrap {
             System.err.println("[SourbyBootstrap] ViaVersion auto-provision (jars) failed: " + t.getMessage());
         }
 
-        // Folia base uses hyacinthusclip (paperclip fork), not Paper's paperclip.
-        Class<?> clipMain = Class.forName("moe.luminolmc.hyacinthusclip.Main");
+        // Folia base uses sourbyclip (our rebranded hyacinthusclip paperclip fork), not Paper's paperclip.
+        Class<?> clipMain = Class.forName("dev.iyanz.sourbyclip.Main");
         clipMain.getMethod("main", String[].class).invoke(null, (Object) args);
     }
 
