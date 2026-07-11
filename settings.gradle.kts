@@ -48,24 +48,20 @@ fun optionalInclude(name: String, op: (ProjectDescriptor.() -> Unit)? = null) {
 // the root build's sourbycraftSuffixProvider so project.version (and therefore the API version
 // reported by "Implementing API version ...", read from apiVersioning.json) stays in lockstep with
 // /ver, the startup banner and the JAR manifest instead of emitting "<mc>.local-SNAPSHOT".
-val sourbycraftGitBranch: String = try {
-    val proc = ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
-        .directory(rootDir)
-        .redirectErrorStream(true)
-        .start()
-    proc.inputStream.bufferedReader().readText().trim().also { proc.waitFor() }
-} catch (e: Exception) {
-    ""
-}
-
+// The branch is read via providers.exec (config-cache compatible) rather than a raw ProcessBuilder
+// at configuration time, which the configuration cache forbids.
 gradle.lifecycle.beforeProject {
+    val branch = providers.exec {
+        commandLine("git", "rev-parse", "--abbrev-ref", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.map { it.trim() }.getOrElse("")
     val releaseVersionFull = providers.gradleProperty("releaseVersion").getOrElse("dev").trim()
     val releaseMajor = releaseVersionFull.substringBefore('-')
     val codename = providers.gradleProperty("codename").getOrElse("dev").trim()
     val suffix = when {
-        sourbycraftGitBranch.contains("experimental") || sourbycraftGitBranch.contains("feat") -> "EXP"
-        sourbycraftGitBranch.startsWith("release/") -> "REL"
-        sourbycraftGitBranch.contains("-dev") || sourbycraftGitBranch.contains("develop") -> "DEV"
+        branch.contains("experimental") || branch.contains("feat") -> "EXP"
+        branch.startsWith("release/") -> "REL"
+        branch.contains("-dev") || branch.contains("develop") -> "DEV"
         codename == "dev" -> "DEV"
         else -> "REL"
     }

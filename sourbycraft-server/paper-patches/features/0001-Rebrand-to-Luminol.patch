@@ -65,18 +65,21 @@ index 30815c8970b1f1c88a3c7bb5fd36efd915f1687d..ed558be6ab203f2d57f2acca169e03e8
          } else {
              final Optional<String> gitBranch = PaperVersionFetcher.BUILD_INFO.gitBranch();
 diff --git a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
-index 10a0be7a4db1a51579d113d279af7a9effe7f438..f17b13613fb80e61705de4607e60f03d9d784931 100644
+index 10a0be7a4db1a51579d113d279af7a9effe7f438..44ffe0b4949d790677c130768326006431188965 100644
 --- a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
 +++ b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
-@@ -31,6 +31,7 @@ public record ServerBuildInfoImpl(
+@@ -29,8 +29,10 @@ public record ServerBuildInfoImpl(
+     private static final String ATTRIBUTE_BUILD_NUMBER = "Build-Number";
+     private static final String ATTRIBUTE_GIT_BRANCH = "Git-Branch";
      private static final String ATTRIBUTE_GIT_COMMIT = "Git-Commit";
++    private static final String ATTRIBUTE_IMPLEMENTATION_VERSION = "Implementation-Version"; // SourbyCraft - clean channel version
  
      private static final String BRAND_PAPER_NAME = "Paper";
 +    private static final String BRAND_SOURBYCRAFT_NAME = "SourbyCraft";
  
      private static final String BUILD_DEV = "DEV";
  
-@@ -42,9 +43,9 @@ public record ServerBuildInfoImpl(
+@@ -42,9 +44,9 @@ public record ServerBuildInfoImpl(
          this(
              getManifestAttribute(manifest, ATTRIBUTE_BRAND_ID)
                  .map(Key::key)
@@ -88,7 +91,7 @@ index 10a0be7a4db1a51579d113d279af7a9effe7f438..f17b13613fb80e61705de4607e60f03d
              SharedConstants.getCurrentVersion().id(),
              SharedConstants.getCurrentVersion().name(),
              getManifestAttribute(manifest, ATTRIBUTE_BUILD_NUMBER)
-@@ -61,7 +62,7 @@ public record ServerBuildInfoImpl(
+@@ -61,12 +63,29 @@ public record ServerBuildInfoImpl(
  
      @Override
      public boolean isBrandCompatible(final @NotNull Key brandId) {
@@ -97,6 +100,28 @@ index 10a0be7a4db1a51579d113d279af7a9effe7f438..f17b13613fb80e61705de4607e60f03d
      }
  
      @Override
+     public @NotNull String asString(final @NotNull StringRepresentation representation) {
+         final StringBuilder sb = new StringBuilder();
++        // SourbyCraft start - report the clean channel version (e.g. "26.2-REL") from the JAR
++        // manifest instead of Paper's raw "<mc>-DEV-<branch>@<sha>" reconstruction. The manifest
++        // Implementation-Version is written by the build (sourbycraftSuffixProvider) and is kept
++        // in lockstep with /ver, the startup banner and META-INF/sourbycraft-build.properties.
++        final Optional<String> cleanVersion = getManifestAttribute(
++            JarManifests.manifest(CraftServer.class), ATTRIBUTE_IMPLEMENTATION_VERSION);
++        if (cleanVersion.isPresent()) {
++            sb.append(cleanVersion.get());
++            if (representation == StringRepresentation.VERSION_FULL) {
++                sb.append(' ');
++                sb.append('(');
++                sb.append(this.buildTime.truncatedTo(ChronoUnit.SECONDS));
++                sb.append(')');
++            }
++            return sb.toString();
++        }
++        // SourbyCraft end - fall back to the upstream reconstruction when no manifest is present
+         sb.append(this.minecraftVersionId);
+         sb.append('-');
+         if (this.buildNumber.isPresent()) {
 diff --git a/src/main/java/org/spigotmc/WatchdogThread.java b/src/main/java/org/spigotmc/WatchdogThread.java
 index 5607f4cc8ca2f620461eb5e97d01d9db0d6b2303..f46c40a26776780f27d654a7140b91fe9acd7fb4 100644
 --- a/src/main/java/org/spigotmc/WatchdogThread.java
