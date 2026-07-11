@@ -183,7 +183,7 @@ index f03fa06c0ba56f7f5e1e45bc1568a490751efde3..eee1c14249addbf4714df733870da974
 +    // KioCG end
  }
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index c5632816feebc11330f508fdf8e74aa122b47a86..87f1e006f6d9220ad74f4bfb70900403023b77c7 100644
+index 9a241790a677b829455324ce45d0024ebd169fe9..827cf39716cc99ce47debc0e254577493a92382d 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -6394,4 +6394,6 @@ public abstract class Entity

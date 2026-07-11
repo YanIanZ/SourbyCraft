@@ -50,7 +50,7 @@ public class KaiijuEntityThrottler {
         if (entityLimit != null) {
             TickInfo tickInfo = entityLimitTickInfoMap.computeIfAbsent(entityLimit, el -> {
                 TickInfo newTickInfo = new TickInfo();
-                newTickInfo.toTick = entityLimit.limit();
+                newTickInfo.toTick = KaiijuEntityLimits.scaledLimit(entityLimit.limit()); // SourbyCraft - perf-engine scale
                 return newTickInfo;
             });
 
@@ -82,14 +82,15 @@ public class KaiijuEntityThrottler {
             KaiijuEntityLimits.EntityLimit entityLimit = entry.getKey();
             TickInfo tickInfo = entry.getValue();
 
+            int scaledLimit = KaiijuEntityLimits.scaledLimit(entityLimit.limit()); // SourbyCraft - perf-engine scale
             int additionals = 0;
             int nextContinueFrom = tickInfo.continueFrom + tickInfo.toTick;
             if (nextContinueFrom >= tickInfo.currentTick) {
-                additionals = entityLimit.limit() - (tickInfo.currentTick - tickInfo.continueFrom);
+                additionals = scaledLimit - (tickInfo.currentTick - tickInfo.continueFrom);
                 nextContinueFrom = 0;
             }
             tickInfo.continueFrom = nextContinueFrom;
-            tickInfo.toTick = entityLimit.limit() + additionals;
+            tickInfo.toTick = scaledLimit + additionals;
 
             if (tickInfo.toRemove == 0 && tickInfo.currentTick > entityLimit.removal()) {
                 tickInfo.toRemove = tickInfo.currentTick - entityLimit.removal();

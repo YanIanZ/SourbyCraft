@@ -60,6 +60,22 @@ public class KaiijuEntityLimits {
     public static YamlConfiguration entityLimitsConfig;
     public static boolean enabled = false;
 
+    // SourbyCraft: runtime-tunable global scale applied to every per-type tick cap. The base uses
+    // the raw per-type `limit` from kaiiju_entity_limits.yml; this multiplier lets the SourbyCraft
+    // perf-engine scale ALL caps down together per-tier under load (fewer entities tick per tick =>
+    // cheaper) without the operator editing the yml. Default 1.0 == the exact base behaviour, so at
+    // rest / GREEN there is ZERO change. Only YELLOW+ tiers push a smaller value (e.g. 0.75 RED,
+    // 0.5 EMERGENCY) via KnobEnforcer. Applied by KaiijuEntityThrottler#scaledLimit, which floors
+    // the scaled cap at 1 so a type is never fully starved. Only takes effect while `enabled` is on.
+    public static volatile double limitScale = 1.0D;
+
+    /** Effective per-type tick cap after applying {@link #limitScale}, floored at 1. */
+    public static int scaledLimit(int baseLimit) {
+        final double scale = limitScale;
+        if (scale >= 1.0D) return baseLimit; // fast path: default / no down-scaling => unchanged
+        return Math.max(1, (int) Math.round(baseLimit * scale));
+    }
+
     protected static Map<Class<? extends Entity>, EntityLimit> entityLimits;
 
     static final String ENTITY_PREFIX = "Entity";

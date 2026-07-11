@@ -10,7 +10,7 @@ VMP (https://github.com/RelativityMC/VMP-fabric)
 Licensed under: MIT (https://opensource.org/licenses/MIT)
 
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index aa52a619a366ae6cb24a1e86b2ce948d2798db0b..40dc99e52282b166705b0aa9f1f218a5011354d8 100644
+index 957937f41a139d5d0df80b1b60d57ad896abd5b4..a23c0b70262a4b5e04dd61453cb7dd36c98b4cb5 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -1155,8 +1155,14 @@ public abstract class Entity

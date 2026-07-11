@@ -171,7 +171,7 @@ index 8fd27a342f7302284c48b3db7d085bb692e08cdc..8992e13df499333235e1a51b725c0ad3
  
      public static <E> NonNullList<E> create() {
 diff --git a/net/minecraft/core/component/PatchedDataComponentMap.java b/net/minecraft/core/component/PatchedDataComponentMap.java
-index 217e4fb33d2707c5e50c7ec2dd2aaee410154254..e904dedd1444044fdafdb2a42b4a9e4cd58ae678 100644
+index 8424703ddbeb457581b27016a749f7e5c3fad165..feb747b3c40b65194d469c6d8681d8a492d39c4b 100644
 --- a/net/minecraft/core/component/PatchedDataComponentMap.java
 +++ b/net/minecraft/core/component/PatchedDataComponentMap.java
 @@ -14,7 +14,7 @@ import java.util.Map.Entry;
@@ -240,7 +240,7 @@ index 6e08d50794c4af4405f3e164a3fd46f376b3f78f..dd2d0940eece3e85078e574f66f71a4c
  
      int getContainerSize();
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 4ba8385302f600809111e0a6e83d182dd243855c..aa52a619a366ae6cb24a1e86b2ce948d2798db0b 100644
+index 17f3476dbaec565fd6202fefe80ce2578b68a629..957937f41a139d5d0df80b1b60d57ad896abd5b4 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -324,7 +324,7 @@ public abstract class Entity
@@ -459,7 +459,7 @@ index 136e018d83c5be90894358a97b23f5fcfa6c0d38..c063694237c0c98ad370ac7fc170172f
              ItemStack itemStack = container.getItem(i);
              if (!itemStack.isEmpty()) {
 diff --git a/net/minecraft/world/item/ItemStack.java b/net/minecraft/world/item/ItemStack.java
-index dc1e9acce122f3ebd7bf2b03150b4045db9493df..5cbfc9e178b5823f92c0afedb1b0248d34c96292 100644
+index 2cfb9bd919d7f2229178e57bbe32d47675e6a04f..703f500648dd2cf0f44678d229e615cabae6a5ed 100644
 --- a/net/minecraft/world/item/ItemStack.java
 +++ b/net/minecraft/world/item/ItemStack.java
 @@ -98,8 +98,12 @@ import org.apache.commons.lang3.function.TriConsumer;
