@@ -54,7 +54,7 @@ public class SparkviewCommand extends Command {
             .build());
 
         if (!SparkBridge.enabled()) {
-            s.sendMessage(text("  Spark bridge disabled in sourbycraft.yml (spark.enabled = false).", SourbyCraftColors.DIM));
+            s.sendMessage(text("  Spark bridge disabled in config (spark.enabled = false).", SourbyCraftColors.DIM));
             s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
             return true;
         }

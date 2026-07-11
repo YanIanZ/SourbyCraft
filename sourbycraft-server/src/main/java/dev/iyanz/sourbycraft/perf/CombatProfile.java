@@ -10,7 +10,7 @@ import java.util.Locale;
  *
  * <p>Operator-selectable bundle of knob defaults tuned for a target
  * playstyle. Applied once at boot from {@code combat.profile} in
- * {@code sourbycraft.yml}. {@link SelfTuneController} still owns runtime
+ * the unified config. {@link SelfTuneController} still owns runtime
  * escalation per {@code PerfSensor} tier transitions — a profile only
  * sets the operator-baseline, not the tier-escalated values.
  *

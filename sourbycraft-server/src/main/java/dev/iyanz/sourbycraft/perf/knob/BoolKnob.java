@@ -33,6 +33,6 @@ public final class BoolKnob extends PerfKnob {
     }
 
     @Override void loadFrom() {
-        this.value = SourbyCraftConfig.ymlBool(key, defaultValue);
+        this.value = SourbyCraftConfig.cfgBool(key, defaultValue);
     }
 }

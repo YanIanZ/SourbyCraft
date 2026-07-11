@@ -77,9 +77,9 @@ public final class PerfEngineBootstrap {
         if (started) return;
         started = true;
         try {
-            // Path parity with the Paper tag, which used new File("sourbycraft.yml") (server-root
-            // relative) from its DedicatedServer NMS patch.
-            SourbyCraftConfig.init(new File("sourbycraft.yml"));
+            // Config lives entirely in the unified TOML now; the File arg is an unused marker that
+            // keeps seedUnifiedPerfDefaults out of any reflective no-arg walk (see init()).
+            SourbyCraftConfig.init(new File("sourbycraft"));
         } catch (Throwable t) {
             SourbyLogger.error("perf-engine: SourbyCraftConfig.init failed", t);
         }
