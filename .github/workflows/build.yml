@@ -21,7 +21,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0        # paperweight needs git history for patch application
-          submodules: recursive # MaplePile (Folia leafpile dep) — required by applyAllPatches
 
       - name: Validate gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
@@ -42,7 +41,7 @@ jobs:
       - name: Publish SourbyPatcher to mavenLocal (build plugin for the Folia patcher)
         run: cd sourbypatcher && ./gradlew publishToMavenLocal --no-daemon --stacktrace -x test
 
-      - name: Setup MaplePile (submodule + deps patch + gen sources)
+      - name: Setup MaplePile (vendored — gen sources)
         run: bash scripts/setup_maple_pile.sh
 
       - name: Apply all patches (Luminol 26.2 -> Folia)
