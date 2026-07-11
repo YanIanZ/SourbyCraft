@@ -1,3 +1,4 @@
 [submodule "MaplePile"]
 	path = MaplePile
 	url = https://github.com/LuminolMC/MaplePile
+	ignore = all
