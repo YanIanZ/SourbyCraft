@@ -69,11 +69,23 @@ public final class SemVer {
         return String.valueOf(a).compareToIgnoreCase(String.valueOf(b));
     }
 
-    /** Split a numeric-core version into a list of Integer (when numeric) / String components. */
+    /**
+     * Split a numeric-core version into a list of Integer (when numeric) / String components.
+     *
+     * <p>Splits on both {@code .} and {@code -} so a DEV build's numeric core keeps decomposing
+     * fully. A DEV version is {@code <major>-<releaseVersionFull>-DEV} (Gradle
+     * {@code sourbycraftSuffixProvider}), e.g. {@code 26.2-1.3-DEV}; after {@link #stripChannel}
+     * removes the {@code -DEV} the core is {@code 26.2-1.3}, whose middle {@code 2-1} still carries
+     * the internal {@code -} separator. Splitting on {@code .} alone would leave {@code "2-1"} as a
+     * non-numeric String component, which then compares LEXICALLY — so {@code 26.10-1.0} would sort
+     * BELOW {@code 26.9-1.0} ({@code "10-1" < "9-1"}), a wrong-sign compare that made the DEV-channel
+     * updater miss a newer release across a minor bump. Splitting on {@code -} too yields the correct
+     * all-numeric component list {@code [26, 2, 1, 3]}.
+     */
     private static List<Comparable<?>> tokenize(String core) {
         List<Comparable<?>> out = new ArrayList<>();
         if (core == null || core.isBlank()) return out;
-        for (String seg : core.split("[.]")) {
+        for (String seg : core.split("[.-]")) {
             if (seg.isBlank()) continue;
             try {
                 out.add(Integer.valueOf(Integer.parseInt(seg.trim())));
