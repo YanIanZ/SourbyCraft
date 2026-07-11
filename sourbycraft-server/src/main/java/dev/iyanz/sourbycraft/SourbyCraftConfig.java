@@ -304,10 +304,12 @@ public class SourbyCraftConfig {
                 cfgDouble("perf.sensor.thresholds.mspt.orange",   40.0),
                 cfgDouble("perf.sensor.thresholds.mspt.red",      60.0),
                 cfgDouble("perf.sensor.thresholds.mspt.emergency",100.0),
-                cfgDouble("perf.sensor.thresholds.tps.yellow",    19.5),
+                // TPS ladder: idle/healthy (~20 TPS) stays GREEN; RED/EMERGENCY require TPS below the
+                // operator's 17-TPS self-tune floor. Keep in sync with PerfSensor.tpsThresholds.
+                cfgDouble("perf.sensor.thresholds.tps.yellow",    19.0),
                 cfgDouble("perf.sensor.thresholds.tps.orange",    18.0),
-                cfgDouble("perf.sensor.thresholds.tps.red",       15.0),
-                cfgDouble("perf.sensor.thresholds.tps.emergency", 10.0),
+                cfgDouble("perf.sensor.thresholds.tps.red",       17.0),
+                cfgDouble("perf.sensor.thresholds.tps.emergency", 15.0),
                 cfgDouble("perf.sensor.thresholds.mem.yellow",    75.0),
                 cfgDouble("perf.sensor.thresholds.mem.orange",    85.0),
                 cfgDouble("perf.sensor.thresholds.mem.red",       92.0),
@@ -388,7 +390,7 @@ public class SourbyCraftConfig {
         seed(f, changed, "perf.sensor.dwell-samples", 3, "Consecutive samples in a worse band before escalating a tier.");
         seed(f, changed, "perf.sensor.recovery-dwell-multiplier", 2.0, "Dwell multiplier when recovering to a better tier (>= 1.0).");
         seedThresholds(f, changed, "mspt", 30.0, 40.0, 60.0, 100.0, "MSPT tier thresholds (higher = worse).");
-        seedThresholds(f, changed, "tps", 19.5, 18.0, 15.0, 10.0, "TPS tier thresholds (lower = worse).");
+        seedThresholds(f, changed, "tps", 19.0, 18.0, 17.0, 15.0, "TPS tier thresholds (lower = worse). Self-tune reacts only below ~17 TPS; idle/healthy servers stay GREEN.");
         seedThresholds(f, changed, "mem", 75.0, 85.0, 92.0, 97.0, "Heap % tier thresholds (higher = worse).");
         seedThresholds(f, changed, "gc-ms-per-min", 20.0, 50.0, 100.0, 300.0, "GC pause ms/min tier thresholds (higher = worse).");
 
