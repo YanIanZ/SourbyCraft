@@ -39,13 +39,13 @@ import me.earthme.luminol.config.modules.optimizations.ProjectileChunkReduceConf
  *       (Kaiiju per-region per-entity-type tick/removal limiter, read in {@code ServerLevel}
  *       entity ticking). SourbyCraft base default {@code false} = no throttling (GREEN, no
  *       regression); the perf-engine flips it on at ORANGE/RED/EMERGENCY so the per-type caps in
- *       {@code kaiiju_entity_limits.yml} engage only under load. The per-type limits are operator
+ *       {@code sourby_entity_limits.yml} engage only under load. The per-type limits are operator
  *       YAML (not a scalar), so we bridge the master gate.</li>
  * </ul>
  *
  * <p><b>NOT bridged (no equivalent base mechanism — documented as remaining, see the F2e
  * report):</b> {@code perf.entity-tick-rate} (the scalar skip-rate has no single base field —
- * Kaiiju's limiter is per-entity-type counts in {@code kaiiju_entity_limits.yml}, now gated via
+ * Kaiiju's limiter is per-entity-type counts in {@code sourby_entity_limits.yml}, now gated via
  * {@code perf.entity-limiter.enabled} above), the excess minecart/boat collision sweepers
  * ({@code perf.lag-machine.excess-*} / {@code remove-excess-*} — the base has no collision-point
  * vehicle cap), and the transient-projectile save suppression
@@ -139,7 +139,7 @@ public final class KnobEnforcer {
      * ({@code KaiijuEntityLimits.enabled}), read in-tick by the Kaiiju per-region entity throttler.
      * When off (SourbyCraft base default), Kaiiju does no throttling — vanilla entity ticking, no
      * regression. The perf-engine flips the knob ON at ORANGE/RED/EMERGENCY so the per-type caps in
-     * {@code kaiiju_entity_limits.yml} engage only while the server is under load. The per-type
+     * {@code sourby_entity_limits.yml} engage only while the server is under load. The per-type
      * limits themselves are operator YAML (not a scalar), so we bridge the master gate; an operator
      * who wants caps active tunes the per-type limits and the gate turns them on under load.
      */
