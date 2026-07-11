@@ -400,6 +400,61 @@ public class SourbyCraftConfig {
             + "boot so old clients (>=1.20) can join. false = manage Via yourself / run offline. The oldest "
             + "allowed client (1.20) is set in plugins/ViaVersion/config.yml -> block-versions.");
 
+        // --- Network / client latency (documented latency-relevant knobs) ---
+        // These keys are read in init() but were previously unseeded, so they never surfaced in the
+        // operator file. Seed + document them here so the latency surface is discoverable. The
+        // network-section header comment (set after the keys exist, below) covers the knobs that
+        // live outside this TOML.
+        seed(f, changed, "network.auto-throttle-view", true,
+            "Dynamically drop each player's view distance under load (perf-engine). Fewer chunks in flight "
+            + "= less per-tick chunk-send work and lower client-perceived stall. Safe: only view distance.");
+        seed(f, changed, "network.min-view-distance", 4,
+            "Floor for auto-throttle-view: view distance never drops below this many chunks.");
+        seed(f, changed, "network.compression-level", 4,
+            "zlib level (0-9) for packets above network-compression-threshold. Bridged live to Paper's "
+            + "misc.compressionLevel when != 4. Lower (e.g. 1-3) = less CPU per compressed packet and "
+            + "slightly lower latency on large packets, at the cost of more bandwidth; 4 is a balanced "
+            + "default. 0 = no compression work (max CPU savings, max bandwidth).");
+        seed(f, changed, "network.max-chunk-send-rate", -1.0,
+            "Cap on chunks streamed to a player per second (bridged to Paper playerMaxChunkSendRate). "
+            + "-1 = auto/unlimited. A finite cap (e.g. 40.0) smooths join/teleport bursts so the netty "
+            + "thread is not saturated by chunk data, keeping gameplay packets low-latency during streaming.");
+        // Section-header note (set after the network.* keys exist so the table node is present).
+        // Documents the latency knobs that are NOT SourbyCraft-TOML keys, plus the safe defaults
+        // already applied and the wins that would need an NMS patch (left documented, not done).
+        if (f.getComment("network") == null) {
+            f.setComment("network", ""
+                + " Client-latency / network tuning.\n"
+                + "\n"
+                + " Already optimal on this build (no config needed):\n"
+                + "   - TCP_NODELAY (Nagle disabled): hardcoded ON for both the server acceptor and every\n"
+                + "     player connection (ServerConnectionListener + Connection). Nagle batches tiny packets\n"
+                + "     for up to ~40ms; disabling it sends movement/interact packets immediately, the single\n"
+                + "     biggest safe latency win, already applied. Safe: affects only TCP buffering, never\n"
+                + "     packet contents or ordering.\n"
+                + "\n"
+                + " server.properties knob (set it there, not in this TOML):\n"
+                + "   - network-compression-threshold: default 256 (a sane default). Packets larger than this\n"
+                + "     many bytes are zlib-compressed; smaller latency-sensitive packets (movement, interact)\n"
+                + "     skip the compress/decompress round-trip, saving CPU and a few ms, while chunks still\n"
+                + "     compress to save bandwidth. Behind a proxy that already compresses the backend link,\n"
+                + "     set -1 to avoid double-compression.\n"
+                + "\n"
+                + " Luminol optimizations (luminol_global_config.toml, NOT here):\n"
+                + "   - use_async_protocol_switching.enabled: kept OFF. Changes the login/config packet\n"
+                + "     sequence and is incompatible with ViaVersion (auto-provisioned for old clients).\n"
+                + "     Enabling it would shave a little join latency but risks breaking legacy-client packet\n"
+                + "     handling — DO NOT enable while Via is in use.\n"
+                + "\n"
+                + " Documented-but-not-done (needs an NMS patch, intentionally not applied):\n"
+                + "   - Per-connection SO_SNDBUF/SO_RCVBUF sizing + TCP_QUICKACK: tuning these needs an edit to\n"
+                + "     the Netty bootstrap; OS defaults are fine for typical player counts, so left as a\n"
+                + "     documented option only.\n"
+                + "   - Live-reloading network-compression-threshold from this TOML would require reflecting\n"
+                + "     into the final DedicatedServerProperties field; left in server.properties.");
+            changed[0] = true;
+        }
+
         // --- Spark bridge + GC advisor ---
         seed(f, changed, "spark.enabled", true,
             "Enable the spark profiler bridge (used by /spark and /sparkview). The bundled spark is "
