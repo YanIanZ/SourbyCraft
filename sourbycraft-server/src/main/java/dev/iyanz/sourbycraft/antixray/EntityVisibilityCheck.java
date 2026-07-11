@@ -49,9 +49,23 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       boundary block that has not yet streamed to the client.</li>
  * </ul>
  *
+ * <h2>Nametag + glow (ESP) coverage</h2>
+ *
+ * <p>This gate returns its verdict into {@code visibleToPlayer}, which
+ * decides whether the player is added to the tracker's {@code seenBy}
+ * set. An entity the client is NOT tracking is not rendered AT ALL — so
+ * hiding an occluded mob here also suppresses its <em>nametag</em> and
+ * its <em>glowing outline</em> (both are client-side renders of a tracked
+ * entity, and a glow outline is precisely the ESP vector that would
+ * otherwise show through walls). No extra packet suppression is needed:
+ * killing the track kills the nametag and the glow with it.
+ *
  * <p>Sync rather than async: tracker updates already run at a 1-in-N
- * cadence, so the per-call {@code level.clip} cost (one DDA traversal
- * bounded by tracking range) is acceptable.
+ * cadence, so the per-call occlusion cost (one DDA traversal bounded by
+ * tracking range, now see-through-aware via {@link OcclusionUtil}) is
+ * acceptable. Glass / leaves no longer over-hide a mob a player can
+ * genuinely see through, because the shared occluder test switched from
+ * the collision shape to {@code isViewBlocking}.
  *
  * <h2>Folia threading</h2>
  *
