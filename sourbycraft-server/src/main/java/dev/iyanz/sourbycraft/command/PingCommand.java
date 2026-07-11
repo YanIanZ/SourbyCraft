@@ -86,7 +86,10 @@ public class PingCommand extends Command {
                 geo = null;
             }
             final String geoFinal = geo;
-            net.minecraft.server.MinecraftServer.getServer().execute(() -> {
+            // Folia-safe reply hop. MinecraftServer.execute() throws UnsupportedOperationException on
+            // Folia (no global main thread), so bounce the reply onto the sender's own scheduler: a
+            // player hops to its region scheduler; a console send is thread-safe so it goes direct.
+            SourbyReply.run(s, () -> {
                 if (geoFinal != null && !geoFinal.isEmpty()) {
                     s.sendMessage(text()
                         .append(text("  Location: ", SourbyCraftColors.LABEL))
