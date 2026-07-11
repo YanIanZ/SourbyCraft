@@ -1,32 +1,36 @@
-<h1 align="center">⚡ SourbyCraft — 26.2 Survival</h1>
+<p align="center">
+  <img src="assets/SourbyCraft.png" alt="SourbyCraft Folia" width="360">
+</p>
 
-<p align="center"><strong>Maximum performance · Resource-efficient · Self-tuning · Built for 200+ players</strong></p>
+<h1 align="center">SourbyCraft — 26.2 Folia</h1>
+
+<p align="center"><strong>Regionized multithreading · Self-tuning per-region perf · Resource-efficient · Built for 200+ players</strong></p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/minecraft-26.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/line-survival-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/base-Folia%20(Luminol%2026.2)-orange?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.2--REL-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/players-200%2B-blueviolet?style=flat-square">
-  <img src="https://img.shields.io/badge/jar-31M%20(SourbyLoader)-green?style=flat-square">
-  <img src="https://img.shields.io/badge/deploy-Docker%20·%20Pterodactyl%20·%20Pelican-2496ed?style=flat-square">
+  <img src="https://img.shields.io/badge/jar-33.7M%20(SourbyLoader)-green?style=flat-square">
+  <img src="https://img.shields.io/badge/deploy-Docker%20·%20Pterodactyl%20·%20Pelican%20·%20k8s-2496ed?style=flat-square">
   <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
 </p>
 
-<p align="center"><em>High-performance <a href="https://github.com/PaperMC/Paper">Paper</a> fork on Minecraft 26.2, tuned for large survival servers. Vanilla region worlds (no SWM), a self-tuning performance engine, resource-pack-proof anti-xray, hardened item stacker, native mod loader, and async multithreading — all kept lean on RAM and CPU.</em></p>
+<p align="center"><em>High-performance <a href="https://github.com/LuminolMC/Luminol">Folia</a> fork (Luminol 26.2 base) on Minecraft 26.2 — true regionized multithreading, built with an own <strong>SourbyPatcher</strong> toolchain into a <strong>SourbyLoader</strong> slim jar (33.7&nbsp;MiB, first-boot lib fetch). Ships a self-tuning per-region performance engine, hex UI + varied lang, offline geoip <code>/ping</code>, an advanced auto-updater, and a full SourbyCraft command suite — all kept lean on RAM and CPU.</em></p>
 
 ---
 
-## Two release lines
+## Release lines
 
 SourbyCraft ships as two parallel tracks:
 
-| Line | Focus | Worlds | Branch |
+| Line | Focus | Base | Branch |
 |---|---|---|---|
-| **26.1.2** | Skyblock / minigames | SWM (Slime World Manager) in-memory worlds | `release/26.1.2` |
-| **26.2** *(this branch)* | **Survival** | Vanilla region storage, no SWM | `release/26.2` |
+| **26.1.2** | Skyblock / minigames | Paper + SWM (Slime World Manager) in-memory worlds | `release/26.1.2` |
+| **26.2** *(this branch)* | **Folia** | Luminol 26.2 — regionized multithreading | `release/26.2` |
 
-26.2 carries forward everything from the 26.1.2 performance + hardening work **minus SWM**, and adds the survival-scale tuning + security fixes in this release.
+26.2 is a full **Paper → Folia re-platform**: own SourbyPatcher build toolchain, Luminol 26.2 Folia base, a per-region self-tuning perf engine, and the SourbyCraft command/UX suite — all Folia-native.
 
 ---
 
