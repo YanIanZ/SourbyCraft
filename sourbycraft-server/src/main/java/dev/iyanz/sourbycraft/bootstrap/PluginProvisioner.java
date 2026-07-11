@@ -47,6 +47,14 @@ import java.util.List;
  * already exists — ours from a prior boot, or the operator's own build — we do nothing for that
  * plugin. Configs are written only when absent, so operator edits are never clobbered.
  *
+ * <p><b>Toggle-off actively quarantines.</b> Flipping {@code viaversion.auto-provision} to
+ * {@code false} must actually remove Via from the pipeline, not just stop future downloads: the
+ * plugin scan loads every {@code plugins/*.jar}, so a previously-provisioned jar left behind keeps
+ * the ViaVersion#4666 native-join stall alive. On an OFF boot we therefore move any pinned jar
+ * whose SHA-256 proves WE provisioned it to {@code <name>.jar.disabled} (reversible; restored —
+ * not re-downloaded — when the toggle is turned back on). A same-prefix jar with a different hash
+ * is operator-installed: never touched, loud warning instead.
+ *
  * <p><b>Toggle.</b> Gated by {@code viaversion.auto-provision} in the unified SourbyCraft config
  * (default {@code false} since 2026-07-12). A native 26.2/1.21.9 (protocol 776) client needs no
  * translation, and ViaVersion injects into EVERY client's pipeline — the current 1.21.9 play-phase
@@ -107,16 +115,28 @@ public final class PluginProvisioner {
     /**
      * Download + SHA-256-verify the pinned Via jars into {@code plugins/}. JDK-only (uses
      * {@code System.out}/{@code err}, not any server class). Best-effort: a fetch failure logs and
-     * continues so the server still boots (just without that legacy-client bridge). No-op when the
-     * on-disk toggle is {@code false}.
+     * continues so the server still boots (just without that legacy-client bridge).
+     *
+     * <p>When the toggle is {@code false} this is NOT a plain no-op: any pinned jar that WE
+     * provisioned on an earlier boot (exact SHA-256 match) is quarantined to
+     * {@code <name>.jar.disabled}. The plugin scan loads every {@code plugins/*.jar}, so a jar left
+     * behind would keep ViaVersion in every client's pipeline — and keep the native 1.21.9 join
+     * stall (ViaVersion#4666) alive — even though the operator turned the feature off.
+     * Operator-installed Via jars (same prefix, different hash) are never touched; we warn instead.
      */
     public static void provisionJars() {
+        Path pluginsDir = Paths.get("plugins");
         if (!autoProvisionEnabledFromDisk()) {
             System.out.println("[SourbyBootstrap] ViaVersion auto-provision disabled "
                 + "(viaversion.auto-provision=false) — old clients will not be bridged.");
+            quarantineProvisionedJars(pluginsDir);
             return;
         }
-        Path pluginsDir = Paths.get("plugins");
+        System.out.println("[SourbyBootstrap] WARNING: ViaVersion auto-provision is ENABLED "
+            + "(viaversion.auto-provision=true). ViaVersion injects into EVERY client's netty pipeline "
+            + "and the current 1.21.9 translation has a confirmed native-join stall (ViaVersion#4666): "
+            + "native 1.21.9 clients can hang on 'Joining world'. Set viaversion.auto-provision=false "
+            + "unless you must bridge pre-1.21.9 clients.");
         try {
             Files.createDirectories(pluginsDir);
         } catch (IOException e) {
@@ -135,6 +155,38 @@ public final class PluginProvisioner {
         }
     }
 
+    /**
+     * Toggle is OFF: get OUR previously-provisioned jars out of the plugin scan. Only a jar whose
+     * SHA-256 matches the pin is moved (to {@code <name>.jar.disabled} — reversible, and invisible
+     * to the {@code *.jar} plugin scan). A same-prefix jar with any other hash is the operator's;
+     * we leave it and warn that it can still stall native 1.21.9 joins.
+     */
+    private static void quarantineProvisionedJars(Path pluginsDir) {
+        if (!Files.isDirectory(pluginsDir)) return;
+        for (Pin pin : PINS) {
+            Path jar = pluginsDir.resolve(pin.fileName());
+            try {
+                if (Files.isRegularFile(jar) && Sha256Verifier.matches(jar, pin.sha256())) {
+                    Path disabled = jar.resolveSibling(jar.getFileName() + ".disabled");
+                    Files.move(jar, disabled, StandardCopyOption.REPLACE_EXISTING);
+                    System.out.println("[SourbyBootstrap] ViaVersion auto-provision: quarantined "
+                        + pin.fileName() + " -> " + disabled.getFileName()
+                        + " (we provisioned it on an earlier boot; auto-provision is now false). "
+                        + "Set viaversion.auto-provision=true to restore it, or delete the .disabled file.");
+                } else if (anyPrefixJarPresent(pluginsDir, pin.jarPrefix())) {
+                    System.err.println("[SourbyBootstrap] WARNING: viaversion.auto-provision=false, but a "
+                        + pin.jarPrefix() + "*.jar we did NOT provision is in plugins/ — it still loads, "
+                        + "and ViaVersion in the pipeline can stall native 1.21.9 joins (ViaVersion#4666: "
+                        + "clients hang on 'Joining world'). Remove it manually if native players cannot join.");
+                }
+            } catch (IOException e) {
+                System.err.println("[SourbyBootstrap] ViaVersion auto-provision: could not quarantine "
+                    + pin.fileName() + ": " + e.getMessage()
+                    + " — remove it from plugins/ manually; it can stall native 1.21.9 joins (ViaVersion#4666).");
+            }
+        }
+    }
+
     /** Download + verify the pinned jar into {@code plugins/} unless it (or a same-prefix jar) is present. */
     private static void ensureJar(Pin pin, Path pluginsDir) throws IOException {
         Path dest = pluginsDir.resolve(pin.fileName());
@@ -147,6 +199,14 @@ public final class PluginProvisioner {
         if (anyPrefixJarPresent(pluginsDir, pin.jarPrefix())) {
             System.out.println("[SourbyBootstrap] ViaVersion auto-provision: found an existing "
                 + pin.jarPrefix() + "*.jar in plugins/ — leaving it untouched.");
+            return;
+        }
+        // Idempotency 3: we quarantined this exact jar while the toggle was off -> restore, no re-download.
+        Path quarantined = dest.resolveSibling(dest.getFileName() + ".disabled");
+        if (Files.isRegularFile(quarantined) && Sha256Verifier.matches(quarantined, pin.sha256())) {
+            Files.move(quarantined, dest, StandardCopyOption.REPLACE_EXISTING);
+            System.out.println("[SourbyBootstrap] ViaVersion auto-provision: restored quarantined "
+                + pin.fileName() + " (SHA-256 re-verified; loads this boot).");
             return;
         }
 
