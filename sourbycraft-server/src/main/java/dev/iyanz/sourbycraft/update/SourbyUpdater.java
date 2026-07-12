@@ -129,11 +129,28 @@ public final class SourbyUpdater {
             }
         }
 
+        // One-shot check shortly after boot so a release published while the server was down is
+        // picked up within minutes, not at the next daily slot.
+        Bukkit.getAsyncScheduler().runDelayed(owner, task -> checkSafely(), 2, TimeUnit.MINUTES);
+
+        int intervalMin = Config.checkIntervalMinutes();
+        if (intervalMin > 0) {
+            Bukkit.getAsyncScheduler().runAtFixedRate(
+                owner,
+                task -> checkSafely(),
+                TimeUnit.MINUTES.toMillis(intervalMin),
+                TimeUnit.MINUTES.toMillis(intervalMin),
+                TimeUnit.MILLISECONDS
+            );
+        }
+
         started = true;
         SourbyLogger.info("auto-updater started: repo=" + Config.repo()
             + " channel=" + resolveChannel().suffix()
             + " mode=" + mode.name().toLowerCase(Locale.ROOT)
-            + " times=" + times + " (Folia async scheduler)");
+            + " times=" + times
+            + (Config.checkIntervalMinutes() > 0 ? " interval=" + Config.checkIntervalMinutes() + "m" : "")
+            + " (Folia async scheduler)");
     }
 
     /** Cancel any scheduled checks. */
@@ -181,9 +198,17 @@ public final class SourbyUpdater {
             return Outcome.NO_RELEASE;
         }
 
-        if (!SemVer.isNewer(latest.tagName, currentVersion)) {
+        if (!isNewerThanRunning(latest.tagName, currentVersion)) {
             SourbyLogger.info("auto-updater: already up to date on channel "
-                + channel.suffix() + " (current " + currentVersion + ", latest " + latest.tagName + ").");
+                + channel.suffix() + " (current " + currentVersion + " build " + ownBuildNumber()
+                + ", latest " + latest.tagName + ").");
+            return Outcome.UP_TO_DATE;
+        }
+        String appliedTag = readApplied();
+        if (latest.tagName.equals(appliedTag)) {
+            // Already swapped to this tag (waiting for/after restart, or a pre-r6 jar whose build
+            // number was not stamped from the release counter). Never re-download or re-restart.
+            SourbyLogger.info("auto-updater: " + latest.tagName + " already applied; nothing to do.");
             return Outcome.UP_TO_DATE;
         }
 
@@ -194,17 +219,78 @@ public final class SourbyUpdater {
             return Outcome.NOTIFIED;
         }
 
-        // stage mode: download + verify + place in the stage dir; swap happens on next restart.
+        // stage/auto: download + verify + place in the stage dir.
         try {
             Path staged = downloadAndStage(latest);
             writePath(corePathFile, staged);
             writePath(latestPathFile, staged);
             SourbyLogger.info("auto-updater: staged " + latest.tagName + " at "
-                + staged.toAbsolutePath() + " and updated auto_update/core.path. Restart to apply.");
+                + staged.toAbsolutePath() + " and updated auto_update/core.path."
+                + (mode == ApplyMode.AUTO ? "" : " Restart to apply."));
+            if (mode == ApplyMode.AUTO) {
+                UpdateApplier.scheduleApplyAndRestart(latest.tagName, staged,
+                    Config.restartDelaySeconds(), Config.restartMode());
+                return Outcome.APPLYING;
+            }
             return Outcome.STAGED;
         } catch (Exception e) {
             SourbyLogger.warn("auto-updater: failed to stage " + latest.tagName + ": " + e.getMessage());
             return Outcome.STAGE_FAILED;
+        }
+    }
+
+    // ------------------------------------------------------------------ release-number ordering
+
+    /**
+     * Newer-ness for our per-release tags: cores compare first ({@code 26.11 > 26.2}); equal cores
+     * fall back to the tag's release number {@code rN} versus THIS jar's stamped build number
+     * ({@code Nf} — CI stamps both from the same counter since r6). Without this, every
+     * {@code v26.2-rN} tag compares equal to the running {@code 26.2-REL} and no update is ever
+     * taken on the same Minecraft version line.
+     */
+    static boolean isNewerThanRunning(String tag, String currentVersion) {
+        int coreCmp = SemVer.compare(coreOf(tag), coreOf(currentVersion));
+        if (coreCmp != 0) return coreCmp > 0;
+        int tagRel = releaseNumberOf(tag);
+        int own = ownBuildNumber();
+        return tagRel > 0 && own > 0 && tagRel > own;
+    }
+
+    /** Version core with any {@code -rN} release counter AND channel suffix stripped. */
+    private static String coreOf(String version) {
+        String v = SemVer.stripChannel(version);
+        return RELEASE_NUM.matcher(v).replaceFirst("");
+    }
+
+    private static final java.util.regex.Pattern RELEASE_NUM =
+        java.util.regex.Pattern.compile("-r(\\d+)$", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** {@code v26.2-r7} -> 7; -1 when the tag has no release counter. */
+    static int releaseNumberOf(String tag) {
+        if (tag == null) return -1;
+        var m = RELEASE_NUM.matcher(SemVer.stripChannel(tag));
+        return m.find() ? Integer.parseInt(m.group(1)) : -1;
+    }
+
+    /** This jar's stamped build number ({@code "7f"} -> 7); -1 when unknown/dev. */
+    static int ownBuildNumber() {
+        try {
+            String b = BuildInfo.load().build();
+            if (b == null) return -1;
+            int i = 0;
+            while (i < b.length() && Character.isDigit(b.charAt(i))) i++;
+            return i > 0 ? Integer.parseInt(b.substring(0, i)) : -1;
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    private @Nullable String readApplied() {
+        try {
+            Path f = autoUpdateDir.resolve("applied.tag");
+            return Files.isRegularFile(f) ? Files.readString(f, StandardCharsets.UTF_8).trim() : null;
+        } catch (IOException e) {
+            return null;
         }
     }
 
@@ -416,19 +502,20 @@ public final class SourbyUpdater {
     // ------------------------------------------------------------------ types
 
     /** Outcome of a single check — returned so an on-demand check (e.g. a command) can report it. */
-    public enum Outcome { DISABLED, NO_RELEASE, UP_TO_DATE, NOTIFIED, STAGED, STAGE_FAILED }
+    public enum Outcome { DISABLED, NO_RELEASE, UP_TO_DATE, NOTIFIED, STAGED, STAGE_FAILED, APPLYING }
 
     /**
      * Safe apply mode. {@code notify} = log + op-notify only (default, safest); {@code stage} =
      * download + verify + place in stage dir for a next-restart swap; {@code off} = disabled.
      */
     public enum ApplyMode {
-        NOTIFY, STAGE, OFF;
+        NOTIFY, STAGE, AUTO, OFF;
 
         static ApplyMode parse(String raw) {
             if (raw == null) return NOTIFY;
             return switch (raw.trim().toLowerCase(Locale.ROOT)) {
                 case "stage" -> STAGE;
+                case "auto", "restart" -> AUTO;
                 case "off", "disabled", "false" -> OFF;
                 default -> NOTIFY; // "notify" and anything unknown -> the safe default.
             };
@@ -470,6 +557,9 @@ public final class SourbyUpdater {
             java.util.List<String> t = me.earthme.luminol.config.modules.misc.AutoUpdateConfig.checkTimes;
             return t == null ? java.util.List.of() : t;
         }
+        static int checkIntervalMinutes() { return Math.max(0, me.earthme.luminol.config.modules.misc.AutoUpdateConfig.checkIntervalMinutes); }
+        static String restartMode()       { return valueOr(me.earthme.luminol.config.modules.misc.AutoUpdateConfig.restartMode, "auto"); }
+        static int restartDelaySeconds()  { return Math.max(5, me.earthme.luminol.config.modules.misc.AutoUpdateConfig.restartDelaySeconds); }
         private static String valueOr(String v, String def) { return v == null || v.isBlank() ? def : v.trim(); }
         private Config() {}
     }

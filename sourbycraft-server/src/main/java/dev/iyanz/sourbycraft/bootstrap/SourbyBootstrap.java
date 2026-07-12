@@ -102,6 +102,18 @@ public final class SourbyBootstrap {
             System.err.println("[SourbyBootstrap] could not auto-accept EULA: " + t.getMessage());
         }
 
+        // Staged-update fallback swap (auto-updater). The in-server apply performs an atomic
+        // rename while running; when that was impossible (Windows file lock, unknown launch jar),
+        // auto_update/core.path survives and THIS is the moment to finish the job: the previous
+        // server process is gone, nothing holds the jar, and we can rename the staged jar over it.
+        // This boot still runs the old bytes (the JVM already holds its open file); the next
+        // restart runs the new build. JDK-only, never fatal.
+        try {
+            applyStagedUpdateIfPresent();
+        } catch (Throwable t) {
+            System.err.println("[SourbyBootstrap] staged-update swap failed (continuing with current jar): " + t);
+        }
+
         // The child (post re-exec) carries the bypass flag and drops straight to boot.
         if (System.getProperty(ORCHESTRATOR_BYPASS) == null
                 && System.getenv("SOURBYCRAFT_ORCHESTRATOR_BYPASS") == null) {
@@ -319,6 +331,39 @@ public final class SourbyBootstrap {
         }
 
         return fork(args, archivePath, jvmArgs, detected.map(CdsEnvironment.Detection::label).orElse(null));
+    }
+
+    /** Consume auto_update/core.path: rename the verified staged jar over the launch jar. */
+    private static void applyStagedUpdateIfPresent() throws Exception {
+        Path corePath = Paths.get("auto_update", "core.path");
+        if (!Files.isRegularFile(corePath)) return;
+        Path staged = Paths.get(new String(Files.readAllBytes(corePath), StandardCharsets.UTF_8).trim());
+        if (!Files.isRegularFile(staged)) {
+            Files.deleteIfExists(corePath);
+            return;
+        }
+        // The updater verified size + SHA-256 at stage time; re-check basic zip validity here so a
+        // corrupted stage can never brick the launch jar.
+        try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(staged.toFile())) {
+            if (!zf.entries().hasMoreElements()) {
+                System.err.println("[SourbyBootstrap] staged update is not a valid jar — ignoring " + staged);
+                return;
+            }
+        }
+        Path ownJar = Paths.get(SourbyBootstrap.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+        if (!Files.isRegularFile(ownJar) || Files.isSameFile(staged, ownJar)) {
+            Files.deleteIfExists(corePath);
+            return;
+        }
+        Files.move(staged, ownJar, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Files.deleteIfExists(corePath);
+        Path pending = Paths.get("auto_update", "pending.tag");
+        if (Files.isRegularFile(pending)) {
+            Files.move(pending, Paths.get("auto_update", "applied.tag"),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        System.out.println("[SourbyBootstrap] applied staged SourbyCraft update to " + ownJar
+            + " — this boot still runs the previous build; the NEXT restart runs the new one.");
     }
 
     /** Forks one child JVM with single-pass AutoCreateSharedArchive; returns its exit code. */
