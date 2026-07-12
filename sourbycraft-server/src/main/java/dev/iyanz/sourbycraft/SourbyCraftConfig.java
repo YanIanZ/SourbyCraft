@@ -232,6 +232,17 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("JvmHeapAdvisor.init failed", t);
         }
 
+        // Re-usable live-apply (also driven by /sourbycraft reload). Boot-only steps (seed,
+        // proxy forwarding, heap advisor) stay in init() above and are NOT re-run on reload.
+        applyLiveConfig();
+    }
+
+    /**
+     * Apply every operator-tunable value from the (already-parsed) unified TOML to the live engine.
+     * Called from {@link #init(File)} at boot and from {@link #reload()} on {@code /sourbycraft
+     * reload}. Safe to re-run: each line re-reads a key and re-sets a field / knob / toggle.
+     */
+    private static void applyLiveConfig() {
         // Load JAR-baked perf knobs, then the sensor config, then the combat-profile preset.
         dev.iyanz.sourbycraft.perf.knob.Knobs.loadFromYml();
         try {
@@ -440,6 +451,36 @@ public class SourbyCraftConfig {
         dev.iyanz.sourbycraft.perf.knob.Knobs.logLoaded();
         dev.iyanz.sourbycraft.util.VirtualExecutor.init();
     }
+
+    /**
+     * Re-read the unified TOML from disk and re-apply it live ({@code /sourbycraft reload}). Returns
+     * a short human summary. Boot-only steps (config seeding, proxy forwarding, JVM heap advisor,
+     * command registration) are NOT re-run. A few settings only fully take effect on restart —
+     * Paper anti-xray engine-mode (worlds already built their controller) and thread-pool sizes —
+     * so the caller should surface that caveat.
+     */
+    public static synchronized String reload() {
+        Object fileObj = unifiedFile();
+        if (fileObj instanceof com.electronwill.nightconfig.core.file.CommentedFileConfig f) {
+            try {
+                f.load(); // re-parse sourbycraft_config/sourbycraft_global_config.toml from disk
+            } catch (Throwable t) {
+                return "reload FAILED: could not re-read the config file: " + t.getMessage();
+            }
+        } else {
+            return "reload FAILED: unified config not available";
+        }
+        try {
+            applyLiveConfig();
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("config reload apply failed", t);
+            return "reload FAILED during apply: " + t.getMessage();
+        }
+        dev.iyanz.sourbycraft.util.SourbyLogger.info("config reloaded from disk (/sourbycraft reload)");
+        return "reloaded — perf knobs, sensor, anti-xray toggles, lag limits + caps applied live. "
+            + "Paper anti-xray engine-mode and thread-pool sizes need a restart to fully change.";
+    }
+
 
     /**
      * Seed the SourbyCraft-owned keys into the single unified TOML so the operator edits ONE file
