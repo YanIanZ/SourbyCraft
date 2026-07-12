@@ -117,22 +117,22 @@ public final class PaperAntiXrayDefense {
     /** Seed the SourbyCraft-owned baritone-defense keys into the unified TOML (absent-only). */
     public static void seedDefaults(com.electronwill.nightconfig.core.file.CommentedFileConfig f, boolean[] changed) {
         seed(f, changed, "antixray.baritone-defense", true,
-            "Baritone/xray defense: seed Paper's built-in anti-xray to engine-mode 2 (OBFUSCATE fake-ores) "
+            "Baritone/xray defense: seed Paper's built-in anti-xray to engine-mode 1 (HIDE) + SourX raytrace "
             + "at boot so occluded ores + base blocks are sent to the client as plain stone. xray/Baritone "
             + "then can't see real ores through walls and can't beeline to them (the primary, sufficient, "
             + "cheap defense). SourbyCraft's raytrace layer still reveals the genuinely visible ores to legit "
             + "players (the layers compose). true = seed config/paper-world-defaults.yml ONCE (only while it "
             + "holds Paper's stock enabled:false default; operator edits are never clobbered). false = never "
             + "touch Paper anti-xray; manage it yourself in paper-world-defaults.yml.");
-        seed(f, changed, "antixray.engine-mode", 2,
-            "Paper anti-xray engine mode. 2 = OBFUSCATE (DEFAULT — hidden ores are replaced with RANDOM "
-            + "FAKE ores in the chunk packet, so an xray client sees a field of phantom ores and a "
-            + "Baritone bot beelines to ghosts: the genuinely strong anti-xray/anti-baritone mode). "
-            + "1 = HIDE (occluded ores sent as plain stone; lighter, but a chunk-caching xray or a "
-            + "cave-exposed leak can slip through — use only on a huge server that needs the lighter "
-            + "per-section cost). 3 = OBFUSCATE_LAYER. SourbyCraft re-asserts this into "
-            + "config/paper-world-defaults.yml on boot when it manages the block (see baritone-defense), "
-            + "so changing this value here migrates existing servers on the next restart.");
+        seed(f, changed, "antixray.engine-mode", 1,
+            "Paper anti-xray engine mode. 1 = HIDE (DEFAULT — occluded ores/base blocks are sent to the "
+            + "client as plain stone, no visual noise for legit miners). SourX's raytrace reveal layer "
+            + "sits on top and hides cave-exposed ores too until a player has genuine line-of-sight, so "
+            + "engine-mode 1 + SourX defeats xray/Baritone without the fake-ore jank. 2 = OBFUSCATE "
+            + "(paints RANDOM FAKE ores into the packet — strongest vs a chunk-caching xray, but legit "
+            + "miners see phantom ores flicker in tunnel walls; opt in only if you accept that). "
+            + "3 = OBFUSCATE_LAYER. SourX re-asserts this into config/paper-world-defaults.yml on boot "
+            + "when it manages the block, so changing it here migrates existing servers on next restart.");
         seed(f, changed, "antixray.max-block-height", 128,
             "Paper anti-xray only hides BELOW this Y (rounded to a 16-block section). Paper's stock default "
             + "is 64; SourbyCraft raises it to 128 so mountain/mesa surface ores and shallow bases are also "
@@ -216,7 +216,7 @@ public final class PaperAntiXrayDefense {
             }
         }
 
-        final int engineMode = clampEngineMode(SourbyCraftConfig.cfgInt("antixray.engine-mode", 2));
+        final int engineMode = clampEngineMode(SourbyCraftConfig.cfgInt("antixray.engine-mode", 1));
 
         // Gate: seed when Paper's stock (disabled). When already enabled, re-assert ONLY when the block
         // is SourbyCraft-managed (carries our full ore palette) and its engine-mode differs from the
