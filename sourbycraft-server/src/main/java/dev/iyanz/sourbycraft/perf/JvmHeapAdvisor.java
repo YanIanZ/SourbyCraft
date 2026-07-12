@@ -57,6 +57,22 @@ public final class JvmHeapAdvisor {
             SourbyLogger.info("jvm-heap: -Xms " + initMb + " / -Xmx " + maxMb
                     + " / committed " + committedMb);
 
+            // The missing -Xmx scenario: a JVM without -Xmx defaults to 25% of the container
+            // limit — a 10G Pterodactyl allocation silently becomes a ~2.5G heap ("panel says
+            // 10G, spark says 2G"). Detect + print the exact flag to paste into the panel.
+            long container = dev.iyanz.sourbycraft.util.ContainerMemory.limitBytes();
+            if (container > 0 && max > 0 && container > max * 2
+                    && !dev.iyanz.sourbycraft.util.ContainerMemory.explicitXmx()) {
+                long suggested = (long) (container * 0.85);
+                SourbyLogger.warn("jvm-heap: panel/container allocates "
+                        + dev.iyanz.sourbycraft.util.ContainerMemory.fmt(container)
+                        + " but the JVM heap is capped at " + fmt(max)
+                        + " (no -Xmx -> JVM default 25% of container RAM).");
+                SourbyLogger.warn("jvm-heap: add to the panel Startup flags:  -Xmx"
+                        + (suggested / (1024L * 1024 * 1024)) + "G   (or -XX:MaxRAMPercentage=85) "
+                        + "to actually use the allocation.");
+            }
+
             // The Pterodactyl scenario: Xms == Xmx >= 4G means the panel
             // sees a fully-committed heap from tick 0 and the bar pegs.
             if (max >= fourGiB && min == max) {
