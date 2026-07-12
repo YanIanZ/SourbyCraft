@@ -138,7 +138,9 @@ public final class SelfTuneController {
             case GREEN -> restoreBaseline();
             case YELLOW -> restoreBaseline();
             case ORANGE -> {
-                Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(Math.max(1, baselineProjectilePerTick / 2));
+                // Baseline 0 = unlimited: divide-down would turn it into the HARSHEST cap (1).
+                // Substitute per-tier absolute defaults instead.
+                Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(baselineProjectilePerTick <= 0 ? 10 : Math.max(1, baselineProjectilePerTick / 2));
                 Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.set(baselineProjectilePerProjectile);
                 Knobs.LAG_MACHINE_REMOVE_EXCESS_MINECARTS.set(baselineRemoveMinecarts);
                 Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.set(baselineMinecartsLimit);
@@ -154,8 +156,8 @@ public final class SelfTuneController {
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(30);
             }
             case RED -> {
-                Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(Math.max(1, baselineProjectilePerTick / 4));
-                Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.set(Math.max(1, baselineProjectilePerProjectile / 2));
+                Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(baselineProjectilePerTick <= 0 ? 5 : Math.max(1, baselineProjectilePerTick / 4)); // 0 = unlimited baseline
+                Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.set(baselineProjectilePerProjectile <= 0 ? 5 : Math.max(1, baselineProjectilePerProjectile / 2));
                 Knobs.LAG_MACHINE_REMOVE_EXCESS_MINECARTS.set(true);
                 Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.set(Math.max(1, baselineMinecartsLimit / 2));
                 Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.set(true);
