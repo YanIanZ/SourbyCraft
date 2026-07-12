@@ -46,7 +46,12 @@ public final class PerWorldHolder<T> {
         }, plugin);
     }
 
-    public T computeIfAbsent(String worldName, Function<String, T> factory) { return map.computeIfAbsent(worldName, factory); }
+    public T computeIfAbsent(String worldName, Function<String, T> factory) {
+        // Lock-free fast path: CHM.computeIfAbsent takes the bin lock even for reads on any bin
+        // collision, and this sits on per-pair-per-tick antixray paths across region threads.
+        T v = map.get(worldName);
+        return v != null ? v : map.computeIfAbsent(worldName, factory);
+    }
     public T get(String worldName) { return map.get(worldName); }
     public void put(String worldName, T value) { map.put(worldName, value); }
     public void remove(String worldName) { map.remove(worldName); }

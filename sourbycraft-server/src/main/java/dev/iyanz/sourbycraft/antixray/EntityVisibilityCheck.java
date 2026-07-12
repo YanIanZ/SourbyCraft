@@ -87,6 +87,32 @@ public final class EntityVisibilityCheck {
     /** Entities closer than 8 blocks to the player's eye are always shown. */
     private static final double NEAR_DISTANCE_SQUARED = 8.0 * 8.0;
 
+    // --- Verdict cache + hysteresis -------------------------------------------------------------
+    // The tracker calls this gate per tracked-entity x nearby-player EVERY TICK (ChunkMap
+    // moonrise$tick -> updatePlayer), so uncached rays are the single largest recurring CPU source
+    // in the authored layer (up to 3 DDA rays per pair per tick). Memoize the verdict per
+    // (player, entityId) for TTL_NANOS, and require HIDE_STREAK consecutive occluded verdicts
+    // before flipping a previously-visible entity to hidden — LOS boundary flapping would
+    // otherwise untrack/retrack (full spawn+metadata packet bursts) every tick for mobs pacing
+    // behind corners. Stale-visible lasts <= TTL (no ESP value: the entity WAS visible <500ms
+    // ago); stale-hidden is fail-safe.
+    //
+    // Value packing: bits[63..3] = System.nanoTime() & ~7 (timestamp), bits[2..1] = occluded
+    // streak (0-3), bit[0] = shown verdict. Inner maps are touched from multiple region threads
+    // (a player near two regions' entities) -> synchronized(inner), the same discipline as
+    // OreReveal.PENDING. Bounded per player; evicted via clear() from OreReveal's quit /
+    // world-change handlers, plus TTL staleness.
+    private static final java.util.Map<java.util.UUID, it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap> VERDICTS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long TTL_NANOS = 500_000_000L; // 10 ticks
+    private static final int MAX_PER_PLAYER = 4096;
+    private static final int HIDE_STREAK = 3;
+
+    /** Evict a player's verdicts (quit / world change). */
+    public static void clear(final java.util.UUID playerId) {
+        VERDICTS.remove(playerId);
+    }
+
     private EntityVisibilityCheck() {}
 
     /**
@@ -114,29 +140,70 @@ public final class EntityVisibilityCheck {
             if (entity instanceof ArmorStand) return true;
             if (entity instanceof HangingEntity) return true;
 
+            Vec3 eye = player.getEyePosition();
+            AABB bb = entity.getBoundingBox();
+            Vec3 centre = new Vec3((bb.minX + bb.maxX) * 0.5, (bb.minY + bb.maxY) * 0.5, (bb.minZ + bb.maxZ) * 0.5);
+
+            // Near-distance bypass FIRST (the common case around a player) — computed once,
+            // before the world-config map lookup so near entities pay neither.
+            final double dsq = eye.distanceToSqr(centre);
+            if (dsq <= NEAR_DISTANCE_SQUARED) return true;
+
             // SourbyCraft S4 - per-world gate + range (world-settings.<world>.anticheat.anti-xray)
             final dev.iyanz.sourbycraft.SourbyCraftWorldConfig wc =
                 dev.iyanz.sourbycraft.SourbyCraftWorldConfig.get((net.minecraft.server.level.ServerLevel) player.level());
             if (!wc.entityObfuscation) return true;
 
-            Vec3 eye = player.getEyePosition();
-            AABB bb = entity.getBoundingBox();
-            Vec3 centre = new Vec3((bb.minX + bb.maxX) * 0.5, (bb.minY + bb.maxY) * 0.5, (bb.minZ + bb.maxZ) * 0.5);
-
-            // Near-distance bypass: avoid edge cases on join / dimension / SWM load.
-            if (eye.distanceToSqr(centre) <= NEAR_DISTANCE_SQUARED) return true;
-
             // Beyond the configured range the tracker's own range governs; skip the clip cost.
             final double range = wc.entityObfuscationRange;
-            if (eye.distanceToSqr(centre) > range * range) return true;
+            if (dsq > range * range) return true;
+
+            // Cached verdict within TTL: no rays at all for the hit path.
+            final it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap verdicts =
+                VERDICTS.computeIfAbsent(player.getUUID(), id -> new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap());
+            final long now = System.nanoTime();
+            final long entityId = entity.getId();
+            long prev;
+            synchronized (verdicts) {
+                prev = verdicts.getOrDefault(entityId, Long.MIN_VALUE);
+                if (prev != Long.MIN_VALUE && now - (prev & ~7L) < TTL_NANOS) {
+                    return (prev & 1L) != 0L;
+                }
+            }
 
             // 3 sample points — centre + top + feet — gives a cheap approximation
             // of full-AABB visibility without 8-corner ray tracing.
-            if (OcclusionUtil.isVisible(player.level(), eye, centre)) return true;
-            Vec3 top = new Vec3(centre.x, bb.maxY - 0.05, centre.z);
-            if (OcclusionUtil.isVisible(player.level(), eye, top)) return true;
-            Vec3 feet = new Vec3(centre.x, bb.minY + 0.05, centre.z);
-            return OcclusionUtil.isVisible(player.level(), eye, feet);
+            boolean rayVisible = OcclusionUtil.isVisible(player.level(), eye, centre);
+            if (!rayVisible) {
+                Vec3 top = new Vec3(centre.x, bb.maxY - 0.05, centre.z);
+                rayVisible = OcclusionUtil.isVisible(player.level(), eye, top);
+            }
+            if (!rayVisible) {
+                Vec3 feet = new Vec3(centre.x, bb.minY + 0.05, centre.z);
+                rayVisible = OcclusionUtil.isVisible(player.level(), eye, feet);
+            }
+
+            // Hysteresis: a previously-shown entity needs HIDE_STREAK consecutive occluded
+            // verdicts before we actually hide it (kills untrack/retrack packet churn at LOS
+            // boundaries). A fresh ray hit always shows immediately.
+            final boolean shown;
+            int streak = prev == Long.MIN_VALUE ? HIDE_STREAK : (int) ((prev >>> 1) & 3L);
+            final boolean prevShown = prev != Long.MIN_VALUE && (prev & 1L) != 0L;
+            if (rayVisible) {
+                shown = true;
+                streak = 0;
+            } else if (prevShown && streak < HIDE_STREAK - 1) {
+                shown = true;
+                streak++;
+            } else {
+                shown = false;
+                streak = HIDE_STREAK;
+            }
+            synchronized (verdicts) {
+                if (verdicts.size() >= MAX_PER_PLAYER) verdicts.clear(); // bound memory; rebuilt in <= TTL
+                verdicts.put(entityId, (now & ~7L) | ((long) Math.min(streak, 3) << 1) | (shown ? 1L : 0L));
+            }
+            return shown;
         } catch (Throwable t) {
             if (FAILED_LOGGED.compareAndSet(false, true)) {
                 dev.iyanz.sourbycraft.util.SourbyLogger.warn("[antixray] entity-visibility check failed — "

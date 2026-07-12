@@ -177,7 +177,7 @@ public final class PaperAntiXrayDefense {
             return;
         }
 
-        final String[] lines = content.split("\n", -1);
+        final String[] lines = content.split("\r?\n", -1); // CRLF-edited files must not fail the exact-match seed
         // Locate the top-level "anticheat:" line and the "  anti-xray:" line under it, then the extent
         // of the anti-xray block (up to the next line at <= 2-space indent that is not part of it).
         int anticheatIdx = -1, antiXrayIdx = -1;

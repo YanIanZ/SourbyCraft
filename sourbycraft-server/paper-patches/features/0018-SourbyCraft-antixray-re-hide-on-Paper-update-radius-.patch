@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <superwhisz@gmail.com>
+Date: Sun, 12 Jul 2026 08:08:28 +0700
+Subject: [PATCH] SourbyCraft antixray: re-hide on Paper update-radius reveal
+
+
+diff --git a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+index 57e091df075809c3629ba22562053251037917b5..829fd9be43d95928cf6c8df364aa48d469dad142 100644
+--- a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
++++ b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+@@ -622,6 +622,17 @@ public final class ChunkPacketBlockControllerAntiXray extends ChunkPacketBlockCo
+     }
+ 
+     private void updateNearbyBlocks(Level level, BlockPos blockPos) {
++        // SourbyCraft start - antixray: re-hide on Paper update-radius reveal
++        // updateBlock below re-broadcasts the REAL state of every engine-hidden block within
++        // update-radius to all chunk viewers — defeating the SourbyCraft exposed-ore overlay on
++        // every solid->non-solid setBlock (pistons, fluids, falling blocks) AND on raw dig-start
++        // packets that fire no Bukkit event (a cheat client can sweep tunnel walls with dig-start
++        // spam to strip the overlay). Give the overlay the same trigger, post-change and
++        // exception-safe (it never throws into this caller).
++        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
++            dev.iyanz.sourbycraft.antixray.OreReveal.onNearbyReveal(serverLevel, blockPos);
++        }
++        // SourbyCraft end - antixray: re-hide on Paper update-radius reveal
+         if (updateRadius >= 2) {
+             BlockPos temp = blockPos.west();
+             updateBlock(level, temp);
