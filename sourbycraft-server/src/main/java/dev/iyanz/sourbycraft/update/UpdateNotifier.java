@@ -29,7 +29,39 @@ public final class UpdateNotifier {
     /** Permission that, in addition to op, receives the in-game update banner. */
     public static final String NOTIFY_PERMISSION = "sourbycraft.update.notify";
 
+    // The most recent "update available" banner, kept so a permission holder who joins AFTER the
+    // check ran still gets pinged (see JoinListener). Cleared when the server reports up-to-date.
+    private static volatile Component pendingBanner;
+    private static volatile String pendingLatest;
+
     private UpdateNotifier() {}
+
+    /** Clear the pending banner (e.g. the check found the server already up to date). */
+    public static void clearPending() {
+        pendingBanner = null;
+        pendingLatest = null;
+    }
+
+    /** True while an update banner is outstanding for join-time notification. */
+    public static boolean hasPending() { return pendingBanner != null; }
+
+    /**
+     * Join listener: a permission holder (op or {@link #NOTIFY_PERMISSION}) who logs in after an
+     * update was detected still gets the banner, shown a couple seconds post-join so it lands after
+     * the join spam. Registered once from the updater start.
+     */
+    public static final class JoinListener implements org.bukkit.event.Listener {
+        @org.bukkit.event.EventHandler
+        public void onJoin(org.bukkit.event.player.PlayerJoinEvent e) {
+            final Component banner = pendingBanner;
+            if (banner == null) return;
+            final org.bukkit.entity.Player p = e.getPlayer();
+            if (!(p.isOp() || p.hasPermission(NOTIFY_PERMISSION))) return;
+            // Hop to the player's region + small delay so the banner isn't buried by join messages.
+            p.getScheduler().runDelayed(org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
+                task -> { if (pendingBanner != null) p.sendMessage(pendingBanner); }, null, 40L);
+        }
+    }
 
     /**
      * Announce an available update. {@code current}/{@code latest} are the full version strings
@@ -40,6 +72,8 @@ public final class UpdateNotifier {
     public static void announce(String current, String latest, UpdateChannel channel,
                                 String releaseUrl, String notes) {
         Component banner = buildBanner(current, latest, channel, releaseUrl, notes);
+        pendingBanner = banner; // for join-time notification of permission holders
+        pendingLatest = latest;
 
         // Console — always. Also mirror a plain line to the SourbyCraft logger for log scrapers.
         try {

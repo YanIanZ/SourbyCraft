@@ -129,6 +129,13 @@ public final class SourbyUpdater {
             }
         }
 
+        // Notify permission holders who join AFTER an update was detected.
+        try {
+            Bukkit.getPluginManager().registerEvents(new UpdateNotifier.JoinListener(), owner);
+        } catch (Throwable t) {
+            SourbyLogger.warn("auto-updater: could not register the join-notify listener: " + t.getMessage());
+        }
+
         // One-shot check shortly after boot so a release published while the server was down is
         // picked up within minutes, not at the next daily slot.
         Bukkit.getAsyncScheduler().runDelayed(owner, task -> checkSafely(), 2, TimeUnit.MINUTES);
@@ -209,6 +216,7 @@ public final class SourbyUpdater {
         if (latest == null) {
             SourbyLogger.info("auto-updater: no matching " + channel.suffix()
                 + " release found for repo " + Config.repo() + " (up to date, or none published yet).");
+            UpdateNotifier.clearPending();
             return Outcome.NO_RELEASE;
         }
 
@@ -216,6 +224,7 @@ public final class SourbyUpdater {
             SourbyLogger.info("auto-updater: already up to date on channel "
                 + channel.suffix() + " (current " + currentVersion + " build " + ownBuildNumber()
                 + ", latest " + latest.tagName + ").");
+            UpdateNotifier.clearPending();
             return Outcome.UP_TO_DATE;
         }
         String appliedTag = readApplied();
