@@ -162,7 +162,7 @@ public class SourbyCraftConfig {
     // (items scattered ~1-2 blocks apart) reliably merges into one entity.
     public static int itemMergeRadius = 3;
     public static boolean ownerProtectionEnabled = true;
-    public static int ownerProtectionTime = 10;
+    public static int ownerProtectionTime = 3; // seconds a dropped item is locked to the dropper (others wait this long)
     /** Pickup delay (ticks) applied to a player-dropped item — how long before ANYONE may collect it.
      *  Vanilla is 40 (2s). Raise it to stop instant re-grabs in PvP; 0 = pickup immediately. */
     public static int itemPickupDelayTicks = 40;
