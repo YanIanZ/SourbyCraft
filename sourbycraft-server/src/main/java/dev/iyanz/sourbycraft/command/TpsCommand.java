@@ -112,9 +112,17 @@ public class TpsCommand extends Command {
         s.sendMessage(text()
             .append(text("  MSPT   ", SourbyCraftColors.DIM))
             .append(text(BarUtil.bar(budgetPct, TPS_BAR_WIDTH), color))
-            .append(text("  " + String.format(Locale.ROOT, "%.1fms", mspt), color))
-            .append(text("  (" + (int) Math.round(budgetPct) + "% of 50ms budget)", SourbyCraftColors.DIM))
+            .append(text("  " + fmtMspt(mspt), color))
+            .append(text("  (" + (budgetPct < 1.0 ? String.format(Locale.ROOT, "%.1f", budgetPct) : String.valueOf((int) Math.round(budgetPct)))
+                + "% of 50ms budget)", SourbyCraftColors.DIM))
             .build());
+    }
+
+    /** A healthy Folia region ticks in tens of microseconds; %.1f would floor that to "0.0ms". */
+    private static String fmtMspt(double mspt) {
+        if (mspt >= 10.0) return String.format(Locale.ROOT, "%.1fms", mspt);
+        if (mspt >= 0.1)  return String.format(Locale.ROOT, "%.2fms", mspt);
+        return String.format(Locale.ROOT, "%.3fms", mspt);
     }
 
     private static void renderFolia(CommandSender s) {

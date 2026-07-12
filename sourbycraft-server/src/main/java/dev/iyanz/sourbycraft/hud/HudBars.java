@@ -99,7 +99,9 @@ public final class HudBars {
             .append(Component.text("TPS ", NamedTextColor.GRAY))
             .append(Component.text(String.format(java.util.Locale.ROOT, "%.2f", tps), valueColor))
             .append(Component.text("   MSPT ", NamedTextColor.GRAY))
-            .append(Component.text(String.format(java.util.Locale.ROOT, "%.1fms", mspt),
+            .append(Component.text((mspt >= 10.0 ? String.format(java.util.Locale.ROOT, "%.1fms", mspt)
+                    : mspt >= 0.1 ? String.format(java.util.Locale.ROOT, "%.2fms", mspt)
+                    : String.format(java.util.Locale.ROOT, "%.3fms", mspt)),
                 mspt < 40 ? NamedTextColor.GREEN : mspt < 60 ? NamedTextColor.YELLOW : NamedTextColor.RED))
             .build());
         TPS_BAR.progress((float) Math.max(0.0, Math.min(1.0, tps / 20.0)));
