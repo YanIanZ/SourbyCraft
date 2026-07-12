@@ -75,18 +75,43 @@ public final class LagLimits implements Listener {
             + " arrows/world=" + SourbyCraftConfig.maxArrowsPerWorld);
     }
 
-    private static int chunkCount(Chunk chunk, Class<? extends Entity> type) {
+    /**
+     * NMS-typed chunk entity count. {@code chunk.getEntities()} materialises a CraftEntity
+     * wrapper ARRAY per call — one allocation burst per spawn event, continuous on mob/item
+     * farms. The Moonrise entity slices give the same census with plain NMS refs (one small
+     * list copy, zero wrappers). Runs on the owning region thread (spawn events fire there).
+     */
+    private static int chunkCountNms(org.bukkit.entity.Entity bukkitEntity,
+                                     java.util.function.Predicate<net.minecraft.world.entity.Entity> pred) {
+        final net.minecraft.world.entity.Entity nms =
+            ((org.bukkit.craftbukkit.entity.CraftEntity) bukkitEntity).getHandle();
+        final ca.spottedleaf.moonrise.patches.chunk_system.level.entity.ChunkEntitySlices slices =
+            ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel) nms.level())
+                .moonrise$getEntityLookup()
+                .getChunk(nms.chunkPosition().x(), nms.chunkPosition().z());
+        if (slices == null) return 0;
         int n = 0;
-        for (Entity e : chunk.getEntities()) {
-            if (type.isInstance(e)) n++;
+        for (final net.minecraft.world.entity.Entity e : slices.getAllEntities()) {
+            if (pred.test(e)) n++;
         }
         return n;
     }
 
+    /** Bukkit-side gate for the SPAWNING entity (single instanceof checks, no census). */
     private static boolean isSpecial(Entity e) {
         return e instanceof TNTPrimed || e instanceof ExperienceOrb
             || e instanceof AreaEffectCloud || e instanceof EvokerFangs;
     }
+
+    private static final java.util.function.Predicate<net.minecraft.world.entity.Entity> NMS_LIVING =
+        e -> e instanceof net.minecraft.world.entity.LivingEntity;
+    private static final java.util.function.Predicate<net.minecraft.world.entity.Entity> NMS_ITEM =
+        e -> e instanceof net.minecraft.world.entity.item.ItemEntity;
+    private static final java.util.function.Predicate<net.minecraft.world.entity.Entity> NMS_SPECIAL =
+        e -> e instanceof net.minecraft.world.entity.item.PrimedTnt
+            || e instanceof net.minecraft.world.entity.ExperienceOrb
+            || e instanceof net.minecraft.world.entity.AreaEffectCloud
+            || e instanceof net.minecraft.world.entity.projectile.EvokerFangs;
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onCreatureSpawn(CreatureSpawnEvent e) {
@@ -94,25 +119,21 @@ public final class LagLimits implements Listener {
         if (cap <= 0) return;
         CreatureSpawnEvent.SpawnReason r = e.getSpawnReason();
         if (r != CreatureSpawnEvent.SpawnReason.NATURAL && r != CreatureSpawnEvent.SpawnReason.SPAWNER) return;
-        if (chunkCount(e.getEntity().getChunk(), LivingEntity.class) >= cap) e.setCancelled(true);
+        if (chunkCountNms(e.getEntity(), NMS_LIVING) >= cap) e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onEntitySpawn(EntitySpawnEvent e) {
         int cap = SourbyCraftConfig.maxSpecialsPerChunk;
         if (cap <= 0 || !isSpecial(e.getEntity())) return;
-        int n = 0;
-        for (Entity other : e.getEntity().getChunk().getEntities()) {
-            if (isSpecial(other)) n++;
-        }
-        if (n >= cap) e.setCancelled(true);
+        if (chunkCountNms(e.getEntity(), NMS_SPECIAL) >= cap) e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onItemSpawn(ItemSpawnEvent e) {
         int cap = SourbyCraftConfig.itemMaxPerChunk;
         if (cap <= 0) return;
-        if (chunkCount(e.getEntity().getChunk(), Item.class) >= cap) e.setCancelled(true);
+        if (chunkCountNms(e.getEntity(), NMS_ITEM) >= cap) e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -151,7 +172,17 @@ public final class LagLimits implements Listener {
         // nothing reads (onProjectileLaunch early-returns when the cap is off).
         if (cap <= 0) return;
         for (World world : Bukkit.getWorlds()) {
-            List<AbstractArrow> arrows = new ArrayList<>(world.getEntitiesByClass(AbstractArrow.class));
+            // NMS iteration: getEntitiesByClass walks EVERY entity in the world and materialises a
+            // CraftEntity wrapper for each just to instanceof-filter — per world, per second.
+            // Iterate the raw entity list and wrap only actual arrows (typically a tiny subset).
+            List<AbstractArrow> arrows = new ArrayList<>();
+            for (final net.minecraft.world.entity.Entity nms :
+                    ((org.bukkit.craftbukkit.CraftWorld) world).getHandle().moonrise$getEntityLookup().getAll()) {
+                if (nms instanceof net.minecraft.world.entity.projectile.arrow.AbstractArrow
+                        && nms.getBukkitEntity() instanceof AbstractArrow arrow) {
+                    arrows.add(arrow);
+                }
+            }
             ARROW_COUNT.put(world.getName(), arrows.size());
             if (arrows.size() <= cap) continue;
             arrows.sort((a, b) -> Integer.compare(a.getEntityId(), b.getEntityId())); // oldest first (id immutable)
