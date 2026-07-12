@@ -87,6 +87,23 @@ public final class OreReveal implements Listener {
 
     private OreReveal() {}
 
+    /**
+     * Memory-pressure hook (perf engine, RED/EMERGENCY): drop half of every level's scan cache.
+     * Purely a soft cache — entries rebuild lazily on the next chunk send; freeing them trades a
+     * few re-scans for immediately reclaimable heap when the sensor says memory is the problem.
+     */
+    public static void trimCachesForMemoryPressure() {
+        for (final Long2ObjectOpenHashMap<CacheEntry> perLevel : SCAN_CACHE.values()) {
+            synchronized (perLevel) {
+                final var it = perLevel.values().iterator();
+                for (int i = 0, target = perLevel.size() / 2; i < target && it.hasNext(); i++) {
+                    it.next();
+                    it.remove();
+                }
+            }
+        }
+    }
+
     public static void register(Plugin plugin) {
         Bukkit.getPluginManager().registerEvents(new OreReveal(), plugin);
         long interval = Math.max(1, SourbyCraftConfig.raytraceIntervalTicks);

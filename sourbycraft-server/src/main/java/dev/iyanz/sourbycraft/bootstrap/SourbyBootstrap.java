@@ -73,8 +73,13 @@ public final class SourbyBootstrap {
      * Preferred over G1 when the committed heap is large ({@code -Xms >= 8G}).
      */
     private static final String[] ZGC_GENERATIONAL_FLAGS = {
-        "-XX:+UnlockExperimentalVMOptions", "-XX:+UseZGC", "-XX:+ZGenerational",
-        "-XX:+AlwaysPreTouch", "-XX:+DisableExplicitGC",
+        // ZGC is generational-by-default since JDK 23 and -XX:+ZGenerational was REMOVED in 24
+        // (passing it only produces a boot warning on our Java 25 floor). No AlwaysPreTouch here:
+        // pre-touching commits the whole heap as resident up-front, which is exactly what panel
+        // operators read as "RAM usage" — let ZGC commit on demand and RETURN idle pages to the
+        // OS (ZUncommit is on by default; the delay just makes it responsive).
+        "-XX:+UnlockExperimentalVMOptions", "-XX:+UseZGC",
+        "-XX:+DisableExplicitGC", "-XX:ZUncommitDelay=60",
     };
 
     /**
@@ -356,6 +361,16 @@ public final class SourbyBootstrap {
         // to the child ONLY when the operator has not chosen a GC (an explicit choice always wins).
         // Pure-efficiency, zero gameplay impact.
         applyGcFlags(cmd, jvmArgs);
+        // RAM right-sizing for the child: with no explicit heap cap the JVM defaults to 25% of
+        // container/host RAM (tiny heap, wasted allocation). 75% leaves OS/off-heap headroom.
+        boolean haveXmx = false;
+        for (String a : jvmArgs) {
+            if (a.startsWith("-Xmx") || a.startsWith("-XX:MaxHeapSize") || a.startsWith("-XX:MaxRAMPercentage")) {
+                haveXmx = true;
+                break;
+            }
+        }
+        if (!haveXmx) cmd.add("-XX:MaxRAMPercentage=75");
         // JDK 19+: create-on-miss, use-on-hit, and recreate automatically when the
         // archive is stale (jar/JDK changed). No manual fingerprint bookkeeping.
         cmd.add("-XX:+AutoCreateSharedArchive");

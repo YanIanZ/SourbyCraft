@@ -94,7 +94,7 @@ public final class LagLimits implements Listener {
         if (cap <= 0) return;
         CreatureSpawnEvent.SpawnReason r = e.getSpawnReason();
         if (r != CreatureSpawnEvent.SpawnReason.NATURAL && r != CreatureSpawnEvent.SpawnReason.SPAWNER) return;
-        if (chunkCount(e.getLocation().getChunk(), LivingEntity.class) >= cap) e.setCancelled(true);
+        if (chunkCount(e.getEntity().getChunk(), LivingEntity.class) >= cap) e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -102,7 +102,7 @@ public final class LagLimits implements Listener {
         int cap = SourbyCraftConfig.maxSpecialsPerChunk;
         if (cap <= 0 || !isSpecial(e.getEntity())) return;
         int n = 0;
-        for (Entity other : e.getLocation().getChunk().getEntities()) {
+        for (Entity other : e.getEntity().getChunk().getEntities()) {
             if (isSpecial(other)) n++;
         }
         if (n >= cap) e.setCancelled(true);
@@ -112,7 +112,7 @@ public final class LagLimits implements Listener {
     public void onItemSpawn(ItemSpawnEvent e) {
         int cap = SourbyCraftConfig.itemMaxPerChunk;
         if (cap <= 0) return;
-        if (chunkCount(e.getLocation().getChunk(), Item.class) >= cap) e.setCancelled(true);
+        if (chunkCount(e.getEntity().getChunk(), Item.class) >= cap) e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
