@@ -320,7 +320,10 @@ public final class SourbyBootstrap {
     private static Integer fork(String[] args, Path archivePath, List<String> jvmArgs, String envLabel) throws Throwable {
         String javaCmd = ProcessHandle.current().info().command()
                 .orElse(System.getProperty("java.home") + "/bin/java");
-        String ownJar = SourbyBootstrap.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath();
+        // Path.of(URI), not URI.getPath(): the latter yields "/C:/..." on Windows, which the child
+        // JVM's -jar cannot open — the fork would exit 1 and hard-fail the boot on Windows bare metal.
+        String ownJar = java.nio.file.Path.of(
+            SourbyBootstrap.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toString();
 
         List<String> cmd = new ArrayList<>();
         cmd.add(javaCmd);

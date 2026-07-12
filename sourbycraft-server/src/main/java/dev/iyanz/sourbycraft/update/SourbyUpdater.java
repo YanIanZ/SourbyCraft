@@ -335,9 +335,7 @@ public final class SourbyUpdater {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] buf = new byte[8192];
             for (int n; (n = in.read(buf)) > 0; ) md.update(buf, 0, n);
-            StringBuilder sb = new StringBuilder(64);
-            for (byte b : md.digest()) sb.append(String.format("%02x", b));
-            return sb.toString();
+            return java.util.HexFormat.of().formatHex(md.digest());
         } catch (Exception e) {
             return null;
         }
