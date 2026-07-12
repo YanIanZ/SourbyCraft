@@ -49,7 +49,7 @@ public final class SourbyCraftCommands {
 
         // Drop any pre-existing SimpleCommandMap entries so our fallback registration
         // is not shadowed by an earlier bukkit/vanilla entry under the same name.
-        String[] names = {"ping", "sys", "plugins", "speedtest", "sparkview", "ver", "perf", "maxp", "tps", "tpsbar", "rambar"};
+        String[] names = {"ping", "sys", "plugins", "speedtest", "sparkview", "ver", "perf", "maxp", "tps", "tpsbar", "rambar", "update"};
         Map<String, Command> known = commandMap.getKnownCommands();
         for (String n : names) {
             String lower = n.toLowerCase(Locale.ROOT);
@@ -68,6 +68,7 @@ public final class SourbyCraftCommands {
         commandMap.register("sourbycraft", new TpsCommand("tps"));
         commandMap.register("sourbycraft", new HudBarCommand("tpsbar", true));
         commandMap.register("sourbycraft", new HudBarCommand("rambar", false));
+        commandMap.register("sourbycraft", new UpdateCommand("update"));
         try {
             org.bukkit.Bukkit.getPluginManager().registerEvents(
                 new dev.iyanz.sourbycraft.hud.HudBars.QuitListener(),
@@ -84,7 +85,7 @@ public final class SourbyCraftCommands {
 
         registered = true;
         org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
-            "Registered 11 SourbyCraft commands (fallback prefix 'sourbycraft'). "
+            "Registered 12 SourbyCraft commands (fallback prefix 'sourbycraft'). "
             + "Use /sourbycraft:<name> if a name collides with Paper's built-ins "
             + "(/ping, /version, /plugins). Native /spark is provided by the bundled profiler.");
     }
