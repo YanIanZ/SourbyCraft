@@ -4,42 +4,31 @@ import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandMap;
 
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * Registers SourbyCraft's custom console commands into the server command map
- * with a "sourbycraft" fallback prefix, shadowing Paper's built-ins.
+ * Registers SourbyCraft's custom commands into the server command map so the BARE names
+ * ({@code /tps}, {@code /ping}, {@code /ver}, ...) resolve to the SourbyCraft styled versions —
+ * not Paper's built-ins.
  *
- * <p>Ported from the Paper tag {@code paper-26.2-pre-folia}, where the same
- * block lived in a paper-server patch to {@code CraftServer}. On the Folia base
- * this runs from Luminol's post-config command hook
- * ({@link me.earthme.luminol.commands.CommandRegister#register()}, invoked by
- * {@code ConfigManager#loadConfigFiles} inside {@code DedicatedServer#initServer}).
- * At that point the {@code CraftServer} and its {@code SimpleCommandMap} already
- * exist, and this precedes {@code syncCommands()}, so the entries registered here
- * are merged into the Brigadier command tree exposed to players + console.
- *
- * <p>Paper claims the bare names /ping, /plugins, /version via its Brigadier
- * command tree, so a plain {@code register("", ...)} gets shadowed. We drop any
- * pre-existing SimpleCommandMap entry first, then register with the
- * "sourbycraft" fallback prefix, so {@code /sourbycraft:<name>} always reaches us
- * (and the bare {@code /<name>} lands on us too whenever Paper has not already
- * claimed the slot). /tpsbar + /rambar are the SourbyCraft HUD boss bars
- * (shared-bar system fed by the perf sensor's worst-region aggregate); SWM is
- * gone on this Folia line. {@code /tps} is
- * registered here as a hex TPS panel. {@code /spark} is intentionally NOT
- * registered here: the bundled spark profiler is re-enabled (paper feature
- * patch 0004), so Paper's own {@code SparksFly} owns the real {@code /spark};
- * {@code /sparkview} remains the SourbyCraft one-shot quick view.
+ * <p><b>Two-phase reclaim (Folia boot order).</b> {@link #registerAll()} runs from the Luminol
+ * post-config hook (DedicatedServer#initServer, via ConfigManager#loadConfigFiles) which precedes
+ * {@code PaperCommands.registerCommands(this)} — so Paper re-registers {@code tps}/{@code mspt}/
+ * {@code ver}/{@code pl}/... into the command map AFTER us and steals the bare names back. An NMS
+ * patch therefore calls {@link #reclaimBareNames()} right after Paper's registration, which drops
+ * every non-SourbyCraft entry for our names and re-points the bare label at our command. Net
+ * result: {@code /tps} is ours, {@code /minecraft:tps} / {@code /paper:tps} still reach Paper's.
  */
 public final class SourbyCraftCommands {
 
     private static volatile boolean registered = false;
+    /** Our command name -> Command, kept so reclaimBareNames() can re-point the bare label. */
+    private static final Map<String, Command> OURS = new LinkedHashMap<>();
 
     public static synchronized void registerAll() {
         if (registered) return;
-
         CommandMap commandMap = Bukkit.getServer().getCommandMap();
         if (commandMap == null) {
             org.slf4j.LoggerFactory.getLogger("SourbyCraft")
@@ -47,47 +36,75 @@ public final class SourbyCraftCommands {
             return;
         }
 
-        // Drop any pre-existing SimpleCommandMap entries so our fallback registration
-        // is not shadowed by an earlier bukkit/vanilla entry under the same name.
-        String[] names = {"ping", "sys", "plugins", "speedtest", "sparkview", "ver", "perf", "maxp", "tps", "tpsbar", "rambar", "update"};
-        Map<String, Command> known = commandMap.getKnownCommands();
-        for (String n : names) {
-            String lower = n.toLowerCase(Locale.ROOT);
-            known.remove(lower);
-            known.remove("bukkit:" + lower);
+        OURS.clear();
+        OURS.put("ping", new PingCommand("ping"));
+        OURS.put("sys", new SysCommand("sys"));
+        OURS.put("plugins", new PluginsCommand("plugins"));
+        OURS.put("speedtest", new SpeedtestCommand("speedtest"));
+        OURS.put("sparkview", new SparkviewCommand("sparkview"));
+        OURS.put("ver", new VerCommand("ver"));
+        OURS.put("perf", new PerfCommand("perf"));
+        OURS.put("maxp", new MaxpCommand("maxp"));
+        OURS.put("tps", new TpsCommand("tps"));
+        OURS.put("mspt", new MsptCommand("mspt"));
+        OURS.put("tpsbar", new HudBarCommand("tpsbar", true));
+        OURS.put("rambar", new HudBarCommand("rambar", false));
+        OURS.put("update", new UpdateCommand("update"));
+
+        final Map<String, Command> known = commandMap.getKnownCommands();
+        for (Map.Entry<String, Command> e : OURS.entrySet()) {
+            final String name = e.getKey();
+            dropForeign(known, name);
+            commandMap.register("sourbycraft", e.getValue()); // ensures a sourbycraft:<name> alias always exists
+            known.put(name, e.getValue());                    // claim the bare name now (Paper may re-steal it -> reclaimBareNames)
         }
 
-        commandMap.register("sourbycraft", new PingCommand("ping"));
-        commandMap.register("sourbycraft", new SysCommand("sys"));
-        commandMap.register("sourbycraft", new PluginsCommand("plugins"));
-        commandMap.register("sourbycraft", new SpeedtestCommand("speedtest"));
-        commandMap.register("sourbycraft", new SparkviewCommand("sparkview"));
-        commandMap.register("sourbycraft", new VerCommand("ver"));
-        commandMap.register("sourbycraft", new PerfCommand("perf"));
-        commandMap.register("sourbycraft", new MaxpCommand("maxp"));
-        commandMap.register("sourbycraft", new TpsCommand("tps"));
-        commandMap.register("sourbycraft", new HudBarCommand("tpsbar", true));
-        commandMap.register("sourbycraft", new HudBarCommand("rambar", false));
-        commandMap.register("sourbycraft", new UpdateCommand("update"));
         try {
-            org.bukkit.Bukkit.getPluginManager().registerEvents(
+            Bukkit.getPluginManager().registerEvents(
                 new dev.iyanz.sourbycraft.hud.HudBars.QuitListener(),
                 org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE);
         } catch (Throwable t) {
             org.slf4j.LoggerFactory.getLogger("SourbyCraft").warn("HudBars quit-listener registration failed", t);
         }
 
-        // /spark is intentionally NOT registered here: the bundled spark profiler is
-        // re-enabled on this Folia build (paper feature patch 0004), so Paper's own
-        // io.papermc.paper.SparksFly registers the genuine /spark before plugins. We must
-        // not shadow it. /sparkview remains the SourbyCraft one-shot quick view and reads
-        // the same spark singleton.
-
         registered = true;
         org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
-            "Registered 12 SourbyCraft commands (fallback prefix 'sourbycraft'). "
-            + "Use /sourbycraft:<name> if a name collides with Paper's built-ins "
-            + "(/ping, /version, /plugins). Native /spark is provided by the bundled profiler.");
+            "Registered " + OURS.size() + " SourbyCraft commands (bare names; /minecraft:<name> or "
+            + "/paper:<name> still reach the built-ins). Native /spark is provided by the bundled profiler.");
+    }
+
+    /**
+     * Called from the NMS patch AFTER {@code PaperCommands.registerCommands} — reclaim the bare
+     * names Paper just stole ({@code tps}, {@code mspt}, {@code ver}, {@code pl}->{@code plugins}, ...).
+     */
+    public static synchronized void reclaimBareNames() {
+        if (!registered) return;
+        CommandMap commandMap = Bukkit.getServer().getCommandMap();
+        if (commandMap == null) return;
+        final Map<String, Command> known = commandMap.getKnownCommands();
+        int reclaimed = 0;
+        for (Map.Entry<String, Command> e : OURS.entrySet()) {
+            final String name = e.getKey();
+            final Command current = known.get(name);
+            if (current != e.getValue()) {
+                dropForeign(known, name);
+                known.put(name, e.getValue());
+                reclaimed++;
+            }
+        }
+        if (reclaimed > 0) {
+            org.slf4j.LoggerFactory.getLogger("SourbyCraft")
+                .info("Reclaimed " + reclaimed + " bare command name(s) from the built-ins.");
+        }
+    }
+
+    /** Remove every command-map entry for {@code name} that is NOT one of ours (bare + all namespaces). */
+    private static void dropForeign(Map<String, Command> known, String name) {
+        final String lower = name.toLowerCase(Locale.ROOT);
+        known.remove(lower);
+        for (String ns : new String[]{"bukkit", "minecraft", "paper", "spigot"}) {
+            known.remove(ns + ":" + lower);
+        }
     }
 
     private SourbyCraftCommands() {}
