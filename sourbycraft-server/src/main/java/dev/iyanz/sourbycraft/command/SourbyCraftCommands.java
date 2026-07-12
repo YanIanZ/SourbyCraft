@@ -50,6 +50,7 @@ public final class SourbyCraftCommands {
         OURS.put("tpsbar", new HudBarCommand("tpsbar", true));
         OURS.put("rambar", new HudBarCommand("rambar", false));
         OURS.put("update", new UpdateCommand("update"));
+        OURS.put("sourbycraft", new SourbyCraftCommand("sourbycraft"));
 
         final Map<String, Command> known = commandMap.getKnownCommands();
         for (Map.Entry<String, Command> e : OURS.entrySet()) {
