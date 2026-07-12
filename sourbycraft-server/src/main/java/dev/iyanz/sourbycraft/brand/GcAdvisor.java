@@ -57,18 +57,30 @@ public final class GcAdvisor {
         return evaluate(gcNames, jvmArgs, xms, xmx);
     }
 
+    /**
+     * Modern (Java 25 / ZGC-era) evaluation. Only flags that ACTIVELY hurt are warned about —
+     * the old advice (AlwaysPreTouch, Xms=Xmx, ZGenerational, UseLargePages) is retired: it
+     * pins the whole heap resident from tick 0 (panels chart that as "RAM usage"), blocks ZGC
+     * uncommit, and ZGenerational was removed in JDK 24 (ZGC is generational by default).
+     */
     public static Result evaluate(List<String> gcNames, List<String> jvmArgs, long xms, long xmx) {
         List<String> warns = new ArrayList<>();
         boolean isZgc = gcNames.stream().anyMatch(n -> n.contains("ZGC"));
         boolean isG1 = gcNames.stream().anyMatch(n -> n.contains("G1"));
         if (!isZgc && !isG1) {
-            warns.add("GC is not ZGC or G1 — detected: " + gcNames + ". Recommended: -XX:+UseZGC -XX:+ZGenerational");
+            warns.add("GC is " + gcNames + " — use -XX:+UseZGC (low-pause, uncommits idle heap).");
         }
-        if (xms > 0 && xmx > 0 && xms != xmx) {
-            warns.add("Xms != Xmx (Xms=" + xms + "MB, Xmx=" + xmx + "MB). Set them equal to avoid heap resize pauses.");
+        if (jvmArgs.stream().anyMatch(a -> a.startsWith("-XX:+ZGenerational"))) {
+            warns.add("-XX:+ZGenerational was REMOVED in JDK 24 — drop the flag (ZGC is generational by default).");
         }
-        if (jvmArgs.stream().noneMatch(a -> a.contains("AlwaysPreTouch"))) {
-            warns.add("Missing -XX:+AlwaysPreTouch — recommended for predictable tick latency.");
+        if (isZgc && jvmArgs.stream().anyMatch(a -> a.startsWith("-XX:+AlwaysPreTouch"))) {
+            warns.add("-XX:+AlwaysPreTouch pins the ENTIRE heap resident from boot — drop it so idle heap returns to the OS.");
+        }
+        if (isZgc && jvmArgs.stream().noneMatch(a -> a.startsWith("-XX:ZUncommitDelay"))) {
+            warns.add("Add -XX:ZUncommitDelay=60 so ZGC returns idle heap pages to the OS quickly.");
+        }
+        if (xms > 0 && xmx > 0 && xms == xmx && xmx >= 4096) {
+            warns.add("-Xms equal to -Xmx commits the full heap up-front — use a small -Xms (e.g. 2G) and let it grow.");
         }
         return new Result(warns.isEmpty(), warns);
     }
@@ -88,24 +100,17 @@ public final class GcAdvisor {
         return 0;
     }
 
+    /** Compact WARN lines instead of the old box banner (whose advice was outdated anyway). */
     public static String renderWarningBanner(Result r) {
         if (r.acceptable()) return "";
         final String w = fg(SourbyCraftColors.WARNING);
         StringBuilder sb = new StringBuilder();
-        sb.append(w).append("╔══════════════════════════════════════════════════╗").append(RESET).append('\n');
-        sb.append(w).append("║  ⚠  SourbyCraft tuned for ZGC generational       ║").append(RESET).append('\n');
-        sb.append(w).append("╠══════════════════════════════════════════════════╣").append(RESET).append('\n');
+        sb.append(w).append("[SourbyCraft] JVM flag advisor:").append(RESET).append('\n');
         for (String warn : r.warnings()) {
-            String line = warn.length() > 46 ? warn.substring(0, 43) + "..." : warn;
-            sb.append(w).append(String.format("║  %-46s║", line)).append(RESET).append('\n');
+            sb.append(w).append("[SourbyCraft]   - ").append(warn).append(RESET).append('\n');
         }
-        sb.append(w).append("║                                                  ║").append(RESET).append('\n');
-        sb.append(w).append("║  Recommended JVM args:                           ║").append(RESET).append('\n');
-        sb.append(w).append("║    -XX:+UseZGC -XX:+ZGenerational                ║").append(RESET).append('\n');
-        sb.append(w).append("║    -XX:+AlwaysPreTouch                           ║").append(RESET).append('\n');
-        sb.append(w).append("║    -XX:+UseLargePages                            ║").append(RESET).append('\n');
-        sb.append(w).append("║    -Xms=Xmx (same value)                         ║").append(RESET).append('\n');
-        sb.append(w).append("╚══════════════════════════════════════════════════╝").append(RESET).append('\n');
+        sb.append(w).append("[SourbyCraft]   Recommended (Java 25): -Xms2G -Xmx<75-85% of allocation> "
+            + "-XX:+UseZGC -XX:ZUncommitDelay=60 --add-modules=jdk.incubator.vector").append(RESET).append('\n');
         return sb.toString();
     }
 }
