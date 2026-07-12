@@ -91,6 +91,25 @@ public class AutoUpdateConfig implements IConfigModule {
     public void onLoaded(CommentedFileConfig configInstance, @Nullable Set<Exception> exs) {
         // Do not start here: config finalise runs before the plugin handle / Folia async scheduler
         // are ready. The boot hook (PerfEngineBootstrap.start) calls startUpdater() when they are.
+        //
+        // One-time migration (seeded-default trap): builds before r6 seeded enabled=false +
+        // apply_mode="notify" into every install's TOML, and those explicit values win over the
+        // new auto defaults forever. A pre-r6 file is recognisable by the ABSENCE of the
+        // check_interval_minutes key (it did not exist then); only that exact seeded shape is
+        // flipped, so an operator who deliberately configured the updater is never overridden.
+        try {
+            boolean preR6File = !configInstance.contains("misc.auto_update.check_interval_minutes");
+            if (preR6File && !enabled && "notify".equalsIgnoreCase(String.valueOf(applyMode).trim())) {
+                enabled = true;
+                applyMode = "auto";
+                configInstance.set("misc.auto_update.enabled", true);
+                configInstance.set("misc.auto_update.apply_mode", "auto");
+                org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
+                    "auto-updater: migrated pre-r6 seeded config (enabled=false/notify) -> enabled=true/auto");
+            }
+        } catch (Throwable t) {
+            org.slf4j.LoggerFactory.getLogger("SourbyCraft").warn("auto-updater config migration failed", t);
+        }
     }
 
     @Override
@@ -128,5 +147,13 @@ public class AutoUpdateConfig implements IConfigModule {
 
     private static @Nullable AutoUpdateConfig holder() {
         return SELF;
+    }
+
+    /** Live updater instance for on-demand checks (/update). Creates one when needed. */
+    public static @Nullable SourbyUpdater updater() {
+        AutoUpdateConfig module = holder();
+        if (module == null) return null;
+        if (module.instance == null) module.instance = new SourbyUpdater();
+        return module.instance;
     }
 }

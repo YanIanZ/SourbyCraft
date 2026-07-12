@@ -183,9 +183,17 @@ public final class SourbyUpdater {
         }
     }
 
-    /** Run one channel-aware update check. Returns the outcome (also used by an on-demand check). */
+    /** Run one channel-aware update check with the configured apply mode. */
     public Outcome check() {
-        ApplyMode mode = ApplyMode.parse(Config.mode());
+        return check(null);
+    }
+
+    /**
+     * Run one check; {@code overrideMode} (e.g. from {@code /update apply}) wins over the
+     * configured mode, letting an operator force a download+apply on a notify-configured server.
+     */
+    public Outcome check(@Nullable ApplyMode overrideMode) {
+        ApplyMode mode = overrideMode != null ? overrideMode : ApplyMode.parse(Config.mode());
         if (mode == ApplyMode.OFF) return Outcome.DISABLED;
 
         String currentVersion = BuildInfo.load().version();
