@@ -114,6 +114,17 @@ public final class SourbyBootstrap {
             System.err.println("[SourbyBootstrap] staged-update swap failed (continuing with current jar): " + t);
         }
 
+        // Self-heal a GC-stale CDS archive. A .jsa created under one GC (e.g. G1, compressed oops on)
+        // is incompatible under another (e.g. ZGC, compressed oops off) — the JVM logs "Cannot use CDS
+        // heap data. Selected GC not compatible" and drops the archive, so CDS never helps. When the
+        // GC changed since the archive was written, delete it here so -XX:+AutoCreateSharedArchive
+        // regenerates a clean one under the current GC on this run's exit. JDK-only, never fatal.
+        try {
+            healStaleCdsArchive();
+        } catch (Throwable t) {
+            System.err.println("[SourbyBootstrap] CDS archive heal check failed (non-fatal): " + t);
+        }
+
         // The child (post re-exec) carries the bypass flag and drops straight to boot.
         if (System.getProperty(ORCHESTRATOR_BYPASS) == null
                 && System.getenv("SOURBYCRAFT_ORCHESTRATOR_BYPASS") == null) {
@@ -562,6 +573,54 @@ public final class SourbyBootstrap {
     private static Path resolveArchivePath() {
         String override = firstNonNull(System.getProperty(CDS_PATH_PROP), System.getenv(CDS_PATH_ENV), null);
         return Paths.get(override != null && !override.isBlank() ? override : DEFAULT_CDS_ARCHIVE_PATH);
+    }
+
+    /**
+     * Delete the CDS archive when the GC changed since it was written, so the JVM regenerates a
+     * clean, GC-compatible one. CDS archived HEAP objects are GC/compressed-oops-specific: an
+     * archive baked under G1 (compressed oops) can't be mapped under ZGC (no compressed oops),
+     * producing "Cannot use CDS heap data. Selected GC not compatible" every boot and disabling
+     * the archive entirely. A tiny marker file records the GC the archive was made under; a
+     * mismatch triggers a one-time delete + marker rewrite. Only acts when AutoCreateSharedArchive
+     * is in play (the JVM will recreate the archive) so we never leave the operator archive-less.
+     */
+    private static void healStaleCdsArchive() {
+        List<String> jvmArgs = java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments();
+        boolean autoCreate = false;
+        Path archive = null;
+        for (String a : jvmArgs) {
+            if (a.startsWith("-XX:+AutoCreateSharedArchive")) autoCreate = true;
+            else if (a.startsWith("-XX:SharedArchiveFile=")) archive = Paths.get(a.substring("-XX:SharedArchiveFile=".length()).trim());
+        }
+        // If we are the ones adding the flags (fork path with no operator CDS flag), use the default.
+        if (archive == null && autoCreate) archive = resolveArchivePath();
+        if (!autoCreate || archive == null) return;
+
+        // Current GC name (first collector bean's family: G1 / ZGC / Shenandoah / Parallel / ...).
+        String gc = "unknown";
+        for (var bean : java.lang.management.ManagementFactory.getGarbageCollectorMXBeans()) {
+            String n = bean.getName();
+            if (n.contains("ZGC") || n.contains("Z ")) { gc = "zgc"; break; }
+            if (n.contains("G1")) { gc = "g1"; break; }
+            if (n.contains("Shenandoah")) { gc = "shenandoah"; break; }
+            if (n.contains("Parallel") || n.contains("PS ")) { gc = "parallel"; break; }
+            if (n.contains("Serial") || n.contains("Copy") || n.contains("MarkSweep")) { gc = "serial"; break; }
+        }
+        try {
+            Path marker = archive.resolveSibling(archive.getFileName() + ".gc");
+            String prev = Files.isRegularFile(marker) ? Files.readString(marker, StandardCharsets.UTF_8).trim() : null;
+            if (prev != null && !prev.equals(gc) && Files.isRegularFile(archive)) {
+                Files.deleteIfExists(archive);
+                System.out.println("[SourbyBootstrap] CDS archive was built under '" + prev + "' but the GC is now '"
+                    + gc + "' — deleted " + archive.getFileName() + " so it regenerates clean (removes the "
+                    + "'Cannot use CDS heap data' warning).");
+            }
+            Path pdir = marker.getParent();
+            if (pdir != null && !Files.exists(pdir)) Files.createDirectories(pdir);
+            Files.writeString(marker, gc + System.lineSeparator());
+        } catch (Throwable ignored) {
+            // Best-effort: a failed heal just leaves the benign warning, never blocks boot.
+        }
     }
 
     /** Parses committed initial heap from -Xms / -XX:InitialHeapSize; -1 if unset. */
