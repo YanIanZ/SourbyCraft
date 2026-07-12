@@ -112,10 +112,20 @@ public final class ViaAutoUpdate {
             if (!el.isJsonObject()) continue;
             final JsonObject v = el.getAsJsonObject();
             if (!hasPaperLoader(v)) continue;
+            // STABLE releases only. A SNAPSHOT/beta (e.g. ViaVersion 5.11.0-SNAPSHOT) can carry a
+            // half-finished mapping and hard-crash on load (Protocol1_13 blockStates null) — never
+            // auto-install one.
+            if (!isRelease(v)) continue;
             if (bestAny == null) bestAny = v;
             if (bestMc == null && listContains(v, "game_versions", mc)) bestMc = v;
         }
         return bestMc != null ? bestMc : bestAny;
+    }
+
+    /** Modrinth version_type == "release" — excludes beta/alpha/snapshot channels. */
+    private static boolean isRelease(JsonObject v) {
+        return v.has("version_type") && v.get("version_type").isJsonPrimitive()
+            && "release".equalsIgnoreCase(v.get("version_type").getAsString());
     }
 
     private static boolean hasPaperLoader(JsonObject v) {
