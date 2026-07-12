@@ -75,9 +75,14 @@ public class TpsCommand extends Command {
     }
 
     private static void renderTps(CommandSender s) {
-        double[] tps = safeTps();
-        String[] labels = {"1m ", "5m ", "15m"};
-        s.sendMessage(text("  Aggregate TPS (1m / 5m / 15m):", SourbyCraftColors.LABEL));
+        // Worst-region windows from the perf sensor (NOT Bukkit.getTPS(), which is only the
+        // CALLING region's report on Folia). "now" = 15s window: recovers within seconds of a
+        // join/chunk-load burst instead of dragging sub-20 for a whole minute.
+        dev.iyanz.sourbycraft.perf.sensor.SensorSnapshot snap =
+            dev.iyanz.sourbycraft.perf.sensor.PerfSensor.snapshot();
+        double[] tps = {snap.tps1s(), snap.tps30s(), snap.tps5m()};
+        String[] labels = {"now", "1m ", "5m "};
+        s.sendMessage(text("  Worst-region TPS (15s / 1m / 5m):", SourbyCraftColors.LABEL));
         for (int i = 0; i < labels.length; i++) {
             double v = (tps != null && i < tps.length) ? clampTps(tps[i]) : Double.NaN;
             if (Double.isNaN(v)) {
@@ -95,7 +100,8 @@ public class TpsCommand extends Command {
     }
 
     private static void renderMspt(CommandSender s) {
-        double mspt = safeMspt();
+        // Worst-region 15s MSPT from the sensor (Bukkit.getAverageTickTime is calling-region only).
+        double mspt = dev.iyanz.sourbycraft.perf.sensor.PerfSensor.snapshot().msptAvg();
         if (Double.isNaN(mspt)) {
             s.sendMessage(line("  MSPT", "(unavailable)", SourbyCraftColors.DIM));
             return;
@@ -155,22 +161,6 @@ public class TpsCommand extends Command {
 
     // --- signal readers (defensive; the Bukkit API can throw very early at boot) ---
 
-    private static double[] safeTps() {
-        try {
-            return Bukkit.getTPS();
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    private static double safeMspt() {
-        try {
-            double m = Bukkit.getAverageTickTime();
-            return (Double.isNaN(m) || m < 0.0) ? Double.NaN : m;
-        } catch (Throwable t) {
-            return Double.NaN;
-        }
-    }
 
     private static double memUsagePercent() {
         Runtime rt = Runtime.getRuntime();
