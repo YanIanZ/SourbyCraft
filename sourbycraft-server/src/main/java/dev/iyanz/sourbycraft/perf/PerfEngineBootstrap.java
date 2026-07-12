@@ -180,8 +180,9 @@ public final class PerfEngineBootstrap {
             SourbyLogger.error("perf-engine: ConfigBridge.register failed", t);
         }
 
-        // OwnerProtection — dropped-item pickup lock. Guard: item.owner-protection-enabled.
-        if (SourbyCraftConfig.ownerProtectionEnabled) {
+        // OwnerProtection — dropped-item pickup lock + pickup-delay. Register when EITHER
+        // owner-protection is on OR a non-vanilla pickup-delay is configured (both live in onDrop).
+        if (SourbyCraftConfig.ownerProtectionEnabled || SourbyCraftConfig.itemPickupDelayTicks != 40) {
             try {
                 OwnerProtection.register(owner);
                 registered.add("owner-protection");

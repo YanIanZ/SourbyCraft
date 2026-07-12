@@ -163,6 +163,9 @@ public class SourbyCraftConfig {
     public static int itemMergeRadius = 3;
     public static boolean ownerProtectionEnabled = true;
     public static int ownerProtectionTime = 10;
+    /** Pickup delay (ticks) applied to a player-dropped item — how long before ANYONE may collect it.
+     *  Vanilla is 40 (2s). Raise it to stop instant re-grabs in PvP; 0 = pickup immediately. */
+    public static int itemPickupDelayTicks = 40;
     public static int itemMaxPerChunk = 64;
     public static int mobTickDistance = 32;
     public static int mobPathfindInterval = 20;
@@ -369,6 +372,7 @@ public class SourbyCraftConfig {
         itemMergeRadius = cfgInt("entity.item-merge-radius", itemMergeRadius);
         ownerProtectionEnabled = cfgBool("item.owner-protection-enabled", ownerProtectionEnabled);
         ownerProtectionTime = Math.min(cfgInt("item.owner-protection-time", ownerProtectionTime), 1638);
+        itemPickupDelayTicks = Math.max(0, Math.min(cfgInt("item.pickup-delay-ticks", itemPickupDelayTicks), 32766));
         itemMaxPerChunk = cfgInt("item.max-per-chunk", itemMaxPerChunk);
         mobTickDistance = cfgInt("entity.mob-tick-distance", mobTickDistance);
         mobPathfindInterval = cfgInt("entity.mob-pathfind-interval", mobPathfindInterval);
