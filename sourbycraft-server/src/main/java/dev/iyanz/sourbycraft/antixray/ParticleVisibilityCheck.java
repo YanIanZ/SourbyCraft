@@ -40,6 +40,9 @@ public final class ParticleVisibilityCheck {
     /** Particles closer than 8 blocks to the player's eye are always shown. */
     private static final double NEAR_DISTANCE_SQUARED = 8.0 * 8.0;
 
+    /** Beyond this the gate fails open — no 512-block cross-region rays for forced particles. */
+    private static final double GATE_RANGE_SQUARED = 64.0 * 64.0;
+
     /**
      * Logged-once guard. The particle gate runs synchronously in {@code ServerLevel#sendParticles};
      * a throw must never break particle broadcast. Fails open to "can see" (send the particle),
@@ -58,7 +61,12 @@ public final class ParticleVisibilityCheck {
             // Near-distance bypass keeps the player's own footstep / breath / interact particles
             // visible even when the camera momentarily sits "behind" a wall as the chunk packets
             // stream in (e.g. join / dimension transition / SWM world load).
-            if (eye.distanceToSqr(x, y, z) <= NEAR_DISTANCE_SQUARED) return true;
+            final double dsq = eye.distanceToSqr(x, y, z);
+            if (dsq <= NEAR_DISTANCE_SQUARED) return true;
+            // Clamp the gate: force-particles (overrideLimiter) reach 512 blocks — a 512-step DDA per
+            // receiver is needless cost and the ray would cross region borders / unloaded chunks.
+            // Beyond 64 blocks fail open (send): distance culling on the client governs there anyway.
+            if (dsq > GATE_RANGE_SQUARED) return true;
             Vec3 target = new Vec3(x, y, z);
             return OcclusionUtil.isVisible(player.level(), eye, target);
         } catch (Throwable t) {

@@ -46,6 +46,10 @@ public final class OcclusionUtil {
 
     private OcclusionUtil() {}
 
+    /** Shared "ray blocked" sentinel — see traversal lambda. Never inspected beyond null-ness. */
+    private static final BlockHitResult BLOCKED =
+        BlockHitResult.miss(Vec3.ZERO, Direction.UP, BlockPos.ZERO);
+
     /**
      * Returns {@code true} when no <em>view-blocking</em> (solid full-cube,
      * suffocating) block sits strictly between {@code from} and {@code to}.
@@ -75,10 +79,16 @@ public final class OcclusionUtil {
                     && pos.getZ() == c.targetBlock.getZ()) {
                     return null;
                 }
-                final BlockState state = c.level.getBlockState(pos);
-                if (occludes(c.level, state, pos, c.fluidObscures)) {
-                    // Any non-null return stops the traversal — the ray is blocked.
-                    return BlockHitResult.miss(c.to, Direction.UP, pos.immutable());
+                // NEVER Level.getBlockState here: rays run on async virtual threads, and the
+                // vanilla path would sync-load (or NPE on) an unloaded chunk. Loaded-chunk-only
+                // read; an unloaded chunk occludes (fail-safe: the ore stays hidden until a ray
+                // through loaded terrain proves it visible). The last-chunk cache makes the
+                // common same-chunk step free.
+                final BlockState state = c.blockStateIfLoaded(pos);
+                if (state == null || occludes(c.level, state, pos, c.fluidObscures)) {
+                    // Any non-null return stops the traversal; callers only test null/non-null,
+                    // so a shared sentinel avoids a BlockPos+BlockHitResult alloc per blocked ray.
+                    return BLOCKED;
                 }
                 return null;
             },
@@ -102,6 +112,36 @@ public final class OcclusionUtil {
         return false;
     }
 
-    /** Immutable per-ray traversal context (no allocation on the hot path beyond this small record). */
-    private record Context(Level level, Vec3 from, Vec3 to, boolean fluidObscures, BlockPos targetBlock) {}
+    /** Per-ray traversal context; caches the last chunk touched (rays cross chunks rarely per step). */
+    private static final class Context {
+        final Level level;
+        final Vec3 from, to;
+        final boolean fluidObscures;
+        final BlockPos targetBlock;
+        private net.minecraft.world.level.chunk.LevelChunk lastChunk;
+        private int lastCx = Integer.MIN_VALUE, lastCz = Integer.MIN_VALUE;
+
+        Context(Level level, Vec3 from, Vec3 to, boolean fluidObscures, BlockPos targetBlock) {
+            this.level = level;
+            this.from = from;
+            this.to = to;
+            this.fluidObscures = fluidObscures;
+            this.targetBlock = targetBlock;
+        }
+
+        /** Block state via loaded-chunk lookup only; {@code null} when the chunk is not loaded. */
+        BlockState blockStateIfLoaded(final BlockPos pos) {
+            if (this.level.isOutsideBuildHeight(pos.getY())) return net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+            final int cx = pos.getX() >> 4, cz = pos.getZ() >> 4;
+            net.minecraft.world.level.chunk.LevelChunk chunk = this.lastChunk;
+            if (cx != this.lastCx || cz != this.lastCz) {
+                chunk = this.level instanceof net.minecraft.server.level.ServerLevel sl
+                    ? sl.getChunkIfLoaded(cx, cz) : null;
+                this.lastChunk = chunk;
+                this.lastCx = cx;
+                this.lastCz = cz;
+            }
+            return chunk == null ? null : chunk.getBlockState(pos);
+        }
+    }
 }
