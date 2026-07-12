@@ -197,9 +197,13 @@ public final class PerfEngineBootstrap {
             try {
                 LagLimits.register(owner);
                 // Folia: drive the 1 Hz arrow sweeper from the global-region scheduler (no global
-                // main-thread scheduler exists). First sweep after 100t, then every 20t.
-                Bukkit.getGlobalRegionScheduler().runAtFixedRate(
-                    owner, task -> LagLimits.sweepArrows(), 100L, 20L);
+                // main-thread scheduler exists). First sweep after 100t, then every 20t. Only the
+                // arrow cap consumes the sweep — do not schedule a per-second full-world entity
+                // scan for operators who disabled it.
+                if (SourbyCraftConfig.maxArrowsPerWorld > 0) {
+                    Bukkit.getGlobalRegionScheduler().runAtFixedRate(
+                        owner, task -> LagLimits.sweepArrows(), 100L, 20L);
+                }
                 registered.add("lag-limits");
             } catch (Throwable t) {
                 SourbyLogger.error("perf-engine: LagLimits.register failed", t);

@@ -69,7 +69,13 @@ public class SourbyCraftConfig {
     public static <T> T cfgGet(String dottedPath, T defaultValue) {
         Object v = lookup(dottedPath);
         if (v != null) {
-            try { return (T) v; } catch (ClassCastException ignored) {}
+            // The unchecked cast is erased — a CCE would surface at the CALL SITE, not here, so
+            // catching it locally was dead code. Check assignability against the default instead
+            // (mirrors cfgBool/cfgInt) so a mistyped key degrades to the default with one WARN.
+            if (defaultValue == null || defaultValue.getClass().isInstance(v)) {
+                return (T) v;
+            }
+            warnOnce(dottedPath, v, defaultValue.getClass().getSimpleName());
         }
         return defaultValue;
     }
@@ -117,6 +123,10 @@ public class SourbyCraftConfig {
         }
         return java.util.Collections.unmodifiableList(out);
     }
+
+    /** Combat profile applied this boot — decides whether the lag-machine TOML bridge runs. */
+    private static volatile dev.iyanz.sourbycraft.perf.CombatProfile activeCombatProfile =
+        dev.iyanz.sourbycraft.perf.CombatProfile.VANILLA;
 
     // --- Live config fields (hardcoded defaults; operator-overridable via the unified TOML). ---
 
@@ -229,13 +239,16 @@ public class SourbyCraftConfig {
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("PerfSensor.loadFromYml failed; using defaults", t);
         }
+        dev.iyanz.sourbycraft.perf.CombatProfile appliedProfile = dev.iyanz.sourbycraft.perf.CombatProfile.VANILLA;
         try {
             String profileName = cfgGet("combat.profile", "vanilla");
-            dev.iyanz.sourbycraft.perf.CombatProfile.parse(profileName,
-                dev.iyanz.sourbycraft.perf.CombatProfile.VANILLA).apply();
+            appliedProfile = dev.iyanz.sourbycraft.perf.CombatProfile.parse(profileName,
+                dev.iyanz.sourbycraft.perf.CombatProfile.VANILLA);
+            appliedProfile.apply();
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("CombatProfile.apply failed; using defaults", t);
         }
+        activeCombatProfile = appliedProfile;
 
         maxPlatformThreads = cfgInt("performance.max-platform-threads", maxPlatformThreads);
         // S5: set max.bg.threads system property for Util's background executor pool.
@@ -377,10 +390,10 @@ public class SourbyCraftConfig {
                 cfgDouble("perf.sensor.thresholds.mspt.emergency",100.0),
                 // TPS ladder: idle/healthy (~20 TPS) stays GREEN; RED/EMERGENCY require TPS below the
                 // operator's 17-TPS self-tune floor. Keep in sync with PerfSensor.tpsThresholds.
-                cfgDouble("perf.sensor.thresholds.tps.yellow",    19.0),
-                cfgDouble("perf.sensor.thresholds.tps.orange",    18.0),
-                cfgDouble("perf.sensor.thresholds.tps.red",       17.0),
-                cfgDouble("perf.sensor.thresholds.tps.emergency", 15.0),
+                cfgDouble("perf.sensor.thresholds.tps.yellow",    17.0),
+                cfgDouble("perf.sensor.thresholds.tps.orange",    15.0),
+                cfgDouble("perf.sensor.thresholds.tps.red",       13.0),
+                cfgDouble("perf.sensor.thresholds.tps.emergency", 10.0),
                 cfgDouble("perf.sensor.thresholds.mem.yellow",    75.0),
                 cfgDouble("perf.sensor.thresholds.mem.orange",    85.0),
                 cfgDouble("perf.sensor.thresholds.mem.red",       92.0),
@@ -394,8 +407,15 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("PerfSensor.applyOperatorConfig failed; using defaults", t);
         }
 
-        // Lag-machine knob operator bridge.
-        try {
+        // Lag-machine knob operator bridge. Layering rule: when a NON-vanilla combat profile is
+        // active, the PROFILE owns these eight knobs — the seeded TOML keys always exist, so an
+        // unconditional bridge would silently clobber the profile back to the seeded defaults
+        // every boot (profile "half-dead"). Operators on a profile tune via the profile; operators
+        // on vanilla tune via the perf.lag-machine.* keys.
+        if (activeCombatProfile != dev.iyanz.sourbycraft.perf.CombatProfile.VANILLA) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.info("combat profile " + activeCombatProfile
+                + " owns perf.lag-machine.* — TOML lag-machine keys not bridged this boot");
+        } else try {
             dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_DISABLE_SAVING_SNOWBALLS.set(
                 cfgBool("perf.lag-machine.disable-saving-snowballs", true));
             dev.iyanz.sourbycraft.perf.knob.Knobs.LAG_MACHINE_DISABLE_SAVING_FIREWORKS.set(
@@ -461,7 +481,8 @@ public class SourbyCraftConfig {
         seed(f, changed, "perf.sensor.dwell-samples", 3, "Consecutive samples in a worse band before escalating a tier.");
         seed(f, changed, "perf.sensor.recovery-dwell-multiplier", 2.0, "Dwell multiplier when recovering to a better tier (>= 1.0).");
         seedThresholds(f, changed, "mspt", 30.0, 40.0, 60.0, 100.0, "MSPT tier thresholds (higher = worse).");
-        seedThresholds(f, changed, "tps", 19.0, 18.0, 17.0, 15.0, "TPS tier thresholds (lower = worse). Self-tune reacts only below ~17 TPS; idle/healthy servers stay GREEN.");
+        migrateSeededTpsLadder(f, changed); // pre-2f installs carry the flap-prone 19/18/17/15 seed
+        seedThresholds(f, changed, "tps", 17.0, 15.0, 13.0, 10.0, "TPS tier thresholds (lower = worse). Self-tune reacts only below ~17 TPS; idle/healthy servers stay GREEN.");
         seedThresholds(f, changed, "mem", 75.0, 85.0, 92.0, 97.0, "Heap % tier thresholds (higher = worse).");
         seedThresholds(f, changed, "gc-ms-per-min", 20.0, 50.0, 100.0, 300.0, "GC pause ms/min tier thresholds (higher = worse).");
 
@@ -648,6 +669,31 @@ public class SourbyCraftConfig {
             f.add(path, def);
             if (comment != null) f.setComment(path, comment);
             changed[0] = true;
+        }
+    }
+
+    /**
+     * One-time migration: builds before 2c6bea7's ladder fix SEEDED tps 19/18/17/15 into every
+     * install's TOML, and an explicit value wins over any new default forever (the seeded-default
+     * trap). If the file carries exactly that quad it is the old seed, not an operator choice —
+     * rewrite it to the 17/15/13/10 ladder the sensor ships with.
+     */
+    private static void migrateSeededTpsLadder(com.electronwill.nightconfig.core.file.CommentedFileConfig f,
+                                               boolean[] changed) {
+        final String base = "perf.sensor.thresholds.tps.";
+        final Object y = f.get(base + "yellow"), o = f.get(base + "orange"),
+            r = f.get(base + "red"), e = f.get(base + "emergency");
+        if (y instanceof Number ny && ny.doubleValue() == 19.0
+            && o instanceof Number no && no.doubleValue() == 18.0
+            && r instanceof Number nr && nr.doubleValue() == 17.0
+            && e instanceof Number ne && ne.doubleValue() == 15.0) {
+            f.set(base + "yellow", 17.0);
+            f.set(base + "orange", 15.0);
+            f.set(base + "red", 13.0);
+            f.set(base + "emergency", 10.0);
+            changed[0] = true;
+            dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                "migrated seeded TPS tier ladder 19/18/17/15 -> 17/15/13/10 (pre-2f seed, flap-prone)");
         }
     }
 

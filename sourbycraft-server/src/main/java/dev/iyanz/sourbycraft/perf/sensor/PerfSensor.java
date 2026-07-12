@@ -112,7 +112,9 @@ public final class PerfSensor {
     // --- JMX GC bean cache + per-minute pause ring ---
     private static List<GarbageCollectorMXBean> gcBeans;
     private static long gcPauseTotalMsAtLastSample = 0L;
-    private static final long[] gcPauseMsRing = new long[60];
+    // Sized in start() to ceil(1200 ticks / cadence-ticks) so the window is ~one minute of wall
+    // time regardless of operator cadence (a fixed 60 SAMPLES is only 60s at cadence 20).
+    private static long[] gcPauseMsRing = new long[60];
     private static int gcPauseRingIdx = 0;
 
     /**
@@ -246,6 +248,9 @@ public final class PerfSensor {
             org.bukkit.plugin.Plugin owner = org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE;
             // initialDelay must be > 0 for the Folia scheduler; use one cadence period.
             long period = Math.max(1, cadenceTicks);
+            // "gc-ms-per-min" must cover ~one minute of wall time at ANY cadence: 1200 ticks worth
+            // of samples, not a fixed 60 samples (60 samples at cadence 100 would be 5 minutes).
+            gcPauseMsRing = new long[Math.max(1, (int) Math.ceil(1200.0 / period))];
             schedulerTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(
                 owner,
                 task -> sample(),
@@ -275,7 +280,17 @@ public final class PerfSensor {
         if (warmupSamplesRemaining < 0) {
             warmupSamplesRemaining = warmupSampleCount();
         }
-        if (warmupSamplesRemaining > 0) { warmupSamplesRemaining--; return; }
+        if (warmupSamplesRemaining > 0) {
+            warmupSamplesRemaining--;
+            // Prime the GC baseline during warmup: without this the first real sample's delta is
+            // the JVM's entire lifetime GC time (seconds after boot), forcing a false EMERGENCY
+            // for the next minute whenever TPS also dips.
+            if (gcBeans == null) gcBeans = ManagementFactory.getGarbageCollectorMXBeans();
+            long total = 0;
+            for (GarbageCollectorMXBean b : gcBeans) total += b.getCollectionTime();
+            gcPauseTotalMsAtLastSample = total;
+            return;
+        }
 
         double[] tps  = aggregateTps();         // Folia-aggregate {1m, 5m, 15m} (may be null on error)
         // Read only the two windows the sensor consumes (1m, 5m); the 15m slot is unused. Reading
@@ -382,8 +397,32 @@ public final class PerfSensor {
      * gone because only the 1m and 5m windows are ever consumed and the classifier clamps per-read.
      */
     private static double[] aggregateTps() {
+        // NOT Bukkit.getTPS(): on this Folia base that returns the CURRENT TICKING REGION's report
+        // — from the sensor's global-region task that is the near-idle global tick loop, which sits
+        // at 20.00 TPS while a player region grinds at 8 (the engine would be blind to the exact
+        // lag it exists to react to). Classify on the WORST region instead: min TPS across every
+        // region of every world (CommandServerHealth's collection pattern, reused callback, no
+        // per-sample list). Falls back to null (-> 20.0) when no region exists (empty server).
         try {
-            return Bukkit.getTPS();
+            final long now = System.nanoTime();
+            final double[] min = {21.0, 21.0};
+            final boolean[] any = {false};
+            for (org.bukkit.World bw : Bukkit.getWorlds()) {
+                final net.minecraft.server.level.ServerLevel lvl = ((org.bukkit.craftbukkit.CraftWorld) bw).getHandle();
+                lvl.regioniser.computeForAllRegions(region -> {
+                    final var handle = region.getData().getRegionSchedulingHandle();
+                    final var r1m = handle.getTickReport1m(now);
+                    if (r1m == null) return;
+                    any[0] = true;
+                    final double t1 = r1m.tpsData().segmentAll().average();
+                    if (t1 < min[0]) min[0] = t1;
+                    final var r5m = handle.getTickReport5m(now);
+                    final double t5 = r5m != null ? r5m.tpsData().segmentAll().average() : t1;
+                    if (t5 < min[1]) min[1] = t5;
+                });
+            }
+            if (!any[0]) return null;
+            return new double[]{min[0], min[1], min[1]};
         } catch (Throwable ignored) {
             return null;
         }
@@ -410,8 +449,21 @@ public final class PerfSensor {
      * classifier treats MSPT as GREEN rather than escalating on a transient API error.
      */
     private static double aggregateMspt() {
+        // Same rationale as aggregateTps(): Bukkit.getAverageTickTime() is the current region's
+        // number. Use the WORST (max) region MSPT over the 1m window.
         try {
-            double mspt = Bukkit.getAverageTickTime();
+            final long now = System.nanoTime();
+            final double[] max = {0.0};
+            for (org.bukkit.World bw : Bukkit.getWorlds()) {
+                final net.minecraft.server.level.ServerLevel lvl = ((org.bukkit.craftbukkit.CraftWorld) bw).getHandle();
+                lvl.regioniser.computeForAllRegions(region -> {
+                    final var r1m = region.getData().getRegionSchedulingHandle().getTickReport1m(now);
+                    if (r1m == null) return;
+                    final double mspt = r1m.timePerTickData().segmentAll().average() / 1.0E6;
+                    if (mspt > max[0]) max[0] = mspt;
+                });
+            }
+            final double mspt = max[0];
             if (Double.isNaN(mspt) || mspt < 0.0) return 0.0;
             return mspt;
         } catch (Throwable ignored) {

@@ -91,14 +91,18 @@ public final class KnobEnforcer {
     private static void enforceProjectileCaps() {
         final int perTick = Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.get();
         if (perTick != lastProjPerTick) {
-            ProjectileChunkReduceConfig.maxProjectileLoadsPerTick = perTick;
+            // Contract: knob value 0 = unlimited. The in-tick reader (Projectile) compares raw
+            // (`> max` then discard()) with NO zero special-case — writing 0 through would make
+            // "unlimited" the harshest cap and DELETE projectiles in flight. Translate here.
+            ProjectileChunkReduceConfig.maxProjectileLoadsPerTick = perTick <= 0 ? Integer.MAX_VALUE : perTick;
             lastProjPerTick = perTick;
             SourbyLogger.debug("enforced perf.lag-machine.max-projectile-loads-per-tick=" + perTick
                 + " -> ProjectileChunkReduceConfig.maxProjectileLoadsPerTick");
         }
         final int perProjectile = Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.get();
         if (perProjectile != lastProjPerProjectile) {
-            ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile = perProjectile;
+            ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile = perProjectile <= 0 ? Integer.MAX_VALUE : perProjectile; // 0 = unlimited
+
             lastProjPerProjectile = perProjectile;
             SourbyLogger.debug("enforced perf.lag-machine.max-projectile-loads-per-projectile=" + perProjectile
                 + " -> ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile");
@@ -162,7 +166,10 @@ public final class KnobEnforcer {
      * per tick while the server struggles. Only has effect while the limiter gate itself is on.
      */
     private static void enforceEntityLimiterScale() {
-        final double scale = Knobs.KAIIJU_ENTITY_LIMITER_SCALE.get();
+        // Clamp to (0, 1]: DoubleKnob has no bounds, and scale <= 0 would collapse every Kaiiju
+        // per-type cap to the minimum (scaledLimit floors at 1) — an operator typo turning the
+        // limiter into an entity purge.
+        final double scale = Math.min(1.0, Math.max(0.05, Knobs.KAIIJU_ENTITY_LIMITER_SCALE.get()));
         if (scale != lastEntityLimiterScale) {
             KaiijuEntityLimits.limitScale = scale;
             lastEntityLimiterScale = scale;

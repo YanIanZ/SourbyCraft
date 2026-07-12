@@ -146,16 +146,25 @@ public final class LagLimits implements Listener {
      */
     public static void sweepArrows() {
         int cap = SourbyCraftConfig.maxArrowsPerWorld;
+        // Cap disabled => the whole sweep is dead weight: the full-world entity snapshot below
+        // costs an EntityLookup copy + Bukkit wrappers per world per second, publishing a count
+        // nothing reads (onProjectileLaunch early-returns when the cap is off).
+        if (cap <= 0) return;
         for (World world : Bukkit.getWorlds()) {
             List<AbstractArrow> arrows = new ArrayList<>(world.getEntitiesByClass(AbstractArrow.class));
             ARROW_COUNT.put(world.getName(), arrows.size());
-            if (cap <= 0 || arrows.size() <= cap) continue;
+            if (arrows.size() <= cap) continue;
             arrows.sort((a, b) -> Integer.compare(a.getEntityId(), b.getEntityId())); // oldest first (id immutable)
             // Shared cull budget: region callbacks decrement it and only remove while it lasts, so
             // at most (size - cap) grounded arrows are culled even though decisions run off-thread.
             java.util.concurrent.atomic.AtomicInteger budget =
                 new java.util.concurrent.atomic.AtomicInteger(arrows.size() - cap);
-            for (AbstractArrow arrow : arrows) {
+            // Fan out region tasks for 2x the budget of oldest candidates, not EVERY arrow in the
+            // world (6000 tasks/s to cull 1000 is queue pressure exactly when the server hurts);
+            // 2x covers ineligible candidates (airborne / fresh player arrows) and the 1 Hz repeat
+            // mops up any shortfall next sweep.
+            final int fanOut = Math.min(arrows.size(), 2 * (arrows.size() - cap));
+            for (AbstractArrow arrow : arrows.subList(0, fanOut)) {
                 // Hop to the arrow's OWNING region BEFORE touching any of its fields. All reads
                 // (isInBlock/getShooter/getTicksLived) and the remove() run on that region thread.
                 arrow.getScheduler().run(
