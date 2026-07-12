@@ -5,7 +5,7 @@ import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
 import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
 
 import java.util.Set;
-import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
@@ -16,7 +16,9 @@ public class LevelAwareRegionScheduler extends Scheduler {
 
     private final AtomicInteger activeCount = new AtomicInteger(0);
     private final MultiThreadedQueue<Runnable> haltedCallbacks = new MultiThreadedQueue<>();
-    private final Set<WrappedTask> managedTasks = new CopyOnWriteArraySet<>();
+    // Concurrent set without the O(n) array copy CopyOnWriteArraySet pays on every region
+    // schedule/deschedule; halt() iteration is weakly consistent, which is all it needs.
+    private final Set<WrappedTask> managedTasks = ConcurrentHashMap.newKeySet();
 
     private final AtomicBoolean fullyExited = new AtomicBoolean(false);
 
@@ -104,8 +106,15 @@ public class LevelAwareRegionScheduler extends Scheduler {
             final boolean notCancelled = this.handle.runTick();
 
             if (!notCancelled && this.thisHalted.compareAndSet(false, true)) {
-                LevelAwareRegionScheduler.this.activeCount.decrementAndGet();
+                // Mirror cancel(): a task that self-cancels concurrently with halt() must still fire
+                // the all-exited callback, or haltAndWaitLevelSchedulerHalt spins to its deadline and
+                // the parent scheduler is never halted (hung shutdown). allTaskExitedCallback is
+                // idempotent (pollOrBlockAdds drains once).
+                final int remaining = LevelAwareRegionScheduler.this.activeCount.decrementAndGet();
                 LevelAwareRegionScheduler.this.managedTasks.remove(this);
+                if (remaining == 0 && LevelAwareRegionScheduler.this.halted.get()) {
+                    LevelAwareRegionScheduler.this.allTaskExitedCallback();
+                }
             }
             return notCancelled;
         }
@@ -126,8 +135,12 @@ public class LevelAwareRegionScheduler extends Scheduler {
             final boolean notCancelled = this.handle.runTasks(canContinue);
 
             if (!notCancelled && this.thisHalted.compareAndSet(false, true)) {
-                LevelAwareRegionScheduler.this.activeCount.decrementAndGet();
+                // Same lost-halt-callback guard as runTick() above.
+                final int remaining = LevelAwareRegionScheduler.this.activeCount.decrementAndGet();
                 LevelAwareRegionScheduler.this.managedTasks.remove(this);
+                if (remaining == 0 && LevelAwareRegionScheduler.this.halted.get()) {
+                    LevelAwareRegionScheduler.this.allTaskExitedCallback();
+                }
             }
 
             return notCancelled;

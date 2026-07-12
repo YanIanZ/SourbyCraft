@@ -96,6 +96,11 @@ public class SpeedtestCommand extends Command {
         this.setPermission("sourbycraft.command.speedtest");
     }
 
+    // One speedtest at a time — repeated invocations would stack OS processes, each
+    // saturating the very bandwidth the test is measuring.
+    private static final java.util.concurrent.atomic.AtomicBoolean IN_FLIGHT =
+        new java.util.concurrent.atomic.AtomicBoolean();
+
     @Override
     public boolean execute(CommandSender sender, String alias, String[] args) {
         LOG.info("Speedtest invoked. OS={} arch={} binPath={} binExists={} binaryName={}",
@@ -113,8 +118,13 @@ public class SpeedtestCommand extends Command {
             return true;
         }
 
+        if (!IN_FLIGHT.compareAndSet(false, true)) {
+            sender.sendMessage(text("A speedtest is already running — wait for it to finish.", SourbyCraftColors.DANGER));
+            return true;
+        }
         sender.sendMessage(text("Running...", SourbyCraftColors.LABEL));
         VirtualExecutor.run(() -> {
+            Process proc = null;
             try {
                 if (!Files.exists(BIN)) {
                     sender.sendMessage(text("Downloading speedtest CLI (first run, ~1MB)...", SourbyCraftColors.LABEL));
@@ -124,11 +134,16 @@ public class SpeedtestCommand extends Command {
                     sender.sendMessage(text("Speedtest unavailable (download failed)", SourbyCraftColors.DANGER));
                     return;
                 }
-                Process proc = new ProcessBuilder(BIN.toString(),
+                proc = new ProcessBuilder(BIN.toString(),
                         "--format=json", "--accept-license", "--accept-gdpr")
                     .redirectErrorStream(true).start();
                 String output = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                proc.waitFor();
+                if (!proc.waitFor(120, java.util.concurrent.TimeUnit.SECONDS)) {
+                    proc.destroyForcibly();
+                    LOG.error("Speedtest timed out after 120s — process killed");
+                    sender.sendMessage(text("Speedtest timed out (120s)", SourbyCraftColors.DANGER));
+                    return;
+                }
 
                 if (output == null || output.trim().isEmpty()) {
                     LOG.error("Speedtest produced empty output");
@@ -174,10 +189,10 @@ public class SpeedtestCommand extends Command {
                     try {
                         sender.sendMessage(text()
                             .append(text("DL: ", SourbyCraftColors.LABEL))
-                            .append(BarUtil.coloredBar(Math.min(dm / 100, 100), 20))
+                            .append(BarUtil.coloredBar(Math.min(dm / 10, 100), 20))
                             .append(text(String.format(java.util.Locale.ROOT, " %.1f Mbps", dm), SourbyCraftColors.SUCCESS))
                             .append(text("\nUL: ", SourbyCraftColors.LABEL))
-                            .append(BarUtil.coloredBar(Math.min(um / 50, 100), 20))
+                            .append(BarUtil.coloredBar(Math.min(um / 10, 100), 20))
                             .append(text(String.format(java.util.Locale.ROOT, " %.1f Mbps", um), SourbyCraftColors.SUCCESS))
                             .append(text("\nPing: ", SourbyCraftColors.LABEL))
                             .append(text(String.format(java.util.Locale.ROOT, "%.0fms", pm),
@@ -190,6 +205,9 @@ public class SpeedtestCommand extends Command {
             } catch (Exception e) {
                 LOG.error("Speedtest process failed: {}", e.toString(), e);
                 sender.sendMessage(text("Speedtest failed: " + e.getMessage(), SourbyCraftColors.DANGER));
+            } finally {
+                if (proc != null && proc.isAlive()) proc.destroyForcibly(); // no orphans on any exit path
+                IN_FLIGHT.set(false);
             }
         });
         return true;
@@ -309,9 +327,7 @@ public class SpeedtestCommand extends Command {
             byte[] buf = new byte[64 * 1024];
             int n;
             while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
-            StringBuilder sb = new StringBuilder(64);
-            for (byte b : md.digest()) sb.append(String.format("%02x", b & 0xff));
-            return sb.toString();
+            return java.util.HexFormat.of().formatHex(md.digest());
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new IOException("SHA-256 unavailable in this JDK", e);
         }

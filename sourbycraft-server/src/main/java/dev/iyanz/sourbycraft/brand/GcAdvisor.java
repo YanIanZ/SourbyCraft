@@ -27,8 +27,11 @@ public final class GcAdvisor {
     /**
      * Read from the unified TOML key {@code branding.gc-advisor.enabled} (default {@code true}).
      */
-    public static final boolean ENABLED =
-        dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool("branding.gc-advisor.enabled", true);
+    // Read lazily, NOT in a static final: class-init can precede unified-config load, which
+    // would latch the operator's setting to the default for the whole boot.
+    private static boolean enabled() {
+        return dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool("branding.gc-advisor.enabled", true);
+    }
 
     private static final String ESC = "\u001B";
     private static final String RESET = ESC + "[0m";
@@ -41,7 +44,7 @@ public final class GcAdvisor {
 
     public static Result run() {
         // gate — if operator disabled gc-advisor in baked yml, skip.
-        if (!ENABLED) {
+        if (!enabled()) {
             dev.iyanz.sourbycraft.util.SourbyLogger.info(
                 "gc-advisor disabled via branding.gc-advisor.enabled=false");
             return new Result(true, List.of());

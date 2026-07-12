@@ -185,6 +185,15 @@ public final class PluginProvisioner {
         if (Files.isRegularFile(dest) && Sha256Verifier.matches(dest, pin.sha256())) {
             return;
         }
+        // Self-heal: a file with OUR exact pinned name but a wrong hash is a corrupt download
+        // (power-loss mid-move, disk corruption) — without this, the prefix check below would
+        // classify it as an operator jar and keep loading the corrupt file forever.
+        if (Files.isRegularFile(dest)) {
+            Path corrupt = dest.resolveSibling(dest.getFileName() + ".corrupt");
+            Files.move(dest, corrupt, StandardCopyOption.REPLACE_EXISTING);
+            System.err.println("[SourbyBootstrap] ViaVersion auto-provision: " + pin.fileName()
+                + " failed SHA-256 verification — moved to " + corrupt.getFileName() + " and re-downloading.");
+        }
         // Idempotency 2: ANY same-prefix jar present (operator build or other pinned version) -> respect it.
         if (anyPrefixJarPresent(pluginsDir, pin.jarPrefix())) {
             System.out.println("[SourbyBootstrap] ViaVersion auto-provision: found an existing "

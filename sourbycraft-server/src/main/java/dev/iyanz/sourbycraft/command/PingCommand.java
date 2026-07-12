@@ -29,7 +29,7 @@ public class PingCommand extends Command {
 
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
-        boolean other = args.length > 0 && !args[0].equals(s.getName());
+        boolean other = args.length > 0 && !args[0].equalsIgnoreCase(s.getName());
         if (other && !s.hasPermission("sourbycraft.command.ping.other")) {
             s.sendMessage(text("No permission", SourbyCraftColors.DANGER));
             return true;
