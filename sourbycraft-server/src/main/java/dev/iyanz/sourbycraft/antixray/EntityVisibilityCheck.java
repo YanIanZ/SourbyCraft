@@ -113,6 +113,11 @@ public final class EntityVisibilityCheck {
         VERDICTS.remove(playerId);
     }
 
+    /** Memory-pressure hook: drop all verdicts — they rebuild within one TTL (500ms). */
+    public static void trimForMemoryPressure() {
+        VERDICTS.clear();
+    }
+
     private EntityVisibilityCheck() {}
 
     /**

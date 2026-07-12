@@ -25,11 +25,17 @@ public record BuildInfo(
 
     private static final String RESOURCE = "/META-INF/sourbycraft-build.properties";
 
+    private static volatile BuildInfo CACHED;
+
     public static BuildInfo load() {
+        // The classpath resource cannot change mid-process; /ver, the banner and the updater all
+        // call this — parse the properties once instead of re-reading the jar per call.
+        BuildInfo cached = CACHED;
+        if (cached != null) return cached;
         try (InputStream in = BuildInfo.class.getResourceAsStream(RESOURCE)) {
-            return loadFrom(in);
+            return CACHED = loadFrom(in);
         } catch (IOException e) {
-            return loadFrom(null);
+            return CACHED = loadFrom(null);
         }
     }
 

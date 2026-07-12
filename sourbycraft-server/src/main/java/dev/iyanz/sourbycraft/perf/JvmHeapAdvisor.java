@@ -73,6 +73,21 @@ public final class JvmHeapAdvisor {
                         + "to actually use the allocation.");
             }
 
+            // ZGC without uncommit tuning: idle heap pages stay resident and the panel's RSS
+            // number never comes back down. One-line flags fix it.
+            try {
+                var jvmArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
+                boolean zgc = jvmArgs.stream().anyMatch(a -> a.startsWith("-XX:+UseZGC") || a.startsWith("-XX:+UseZ"));
+                boolean uncommitTuned = jvmArgs.stream().anyMatch(a -> a.startsWith("-XX:ZUncommitDelay"));
+                boolean preTouch = jvmArgs.stream().anyMatch(a -> a.startsWith("-XX:+AlwaysPreTouch"));
+                if (zgc && !uncommitTuned) {
+                    SourbyLogger.info("jvm-heap: ZGC detected — add -XX:ZUncommitDelay=60 so idle heap "
+                            + "pages return to the OS (panel RAM bar follows real usage)"
+                            + (preTouch ? "; drop -XX:+AlwaysPreTouch (it commits the whole heap up-front)" : "") + ".");
+                }
+            } catch (Throwable ignored) {
+            }
+
             // The Pterodactyl scenario: Xms == Xmx >= 4G means the panel
             // sees a fully-committed heap from tick 0 and the bar pegs.
             if (max >= fourGiB && min == max) {

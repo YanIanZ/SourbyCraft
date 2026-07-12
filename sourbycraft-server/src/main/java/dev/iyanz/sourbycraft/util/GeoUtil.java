@@ -113,7 +113,13 @@ public final class GeoUtil {
             if (loc.isEmpty()) return null;
 
             if (cache.size() >= MAX_CACHE) {
-                cache.clear(); // simple bounded-size eviction
+                // Evict half, not all: a full clear converts every active player's next /ping into
+                // a fresh DB lookup burst. Hash-order is fine for an IP->location cache.
+                var it = cache.keySet().iterator();
+                for (int i = 0, target = cache.size() / 2; i < target && it.hasNext(); i++) {
+                    it.next();
+                    it.remove();
+                }
             }
             cache.put(ip, loc);
             return loc;
@@ -190,5 +196,10 @@ public final class GeoUtil {
             Files.deleteIfExists(tmp);
             throw e;
         }
+    }
+
+    /** Memory-pressure hook: drop the IP->location cache; entries rebuild on next lookup. */
+    public static void trimForMemoryPressure() {
+        cache.clear();
     }
 }

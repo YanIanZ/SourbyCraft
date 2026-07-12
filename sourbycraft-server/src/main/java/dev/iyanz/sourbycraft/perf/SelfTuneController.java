@@ -169,6 +169,7 @@ public final class SelfTuneController {
                 // NMS-scalar deep-enforcement: scale entity caps to 0.75, widen goal-selector cadence to 40.
                 Knobs.KAIIJU_ENTITY_LIMITER_SCALE.set(0.75D);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(40);
+                MemoryPressure.trimSoftCaches();
             }
             case EMERGENCY -> {
                 Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(1);
@@ -184,6 +185,7 @@ public final class SelfTuneController {
                 // NMS-scalar deep-enforcement: halve entity caps, widen goal-selector cadence to 60.
                 Knobs.KAIIJU_ENTITY_LIMITER_SCALE.set(0.5D);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(60);
+                MemoryPressure.trimSoftCaches();
             }
         }
     }
