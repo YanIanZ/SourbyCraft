@@ -25,8 +25,9 @@ import java.util.Map;
  * pre-existing SimpleCommandMap entry first, then register with the
  * "sourbycraft" fallback prefix, so {@code /sourbycraft:<name>} always reaches us
  * (and the bare {@code /<name>} lands on us too whenever Paper has not already
- * claimed the slot). SWM / tpsbar / rambar are intentionally omitted — the bars
- * are handled by Luminol and SWM is gone on this Folia line. {@code /tps} is
+ * claimed the slot). /tpsbar + /rambar are the SourbyCraft HUD boss bars
+ * (shared-bar system fed by the perf sensor's worst-region aggregate); SWM is
+ * gone on this Folia line. {@code /tps} is
  * registered here as a hex TPS panel. {@code /spark} is intentionally NOT
  * registered here: the bundled spark profiler is re-enabled (paper feature
  * patch 0004), so Paper's own {@code SparksFly} owns the real {@code /spark};
@@ -48,7 +49,7 @@ public final class SourbyCraftCommands {
 
         // Drop any pre-existing SimpleCommandMap entries so our fallback registration
         // is not shadowed by an earlier bukkit/vanilla entry under the same name.
-        String[] names = {"ping", "sys", "plugins", "speedtest", "sparkview", "ver", "perf", "maxp", "tps"};
+        String[] names = {"ping", "sys", "plugins", "speedtest", "sparkview", "ver", "perf", "maxp", "tps", "tpsbar", "rambar"};
         Map<String, Command> known = commandMap.getKnownCommands();
         for (String n : names) {
             String lower = n.toLowerCase(Locale.ROOT);
@@ -65,6 +66,15 @@ public final class SourbyCraftCommands {
         commandMap.register("sourbycraft", new PerfCommand("perf"));
         commandMap.register("sourbycraft", new MaxpCommand("maxp"));
         commandMap.register("sourbycraft", new TpsCommand("tps"));
+        commandMap.register("sourbycraft", new HudBarCommand("tpsbar", true));
+        commandMap.register("sourbycraft", new HudBarCommand("rambar", false));
+        try {
+            org.bukkit.Bukkit.getPluginManager().registerEvents(
+                new dev.iyanz.sourbycraft.hud.HudBars.QuitListener(),
+                org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE);
+        } catch (Throwable t) {
+            org.slf4j.LoggerFactory.getLogger("SourbyCraft").warn("HudBars quit-listener registration failed", t);
+        }
 
         // /spark is intentionally NOT registered here: the bundled spark profiler is
         // re-enabled on this Folia build (paper feature patch 0004), so Paper's own
@@ -74,7 +84,7 @@ public final class SourbyCraftCommands {
 
         registered = true;
         org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
-            "Registered 9 SourbyCraft commands (fallback prefix 'sourbycraft'). "
+            "Registered 11 SourbyCraft commands (fallback prefix 'sourbycraft'). "
             + "Use /sourbycraft:<name> if a name collides with Paper's built-ins "
             + "(/ping, /version, /plugins). Native /spark is provided by the bundled profiler.");
     }
