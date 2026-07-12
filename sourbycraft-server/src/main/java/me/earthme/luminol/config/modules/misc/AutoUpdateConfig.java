@@ -36,14 +36,15 @@ import java.util.Set;
                 SourbyCraft auto-updater. Checks the SourbyCraft GitHub repo's Releases for a newer
                 jar on the SAME release channel as this build (REL/DEV/EXP) on a daily schedule.
                 Downloads are verified (size + SHA-256 when published + valid-jar check) before use.
-                apply_mode controls what happens: 'notify' (default) only logs + notifies operators;
-                'stage' also places the verified jar under auto_update/sourbycraft and writes
-                auto_update/core.path for the launcher to swap on the NEXT restart (never mid-run);
-                'off' disables checks entirely."""
+                apply_mode controls what happens: 'auto' (default) downloads + verifies + swaps the
+                launch jar atomically and self-restarts after a warning window; 'stage' downloads +
+                verifies + stages for the next restart; 'notify' only logs + notifies operators;
+                'off' disables checks entirely. The running jar file is only ever replaced via an
+                atomic rename (the live process keeps its already-open file), never rewritten in place."""
 )
 public class AutoUpdateConfig implements IConfigModule {
     @ConfigInfo(name = "enabled", comments = "Whether SourbyCraft should check for updates automatically.")
-    public static boolean enabled = false;
+    public static boolean enabled = true;
 
     @ConfigInfo(name = "repo", comments = "SourbyCraft GitHub repository to check, as owner/name. Default: YanIanZ/SourbyCraft.")
     public static String repo = "YanIanZ/SourbyCraft";
@@ -55,12 +56,30 @@ public class AutoUpdateConfig implements IConfigModule {
     public static String channel = "";
 
     @ConfigInfo(name = "apply_mode", comments = """
-            What to do when a newer release is found: 'notify' (default, safest — log + op banner
-            only), 'stage' (download + verify + stage for next-restart swap) or 'off' (disable).""")
-    public static String applyMode = "notify";
+            What to do when a newer release is found: 'auto' (default — download + verify + swap the
+            launch jar + self-restart after restart_delay_seconds), 'stage' (download + verify + stage
+            for next-restart swap, never restarts by itself), 'notify' (log + op banner only) or
+            'off' (disable).""")
+    public static String applyMode = "auto";
 
     @ConfigInfo(name = "check_times", comments = "List of daily check times in HH:mm, based on the server's local time zone.")
     public static List<String> checkTimes = List.of("06:00");
+
+    @ConfigInfo(name = "check_interval_minutes", comments = """
+            Additionally poll every N minutes (0 = only the daily check_times). 30 keeps the server
+            within half an hour of a new release without hammering the GitHub API.""")
+    public static int checkIntervalMinutes = 30;
+
+    @ConfigInfo(name = "restart_mode", comments = """
+            How 'auto' restarts after swapping the jar: 'auto' (detect the environment — Pterodactyl
+            containers exit with code 70 so the panel's crash-detection restarts the server; anything
+            else uses Spigot's restart mechanism / restart-script), 'spigot' (always the Spigot
+            restart path), 'exit' (always exit 70) or 'stop' (clean stop; your process manager must
+            bring the server back).""")
+    public static String restartMode = "auto";
+
+    @ConfigInfo(name = "restart_delay_seconds", comments = "Warning window broadcast to players before the auto-restart. Minimum 5.")
+    public static int restartDelaySeconds = 60;
 
     @ConfigInfo(name = "allow_prerelease", comments = "Whether GitHub prereleases on the tracked channel are eligible.")
     public static boolean allowPrerelease = false;
