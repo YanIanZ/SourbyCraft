@@ -31,7 +31,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Exposed-ore hide/reveal layer above Paper's anti-xray engine.
+ * SourX — SourbyCraft's ray-trace anti-xray engine (a Folia port + hardening of
+ * stonar96/RayTraceAntiXray, its full potential unlocked: engine-mode-2 obfuscation base,
+ * per-player async LOS reveal, entity/particle/liquid gates, and all tuning knobs exposed).
+ *
+ * <p>Exposed-ore hide/reveal layer above Paper's anti-xray engine.
  *
  * <p>Paper engine-mode 1 hides ores that are fully enclosed; ores exposed to a
  * cave surface still leak through walls. This layer hides those on chunk send
@@ -112,7 +116,7 @@ public final class OreReveal implements Listener {
         Bukkit.getGlobalRegionScheduler().runAtFixedRate(
             org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
             task -> tickCycle(), interval, interval);
-        plugin.getLogger().info("[antixray] ore reveal " + (RayTraceWorker.ENABLED.get() ? "ENABLED" : "disabled")
+        plugin.getLogger().info("[SourX] engine " + (RayTraceWorker.ENABLED.get() ? "ENABLED" : "disabled")
             + " (interval=" + interval + "t distance=" + SourbyCraftConfig.raytraceDistance
             + " checks/cycle=" + SourbyCraftConfig.raytraceMaxChecksPerCycle + ")");
         if (RayTraceWorker.ENABLED.get()) {
@@ -131,7 +135,7 @@ public final class OreReveal implements Listener {
                 }
             }
             if (!anyPaperAntiXray) {
-                plugin.getLogger().warning("[antixray] raytrace enabled but no world has paper anti-xray enabled — "
+                plugin.getLogger().warning("[SourX] raytrace enabled but no world has paper anti-xray enabled — "
                     + "ore reveal is a complementary layer and stays inert until anticheat.anti-xray.enabled: true "
                     + "in paper-world-defaults.yml (enable antixray.baritone-defense to seed it automatically; "
                     + "buried ores would leak anyway without the Paper engine).");
@@ -170,7 +174,7 @@ public final class OreReveal implements Listener {
             hideExposedFor(player, level, exposed.ores(), exposed.fluids());
         } catch (Throwable t) {
             if (CHUNK_SENT_FAILED_LOGGED.compareAndSet(false, true)) {
-                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[antixray] onChunkSent failed — leaving chunk "
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[SourX] onChunkSent failed — leaving chunk "
                     + "unmodified (ores not hidden this send); anti-xray overlay disabled for this failure "
                     + "mode. Further occurrences are suppressed. Cause: " + t);
             }
@@ -357,7 +361,7 @@ public final class OreReveal implements Listener {
             reHideNeighbors(level, changed.getX(), changed.getY(), changed.getZ());
         } catch (Throwable t) {
             if (NEARBY_REVEAL_FAILED_LOGGED.compareAndSet(false, true)) {
-                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[antixray] onNearbyReveal failed — skipping "
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[SourX] onNearbyReveal failed — skipping "
                     + "re-hide for this change; further occurrences suppressed. Cause: " + t);
             }
         }
@@ -506,7 +510,7 @@ public final class OreReveal implements Listener {
                         revealOnRegion(player);
                     } catch (Throwable t) {
                         if (CHUNK_SENT_FAILED_LOGGED.compareAndSet(false, true)) {
-                            dev.iyanz.sourbycraft.util.SourbyLogger.warn("[antixray] reveal cycle failed — "
+                            dev.iyanz.sourbycraft.util.SourbyLogger.warn("[SourX] reveal cycle failed — "
                                 + "suppressing further logs. Cause: " + t);
                         }
                     }

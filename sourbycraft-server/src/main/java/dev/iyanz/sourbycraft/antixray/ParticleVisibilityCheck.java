@@ -71,7 +71,7 @@ public final class ParticleVisibilityCheck {
             return OcclusionUtil.isVisible(player.level(), eye, target);
         } catch (Throwable t) {
             if (FAILED_LOGGED.compareAndSet(false, true)) {
-                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[antixray] particle-visibility check failed — "
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[SourX] particle-visibility check failed — "
                     + "sending particle (fail-open); further occurrences suppressed. Cause: " + t);
             }
             return true;

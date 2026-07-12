@@ -117,19 +117,22 @@ public final class PaperAntiXrayDefense {
     /** Seed the SourbyCraft-owned baritone-defense keys into the unified TOML (absent-only). */
     public static void seedDefaults(com.electronwill.nightconfig.core.file.CommentedFileConfig f, boolean[] changed) {
         seed(f, changed, "antixray.baritone-defense", true,
-            "Baritone/xray defense: seed Paper's built-in anti-xray to engine-mode 1 (HIDE — lightweight) "
+            "Baritone/xray defense: seed Paper's built-in anti-xray to engine-mode 2 (OBFUSCATE fake-ores) "
             + "at boot so occluded ores + base blocks are sent to the client as plain stone. xray/Baritone "
             + "then can't see real ores through walls and can't beeline to them (the primary, sufficient, "
             + "cheap defense). SourbyCraft's raytrace layer still reveals the genuinely visible ores to legit "
             + "players (the layers compose). true = seed config/paper-world-defaults.yml ONCE (only while it "
             + "holds Paper's stock enabled:false default; operator edits are never clobbered). false = never "
             + "touch Paper anti-xray; manage it yourself in paper-world-defaults.yml.");
-        seed(f, changed, "antixray.engine-mode", 1,
-            "Paper anti-xray engine mode written when baritone-defense seeds the config. 1 = HIDE "
-            + "(occluded ores/base blocks sent as plain stone — LIGHTWEIGHT and defeats Baritone: it can't "
-            + "see ore through walls; recommended). 2 = OBFUSCATE (also paints FAKE ores everywhere to waste "
-            + "a bot's time — stronger but a heavier per-section fill; only enable if you accept the cost). "
-            + "3 = OBFUSCATE_LAYER.");
+        seed(f, changed, "antixray.engine-mode", 2,
+            "Paper anti-xray engine mode. 2 = OBFUSCATE (DEFAULT — hidden ores are replaced with RANDOM "
+            + "FAKE ores in the chunk packet, so an xray client sees a field of phantom ores and a "
+            + "Baritone bot beelines to ghosts: the genuinely strong anti-xray/anti-baritone mode). "
+            + "1 = HIDE (occluded ores sent as plain stone; lighter, but a chunk-caching xray or a "
+            + "cave-exposed leak can slip through — use only on a huge server that needs the lighter "
+            + "per-section cost). 3 = OBFUSCATE_LAYER. SourbyCraft re-asserts this into "
+            + "config/paper-world-defaults.yml on boot when it manages the block (see baritone-defense), "
+            + "so changing this value here migrates existing servers on the next restart.");
         seed(f, changed, "antixray.max-block-height", 128,
             "Paper anti-xray only hides BELOW this Y (rounded to a 16-block section). Paper's stock default "
             + "is 64; SourbyCraft raises it to 128 so mountain/mesa surface ores and shallow bases are also "
@@ -161,11 +164,11 @@ public final class PaperAntiXrayDefense {
      */
     public static void apply() {
         if (!SourbyCraftConfig.cfgBool("antixray.baritone-defense", true)) {
-            SourbyLogger.debug("[antixray] baritone-defense off — Paper anti-xray left untouched");
+            SourbyLogger.debug("[SourX] baritone-defense off — Paper anti-xray left untouched");
             return;
         }
         if (!Files.isRegularFile(WORLD_DEFAULTS)) {
-            SourbyLogger.warn("[antixray] baritone-defense: " + WORLD_DEFAULTS
+            SourbyLogger.warn("[SourX] baritone-defense: " + WORLD_DEFAULTS
                 + " not found (non-standard config dir?); skipping engine-mode seed");
             return;
         }
@@ -173,7 +176,7 @@ public final class PaperAntiXrayDefense {
         try {
             content = Files.readString(WORLD_DEFAULTS, StandardCharsets.UTF_8);
         } catch (IOException e) {
-            SourbyLogger.warn("[antixray] baritone-defense: could not read " + WORLD_DEFAULTS + ": " + e.getMessage());
+            SourbyLogger.warn("[SourX] baritone-defense: could not read " + WORLD_DEFAULTS + ": " + e.getMessage());
             return;
         }
 
@@ -186,7 +189,7 @@ public final class PaperAntiXrayDefense {
             else if (anticheatIdx >= 0 && lines[i].equals("  anti-xray:")) { antiXrayIdx = i; break; }
         }
         if (antiXrayIdx < 0) {
-            SourbyLogger.warn("[antixray] baritone-defense: anticheat.anti-xray block not found in "
+            SourbyLogger.warn("[SourX] baritone-defense: anticheat.anti-xray block not found in "
                 + WORLD_DEFAULTS + " (unexpected Paper layout); skipping");
             return;
         }
@@ -201,19 +204,37 @@ public final class PaperAntiXrayDefense {
             if (indent <= 2 && !ln.startsWith("    ")) { endIdx = i; break; }
         }
 
-        // Read the current enabled state within the block; only seed while it is Paper's stock false.
+        // Read the current enabled state + engine-mode within the block.
         boolean stockDisabled = false;
+        int currentMode = -1;
         for (int i = antiXrayIdx + 1; i < endIdx; i++) {
-            if (lines[i].trim().equals("enabled: false")) { stockDisabled = true; break; }
-            if (lines[i].trim().equals("enabled: true")) { stockDisabled = false; break; }
-        }
-        if (!stockDisabled) {
-            SourbyLogger.info("[antixray] baritone-defense: Paper anti-xray already enabled/customized in "
-                + WORLD_DEFAULTS + " — leaving it untouched (already defended or operator-managed)");
-            return;
+            final String t = lines[i].trim();
+            if (t.equals("enabled: false")) { stockDisabled = true; }
+            else if (t.equals("enabled: true")) { stockDisabled = false; }
+            else if (t.startsWith("engine-mode:")) {
+                try { currentMode = Integer.parseInt(t.substring("engine-mode:".length()).trim()); } catch (NumberFormatException ignored) {}
+            }
         }
 
-        final int engineMode = clampEngineMode(SourbyCraftConfig.cfgInt("antixray.engine-mode", 1));
+        final int engineMode = clampEngineMode(SourbyCraftConfig.cfgInt("antixray.engine-mode", 2));
+
+        // Gate: seed when Paper's stock (disabled). When already enabled, re-assert ONLY when the block
+        // is SourbyCraft-managed (carries our full ore palette) and its engine-mode differs from the
+        // configured value — this migrates existing installs (e.g. an earlier engine-mode-1 seed) to the
+        // configured mode without clobbering a hand-rolled operator block. baritone-defense=false opts out.
+        final boolean managed = blockCarriesOrePalette(lines, antiXrayIdx, endIdx);
+        if (!stockDisabled) {
+            if (managed && currentMode != engineMode) {
+                SourbyLogger.info("[SourX] baritone-defense: migrating SourbyCraft-managed anti-xray "
+                    + "engine-mode " + currentMode + " -> " + engineMode + " in " + WORLD_DEFAULTS);
+                // fall through to rewrite
+            } else {
+                SourbyLogger.info("[SourX] baritone-defense: Paper anti-xray already enabled"
+                    + (managed ? " (SourbyCraft-managed, engine-mode " + currentMode + " matches config)" : ", operator-managed")
+                    + " in " + WORLD_DEFAULTS + " — leaving it untouched");
+                return;
+            }
+        }
         final int maxBlockHeight = SourbyCraftConfig.cfgInt("antixray.max-block-height", 128);
         final boolean hideBase = SourbyCraftConfig.cfgBool("antixray.hide-base-blocks", true);
 
@@ -249,13 +270,13 @@ public final class PaperAntiXrayDefense {
 
         try {
             Files.writeString(WORLD_DEFAULTS, out.toString(), StandardCharsets.UTF_8);
-            SourbyLogger.info("[antixray] baritone-defense: seeded Paper anti-xray -> engine-mode "
+            SourbyLogger.info("[SourX] baritone-defense: seeded Paper anti-xray -> engine-mode "
                 + engineMode + (engineMode == 1 ? " (HIDE, lightweight)" : engineMode == 2 ? " (OBFUSCATE/fake-ores)" : " (OBFUSCATE_LAYER)")
                 + ", " + hidden.size() + " hidden blocks (" + ORE_PALETTE.size() + " ore set"
                 + (hideBase ? " + base indicators" : "") + "), max-block-height " + maxBlockHeight
                 + " in " + WORLD_DEFAULTS + " — worlds build their controller from it");
         } catch (IOException e) {
-            SourbyLogger.warn("[antixray] baritone-defense: could not write " + WORLD_DEFAULTS + ": " + e.getMessage());
+            SourbyLogger.warn("[SourX] baritone-defense: could not write " + WORLD_DEFAULTS + ": " + e.getMessage());
         }
     }
 
@@ -274,7 +295,7 @@ public final class PaperAntiXrayDefense {
                 try {
                     var ax = ((org.bukkit.craftbukkit.CraftWorld) e.getWorld()).getHandle()
                         .paperConfig().anticheat.antiXray;
-                    plugin.getLogger().info("[antixray] world '" + e.getWorld().getName()
+                    plugin.getLogger().info("[SourX] world '" + e.getWorld().getName()
                         + "': Paper anti-xray " + (ax.enabled ? "ACTIVE engine-mode " + ax.engineMode.getId()
                         + " (" + ax.engineMode.getDescription() + "), " + ax.hiddenBlocks.size()
                         + " hidden blocks, max-y " + ax.maxBlockHeight : "disabled"));
@@ -313,6 +334,19 @@ public final class PaperAntiXrayDefense {
             return true; // fail-open: don't warn on a read error
         }
         return false;
+    }
+
+    /** True when the anti-xray block already lists our signature ores (i.e. it is a SourbyCraft-seeded block). */
+    private static boolean blockCarriesOrePalette(String[] lines, int fromIdx, int toIdx) {
+        final String[] signature = {"diamond_ore", "deepslate_diamond_ore", "coal_ore", "ancient_debris"};
+        for (final String sig : signature) {
+            boolean found = false;
+            for (int i = fromIdx + 1; i < toIdx; i++) {
+                if (lines[i].trim().equals("- " + sig)) { found = true; break; }
+            }
+            if (!found) return false;
+        }
+        return true;
     }
 
     private static int indentOf(String s) {

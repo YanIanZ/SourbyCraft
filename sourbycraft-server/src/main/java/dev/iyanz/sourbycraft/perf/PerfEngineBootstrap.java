@@ -277,7 +277,7 @@ public final class PerfEngineBootstrap {
             if (dev.iyanz.sourbycraft.antixray.ParticleVisibilityCheck.ENABLED.get()) {
                 registered.add("antixray-hide-particles");
             }
-            owner.getLogger().info("[antixray] anti-ESP: entities "
+            owner.getLogger().info("[SourX] anti-ESP: entities "
                 + (dev.iyanz.sourbycraft.antixray.EntityVisibilityCheck.ENABLED.get() ? "ENABLED" : "disabled")
                 + ", particles "
                 + (dev.iyanz.sourbycraft.antixray.ParticleVisibilityCheck.ENABLED.get() ? "ENABLED" : "disabled"));

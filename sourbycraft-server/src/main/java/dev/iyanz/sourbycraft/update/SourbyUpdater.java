@@ -181,6 +181,12 @@ public final class SourbyUpdater {
         } finally {
             checkRunning.set(false);
         }
+        // Keep the auto-provisioned Via plugins current on the same cadence (own try/catch).
+        try {
+            ViaAutoUpdate.check();
+        } catch (Throwable t) {
+            SourbyLogger.warn("via-updater failed (non-fatal): " + t.getMessage());
+        }
     }
 
     /** Run one channel-aware update check with the configured apply mode. */
@@ -264,6 +270,19 @@ public final class SourbyUpdater {
         return tagRel > 0 && own > 0 && tagRel > own;
     }
 
+    /**
+     * Order two release TAGS: numeric core first, then the {@code -rN} release counter. NOT plain
+     * {@link SemVer#compare}, which tokenises {@code "26.2-r10"} into {@code [26,2,"r10"]} and then
+     * compares {@code "r10"} vs {@code "r9"} LEXICALLY — {@code "r10" < "r9"} — so it ranks r10
+     * BELOW r9. That made {@code fetchLatestForChannel} keep picking r9 as "latest" and the
+     * updater got stuck one release behind forever.
+     */
+    static int compareTags(String a, String b) {
+        int coreCmp = SemVer.compare(coreOf(a), coreOf(b));
+        if (coreCmp != 0) return coreCmp;
+        return Integer.compare(releaseNumberOf(a), releaseNumberOf(b));
+    }
+
     /** Version core with any {@code -rN} release counter AND channel suffix stripped. */
     private static String coreOf(String version) {
         String v = SemVer.stripChannel(version);
@@ -320,7 +339,7 @@ public final class SourbyUpdater {
             if (!el.isJsonObject()) continue;
             ReleaseInfo info = parseRelease(el.getAsJsonObject(), channel);
             if (info == null) continue;
-            if (best == null || SemVer.compare(info.tagName, best.tagName) > 0) {
+            if (best == null || compareTags(info.tagName, best.tagName) > 0) {
                 best = info;
             }
         }
