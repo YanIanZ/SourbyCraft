@@ -338,13 +338,17 @@ public final class Sourbyclip {
                     originalRootDir = originalJarFs.getPath("/");
                 }
 
-                final var versionsMap = new HashMap<String, URL>();
+                // ConcurrentHashMap: extractEntries fans the downloads out as parallel
+                // CompletableFutures that all put() into this map — concurrent writes corrupt a
+                // plain HashMap's table (observed: valuesToArray AIOOBE at classpath setup on
+                // fresh boots that actually download).
+                final var versionsMap = new java.util.concurrent.ConcurrentHashMap<String, URL>();
                 urls.putIfAbsent("versions", versionsMap);
                 final FileEntry[] versionEntries = findVersionEntries();
                 extractEntries(versionsMap, patches, originalRootDir, repoDir, versionEntries, "versions");
 
                 final FileEntry[] libraryEntries = findLibraryEntries();
-                final var librariesMap = new HashMap<String, URL>();
+                final var librariesMap = new java.util.concurrent.ConcurrentHashMap<String, URL>(); // same parallel-writer contract as versionsMap
                 urls.putIfAbsent("libraries", librariesMap);
                 extractEntries(librariesMap, patches, originalRootDir, repoDir, libraryEntries, "libraries");
             } finally {
