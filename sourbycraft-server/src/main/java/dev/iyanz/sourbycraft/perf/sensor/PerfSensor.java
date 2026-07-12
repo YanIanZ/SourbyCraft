@@ -292,17 +292,18 @@ public final class PerfSensor {
             return;
         }
 
-        double[] tps  = aggregateTps();         // Folia-aggregate {1m, 5m, 15m} (may be null on error)
-        // Read only the two windows the sensor consumes (1m, 5m); the 15m slot is unused. Reading
-        // scalars off the API array here avoids allocating an intermediate defensive double[3] every
-        // sample (once per second, forever) — the array copy carried no information the classifier used.
-        double tps1m  = tpsAt(tps, 0);
-        double tps5m  = tpsAt(tps, 1);
+        double[] tps  = aggregateTps();         // worst-region {15s, 1m, 5m} (may be null on error)
+        // Classify on the 15s window: reacts within seconds AND recovers within seconds — the 1m
+        // window kept the tier (and the displayed TPS) depressed for a minute after every join
+        // burst even though ticking was already back on schedule. Dwell hysteresis smooths it.
+        double tps15s = tpsAt(tps, 0);
+        double tps1m  = tpsAt(tps, 1);
+        double tps5m  = tpsAt(tps, 2);
         double mspt   = aggregateMspt();        // Folia-aggregate MSPT (millis)
         double memPct = memUsagePercent();
         double gcMs   = gcMsLastMinute();
 
-        Tier reading = classifyAll(tps1m, mspt, memPct, gcMs);
+        Tier reading = classifyAll(tps15s, mspt, memPct, gcMs);
 
         // Hysteresis: dwell + band (recovery requires multiplier × dwell samples)
         if (reading == currentTier) {
@@ -319,11 +320,10 @@ public final class PerfSensor {
             dwellCount = 1;
         }
 
-        // SensorSnapshot shape preserved from the tag: tps1s slot carries the 1m aggregate
-        // (Folia's finest-grained public TPS), tps30s carries 1m too (no sub-minute window on
-        // the Folia aggregate), tps5m carries the 5m aggregate.
+        // SensorSnapshot slots: tps1s carries the worst-region 15s window (the "now" number the
+        // HUD + /tps lead with), tps30s carries 1m, tps5m carries 5m.
         lastSnapshot = new SensorSnapshot(
-            System.nanoTime(), tps1m, tps1m, tps5m, mspt, memPct, gcMs,
+            System.nanoTime(), tps15s, tps1m, tps5m, mspt, memPct, gcMs,
             currentTier, candidateTier, dwellCount
         );
     }
@@ -405,24 +405,32 @@ public final class PerfSensor {
         // per-sample list). Falls back to null (-> 20.0) when no region exists (empty server).
         try {
             final long now = System.nanoTime();
-            final double[] min = {21.0, 21.0};
+            // {15s, 1m, 5m} — the 15s window leads: a region created seconds ago (join burst,
+            // region split, world load) carries its startup chunk-load dip in the LONG windows for
+            // a full minute+ after ticking is back on schedule, which read as "TPS stuck below 20"
+            // right after boot. 15s recovers as fast as the server actually does.
+            final double[] min = {21.0, 21.0, 21.0};
             final boolean[] any = {false};
             for (org.bukkit.World bw : Bukkit.getWorlds()) {
                 final net.minecraft.server.level.ServerLevel lvl = ((org.bukkit.craftbukkit.CraftWorld) bw).getHandle();
                 lvl.regioniser.computeForAllRegions(region -> {
                     final var handle = region.getData().getRegionSchedulingHandle();
-                    final var r1m = handle.getTickReport1m(now);
-                    if (r1m == null) return;
+                    final var r15 = handle.getTickReport15s(now);
+                    if (r15 == null) return;
+                    final double t15 = r15.tpsData().segmentAll().average();
+                    if (Double.isNaN(t15)) return; // region too young to have a meaningful window
                     any[0] = true;
-                    final double t1 = r1m.tpsData().segmentAll().average();
-                    if (t1 < min[0]) min[0] = t1;
+                    if (t15 < min[0]) min[0] = t15;
+                    final var r1m = handle.getTickReport1m(now);
+                    final double t1 = r1m != null ? r1m.tpsData().segmentAll().average() : t15;
+                    if (!Double.isNaN(t1) && t1 < min[1]) min[1] = t1;
                     final var r5m = handle.getTickReport5m(now);
                     final double t5 = r5m != null ? r5m.tpsData().segmentAll().average() : t1;
-                    if (t5 < min[1]) min[1] = t5;
+                    if (!Double.isNaN(t5) && t5 < min[2]) min[2] = t5;
                 });
             }
             if (!any[0]) return null;
-            return new double[]{min[0], min[1], min[1]};
+            return new double[]{min[0], min[1], min[2]};
         } catch (Throwable ignored) {
             return null;
         }
@@ -457,10 +465,11 @@ public final class PerfSensor {
             for (org.bukkit.World bw : Bukkit.getWorlds()) {
                 final net.minecraft.server.level.ServerLevel lvl = ((org.bukkit.craftbukkit.CraftWorld) bw).getHandle();
                 lvl.regioniser.computeForAllRegions(region -> {
-                    final var r1m = region.getData().getRegionSchedulingHandle().getTickReport1m(now);
-                    if (r1m == null) return;
-                    final double mspt = r1m.timePerTickData().segmentAll().average() / 1.0E6;
-                    if (mspt > max[0]) max[0] = mspt;
+                    // 15s window: same fast-recovery rationale as aggregateTps.
+                    final var r15 = region.getData().getRegionSchedulingHandle().getTickReport15s(now);
+                    if (r15 == null) return;
+                    final double mspt = r15.timePerTickData().segmentAll().average() / 1.0E6;
+                    if (!Double.isNaN(mspt) && mspt > max[0]) max[0] = mspt;
                 });
             }
             final double mspt = max[0];
