@@ -37,6 +37,14 @@ public final class OwnerProtection implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDrop(PlayerDropItemEvent e) {
+        // Pickup delay: how long before ANYONE (incl. the dropper) may collect the item. Applied
+        // independently of owner-protection so it works even with owner-protection off. Vanilla
+        // sets 40 on a manual drop, so only override when the operator chose a non-vanilla value.
+        final int delay = SourbyCraftConfig.itemPickupDelayTicks;
+        if (delay != 40) {
+            try { e.getItemDrop().setPickupDelay(delay); } catch (Throwable ignored) {}
+        }
+
         if (!SourbyCraftConfig.ownerProtectionEnabled) return;
         int seconds = SourbyCraftConfig.ownerProtectionTime;
         if (seconds <= 0) return;
