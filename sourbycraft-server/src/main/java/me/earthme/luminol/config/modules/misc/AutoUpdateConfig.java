@@ -84,6 +84,13 @@ public class AutoUpdateConfig implements IConfigModule {
     @ConfigInfo(name = "allow_prerelease", comments = "Whether GitHub prereleases on the tracked channel are eligible.")
     public static boolean allowPrerelease = false;
 
+    @ConfigInfo(name = "via_auto_update", comments = """
+            Also keep the auto-provisioned ViaVersion + ViaBackwards plugins current: on each check,
+            pull the latest Modrinth release for this MC version, SHA-512-verify it, and swap it into
+            plugins/ (takes effect on the next restart). Only active when viaversion.auto-provision is
+            on.""")
+    public static boolean viaAutoUpdate = true;
+
     @DoNotLoad
     public SourbyUpdater instance = null;
 

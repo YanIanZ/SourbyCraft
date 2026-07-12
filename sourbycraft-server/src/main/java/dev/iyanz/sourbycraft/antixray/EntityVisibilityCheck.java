@@ -211,7 +211,7 @@ public final class EntityVisibilityCheck {
             return shown;
         } catch (Throwable t) {
             if (FAILED_LOGGED.compareAndSet(false, true)) {
-                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[antixray] entity-visibility check failed — "
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("[SourX] entity-visibility check failed — "
                     + "showing entity (fail-open); further occurrences suppressed. Cause: " + t);
             }
             return true;

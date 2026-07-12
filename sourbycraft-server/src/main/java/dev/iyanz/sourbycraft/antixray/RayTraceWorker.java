@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Per-player async ray-trace driver for the anti-xray visibility cache.
  *
- * <p>SourbyCraft port of RayTraceAntiXray's {@code RayTraceCallable}.
+ * <p>SourX engine — SourbyCraft's port of stonar96/RayTraceAntiXray's {@code RayTraceCallable}.
  * For each ore position the reveal cycle wants a verdict on, the worker
  * runs line-of-sight checks on {@link VirtualExecutor}. The result lands
  * in {@link VisibilityCache} and the next reveal cycle consults it.
