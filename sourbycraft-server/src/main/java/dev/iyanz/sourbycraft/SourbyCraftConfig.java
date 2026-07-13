@@ -184,8 +184,8 @@ public class SourbyCraftConfig {
     public static boolean antixrayEnabled = true;
     /** Global master for fluid-obscures; ANDed with the per-world SourbyCraftWorldConfig.fluidObscures. */
     public static boolean fluidObscures = true;
-    /** Also hide cave-exposed LIQUID (water/lava source+flowing) blocks, not just ores. Default ON. */
-    public static boolean hideLiquids = true;
+    /** Also hide cave-exposed LIQUID (water/lava) blocks, not just ores. Default OFF — hiding fluids visibly flickers them as LOS changes. */
+    public static boolean hideLiquids = false; // OFF: hiding cave water/lava flickers/glitches fluid rendering
     /** Anti-ESP: hide occluded mobs / item drops (holograms exempt). Seeds EntityVisibilityCheck.ENABLED. */
     public static boolean hideEntities = true;
     /** Anti-ESP: drop particle packets the receiver has no line-of-sight to. Seeds ParticleVisibilityCheck.ENABLED. */
@@ -558,7 +558,7 @@ public class SourbyCraftConfig {
             "Master switch for the raytrace ore/liquid reveal layer. false = onChunkSent is a single volatile read (zero cost).");
         seed(f, changed, "antixray.fluid-obscures", true,
             "A fluid (water/lava) between the player eye and an ore obscures it (ore stays hidden). ANDed with the per-world override.");
-        seed(f, changed, "antixray.hide-liquids", true,
+        seed(f, changed, "antixray.hide-liquids", false,
             "Also hide cave-exposed LIQUID (water/lava, source + flowing) blocks the same way as ores. Reveals on real line-of-sight.");
         seed(f, changed, "antixray.hide-entities", true,
             "Anti-ESP: hide occluded mobs / item drops from a player's client (behind blocks, out of line-of-sight). "

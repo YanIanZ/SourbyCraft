@@ -138,7 +138,7 @@ public final class PaperAntiXrayDefense {
             + "is 64; SourbyCraft raises it to 128 so mountain/mesa surface ores and shallow bases are also "
             + "protected. Higher = a few more chunk sections scanned per send (small, bounded cost); set "
             + "back to 64 for the lightest footprint on huge servers.");
-        seed(f, changed, "antixray.hide-base-blocks", true,
+        seed(f, changed, "antixray.hide-base-blocks", false,
             "Anti-raid: add chests/barrels/shulkers/spawners/valuable storage (antixray.base-blocks) to "
             + "Paper's anti-xray hidden set so an underground base is invisible to xray scouting — every "
             + "occluded base block is sent to the client as plain stone, revealed only to a player with "
@@ -217,26 +217,31 @@ public final class PaperAntiXrayDefense {
         }
 
         final int engineMode = clampEngineMode(SourbyCraftConfig.cfgInt("antixray.engine-mode", 1));
+        final int maxBlockHeight = SourbyCraftConfig.cfgInt("antixray.max-block-height", 128);
+        final boolean hideBase = SourbyCraftConfig.cfgBool("antixray.hide-base-blocks", false);
 
         // Gate: seed when Paper's stock (disabled). When already enabled, re-assert ONLY when the block
-        // is SourbyCraft-managed (carries our full ore palette) and its engine-mode differs from the
-        // configured value — this migrates existing installs (e.g. an earlier engine-mode-1 seed) to the
-        // configured mode without clobbering a hand-rolled operator block. baritone-defense=false opts out.
+        // is SourbyCraft-managed (carries our full ore palette) and something we own differs from config:
+        // the engine-mode, OR whether base-blocks (chest/spawner/...) are in the hidden set. This
+        // migrates existing installs (e.g. an earlier hide-base-blocks=true that flickered chests) to
+        // the new config without clobbering a hand-rolled operator block. baritone-defense=false opts out.
         final boolean managed = blockCarriesOrePalette(lines, antiXrayIdx, endIdx);
+        final boolean ymlHasBase = blockContainsLine(lines, antiXrayIdx, endIdx, "- chest");
         if (!stockDisabled) {
-            if (managed && currentMode != engineMode) {
-                SourbyLogger.info("[SourX] baritone-defense: migrating SourbyCraft-managed anti-xray "
-                    + "engine-mode " + currentMode + " -> " + engineMode + " in " + WORLD_DEFAULTS);
+            final boolean modeDiff = currentMode != engineMode;
+            final boolean baseDiff = ymlHasBase != hideBase;
+            if (managed && (modeDiff || baseDiff)) {
+                SourbyLogger.info("[SourX] baritone-defense: migrating SourbyCraft-managed anti-xray in "
+                    + WORLD_DEFAULTS + " (engine-mode " + currentMode + "->" + engineMode
+                    + ", base-blocks " + ymlHasBase + "->" + hideBase + ")");
                 // fall through to rewrite
             } else {
                 SourbyLogger.info("[SourX] baritone-defense: Paper anti-xray already enabled"
-                    + (managed ? " (SourbyCraft-managed, engine-mode " + currentMode + " matches config)" : ", operator-managed")
+                    + (managed ? " (SourbyCraft-managed, matches config)" : ", operator-managed")
                     + " in " + WORLD_DEFAULTS + " — leaving it untouched");
                 return;
             }
         }
-        final int maxBlockHeight = SourbyCraftConfig.cfgInt("antixray.max-block-height", 128);
-        final boolean hideBase = SourbyCraftConfig.cfgBool("antixray.hide-base-blocks", true);
 
         // Preserve determinism + de-dupe: LinkedHashSet keeps insertion order, drops accidental dupes.
         final Set<String> hiddenSet = new LinkedHashSet<>(ORE_PALETTE);
@@ -332,6 +337,14 @@ public final class PaperAntiXrayDefense {
             }
         } catch (IOException e) {
             return true; // fail-open: don't warn on a read error
+        }
+        return false;
+    }
+
+    /** True when the anti-xray block contains a trimmed line equal to {@code needle}. */
+    private static boolean blockContainsLine(String[] lines, int fromIdx, int toIdx, String needle) {
+        for (int i = fromIdx + 1; i < toIdx; i++) {
+            if (lines[i].trim().equals(needle)) return true;
         }
         return false;
     }
