@@ -208,17 +208,22 @@ public final class OreReveal implements Listener {
         final BlockState stoneState = fakeState(level, 0);
         final BlockState deepState = fakeState(level, -1);
         final it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet visible = VisibilityCache.setFor(pid);
+        // ENGINE UPGRADE: batch the hides into ONE multi-block-change packet per 16³ section instead
+        // of N single ClientboundBlockUpdatePackets. On a join chunk-burst this collapses hundreds of
+        // packets into a handful, and — because the client applies a section's changes atomically —
+        // the ores go to stone in one frame, tightening the reveal window (no partial-hide flicker).
+        final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap<BlockState>> bySection =
+            new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
         // Folia: guard the per-player fastutil set — the reveal cycle (player's region) and other
-        // region sends for this player mutate it concurrently. Sends are issued inside the monitor;
-        // the packet queue is thread-safe and the loop is bounded by maxPending so the critical
-        // section stays short.
+        // region sends for this player mutate it concurrently. The loop is bounded by maxPending so
+        // the critical section stays short; packet sends happen AFTER, outside the monitor.
         synchronized (pending) {
             for (final long key : ores) {
                 if (pending.size() >= maxPending) break;   // budget full: remaining ores stay visible (fail-open)
                 if (VisibilityCache.isVisible(visible, key)) continue; // confirmed visible from this eye
                 pending.add(key);
                 pos.set(key);
-                player.connection.send(new ClientboundBlockUpdatePacket(pos.immutable(), pos.getY() < 0 ? deepState : stoneState));
+                accumulateHide(bySection, pos, pos.getY() < 0 ? deepState : stoneState);
             }
             int fluidBudget = Math.min(maxFluidPending, maxPending - pending.size());
             for (final long key : fluids) {
@@ -226,9 +231,24 @@ public final class OreReveal implements Listener {
                 if (VisibilityCache.isVisible(visible, key)) continue;
                 pending.add(key);
                 pos.set(key);
-                player.connection.send(new ClientboundBlockUpdatePacket(pos.immutable(), pos.getY() < 0 ? deepState : stoneState));
+                accumulateHide(bySection, pos, pos.getY() < 0 ? deepState : stoneState);
             }
         }
+        // Send outside the monitor — the packet queue is thread-safe and this keeps the critical
+        // section to pure bookkeeping.
+        for (final var e : bySection.long2ObjectEntrySet()) {
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket(
+                net.minecraft.core.SectionPos.of(e.getLongKey()), e.getValue()));
+        }
+    }
+
+    /** Add one (position -> fake state) hide to its 16³ section bucket (keyed by SectionPos.asLong). */
+    private static void accumulateHide(
+            final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap<BlockState>> bySection,
+            final BlockPos.MutableBlockPos pos, final BlockState fake) {
+        final long sectionKey = net.minecraft.core.SectionPos.of(pos).asLong();
+        bySection.computeIfAbsent(sectionKey, k -> new it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap<>())
+            .put(net.minecraft.core.SectionPos.sectionRelativePos(pos), fake);
     }
 
     /**
