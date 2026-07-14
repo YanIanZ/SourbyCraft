@@ -1,6 +1,6 @@
 package dev.iyanz.sourbycraft.antixray;
 
-import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 
 import java.util.Map;
 import java.util.UUID;
@@ -8,82 +8,109 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Per-player set of block positions (packed long via
- * {@code net.minecraft.core.BlockPos.asLong}) that the
- * {@link RayTraceWorker} has confirmed are currently in line-of-sight.
- * The chunk-send obfuscation path consults this cache before stripping
- * an ore from the outgoing packet — present in cache => ore stays
- * visible, absent => ore stays obfuscated.
+ * SourbyEngine per-player REVEALED-ore set (packed BlockPos.asLong -> consecutive-miss streak).
  *
- * <p>Set is bounded by {@link #MAX_PER_PLAYER}; a {@link LongLinkedOpenHashSet}
- * gives true FIFO eviction ({@code removeFirstLong}) without allocating an
- * iterator per insert once full.
+ * <p>Unlike the old persistent cache, a reveal here is DYNAMIC: the SourbyEngine reveal cycle
+ * re-validates line-of-sight to revealed ores and, when a player loses sight of one for
+ * {@link #HIDE_STREAK} consecutive checks, drops it so the ore is re-hidden. This closes the
+ * "peek once, x-ray forever" hole — an ore is shown only while the player can actually see it.
  *
- * <p><b>Epoch guard (anti-leak).</b> An async ray submitted before a
- * teleport / world change / quit may land AFTER the corresponding
- * {@link #clear} — re-confirming visibility from a stale eye position,
- * which is exactly the leak those clears exist to close. Every clear bumps
- * the player's epoch; workers capture the epoch at submit time and
- * {@link #markVisible(UUID, long, long)} discards results whose epoch no
- * longer matches. Epoch counters are monotonic and deliberately survive
- * quit (one {@code AtomicLong} per unique UUID since boot — trivially
- * bounded) so an in-flight worker can never resurrect a cleared state by
- * recreating a zeroed counter.
+ * <p><b>Epoch guard.</b> An async ray submitted before a teleport / world change / quit may land
+ * after the matching {@link #clear}; every clear bumps the player's epoch and stale results are
+ * discarded. Epoch counters survive quit (one {@code AtomicLong} per UUID since boot, trivially
+ * bounded) so an in-flight worker can never resurrect a cleared state.
  */
 public final class VisibilityCache {
 
     public static final int MAX_PER_PLAYER = 4096;
+    /** Consecutive out-of-sight re-validations before a revealed ore is re-hidden (anti-flicker). */
+    public static final int HIDE_STREAK = 3;
 
-    private static final Map<UUID, LongLinkedOpenHashSet> CACHE = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long2IntOpenHashMap> CACHE = new ConcurrentHashMap<>();
     private static final Map<UUID, AtomicLong> EPOCHS = new ConcurrentHashMap<>();
 
     private VisibilityCache() {}
 
-    /** Current epoch for the player; capture at submit time, pass to {@link #markVisible}. */
     public static long epoch(final UUID playerId) {
         AtomicLong e = EPOCHS.get(playerId);
         return (e != null ? e : EPOCHS.computeIfAbsent(playerId, id -> new AtomicLong())).get();
+    }
+
+    /** The per-player revealed-ore map (miss streaks); may be null. Guard with synchronized(map). */
+    public static Long2IntOpenHashMap mapFor(final UUID playerId) {
+        return CACHE.get(playerId);
+    }
+
+    /** True when NO player has any revealed ore (cheap gate for the global reveal cycle). */
+    public static boolean isEmpty() {
+        return CACHE.isEmpty();
+    }
+
+    /** True when this player has at least one revealed ore needing re-validation. */
+    public static boolean hasRevealed(final UUID playerId) {
+        final Long2IntOpenHashMap map = CACHE.get(playerId);
+        if (map == null) return false;
+        synchronized (map) {
+            return !map.isEmpty();
+        }
     }
 
     public static boolean isVisible(final UUID playerId, final long blockKey) {
         return isVisible(CACHE.get(playerId), blockKey);
     }
 
-    /**
-     * Per-player set handle for loop hoisting: fetch once via {@link #setFor}, then call this
-     * overload per key — collapses O(pending) ConcurrentHashMap lookups to one per player-cycle.
-     */
-    public static LongLinkedOpenHashSet setFor(final UUID playerId) {
-        return CACHE.get(playerId);
-    }
-
-    public static boolean isVisible(final LongLinkedOpenHashSet set, final long blockKey) {
-        if (set == null) return false;
-        // Same monitor as markVisible: virtual-thread writes must happen-before region-thread reads,
-        // and contains() during a backing-array resize is not safe unsynchronized.
-        synchronized (set) {
-            return set.contains(blockKey);
+    public static boolean isVisible(final Long2IntOpenHashMap map, final long blockKey) {
+        if (map == null) return false;
+        synchronized (map) {
+            return map.containsKey(blockKey);
         }
     }
 
     /**
-     * Record a confirmed-visible position. {@code epochAtSubmit} must be the value of
+     * Mark an ore revealed (miss streak reset to 0). {@code epochAtSubmit} must be the value of
      * {@link #epoch} captured when the ray was submitted; a clear in between discards the result.
      */
     public static void markVisible(final UUID playerId, final long blockKey, final long epochAtSubmit) {
         if (epoch(playerId) != epochAtSubmit) return; // eye moved (teleport/world/quit) since submit
-        LongLinkedOpenHashSet set = CACHE.computeIfAbsent(playerId, id -> new LongLinkedOpenHashSet());
-        synchronized (set) {
-            if (set.size() >= MAX_PER_PLAYER) {
-                set.removeFirstLong(); // FIFO: evict the oldest confirmation
+        Long2IntOpenHashMap map = CACHE.computeIfAbsent(playerId, id -> {
+            Long2IntOpenHashMap m = new Long2IntOpenHashMap();
+            m.defaultReturnValue(0);
+            return m;
+        });
+        synchronized (map) {
+            if (map.size() >= MAX_PER_PLAYER && !map.containsKey(blockKey)) return; // bounded; drop new
+            map.put(blockKey, 0);
+        }
+    }
+
+    /**
+     * Record a re-validation MISS for a revealed ore. Returns {@code true} when the ore has now
+     * been out of sight for {@link #HIDE_STREAK} consecutive checks and should be RE-HIDDEN (it is
+     * removed from the revealed set in that case).
+     */
+    public static boolean recordMissAndMaybeHide(final Long2IntOpenHashMap map, final long blockKey) {
+        if (map == null) return false;
+        synchronized (map) {
+            if (!map.containsKey(blockKey)) return false;
+            int miss = map.get(blockKey) + 1;
+            if (miss >= HIDE_STREAK) {
+                map.remove(blockKey);
+                return true;
             }
-            set.add(blockKey);
+            map.put(blockKey, miss);
+            return false;
+        }
+    }
+
+    /** Re-validation HIT: the player still sees the ore — reset its miss streak. */
+    public static void recordHit(final Long2IntOpenHashMap map, final long blockKey) {
+        if (map == null) return;
+        synchronized (map) {
+            if (map.containsKey(blockKey)) map.put(blockKey, 0);
         }
     }
 
     public static void clear(final UUID playerId) {
-        // Bump BEFORE removing the set so an in-flight markVisible either sees the old epoch and
-        // writes into the map we are about to drop, or sees the new epoch and discards itself.
         EPOCHS.computeIfAbsent(playerId, id -> new AtomicLong()).incrementAndGet();
         CACHE.remove(playerId);
     }

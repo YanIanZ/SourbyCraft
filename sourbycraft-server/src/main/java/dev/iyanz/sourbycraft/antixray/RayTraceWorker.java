@@ -4,6 +4,7 @@ import dev.iyanz.sourbycraft.util.SourbyLogger;
 import dev.iyanz.sourbycraft.util.VirtualExecutor;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
@@ -105,13 +106,34 @@ public final class RayTraceWorker {
             try {
                 for (final long key : work) {
                     if (checkOne(level, eye, key, fluidObscures)) {
+                        // SourbyEngine: reveal the ore the instant sight is confirmed. Mark it in the
+                        // (now dynamic) revealed-set and push the TRUE block-state so the client drops
+                        // the stone placeholder — the reveal cycle no longer does this deferred a tick
+                        // later. markVisible is epoch-guarded, so a reveal racing a teleport is dropped;
+                        // we gate the packet on the same epoch to avoid revealing into a stale eye.
+                        if (VisibilityCache.epoch(playerId) != epoch) continue;
                         VisibilityCache.markVisible(playerId, key, epoch);
+                        final BlockPos p = BlockPos.of(key);
+                        if (level.isLoaded(p)) {
+                            player.connection.send(new ClientboundBlockUpdatePacket(p, level.getBlockState(p)));
+                        }
                     }
                 }
             } catch (Throwable t) {
                 logFailure(t);
             }
         });
+    }
+
+    /**
+     * Synchronous single-ore line-of-sight test (centre ray + up-to-3 player-facing face probes).
+     * Public so the SourbyEngine reveal cycle can re-validate revealed ores on the region thread.
+     * Reads loaded chunks only (unloaded = occluding), so it is safe on any thread that may read
+     * that world's block state.
+     */
+    public static boolean hasLineOfSight(final ServerLevel level, final Vec3 eye, final long key,
+                                         final boolean fluidObscures) {
+        return checkOne(level, eye, key, fluidObscures);
     }
 
     /** One ore: centre ray, then the up-to-3 player-facing face-midpoint probes. */
