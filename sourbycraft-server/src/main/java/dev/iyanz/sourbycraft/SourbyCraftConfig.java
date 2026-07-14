@@ -184,8 +184,15 @@ public class SourbyCraftConfig {
     public static boolean antixrayEnabled = true;
     /** Global master for fluid-obscures; ANDed with the per-world SourbyCraftWorldConfig.fluidObscures. */
     public static boolean fluidObscures = true;
-    /** Also hide cave-exposed LIQUID (water/lava) blocks, not just ores. Default OFF — hiding fluids visibly flickers them as LOS changes. */
-    public static boolean hideLiquids = false; // OFF: hiding cave water/lava flickers/glitches fluid rendering
+    /** Also hide cave-exposed LIQUID (water/lava) blocks, not just ores. SourbyEngine re-hides them
+     *  dynamically on loss of sight, so the old persistent-reveal flicker is gone. Default ON. */
+    public static boolean hideLiquids = true;
+    /** Hide cave-exposed BLOCK-ENTITIES (chests, barrels, shulker boxes, spawners, vaults, …) via the
+     *  SourbyEngine block-update path. Wurst/xray reads the client's block-entity list, so a chest sent
+     *  real leaks even behind wall; the stone block-update SourbyEngine sends removes the client-side
+     *  block-entity, and the reveal re-creates it on line of sight. Never routed through Paper's palette
+     *  obfuscation (that leaves the block-entity in the chunk packet → the old "chest berubah" glitch). */
+    public static boolean hideBlockEntities = true;
     /** Anti-ESP: hide occluded mobs / item drops (holograms exempt). Seeds EntityVisibilityCheck.ENABLED. */
     public static boolean hideEntities = true;
     /** Anti-ESP: drop particle packets the receiver has no line-of-sight to. Seeds ParticleVisibilityCheck.ENABLED. */
@@ -334,6 +341,7 @@ public class SourbyCraftConfig {
         antixrayEnabled = cfgBool("antixray.enabled", antixrayEnabled);
         fluidObscures = cfgBool("antixray.fluid-obscures", fluidObscures);
         hideLiquids = cfgBool("antixray.hide-liquids", hideLiquids);
+        hideBlockEntities = cfgBool("antixray.hide-block-entities", hideBlockEntities);
         hideEntities = cfgBool("antixray.hide-entities", hideEntities);
         hideParticles = cfgBool("antixray.hide-particles", hideParticles);
         raytraceIntervalTicks = Math.max(1, cfgInt("antixray.raytrace.interval-ticks", raytraceIntervalTicks));
@@ -528,6 +536,7 @@ public class SourbyCraftConfig {
         seedThresholds(f, changed, "mspt", 30.0, 40.0, 60.0, 100.0, "MSPT tier thresholds (higher = worse).");
         migrateSeededTpsLadder(f, changed); // pre-2f installs carry the flap-prone 19/18/17/15 seed
         migrateSeededAntixrayExtras(f, changed); // retract the chest/liquid-flicker seeds once
+        migrateAntixrayReenableLiquids(f, changed); // r22: SourbyEngine re-hides dynamically -> liquids back on
         seedThresholds(f, changed, "tps", 17.0, 15.0, 13.0, 10.0, "TPS tier thresholds (lower = worse). Self-tune reacts only below ~17 TPS; idle/healthy servers stay GREEN.");
         seedThresholds(f, changed, "mem", 75.0, 85.0, 92.0, 97.0, "Heap % tier thresholds (higher = worse).");
         seedThresholds(f, changed, "gc-ms-per-min", 20.0, 50.0, 100.0, 300.0, "GC pause ms/min tier thresholds (higher = worse).");
@@ -559,8 +568,14 @@ public class SourbyCraftConfig {
             "Master switch for the raytrace ore/liquid reveal layer. false = onChunkSent is a single volatile read (zero cost).");
         seed(f, changed, "antixray.fluid-obscures", true,
             "A fluid (water/lava) between the player eye and an ore obscures it (ore stays hidden). ANDed with the per-world override.");
-        seed(f, changed, "antixray.hide-liquids", false,
-            "Also hide cave-exposed LIQUID (water/lava, source + flowing) blocks the same way as ores. Reveals on real line-of-sight.");
+        seed(f, changed, "antixray.hide-liquids", true,
+            "Also hide cave-exposed LIQUID (water/lava, source + flowing) blocks the same way as ores. Reveals on real "
+            + "line-of-sight and RE-HIDES when sight is lost (SourbyEngine dynamic visibility). Set false if fluid re-render bothers you.");
+        seed(f, changed, "antixray.hide-block-entities", true,
+            "Hide cave-exposed BLOCK-ENTITIES (chests, trapped/ender chests, barrels, shulker boxes, hoppers, "
+            + "dispensers/droppers, furnaces, brewing stands, mob/trial spawners, vaults) via SourbyEngine's block-update "
+            + "path — this removes the block-entity from the receiver's client so xray/ESP can't read it through walls. "
+            + "Reveals + re-hides on line-of-sight like ores. NOT routed through Paper's palette (that glitched chests).");
         seed(f, changed, "antixray.hide-entities", true,
             "Anti-ESP: hide occluded mobs / item drops from a player's client (behind blocks, out of line-of-sight). "
             + "Players, holograms (Display / armor-stand), and hanging entities (frames/paintings) are always shown; "
@@ -754,6 +769,35 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.info(
                 "migrated anti-xray extras -> hide-liquids=false + hide-base-blocks=false "
                 + "(they flicker as stone; ore anti-xray unchanged). Set them true to re-enable.");
+        }
+    }
+
+    /**
+     * One-time re-enable of {@code antixray.hide-liquids}. {@link #migrateSeededAntixrayExtras} turned
+     * liquids OFF because the old persistent-reveal engine left them flickering as stone. SourbyEngine
+     * (r21+) re-hides dynamically on loss of sight, which removes that flicker mode, so liquids go back
+     * ON exactly once — gated on {@code antixray.dynamic-rehide-migrated} so an operator who turns them
+     * off again afterwards is never overridden. Only flips a value that is currently the retracted
+     * {@code false}; an already-true or absent (fresh-install, seeded true below) value is left alone.
+     */
+    private static void migrateAntixrayReenableLiquids(com.electronwill.nightconfig.core.file.CommentedFileConfig f,
+                                                       boolean[] changed) {
+        final Object done = f.get("antixray.dynamic-rehide-migrated");
+        if (done instanceof Boolean b && b) return; // already migrated
+        boolean flipped = false;
+        if (Boolean.FALSE.equals(f.get("antixray.hide-liquids"))) {
+            f.set("antixray.hide-liquids", true);
+            flipped = true;
+        }
+        f.set("antixray.dynamic-rehide-migrated", true);
+        f.setComment("antixray.dynamic-rehide-migrated",
+            "Internal: marks the one-time re-enable of hide-liquids after SourbyEngine gained dynamic "
+            + "re-hide. Do not edit. Set antixray.hide-liquids=false yourself to keep liquids visible.");
+        changed[0] = true;
+        if (flipped) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                "re-enabled anti-xray hide-liquids (SourbyEngine now re-hides cave fluids dynamically "
+                + "on loss of sight). Set antixray.hide-liquids=false to opt out.");
         }
     }
 
