@@ -38,7 +38,7 @@ public final class ParticleVisibilityCheck {
     private ParticleVisibilityCheck() {}
 
     /** Particles closer than 8 blocks to the player's eye are always shown. */
-    private static final double NEAR_DISTANCE_SQUARED = 8.0 * 8.0;
+    private static final double NEAR_DISTANCE_SQUARED = 3.0 * 3.0; // 8->3: don't leak occluded particles at close range
 
     /** Beyond this the gate fails open — no 512-block cross-region rays for forced particles. */
     private static final double GATE_RANGE_SQUARED = 64.0 * 64.0;

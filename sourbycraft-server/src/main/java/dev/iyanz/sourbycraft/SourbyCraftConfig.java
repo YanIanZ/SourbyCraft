@@ -527,6 +527,7 @@ public class SourbyCraftConfig {
         seed(f, changed, "perf.sensor.recovery-dwell-multiplier", 2.0, "Dwell multiplier when recovering to a better tier (>= 1.0).");
         seedThresholds(f, changed, "mspt", 30.0, 40.0, 60.0, 100.0, "MSPT tier thresholds (higher = worse).");
         migrateSeededTpsLadder(f, changed); // pre-2f installs carry the flap-prone 19/18/17/15 seed
+        migrateSeededAntixrayExtras(f, changed); // retract the chest/liquid-flicker seeds once
         seedThresholds(f, changed, "tps", 17.0, 15.0, 13.0, 10.0, "TPS tier thresholds (lower = worse). Self-tune reacts only below ~17 TPS; idle/healthy servers stay GREEN.");
         seedThresholds(f, changed, "mem", 75.0, 85.0, 92.0, 97.0, "Heap % tier thresholds (higher = worse).");
         seedThresholds(f, changed, "gc-ms-per-min", 20.0, 50.0, 100.0, 300.0, "GC pause ms/min tier thresholds (higher = worse).");
@@ -723,6 +724,39 @@ public class SourbyCraftConfig {
      * trap). If the file carries exactly that quad it is the old seed, not an operator choice —
      * rewrite it to the 17/15/13/10 ladder the sensor ships with.
      */
+    /**
+     * One-time retraction of the anti-xray extras that flicker as stone (chests are block entities,
+     * fluids re-render on LOS change). Pre-r18 installs seeded antixray.hide-liquids=true and
+     * antixray.hide-base-blocks=true; those explicit values win over the new false defaults forever.
+     * Flip them false EXACTLY ONCE, gated on antixray.extras-migrated so an operator who deliberately
+     * turns them back on afterwards is never overridden again. The PaperAntiXrayDefense re-assert
+     * (later in init) then rewrites paper-world-defaults.yml to drop the base blocks on this same boot.
+     */
+    private static void migrateSeededAntixrayExtras(com.electronwill.nightconfig.core.file.CommentedFileConfig f,
+                                                    boolean[] changed) {
+        final Object done = f.get("antixray.extras-migrated");
+        if (done instanceof Boolean b && b) return; // already migrated
+        boolean flipped = false;
+        if (Boolean.TRUE.equals(f.get("antixray.hide-liquids"))) {
+            f.set("antixray.hide-liquids", false);
+            flipped = true;
+        }
+        if (Boolean.TRUE.equals(f.get("antixray.hide-base-blocks"))) {
+            f.set("antixray.hide-base-blocks", false);
+            flipped = true;
+        }
+        f.set("antixray.extras-migrated", true);
+        f.setComment("antixray.extras-migrated",
+            "Internal: marks the one-time retraction of the chest/liquid-flicker anti-xray extras. "
+            + "Do not edit. Set antixray.hide-liquids / antixray.hide-base-blocks yourself to re-enable them.");
+        changed[0] = true;
+        if (flipped) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                "migrated anti-xray extras -> hide-liquids=false + hide-base-blocks=false "
+                + "(they flicker as stone; ore anti-xray unchanged). Set them true to re-enable.");
+        }
+    }
+
     private static void migrateSeededTpsLadder(com.electronwill.nightconfig.core.file.CommentedFileConfig f,
                                                boolean[] changed) {
         final String base = "perf.sensor.thresholds.tps.";
