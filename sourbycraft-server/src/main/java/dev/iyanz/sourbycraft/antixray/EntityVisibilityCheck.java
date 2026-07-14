@@ -85,7 +85,10 @@ public final class EntityVisibilityCheck {
     public static final AtomicBoolean ENABLED = new AtomicBoolean(false);
 
     /** Entities closer than 8 blocks to the player's eye are always shown. */
-    private static final double NEAR_DISTANCE_SQUARED = 8.0 * 8.0;
+    // 3 blocks (was 8): within this hard radius an entity is always shown (mount/join grace).
+    // Beyond it the raytrace decides — so a mob 4-8 blocks away behind a wall is now HIDDEN from
+    // ESP instead of shown, closing the "through-wall shell" a Wurst client saw at close range.
+    private static final double NEAR_DISTANCE_SQUARED = 3.0 * 3.0;
 
     // --- Verdict cache + hysteresis -------------------------------------------------------------
     // The tracker calls this gate per tracked-entity x nearby-player EVERY TICK (ChunkMap

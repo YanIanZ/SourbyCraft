@@ -57,7 +57,10 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class OreReveal implements Listener {
 
-    private static final double NEAR_DISTANCE = 8.0;
+    // 3 blocks (was 8): within this the ore is revealed without a raytrace (mining grace — you are
+    // about to break through to it). Beyond it ONLY a raytrace-confirmed line-of-sight reveals it,
+    // so ores 4-8 blocks behind a wall stay hidden from a nearby Wurst xray instead of showing.
+    private static final double NEAR_DISTANCE = 3.0;
     private static final double NEAR_DISTANCE_SQUARED = NEAR_DISTANCE * NEAR_DISTANCE;
 
     /**
