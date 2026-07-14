@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <!-- This module was also published with a richer model, Gradle metadata,  -->
+  <!-- which should be used instead. Do not delete the following line which  -->
+  <!-- is to indicate to Gradle or any Gradle module metadata file consumer  -->
+  <!-- that they should prefer consuming it instead. -->
+  <!-- do_not_remove: published-with-gradle-metadata -->
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>dev.iyanz</groupId>
+  <artifactId>sourbyclip</artifactId>
+  <version>3.0.18</version>
+  <name>Sourbyclip</name>
+  <description>Launcher for the SourbyCraft Minecraft server</description>
+  <url>https://github.com/iyanz/SourbyCraft</url>
+  <licenses>
+    <license>
+      <name>MIT</name>
+      <url>https://github.com/iyanz/SourbyCraft/blob/main/sourbyclip/license.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <id>iyanz</id>
+      <name>SourbyCraft</name>
+    </developer>
+    <developer>
+      <id>DemonWav</id>
+      <name>Kyle Wood</name>
+      <email>demonwav@gmail.com</email>
+      <url>https://github.com/DemonWav</url>
+    </developer>
+    <developer>
+      <id>MrHua269</id>
+      <name>MrHua269</name>
+      <email>mrhua269@gmail.com</email>
+      <url>https://github.com/MrHua269</url>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:https://github.com/iyanz/SourbyCraft.git</connection>
+    <developerConnection>scm:git:git@github.com:iyanz/SourbyCraft.git</developerConnection>
+    <url>https://github.com/iyanz/SourbyCraft</url>
+  </scm>
+  <issueManagement>
+    <system>GitHub</system>
+    <url>https://github.com/iyanz/SourbyCraft/issues</url>
+  </issueManagement>
+</project>

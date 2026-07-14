@@ -1,160 +1,201 @@
-<h1 align="center">⚡ SourbyCraft — 26.2 Survival</h1>
+<p align="center">
+  <img src="assets/SourbyCraft.png" alt="SourbyCraft Folia" width="380">
+</p>
 
-<p align="center"><strong>Maximum performance · Resource-efficient · Self-tuning · Built for 200+ players</strong></p>
+<h1 align="center">SourbyCraft — 26.2 Folia</h1>
+
+<p align="center"><strong>Regionized multithreading · Self-tuning per-region performance · Lean on CPU &amp; RAM · Built for 200+ players</strong></p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/minecraft-26.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/line-survival-orange?style=flat-square">
+  <img src="https://img.shields.io/badge/base-Folia%20·%20Luminol%2026.2-orange?style=flat-square">
   <img src="https://img.shields.io/badge/version-26.2--REL-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/players-200%2B-blueviolet?style=flat-square">
-  <img src="https://img.shields.io/badge/jar-31M%20(SourbyLoader)-green?style=flat-square">
-  <img src="https://img.shields.io/badge/deploy-Docker%20·%20Pterodactyl%20·%20Pelican-2496ed?style=flat-square">
+  <img src="https://img.shields.io/badge/jar-33.7M%20(SourbyLoader)-green?style=flat-square">
+  <img src="https://img.shields.io/badge/deploy-Docker%20·%20Pterodactyl%20·%20Pelican%20·%20k8s-2496ed?style=flat-square">
   <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
 </p>
 
-<p align="center"><em>High-performance <a href="https://github.com/PaperMC/Paper">Paper</a> fork on Minecraft 26.2, tuned for large survival servers. Vanilla region worlds (no SWM), a self-tuning performance engine, resource-pack-proof anti-xray, hardened item stacker, native mod loader, and async multithreading — all kept lean on RAM and CPU.</em></p>
+---
+
+## What is it
+
+**SourbyCraft 26.2 Folia** is a high-performance Minecraft **26.2** server — a full **Paper → Folia re-platform** of the SourbyCraft project. It runs on true **regionized multithreading** (the world is split into independently-ticked regions across CPU cores, no single main thread), built on the [Luminol](https://github.com/LuminolMC/Luminol) 26.2 Folia base.
+
+It is compiled with an **own build toolchain — SourbyPatcher** (a fork of the Luminol/paperweight patcher) — and packaged as a **SourbyLoader** slim jar: a **33.7 MiB** paperclip that downloads its heavy libraries once on first boot instead of bundling them, so the artifact stays tiny.
+
+On top of that base it adds a **self-tuning per-region performance engine**, a full SourbyCraft **command &amp; UX suite** (hex-colored), offline **GeoIP**, a varied **message/lang** layer, and an **advanced auto-updater** — all **100% Folia-native**.
 
 ---
 
-## Two release lines
+## Highlights
 
-SourbyCraft ships as two parallel tracks:
+| | |
+|---|---|
+| ⚡ **Regionized multithreading** | Folia base — regions tick in parallel across cores; scales with player spread |
+| 🎛️ **Self-tuning perf engine** | Per-region-aggregate sensor → performance **Tier** → knobs enforced onto the base's optimizations, live |
+| 📦 **SourbyLoader slim jar** | 33.7 MiB — libraries fetched (SHA-256 verified) on first boot, not bundled |
+| 🧰 **SourbyPatcher** | Own build toolchain; SourbyCraft owns the full chain (patcher + Folia base) |
+| 🌍 **Offline GeoIP** | `/ping` shows player location from a local db-ip.com database — no IP leaves the server |
+| 🎨 **Hex UI everywhere** | Truecolor banner, advisors, command output, and rebranded log prefixes |
+| 🗺️ **Varied messages** | Configurable, multi-variant server-full / MOTD / join-leave lang |
+| 🔄 **Advanced auto-updater** | Channel-aware (REL/DEV/EXP), SHA-256-verified, safe staged apply |
+| 🕰️ **Built-in ViaVersion** | Old clients (**1.20 → server's 26.2 / 1.21.9**) join out of the box — ViaVersion + ViaBackwards auto-provisioned (pinned, SHA-256-verified) on first boot |
+| 🚀 **Auto-CDS** | Class-Data-Sharing that adapts to bare-metal / Docker / k8s / systemd / panels |
+| 🧵 **SIMD + Pufferfish** | Vectorized ops (`jdk.incubator.vector`) + Pufferfish optimizations enabled |
 
-| Line | Focus | Worlds | Branch |
+---
+
+## Quick start
+
+Requires **Java 25**.
+
+```bash
+# grab SourbyCraft-26.2-REL.jar from Releases, then:
+java -Xmx4G -jar SourbyCraft-26.2-REL.jar --nogui
+```
+
+First boot fetches ~32 MiB of libraries (SourbyLoader, one-time, verified) and generates the config. That's it — regionized threading is on by default.
+
+> **Offline first boot?** The libraries must be downloaded once. If the machine has no internet, download them manually — SourbyLoader prints the exact URLs + target paths it needs.
+
+---
+
+## Commands
+
+Console-runnable; each also works as `/sourbycraft:<name>` if a plugin shadows the bare name.
+
+| Command | Does |
+|---|---|
+| `/perf` | Live perf engine — Tier, TPS (1s/30s/5m), MSPT, and the active knobs |
+| `/ping [player]` | Latency + **GeoIP** location (offline) |
+| `/ver` · `/version` | Branded build info (version, channel, GMT+7 build time) |
+| `/sys` | Server/JVM/host snapshot |
+| `/plugins` | SourbyCraft-styled plugin list |
+| `/maxp [n]` | Show or set max players — **persists across restart** |
+| `/speedtest` | Network speed (Ookla CLI, SHA-256-pinned) |
+| `/sparkview` | Quick [spark](https://spark.lucko.me) profiler view |
+
+**Max-player bypass:** players with `sourbycraft.maxplayers.bypass` (or ops) can join a full server.
+
+---
+
+## Performance engine
+
+Folia has no global tick, so the engine works on **aggregates**:
+
+1. A **sensor** samples server-wide load (`getTPS()` / MSPT / heap / GC) on the global-region scheduler.
+2. A **self-tune controller** classifies a server-wide **Tier** (GREEN → YELLOW → RED …) with warmup + hysteresis.
+3. On tier change, a **KnobEnforcer** pushes tuned values onto the base's own Folia-safe optimizations (projectile chunk-load caps, goal-selector throttle, …) — so enforcement runs on the base's already-optimized paths, never fighting Luminol.
+
+All Folia-native (region/async schedulers, no legacy Bukkit global scheduler), 0-allocation sample path.
+
+---
+
+## Configuration
+
+One unified file: **`sourbycraft_config/sourbycraft_global_config.toml`**. It carries Luminol's ~60 optimization modules **and** SourbyCraft's `perf.*`, `messages.*`, `misc.auto_update.*`, and `max-players` keys — a single place to tune everything, with room for more.
+
+### Built-in ViaVersion / ViaBackwards (old-client support)
+
+Old clients join with **zero manual install**. On first boot SourbyCraft downloads the pinned **ViaVersion 5.10.0** + **ViaBackwards 5.10.0** jars into `plugins/` (each **SHA-256-verified**, https-only, exactly like the slim-jar libraries) *before* the plugin manager scans — so they load and enable the same boot. Both are Folia builds (`folia-supported: true`).
+
+- **Supported client range:** oldest **1.20** → the server's native **26.2 (MC 1.21.9, protocol 776)**. Clients older than 1.20 are refused with a clean message.
+- **Change the floor:** `plugins/ViaVersion/config.yml` → `block-versions` (default `["<1.20"]`). Lower it (e.g. `["<1.16.5"]`) to allow older clients.
+- **Toggle:** `[viaversion] auto-provision` in the unified TOML (default `true`). Set `false` if you manage Via yourself or run fully offline.
+- **Idempotent:** never re-downloads a present/verified jar and never overwrites your config edits; an existing `ViaVersion-*.jar` / `ViaBackwards-*.jar` (yours or ours) is left untouched.
+
+### Behind a proxy (Velocity / XCord / FlameCord / BungeeCord / Waterfall)
+
+SourbyCraft uses Paper/Folia's **native** IP forwarding — nothing is reimplemented. The unified TOML adds a clean `proxy.*` surface over it, applies your choice to the underlying Paper/Spigot settings **at boot, before the network binds**, validates the result, and logs the active mode as one hex line (`[SourbyCraft] proxy: velocity (modern forwarding)` / `bungeecord (legacy forwarding)` / `direct (no proxy)`).
+
+Set `proxy.mode` in `sourbycraft_config/sourbycraft_global_config.toml`, then **`online-mode=false`** in `server.properties` (the proxy authenticates), then **restrict the backend port to your proxy** (see anti-bypass below).
+
+**Velocity (modern, secure — recommended):**
+
+```toml
+[proxy]
+mode = "velocity"
+[proxy.velocity]
+secret = ""          # leave blank here; set PAPER_VELOCITY_SECRET instead (never commit a secret)
+online-mode = true
+```
+
+The secret must **exactly** match your proxy's `forwarding.secret`. Prefer the `PAPER_VELOCITY_SECRET` env var over storing it in the file. If the mode is `velocity` but no secret is found, boot warns and Paper drops proxied logins.
+
+**XCord / FlameCord / BungeeCord / Waterfall (legacy):** XCord and FlameCord are BungeeCord *forks*, so all four use the **same legacy path**:
+
+```toml
+[proxy]
+mode = "bungeecord"
+[proxy.bungeecord]
+online-mode = true
+```
+
+(Equivalent to `settings.bungeecord: true` in `spigot.yml` + `proxies.bungee-cord.online-mode` in `paper-global.yml` — SourbyCraft sets both for you at boot.)
+
+**Anti-bypass (required when proxied):** a direct connection to the backend can spoof any identity. The **primary defense is a firewall** — bind the backend port to the proxy IP only (iptables / security-group / `server-ip=127.0.0.1` for a same-host proxy). As a fallback for hosts where you can't firewall, an **opt-in** allowlist listener rejects any direct (non-proxy) source IP:
+
+```toml
+[proxy]
+anti-bypass-enabled = true
+allowed-ips = ["127.0.0.1", "10.0.0.5"]   # your proxy IP(s)
+```
+
+It is **off by default** — enabling it registers a `PlayerLoginEvent` listener, which disables the config-phase fast join path and slows every join. Leave it off and firewall instead where you can. Detected misconfigurations (velocity without a secret, both modes enabled, proxy active while `online-mode=true`, empty allowlist) are warned at boot.
+
+---
+
+## Deploy
+
+Reference **Dockerfile** + entrypoint included (non-root, UTF-8 console). **Auto-CDS** detects the environment and does the safe thing automatically:
+
+- **Bare-metal** → forks one child JVM with `-XX:+AutoCreateSharedArchive` (faster restarts).
+- **Docker / Pterodactyl / Pelican / Kubernetes / systemd / LXC / Podman / Nomad / cloud / CI** → boots inline (never double-commits heap under a cgroup cap or hides behind an orchestrator PID) and prints a copy-paste single-JVM CDS flag.
+
+Override with `-Dsourbycraft.cds.mode=auto|flag|fork|off`. SIMD is auto-enabled on the fork path; on managed panels add `--add-modules=jdk.incubator.vector` (the server prints the hint).
+
+---
+
+## Build from source
+
+Requires **JDK 25** and git.
+
+```bash
+# 1. publish the SourbyPatcher build plugin
+cd sourbypatcher && ./gradlew publishToMavenLocal && cd ..
+
+# 2. set up the MaplePile submodule (Folia leafpile dep)
+bash scripts/setup_maple_pile.sh
+
+# 3. apply patches, then build the slim jar
+./gradlew applyAllPatches
+./gradlew slimPaperclipJar   # -> build/libs/SourbyCraft-slim.jar
+```
+
+`applyAllPatches` materializes the Folia server sources from the pinned upstream; `slimPaperclipJar` strips the externalized libraries and injects the SourbyLoader bootstrap.
+
+---
+
+## Release lines
+
+| Line | Focus | Base | Branch |
 |---|---|---|---|
-| **26.1.2** | Skyblock / minigames | SWM (Slime World Manager) in-memory worlds | `release/26.1.2` |
-| **26.2** *(this branch)* | **Survival** | Vanilla region storage, no SWM | `release/26.2` |
+| **26.1.2** | Skyblock / minigames | Paper + SWM in-memory worlds | `release/26.1.2` |
+| **26.2** *(this)* | **Folia** | Luminol 26.2 — regionized multithreading | `release/26.2` |
 
-26.2 carries forward everything from the 26.1.2 performance + hardening work **minus SWM**, and adds the survival-scale tuning + security fixes in this release.
-
----
-
-## What 26.2 delivers
-
-### 🛡️ Resource-pack-proof anti-xray (default ON)
-Anti-xray is enabled out of the box and hardened so a transparent-block ("x-ray") resource pack no longer reveals ores:
-- **Paper HIDE engine (engine-mode 1), `max-block-height: 320`** — enclosed ores are rewritten to stone/deepslate **in the chunk packet**, so the real ore data never reaches the client. An x-ray texture pack sees the replacement stone, not ore, at every altitude (copper → y112, mountain emerald, deepslate → -64).
-- **SourbyCraft raytrace layer** — hides *cave-exposed* ores (the gap Paper's engine leaves) until the player has genuine line-of-sight, then reveals them via an async raytrace on virtual threads. No real ore data for ores a player can't legitimately see.
-
-### 🧱 Hardened item stacker
-- **Anti-siphon:** items are never merged across distinct pickup-owners, so a player can't drop an item beside another player's owner-protected drop to siphon it.
-- **No item-x-ray via holograms:** stack-count holograms are render-range-clamped (≈13 blocks) and occluded behind blocks, so distant players can't scout stack contents through walls.
-- Line-of-sight gate on every merge path (spawn scan, periodic sweep, vanilla merge) — no through-wall merging.
-
-### 🚀 Performance for 150+ players
-- **Self-tuning engine** — a multi-signal `PerfSensor` (TPS / MSPT / heap / GC) drives a 5-tier state machine (GREEN→EMERGENCY). `SelfTuneController` escalates entity-tick-rate + adaptive AI throttle automatically under load and relaxes them on recovery: vanilla feel when idle, headroom when full.
-- **Async mob spawning** (pufferfish semantics) — the per-tick density/mob-cap scan runs off-main on virtual threads; spawns + Bukkit events stay on the main thread (plugin-safe).
-- **Multithread chunk generation** — Moonrise workers, exposed + smart-auto-sized (`performance.threads.chunk-workers`).
-- **Baseline adaptive AI throttle** — mobs >80 blocks from any player tick AI every 2nd tick (near-zero gameplay impact, real CPU headroom at high pop).
-- **Lag-machine guards** — projectile-load caps, snowball/firework save skips, per-chunk/world entity + item + arrow caps.
-- No new platform threads: async work rides ~1 KB virtual threads; worker pools park when idle. Design goal: **≥80% resource efficiency vs. naive multithreading.**
-
-### 🧩 Native mod loader (`mods/`)
-Server-side extension jars via a first-party `SourbyMod` API — `sourbymod.yml` descriptor, per-mod classloader with full NMS visibility, lifecycle managed by the module registry. **Not** a Fabric/Forge bridge (Paper fork); non-SourbyMod jars are warned + ignored. See [`docs/SOURBYMODS.md`](docs/SOURBYMODS.md).
-
-### 📦 SourbyLoader — slim jar (~31M)
-Heavy optional libraries (zstd, adventure, configurate, snakeyaml, jline, JDBC drivers, spark, flare, protobuf, sentry) are stripped from the shipped jar and fetched on first boot into the paperclip library cache. The download list is SHA-256-verified. The Paper 26.2 server patch (~21.7M) is the hard floor — it can't be externalized — so the jar lands at ~31M rather than smaller. First boot needs internet once; after that it runs fully offline.
-
-### ⚡ Auto-CDS — 30–50% faster startup, container-safe
-Class Data Sharing memory-maps the JVM's class metadata (`cache/sourbycraft.jsa`, self-healing on jar/JDK change) instead of re-parsing it every boot. Unlike a naive fork-a-helper-JVM approach, the bootstrap is **environment-aware**:
-- **Docker / Pterodactyl / Pelican, or any committed `-Xms`** → it does **not** fork. A second JVM there double-commits the heap (OOM-kill under a cgroup limit) and hides the real server behind an orchestrator PID (breaks panel memory graphs + stop signals). Instead it boots inline and prints the one flag to add for single-JVM CDS.
-- **Bare metal, no committed heap** → it forks one child with `-XX:+AutoCreateSharedArchive` (JDK 19+ single-pass) and forwards console + stop.
-- Tunable via `sourbycraft.cds.mode = auto|flag|fork|off`. Full matrix + per-panel flags in [`docs/CDS.md`](docs/CDS.md).
-
-### Carried forward (from 26.1.2 r48)
-Security enforcement (NBT/sign/anvil/packet guards), entity/item config caps with Spigot/Paper bridges, ViewThrottle, compression bridge, redstone budget, DAB-lite activation overrides, module registry + PerWorldHolder.
+The pre-Folia Paper tree is preserved at tag `paper-26.2-pre-folia`.
 
 ---
 
-## Tuning for 150+ players
+## Known issues
 
-SourbyCraft auto-tunes under load, but the operator config that dominates large-server performance lives in Paper's files. Recommended starting point for ~150 players (adjust to hardware):
-
-**`config/paper-global.yml`**
-```yaml
-chunk-loading-basic:
-  player-max-chunk-send-rate: 100.0
-  player-max-chunk-load-rate: 120.0
-chunk-loading-advanced:
-  player-max-concurrent-chunk-loads: 0    # auto per-player
-```
-
-**`config/paper-world-defaults.yml`**
-```yaml
-chunks:
-  max-auto-save-chunks-per-tick: 12
-entities:
-  spawning:
-    per-player-mob-spawns: true           # fair caps, avoids one area starving spawns
-anticheat:
-  anti-xray:
-    enabled: true                          # SourbyCraft default; keep it on
-    engine-mode: 1
-    max-block-height: 320
-```
-
-**`server.properties`**
-```properties
-view-distance=7
-simulation-distance=5
-```
-
-**JVM** (Aikar-style flags, sized to host RAM):
-```
--Xms<half RAM> -Xmx<half RAM> -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions
-```
-
-Run a proxy (Velocity, `network.proxy-mode: velocity-modern`) and split load across backends for the smoothest 150+ experience.
+- **Base `/stop` NPE** (`CommandSourceStack.getLevel()` null) on the vanilla shutdown console path — an upstream Folia/Luminol issue, not this fork. Clean shutdown still works via signal; a CDS archive write on `/stop` may be skipped.
 
 ---
 
-## Concurrency model — parallelism without breaking plugins
+## Credits &amp; license
 
-Folia reaches its throughput by **regionizing world ticking across threads**, which breaks the single-main-thread contract every Bukkit plugin relies on. SourbyCraft takes the opposite trade: **async *compute*, main-thread *apply*.**
+Built on [Folia](https://papermc.io/software/folia) / [Luminol](https://github.com/LuminolMC/Luminol) (+ Kaiiju, Leaves, Lithium, Pufferfish, MaplePile) and [Paper](https://github.com/PaperMC/Paper). SourbyPatcher forks the Luminol paperweight toolchain.
 
-- Heavy read-only work runs off the main thread — chunk generation, chunk I/O and lighting (Moonrise), mob-spawn density scans (async spawning), anti-xray raytraces — on virtual threads or the Moonrise worker pool.
-- Every result is **applied back on the main thread**, and **all Bukkit events + plugin callbacks still fire on the main thread.** A plugin never observes off-thread world state, so the entire plugin ecosystem stays compatible.
-
-This is the "safer, exclusive" path: you get real multi-core parallelism for the expensive parts (which dominate large-server CPU) while keeping 100% plugin compatibility. It is **not** Folia-level region parallelism for gameplay ticking — that cannot be done without breaking plugins. On strong hardware (8+ fast cores, NVMe, a proxy splitting load) this design holds a stable tick for 150–200 players.
-
----
-
-## Running in Docker / Pterodactyl / Pelican
-
-A reference `Dockerfile` + `docker/entrypoint.sh` + `docker-compose.yml` ship in the repo. The container runs the server as **PID 1** (`exec java …`, so `SIGTERM` = a clean world-saving `/stop`), as a **non-root** user, with single-JVM Auto-CDS and Aikar G1 flags baked in. The `/data` volume persists worlds, the SourbyLoader lib cache, and the CDS archive.
-
-```bash
-./gradlew applyAllPatches :sourbycraft-server:compileJava assembleReleaseArtifacts
-docker compose up -d --build     # set EULA=true + MEMORY in docker-compose.yml first
-```
-
-Heap is sized from `MEMORY` (MiB) or auto-derived from the container's cgroup limit. First boot needs internet once for SourbyLoader; after that it runs offline.
-
-**Pterodactyl / Pelican:** add one flag to the Startup command in front of `-jar` for zero-overhead single-JVM CDS — the wings/daemon then tracks the real `java` PID, so the memory graph and Stop button behave:
-
-```
--XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=cache/sourbycraft.jsa
-```
-
-SourbyCraft detects a panel/container and reminds you once in the console if it's missing. Full per-environment setup (incl. the JDK 24+ AOT cache) is in [`docs/CDS.md`](docs/CDS.md).
-
----
-
-## Building
-
-Requires **Java 25** and git history (paperweight applies patches as commits).
-
-```bash
-./gradlew applyAllPatches          # rebase feature patches onto Paper/MC 26.2
-./gradlew :sourbycraft-server:compileJava
-./gradlew assembleReleaseArtifacts # → release/SourbyCraft-26.2-REL.jar
-```
-
-CI (`.github/workflows/build.yml`) applies patches, compiles, assembles the jar, and **boots the server to `Done` then stops it** on every push/PR.
-
----
-
-## License
-
-[PolyForm Noncommercial 1.0.0](LICENSE). Fork of [PaperMC/Paper](https://github.com/PaperMC/Paper).
+Licensed under **PolyForm Noncommercial 1.0.0** — see [`LICENSE`](LICENSE).

@@ -8,6 +8,28 @@ directory and self-heals when the jar or JDK changes.
 The bootstrap picks a strategy per environment instead of blindly forking a second
 JVM — because forking is actively harmful in containers and process-managed panels.
 
+Environment classification is an ordered detector chain (`CdsEnvironment`) covering:
+
+| Environment | Signals | Policy |
+|---|---|---|
+| Pterodactyl / Pelican | `P_SERVER_*`, `PELICAN` | inline + hint |
+| Generic game panel | `SERVER_MEMORY` + `SERVER_IP` | inline + hint |
+| Kubernetes | `KUBERNETES_SERVICE_HOST`, `/var/run/secrets/kubernetes.io` | inline + hint |
+| Nomad | `NOMAD_ALLOC_ID` / `NOMAD_TASK_NAME` | inline + hint |
+| Docker / containerd | `/.dockerenv`, `/proc/1/cgroup` slice | inline + hint |
+| Podman | `/run/.containerenv`, `container=podman` | inline + hint |
+| LXC / OpenVZ | `container=lxc`, `/proc/vz`, `/proc/1/environ` | inline + hint |
+| systemd service | `INVOCATION_ID`, `NOTIFY_SOCKET`, `MANAGERPID` | inline + hint |
+| CI runner | `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, … | inline + hint |
+| cgroup v1/v2 cap | `memory.max` / `memory.limit_in_bytes` | inline + hint |
+| WSL | `microsoft` in `/proc/sys/kernel/osrelease` | fork OK¹ |
+| Cloud VM (AWS/GCP/Azure) | DMI `sys_vendor` | fork OK¹ |
+| Bare metal | (no marker) | fork OK¹ |
+
+¹ Fork-permitted environments still boot inline + hint when a large committed heap
+(`-Xms` ≥ 256M) is present, since forking would double-commit it. Adding a new
+scenario is a single detector entry — no growing `if` ladder.
+
 ## Why not just fork a helper JVM?
 
 The old model launched a tiny orchestrator JVM that re-execs the real server with a
@@ -70,7 +92,7 @@ Add the CDS flag to the Startup command in front of `-jar`. SourbyCraft detects 
 Pelican/Pterodactyl environment and will remind you once in the console if it is
 missing.
 
-### Bare metal / systemd
+### Bare metal (shell / dev box)
 
 Two options:
 
@@ -82,6 +104,18 @@ Two options:
   java -Xms8G -Xmx8G -XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=cache/sourbycraft.jsa \
     <aikar flags> -jar SourbyCraft-26.2-REL.jar --nogui
   ```
+
+### systemd service
+
+Detected via `INVOCATION_ID` / `NOTIFY_SOCKET`. The bootstrap **does not fork** here —
+forking would make the unit's `MainPID` the wrapper, so `systemctl stop`/`status`,
+`Type=notify` readiness, and cgroup accounting would target the wrong process. It boots
+inline and hints the flag once. Add it to your `ExecStart` for single-JVM CDS:
+
+```
+ExecStart=/usr/bin/java -Xms8G -Xmx8G -XX:+AutoCreateSharedArchive \
+  -XX:SharedArchiveFile=cache/sourbycraft.jsa <aikar flags> -jar SourbyCraft-26.2-REL.jar --nogui
+```
 
 ## Modes + overrides
 

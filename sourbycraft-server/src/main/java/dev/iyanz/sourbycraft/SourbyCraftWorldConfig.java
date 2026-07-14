@@ -1,112 +1,73 @@
 package dev.iyanz.sourbycraft;
 
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.minimessage.MiniMessage;
-import org.bukkit.World;
-import org.bukkit.configuration.ConfigurationSection;
+import net.minecraft.server.level.ServerLevel;
 
-import java.util.List;
-
-import static dev.iyanz.sourbycraft.SourbyCraftConfig.log;
-
-public class SourbyCraftWorldConfig {
+/**
+ * Per-world SourbyCraft settings (Folia base) — read from the single unified TOML.
+ *
+ * <p>Folia port of the pre-folia {@code SourbyCraftWorldConfig}. The Paper tag drove this
+ * off a YAML {@code world-settings.<world>.*} tree; on the Folia base every SourbyCraft
+ * knob lives in the one unified TOML ({@code sourbycraft_config/sourbycraft_global_config.toml}),
+ * so this reads through {@link SourbyCraftConfig#cfgBool}/{@link SourbyCraftConfig#cfgInt}
+ * with a per-world override that falls back to the shared default:
+ *
+ * <pre>
+ *   antixray.world-overrides.&lt;world&gt;.fluid-obscures   (per-world override)
+ *   antixray.fluid-obscures                             (shared default)
+ * </pre>
+ *
+ * <p>Instances are cached by world name in a {@link dev.iyanz.sourbycraft.core.PerWorldHolder}
+ * (Folia-safe {@link java.util.concurrent.ConcurrentHashMap}, evicted on {@code WorldUnloadEvent}).
+ * {@link #get(ServerLevel)} is called from the region-thread chunk-send hot path
+ * ({@link dev.iyanz.sourbycraft.antixray.OreReveal#onChunkSent}), so it must never touch disk —
+ * the unified TOML is fully loaded before any world exists and reads are pure map lookups.
+ */
+public final class SourbyCraftWorldConfig {
 
     private final String worldName;
-    private final World.Environment environment;
 
-    public SourbyCraftWorldConfig(String worldName, World.Environment environment) {
+    // SourbyCraft - antixray config (per-world, read once at construction).
+    /** When true, a fluid (water/lava) between eye and ore obscures it (ore stays hidden). */
+    public final boolean fluidObscures;
+    /** When true, ALL Paper anti-xray hidden-blocks (not just ores) are raytrace-gated. */
+    public final boolean allBlocks;
+    /** F2/Agent-B reuse: obfuscate tile-entity / block-entity NBT beyond the range below. */
+    public final boolean entityObfuscation;
+    /** F2/Agent-B reuse: distance (blocks) past which entity/tile NBT is obfuscated. */
+    public final int entityObfuscationRange;
+
+    private SourbyCraftWorldConfig(String worldName) {
         this.worldName = worldName;
-        this.environment = environment;
-        this.init();
+        this.fluidObscures = worldBool("fluid-obscures", true);
+        this.allBlocks = worldBool("all-blocks", false);
+        this.entityObfuscation = worldBool("entity-obfuscation", true);
+        this.entityObfuscationRange = worldInt("entity-obfuscation-range", 64);
     }
 
-    // SourbyCraft MT1 - PerWorldHolder replaces raw ConcurrentHashMap so world-unload
-    // eviction is centralized in PerWorldHolder.registerCleanup (one shared listener).
+    // SourbyCraft MT1 - PerWorldHolder centralizes WorldUnloadEvent eviction (SWM island resets
+    // reuse world names, so a cached config MUST drop on unload). Folia-safe ConcurrentHashMap.
     private static final dev.iyanz.sourbycraft.core.PerWorldHolder<SourbyCraftWorldConfig> BY_WORLD =
         new dev.iyanz.sourbycraft.core.PerWorldHolder<>();
 
-    public static SourbyCraftWorldConfig get(net.minecraft.server.level.ServerLevel level) {
-        org.bukkit.World w = level.getWorld();
-        return BY_WORLD.computeIfAbsent(w.getName(), n -> new SourbyCraftWorldConfig(n, w.getEnvironment()));
+    /** Cached per-world config for {@code level}'s Bukkit world (region-thread safe, no disk). */
+    public static SourbyCraftWorldConfig get(ServerLevel level) {
+        String name = level.getWorld().getName();
+        return BY_WORLD.computeIfAbsent(name, SourbyCraftWorldConfig::new);
     }
 
-    /** Drop the cached config on world unload — SWM island resets reuse world names. Delegate kept for API stability. */
+    /** Drop the cached config on world unload — SWM island resets reuse world names. */
     public static void invalidate(String worldName) {
         BY_WORLD.remove(worldName);
     }
 
-    public void init() {
-        log("-------- World Settings For [" + worldName + "] --------");
-        // saveAfter=false: this runs lazily from the chunk-send / entity-tracker hot path (S4) —
-        // never pay a main-thread YAML disk write there.
-        SourbyCraftConfig.readConfig(SourbyCraftWorldConfig.class, this, false);
+    /** Per-world override under {@code antixray.world-overrides.<world>.<key>}, else shared default. */
+    private boolean worldBool(String key, boolean def) {
+        boolean shared = SourbyCraftConfig.cfgBool("antixray." + key, def);
+        return SourbyCraftConfig.cfgBool("antixray.world-overrides." + worldName + "." + key, shared);
     }
 
-    private void set(String path, Object val) {
-        SourbyCraftConfig.config.addDefault("world-settings.default." + path, val);
-        SourbyCraftConfig.config.set("world-settings.default." + path, val);
-        if (SourbyCraftConfig.config.get("world-settings." + this.worldName + "." + path) != null) {
-            SourbyCraftConfig.config.addDefault("world-settings." + this.worldName + "." + path, val);
-            SourbyCraftConfig.config.set("world-settings." + this.worldName + "." + path, val);
-        }
+    private int worldInt(String key, int def) {
+        int shared = SourbyCraftConfig.cfgInt("antixray." + key, def);
+        return SourbyCraftConfig.cfgInt("antixray.world-overrides." + worldName + "." + key, shared);
     }
-
-    private void setComment(String path, String... comment) {
-        SourbyCraftConfig.config.setComments("world-settings.default." + path, List.of(comment));
-        if (SourbyCraftConfig.config.get("world-settings." + this.worldName + "." + path) != null) {
-            SourbyCraftConfig.config.setComments("world-settings.default." + path, List.of(comment));
-        }
-    }
-
-    private ConfigurationSection getConfigurationSection(String path) {
-        ConfigurationSection section = SourbyCraftConfig.config.getConfigurationSection("world-settings." + this.worldName + "." + path);
-        return section != null ? section : SourbyCraftConfig.config.getConfigurationSection("world-settings.default." + path);
-    }
-
-    private boolean getBoolean(String path, boolean def) {
-        SourbyCraftConfig.config.addDefault("world-settings.default." + path, def);
-        return SourbyCraftConfig.config.getBoolean("world-settings." + this.worldName + "." + path, SourbyCraftConfig.config.getBoolean("world-settings.default." + path));
-    }
-
-    private double getDouble(String path, double def) {
-        SourbyCraftConfig.config.addDefault("world-settings.default." + path, def);
-        return SourbyCraftConfig.config.getDouble("world-settings." + this.worldName + "." + path, SourbyCraftConfig.config.getDouble("world-settings.default." + path));
-    }
-
-    private int getInt(String path, int def) {
-        SourbyCraftConfig.config.addDefault("world-settings.default." + path, def);
-        return SourbyCraftConfig.config.getInt("world-settings." + this.worldName + "." + path, SourbyCraftConfig.config.getInt("world-settings.default." + path));
-    }
-
-    @SuppressWarnings("unchecked")
-    private <T> List<T> getList(String path, List<T> def) {
-        SourbyCraftConfig.config.addDefault("world-settings.default." + path, def);
-        return (List<T>) SourbyCraftConfig.config.getList("world-settings." + this.worldName + "." + path, SourbyCraftConfig.config.getList("world-settings.default." + path));
-    }
-
-    private String getString(String path, String def) {
-        SourbyCraftConfig.config.addDefault("world-settings.default." + path, def);
-        return SourbyCraftConfig.config.getString("world-settings." + this.worldName + "." + path, SourbyCraftConfig.config.getString("world-settings.default." + path));
-    }
-
-    private Component getComponent(String path, Component def) {
-        // See SourbyCraftConfig#getComponent — TextRender catches MiniMessage
-        // parser exceptions and falls back to legacy &-codes (then plain text).
-        String raw = getString(path, MiniMessage.miniMessage().serialize(def));
-        return dev.iyanz.sourbycraft.util.TextRender.parseOr(raw, def);
-    }
-
-    // SourbyCraft start - antixray config
-    public boolean fluidObscures = true;
-    public boolean allBlocks = false;
-    public boolean entityObfuscation = true;
-    public int entityObfuscationRange = 64;
-
-    private void antixray() {
-        fluidObscures = getBoolean("anticheat.anti-xray.fluid-obscures", fluidObscures);
-        allBlocks = getBoolean("anticheat.anti-xray.all-blocks", allBlocks);
-        entityObfuscation = getBoolean("anticheat.anti-xray.entity-obfuscation", entityObfuscation);
-        entityObfuscationRange = getInt("anticheat.anti-xray.entity-obfuscation-range", entityObfuscationRange);
-    }
-    // SourbyCraft end
 }

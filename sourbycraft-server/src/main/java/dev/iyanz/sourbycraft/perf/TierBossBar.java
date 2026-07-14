@@ -16,13 +16,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * P8 Operator UX — Tier BossBar.
  *
  * <p>Per-op {@link BossBar} reflecting the current {@link PerfSensor}
- * tier. Colour + label flip on tier transitions; progress bar shows
- * {@code dwellCount / dwellSamples} so operators can see how close
- * the sensor is to escalating.
+ * tier. Colour + label flip on tier transitions. Subscribers opt-in via
+ * {@link #show(Player)} (e.g. wired by a future {@code /perf bossbar}
+ * subcommand). On tier change every subscribed player gets the bar refreshed.
  *
- * <p>Subscribers opt-in via {@link #show(Player)} (e.g. wired by a
- * future {@code /perf bossbar} subcommand). On tier change every
- * subscribed player gets the bar refreshed.
+ * <p><b>Folia adaptation (F2c).</b> {@link #onTierChange(Tier)} is invoked from
+ * {@code PerfSensor.transition()} on the global-region scheduler thread. Showing /
+ * hiding a bossbar sends packets to a specific player, which must be done on that
+ * player's owning region on Folia — so the refresh for each subscriber is hopped onto
+ * that player's entity scheduler via {@code player.getScheduler().run(...)}. The
+ * subscriber map is a {@link ConcurrentHashMap}, so publishing from the scheduler thread
+ * and reading from region threads is safe. The BossBar itself is a plain adventure API
+ * object (platform-agnostic).
  */
 public final class TierBossBar {
 
@@ -47,7 +52,7 @@ public final class TierBossBar {
         return player != null && BARS.containsKey(player.getUniqueId());
     }
 
-    /** Invoked by {@code PerfSensor.transition()} on every tier change. */
+    /** Invoked by {@code PerfSensor.transition()} on every tier change (global-region thread). */
     public static void onTierChange(final Tier newTier) {
         if (BARS.isEmpty()) return;
         BARS.forEach((uuid, oldBar) -> {
@@ -57,10 +62,17 @@ public final class TierBossBar {
                     BARS.remove(uuid);
                     return;
                 }
-                p.hideBossBar(oldBar);
-                BossBar fresh = buildBar(newTier);
-                BARS.put(uuid, fresh);
-                p.showBossBar(fresh);
+                // Folia: bossbar packet send must run on the player's owning region.
+                p.getScheduler().run(
+                    org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
+                    task -> {
+                        p.hideBossBar(oldBar);
+                        BossBar fresh = buildBar(newTier);
+                        BARS.put(uuid, fresh);
+                        p.showBossBar(fresh);
+                    },
+                    null
+                );
             } catch (Throwable t) {
                 SourbyLogger.error("TierBossBar refresh failed for " + uuid, t);
             }

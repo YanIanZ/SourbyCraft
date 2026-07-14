@@ -12,6 +12,23 @@ import org.bukkit.plugin.Plugin;
  * config engines. A value is applied ONLY when the operator changed it from
  * the SourbyCraft compiled default — otherwise Spigot/Paper settings win.
  * Zero hot-path cost: runs once per world load.
+ *
+ * <p><b>Folia adaptation.</b> On the Paper line this was wired via the deleted
+ * {@code SourbyCorePlugin}; on the Folia base it is registered from
+ * {@link PerfEngineBootstrap#startActuators()} (which runs from the post-config
+ * {@code DedicatedServer#initServer} hook, <em>before</em> any world is loaded, so the
+ * boot loop over {@link Bukkit#getWorlds()} is normally empty — every world is caught
+ * by the {@link #onWorldLoad} listener as it loads). Two threading concerns:
+ * <ul>
+ *   <li><b>Per-world config mutation</b> ({@code spigotConfig}/{@code paperConfig()} fields)
+ *       runs from {@link #onWorldLoad}, which fires on the loading world's own region thread
+ *       on Folia — the correct owner for that world's regionized config. The boot-loop path
+ *       calls {@link #apply} for worlds already present (none at the initServer hook).</li>
+ *   <li><b>Server-global mutation</b> ({@link net.minecraft.server.MinecraftServer#setPlayerIdleTimeout})
+ *       must run on the global-region thread. It is dispatched via
+ *       {@link Bukkit#getGlobalRegionScheduler()} so it executes on that thread once the
+ *       global region starts ticking, rather than being poked directly from the boot thread.</li>
+ * </ul>
  */
 public final class ConfigBridge implements Listener {
 
@@ -25,10 +42,16 @@ public final class ConfigBridge implements Listener {
     public static void register(Plugin plugin) {
         ConfigBridge bridge = new ConfigBridge();
         Bukkit.getPluginManager().registerEvents(bridge, plugin);
+        // Normally empty at the initServer hook (worlds load later); the WorldLoadEvent listener
+        // catches each world as it loads. Kept for robustness if a world is already present.
         for (org.bukkit.World w : Bukkit.getWorlds()) bridge.apply(w, plugin);
+        // server.idle-timeout is a server-global mutation: dispatch onto the global-region thread.
         if (SourbyCraftConfig.idleTimeout > 0) {
-            net.minecraft.server.MinecraftServer.getServer().setPlayerIdleTimeout(SourbyCraftConfig.idleTimeout);
-            plugin.getLogger().info("[bridge] server.idle-timeout -> " + SourbyCraftConfig.idleTimeout + " min");
+            final int idle = SourbyCraftConfig.idleTimeout;
+            Bukkit.getGlobalRegionScheduler().run(plugin, task -> {
+                net.minecraft.server.MinecraftServer.getServer().setPlayerIdleTimeout(idle);
+                dev.iyanz.sourbycraft.util.SourbyLogger.info("[bridge] server.idle-timeout -> " + idle + " min");
+            });
         }
     }
 

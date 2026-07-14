@@ -29,7 +29,7 @@ public class PingCommand extends Command {
 
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
-        boolean other = args.length > 0 && !args[0].equals(s.getName());
+        boolean other = args.length > 0 && !args[0].equalsIgnoreCase(s.getName());
         if (other && !s.hasPermission("sourbycraft.command.ping.other")) {
             s.sendMessage(text("No permission", SourbyCraftColors.DANGER));
             return true;
@@ -70,9 +70,9 @@ public class PingCommand extends Command {
         // Always emit a Location row so the panel layout is consistent regardless of geo
         // outcome. Show a "looking up..." placeholder synchronously, then the async path
         // either rewrites by sending the resolved row (city / country / ISP) or — on a
-        // miss (null address, proxy-stripped IP, ip-api offline, RFC1918) — appends a
-        // labelled "unavailable" line so operators can tell at a glance whether the geo
-        // signal was empty vs the lookup never ran.
+        // miss (null address, proxy-stripped IP, RFC1918, or the local db-ip.com mmdb
+        // absent/unreadable) — appends a labelled "unavailable" line so operators can tell
+        // at a glance whether the geo signal was empty vs the lookup never ran.
         s.sendMessage(text()
             .append(text("  Location: ", SourbyCraftColors.LABEL))
             .append(text("looking up...", SourbyCraftColors.DIM))
@@ -86,7 +86,10 @@ public class PingCommand extends Command {
                 geo = null;
             }
             final String geoFinal = geo;
-            net.minecraft.server.MinecraftServer.getServer().execute(() -> {
+            // Folia-safe reply hop. MinecraftServer.execute() throws UnsupportedOperationException on
+            // Folia (no global main thread), so bounce the reply onto the sender's own scheduler: a
+            // player hops to its region scheduler; a console send is thread-safe so it goes direct.
+            SourbyReply.run(s, () -> {
                 if (geoFinal != null && !geoFinal.isEmpty()) {
                     s.sendMessage(text()
                         .append(text("  Location: ", SourbyCraftColors.LABEL))
@@ -96,7 +99,7 @@ public class PingCommand extends Command {
                     s.sendMessage(text()
                         .append(text("  Location: ", SourbyCraftColors.LABEL))
                         .append(text("unavailable", SourbyCraftColors.DIM))
-                        .append(text("  (proxy-stripped IP, RFC1918, or ip-api offline)", SourbyCraftColors.DIM))
+                        .append(text("  (proxy-stripped IP, RFC1918, or local geo db unavailable)", SourbyCraftColors.DIM))
                         .build());
                 }
             });

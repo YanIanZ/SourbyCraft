@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * read-only snapshot helpers backed by the spark statistic API.
  *
  * <p>Operator opt-out is honoured via the {@code spark.enabled} key in
- * {@code sourbycraft.yml}: setting it to {@code false} short-circuits
+ * the unified config: setting it to {@code false} short-circuits
  * every accessor here so /sparkview and the PerfSensor fallback path
  * never touch the spark API at all (useful for paranoia setups where
  * the spark plugin is intentionally pinned off).
@@ -41,7 +41,7 @@ public final class SparkBridge {
     /** Returns {@code true} when the operator has not disabled the spark bridge. */
     public static boolean enabled() {
         try {
-            return SourbyCraftConfig.ymlBool("spark.enabled", true);
+            return SourbyCraftConfig.cfgBool("spark.enabled", true);
         } catch (Throwable t) {
             return true;
         }
