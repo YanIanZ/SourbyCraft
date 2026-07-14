@@ -71,14 +71,15 @@ public final class OreReveal implements Listener {
     private static final double NEAR_DISTANCE = 3.0;
     private static final double NEAR_DISTANCE_SQUARED = NEAR_DISTANCE * NEAR_DISTANCE;
 
-    // Re-hide grace: an ALREADY-revealed block within this radius stays revealed regardless of a
-    // per-cycle raytrace miss. This kills the dominant flicker source — while you mine, an ore at the
-    // edge of your view makes the raytrace flip visible/occluded each tick, and without this it would
-    // reveal→re-hide→reveal every few cycles. Blocks are only re-hidden once you move further than this
-    // AND lose line of sight (HIDE_STREAK cycles). Ores stay packet-hidden until first revealed, so this
-    // only affects blocks you have already legitimately seen — a small, near-field exposure for zero
-    // flicker. Beyond this radius the normal line-of-sight re-hide applies.
-    private static final double REHIDE_GRACE_DISTANCE = 12.0;
+    // Re-hide grace: an ALREADY-revealed block within this SMALL radius stays revealed regardless of a
+    // per-cycle raytrace miss — the active-mining zone, where an ore at the edge of your view makes the
+    // raytrace flip visible/occluded each tick (reveal→re-hide→reveal flicker). Kept deliberately tight
+    // (a cheater standing 6 blocks from an ore is about to reach it anyway; the main anti-flicker is the
+    // HIDE_STREAK hysteresis, which only holds ores that keep getting intermittent hits, i.e. that you
+    // are still actually seeing). Beyond this radius — and, within it, once you move away AND lose line
+    // of sight for HIDE_STREAK cycles — the normal re-hide applies. Occluded ores are never revealed in
+    // the first place (packet-level hide), so this only touches exposed cave ores you have already seen.
+    private static final double REHIDE_GRACE_DISTANCE = 6.0;
     private static final double REHIDE_GRACE_DISTANCE_SQUARED = REHIDE_GRACE_DISTANCE * REHIDE_GRACE_DISTANCE;
 
     /**
