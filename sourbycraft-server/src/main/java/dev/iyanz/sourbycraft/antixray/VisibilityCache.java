@@ -23,8 +23,10 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class VisibilityCache {
 
     public static final int MAX_PER_PLAYER = 4096;
-    /** Consecutive out-of-sight re-validations before a revealed ore is re-hidden (anti-flicker). */
-    public static final int HIDE_STREAK = 3;
+    /** Consecutive out-of-sight re-validations before a revealed ore is re-hidden (anti-flicker).
+     *  Higher = stickier reveal = less flicker from transient raytrace false-negatives, at the cost of
+     *  a slightly longer re-hide delay once the player genuinely looks away. */
+    public static final int HIDE_STREAK = 5;
 
     private static final Map<UUID, Long2IntOpenHashMap> CACHE = new ConcurrentHashMap<>();
     private static final Map<UUID, AtomicLong> EPOCHS = new ConcurrentHashMap<>();

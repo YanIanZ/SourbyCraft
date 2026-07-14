@@ -193,6 +193,10 @@ public class SourbyCraftConfig {
      *  block-entity, and the reveal re-creates it on line of sight. Never routed through Paper's palette
      *  obfuscation (that leaves the block-entity in the chunk packet → the old "chest berubah" glitch). */
     public static boolean hideBlockEntities = true;
+    /** Packet-level anti-xray: obfuscate cave-EXPOSED ores in the chunk packet too (not just occluded).
+     *  The real ore state never reaches the client → unspoofable by x-ray; the raytrace layer reveals
+     *  only line-of-sight ores. Default ON. false = vanilla Paper occlusion-only hiding. */
+    public static boolean hideExposedOres = true;
     /** Anti-ESP: hide occluded mobs / item drops (holograms exempt). Seeds EntityVisibilityCheck.ENABLED. */
     public static boolean hideEntities = true;
     /** Anti-ESP: drop particle packets the receiver has no line-of-sight to. Seeds ParticleVisibilityCheck.ENABLED. */
@@ -342,6 +346,10 @@ public class SourbyCraftConfig {
         fluidObscures = cfgBool("antixray.fluid-obscures", fluidObscures);
         hideLiquids = cfgBool("antixray.hide-liquids", hideLiquids);
         hideBlockEntities = cfgBool("antixray.hide-block-entities", hideBlockEntities);
+        hideExposedOres = cfgBool("antixray.hide-exposed-ores", hideExposedOres);
+        // Packet-level: obfuscate cave-EXPOSED ores in the chunk packet too (not just occluded), so the
+        // real ore never reaches the client. The raytrace layer reveals only line-of-sight ores.
+        io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray.HIDE_EXPOSED_ORES = antixrayEnabled && hideExposedOres;
         hideEntities = cfgBool("antixray.hide-entities", hideEntities);
         hideParticles = cfgBool("antixray.hide-particles", hideParticles);
         raytraceIntervalTicks = Math.max(1, cfgInt("antixray.raytrace.interval-ticks", raytraceIntervalTicks));
@@ -571,6 +579,11 @@ public class SourbyCraftConfig {
         seed(f, changed, "antixray.hide-liquids", true,
             "Also hide cave-exposed LIQUID (water/lava, source + flowing) blocks the same way as ores. Reveals on real "
             + "line-of-sight and RE-HIDES when sight is lost (SourbyEngine dynamic visibility). Set false if fluid re-render bothers you.");
+        seed(f, changed, "antixray.hide-exposed-ores", true,
+            "PACKET-LEVEL anti-xray: obfuscate cave-EXPOSED ores in the chunk packet too, not just fully-occluded "
+            + "ones — the real ore state NEVER reaches the client, so no x-ray/Baritone can read it (unspoofable). "
+            + "The raytrace layer then reveals only the ores a player truly has line-of-sight to. false = vanilla "
+            + "Paper occlusion-only (exposed cave ores are sent real and leak). Recommended true.");
         seed(f, changed, "antixray.hide-block-entities", true,
             "Hide cave-exposed BLOCK-ENTITIES (chests, trapped/ender chests, barrels, shulker boxes, hoppers, "
             + "dispensers/droppers, furnaces, brewing stands, mob/trial spawners, vaults) via SourbyEngine's block-update "
