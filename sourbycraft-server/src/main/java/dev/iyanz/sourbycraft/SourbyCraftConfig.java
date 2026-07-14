@@ -203,8 +203,14 @@ public class SourbyCraftConfig {
     public static boolean hideParticles = true;
     /** tickCycle cadence in server ticks (reveal-confirmed + submit near-pending raytraces). */
     public static int raytraceIntervalTicks = 2;
-    /** Max distance (blocks) a player eye may be from an ore for a raytrace to be submitted. */
+    /** Max distance (blocks) a player eye may be from an ore for it to be ray-traced at all. */
     public static double raytraceDistance = 64.0;
+    /** RayTraceAntiXray model: blocks within this distance are line-of-sight tested each cycle and
+     *  revealed if visible / re-hidden if not; blocks between this and {@link #raytraceDistance} are
+     *  held hidden (so walking away re-hides before a block leaves range). Must be &lt;= ray-distance. */
+    public static double rehideDistance = 48.0;
+    /** Only reveal blocks within the player's view cone. false = 360° (no turn-around pop-in, heavier). */
+    public static boolean frustumCulling = false;
     /** Per tickCycle, the max number of async raytrace checks submitted per player. */
     public static int raytraceMaxChecksPerCycle = 10;
     /** Per player, the max number of hidden-and-pending ore positions held at once (budget). */
@@ -354,6 +360,8 @@ public class SourbyCraftConfig {
         hideParticles = cfgBool("antixray.hide-particles", hideParticles);
         raytraceIntervalTicks = Math.max(1, cfgInt("antixray.raytrace.interval-ticks", raytraceIntervalTicks));
         raytraceDistance = Math.max(1.0, cfgDouble("antixray.raytrace.distance", raytraceDistance));
+        rehideDistance = Math.max(1.0, cfgDouble("antixray.raytrace.rehide-distance", rehideDistance));
+        frustumCulling = cfgBool("antixray.raytrace.frustum-culling", frustumCulling);
         raytraceMaxChecksPerCycle = Math.max(0, cfgInt("antixray.raytrace.max-checks-per-cycle", raytraceMaxChecksPerCycle));
         raytraceMaxPendingPerPlayer = Math.max(0, cfgInt("antixray.raytrace.max-pending-per-player", raytraceMaxPendingPerPlayer));
         raytraceCacheTtlTicks = Math.max(1, cfgInt("antixray.raytrace.cache-ttl-ticks", raytraceCacheTtlTicks));
@@ -601,7 +609,14 @@ public class SourbyCraftConfig {
         seed(f, changed, "antixray.raytrace.interval-ticks", 2,
             "tickCycle cadence in server ticks: reveal confirmed ores + submit near-pending raytraces. Higher = cheaper, laggier reveal.");
         seed(f, changed, "antixray.raytrace.distance", 64.0,
-            "Max distance (blocks) from the player eye an ore may be for a line-of-sight raytrace to be submitted.");
+            "Max distance (blocks) from the player eye a hidden block is ray-traced at all.");
+        seed(f, changed, "antixray.raytrace.rehide-distance", 48.0,
+            "RayTraceAntiXray model: blocks within this distance are line-of-sight tested each cycle (revealed if "
+            + "visible, re-hidden if not); between this and distance they are held hidden so moving away re-hides "
+            + "before a block leaves range. Must be <= distance. Larger = ores reveal from further; smaller = cheaper.");
+        seed(f, changed, "antixray.raytrace.frustum-culling", false,
+            "Only reveal blocks inside the player's view cone. true = fewer rays (cheaper) but a brief pop-in when "
+            + "turning to face hidden blocks; false = 360° reveal within distance (smoother, heavier).");
         seed(f, changed, "antixray.raytrace.max-checks-per-cycle", 10,
             "Per tickCycle, max async raytrace checks submitted per player (throttle; the async worker runs off-thread).");
         seed(f, changed, "antixray.raytrace.max-pending-per-player", 512,

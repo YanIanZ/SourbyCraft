@@ -71,40 +71,25 @@ public final class OreReveal implements Listener {
     private static final double NEAR_DISTANCE = 3.0;
     private static final double NEAR_DISTANCE_SQUARED = NEAR_DISTANCE * NEAR_DISTANCE;
 
-    // Re-hide grace: an ALREADY-revealed block within this SMALL radius stays revealed regardless of a
-    // per-cycle raytrace miss — the active-mining zone, where an ore at the edge of your view makes the
-    // raytrace flip visible/occluded each tick (reveal→re-hide→reveal flicker). Kept deliberately tight
-    // (a cheater standing 6 blocks from an ore is about to reach it anyway; the main anti-flicker is the
-    // HIDE_STREAK hysteresis, which only holds ores that keep getting intermittent hits, i.e. that you
-    // are still actually seeing). Beyond this radius — and, within it, once you move away AND lose line
-    // of sight for HIDE_STREAK cycles — the normal re-hide applies. Occluded ores are never revealed in
-    // the first place (packet-level hide), so this only touches exposed cave ores you have already seen.
-    private static final double REHIDE_GRACE_DISTANCE = 6.0;
-    private static final double REHIDE_GRACE_DISTANCE_SQUARED = REHIDE_GRACE_DISTANCE * REHIDE_GRACE_DISTANCE;
-
     /**
-     * Per-player pending hidden-ore positions (BlockPos.asLong). Snapshot-iterated by the reveal
-     * cycle; mutated by chunk sends on region threads. Fastutil sets are not safe under concurrent
-     * structural mutation, so every touch is {@code synchronized(pending)}.
+     * Per-player SourbyEngine visibility state — a faithful adaptation of stonar96/RayTraceAntiXray's
+     * per-player {@code chunks}/{@code ChunkBlocks} model. {@code blocks} maps every tracked hideable
+     * position (BlockPos.asLong) to its current client state: {@code true} = spoofed to stone (the
+     * x-ray view), {@code false} = revealed real. Chunk sends / block changes add positions as hidden;
+     * the reveal cycle raytraces from a single eye snapshot and flips them.
      */
-    private static final Map<UUID, LongOpenHashSet> PENDING = new ConcurrentHashMap<>();
+    private static final class RevealState {
+        final it.unimi.dsi.fastutil.longs.Long2BooleanOpenHashMap blocks = new it.unimi.dsi.fastutil.longs.Long2BooleanOpenHashMap();
+        volatile long epoch;             // bumped on teleport/world-change/quit; stale async results dropped
+        RevealState() { blocks.defaultReturnValue(true); }
+    }
 
-    /**
-     * SourbyEngine round-robin cursor for the revealed-set re-validation pass. Each cycle re-checks
-     * line-of-sight for at most {@code raytraceMaxChecksPerCycle} revealed ores; the cursor advances
-     * by the rays spent so, over successive cycles, EVERY revealed ore is eventually re-validated
-     * even when a mined-out area holds more revealed ores than one cycle's ray budget. Plain
-     * {@code int} boxing in a CHM — read/written only on the player's own region thread.
-     */
-    private static final Map<UUID, Integer> REVAL_CURSOR = new ConcurrentHashMap<>();
+    /** Per-player reveal state. The {@code blocks} map is guarded by {@code synchronized(state.blocks)}. */
+    private static final Map<UUID, RevealState> STATE = new ConcurrentHashMap<>();
 
-    /**
-     * Phase A round-robin cursor over the in-range pending set. With block-entities hidden
-     * occlusion-independently a base can hold far more pending keys than one cycle's ray budget;
-     * without round-robin the first {@code budget} keys (often permanently-occluded chests that never
-     * confirm) would monopolise every ray and blocks later in iteration order would never reveal.
-     */
-    private static final Map<UUID, Integer> PENDING_CURSOR = new ConcurrentHashMap<>();
+    private static RevealState stateFor(final UUID id) {
+        return STATE.computeIfAbsent(id, k -> new RevealState());
+    }
 
     /**
      * Per-chunk exposed scan cache — which ores/fluids in a chunk are cave-exposed is
@@ -155,11 +140,11 @@ public final class OreReveal implements Listener {
         Bukkit.getGlobalRegionScheduler().runAtFixedRate(
             org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
             task -> tickCycle(), interval, interval);
-        plugin.getLogger().info("[SourbyEngine] dynamic raytrace anti-xray "
+        plugin.getLogger().info("[SourbyEngine] RayTraceAntiXray-model anti-xray "
             + (RayTraceWorker.ENABLED.get() ? "ENABLED" : "disabled")
-            + " (interval=" + interval + "t distance=" + SourbyCraftConfig.raytraceDistance
-            + " checks/cycle=" + SourbyCraftConfig.raytraceMaxChecksPerCycle
-            + " hide-streak=" + VisibilityCache.HIDE_STREAK + ")");
+            + " (interval=" + interval + "t ray-distance=" + SourbyCraftConfig.raytraceDistance
+            + " rehide-distance=" + SourbyCraftConfig.rehideDistance
+            + " frustum-cull=" + SourbyCraftConfig.frustumCulling + ")");
         if (RayTraceWorker.ENABLED.get()) {
             // This runs from the post-config actuator hook, which fires BEFORE DedicatedServer#loadLevel
             // builds any world — so Bukkit.getWorlds() is (almost) always empty here and a live
@@ -229,54 +214,47 @@ public final class OreReveal implements Listener {
     }
 
     /**
-     * Hide the given exposed positions for one player (fake block updates), skipping only positions
-     * already CONFIRMED visible. Positions already pending are re-sent anyway: after a client chunk
-     * re-send (leave + re-enter view range) the packet carried the REAL states, so skipping on
-     * "already pending" would leak every unconfirmed ore — a duplicate fake update is harmless,
-     * a skipped one is an xray hole.
+     * Track the given exposed positions as HIDDEN for one player and spoof them to stone.
      *
-     * <p>Fluids get a smaller dedicated budget slice so an ocean-sized fluid set can never starve
-     * the ore budget (ores are the security-critical half).
+     * <p>RayTraceAntiXray model: on chunk send (and on block-change re-exposure) every hideable
+     * position is (re)marked {@code hidden=true} and a stone update is sent, matching the state the
+     * client just received — ores are already stone from the packet (the update is a harmless
+     * belt-and-suspenders), chests/liquids (which Paper's packet engine does not touch) are actually
+     * hidden by it. The per-player reveal cycle then reveals only the positions with real line of
+     * sight. Re-marking a currently-revealed position as hidden is correct: the chunk packet carried
+     * the real state again, so the client would otherwise see it — the next cycle re-reveals it if
+     * still visible.
+     *
+     * <p>Fluids get a smaller budget slice so an ocean-sized fluid set can't starve the ore budget.
      */
     private static void hideExposedFor(final ServerPlayer player, final ServerLevel level,
                                        final long[] ores, final long[] fluids) {
-        final UUID pid = player.getUUID();
-        final LongOpenHashSet pending = PENDING.computeIfAbsent(pid, id -> new LongOpenHashSet());
+        final RevealState state = stateFor(player.getUUID());
         final int maxPending = SourbyCraftConfig.raytraceMaxPendingPerPlayer;
         final int maxFluidPending = Math.max(16, maxPending / 4);
         final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        // Hoisted per-level fake states + per-player confirmed-visible set (one CHM lookup, not one per key).
         final BlockState stoneState = fakeState(level, 0);
         final BlockState deepState = fakeState(level, -1);
-        final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap visible = VisibilityCache.mapFor(pid);
-        // ENGINE UPGRADE: batch the hides into ONE multi-block-change packet per 16³ section instead
-        // of N single ClientboundBlockUpdatePackets. On a join chunk-burst this collapses hundreds of
-        // packets into a handful, and — because the client applies a section's changes atomically —
-        // the ores go to stone in one frame, tightening the reveal window (no partial-hide flicker).
+        // Batch stone updates into ONE multi-block-change packet per 16³ section (a join chunk-burst
+        // collapses hundreds of packets into a handful; the client applies a section atomically).
         final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap<BlockState>> bySection =
             new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
-        // Folia: guard the per-player fastutil set — the reveal cycle (player's region) and other
-        // region sends for this player mutate it concurrently. The loop is bounded by maxPending so
-        // the critical section stays short; packet sends happen AFTER, outside the monitor.
-        synchronized (pending) {
+        synchronized (state.blocks) {
             for (final long key : ores) {
-                if (pending.size() >= maxPending) break;   // budget full: remaining ores stay visible (fail-open)
-                if (VisibilityCache.isVisible(visible, key)) continue; // confirmed visible from this eye
-                pending.add(key);
+                if (state.blocks.size() >= maxPending && !state.blocks.containsKey(key)) break; // budget full: fail-open
+                state.blocks.put(key, true);
                 pos.set(key);
                 accumulateHide(bySection, pos, pos.getY() < 0 ? deepState : stoneState);
             }
-            int fluidBudget = Math.min(maxFluidPending, maxPending - pending.size());
+            int fluidBudget = maxFluidPending;
             for (final long key : fluids) {
                 if (fluidBudget-- <= 0) break;
-                if (VisibilityCache.isVisible(visible, key)) continue;
-                pending.add(key);
+                if (state.blocks.size() >= maxPending && !state.blocks.containsKey(key)) break;
+                state.blocks.put(key, true);
                 pos.set(key);
                 accumulateHide(bySection, pos, pos.getY() < 0 ? deepState : stoneState);
             }
         }
-        // Send outside the monitor — the packet queue is thread-safe and this keeps the critical
-        // section to pure bookkeeping.
         for (final var e : bySection.long2ObjectEntrySet()) {
             player.connection.send(new net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket(
                 net.minecraft.core.SectionPos.of(e.getLongKey()), e.getValue()));
@@ -610,33 +588,36 @@ public final class OreReveal implements Listener {
     }
 
     /**
-     * Global-region cycle: for every player with pending positions, hop to the player's owning
-     * region and run {@link #revealOnRegion} there. The global thread reads ONLY the player list
-     * and the (concurrent) PENDING map — never world/block/entity state (Folia rule 1); this also
-     * moves the reveal work off the single global thread onto the per-player region threads.
+     * Global-region cycle: for every player that has tracked hideable blocks, hop to the player's
+     * OWNING region, snapshot the eye position + look direction there (Folia-sound entity read), and
+     * submit ONE async ray-trace task. The global thread only reads the player list + the concurrent
+     * STATE map — never world/block state.
      */
     private static void tickCycle() {
-        if (!RayTraceWorker.ENABLED.get()) return;
-        // Nothing to do only when NO player has pending hides AND no revealed ores to re-validate.
-        if (PENDING.isEmpty() && VisibilityCache.isEmpty()) return;
+        if (!RayTraceWorker.ENABLED.get() || STATE.isEmpty()) return;
+        final boolean frustum = SourbyCraftConfig.frustumCulling;
         for (final ServerPlayer player : net.minecraft.server.MinecraftServer.getServer().getPlayerList().getPlayers()) {
-            final UUID id = player.getUUID();
-            final LongOpenHashSet pending = PENDING.get(id);
-            boolean hasPending = false;
-            if (pending != null) {
-                synchronized (pending) { hasPending = !pending.isEmpty(); }
-            }
-            // Phase B (re-hide on loss of sight) must run even with no pending hides, so also hop
-            // when the player still has revealed ores that need line-of-sight re-validation.
-            if (!hasPending && !VisibilityCache.hasRevealed(id)) continue;
+            final RevealState state = STATE.get(player.getUUID());
+            if (state == null) continue;
+            synchronized (state.blocks) { if (state.blocks.isEmpty()) continue; }
             player.getBukkitEntity().getScheduler().run(
                 org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
                 task -> {
                     try {
-                        revealOnRegion(player);
+                        final ServerLevel level = player.level();
+                        if (level == null) return;
+                        final Vec3 eye = player.getEyePosition();           // Folia-sound: owning region
+                        final Vec3 look = player.getViewVector(1.0f);       // look direction for frustum cull
+                        final long epoch = state.epoch;
+                        final boolean fluidObscures = SourbyCraftConfig.fluidObscures
+                            && SourbyCraftWorldConfig.get(level).fluidObscures;
+                        // Off the region thread: the whole ray sweep + packet sends. Reads use
+                        // getChunkIfLoaded only (thread-safe), matching RayTraceAntiXray's async model.
+                        dev.iyanz.sourbycraft.util.VirtualExecutor.run(() ->
+                            rayTraceAndApply(player, state, level, epoch, eye, look, frustum, fluidObscures));
                     } catch (Throwable t) {
                         if (CHUNK_SENT_FAILED_LOGGED.compareAndSet(false, true)) {
-                            dev.iyanz.sourbycraft.util.SourbyLogger.warn("[SourX] reveal cycle failed — "
+                            dev.iyanz.sourbycraft.util.SourbyLogger.warn("[SourbyEngine] reveal cycle failed — "
                                 + "suppressing further logs. Cause: " + t);
                         }
                     }
@@ -646,151 +627,112 @@ public final class OreReveal implements Listener {
     }
 
     /**
-     * SourbyEngine per-player reveal/re-hide pass on the player's OWNING region thread (eye read is
-     * sound; block reads are at worst cross-region-racy and self-correct next cycle).
-     *
-     * <p>Unlike a one-way reveal, this is a DYNAMIC visibility state machine that closes the
-     * "peek once, x-ray forever" hole of a persistent reveal cache:
+     * SourbyEngine per-player ray-trace + diff — a faithful adaptation of RayTraceAntiXray's
+     * {@code RayTraceCallable}. Runs on a virtual thread from ONE consistent eye snapshot:
      * <ul>
-     *   <li><b>Phase A — pending (hidden) ores → reveal on sight.</b> Point-blank ores reveal
-     *       without a ray; in-range ores are handed to the async {@link RayTraceWorker}, which
-     *       sends the true block-state and moves the ore into the revealed set the instant sight is
-     *       confirmed; far ores are pruned (client no longer holds the chunk).</li>
-     *   <li><b>Phase B — revealed ores → re-hide on loss of sight.</b> A round-robin, ray-budgeted
-     *       re-validation: a revealed ore that leaves line-of-sight for {@link VisibilityCache#HIDE_STREAK}
-     *       consecutive checks is re-hidden (stone placeholder re-sent) and returned to pending, so
-     *       walking behind a wall re-conceals the ore instead of leaving it x-rayable. The streak is
-     *       the anti-flicker hysteresis; point-blank ores are held revealed as grace.</li>
+     *   <li>Every tracked block within {@code rehideDistance} is line-of-sight tested with
+     *       {@link BlockOcclusionCulling} (biased "visible when in doubt", so borderline blocks stay
+     *       revealed rather than flicker). Between {@code rehideDistance} and {@code rayTraceDistance}
+     *       a block is treated as not-visible → re-hidden. Beyond a prune radius it is dropped.</li>
+     *   <li>The result is diffed against the block's current client state: newly visible + hidden →
+     *       reveal (real block update); no longer visible + shown → hide (stone update). Unchanged
+     *       blocks send nothing — no per-tick churn, so no flicker.</li>
      * </ul>
-     * All packet sends happen OUTSIDE the pending monitor so chunk sends on other region threads
-     * never stall on us.
+     * Because there is a single snapshot and NO per-cycle ray budget, a directly-visible chest/ore is
+     * always revealed in one cycle (the old budget starved it into staying stone) and there is no
+     * stale-eye vs fresh-eye disagreement (the old two-phase split flickered).
      */
-    private static void revealOnRegion(final ServerPlayer player) {
-        final UUID pid = player.getUUID();
-        final ServerLevel level = player.level();
-        if (level == null) return;
-        final Vec3 eye = player.getEyePosition();
-        final double distance = SourbyCraftConfig.raytraceDistance;
-        final double distanceSq = distance * distance;
-        // Keys further than this are pruned/dropped: the client no longer holds that chunk (out of
-        // view range), and if it is ever re-sent, hideExposedFor re-hides unconditionally (C4).
-        final double pruneSq = Math.max(distanceSq * 4, 96 * 96);
-        final boolean fluidObscures = SourbyCraftConfig.fluidObscures
-            && SourbyCraftWorldConfig.get(level).fluidObscures;
+    private static void rayTraceAndApply(final ServerPlayer player, final RevealState state,
+                                         final ServerLevel level, final long epoch,
+                                         final Vec3 eye, final Vec3 look,
+                                         final boolean frustum, final boolean fluidObscures) {
+        final long[] keys;
+        final boolean[] hidden;
+        synchronized (state.blocks) {
+            final int n = state.blocks.size();
+            if (n == 0) return;
+            keys = new long[n];
+            hidden = new boolean[n];
+            int i = 0;
+            for (final var e : state.blocks.long2BooleanEntrySet()) { keys[i] = e.getLongKey(); hidden[i] = e.getBooleanValue(); i++; }
+        }
+        final double rayTraceDistance = SourbyCraftConfig.raytraceDistance;
+        final double rayTraceDistanceSq = rayTraceDistance * rayTraceDistance;
+        final double rehideDistance = Math.min(SourbyCraftConfig.rehideDistance, rayTraceDistance);
+        final double rehideDistanceSq = rehideDistance * rehideDistance;
+        final double pruneSq = Math.max(rayTraceDistanceSq * 2.25, 96 * 96); // 1.5x rayTraceDistance
+        final double eyeX = eye.x, eyeY = eye.y, eyeZ = eye.z;
+        final double lookX = look.x, lookY = look.y, lookZ = look.z;
+
+        // Folia-safe occlusion oracle: loaded-chunk reads only, last-chunk cached; unloaded = occluding.
+        final long[] chunkCache = { Long.MIN_VALUE };
+        final net.minecraft.world.level.chunk.LevelChunk[] chunkRef = { null };
+        final BlockPos.MutableBlockPos op = new BlockPos.MutableBlockPos();
+        final int minY = level.getMinY(), maxY = level.getMaxY();
+        final BlockOcclusionCulling culling = new BlockOcclusionCulling((bx, by, bz) -> {
+            if (by < minY || by > maxY) return false;                 // void / above build = open
+            final int cx = bx >> 4, cz = bz >> 4;
+            final long ck = net.minecraft.world.level.ChunkPos.pack(cx, cz);
+            if (ck != chunkCache[0]) {
+                chunkCache[0] = ck;
+                chunkRef[0] = level.getChunkIfLoaded(cx, cz);
+            }
+            final net.minecraft.world.level.chunk.LevelChunk c = chunkRef[0];
+            if (c == null) return true;                               // unloaded = occluding (fail-safe)
+            final BlockState st = c.getBlockState(op.set(bx, by, bz));
+            if (st.isViewBlocking(level, op)) return true;
+            return fluidObscures && !st.getFluidState().isEmpty();
+        }, frustum);
+
         final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap visible = VisibilityCache.mapFor(pid);
-
-        // ---- Phase A: pending (hidden) ores → reveal when the player gains line of sight ----
-        final LongOpenHashSet pending = PENDING.get(pid);
-        if (pending != null) {
-            final long[] keys;
-            synchronized (pending) {
-                keys = pending.isEmpty() ? null : pending.toLongArray();
-            }
-            if (keys != null) {
-                final LongArrayList resolved = new LongArrayList();
-                // Cheap pass over EVERY key: reveal point-blank, prune far, resolve already-confirmed,
-                // and collect the in-range keys that still need a line-of-sight ray. The ray budget is
-                // then spent round-robin across that collected list (cursor below), so with a dense
-                // pending set — every chest in a base is hidden occlusion-independently — an occluded
-                // block that never confirms cannot permanently starve the rays of a block further down
-                // the iteration order. Without this, chests past the first `budget` slots never reveal.
-                final LongArrayList rayable = new LongArrayList();
-                for (final long key : keys) {
-                    // Already revealed by a worker confirm since the snapshot: hand off to Phase B.
-                    if (VisibilityCache.isVisible(visible, key)) { resolved.add(key); continue; }
-                    pos.set(key);
-                    final double dsq = eye.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
-                    if (dsq <= NEAR_DISTANCE_SQUARED) {
-                        // point-blank: reveal without a ray (occlusion irrelevant this close, mining UX)
-                        if (level.isLoaded(pos)) {
-                            player.connection.send(new ClientboundBlockUpdatePacket(pos.immutable(), level.getBlockState(pos)));
-                            VisibilityCache.markVisible(pid, key, VisibilityCache.epoch(pid));
-                        }
-                        resolved.add(key);
-                        continue;
-                    }
-                    if (dsq > pruneSq) {
-                        resolved.add(key); // client no longer holds the chunk; re-send re-hides (C4)
-                        continue;
-                    }
-                    if (dsq <= distanceSq) rayable.add(key); // worker reveals + marks visible on sight
-                }
-                final int rn = rayable.size();
-                if (rn > 0) {
-                    final int budget = Math.max(1, SourbyCraftConfig.raytraceMaxChecksPerCycle);
-                    final long[] submitBuf = new long[Math.min(budget, rn)];
-                    int rstart = PENDING_CURSOR.getOrDefault(pid, 0);
-                    if (rstart >= rn || rstart < 0) rstart = 0;
-                    final int submitCount = Math.min(budget, rn);
-                    for (int i = 0; i < submitCount; i++) submitBuf[i] = rayable.getLong((rstart + i) % rn);
-                    PENDING_CURSOR.put(pid, (rstart + submitCount) % rn);
-                    RayTraceWorker.submitBatch(player, submitBuf, submitCount);
-                }
-                if (!resolved.isEmpty()) {
-                    synchronized (pending) {
-                        for (int i = 0; i < resolved.size(); i++) pending.remove(resolved.getLong(i));
-                    }
-                }
-            }
-        }
-
-        // ---- Phase B: revealed ores → re-hide when line of sight is lost (SourbyEngine core) ----
-        if (visible == null) return;
-        final long[] revealed;
-        synchronized (visible) {
-            revealed = visible.isEmpty() ? null : visible.keySet().toLongArray();
-        }
-        if (revealed == null) return;
-        final int len = revealed.length;
-        int budget = Math.max(1, SourbyCraftConfig.raytraceMaxChecksPerCycle);
-        int start = REVAL_CURSOR.getOrDefault(pid, 0);
-        if (start >= len || start < 0) start = 0;
-        int raysSpent = 0;
+        final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap<BlockState>> hideBySection =
+            new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
         final BlockState stoneState = fakeState(level, 0);
         final BlockState deepState = fakeState(level, -1);
-        final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap<BlockState>> rehideBySection =
-            new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
-        final LongArrayList rehide = new LongArrayList();
-        for (int n = 0; n < len; n++) {
-            final long key = revealed[(start + n) % len];
-            pos.set(key);
-            final double dsq = eye.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
-            if (dsq <= REHIDE_GRACE_DISTANCE_SQUARED) { VisibilityCache.recordHit(visible, key); continue; } // near-field grace: no flicker while mining
-            if (dsq > pruneSq) {
-                // Too far to have line of sight — definitely out of view. Drop tracking and send ONE
-                // backstop stone update: if the client still holds this chunk (view distance > prune
-                // radius) a revealed ore/chest would otherwise stay x-rayable; if the chunk is already
-                // unloaded the update is harmlessly ignored. It lands back in pending for a single
-                // cycle, then Phase A prunes it as out-of-range — no lasting churn.
-                synchronized (visible) { visible.remove(key); }
-                rehide.add(key);
-                continue;
+        // Collected mutations to apply back to the map after the sweep (keeps the lock off the rays).
+        final LongArrayList reveals = new LongArrayList();   // key -> now visible (map=false)
+        final LongArrayList rehides = new LongArrayList();   // key -> now hidden  (map=true)
+        final LongArrayList prunes = new LongArrayList();
+
+        for (int i = 0; i < keys.length; i++) {
+            final long key = keys[i];
+            final int bx = BlockPos.getX(key), by = BlockPos.getY(key), bz = BlockPos.getZ(key);
+            final double centerX = bx + 0.5, centerY = by + 0.5, centerZ = bz + 0.5;
+            final double diffX = eyeX - centerX, diffY = eyeY - centerY, diffZ = eyeZ - centerZ;
+            final double distSq = diffX * diffX + diffY * diffY + diffZ * diffZ;
+            if (distSq > pruneSq) { prunes.add(key); continue; }      // client has long since unloaded it
+            if (distSq > rayTraceDistanceSq) continue;                // out of range: leave as-is this cycle
+            boolean visible = false;
+            if (distSq < rehideDistanceSq) {
+                visible = culling.isVisible(bx, by, bz, centerX, centerY, centerZ, diffX, diffY, diffZ, distSq, lookX, lookY, lookZ);
             }
-            if (budget <= 0) continue; // ray budget spent this cycle; this ore is re-checked next cycle
-            budget--; raysSpent++;
-            if (RayTraceWorker.hasLineOfSight(level, eye, key, fluidObscures)) {
-                VisibilityCache.recordHit(visible, key);
-            } else if (VisibilityCache.recordMissAndMaybeHide(visible, key)) {
-                rehide.add(key); // out of sight HIDE_STREAK cycles running → re-hide
+            if (visible) {
+                if (hidden[i]) {
+                    pos.set(bx, by, bz);
+                    final net.minecraft.world.level.chunk.LevelChunk c = level.getChunkIfLoaded(bx >> 4, bz >> 4);
+                    if (c != null) {
+                        player.connection.send(new ClientboundBlockUpdatePacket(pos.immutable(), c.getBlockState(pos)));
+                        reveals.add(key);
+                    }
+                }
+            } else if (!hidden[i]) {
+                pos.set(bx, by, bz);
+                accumulateHide(hideBySection, pos, by < 0 ? deepState : stoneState);
+                rehides.add(key);
             }
         }
-        REVAL_CURSOR.put(pid, len == 0 ? 0 : (start + Math.max(raysSpent, 1)) % len);
-        if (!rehide.isEmpty()) {
-            final LongOpenHashSet pend = PENDING.computeIfAbsent(pid, id -> new LongOpenHashSet());
-            synchronized (pend) {
-                for (int i = 0; i < rehide.size(); i++) {
-                    final long key = rehide.getLong(i);
-                    pos.set(key);
-                    if (!level.isLoaded(pos)) continue;
-                    pend.add(key); // Phase A re-reveals if sight is regained
-                    accumulateHide(rehideBySection, pos, pos.getY() < 0 ? deepState : stoneState);
-                }
-            }
-            for (final var e : rehideBySection.long2ObjectEntrySet()) {
-                player.connection.send(new net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket(
-                    net.minecraft.core.SectionPos.of(e.getLongKey()), e.getValue()));
-            }
+
+        // Teleport / world change / quit since the snapshot → discard (state may be cleared/replaced).
+        if (state.epoch != epoch) return;
+        for (final var e : hideBySection.long2ObjectEntrySet()) {
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket(
+                net.minecraft.core.SectionPos.of(e.getLongKey()), e.getValue()));
+        }
+        synchronized (state.blocks) {
+            if (state.epoch != epoch) return;
+            for (int i = 0; i < reveals.size(); i++) { final long k = reveals.getLong(i); if (state.blocks.containsKey(k)) state.blocks.put(k, false); }
+            for (int i = 0; i < rehides.size(); i++) { final long k = rehides.getLong(i); if (state.blocks.containsKey(k)) state.blocks.put(k, true); }
+            for (int i = 0; i < prunes.size(); i++) state.blocks.remove(prunes.getLong(i));
         }
     }
 
@@ -882,10 +824,13 @@ public final class OreReveal implements Listener {
     }
 
     private static void clearPlayer(final UUID id) {
-        PENDING.remove(id);
-        REVAL_CURSOR.remove(id);
-        PENDING_CURSOR.remove(id);
-        VisibilityCache.clear(id); // bumps the epoch: in-flight ray results are discarded
+        final RevealState state = STATE.remove(id);
+        if (state != null) {
+            // Bump the epoch so any in-flight async ray sweep discards its results instead of sending
+            // reveals into a stale eye (teleport/world-change/quit).
+            state.epoch++;
+            synchronized (state.blocks) { state.blocks.clear(); }
+        }
         EntityVisibilityCheck.clear(id);
     }
 
