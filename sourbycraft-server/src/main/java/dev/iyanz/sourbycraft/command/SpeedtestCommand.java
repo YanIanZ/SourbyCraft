@@ -14,6 +14,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.Duration;
 import java.util.Map;
@@ -27,6 +28,22 @@ public class SpeedtestCommand extends Command {
 
     private static final String OS_NAME = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT);
     private static final String OS_ARCH = System.getProperty("os.arch").toLowerCase(java.util.Locale.ROOT);
+
+    /**
+     * SHA-256 pins for every supported Ookla CLI 1.2.0 archive (the exact bytes served by
+     * {@link #OOKLA_BASE_URL} on 2026-07-11). The downloaded archive is verified against its pin
+     * BEFORE the binary is ever extracted/executed — matching the download-integrity discipline of
+     * {@code SourbyUpdater} / {@code LibDownloader}. A platform with no published binary (e.g. Windows
+     * ARM64: Ookla ships no {@code winarm64} build for 1.2.0) is deliberately absent, so
+     * {@link #resolveBinaryName()} reports it unsupported rather than executing an unpinned download.
+     */
+    private static final Map<String, String> OOKLA_SHA256 = Map.of(
+        "ookla-speedtest-1.2.0-linux-x86_64.tgz",     "5690596c54ff9bed63fa3732f818a05dbc2db19ad36ed68f21ca5f64d5cfeeb7",
+        "ookla-speedtest-1.2.0-linux-aarch64.tgz",    "3953d231da3783e2bf8904b6dd72767c5c6e533e163d3742fd0437affa431bd3",
+        "ookla-speedtest-1.2.0-linux-armhf.tgz",      "e45fcdebbd8a185553535533dd032d6b10bc8c64eee4139b1147b9c09835d08d",
+        "ookla-speedtest-1.2.0-macosx-universal.tgz", "c9f8192149ebc88f8699998cecab1ce144144045907ece6f53cf50877f4de66f",
+        "ookla-speedtest-1.2.0-win64.zip",            "13e3d888b845d301a556419e31f14ab9bff57e3f06089ef2fd3bdc9ba6841efa"
+    );
 
     private static String resolveBinaryName() {
         if (OS_NAME.contains("linux")) {
@@ -43,9 +60,8 @@ public class SpeedtestCommand extends Command {
         } else if (OS_NAME.contains("windows")) {
             if (OS_ARCH.equals("x86_64") || OS_ARCH.equals("amd64")) {
                 return "ookla-speedtest-1.2.0-win64.zip";
-            } else if (OS_ARCH.equals("aarch64") || OS_ARCH.equals("arm64")) {
-                return "ookla-speedtest-1.2.0-winarm64.zip";
             }
+            // No Windows-ARM64 build is published for Ookla CLI 1.2.0 (unpinnable) -> unsupported.
         }
         return null;
     }
@@ -80,6 +96,11 @@ public class SpeedtestCommand extends Command {
         this.setPermission("sourbycraft.command.speedtest");
     }
 
+    // One speedtest at a time — repeated invocations would stack OS processes, each
+    // saturating the very bandwidth the test is measuring.
+    private static final java.util.concurrent.atomic.AtomicBoolean IN_FLIGHT =
+        new java.util.concurrent.atomic.AtomicBoolean();
+
     @Override
     public boolean execute(CommandSender sender, String alias, String[] args) {
         LOG.info("Speedtest invoked. OS={} arch={} binPath={} binExists={} binaryName={}",
@@ -97,8 +118,13 @@ public class SpeedtestCommand extends Command {
             return true;
         }
 
+        if (!IN_FLIGHT.compareAndSet(false, true)) {
+            sender.sendMessage(text("A speedtest is already running — wait for it to finish.", SourbyCraftColors.DANGER));
+            return true;
+        }
         sender.sendMessage(text("Running...", SourbyCraftColors.LABEL));
         VirtualExecutor.run(() -> {
+            Process proc = null;
             try {
                 if (!Files.exists(BIN)) {
                     sender.sendMessage(text("Downloading speedtest CLI (first run, ~1MB)...", SourbyCraftColors.LABEL));
@@ -108,11 +134,16 @@ public class SpeedtestCommand extends Command {
                     sender.sendMessage(text("Speedtest unavailable (download failed)", SourbyCraftColors.DANGER));
                     return;
                 }
-                Process proc = new ProcessBuilder(BIN.toString(),
+                proc = new ProcessBuilder(BIN.toString(),
                         "--format=json", "--accept-license", "--accept-gdpr")
                     .redirectErrorStream(true).start();
-                String output = new String(proc.getInputStream().readAllBytes());
-                proc.waitFor();
+                String output = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                if (!proc.waitFor(120, java.util.concurrent.TimeUnit.SECONDS)) {
+                    proc.destroyForcibly();
+                    LOG.error("Speedtest timed out after 120s — process killed");
+                    sender.sendMessage(text("Speedtest timed out (120s)", SourbyCraftColors.DANGER));
+                    return;
+                }
 
                 if (output == null || output.trim().isEmpty()) {
                     LOG.error("Speedtest produced empty output");
@@ -151,14 +182,17 @@ public class SpeedtestCommand extends Command {
                 double um = ((Number) ul.get("bandwidth")).doubleValue() * 8 / 1_000_000;
                 double pm = ((Number) ping.get("latency")).doubleValue();
 
-                net.minecraft.server.MinecraftServer.getServer().execute(() -> {
+                // Folia-safe reply hop. MinecraftServer.execute() throws UnsupportedOperationException
+                // on Folia (no global main thread) — the crash the boot log showed at line 169. Bounce
+                // the reply onto the sender's own scheduler instead (player region / console direct).
+                SourbyReply.run(sender, () -> {
                     try {
                         sender.sendMessage(text()
                             .append(text("DL: ", SourbyCraftColors.LABEL))
-                            .append(BarUtil.coloredBar(Math.min(dm / 100, 100), 20))
+                            .append(BarUtil.coloredBar(Math.min(dm / 10, 100), 20))
                             .append(text(String.format(java.util.Locale.ROOT, " %.1f Mbps", dm), SourbyCraftColors.SUCCESS))
                             .append(text("\nUL: ", SourbyCraftColors.LABEL))
-                            .append(BarUtil.coloredBar(Math.min(um / 50, 100), 20))
+                            .append(BarUtil.coloredBar(Math.min(um / 10, 100), 20))
                             .append(text(String.format(java.util.Locale.ROOT, " %.1f Mbps", um), SourbyCraftColors.SUCCESS))
                             .append(text("\nPing: ", SourbyCraftColors.LABEL))
                             .append(text(String.format(java.util.Locale.ROOT, "%.0fms", pm),
@@ -171,6 +205,9 @@ public class SpeedtestCommand extends Command {
             } catch (Exception e) {
                 LOG.error("Speedtest process failed: {}", e.toString(), e);
                 sender.sendMessage(text("Speedtest failed: " + e.getMessage(), SourbyCraftColors.DANGER));
+            } finally {
+                if (proc != null && proc.isAlive()) proc.destroyForcibly(); // no orphans on any exit path
+                IN_FLIGHT.set(false);
             }
         });
         return true;
@@ -198,6 +235,20 @@ public class SpeedtestCommand extends Command {
             Files.deleteIfExists(tarball);
             throw new IOException("HTTP " + resp.statusCode() + " from " + OOKLA_URL);
         }
+        // SHA-256 integrity gate: verify the downloaded archive against its pin BEFORE extracting or
+        // executing anything. A MITM'd/tampered mirror would otherwise yield an unpinned executable.
+        String expected = OOKLA_SHA256.get(BINARY_NAME);
+        if (expected == null) {
+            Files.deleteIfExists(tarball);
+            throw new IOException("no SHA-256 pin for " + BINARY_NAME + "; refusing to execute unverified binary");
+        }
+        String actual = sha256(tarball);
+        if (!expected.equalsIgnoreCase(actual)) {
+            Files.deleteIfExists(tarball);
+            throw new IOException("SHA-256 mismatch for " + BINARY_NAME
+                + ": got " + actual + ", expected " + expected + " (refusing to execute)");
+        }
+        LOG.info("Speedtest archive SHA-256 verified for {}", BINARY_NAME);
         try (InputStream raw = Files.newInputStream(tarball)) {
             if (OOKLA_URL.endsWith(".zip")) {
                 extractSpeedtestFromZip(raw, BIN);
@@ -266,6 +317,19 @@ public class SpeedtestCommand extends Command {
                     return;
                 }
             }
+        }
+    }
+
+    /** Hex-encoded SHA-256 of a file, for the download-integrity gate. */
+    private static String sha256(Path file) throws IOException {
+        try (InputStream in = Files.newInputStream(file)) {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+            return java.util.HexFormat.of().formatHex(md.digest());
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 unavailable in this JDK", e);
         }
     }
 

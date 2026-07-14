@@ -13,6 +13,11 @@ import java.util.List;
  * The advisor exists so a misconfigured deployment surfaces in the
  * boot log instead of waiting for an in-game incident.
  *
+ * <p>Ported from the Paper tag {@code paper-26.2-pre-folia}. On the Folia base it
+ * runs from the authored-source post-config hook
+ * ({@link me.earthme.luminol.commands.CommandRegister#register()}) instead of an
+ * NMS patch — by that point Paper's {@code GlobalConfiguration} is loaded.
+ *
  * <p>Findings:
  *
  * <pre>

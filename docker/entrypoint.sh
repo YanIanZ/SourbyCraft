@@ -39,6 +39,15 @@ GC_FLAGS="-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 \
 -XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 \
 -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1"
 
+# Force UTF-8 console + file encoding. The base image has no locale set, so stdout.encoding
+# would default to US-ASCII and the branded box-drawing chars (═, …) print as ? / �.
+ENCODING_FLAGS="-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -Dfile.encoding=UTF-8"
+
+# Resolve the SIMD incubator module so Luminol's SIMDConfig auto-uses vectorized ops (map
+# colors, mob AI). The inline (no-fork) container boot can't add this to a running JVM, so it
+# must be present at launch — this silences the "SIMD ... not configured" warning.
+SIMD_FLAGS="--add-modules=jdk.incubator.vector"
+
 # exec → java becomes PID 1 and receives SIGTERM directly for a clean shutdown.
 # shellcheck disable=SC2086
-exec java $HEAP_FLAGS $CDS_FLAGS $GC_FLAGS ${JVM_OPTS:-} -jar "$JAR" --nogui "$@"
+exec java $ENCODING_FLAGS $SIMD_FLAGS $HEAP_FLAGS $CDS_FLAGS $GC_FLAGS ${JVM_OPTS:-} -jar "$JAR" --nogui "$@"

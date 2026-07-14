@@ -1,0 +1,64 @@
+[versions]
+asm = "9.9.1"
+lorenz = "0.5.8"
+hypo = "1.2.4"
+serialize = "1.9.0"
+jst = "1.0.68+paper.2-SNAPSHOT"
+tinyRemapper = "0.12.0"
+# For paper-checkstyle plugin
+checkstyle = "12.1.2"
+
+[libraries]
+asm-core = { module = "org.ow2.asm:asm", version.ref = "asm" }
+asm-tree = { module = "org.ow2.asm:asm-tree", version.ref = "asm" }
+
+httpclient = "org.apache.httpcomponents:httpclient:4.5.14"
+kotson = "com.github.salomonbrys.kotson:kotson:2.5.0"
+coroutines = "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2"
+jgit = "org.eclipse.jgit:org.eclipse.jgit:7.4.0.202509020913-r"
+gson = "com.google.code.gson:gson:2.13.2"
+
+cadix-lorenz-core = { module = "org.cadixdev:lorenz", version.ref = "lorenz" }
+cadix-lorenz-asm = { module = "org.cadixdev:lorenz-asm", version.ref = "lorenz" }
+cadix-lorenz-proguard = { module = "org.cadixdev:lorenz-io-proguard", version.ref = "lorenz" }
+cadix-atlas = "org.cadixdev:atlas:0.2.1"
+cadix-at = "org.cadixdev:at:0.1.0-rc1"
+
+hypo-model = { module = "dev.denwav.hypo:hypo-model", version.ref = "hypo" }
+hypo-core = { module = "dev.denwav.hypo:hypo-core", version.ref = "hypo" }
+hypo-hydrate = { module = "dev.denwav.hypo:hypo-hydrate", version.ref = "hypo" }
+hypo-asm-core = { module = "dev.denwav.hypo:hypo-asm", version.ref = "hypo" }
+hypo-asm-hydrate = { module = "dev.denwav.hypo:hypo-asm-hydrate", version.ref = "hypo" }
+hypo-mappings = { module = "dev.denwav.hypo:hypo-mappings", version.ref = "hypo" }
+
+lorenzTiny = "net.fabricmc:lorenz-tiny:3.0.0"
+jbsdiff = "io.sigpipe:jbsdiff:1.0"
+
+diffpatch = "io.codechicken:DiffPatch:1.5.0.30"
+
+serialize-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "serialize" }
+serialize-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialize" }
+
+jst = { module = "io.papermc.jst:jst-cli-bundle", version.ref = "jst" }
+# jst = { module = "net.neoforged.jst:jst-cli-bundle", version.ref = "jst" }
+tinyRemapper = { module = "net.fabricmc:tiny-remapper", version.ref = "tinyRemapper" }
+
+# test
+mockk = "io.mockk:mockk:1.14.9"
+
+# Gradle
+gradle-licenser = "net.kyori:indra-licenser-spotless:4.0.0"
+gradle-spotless = "com.diffplug.spotless:spotless-plugin-gradle:8.6.0"
+gradle-shadow = "com.gradleup.shadow:com.gradleup.shadow.gradle.plugin:9.4.2"
+gradle-kotlin-dsl = "org.gradle.kotlin.kotlin-dsl:org.gradle.kotlin.kotlin-dsl.gradle.plugin:6.5.2"
+gradle-plugin-kotlin = { module = "org.jetbrains.kotlin.jvm:org.jetbrains.kotlin.jvm.gradle.plugin" }
+gradle-plugin-publish = "com.gradle.publish:plugin-publish-plugin:2.0.0"
+
+# for renovate
+zCheckstyle = { module = "com.puppycrawl.tools:checkstyle", version.ref = "checkstyle" }
+
+[bundles]
+asm = ["asm-core", "asm-tree"]
+cadix = ["cadix-lorenz-core", "cadix-lorenz-asm", "cadix-lorenz-proguard", "cadix-atlas", "cadix-at"]
+hypo = ["hypo-model", "hypo-core", "hypo-hydrate", "hypo-asm-core", "hypo-asm-hydrate", "hypo-mappings"]
+kotson = ["kotson", "gson"]

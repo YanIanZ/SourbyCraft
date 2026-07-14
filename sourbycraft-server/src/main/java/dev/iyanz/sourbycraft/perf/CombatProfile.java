@@ -10,7 +10,7 @@ import java.util.Locale;
  *
  * <p>Operator-selectable bundle of knob defaults tuned for a target
  * playstyle. Applied once at boot from {@code combat.profile} in
- * {@code sourbycraft.yml}. {@link SelfTuneController} still owns runtime
+ * the unified config. {@link SelfTuneController} still owns runtime
  * escalation per {@code PerfSensor} tier transitions — a profile only
  * sets the operator-baseline, not the tier-escalated values.
  *
@@ -67,5 +67,9 @@ public enum CombatProfile {
             }
         }
         SourbyLogger.info("combat profile applied: " + this);
+        // F2e: enforce the profile's knob baseline onto the base config immediately, so the
+        // operator-selected combat profile has real in-tick effect from boot (before any tier
+        // escalation). SelfTuneController re-enforces on every subsequent tier transition.
+        KnobEnforcer.enforceAll();
     }
 }

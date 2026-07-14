@@ -20,7 +20,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # paperweight needs git history for patch application
+          fetch-depth: 0        # paperweight needs git history for patch application
 
       - name: Validate gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
@@ -38,24 +38,39 @@ jobs:
           git config --global user.name "Github Actions"
           git config --global --add safe.directory '*'
 
-      - name: Verify patch parity
-        run: bash scripts/verify-patch-parity.sh
-        continue-on-error: true
+      - name: Publish SourbyPatcher to mavenLocal (build plugin for the Folia patcher)
+        run: cd sourbypatcher && ./gradlew publishToMavenLocal --no-daemon --stacktrace -x test
 
-      - name: Apply all patches (rebase onto Paper/MC 26.2)
+      - name: Setup Metal (vendored — gen sources)
+        run: bash scripts/setup_metal.sh
+
+      - name: Apply all patches (Luminol 26.2 -> Folia)
         run: ./gradlew applyAllPatches --no-daemon --stacktrace
 
       - name: Compile server
-        run: ./gradlew :sourbycraft-server:compileJava --no-daemon
+        run: ./gradlew :sourbycraft-server:compileJava --no-daemon --stacktrace
 
-      - name: Assemble release jar
-        run: ./gradlew assembleReleaseArtifacts --no-daemon
+      - name: Compute next release number (rN — also stamped as build Nf)
+        id: relnum
+        run: |
+          # Highest existing v26.2-rN tag + 1. ls-remote needs no tag fetch and no auth (public).
+          last=$(git ls-remote --tags origin 'v26.2-r*' | sed -n 's#.*refs/tags/v26\.2-r\([0-9]*\)$#\1#p' | sort -n | tail -1)
+          next=$(( ${last:-0} + 1 ))
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "Next release: v26.2-r$next (build ${next}f)"
+
+      - name: Build slim release jar (SourbyLoader)
+        run: |
+          # Release number == build number from r6 onward: the auto-updater compares the tag's rN
+          # against the running jar's own build Nf, so the two MUST be stamped from the same counter.
+          ./gradlew slimPaperclipJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.next }}
+          mkdir -p release
+          cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-REL.jar
 
       - name: Show build info
         run: |
           jar=$(ls release/SourbyCraft-*-REL.jar 2>/dev/null | head -1)
           echo "Built: $jar ($(du -h "$jar" | cut -f1))"
-          unzip -p "$jar" META-INF/sourbycraft-build.properties 2>/dev/null || true
 
       - name: Upload jar
         uses: actions/upload-artifact@v4
@@ -139,3 +154,49 @@ jobs:
         run: |
           docker run --rm --entrypoint sh sourbycraft:ci -c \
             'id -un; test -x /app/entrypoint.sh && echo entrypoint-ok; test -f /app/server.jar && echo jar-ok'
+
+  release:
+    name: Publish release (auto)
+    runs-on: ubuntu-24.04
+    needs: [build, boot-test, docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release/26.2'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (tags + history for the changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Download jar
+        uses: actions/download-artifact@v4
+        with:
+          name: SourbyCraft-26.2
+          path: release
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          last=$(git tag -l 'v26.2-r*' | sed -n 's#^v26\.2-r\([0-9]*\)$#\1#p' | sort -n | tail -1)
+          next=$(( ${last:-0} + 1 ))
+          tag="v26.2-r$next"
+          jar=$(ls release/SourbyCraft-*-REL.jar | head -1)
+          sha=$(sha256sum "$jar" | cut -d' ' -f1)
+          echo "$sha  $(basename "$jar")" > "$jar.sha256"
+          title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next [$(git log -1 --format=%s | cut -c1-80)]"
+          {
+            echo "**Build ${next}f** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
+            echo
+            echo "Auto-published from \`release/26.2\` after a green build + boot test."
+            echo
+            echo "## Commits"
+            if [ -n "${last:-}" ]; then
+              git log "v26.2-r$last"..HEAD --format='- %s' | head -40
+            else
+              git log -10 --format='- %s'
+            fi
+          } > notes.md
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$jar" "$jar.sha256"

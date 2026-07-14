@@ -1,7 +1,6 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
-import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics;
 import dev.iyanz.sourbycraft.util.BarUtil;
 import org.bukkit.Bukkit;
@@ -24,11 +23,32 @@ public class SysCommand extends Command {
 
     private static final String DIVIDER = BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH);
 
+    // CPU identity via OSHI is expensive to enumerate (WMI on Windows) — resolve it ONCE on a
+    // virtual thread at registration; the command only ever reads these volatile snapshots.
+    private static volatile String cpuName;
+    private static volatile String cpuCores;
+    private static final java.lang.management.OperatingSystemMXBean OS_BEAN =
+        ManagementFactory.getOperatingSystemMXBean();
+
     public SysCommand(String name) {
         super(name);
         this.description = "Server specs";
         this.usageMessage = "/sys";
         this.setPermission("sourbycraft.command.sys");
+        prewarmCpuIdentity();
+    }
+
+    private static void prewarmCpuIdentity() {
+        if (cpuName != null) return;
+        dev.iyanz.sourbycraft.util.VirtualExecutor.run(() -> {
+            try {
+                var cpu = new oshi.SystemInfo().getHardware().getProcessor();
+                cpuCores = cpu.getPhysicalProcessorCount() + "c/" + cpu.getLogicalProcessorCount() + "t";
+                cpuName = cpu.getProcessorIdentifier().getName().trim();
+            } catch (Throwable ignored) {
+                // OSHI absent/unsupported -> CPU identity line is simply omitted.
+            }
+        });
     }
 
     @Override
@@ -49,20 +69,25 @@ public class SysCommand extends Command {
             .append(text(d + "d " + h + "h " + m + "m", SourbyCraftColors.VALUE))
             .build());
 
-        try {
-            oshi.SystemInfo si = new oshi.SystemInfo();
-            var cpu = si.getHardware().getProcessor();
-            double load = cpu.getSystemCpuLoad(1000) * 100;
+        // Non-blocking CPU readout: OSHI's getSystemCpuLoad(1000) SLEEPS 1s (a full region stall on
+        // Folia) — use the JMX bean's sampled load instead and the prewarmed identity strings.
+        String name = cpuName, cores = cpuCores;
+        if (name != null) {
             s.sendMessage(text()
                 .append(text("  CPU: ", SourbyCraftColors.LABEL))
-                .append(text(cpu.getProcessorIdentifier().getName().trim(), SourbyCraftColors.VALUE))
-                .append(text("  (" + cpu.getPhysicalProcessorCount() + "c/" + cpu.getLogicalProcessorCount() + "t)", SourbyCraftColors.DIM))
+                .append(text(name, SourbyCraftColors.VALUE))
+                .append(text("  (" + cores + ")", SourbyCraftColors.DIM))
                 .build());
-            s.sendMessage(text()
-                .append(text("  Load: ", SourbyCraftColors.LABEL))
-                .append(BarUtil.coloredBar(load, BarUtil.DEFAULT_WIDTH))
-                .build());
-        } catch (NoClassDefFoundError ignored) {}
+        }
+        if (OS_BEAN instanceof com.sun.management.OperatingSystemMXBean osb) {
+            double load = osb.getCpuLoad() * 100;
+            if (load >= 0) {
+                s.sendMessage(text()
+                    .append(text("  Load: ", SourbyCraftColors.LABEL))
+                    .append(BarUtil.coloredBar(load, BarUtil.DEFAULT_WIDTH))
+                    .build());
+            }
+        }
 
         Runtime rt = Runtime.getRuntime();
         long maxM = rt.maxMemory();
@@ -85,7 +110,7 @@ public class SysCommand extends Command {
         for (World w : Bukkit.getWorlds()) {
             s.sendMessage(text()
                 .append(text("  " + w.getName() + ": ", SourbyCraftColors.LABEL))
-                .append(text(w.getLoadedChunks().length + " chunks", SourbyCraftColors.VALUE))
+                .append(text(w.getChunkCount() + " chunks", SourbyCraftColors.VALUE))
                 .append(text("  ~" + rec + " threads", SourbyCraftColors.DIM))
                 .build());
         }
@@ -125,12 +150,6 @@ public class SysCommand extends Command {
                 .append(text("  " + entry.reason(), SourbyCraftColors.DIM))
                 .build());
         }
-
-        s.sendMessage(text()
-            .append(text("  SWM: ", SourbyCraftColors.LABEL))
-            .append(text(SourbyCraftConfig.swmEnabled ? "enabled" : "disabled",
-                SourbyCraftConfig.swmEnabled ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DIM))
-            .build());
 
         s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
         return true;

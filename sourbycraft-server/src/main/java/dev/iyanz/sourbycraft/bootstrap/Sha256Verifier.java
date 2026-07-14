@@ -28,8 +28,6 @@ final class Sha256Verifier {
     }
 
     private static String toHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder(bytes.length * 2);
-        for (byte b : bytes) sb.append(String.format("%02x", b & 0xff));
-        return sb.toString();
+        return java.util.HexFormat.of().formatHex(bytes); // JDK type — bootstrap stays JDK-only
     }
 }
