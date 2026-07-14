@@ -71,6 +71,16 @@ public final class OreReveal implements Listener {
     private static final double NEAR_DISTANCE = 3.0;
     private static final double NEAR_DISTANCE_SQUARED = NEAR_DISTANCE * NEAR_DISTANCE;
 
+    // Re-hide grace: an ALREADY-revealed block within this radius stays revealed regardless of a
+    // per-cycle raytrace miss. This kills the dominant flicker source — while you mine, an ore at the
+    // edge of your view makes the raytrace flip visible/occluded each tick, and without this it would
+    // reveal→re-hide→reveal every few cycles. Blocks are only re-hidden once you move further than this
+    // AND lose line of sight (HIDE_STREAK cycles). Ores stay packet-hidden until first revealed, so this
+    // only affects blocks you have already legitimately seen — a small, near-field exposure for zero
+    // flicker. Beyond this radius the normal line-of-sight re-hide applies.
+    private static final double REHIDE_GRACE_DISTANCE = 12.0;
+    private static final double REHIDE_GRACE_DISTANCE_SQUARED = REHIDE_GRACE_DISTANCE * REHIDE_GRACE_DISTANCE;
+
     /**
      * Per-player pending hidden-ore positions (BlockPos.asLong). Snapshot-iterated by the reveal
      * cycle; mutated by chunk sends on region threads. Fastutil sets are not safe under concurrent
@@ -745,7 +755,7 @@ public final class OreReveal implements Listener {
             final long key = revealed[(start + n) % len];
             pos.set(key);
             final double dsq = eye.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
-            if (dsq <= NEAR_DISTANCE_SQUARED) { VisibilityCache.recordHit(visible, key); continue; } // grace
+            if (dsq <= REHIDE_GRACE_DISTANCE_SQUARED) { VisibilityCache.recordHit(visible, key); continue; } // near-field grace: no flicker while mining
             if (dsq > pruneSq) {
                 // Too far to have line of sight — definitely out of view. Drop tracking and send ONE
                 // backstop stone update: if the client still holds this chunk (view distance > prune
