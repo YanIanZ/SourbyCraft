@@ -88,6 +88,14 @@ public final class OreReveal implements Listener {
     private static final Map<UUID, Integer> REVAL_CURSOR = new ConcurrentHashMap<>();
 
     /**
+     * Phase A round-robin cursor over the in-range pending set. With block-entities hidden
+     * occlusion-independently a base can hold far more pending keys than one cycle's ray budget;
+     * without round-robin the first {@code budget} keys (often permanently-occluded chests that never
+     * confirm) would monopolise every ray and blocks later in iteration order would never reveal.
+     */
+    private static final Map<UUID, Integer> PENDING_CURSOR = new ConcurrentHashMap<>();
+
+    /**
      * Per-chunk exposed scan cache — which ores/fluids in a chunk are cave-exposed is
      * player-independent, so the ~4096-block/section scan runs ONCE per chunk and every
      * player/send reuses the result. Keyed by {@link ServerLevel} identity; evicted on chunk
@@ -319,6 +327,8 @@ public final class OreReveal implements Listener {
         final LongArrayList fluids = new LongArrayList();
         final java.util.Set<Block> oreSet = oreCandidates();
         final boolean hideLiquids = SourbyCraftConfig.hideLiquids;
+        final boolean hideBE = SourbyCraftConfig.hideBlockEntities;
+        final java.util.Set<Block> beSet = beCandidates();
         // Match Paper's own engine coverage: above max-block-height Paper hides nothing, and
         // surface ores are instantly LOS-confirmable — scanning higher sections buys no defense.
         final int maxY = level.paperConfig().anticheat.antiXray.maxBlockHeight;
@@ -327,14 +337,23 @@ public final class OreReveal implements Listener {
             if (section == null || section.hasOnlyAir()) continue;
             final int yBase = chunk.getSectionYFromSectionIndex(idx) << 4;
             if (yBase > maxY) continue;
-            if (!section.getStates().maybeHas(state -> isCandidate(state, oreSet, extraHidden, hideLiquids))) continue;
+            if (!section.getStates().maybeHas(state -> isCandidate(state, oreSet, extraHidden, beSet, hideBE, hideLiquids))) continue;
             for (int y = 0; y < 16; y++) {
                 if (yBase + y > maxY) break;
                 for (int z = 0; z < 16; z++) {
                     for (int x = 0; x < 16; x++) {
                         final BlockState state = section.getBlockState(x, y, z);
+                        final Block block = state.getBlock();
+                        final int wx = chunkX + x, wy = yBase + y, wz = chunkZ + z;
+                        // Block-entities (chests, spawners, …) leak through walls via the client BE list,
+                        // so hide ALL of them regardless of occlusion — no isExposed gate. Paper never
+                        // hid these, so there is no occluded-set overlap to defer to.
+                        if (hideBE && beSet.contains(block)) {
+                            ores.add(BlockPos.asLong(wx, wy, wz));
+                            continue;
+                        }
                         final boolean fluid = !state.getFluidState().isEmpty()
-                            && !oreSet.contains(state.getBlock()) && !extraHidden.contains(state.getBlock());
+                            && !oreSet.contains(block) && !extraHidden.contains(block);
                         if (fluid) {
                             if (!hideLiquids) continue;
                             // C3: only CAVE fluids are hidden. A fluid at/above the column's solid
@@ -342,11 +361,10 @@ public final class OreReveal implements Listener {
                             // rivers, surface lakes — and turning those to stone both looks broken
                             // and floods the pending budget until real cave ores leak (fail-open).
                             if (yBase + y >= chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, x, z)) continue;
-                        } else if (!oreSet.contains(state.getBlock())
-                            && (extraHidden.isEmpty() || !extraHidden.contains(state.getBlock()))) {
+                        } else if (!oreSet.contains(block)
+                            && (extraHidden.isEmpty() || !extraHidden.contains(block))) {
                             continue;
                         }
-                        final int wx = chunkX + x, wy = yBase + y, wz = chunkZ + z;
                         if (!isExposed(level, chunk, wx, wy, wz, fluidObscures, pos)) continue;
                         (fluid ? fluids : ores).add(BlockPos.asLong(wx, wy, wz));
                     }
@@ -421,21 +439,37 @@ public final class OreReveal implements Listener {
         final java.util.Set<Block> extraHidden = extraHiddenFor(level, wc);
         final java.util.Set<Block> oreSet = oreCandidates();
         final boolean hideLiquids = SourbyCraftConfig.hideLiquids;
+        final boolean hideBE = SourbyCraftConfig.hideBlockEntities;
+        final java.util.Set<Block> beSet = beCandidates();
         final int maxY = level.paperConfig().anticheat.antiXray.maxBlockHeight;
         final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         LongArrayList newlyExposed = null;
+        // The CHANGED block itself: a freshly placed/updated block-entity (chest, spawner, …) must be
+        // hidden regardless of occlusion — it leaks through walls via the client BE list. Ores/fluids
+        // are handled by the neighbour-exposure sweep below (their own change re-scans the chunk).
+        if (hideBE && by <= maxY && by >= level.getMinY() && by <= level.getMaxY()) {
+            final LevelChunk cc = level.getChunkIfLoaded(bx >> 4, bz >> 4);
+            if (cc != null && beSet.contains(cc.getBlockState(pos.set(bx, by, bz)).getBlock())) {
+                newlyExposed = new LongArrayList(6);
+                newlyExposed.add(BlockPos.asLong(bx, by, bz));
+            }
+        }
         for (final net.minecraft.core.Direction dir : DIRECTIONS) {
             final int nx = bx + dir.getStepX(), ny = by + dir.getStepY(), nz = bz + dir.getStepZ();
             if (ny < level.getMinY() || ny > level.getMaxY() || ny > maxY) continue;
             final LevelChunk nc = level.getChunkIfLoaded(nx >> 4, nz >> 4);
             if (nc == null) continue;
             final BlockState state = nc.getBlockState(pos.set(nx, ny, nz));
+            final Block block = state.getBlock();
+            // A block-entity neighbour is already hidden occlusion-independently from chunk send, so a
+            // neighbour change never newly-exposes it; only ores/fluids gain exposure here.
+            if (hideBE && beSet.contains(block)) continue;
             final boolean fluid = !state.getFluidState().isEmpty()
-                && !oreSet.contains(state.getBlock()) && !extraHidden.contains(state.getBlock());
+                && !oreSet.contains(block) && !extraHidden.contains(block);
             if (fluid) {
                 if (!hideLiquids) continue;
                 if (ny >= nc.getHeight(Heightmap.Types.OCEAN_FLOOR, nx & 15, nz & 15)) continue; // sky fluid
-            } else if (!isCandidate(state, oreSet, extraHidden, false)) {
+            } else if (!isCandidate(state, oreSet, extraHidden, beSet, hideBE, false)) {
                 continue;
             }
             if (!isExposed(level, nc, nx, ny, nz, fluidObscures, pos)) continue;
@@ -485,14 +519,47 @@ public final class OreReveal implements Listener {
         return s;
     }
 
-    /** Candidate = ore, operator-extra hidden block, or (when enabled) any fluid carrier. */
+    private static volatile it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<Block> BE_CANDIDATES;
+
+    /**
+     * Loot / dungeon-indicator BLOCK-ENTITIES that xray + ChestESP read straight from the client's
+     * chunk block-entity list — so they leak through walls even when fully enclosed, which is exactly
+     * why they are hidden regardless of cave-exposure (unlike ores, where Paper's engine already hides
+     * the occluded set). Hidden via SourbyEngine's stone block-update (removes the client-side
+     * block-entity), revealed on line of sight. Never added to Paper's hiddenBlocks — palette
+     * obfuscation leaves the block-entity in the packet and glitches the chest.
+     */
+    private static it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<Block> beCandidates() {
+        var s = BE_CANDIDATES;
+        if (s == null) {
+            final var set = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<Block>(64);
+            java.util.Collections.addAll(set,
+                Blocks.CHEST, Blocks.TRAPPED_CHEST, Blocks.ENDER_CHEST, Blocks.BARREL,
+                Blocks.HOPPER, Blocks.DISPENSER, Blocks.DROPPER,
+                Blocks.FURNACE, Blocks.BLAST_FURNACE, Blocks.SMOKER,
+                Blocks.BREWING_STAND, Blocks.BEACON,
+                Blocks.SPAWNER, Blocks.TRIAL_SPAWNER, Blocks.VAULT,
+                Blocks.DECORATED_POT);
+            for (final Block b : net.minecraft.core.registries.BuiltInRegistries.BLOCK) {
+                if (b instanceof net.minecraft.world.level.block.ShulkerBoxBlock) set.add(b);
+            }
+            BE_CANDIDATES = s = set;
+        }
+        return s;
+    }
+
+    /** Candidate = ore, block-entity (when enabled), operator-extra hidden block, or (when enabled) any fluid carrier. */
     private static boolean isCandidate(final BlockState state,
                                        final java.util.Set<Block> oreSet,
                                        final java.util.Set<Block> extraHidden,
+                                       final java.util.Set<Block> beSet,
+                                       final boolean hideBE,
                                        final boolean includeFluids) {
-        if (oreSet.contains(state.getBlock())) return true;
+        final Block block = state.getBlock();
+        if (oreSet.contains(block)) return true;
+        if (hideBE && beSet.contains(block)) return true;
         if (includeFluids && !state.getFluidState().isEmpty()) return true;
-        return !extraHidden.isEmpty() && extraHidden.contains(state.getBlock());
+        return !extraHidden.isEmpty() && extraHidden.contains(block);
     }
 
     /** Exposed = any of the 6 neighbours is non-occluding (and, with fluid-obscures, not a fluid). */
@@ -611,8 +678,13 @@ public final class OreReveal implements Listener {
             }
             if (keys != null) {
                 final LongArrayList resolved = new LongArrayList();
-                final long[] submitBuf = new long[Math.max(1, SourbyCraftConfig.raytraceMaxChecksPerCycle)];
-                int submitCount = 0;
+                // Cheap pass over EVERY key: reveal point-blank, prune far, resolve already-confirmed,
+                // and collect the in-range keys that still need a line-of-sight ray. The ray budget is
+                // then spent round-robin across that collected list (cursor below), so with a dense
+                // pending set — every chest in a base is hidden occlusion-independently — an occluded
+                // block that never confirms cannot permanently starve the rays of a block further down
+                // the iteration order. Without this, chests past the first `budget` slots never reveal.
+                final LongArrayList rayable = new LongArrayList();
                 for (final long key : keys) {
                     // Already revealed by a worker confirm since the snapshot: hand off to Phase B.
                     if (VisibilityCache.isVisible(visible, key)) { resolved.add(key); continue; }
@@ -631,11 +703,19 @@ public final class OreReveal implements Listener {
                         resolved.add(key); // client no longer holds the chunk; re-send re-hides (C4)
                         continue;
                     }
-                    if (dsq <= distanceSq && submitCount < submitBuf.length) {
-                        submitBuf[submitCount++] = key; // worker reveals + marks visible on sight
-                    }
+                    if (dsq <= distanceSq) rayable.add(key); // worker reveals + marks visible on sight
                 }
-                if (submitCount > 0) RayTraceWorker.submitBatch(player, submitBuf, submitCount);
+                final int rn = rayable.size();
+                if (rn > 0) {
+                    final int budget = Math.max(1, SourbyCraftConfig.raytraceMaxChecksPerCycle);
+                    final long[] submitBuf = new long[Math.min(budget, rn)];
+                    int rstart = PENDING_CURSOR.getOrDefault(pid, 0);
+                    if (rstart >= rn || rstart < 0) rstart = 0;
+                    final int submitCount = Math.min(budget, rn);
+                    for (int i = 0; i < submitCount; i++) submitBuf[i] = rayable.getLong((rstart + i) % rn);
+                    PENDING_CURSOR.put(pid, (rstart + submitCount) % rn);
+                    RayTraceWorker.submitBatch(player, submitBuf, submitCount);
+                }
                 if (!resolved.isEmpty()) {
                     synchronized (pending) {
                         for (int i = 0; i < resolved.size(); i++) pending.remove(resolved.getLong(i));
@@ -667,7 +747,13 @@ public final class OreReveal implements Listener {
             final double dsq = eye.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
             if (dsq <= NEAR_DISTANCE_SQUARED) { VisibilityCache.recordHit(visible, key); continue; } // grace
             if (dsq > pruneSq) {
-                synchronized (visible) { visible.remove(key); } // chunk gone client-side; re-send re-hides
+                // Too far to have line of sight — definitely out of view. Drop tracking and send ONE
+                // backstop stone update: if the client still holds this chunk (view distance > prune
+                // radius) a revealed ore/chest would otherwise stay x-rayable; if the chunk is already
+                // unloaded the update is harmlessly ignored. It lands back in pending for a single
+                // cycle, then Phase A prunes it as out-of-range — no lasting churn.
+                synchronized (visible) { visible.remove(key); }
+                rehide.add(key);
                 continue;
             }
             if (budget <= 0) continue; // ray budget spent this cycle; this ore is re-checked next cycle
@@ -787,6 +873,7 @@ public final class OreReveal implements Listener {
     private static void clearPlayer(final UUID id) {
         PENDING.remove(id);
         REVAL_CURSOR.remove(id);
+        PENDING_CURSOR.remove(id);
         VisibilityCache.clear(id); // bumps the epoch: in-flight ray results are discarded
         EntityVisibilityCheck.clear(id);
     }

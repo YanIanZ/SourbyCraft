@@ -112,11 +112,19 @@ public final class RayTraceWorker {
                         // later. markVisible is epoch-guarded, so a reveal racing a teleport is dropped;
                         // we gate the packet on the same epoch to avoid revealing into a stale eye.
                         if (VisibilityCache.epoch(playerId) != epoch) continue;
+                        // Folia: this runs on a VIRTUAL thread, off the block's owning region, so
+                        // Level.getBlockState/isLoaded NPE here (the off-region getBlockState trap that
+                        // produced "RayTraceWorker check failed: NullPointerException"). Read the real
+                        // state through getChunkIfLoaded — the same loaded-chunk-only accessor
+                        // OcclusionUtil uses — which is safe from any thread. Packet send is thread-safe
+                        // (netty queue). Mark visible ONLY when we can also send the reveal, else the ore
+                        // would be cached-visible but stuck showing stone (reveal never delivered).
+                        final int cx = BlockPos.getX(key) >> 4, cz = BlockPos.getZ(key) >> 4;
+                        final net.minecraft.world.level.chunk.LevelChunk chunk = level.getChunkIfLoaded(cx, cz);
+                        if (chunk == null) continue; // not loaded here; reveal cycle retries next tick
                         VisibilityCache.markVisible(playerId, key, epoch);
                         final BlockPos p = BlockPos.of(key);
-                        if (level.isLoaded(p)) {
-                            player.connection.send(new ClientboundBlockUpdatePacket(p, level.getBlockState(p)));
-                        }
+                        player.connection.send(new ClientboundBlockUpdatePacket(p, chunk.getBlockState(p)));
                     }
                 }
             } catch (Throwable t) {
