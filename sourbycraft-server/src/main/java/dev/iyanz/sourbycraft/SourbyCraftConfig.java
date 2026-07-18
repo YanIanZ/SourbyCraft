@@ -415,6 +415,13 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.perf.knob.Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(
                 cfgBool("perf.ai.goal-selector-inactive-throttle",
                     me.earthme.luminol.config.modules.optimizations.EntityGoalSelectorInactiveTickConfig.enabled));
+            // Villager lobotomize (Purpur, via Luminol): skip the full brain tick for a villager that
+            // is physically confined to a single block (a trading-hall villager that cannot path
+            // anywhere) — trading + restock still run, only the wasted pathfinding/brain work is cut.
+            // Reloadable via /sourbycraft reload. Default ON: it only affects genuinely-stuck villagers
+            // (the exact lag case) and is a no-op for any villager that can move.
+            me.earthme.luminol.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeEnabled =
+                cfgBool("perf.villager-lobotomize", true);
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("load-gated knob operator bridge failed; using knob defaults", t);
         }
@@ -538,6 +545,7 @@ public class SourbyCraftConfig {
         seed(f, changed, "perf.ai.throttle-tick-interval", 4, "When AI is throttled, run aiStep only every N ticks.");
         seed(f, changed, "perf.ai.goal-selector-inactive-throttle", true, "Throttle the AI goal-selector to 1-in-20 ticks for inactive mobs (behaviour-neutral). Perf-engine also forces this on under load.");
         seed(f, changed, "perf.entity-limiter.enabled", false, "Master gate for the per-region per-entity-type tick/removal limiter (sourby_entity_limits.yml). Off = no throttling; the perf-engine turns it on under load.");
+        seed(f, changed, "perf.villager-lobotomize", true, "Skip the full AI/brain tick for a villager physically stuck in a single block (a trading-hall villager that cannot path anywhere). Trading + restocking still work — only the wasted pathfinding is cut. No-op for any villager that can move. Reloadable.");
         seed(f, changed, "perf.lag-machine.disable-saving-snowballs", true, "Skip NBT save for snowballs so a mass-spawn lag machine can't persist thousands of throwaway projectiles (ENFORCED: Snowball#shouldBeSaved). No gameplay loss — they expire in seconds.");
         seed(f, changed, "perf.lag-machine.disable-saving-fireworks", true, "Skip NBT save for firework rockets (ENFORCED: FireworkRocketEntity#shouldBeSaved). Rockets live ~1-2s and detonate; elytra-attached rockets are never saved anyway.");
         seed(f, changed, "perf.lag-machine.max-projectile-loads-per-tick", 10, "Max projectile-triggered chunk loads per tick. 0 = unlimited.");
