@@ -86,6 +86,17 @@ public final class KnobEnforcer {
         enforceEntityLimiterGate();
         enforceEntityLimiterScale();
         enforceGoalSelectorInterval();
+        enforceSaveSuppress();
+    }
+
+    /**
+     * Push the snowball/firework save-suppression knobs onto the {@code SaveSuppress} holder read by
+     * {@code Snowball#shouldBeSaved} / {@code FireworkRocketEntity#shouldBeSaved} (r29 — previously
+     * these knobs were set-only theater with no reader). On by default (base default true).
+     */
+    private static void enforceSaveSuppress() {
+        dev.iyanz.sourbycraft.perf.knob.SaveSuppress.snowballs = Knobs.LAG_MACHINE_DISABLE_SAVING_SNOWBALLS.get();
+        dev.iyanz.sourbycraft.perf.knob.SaveSuppress.fireworks = Knobs.LAG_MACHINE_DISABLE_SAVING_FIREWORKS.get();
     }
 
     private static void enforceProjectileCaps() {

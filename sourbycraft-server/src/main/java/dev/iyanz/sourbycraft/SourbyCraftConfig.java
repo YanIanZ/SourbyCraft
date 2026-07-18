@@ -529,19 +529,19 @@ public class SourbyCraftConfig {
         }
 
         // --- Knobs ---
-        seed(f, changed, "perf.entity-tick-rate", 20, "Skip-rate for entity ticking. 1 = every tick (vanilla), 20 = once/sec.");
+        seed(f, changed, "perf.entity-tick-rate", 1, "RESERVED (no in-tick actuator on this base — no effect). Entity ticking is governed by the entity activation range + the per-region Kaiiju limiter instead; kept for compatibility.");
         seed(f, changed, "perf.ai.throttle-beyond-distance", 0, "Distance (blocks) past nearest player to throttle mob AI. 0 = disabled.");
         seed(f, changed, "perf.ai.throttle-tick-interval", 4, "When AI is throttled, run aiStep only every N ticks.");
         seed(f, changed, "perf.ai.goal-selector-inactive-throttle", true, "Throttle the AI goal-selector to 1-in-20 ticks for inactive mobs (behaviour-neutral). Perf-engine also forces this on under load.");
         seed(f, changed, "perf.entity-limiter.enabled", false, "Master gate for the per-region per-entity-type tick/removal limiter (sourby_entity_limits.yml). Off = no throttling; the perf-engine turns it on under load.");
-        seed(f, changed, "perf.lag-machine.disable-saving-snowballs", true, "Skip NBT save for snowballs (known lag-machine vector).");
-        seed(f, changed, "perf.lag-machine.disable-saving-fireworks", true, "Skip NBT save for firework rockets.");
+        seed(f, changed, "perf.lag-machine.disable-saving-snowballs", true, "Skip NBT save for snowballs so a mass-spawn lag machine can't persist thousands of throwaway projectiles (ENFORCED: Snowball#shouldBeSaved). No gameplay loss — they expire in seconds.");
+        seed(f, changed, "perf.lag-machine.disable-saving-fireworks", true, "Skip NBT save for firework rockets (ENFORCED: FireworkRocketEntity#shouldBeSaved). Rockets live ~1-2s and detonate; elytra-attached rockets are never saved anyway.");
         seed(f, changed, "perf.lag-machine.max-projectile-loads-per-tick", 10, "Max projectile-triggered chunk loads per tick. 0 = unlimited.");
         seed(f, changed, "perf.lag-machine.max-projectile-loads-per-projectile", 10, "Max chunk loads a single projectile may trigger. 0 = unlimited.");
-        seed(f, changed, "perf.lag-machine.remove-excess-minecarts", false, "Remove excess minecarts on collision.");
-        seed(f, changed, "perf.lag-machine.excess-minecarts-limit", 10, "Threshold for excess minecarts at a collision point.");
-        seed(f, changed, "perf.lag-machine.remove-excess-boats", false, "Remove excess boats on collision.");
-        seed(f, changed, "perf.lag-machine.excess-boats-limit", 10, "Threshold for excess boats at a collision point.");
+        seed(f, changed, "perf.lag-machine.remove-excess-minecarts", false, "RESERVED (no in-tick actuator on this base — no effect). Use the per-region Kaiiju entity limiter (perf.entity-limiter) to cap minecarts instead.");
+        seed(f, changed, "perf.lag-machine.excess-minecarts-limit", 10, "RESERVED — paired with remove-excess-minecarts (no effect).");
+        seed(f, changed, "perf.lag-machine.remove-excess-boats", false, "RESERVED (no in-tick actuator on this base — no effect). Use the per-region Kaiiju entity limiter (perf.entity-limiter) to cap boats instead.");
+        seed(f, changed, "perf.lag-machine.excess-boats-limit", 10, "RESERVED — paired with remove-excess-boats (no effect).");
 
         // --- Sensor ---
         seed(f, changed, "perf.sensor.enabled", true, "Master switch for the multi-signal load sensor + self-tune loop.");

@@ -98,17 +98,20 @@ public final class SelfTuneController {
         SourbyLogger.info("self-tune [tier-" + tier + "] ENFORCED:"
             + " projectile-loads/tick=" + Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.get()
             + " projectile-loads/projectile=" + Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_PROJECTILE.get()
-            + " ai-inactive-throttle=" + (aiThrottled ? "on" : "off")
+            + " ai-distance-throttle=" + (aiThrottled ? "on" : "off")
             + " (dist=" + Knobs.AI_THROTTLE_BEYOND_DISTANCE.get()
             + " interval=" + Knobs.AI_THROTTLE_TICK_INTERVAL.get() + ")"
             + " goal-selector-inactive-throttle=" + (goalSelector ? "on" : "off")
             + " goal-selector-interval=" + Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.get()
             + " entity-limiter=" + (Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.get() ? "on" : "off")
-            + " entity-limiter-scale=" + Knobs.KAIIJU_ENTITY_LIMITER_SCALE.get());
-        SourbyLogger.debug("self-tune [tier-" + tier + "] set-only (no in-tick actuator on this base):"
-            + " entity-tick-rate=" + Knobs.ENTITY_TICK_RATE.get()
+            + " entity-limiter-scale=" + Knobs.KAIIJU_ENTITY_LIMITER_SCALE.get()
             + " disable-saving-snowballs=" + Knobs.LAG_MACHINE_DISABLE_SAVING_SNOWBALLS.get()
-            + " disable-saving-fireworks=" + Knobs.LAG_MACHINE_DISABLE_SAVING_FIREWORKS.get()
+            + " disable-saving-fireworks=" + Knobs.LAG_MACHINE_DISABLE_SAVING_FIREWORKS.get());
+        // The knobs below are RESERVED: config surface exists but has no in-tick actuator on the
+        // current base, so they intentionally do nothing (kept for compatibility / future wiring, and
+        // to avoid a config-breaking removal). Logged honestly so nobody reads them as "applied".
+        SourbyLogger.debug("self-tune [tier-" + tier + "] reserved (no in-tick actuator — no effect):"
+            + " entity-tick-rate=" + Knobs.ENTITY_TICK_RATE.get()
             + " remove-excess-minecarts=" + Knobs.LAG_MACHINE_REMOVE_EXCESS_MINECARTS.get()
             + " (limit=" + Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.get() + ")"
             + " remove-excess-boats=" + Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.get()

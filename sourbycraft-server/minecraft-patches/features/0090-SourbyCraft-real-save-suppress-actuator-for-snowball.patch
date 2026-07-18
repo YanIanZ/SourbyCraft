@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 18 Jul 2026 15:45:28 +0700
+Subject: [PATCH] SourbyCraft: real save-suppress actuator for snowballs +
+ firework rockets
+
+
+diff --git a/net/minecraft/world/entity/projectile/FireworkRocketEntity.java b/net/minecraft/world/entity/projectile/FireworkRocketEntity.java
+index dafb6c76a4b2d8c0a3fa9405c563e0ab9319584e..b7867ea3dd8298f85a0c059d8872c0be08dc9d81 100644
+--- a/net/minecraft/world/entity/projectile/FireworkRocketEntity.java
++++ b/net/minecraft/world/entity/projectile/FireworkRocketEntity.java
+@@ -102,6 +102,15 @@ public class FireworkRocketEntity extends Projectile implements ItemSupplier {
+         entityData.define(DATA_SHOT_AT_ANGLE, false);
+     }
+ 
++    // SourbyCraft - real actuator for perf.lag-machine.disable-saving-fireworks (was set-only). A
++    // firework rocket lives ~1-2s and detonates; persisting its NBT is a lag-machine vector. When
++    // suppressed it is dropped on save/unload instead. A rocket ATTACHED to an entity (elytra boost)
++    // is never saved anyway. On by SourbyCraft default.
++    @Override
++    public boolean shouldBeSaved() {
++        return !dev.iyanz.sourbycraft.perf.knob.SaveSuppress.fireworks && super.shouldBeSaved();
++    }
++
+     @Override
+     public boolean shouldRenderAtSqrDistance(final double distance) {
+         return distance < 4096.0 && !this.isAttachedToEntity();
+diff --git a/net/minecraft/world/entity/projectile/throwableitemprojectile/Snowball.java b/net/minecraft/world/entity/projectile/throwableitemprojectile/Snowball.java
+index d183a75c87626c680b96016c535f31acdfbc710e..6efedfa9b4721f4f662b28fbf07b36023c9a1d62 100644
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/Snowball.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/Snowball.java
+@@ -35,6 +35,15 @@ public class Snowball extends ThrowableItemProjectile {
+         return Items.SNOWBALL;
+     }
+ 
++    // SourbyCraft - real actuator for perf.lag-machine.disable-saving-snowballs (was set-only). A
++    // snowball is a throwaway projectile; persisting its NBT is a known lag-machine vector (mass-spawn
++    // → every chunk save writes + later re-loads/ticks thousands). When suppressed it is dropped on
++    // save/unload instead — no gameplay loss (it would expire in seconds). On by SourbyCraft default.
++    @Override
++    public boolean shouldBeSaved() {
++        return !dev.iyanz.sourbycraft.perf.knob.SaveSuppress.snowballs && super.shouldBeSaved();
++    }
++
+     private ParticleOptions getParticle() {
+         ItemStack item = this.getItem();
+         return item.isEmpty() ? ParticleTypes.ITEM_SNOWBALL : new ItemParticleOption(ParticleTypes.ITEM, ItemStackTemplate.fromNonEmptyStack(item));
