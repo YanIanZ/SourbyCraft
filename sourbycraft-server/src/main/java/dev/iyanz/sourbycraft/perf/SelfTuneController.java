@@ -55,6 +55,12 @@ public final class SelfTuneController {
     // restore them exactly (scale 1.0, interval 20 = no regression); ORANGE and below tighten.
     private static volatile double baselineEntityLimiterScale = 1.0D;
     private static volatile int baselineGoalSelectorInterval = -1;
+    // F-perfup2: chunk-throughput baselines (Paper defaults 75 / 100 / -1). Captured on first tier
+    // change so GREEN/YELLOW restore them exactly (no regression); ORANGE and below cap them so the
+    // aggregate per-tick chunk cost across all players stays bounded — the view-distance ceiling lever.
+    private static volatile double baselineChunkSendRate = Double.NaN;
+    private static volatile double baselineChunkLoadRate = Double.NaN;
+    private static volatile double baselineChunkGenerateRate = Double.NaN;
     private static volatile boolean enabled = true;
 
     private SelfTuneController() {}
@@ -105,6 +111,9 @@ public final class SelfTuneController {
             + " goal-selector-interval=" + Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.get()
             + " entity-limiter=" + (Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.get() ? "on" : "off")
             + " entity-limiter-scale=" + Knobs.KAIIJU_ENTITY_LIMITER_SCALE.get()
+            + " chunk-send-rate=" + Knobs.CHUNK_SEND_RATE.get()
+            + " chunk-load-rate=" + Knobs.CHUNK_LOAD_RATE.get()
+            + " chunk-generate-rate=" + Knobs.CHUNK_GENERATE_RATE.get()
             + " disable-saving-snowballs=" + Knobs.LAG_MACHINE_DISABLE_SAVING_SNOWBALLS.get()
             + " disable-saving-fireworks=" + Knobs.LAG_MACHINE_DISABLE_SAVING_FIREWORKS.get());
         // The knobs below are RESERVED: config surface exists but has no in-tick actuator on the
@@ -134,6 +143,10 @@ public final class SelfTuneController {
         // NMS-scalar deep-enforcement: snapshot the base magnitudes (scale 1.0, interval 20).
         baselineEntityLimiterScale = Knobs.KAIIJU_ENTITY_LIMITER_SCALE.get();
         baselineGoalSelectorInterval = Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.get();
+        // F-perfup2: snapshot the operator/base chunk-rate defaults (75 / 100 / -1).
+        baselineChunkSendRate = Knobs.CHUNK_SEND_RATE.get();
+        baselineChunkLoadRate = Knobs.CHUNK_LOAD_RATE.get();
+        baselineChunkGenerateRate = Knobs.CHUNK_GENERATE_RATE.get();
     }
 
     private static void applyTier(final Tier tier) {
@@ -150,6 +163,16 @@ public final class SelfTuneController {
                 Knobs.AI_THROTTLE_TICK_INTERVAL.set(3);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(25);
+                // F-perfup2: engage a GENTLE chunk cap already at YELLOW — the first non-idle tier.
+                // The perf sensor flaps YELLOW<->EMERGENCY near the wall; if the chunk caps only began
+                // at ORANGE, generate-rate would bounce back to the -1 (uncapped) baseline every YELLOW
+                // window and the gen-burst stalls would return. Capping from YELLOW keeps chunk work
+                // bounded across the whole flap band; only a truly idle GREEN restores full-speed
+                // streaming. Gentle here (mild send trim, generous but FINITE gen cap) so a lightly
+                // loaded server barely notices, while the -1 firehose is eliminated.
+                Knobs.CHUNK_SEND_RATE.set(60.0D);
+                Knobs.CHUNK_LOAD_RATE.set(85.0D);
+                Knobs.CHUNK_GENERATE_RATE.set(50.0D); // finite: covers walk/sprint/elytra, bounds the firehose
             }
             case ORANGE -> {
                 // Baseline 0 = unlimited: divide-down would turn it into the HARSHEST cap (1).
@@ -168,6 +191,11 @@ public final class SelfTuneController {
                 // NMS-scalar deep-enforcement: gently scale down entity caps + widen goal-selector cadence.
                 Knobs.KAIIJU_ENTITY_LIMITER_SCALE.set(0.85D);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(30);
+                // F-perfup2: cap per-player chunk throughput so the aggregate per-tick chunk cost
+                // across all players stays bounded (the high-view-distance ceiling lever).
+                Knobs.CHUNK_SEND_RATE.set(50.0D);
+                Knobs.CHUNK_LOAD_RATE.set(70.0D);
+                Knobs.CHUNK_GENERATE_RATE.set(40.0D); // finite cap replaces the -1 uncapped baseline
             }
             case RED -> {
                 Knobs.LAG_MACHINE_MAX_PROJECTILE_LOADS_PER_TICK.set(baselineProjectilePerTick <= 0 ? 5 : Math.max(1, baselineProjectilePerTick / 4)); // 0 = unlimited baseline
@@ -183,6 +211,10 @@ public final class SelfTuneController {
                 // NMS-scalar deep-enforcement: scale entity caps to 0.75, widen goal-selector cadence to 40.
                 Knobs.KAIIJU_ENTITY_LIMITER_SCALE.set(0.75D);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(40);
+                // F-perfup2: tighter chunk-throughput caps.
+                Knobs.CHUNK_SEND_RATE.set(35.0D);
+                Knobs.CHUNK_LOAD_RATE.set(55.0D);
+                Knobs.CHUNK_GENERATE_RATE.set(25.0D);
                 MemoryPressure.trimSoftCaches();
             }
             case EMERGENCY -> {
@@ -199,6 +231,10 @@ public final class SelfTuneController {
                 // NMS-scalar deep-enforcement: halve entity caps, widen goal-selector cadence to 60.
                 Knobs.KAIIJU_ENTITY_LIMITER_SCALE.set(0.5D);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(60);
+                // F-perfup2: hardest chunk-throughput caps — the biggest per-tick relief at the wall.
+                Knobs.CHUNK_SEND_RATE.set(20.0D);
+                Knobs.CHUNK_LOAD_RATE.set(40.0D);
+                Knobs.CHUNK_GENERATE_RATE.set(15.0D);
                 MemoryPressure.trimSoftCaches();
             }
         }
@@ -225,5 +261,12 @@ public final class SelfTuneController {
         // NMS-scalar deep-enforcement: GREEN/YELLOW restore the base magnitudes (scale 1.0, interval 20).
         Knobs.KAIIJU_ENTITY_LIMITER_SCALE.set(baselineEntityLimiterScale);
         if (baselineGoalSelectorInterval != -1) Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(baselineGoalSelectorInterval);
+        // F-perfup2: GREEN/YELLOW restore the base chunk-rate defaults exactly (75 / 100 / -1) — no
+        // regression, full-speed chunk streaming when the server is healthy.
+        if (!Double.isNaN(baselineChunkSendRate)) {
+            Knobs.CHUNK_SEND_RATE.set(baselineChunkSendRate);
+            Knobs.CHUNK_LOAD_RATE.set(baselineChunkLoadRate);
+            Knobs.CHUNK_GENERATE_RATE.set(baselineChunkGenerateRate);
+        }
     }
 }
