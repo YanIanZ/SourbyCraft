@@ -47,19 +47,63 @@ public final class HudBars {
 
     private HudBars() {}
 
+    // Permission gating the admin auto-HUD on join. Ops get it by default (unregistered permission
+    // defaults to OP); grant it to non-op staff to give them the bars too.
+    public static final String AUTO_PERMISSION = "sourbycraft.hud.auto";
+
+    // Per-player, per-bar OPT-OUT flag persisted in the player's PDC so that turning a bar off STICKS
+    // across rejoins/restarts (otherwise the join auto-show would re-enable it every time). PDC value
+    // (byte) 1 = opted out (do not auto-show); absent/0 = auto-show for admins.
+    private static final org.bukkit.NamespacedKey OPTOUT_TPS =
+        new org.bukkit.NamespacedKey("sourbycraft", "hud_tps_optout");
+    private static final org.bukkit.NamespacedKey OPTOUT_RAM =
+        new org.bukkit.NamespacedKey("sourbycraft", "hud_ram_optout");
+
+    private static boolean isOptedOut(final Player player, final boolean tps) {
+        final Byte v = player.getPersistentDataContainer().get(
+            tps ? OPTOUT_TPS : OPTOUT_RAM, org.bukkit.persistence.PersistentDataType.BYTE);
+        return v != null && v != 0;
+    }
+
+    private static void setOptedOut(final Player player, final boolean tps, final boolean out) {
+        final var pdc = player.getPersistentDataContainer();
+        final var key = tps ? OPTOUT_TPS : OPTOUT_RAM;
+        if (out) pdc.set(key, org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
+        else pdc.remove(key);
+    }
+
     /** Toggle a bar for the player; returns true when the bar is now SHOWN. */
     public static boolean toggle(final Player player, final boolean tps) {
+        final boolean show = setShown(player, tps, !(tps ? TPS_VIEWERS : RAM_VIEWERS).contains(player.getUniqueId()));
+        // Manual toggle records the choice so the admin auto-HUD respects it on the next join: hiding
+        // opts out (stays hidden), showing opts back in (auto-shows again).
+        setOptedOut(player, tps, !show);
+        return show;
+    }
+
+    /** Force a bar shown/hidden without touching the opt-out flag. Returns whether it is now shown. */
+    private static boolean setShown(final Player player, final boolean tps, final boolean show) {
         final Set<UUID> viewers = tps ? TPS_VIEWERS : RAM_VIEWERS;
         final BossBar bar = tps ? TPS_BAR : RAM_BAR;
         final UUID id = player.getUniqueId();
-        final boolean show = viewers.add(id);
-        if (!show) viewers.remove(id);
+        if (show) viewers.add(id); else viewers.remove(id);
         ANY.compute(id, (k, v) -> TPS_VIEWERS.contains(k) || RAM_VIEWERS.contains(k) ? Boolean.TRUE : null);
         // Show/hide on the player's owning region thread (packet-adjacent audience op).
         player.getScheduler().run(org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
             task -> { if (show) player.showBossBar(bar); else player.hideBossBar(bar); }, null);
         ensureTask();
         return show;
+    }
+
+    /**
+     * Admin auto-HUD: on join, show both bars to a player with {@link #AUTO_PERMISSION} UNLESS they
+     * have opted a given bar out (persisted). Non-admins are untouched (they can still toggle manually
+     * with /tpsbar /rambar). Regular players never get the bars automatically.
+     */
+    public static void autoShowOnJoin(final Player player) {
+        if (!player.hasPermission(AUTO_PERMISSION)) return;
+        if (!isOptedOut(player, true)) setShown(player, true, true);
+        if (!isOptedOut(player, false)) setShown(player, false, true);
     }
 
     public static void onQuit(final Player player) {
@@ -129,8 +173,18 @@ public final class HudBars {
         RAM_BAR.color(pct < 0.60 ? BossBar.Color.GREEN : pct < 0.85 ? BossBar.Color.YELLOW : BossBar.Color.RED);
     }
 
-    /** Bukkit listener holder — registered once by the command registrar. */
+    /** Bukkit listener holder — registered once by the command registrar. Handles the admin
+     *  auto-HUD on join and viewer cleanup on quit. */
     public static final class QuitListener implements org.bukkit.event.Listener {
+        @org.bukkit.event.EventHandler
+        public void onJoin(org.bukkit.event.player.PlayerJoinEvent e) {
+            // Hop to the player's region for the audience/bossbar op (Folia). A small delay lets the
+            // client finish the join handshake before the bar is added.
+            final Player p = e.getPlayer();
+            p.getScheduler().runDelayed(org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
+                task -> { try { HudBars.autoShowOnJoin(p); } catch (Throwable ignored) {} }, null, 20L);
+        }
+
         @org.bukkit.event.EventHandler
         public void onQuit(org.bukkit.event.player.PlayerQuitEvent e) {
             HudBars.onQuit(e.getPlayer());
