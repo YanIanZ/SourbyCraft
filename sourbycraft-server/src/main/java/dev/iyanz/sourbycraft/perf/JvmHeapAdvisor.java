@@ -94,14 +94,25 @@ public final class JvmHeapAdvisor {
             // OutOfMemoryError in the log ("crash OOM" with a healthy-looking heap). Warn when the
             // headroom is under ~20% and print the exact right-sized flag.
             if (container > 0 && max > 0 && max > container * 0.80) {
-                long suggested = Math.max(1L, (long) (container * 0.70) / (1024L * 1024 * 1024));
-                SourbyLogger.warn("jvm-heap: -Xmx " + fmt(max) + " leaves only "
-                        + dev.iyanz.sourbycraft.util.ContainerMemory.fmt(container - max)
-                        + " of the container's " + dev.iyanz.sourbycraft.util.ContainerMemory.fmt(container)
-                        + " for OFF-HEAP (netty/Geyser buffers, metaspace, threads). The panel kills on"
-                        + " total RSS — this is the silent 'crash OOM without a Java error'.");
-                SourbyLogger.warn("jvm-heap: set  -Xmx" + suggested + "G  (~70% of the container) and add"
-                        + " -XX:MaxDirectMemorySize=1G -XX:ZUncommitDelay=60 (ZGC) so RSS stays under the limit.");
+                final double gib = 1024.0 * 1024.0 * 1024.0;
+                long xmxG = Math.max(1L, Math.round(container * 0.67 / gib));
+                long softMb = Math.round(xmxG * 1024.0 * 0.85); // 85% of Xmx in MiB
+                // A single boxed, copy-paste-ready block — the earlier two-line WARN was easy to miss
+                // in the boot spam, so operators (this one included) kept the RSS-OOM startup. Print the
+                // exact panel command they should paste, derived from the detected container size.
+                final String cmd = "java -Xms1G -Xmx" + xmxG + "G -XX:+UseZGC -XX:+ZGenerational"
+                        + " -XX:SoftMaxHeapSize=" + softMb + "M -XX:ZUncommitDelay=60"
+                        + " -XX:MaxDirectMemorySize=1G -XX:+ExplicitGCInvokesConcurrent"
+                        + " --add-modules=jdk.incubator.vector -jar server.jar";
+                SourbyLogger.warn("==================== SourbyCraft: HEAP MISCONFIG ====================");
+                SourbyLogger.warn(" -Xmx " + fmt(max) + " in a "
+                        + dev.iyanz.sourbycraft.util.ContainerMemory.fmt(container) + " container leaves only "
+                        + dev.iyanz.sourbycraft.util.ContainerMemory.fmt(container - max) + " for OFF-HEAP");
+                SourbyLogger.warn(" (Geyser/netty buffers, metaspace, threads, ZGC). The panel kills on total");
+                SourbyLogger.warn(" RSS -> silent \"crash OOM\" with NO Java OutOfMemoryError in the log.");
+                SourbyLogger.warn(" FIX - set your panel Startup command to:");
+                SourbyLogger.warn("   " + cmd);
+                SourbyLogger.warn("=====================================================================");
             }
 
             // The Pterodactyl scenario: Xms == Xmx >= 4G means the panel
