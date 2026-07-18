@@ -136,7 +136,18 @@ public final class SelfTuneController {
     private static void applyTier(final Tier tier) {
         switch (tier) {
             case GREEN -> restoreBaseline();
-            case YELLOW -> restoreBaseline();
+            case YELLOW -> {
+                // r26: YELLOW was a no-op (restoreBaseline), so nothing happened until TPS < ORANGE
+                // — the operator's "perf tidak bekerja saat tps down". YELLOW now applies the
+                // LIGHTEST real relief: distant-mob AI throttling + the inactive goal-selector
+                // throttle. Both only affect mobs far from players / already inactive, so gameplay
+                // near players is untouched; everything else stays at the operator baseline.
+                restoreBaseline();
+                Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(96);
+                Knobs.AI_THROTTLE_TICK_INTERVAL.set(2);
+                Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
+                Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(25);
+            }
             case ORANGE -> {
                 // Baseline 0 = unlimited: divide-down would turn it into the HARSHEST cap (1).
                 // Substitute per-tier absolute defaults instead.

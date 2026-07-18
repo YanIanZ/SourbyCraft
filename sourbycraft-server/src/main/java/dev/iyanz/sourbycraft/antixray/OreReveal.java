@@ -193,11 +193,35 @@ public final class OreReveal implements Listener {
             final SourbyCraftWorldConfig wc = SourbyCraftWorldConfig.get(level);
             final boolean fluidObscures = SourbyCraftConfig.fluidObscures && wc.fluidObscures;
 
-            // Player-independent scan, computed once per chunk and cached. Per-send work is now
-            // just iterating the (small) exposed lists + a per-player pending/visibility check.
-            final CacheEntry exposed = getOrComputeExposed(level, chunk, extraHiddenFor(level, wc), fluidObscures);
-            if (exposed.ores().length == 0 && exposed.fluids().length == 0) return;
-            hideExposedFor(player, level, exposed.ores(), exposed.fluids());
+            // Player-independent scan, computed once per chunk and cached. CACHE HIT: apply inline
+            // (cheap — iterate the small exposed lists). CACHE MISS: the ~98k-block section scan used
+            // to run HERE, on the region thread, inside the chunk-send burst — with two players
+            // exploring, a continuous stream of fresh chunks each paid a multi-ms scan on the ticking
+            // thread (a measurable slice of the sub-20-TPS exploration grind). The miss path now
+            // scans on a virtual thread and applies the hide when done. Safety: ORES are already
+            // stone in the chunk packet itself (paper patch 0020), so the async gap leaks nothing
+            // for ores; chests/liquids get their stone update a few ms later — an acceptable window
+            // (the same class of gap as Paper's own async obfuscation executor).
+            final java.util.Set<Block> extraHidden = extraHiddenFor(level, wc);
+            final CacheEntry cached = getCachedExposed(level, chunk);
+            if (cached != null) {
+                if (cached.ores().length == 0 && cached.fluids().length == 0) return;
+                hideExposedFor(player, level, cached.ores(), cached.fluids());
+                return;
+            }
+            dev.iyanz.sourbycraft.util.VirtualExecutor.run(() -> {
+                try {
+                    final CacheEntry exposed = getOrComputeExposed(level, chunk, extraHidden, fluidObscures);
+                    if (exposed.ores().length == 0 && exposed.fluids().length == 0) return;
+                    if (player.hasDisconnected()) return;
+                    hideExposedFor(player, level, exposed.ores(), exposed.fluids());
+                } catch (Throwable t) {
+                    if (CHUNK_SENT_FAILED_LOGGED.compareAndSet(false, true)) {
+                        dev.iyanz.sourbycraft.util.SourbyLogger.warn("[SourbyEngine] async chunk scan failed — "
+                            + "chunk left unmodified. Further occurrences suppressed. Cause: " + t);
+                    }
+                }
+            });
         } catch (Throwable t) {
             if (CHUNK_SENT_FAILED_LOGGED.compareAndSet(false, true)) {
                 dev.iyanz.sourbycraft.util.SourbyLogger.warn("[SourX] onChunkSent failed — leaving chunk "
@@ -275,6 +299,17 @@ public final class OreReveal implements Listener {
      * the per-level monitor so concurrent region sends on the same world never serialize on a scan;
      * a benign double-scan writes the same result twice.
      */
+    /** Cache-only lookup (no scan): fresh entry or {@code null} on miss/stale. Region-thread cheap. */
+    private static CacheEntry getCachedExposed(final ServerLevel level, final LevelChunk chunk) {
+        final Long2ObjectOpenHashMap<CacheEntry> perLevel = SCAN_CACHE.get(level);
+        if (perLevel == null) return null;
+        final long now = level.getGameTime();
+        synchronized (perLevel) {
+            final CacheEntry cached = perLevel.get(chunk.getPos().pack());
+            return cached != null && (now - cached.tick()) < SourbyCraftConfig.raytraceCacheTtlTicks ? cached : null;
+        }
+    }
+
     private static CacheEntry getOrComputeExposed(final ServerLevel level, final LevelChunk chunk,
                                                   final java.util.Set<Block> extraHidden, final boolean fluidObscures) {
         final long chunkKey = chunk.getPos().pack();

@@ -88,6 +88,22 @@ public final class JvmHeapAdvisor {
             } catch (Throwable ignored) {
             }
 
+            // Container-kill scenario (r26): Xmx too close to the container limit leaves no room
+            // for off-heap (netty/Geyser direct buffers, metaspace, thread stacks, mapped region
+            // files, ZGC bookkeeping) — the PANEL kills the container on RSS with no Java
+            // OutOfMemoryError in the log ("crash OOM" with a healthy-looking heap). Warn when the
+            // headroom is under ~20% and print the exact right-sized flag.
+            if (container > 0 && max > 0 && max > container * 0.80) {
+                long suggested = Math.max(1L, (long) (container * 0.70) / (1024L * 1024 * 1024));
+                SourbyLogger.warn("jvm-heap: -Xmx " + fmt(max) + " leaves only "
+                        + dev.iyanz.sourbycraft.util.ContainerMemory.fmt(container - max)
+                        + " of the container's " + dev.iyanz.sourbycraft.util.ContainerMemory.fmt(container)
+                        + " for OFF-HEAP (netty/Geyser buffers, metaspace, threads). The panel kills on"
+                        + " total RSS — this is the silent 'crash OOM without a Java error'.");
+                SourbyLogger.warn("jvm-heap: set  -Xmx" + suggested + "G  (~70% of the container) and add"
+                        + " -XX:MaxDirectMemorySize=1G -XX:ZUncommitDelay=60 (ZGC) so RSS stays under the limit.");
+            }
+
             // The Pterodactyl scenario: Xms == Xmx >= 4G means the panel
             // sees a fully-committed heap from tick 0 and the bar pegs.
             if (max >= fourGiB && min == max) {
