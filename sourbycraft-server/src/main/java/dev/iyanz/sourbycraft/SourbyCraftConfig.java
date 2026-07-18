@@ -144,7 +144,11 @@ public class SourbyCraftConfig {
     // the auto-provisioned jars to *.jar.disabled (operator-installed Via jars are never touched).
     public static boolean viaVersionAutoProvision = true;
 
-    public static boolean autoThrottleView = true;
+    // Default OFF (r31): changing the view distance at runtime forces every client to reload its
+    // chunk set — a visible screen flicker — and it is the ONLY client-visible perf actuator (AI
+    // throttle, Kaiiju limiter, projectile caps, save-suppress all act invisibly). Opt-in for
+    // operators who accept the flicker for the extra headroom; when on it only engages at RED+.
+    public static boolean autoThrottleView = false;
     public static int minViewDistance = 4;
     public static int compressionLevel = 4;
     public static int entityTickRate() {
@@ -635,11 +639,14 @@ public class SourbyCraftConfig {
         // operator file. Seed + document them here so the latency surface is discoverable. The
         // network-section header comment (set after the keys exist, below) covers the knobs that
         // live outside this TOML.
-        seed(f, changed, "network.auto-throttle-view", true,
-            "Dynamically drop each player's view distance under load (perf-engine). Fewer chunks in flight "
-            + "= less per-tick chunk-send work and lower client-perceived stall. Safe: only view distance.");
+        seed(f, changed, "network.auto-throttle-view", false,
+            "Dynamically drop each world's view distance under load (perf-engine). DEFAULT OFF: changing the "
+            + "view distance at runtime makes clients reload chunks — a visible SCREEN FLICKER — and it is the "
+            + "only client-visible actuator (AI throttle / entity limiter / projectile caps act invisibly). "
+            + "Turn on only if you accept the flicker for extra headroom; when on it engages only at RED/EMERGENCY.");
+        migrateSeededAutoThrottleView(f, changed); // flip the old seeded `true` off once (kills the flicker)
         seed(f, changed, "network.min-view-distance", 4,
-            "Floor for auto-throttle-view: view distance never drops below this many chunks.");
+            "Floor for auto-throttle-view (when enabled): view distance never drops below this many chunks.");
         seed(f, changed, "network.compression-level", 4,
             "zlib level (0-9) for packets above network-compression-threshold. Bridged live to Paper's "
             + "misc.compressionLevel when != 4. Lower (e.g. 1-3) = less CPU per compressed packet and "
@@ -826,6 +833,35 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.info(
                 "re-enabled anti-xray hide-liquids (SourbyEngine now re-hides cave fluids dynamically "
                 + "on loss of sight). Set antixray.hide-liquids=false to opt out.");
+        }
+    }
+
+    /**
+     * One-time flip of {@code network.auto-throttle-view} from the old seeded {@code true} to
+     * {@code false} (r31). Runtime view-distance stepping is the only client-visible perf actuator and
+     * makes clients reload chunks — a screen flicker the operator reported. Every pre-r31 install
+     * carries the seeded {@code true}, which would win over the new false default forever (the
+     * seeded-default trap), so flip it EXACTLY ONCE, gated on {@code network.auto-throttle-view-migrated}
+     * so an operator who deliberately turns it back on afterwards is never overridden again.
+     */
+    private static void migrateSeededAutoThrottleView(com.electronwill.nightconfig.core.file.CommentedFileConfig f,
+                                                      boolean[] changed) {
+        final Object done = f.get("network.auto-throttle-view-migrated");
+        if (done instanceof Boolean b && b) return; // already migrated
+        boolean flipped = false;
+        if (Boolean.TRUE.equals(f.get("network.auto-throttle-view"))) {
+            f.set("network.auto-throttle-view", false);
+            flipped = true;
+        }
+        f.set("network.auto-throttle-view-migrated", true);
+        f.setComment("network.auto-throttle-view-migrated",
+            "Internal: marks the one-time disable of runtime view-distance throttling (it flickered the "
+            + "client screen). Do not edit. Set network.auto-throttle-view=true yourself to re-enable it.");
+        changed[0] = true;
+        if (flipped) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                "disabled network.auto-throttle-view (runtime view-distance changes flickered the client "
+                + "screen; the invisible perf actuators handle load instead). Set it true to re-enable.");
         }
     }
 
