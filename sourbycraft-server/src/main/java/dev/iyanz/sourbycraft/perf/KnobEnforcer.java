@@ -72,6 +72,10 @@ public final class KnobEnforcer {
     private static volatile int lastEntityLimiterGate = Integer.MIN_VALUE; // 0/1, MIN_VALUE = never enforced
     private static volatile double lastEntityLimiterScale = Double.NaN;    // NaN = never enforced
     private static volatile int lastGoalSelectorInterval = Integer.MIN_VALUE; // MIN_VALUE = never enforced
+    // F-perfup2 chunk-throughput bridge (NaN = never enforced).
+    private static volatile double lastChunkSendRate = Double.NaN;
+    private static volatile double lastChunkLoadRate = Double.NaN;
+    private static volatile double lastChunkGenerateRate = Double.NaN;
 
     private KnobEnforcer() {}
 
@@ -87,6 +91,48 @@ public final class KnobEnforcer {
         enforceEntityLimiterScale();
         enforceGoalSelectorInterval();
         enforceSaveSuppress();
+        enforceChunkRates();
+    }
+
+    /**
+     * F-perfup2: push the chunk-throughput knobs onto Paper's
+     * {@code GlobalConfiguration.chunkLoadingBasic.playerMaxChunk{Send,Load,Generate}Rate}. Moonrise's
+     * {@code RegionizedPlayerChunkLoader} reads these LIVE every player-update cycle
+     * (via {@code PlatformHooks.configPlayerMax*Rate()}) to size per-player {@code StaggeredRateLimiter}s,
+     * so a runtime write takes effect on the next update — no NMS read-site patch needed. Base contract:
+     * a value {@code <= 0} means "unlimited" (Moonrise clamps to {@code MAX_RATE}), so the knob value is
+     * passed through verbatim, including the {@code -1} unlimited generate default at GREEN.
+     *
+     * <p>Guards on {@code GlobalConfiguration.get() != null}: enforceAll() can run at boot before the
+     * global config singleton is installed.
+     */
+    private static void enforceChunkRates() {
+        final io.papermc.paper.configuration.GlobalConfiguration cfg =
+            io.papermc.paper.configuration.GlobalConfiguration.get();
+        if (cfg == null || cfg.chunkLoadingBasic == null) return; // pre-config boot
+        final io.papermc.paper.configuration.GlobalConfiguration.ChunkLoadingBasic basic = cfg.chunkLoadingBasic;
+
+        final double send = Knobs.CHUNK_SEND_RATE.get();
+        if (send != lastChunkSendRate) {
+            basic.playerMaxChunkSendRate = send;
+            lastChunkSendRate = send;
+            SourbyLogger.debug("enforced perf.chunk.send-rate=" + send
+                + " -> GlobalConfiguration.chunkLoadingBasic.playerMaxChunkSendRate");
+        }
+        final double load = Knobs.CHUNK_LOAD_RATE.get();
+        if (load != lastChunkLoadRate) {
+            basic.playerMaxChunkLoadRate = load;
+            lastChunkLoadRate = load;
+            SourbyLogger.debug("enforced perf.chunk.load-rate=" + load
+                + " -> GlobalConfiguration.chunkLoadingBasic.playerMaxChunkLoadRate");
+        }
+        final double gen = Knobs.CHUNK_GENERATE_RATE.get();
+        if (gen != lastChunkGenerateRate) {
+            basic.playerMaxChunkGenerateRate = gen;
+            lastChunkGenerateRate = gen;
+            SourbyLogger.debug("enforced perf.chunk.generate-rate=" + gen
+                + " -> GlobalConfiguration.chunkLoadingBasic.playerMaxChunkGenerateRate");
+        }
     }
 
     /**

@@ -100,6 +100,37 @@ public final class Knobs {
     public static final IntKnob GOAL_SELECTOR_INACTIVE_TICK_INTERVAL =
         new IntKnob("perf.ai.goal-selector-interval", 20, 1, 200);
 
+    // === F-perfup2: chunk-throughput knobs (raise the player ceiling at high view-distance) ===
+    // At view-distance 10 with many players the tick wall is the chunk pipeline (each player streams
+    // 21x21=441 chunks). These three are bridged by KnobEnforcer onto Paper's
+    // GlobalConfiguration.chunkLoadingBasic fields, which Moonrise's RegionizedPlayerChunkLoader reads
+    // LIVE every update per player (feeding per-player StaggeredRateLimiters). Lowering the per-player
+    // rate spreads chunk send/load/gen over more ticks -> the aggregate per-tick cost across N players
+    // stays bounded -> MSPT flattens -> more players fit before EMERGENCY. GREEN/YELLOW hold the base
+    // defaults (no regression); the perf engine tightens at ORANGE and below. Value <= 0 = unlimited
+    // (the base contract), so the generate-rate default -1 means "uncapped until a load tier caps it".
+
+    /** Per-player chunk SEND rate (chunks/sec). Base default 75. Lowered under load. */
+    public static final DoubleKnob CHUNK_SEND_RATE =
+        new DoubleKnob("perf.chunk.send-rate", 75.0D,
+            KnobMeta.active("Per-player chunk-send rate (chunks/sec); Paper playerMaxChunkSendRate.",
+                "Base 75; the perf-engine lowers it under load to spread chunk packets over more ticks."));
+
+    /** Per-player chunk LOAD rate (chunks/sec; also gates generation, since a load tests gen first).
+     *  Base default 100. Lowered under load. */
+    public static final DoubleKnob CHUNK_LOAD_RATE =
+        new DoubleKnob("perf.chunk.load-rate", 100.0D,
+            KnobMeta.active("Per-player chunk-load rate (chunks/sec); Paper playerMaxChunkLoadRate.",
+                "Base 100; the perf-engine lowers it under load. A load tests generation first, so this also bounds gen."));
+
+    /** Per-player chunk GENERATE rate (chunks/sec). Base default -1 (unlimited) — the uncapped
+     *  generation of fast-moving players into fresh terrain is a prime cause of multi-second MSPT
+     *  stalls. GREEN keeps -1 (no regression); the perf-engine imposes a finite cap under load. */
+    public static final DoubleKnob CHUNK_GENERATE_RATE =
+        new DoubleKnob("perf.chunk.generate-rate", -1.0D,
+            KnobMeta.active("Per-player chunk-generation rate (chunks/sec); Paper playerMaxChunkGenerateRate.",
+                "Base -1 (unlimited); the perf-engine imposes a finite cap under load to kill gen-burst stalls."));
+
     public static Map<String, Object> snapshot() {
         return KnobRegistry.snapshot();
     }
