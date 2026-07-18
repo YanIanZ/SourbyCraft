@@ -150,6 +150,10 @@ public class SourbyCraftConfig {
     // operators who accept the flicker for the extra headroom; when on it only engages at RED+.
     public static boolean autoThrottleView = false;
     public static int minViewDistance = 4;
+    /** On world load, bump a world still at the old vanilla "unlimited" border (59,999,968) up to the
+     *  raised max (65,999,968 / ±33M) so the expanded limit actually applies to existing worlds. An
+     *  operator's deliberately-set finite border is left untouched. */
+    public static boolean expandBorderToMax = true;
     public static int compressionLevel = 4;
     public static int entityTickRate() {
         return dev.iyanz.sourbycraft.perf.knob.Knobs.ENTITY_TICK_RATE.get();
@@ -297,6 +301,7 @@ public class SourbyCraftConfig {
 
         autoThrottleView = cfgBool("network.auto-throttle-view", autoThrottleView);
         minViewDistance = cfgInt("network.min-view-distance", minViewDistance);
+        expandBorderToMax = cfgBool("world.expand-border-to-max", expandBorderToMax);
         compressionLevel = clamp(cfgInt("network.compression-level", compressionLevel), 0, 9);
         // S5: bridge compression level to Paper's live engine when non-default.
         if (compressionLevel != 4) {
@@ -673,6 +678,12 @@ public class SourbyCraftConfig {
         migrateSeededAutoThrottleView(f, changed); // flip the old seeded `true` off once (kills the flicker)
         seed(f, changed, "network.min-view-distance", 4,
             "Floor for auto-throttle-view (when enabled): view distance never drops below this many chunks.");
+        seed(f, changed, "world.expand-border-to-max", true,
+            "Raise the world size limit from the vanilla 30M (60M border) to 33M (66M border) — the maximum "
+            + "SAFE size (staying under the BlockPos 26-bit hard cap ±33,554,431, so terrain + structures "
+            + "generate and clients render correctly). On world load, a world still at the old vanilla "
+            + "'unlimited' border is bumped to the new max; a deliberately-set finite border is left alone. "
+            + "Note: larger is IMPOSSIBLE — >33.5M would corrupt block positions on every vanilla client.");
         seed(f, changed, "network.compression-level", 4,
             "zlib level (0-9) for packets above network-compression-threshold. Bridged live to Paper's "
             + "misc.compressionLevel when != 4. Lower (e.g. 1-3) = less CPU per compressed packet and "
