@@ -457,6 +457,17 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("PerfSensor.applyOperatorConfig failed; using defaults", t);
         }
 
+        // SmartSwap (adaptive heap reclaim) operator bridge — reloadable.
+        try {
+            dev.iyanz.sourbycraft.perf.SmartSwap.configure(
+                cfgBool("perf.smart-swap.enabled", true),
+                cfgDouble("perf.smart-swap.soft-percent",   82.0),
+                cfgDouble("perf.smart-swap.medium-percent", 90.0),
+                cfgDouble("perf.smart-swap.hard-percent",   95.0));
+        } catch (Throwable t) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.error("SmartSwap.configure failed; using defaults", t);
+        }
+
         // Lag-machine knob operator bridge. Layering rule: when a NON-vanilla combat profile is
         // active, the PROFILE owns these eight knobs — the seeded TOML keys always exist, so an
         // unconditional bridge would silently clobber the profile back to the seeded defaults
@@ -566,7 +577,14 @@ public class SourbyCraftConfig {
         migrateSeededAntixrayExtras(f, changed); // retract the chest/liquid-flicker seeds once
         migrateAntixrayReenableLiquids(f, changed); // r22: SourbyEngine re-hides dynamically -> liquids back on
         seedThresholds(f, changed, "tps", 19.0, 16.5, 14.0, 10.0, "TPS tier thresholds (lower = worse). Sustained sub-19 TPS (15s window + dwell) reaches YELLOW = light relief; idle/healthy servers stay GREEN.");
-        seedThresholds(f, changed, "mem", 75.0, 85.0, 92.0, 97.0, "Heap % tier thresholds (higher = worse).");
+        seedThresholds(f, changed, "mem", 75.0, 85.0, 92.0, 97.0, "Heap % tier thresholds (higher = worse). NOTE: memory no longer drives the CPU tier (r34) — these only inform display; SmartSwap handles reclamation.");
+        // SmartSwap — adaptive, trend-aware heap reclamation (trim caches + concurrent GC to uncommit
+        // pages). Keeps container RSS under its limit WITHOUT touching TPS; escalates early when RSS is
+        // climbing fast. Percentages are of max(heap, container-RSS).
+        seed(f, changed, "perf.smart-swap.enabled", true, "Adaptive heap reclaim: trim soft caches + concurrent GC (ZGC uncommit) as memory usage rises, so RSS stays under the container limit without touching TPS. Trend-aware (acts early when climbing fast).");
+        seed(f, changed, "perf.smart-swap.soft-percent", 82.0, "Usage % at which SmartSwap starts trimming rebuildable soft caches (antixray scan/entity-verdicts/geo).");
+        seed(f, changed, "perf.smart-swap.medium-percent", 90.0, "Usage % at which SmartSwap also requests a concurrent GC to hand freed pages back to the OS.");
+        seed(f, changed, "perf.smart-swap.hard-percent", 95.0, "Usage % at which SmartSwap runs the GC more insistently (shorter throttle). Kept below 100 so pages return before the panel kills on RSS.");
         seedThresholds(f, changed, "gc-ms-per-min", 20.0, 50.0, 100.0, 300.0, "GC pause ms/min tier thresholds (higher = worse).");
 
         // --- Built-in ViaVersion/ViaBackwards auto-provision (default ON) ---
