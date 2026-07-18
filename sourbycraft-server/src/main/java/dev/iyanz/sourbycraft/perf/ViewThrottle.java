@@ -13,13 +13,18 @@ import dev.iyanz.sourbycraft.core.PerWorldHolder;
 /**
  * SourbyCraft S5 — lightweight view-distance throttle engine.
  *
- * <p>Every 100 ticks reads the live {@link PerfSensor} tier and adjusts each world's
+ * <p><b>Default OFF (opt-in).</b> Changing the view distance at runtime forces clients to reload
+ * their chunk set — a visible screen flicker — and it is the only client-visible perf actuator (the
+ * AI throttle, Kaiiju entity limiter, projectile caps and save-suppress all act invisibly). It is
+ * gated on {@link SourbyCraftConfig#autoThrottleView} (default false); when off, no task is scheduled.
+ *
+ * <p>When enabled, every 100 ticks it reads the live {@link PerfSensor} tier and adjusts each world's
  * view distance:
  * <ul>
- *   <li>Degraded / worst tier (ORANGE, RED, EMERGENCY): step down one chunk per cycle,
- *       floored at {@code max(2, min(32, SourbyCraftConfig.minViewDistance))}.</li>
- *   <li>Healthy tier (GREEN, YELLOW): step back up one chunk toward the world's original
- *       view distance (captured on first touch).</li>
+ *   <li>Crisis tier (RED, EMERGENCY only — NOT ORANGE): step down one chunk per cycle, floored at
+ *       {@code max(2, min(32, SourbyCraftConfig.minViewDistance))}.</li>
+ *   <li>Otherwise, after a sustained non-crisis run (anti-flicker hysteresis): step back up one chunk
+ *       toward the world's original view distance (captured on first touch).</li>
  * </ul>
  *
  * <p>Logging is collapsed to one debug summary line per tier change (e.g.
@@ -57,17 +62,17 @@ public final class ViewThrottle {
     private static Tier lastLoggedTier = null;
 
     /**
-     * Consecutive healthy (GREEN/YELLOW) cycles seen so far. RECOVERY (stepping view distance back up)
-     * only begins after {@link #RECOVERY_HOLD_CYCLES} of these in a row, and any single degraded cycle
-     * resets it to 0. This is the anti-blink guard: without it, a server whose TPS hovers near a tier
-     * threshold flapped ORANGE(step down)→YELLOW(step up)→ORANGE(step down)… every 5 s, so the outer
-     * ring of chunks the clients hold unloaded and reloaded on each swing — visible chunk "blink".
-     * Asymmetric on purpose: drop the view distance FAST to protect TPS, restore it only once the
-     * server has been genuinely stable, so a brief GREEN dip during a bad spell never reverses the drop.
+     * Consecutive non-crisis cycles (tier at/above ORANGE — i.e. NOT RED/EMERGENCY) seen so far.
+     * RECOVERY (stepping view distance back up) only begins after {@link #RECOVERY_HOLD_CYCLES} of
+     * these in a row, and any single crisis cycle resets it to 0. This is the anti-flicker guard:
+     * without it, a server whose TPS flaps near a threshold dropped the view distance then stepped it
+     * back up every 5 s, so the outer ring of chunks the clients hold unloaded and reloaded on each
+     * swing — a visible screen flicker. Asymmetric on purpose: drop FAST to protect TPS, restore only
+     * once the server has been stable for a while, so a brief recovery never reverses the drop.
      */
     private static int consecutiveHealthyCycles = 0;
 
-    /** ~30 s of sustained GREEN/YELLOW (at the 100-tick / 5 s cadence) before view distance recovers. */
+    /** ~30 s of sustained non-crisis tier (at the 100-tick / 5 s cadence) before view distance recovers. */
     private static final int RECOVERY_HOLD_CYCLES = 6;
 
     private ViewThrottle() {}
@@ -77,10 +82,10 @@ public final class ViewThrottle {
      * No-ops (with a log line) when {@link SourbyCraftConfig#autoThrottleView} is false.
      */
     public static void register(Plugin plugin) {
-        if (!SourbyCraftConfig.autoThrottleView) {
-            SourbyLogger.info("ViewThrottle: disabled (network.auto-throttle-view=false)");
-            return;
-        }
+        // Always schedule the tick, even when auto-throttle-view is currently off, so that toggling
+        // network.auto-throttle-view via /sourbycraft reload takes effect WITHOUT a restart: tick()
+        // reads the live flag each cycle and no-ops (restoring any throttled worlds) while it is off.
+        // A 5 s no-op tick is free; this is the price of reload-live behaviour.
         int minDist = Math.max(2, Math.min(32, SourbyCraftConfig.minViewDistance));
         schedulerTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(
             org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
@@ -88,13 +93,37 @@ public final class ViewThrottle {
             100L, // initial delay (ticks)
             100L  // period (ticks)
         );
-        SourbyLogger.info("ViewThrottle: registered (Folia global-region) — min-view-distance=" + minDist);
+        SourbyLogger.info("ViewThrottle: registered (Folia global-region) — enabled="
+            + SourbyCraftConfig.autoThrottleView + " min-view-distance=" + minDist
+            + " (auto-throttle-view is reloadable via /sourbycraft reload)");
     }
 
     private static void tick() {
+        // Reloadable gate: when disabled (default, or turned off via /sourbycraft reload), restore any
+        // worlds we previously throttled DOWN back to their captured original view distance, then idle.
+        // Reading the live config field here is what makes the toggle take effect without a restart.
+        if (!SourbyCraftConfig.autoThrottleView) {
+            boolean restoredAny = false;
+            for (World world : Bukkit.getWorlds()) {
+                Integer original = originalViewDistance.get(world.getName());
+                if (original != null) {
+                    if (world.getViewDistance() != original) {
+                        world.setViewDistance(original);
+                        restoredAny = true;
+                    }
+                    originalViewDistance.remove(world.getName());
+                }
+            }
+            consecutiveHealthyCycles = 0;
+            if (restoredAny) SourbyLogger.debug("ViewThrottle disabled — restored original view distances");
+            return;
+        }
         Tier tier = PerfSensor.currentTier();
         int minDist = Math.max(2, Math.min(32, SourbyCraftConfig.minViewDistance));
-        final boolean degraded = tier.isWorseThan(Tier.YELLOW); // ORANGE/RED/EMERGENCY
+        // Engage only at RED/EMERGENCY (genuine crisis), not ORANGE. Runtime view-distance changes
+        // flicker the client (chunk reload), so an opted-in operator only pays that cost when the
+        // server is actually in trouble — mild ORANGE load is handled by the invisible actuators.
+        final boolean degraded = tier.isWorseThan(Tier.ORANGE); // RED/EMERGENCY only
 
         // Anti-blink hysteresis. Track a run of healthy cycles; a degraded cycle resets it. Recovery
         // (stepping the view distance back up) is gated on a sustained run, so tier flapping near a

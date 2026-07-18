@@ -211,15 +211,14 @@ public final class PerfEngineBootstrap {
             }
         }
 
-        // ViewThrottle — per-world view-distance throttle. Self-guards on autoThrottleView, but we
-        // also short-circuit here for zero cost when disabled. (Logs its own "ViewThrottle: registered" line.)
-        if (SourbyCraftConfig.autoThrottleView) {
-            try {
-                ViewThrottle.register(owner);
-                registered.add("view-throttle");
-            } catch (Throwable t) {
-                SourbyLogger.error("perf-engine: ViewThrottle.register failed", t);
-            }
+        // ViewThrottle — per-world view-distance throttle. Registered UNCONDITIONALLY so that toggling
+        // network.auto-throttle-view via /sourbycraft reload works without a restart; tick() reads the
+        // live flag each cycle and no-ops (a free 5 s tick) while disabled, which is the default.
+        try {
+            ViewThrottle.register(owner);
+            registered.add("view-throttle");
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: ViewThrottle.register failed", t);
         }
 
         // MaxPlayersBypass — let sourbycraft.maxplayers.bypass holders (+ ops) join a full server.
