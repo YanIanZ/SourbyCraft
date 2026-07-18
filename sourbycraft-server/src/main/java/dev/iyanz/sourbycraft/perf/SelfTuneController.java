@@ -146,8 +146,8 @@ public final class SelfTuneController {
                 // throttle. Both only affect mobs far from players / already inactive, so gameplay
                 // near players is untouched; everything else stays at the operator baseline.
                 restoreBaseline();
-                Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(96);
-                Knobs.AI_THROTTLE_TICK_INTERVAL.set(2);
+                Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(64); // harsher than the GREEN baseline (80/3)
+                Knobs.AI_THROTTLE_TICK_INTERVAL.set(3);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_INTERVAL.set(25);
             }
@@ -160,8 +160,8 @@ public final class SelfTuneController {
                 Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.set(baselineMinecartsLimit);
                 Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.set(baselineRemoveBoats);
                 Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(baselineBoatsLimit);
-                Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(64);
-                Knobs.AI_THROTTLE_TICK_INTERVAL.set(2);
+                Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(48);
+                Knobs.AI_THROTTLE_TICK_INTERVAL.set(4);
                 // F-perfup: engage per-region entity caps + force the inactive goal-selector throttle on.
                 Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(true);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
@@ -176,8 +176,8 @@ public final class SelfTuneController {
                 Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.set(Math.max(1, baselineMinecartsLimit / 2));
                 Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.set(true);
                 Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(Math.max(1, baselineBoatsLimit / 2));
-                Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(48);
-                Knobs.AI_THROTTLE_TICK_INTERVAL.set(4);
+                Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(40);
+                Knobs.AI_THROTTLE_TICK_INTERVAL.set(6);
                 Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(true);
                 Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(true);
                 // NMS-scalar deep-enforcement: scale entity caps to 0.75, widen goal-selector cadence to 40.
@@ -212,8 +212,13 @@ public final class SelfTuneController {
         Knobs.LAG_MACHINE_EXCESS_MINECARTS_LIMIT.set(baselineMinecartsLimit);
         Knobs.LAG_MACHINE_REMOVE_EXCESS_BOATS.set(baselineRemoveBoats);
         Knobs.LAG_MACHINE_EXCESS_BOATS_LIMIT.set(baselineBoatsLimit);
-        Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(baselineAiThrottleDistance);
-        Knobs.AI_THROTTLE_TICK_INTERVAL.set(baselineAiThrottleInterval);
+        // r35 raw-perf: even at GREEN, gently throttle the AI of mobs FAR from every player (default
+        // beyond 80 blocks, brain/pathfinding every 3rd tick). Distant mobs barely interact, but their
+        // pathfinding (WalkNodeEvaluator/PathNavigation — the #1 hotspot in the live spark profile) is
+        // pure waste — so this is an always-on throughput win, not a load reaction. Reloadable; set
+        // perf.ai.throttle-beyond-distance = 0 to disable and get vanilla every-tick AI everywhere.
+        Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(dev.iyanz.sourbycraft.SourbyCraftConfig.aiBaselineThrottleDistance);
+        Knobs.AI_THROTTLE_TICK_INTERVAL.set(dev.iyanz.sourbycraft.SourbyCraftConfig.aiBaselineThrottleInterval);
         // F-perfup: GREEN/YELLOW restore the operator/base defaults exactly — no regression.
         Knobs.KAIIJU_ENTITY_LIMITER_ENABLED.set(baselineEntityLimiterEnabled);
         Knobs.GOAL_SELECTOR_INACTIVE_TICK_ENABLED.set(baselineGoalSelectorInactive);

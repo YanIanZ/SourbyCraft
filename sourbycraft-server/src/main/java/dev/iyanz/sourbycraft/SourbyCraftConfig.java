@@ -219,6 +219,12 @@ public class SourbyCraftConfig {
     public static double rehideDistance = 48.0;
     /** Only reveal blocks within the player's view cone. false = 360° (no turn-around pop-in, heavier). */
     public static boolean frustumCulling = false;
+    /** r35 raw-perf: ALWAYS-ON distant-mob AI throttle baseline (even at GREEN). A mob with no player
+     *  within this many blocks runs its brain/pathfinding only every {@link #aiBaselineThrottleInterval}
+     *  ticks — distant mobs barely interact, so their pathfinding is pure waste. 0 = disabled (vanilla
+     *  every-tick AI). Load tiers throttle harder on top. Reloadable. */
+    public static int aiBaselineThrottleDistance = 80;
+    public static int aiBaselineThrottleInterval = 3;
     /** Per tickCycle, the max number of async raytrace checks submitted per player. */
     public static int raytraceMaxChecksPerCycle = 10;
     /** Per player, the max number of hidden-and-pending ore positions held at once (budget). */
@@ -427,6 +433,15 @@ public class SourbyCraftConfig {
             // (the exact lag case) and is a no-op for any villager that can move.
             me.earthme.luminol.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeEnabled =
                 cfgBool("perf.villager-lobotomize", true);
+            // r35 raw-perf: always-on distant-mob AI throttle baseline (SelfTuneController GREEN reads it).
+            aiBaselineThrottleDistance = Math.max(0, cfgInt("perf.ai.throttle-beyond-distance", aiBaselineThrottleDistance));
+            aiBaselineThrottleInterval = Math.max(1, cfgInt("perf.ai.throttle-tick-interval", aiBaselineThrottleInterval));
+            // Set the knob now so the baseline throttle is live from BOOT (initial GREEN, before any
+            // tier transition) and after /sourbycraft reload — enforceAll() below pushes it to the
+            // in-tick ActiveAiThrottle holder. SelfTuneController overrides it harder under load.
+            dev.iyanz.sourbycraft.perf.knob.Knobs.AI_THROTTLE_BEYOND_DISTANCE.set(aiBaselineThrottleDistance);
+            dev.iyanz.sourbycraft.perf.knob.Knobs.AI_THROTTLE_TICK_INTERVAL.set(aiBaselineThrottleInterval);
+            dev.iyanz.sourbycraft.perf.KnobEnforcer.enforceAll();
         } catch (Throwable t) {
             dev.iyanz.sourbycraft.util.SourbyLogger.error("load-gated knob operator bridge failed; using knob defaults", t);
         }
@@ -557,8 +572,8 @@ public class SourbyCraftConfig {
 
         // --- Knobs ---
         seed(f, changed, "perf.entity-tick-rate", 1, "RESERVED (no in-tick actuator on this base — no effect). Entity ticking is governed by the entity activation range + the per-region Kaiiju limiter instead; kept for compatibility.");
-        seed(f, changed, "perf.ai.throttle-beyond-distance", 0, "Distance (blocks) past nearest player to throttle mob AI. 0 = disabled.");
-        seed(f, changed, "perf.ai.throttle-tick-interval", 4, "When AI is throttled, run aiStep only every N ticks.");
+        seed(f, changed, "perf.ai.throttle-beyond-distance", 80, "ALWAYS-ON raw-perf: a mob with NO player within this many blocks runs its brain/pathfinding only every 'throttle-tick-interval' ticks — distant mobs barely interact, so their pathfinding (the #1 tick hotspot) is pure waste. 0 = disabled (vanilla every-tick AI everywhere). Load tiers throttle harder on top.");
+        seed(f, changed, "perf.ai.throttle-tick-interval", 3, "How often a distance-throttled mob runs its AI (every N ticks). Higher = cheaper but distant mobs react slower. Applies at/beyond throttle-beyond-distance.");
         seed(f, changed, "perf.ai.goal-selector-inactive-throttle", true, "Throttle the AI goal-selector to 1-in-20 ticks for inactive mobs (behaviour-neutral). Perf-engine also forces this on under load.");
         seed(f, changed, "perf.entity-limiter.enabled", false, "Master gate for the per-region per-entity-type tick/removal limiter (sourby_entity_limits.yml). Off = no throttling; the perf-engine turns it on under load.");
         seed(f, changed, "perf.villager-lobotomize", true, "Skip the full AI/brain tick for a villager physically stuck in a single block (a trading-hall villager that cannot path anywhere). Trading + restocking still work — only the wasted pathfinding is cut. No-op for any villager that can move. Reloadable.");
@@ -676,6 +691,7 @@ public class SourbyCraftConfig {
             + "only client-visible actuator (AI throttle / entity limiter / projectile caps act invisibly). "
             + "Turn on only if you accept the flicker for extra headroom; when on it engages only at RED/EMERGENCY.");
         migrateSeededAutoThrottleView(f, changed); // flip the old seeded `true` off once (kills the flicker)
+        migrateSeededAiBaselineThrottle(f, changed); // flip the old seeded throttle-distance 0 -> 80 once (r35 raw-perf)
         seed(f, changed, "network.min-view-distance", 4,
             "Floor for auto-throttle-view (when enabled): view distance never drops below this many chunks.");
         seed(f, changed, "world.expand-border-to-max", true,
@@ -870,6 +886,38 @@ public class SourbyCraftConfig {
             dev.iyanz.sourbycraft.util.SourbyLogger.info(
                 "re-enabled anti-xray hide-liquids (SourbyEngine now re-hides cave fluids dynamically "
                 + "on loss of sight). Set antixray.hide-liquids=false to opt out.");
+        }
+    }
+
+    /**
+     * One-time flip of {@code perf.ai.throttle-beyond-distance} from the old seeded {@code 0}
+     * (disabled) to {@code 80} — the r35 always-on distant-mob AI throttle. Pre-r35 installs carry the
+     * seeded 0, which would keep the raw-perf win off forever (the seeded-default trap). Flip it EXACTLY
+     * ONCE, gated on {@code perf.ai.baseline-throttle-migrated}, and only when it is still the old
+     * seeded 0 — an operator who set a value themselves is never overridden.
+     */
+    private static void migrateSeededAiBaselineThrottle(com.electronwill.nightconfig.core.file.CommentedFileConfig f,
+                                                        boolean[] changed) {
+        final Object done = f.get("perf.ai.baseline-throttle-migrated");
+        if (done instanceof Boolean b && b) return;
+        final Object cur = f.get("perf.ai.throttle-beyond-distance");
+        boolean flipped = false;
+        if (cur instanceof Number n && n.intValue() == 0) {
+            f.set("perf.ai.throttle-beyond-distance", 80);
+            if (f.get("perf.ai.throttle-tick-interval") instanceof Number iv && iv.intValue() == 4) {
+                f.set("perf.ai.throttle-tick-interval", 3);
+            }
+            flipped = true;
+        }
+        f.set("perf.ai.baseline-throttle-migrated", true);
+        f.setComment("perf.ai.baseline-throttle-migrated",
+            "Internal: marks the one-time enable of the always-on distant-mob AI throttle. Do not edit. "
+            + "Set perf.ai.throttle-beyond-distance = 0 yourself to disable it.");
+        changed[0] = true;
+        if (flipped) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                "enabled always-on distant-mob AI throttle (perf.ai.throttle-beyond-distance 0 -> 80): "
+                + "mobs far from all players run pathfinding every 3rd tick — a raw-perf win. Set it 0 to opt out.");
         }
     }
 
