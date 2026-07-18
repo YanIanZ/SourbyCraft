@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 18 Jul 2026 14:14:37 +0700
+Subject: [PATCH] =?UTF-8?q?SourbyCraft:=20Folia=20sync-teleport=20compat?=
+ =?UTF-8?q?=20=E2=80=94=20delegate=20to=20async=20on=20owning=20region=20i?=
+ =?UTF-8?q?nstead=20of=20throwing?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
+index efcb8b97cd685e1243c770bf3e8daf03615abb1d..69343fcfdb3adb24e27364bcc13934bde48c16e8 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
+@@ -303,6 +303,17 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
+ 
+     protected boolean teleport0(Location location, TeleportCause cause, TeleportFlag... flags) {
+         // Folia start - region threading
++        // SourbyCraft - Folia sync-teleport compat: non-Folia plugins (e.g. Slimefun
++        // PickaxeOfTheSeeker) call the SYNCHRONOUS teleport from a region tick. Vanilla Folia throws,
++        // which breaks the plugin AND spam-floods the console (40+ stack traces in the operator's
++        // logs). When we are on the entity's OWNING region thread the async teleport runs immediately
++        // and in-region (teleportAsync's fast path), so the teleport still lands this tick — route the
++        // sync call through it and return true. Only a genuinely cross-region sync teleport (which
++        // cannot execute inline safely) still throws, so real threading bugs are not hidden.
++        if (org.bukkit.Bukkit.isOwnedByCurrentRegion(this)) {
++            this.teleportAsync(location, cause, flags);
++            return true;
++        }
+         if (true) {
+             throw new UnsupportedOperationException("Must use teleportAsync while in region threading");
+         }
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index e655c6b817b1ef2b3186c4b16a1039081139e97f..ec29f520282c8f04d3815beb75f13cd79ec45c31 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -1335,13 +1335,21 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+     @Override
+     protected boolean teleport0(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, io.papermc.paper.entity.TeleportFlag... flags) {
+         // Folia start - region threading
++        // SourbyCraft - Folia sync-teleport compat (see CraftEntity#teleport0): route a synchronous
++        // player teleport issued from its OWNING region thread through the async path (runs inline,
++        // in-region) instead of throwing, so non-Folia plugins keep working without console-spamming
++        // stack traces. Genuinely cross-region sync teleports still throw.
++        if (this.getHandle().connection == null) {
++            return false;
++        }
++        if (org.bukkit.Bukkit.isOwnedByCurrentRegion(this)) {
++            this.teleportAsync(location, cause, flags);
++            return true;
++        }
+         if (true) {
+             throw new UnsupportedOperationException("Must use teleportAsync while in region threading");
+         }
+         // Folia end - region threading
+-        if (this.getHandle().connection == null) {
+-            return false;
+-        }
+         // Minecraft does not currently support teleporting players between worlds with passengers.
+         // It causes them to be dismounted, and causes weird behavior.
+         if (location.getWorld() != this.getWorld() && this.getHandle().isVehicle()) {
