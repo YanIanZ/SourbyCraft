@@ -362,20 +362,19 @@ public final class PerfSensor {
         // the TPS tier (GREEN on a healthy server), full stop. Only once TPS is genuinely below the
         // floor do the non-TPS signals refine how severe the drop is (ORANGE/RED/EMERGENCY).
         boolean tpsBelowFloor = !Double.isNaN(tps) && tps < AGGRESSIVE_TPS_FLOOR;
-        // OOM-prevention EXCEPTION to the TPS gate: heap pressure is the one signal that stays
-        // silent right up until the crash — a server can sit at 20.00 TPS with the heap at 95%
-        // and die OutOfMemory seconds later. Behind the TPS gate the RED/EMERGENCY memory tiers
-        // (which fire MemoryPressure.trimSoftCaches, the engine's pressure valve) were UNREACHABLE
-        // on a healthy-TPS server — the valve existed but could never open before the OOM. So a
-        // memory reading at RED or worse escalates the tier regardless of TPS. YELLOW/ORANGE memory
-        // stays TPS-gated (75-92% heap is normal JVM behaviour right before a GC — reacting to it
-        // caused the GREEN<->YELLOW flapping the operator reported).
-        Tier memTier = classifySignal(memPct, memThresholds, false);
+        // r34 — memory is DECOUPLED from the tier. The r28 "memory RED+ escalates the tier regardless
+        // of TPS" rule made the perf-engine sit at permanent RED/EMERGENCY on a server whose container
+        // RSS is pinned near 100% (an over-sized -Xmx), throttling mob AI + entities HARD even though
+        // TPS was a healthy 20 — the engine was fighting a memory number the operator is fine with,
+        // and the aggressive CPU throttling itself felt like instability. The OOM SAFETY still works:
+        // MemoryPressure.emergencyHeapRelief() is fired directly from sample() on a high memPct sample,
+        // independent of the tier, so cache-trim + concurrent GC still run — but memory no longer
+        // drives the CPU-throttling tier. The tier is now TPS-led, refined by MSPT + GC-pause (both of
+        // which reflect memory pressure that ACTUALLY hurts ticking) once TPS is genuinely below floor.
         if (!tpsBelowFloor) {
-            return memTier.isWorseThan(Tier.ORANGE) ? tpsTier.worse(memTier) : tpsTier;
+            return tpsTier; // healthy TPS -> GREEN, no matter the heap/RSS number
         }
         Tier otherTier = classifySignal(mspt,   msptThresholds, false)
-            .worse(memTier)
             .worse(classifySignal(gcMs,   gcMsThresholds, false));
         return tpsTier.worse(otherTier);
     }
