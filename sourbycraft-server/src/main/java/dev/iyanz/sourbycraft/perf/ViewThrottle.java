@@ -56,6 +56,20 @@ public final class ViewThrottle {
      */
     private static Tier lastLoggedTier = null;
 
+    /**
+     * Consecutive healthy (GREEN/YELLOW) cycles seen so far. RECOVERY (stepping view distance back up)
+     * only begins after {@link #RECOVERY_HOLD_CYCLES} of these in a row, and any single degraded cycle
+     * resets it to 0. This is the anti-blink guard: without it, a server whose TPS hovers near a tier
+     * threshold flapped ORANGE(step down)→YELLOW(step up)→ORANGE(step down)… every 5 s, so the outer
+     * ring of chunks the clients hold unloaded and reloaded on each swing — visible chunk "blink".
+     * Asymmetric on purpose: drop the view distance FAST to protect TPS, restore it only once the
+     * server has been genuinely stable, so a brief GREEN dip during a bad spell never reverses the drop.
+     */
+    private static int consecutiveHealthyCycles = 0;
+
+    /** ~30 s of sustained GREEN/YELLOW (at the 100-tick / 5 s cadence) before view distance recovers. */
+    private static final int RECOVERY_HOLD_CYCLES = 6;
+
     private ViewThrottle() {}
 
     /**
@@ -80,6 +94,18 @@ public final class ViewThrottle {
     private static void tick() {
         Tier tier = PerfSensor.currentTier();
         int minDist = Math.max(2, Math.min(32, SourbyCraftConfig.minViewDistance));
+        final boolean degraded = tier.isWorseThan(Tier.YELLOW); // ORANGE/RED/EMERGENCY
+
+        // Anti-blink hysteresis. Track a run of healthy cycles; a degraded cycle resets it. Recovery
+        // (stepping the view distance back up) is gated on a sustained run, so tier flapping near a
+        // threshold can only DROP the view distance (protective, monotonic) and never yo-yo it — the
+        // chunk ring at the edge stops unloading/reloading.
+        if (degraded) {
+            consecutiveHealthyCycles = 0;
+        } else if (consecutiveHealthyCycles < RECOVERY_HOLD_CYCLES) {
+            consecutiveHealthyCycles++;
+        }
+        final boolean mayRecover = !degraded && consecutiveHealthyCycles >= RECOVERY_HOLD_CYCLES;
 
         // Collapse logging: aggregate this cycle's adjustments and emit at most ONE summary line,
         // and only when the tier changed since we last logged. This turns a per-world-per-step
@@ -96,7 +122,7 @@ public final class ViewThrottle {
             // Capture original on first encounter (before any of our changes).
             int original = originalViewDistance.computeIfAbsent(name, k -> current);
 
-            if (tier.isWorseThan(Tier.YELLOW)) {
+            if (degraded) {
                 // Degraded/worst tier → step down one chunk, floor at minDist.
                 int target = Math.max(minDist, current - 1);
                 if (target != current) {
@@ -105,8 +131,8 @@ public final class ViewThrottle {
                     minTarget = Math.min(minTarget, target);
                     maxTarget = Math.max(maxTarget, target);
                 }
-            } else if (current < original) {
-                // Healthy tier → step +1 toward original.
+            } else if (mayRecover && current < original) {
+                // Healthy AND stable for RECOVERY_HOLD_CYCLES → step +1 toward original.
                 int target = Math.min(original, current + 1);
                 world.setViewDistance(target);
                 changedWorlds++;
