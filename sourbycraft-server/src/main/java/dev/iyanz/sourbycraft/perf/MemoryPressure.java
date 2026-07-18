@@ -23,14 +23,33 @@ public final class MemoryPressure {
         final long now = System.nanoTime();
         final long last = LAST_TRIM.get();
         if (now - last < THROTTLE_NANOS || !LAST_TRIM.compareAndSet(last, now)) return;
+        trimNow();
+    }
+
+    /**
+     * Trim every rebuildable soft cache NOW, with no throttle (the caller — {@link SmartSwap} — owns
+     * the throttling). All targets rebuild lazily and bounded, so the only cost is a brief warm-up.
+     */
+    public static void trimNow() {
         try {
             dev.iyanz.sourbycraft.antixray.OreReveal.trimCachesForMemoryPressure();
             dev.iyanz.sourbycraft.antixray.EntityVisibilityCheck.trimForMemoryPressure();
             dev.iyanz.sourbycraft.util.GeoUtil.trimForMemoryPressure();
-            SourbyLogger.info("memory pressure: trimmed soft caches (antixray scan/verdicts, geo)");
         } catch (Throwable t) {
             SourbyLogger.warn("memory pressure trim failed: " + t.getMessage());
         }
+    }
+
+    /**
+     * Request a concurrent GC to hand freed heap pages back to the OS NOW, with no throttle (the
+     * caller owns it). No-op (returns false) when an explicit GC would be a no-op ({@code
+     * -XX:+DisableExplicitGC}) or a harmful stop-the-world ({@link #explicitGcUseful()}). Returns true
+     * when a GC was actually requested.
+     */
+    public static boolean requestConcurrentGc() {
+        if (!explicitGcUseful()) return false;
+        System.gc();
+        return true;
     }
 
     private static final long GC_THROTTLE_NANOS = 120_000_000_000L; // 2 min

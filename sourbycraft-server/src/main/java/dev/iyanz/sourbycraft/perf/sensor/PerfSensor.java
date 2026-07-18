@@ -303,12 +303,12 @@ public final class PerfSensor {
         double memPct = memUsagePercent();
         double gcMs   = gcMsLastMinute();
 
-        // r26 container-kill defense: memory at EMERGENCY acts IMMEDIATELY (per-sample, not on tier
-        // CHANGE — a tier already stuck at EMERGENCY would otherwise never re-fire the valve). The
-        // relief call is internally throttled, so per-sample invocation is safe. Independent of TPS.
-        if (memPct > memThresholds[4]) {
-            dev.iyanz.sourbycraft.perf.MemoryPressure.emergencyHeapRelief();
-        }
+        // SmartSwap (r35): adaptive, trend-aware heap reclamation, fed every sample INDEPENDENT of the
+        // tier (memory no longer drives the CPU tier — see classifyAll). It trims soft caches + runs a
+        // concurrent GC to uncommit pages, escalating early when RSS is climbing fast toward the limit,
+        // so the container stays under its RSS cap without touching TPS. Subsumes the old fixed-97%
+        // emergency relief with a progressive ladder.
+        dev.iyanz.sourbycraft.perf.SmartSwap.onSample(memPct, System.nanoTime());
 
         final Tier reading;
         if (tps == null && lastAggregateSawYoungRegionsOnly) {
