@@ -68,6 +68,9 @@ public final class SourbyCraftCommands {
             org.slf4j.LoggerFactory.getLogger("SourbyCraft").warn("HudBars quit-listener registration failed", t);
         }
 
+        // Apply the raised world-size limit (66M border) to existing worlds on load.
+        dev.iyanz.sourbycraft.core.WorldSizeExpander.register(org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE);
+
         registered = true;
         org.slf4j.LoggerFactory.getLogger("SourbyCraft").info(
             "Registered " + OURS.size() + " SourbyCraft commands (bare names; /minecraft:<name> or "

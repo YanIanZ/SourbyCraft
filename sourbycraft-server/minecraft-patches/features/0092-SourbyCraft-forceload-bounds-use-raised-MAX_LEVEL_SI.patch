@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 18 Jul 2026 23:16:31 +0700
+Subject: [PATCH] SourbyCraft: forceload bounds use raised MAX_LEVEL_SIZE (33M)
+
+
+diff --git a/net/minecraft/server/commands/ForceLoadCommand.java b/net/minecraft/server/commands/ForceLoadCommand.java
+index 5345a47f742f0639e63e49239644c3709426d14d..45e1f3b4f6981af9d30d14abfad3466ebe8c0bf0 100644
+--- a/net/minecraft/server/commands/ForceLoadCommand.java
++++ b/net/minecraft/server/commands/ForceLoadCommand.java
+@@ -167,7 +167,7 @@ public class ForceLoadCommand {
+         int minZ = Math.min(from.z(), to.z());
+         int maxX = Math.max(from.x(), to.x());
+         int maxZ = Math.max(from.z(), to.z());
+-        if (minX >= -30000000 && minZ >= -30000000 && maxX < 30000000 && maxZ < 30000000) {
++        if (minX >= -net.minecraft.world.level.Level.MAX_LEVEL_SIZE && minZ >= -net.minecraft.world.level.Level.MAX_LEVEL_SIZE && maxX < net.minecraft.world.level.Level.MAX_LEVEL_SIZE && maxZ < net.minecraft.world.level.Level.MAX_LEVEL_SIZE) { // SourbyCraft: raised MAX_LEVEL_SIZE (33M)
+             int minChunkX = SectionPos.blockToSectionCoord(minX);
+             int minChunkZ = SectionPos.blockToSectionCoord(minZ);
+             int maxChunkX = SectionPos.blockToSectionCoord(maxX);
