@@ -305,6 +305,13 @@ public final class PerfSensor {
 
         Tier reading = classifyAll(tps15s, mspt, memPct, gcMs);
 
+        // r26 container-kill defense: memory at EMERGENCY acts IMMEDIATELY (per-sample, not on tier
+        // CHANGE — a tier already stuck at EMERGENCY would otherwise never re-fire the valve). The
+        // relief call is internally throttled, so per-sample invocation is safe.
+        if (memPct > memThresholds[4]) {
+            dev.iyanz.sourbycraft.perf.MemoryPressure.emergencyHeapRelief();
+        }
+
         // Hysteresis: dwell + band (recovery requires multiplier × dwell samples)
         if (reading == currentTier) {
             candidateTier = currentTier;
@@ -346,11 +353,20 @@ public final class PerfSensor {
         // the TPS tier (GREEN on a healthy server), full stop. Only once TPS is genuinely below the
         // floor do the non-TPS signals refine how severe the drop is (ORANGE/RED/EMERGENCY).
         boolean tpsBelowFloor = !Double.isNaN(tps) && tps < AGGRESSIVE_TPS_FLOOR;
+        // OOM-prevention EXCEPTION to the TPS gate: heap pressure is the one signal that stays
+        // silent right up until the crash — a server can sit at 20.00 TPS with the heap at 95%
+        // and die OutOfMemory seconds later. Behind the TPS gate the RED/EMERGENCY memory tiers
+        // (which fire MemoryPressure.trimSoftCaches, the engine's pressure valve) were UNREACHABLE
+        // on a healthy-TPS server — the valve existed but could never open before the OOM. So a
+        // memory reading at RED or worse escalates the tier regardless of TPS. YELLOW/ORANGE memory
+        // stays TPS-gated (75-92% heap is normal JVM behaviour right before a GC — reacting to it
+        // caused the GREEN<->YELLOW flapping the operator reported).
+        Tier memTier = classifySignal(memPct, memThresholds, false);
         if (!tpsBelowFloor) {
-            return tpsTier;
+            return memTier.isWorseThan(Tier.ORANGE) ? tpsTier.worse(memTier) : tpsTier;
         }
         Tier otherTier = classifySignal(mspt,   msptThresholds, false)
-            .worse(classifySignal(memPct, memThresholds,  false))
+            .worse(memTier)
             .worse(classifySignal(gcMs,   gcMsThresholds, false));
         return tpsTier.worse(otherTier);
     }
@@ -484,7 +500,41 @@ public final class PerfSensor {
         Runtime rt = Runtime.getRuntime();
         long used = rt.totalMemory() - rt.freeMemory();
         long max = rt.maxMemory();
-        return max > 0 ? 100.0 * used / max : 0.0;
+        double heapPct = max > 0 ? 100.0 * used / max : 0.0;
+        // Container-kill defense: the operator's crashes were the PANEL killing the container, not a
+        // Java OutOfMemoryError — heap% looked fine (Xmx 8G) while container RSS (ZGC committed pages
+        // that never uncommit + Geyser/netty direct buffers + metaspace) crept to the cgroup limit.
+        // Sample cgroup-v2 memory.current/memory.max too and classify on the WORSE of the two, so the
+        // RED/EMERGENCY memory tier (cache trims + the r26 TPS-gate bypass) fires BEFORE the kill.
+        double cgroupPct = cgroupMemPercent();
+        return Math.max(heapPct, cgroupPct);
+    }
+
+    // cgroup-v2 memory files (Pterodactyl/docker). Read at most once per sample (~1/s): two tiny
+    // virtual-file reads, no allocation churn. memory.max is static per container -> cached.
+    private static long cgroupMemMax = -2; // -2 = unprobed, -1 = unavailable/unlimited
+    private static double cgroupMemPercent() {
+        try {
+            if (cgroupMemMax == -2) {
+                cgroupMemMax = -1;
+                java.nio.file.Path maxPath = java.nio.file.Path.of("/sys/fs/cgroup/memory.max");
+                if (java.nio.file.Files.isReadable(maxPath)) {
+                    String s = java.nio.file.Files.readString(maxPath).trim();
+                    if (!"max".equals(s)) cgroupMemMax = Long.parseLong(s);
+                }
+                if (cgroupMemMax > 0) {
+                    SourbyLogger.info("perf sensor: container memory limit detected ("
+                        + (cgroupMemMax >> 20) + " MiB) — classifying on max(heap%, container-RSS%)");
+                }
+            }
+            if (cgroupMemMax <= 0) return 0.0;
+            java.nio.file.Path curPath = java.nio.file.Path.of("/sys/fs/cgroup/memory.current");
+            if (!java.nio.file.Files.isReadable(curPath)) return 0.0;
+            long cur = Long.parseLong(java.nio.file.Files.readString(curPath).trim());
+            return 100.0 * cur / cgroupMemMax;
+        } catch (Throwable ignored) {
+            return 0.0; // not a container / cgroup v1 / parse issue — heap% alone governs
+        }
     }
 
     private static double gcMsLastMinute() {

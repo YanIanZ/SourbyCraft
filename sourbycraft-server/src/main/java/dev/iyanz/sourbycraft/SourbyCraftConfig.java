@@ -553,7 +553,7 @@ public class SourbyCraftConfig {
         migrateSeededTpsLadder(f, changed); // pre-2f installs carry the flap-prone 19/18/17/15 seed
         migrateSeededAntixrayExtras(f, changed); // retract the chest/liquid-flicker seeds once
         migrateAntixrayReenableLiquids(f, changed); // r22: SourbyEngine re-hides dynamically -> liquids back on
-        seedThresholds(f, changed, "tps", 17.0, 15.0, 13.0, 10.0, "TPS tier thresholds (lower = worse). Self-tune reacts only below ~17 TPS; idle/healthy servers stay GREEN.");
+        seedThresholds(f, changed, "tps", 19.0, 16.5, 14.0, 10.0, "TPS tier thresholds (lower = worse). Sustained sub-19 TPS (15s window + dwell) reaches YELLOW = light relief; idle/healthy servers stay GREEN.");
         seedThresholds(f, changed, "mem", 75.0, 85.0, 92.0, 97.0, "Heap % tier thresholds (higher = worse).");
         seedThresholds(f, changed, "gc-ms-per-min", 20.0, 50.0, 100.0, 300.0, "GC pause ms/min tier thresholds (higher = worse).");
 
@@ -845,6 +845,26 @@ public class SourbyCraftConfig {
             changed[0] = true;
             dev.iyanz.sourbycraft.util.SourbyLogger.info(
                 "migrated seeded TPS tier ladder 19/18/17/15 -> 17/15/13/10 (pre-2f seed, flap-prone)");
+        }
+        // Second re-ladder (r26): 17/15/13/10 waited until TPS < 15 for the first REAL action
+        // (YELLOW only restored baseline), so an exploration server grinding at 17-19 TPS got no
+        // relief at all — "perf tidak bekerja saat tps down". New ladder reacts from 19: sustained
+        // sub-19 (15s window + dwell hysteresis, so a join-burst dip does not trip it) now reaches
+        // YELLOW, which since r26 applies a LIGHT real action instead of a no-op. Same seeded-default
+        // rules: rewrite only the exact old seed quad; an operator's custom ladder is never touched.
+        final Object y2 = f.get(base + "yellow"), o2 = f.get(base + "orange"),
+            r2 = f.get(base + "red"), e2 = f.get(base + "emergency");
+        if (y2 instanceof Number ny2 && ny2.doubleValue() == 17.0
+            && o2 instanceof Number no2 && no2.doubleValue() == 15.0
+            && r2 instanceof Number nr2 && nr2.doubleValue() == 13.0
+            && e2 instanceof Number ne2 && ne2.doubleValue() == 10.0) {
+            f.set(base + "yellow", 19.0);
+            f.set(base + "orange", 16.5);
+            f.set(base + "red", 14.0);
+            f.set(base + "emergency", 10.0);
+            changed[0] = true;
+            dev.iyanz.sourbycraft.util.SourbyLogger.info(
+                "migrated seeded TPS tier ladder 17/15/13/10 -> 19/16.5/14/10 (react below 20 TPS, r26)");
         }
     }
 
