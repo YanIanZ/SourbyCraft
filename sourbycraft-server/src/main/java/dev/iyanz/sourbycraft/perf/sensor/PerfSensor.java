@@ -303,13 +303,22 @@ public final class PerfSensor {
         double memPct = memUsagePercent();
         double gcMs   = gcMsLastMinute();
 
-        Tier reading = classifyAll(tps15s, mspt, memPct, gcMs);
-
         // r26 container-kill defense: memory at EMERGENCY acts IMMEDIATELY (per-sample, not on tier
         // CHANGE — a tier already stuck at EMERGENCY would otherwise never re-fire the valve). The
-        // relief call is internally throttled, so per-sample invocation is safe.
+        // relief call is internally throttled, so per-sample invocation is safe. Independent of TPS.
         if (memPct > memThresholds[4]) {
             dev.iyanz.sourbycraft.perf.MemoryPressure.emergencyHeapRelief();
+        }
+
+        final Tier reading;
+        if (tps == null && lastAggregateSawYoungRegionsOnly) {
+            // M2 young-region blind window: TPS is genuinely UNKNOWN (regions exist but none reported
+            // yet), so do NOT let it read as 20.0 and reset the tier to GREEN. HOLD the current tier;
+            // only let a memory reading at RED+ escalate above it (same OOM bypass as classifyAll).
+            final Tier memTier = classifySignal(memPct, memThresholds, false);
+            reading = memTier.isWorseThan(Tier.ORANGE) ? currentTier.worse(memTier) : currentTier;
+        } else {
+            reading = classifyAll(tps15s, mspt, memPct, gcMs);
         }
 
         // Hysteresis: dwell + band (recovery requires multiplier × dwell samples)
@@ -427,9 +436,11 @@ public final class PerfSensor {
             // right after boot. 15s recovers as fast as the server actually does.
             final double[] min = {21.0, 21.0, 21.0};
             final boolean[] any = {false};
+            final boolean[] sawRegion = {false};
             for (org.bukkit.World bw : Bukkit.getWorlds()) {
                 final net.minecraft.server.level.ServerLevel lvl = ((org.bukkit.craftbukkit.CraftWorld) bw).getHandle();
                 lvl.regioniser.computeForAllRegions(region -> {
+                    sawRegion[0] = true; // a region EXISTS, even if it is too young to have a report yet
                     final var handle = region.getData().getRegionSchedulingHandle();
                     final var r15 = handle.getTickReport15s(now);
                     if (r15 == null) return;
@@ -445,12 +456,22 @@ public final class PerfSensor {
                     if (!Double.isNaN(t5) && t5 < min[2]) min[2] = t5;
                 });
             }
+            // M2: distinguish "no regions at all" (empty/idle server → 20.0 GREEN is correct) from
+            // "regions exist but every one is too young for a 15s report" (a busy region just split —
+            // Folia splits exactly under load — or fresh-area exploration/world load). In the second
+            // case snapping to 20.0 would blind the sensor for up to 15s at the precise moment load
+            // spiked. Record which case this was so sample() can HOLD the tier instead of resetting.
+            lastAggregateSawYoungRegionsOnly = sawRegion[0] && !any[0];
             if (!any[0]) return null;
             return new double[]{min[0], min[1], min[2]};
         } catch (Throwable ignored) {
+            lastAggregateSawYoungRegionsOnly = false;
             return null;
         }
     }
+
+    /** Set by {@link #aggregateTps()}: true when regions exist but none had a usable 15s report yet. */
+    private static volatile boolean lastAggregateSawYoungRegionsOnly = false;
 
     /**
      * Clamped read of one window from an {@link #aggregateTps()} result. Returns 20.0 defensively

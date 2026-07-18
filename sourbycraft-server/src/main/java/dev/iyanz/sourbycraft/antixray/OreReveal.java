@@ -41,26 +41,27 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Exposed-ore hide/reveal layer above Paper's anti-xray engine.
  *
  * <p>Paper engine-mode 1 hides ores that are fully enclosed; ores exposed to a cave surface still
- * leak through walls. This layer hides those on chunk send (per-player fake block updates) and:
- * <ul>
- *   <li><b>reveals</b> each one when {@link RayTraceWorker} confirms actual line of sight, or
- *       instantly within {@value #NEAR_DISTANCE} blocks (mining UX);</li>
- *   <li><b>re-hides</b> it again once the player has lost sight of it for
- *       {@link VisibilityCache#HIDE_STREAK} consecutive re-validations (hysteresis kills flicker) —
- *       so walking behind a wall re-conceals the ore instead of leaving it permanently x-rayable.</li>
- * </ul>
- * See {@link #revealOnRegion} for the two-phase reveal/re-hide state machine.
+ * leak through walls. This layer tracks those (plus block-entities/liquids) per player in
+ * {@link RevealState} and, each cycle, ray-traces them from ONE eye snapshot ({@link #rayTraceAndApply},
+ * a port of stonar96/RayTraceAntiXray): a block in line of sight is <b>revealed</b> (real block
+ * update), a tracked block that has LOST sight is <b>re-hidden</b> (stone update). No per-cycle ray
+ * budget and a single snapshot per cycle — so a directly-visible block reveals in one pass and there
+ * is no stale-vs-fresh-eye flicker. See {@link BlockOcclusionCulling} for the visibility test.
+ *
+ * <p>NOTE: {@code RayTraceWorker} and {@code VisibilityCache} are the SUPERSEDED reveal path from the
+ * pre-port engine and are now dead code (only {@code RayTraceWorker.ENABLED} survives as the master
+ * on/off flag). The live epoch guard is {@link RevealState#epoch}, not the old VisibilityCache epoch.
  *
  * <h2>Folia threading model</h2>
  * <ul>
- *   <li>{@link #onChunkSent} — region thread owning the sent chunk.</li>
+ *   <li>{@link #onChunkSent} — region thread owning the sent chunk; the exposed-block SCAN on a cache
+ *       miss is offloaded to a virtual thread (loaded-chunk-only, palette-read guarded).</li>
  *   <li>{@link #onNearbyReveal} — region thread of a block change (NMS hook, post-change).</li>
- *   <li>{@link #tickCycle} — global-region thread, which only READS the player list and hops the
- *       actual reveal work onto each player's owning region via the entity scheduler
- *       ({@link #revealOnRegion}); the global thread never touches world block state.</li>
- *   <li>{@link RayTraceWorker} — virtual threads, loaded-chunk-only reads.</li>
+ *   <li>{@link #tickCycle} — global-region thread; only READS the player list + the concurrent
+ *       {@link #STATE} map, then hops each player's ray sweep to their owning region to snapshot the
+ *       eye and dispatches {@link #rayTraceAndApply} on a virtual thread.</li>
  * </ul>
- * Per-player {@link #PENDING} sets and the per-level scan cache are guarded by their own
+ * Per-player {@link RevealState#blocks} maps and the per-level scan cache are guarded by their own
  * monitors; packet sends are thread-safe.
  */
 public final class OreReveal implements Listener {
@@ -340,6 +341,16 @@ public final class OreReveal implements Listener {
     }
 
     /** Full one-shot scan: every cave-exposed hidden ore + hidden fluid position in the chunk. */
+    /** Off-region-safe section read: a concurrent palette resize on the owning region throws
+     *  MissingPaletteEntryException — treat that as air (skip) rather than aborting the whole scan. */
+    private static BlockState safeBlockState(final LevelChunkSection section, final int x, final int y, final int z) {
+        try {
+            return section.getBlockState(x, y, z);
+        } catch (Throwable t) {
+            return net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+        }
+    }
+
     private static CacheEntry scanExposed(final ServerLevel level, final LevelChunk chunk,
                                           final java.util.Set<Block> extraHidden, final boolean fluidObscures,
                                           final long now) {
@@ -361,12 +372,24 @@ public final class OreReveal implements Listener {
             if (section == null || section.hasOnlyAir()) continue;
             final int yBase = chunk.getSectionYFromSectionIndex(idx) << 4;
             if (yBase > maxY) continue;
-            if (!section.getStates().maybeHas(state -> isCandidate(state, oreSet, extraHidden, beSet, hideBE, hideLiquids))) continue;
+            // M1: this scan runs on a virtual thread while the owning region may be MUTATING this
+            // section's palette (a player mining/placing in the chunk). A concurrent PalettedContainer
+            // resize makes reads throw MissingPaletteEntryException. Paper's own anti-xray guards every
+            // off-thread palette read the same way; guard maybeHas (fall through to the full scan on a
+            // throw) and each getBlockState (treat as AIR = skip) instead of letting one racy read abort
+            // the whole scan (which silently dropped a send's chest/liquid hides after the first race).
+            boolean maybeHasCandidate;
+            try {
+                maybeHasCandidate = section.getStates().maybeHas(state -> isCandidate(state, oreSet, extraHidden, beSet, hideBE, hideLiquids));
+            } catch (Throwable t) {
+                maybeHasCandidate = true; // palette raced: do the full guarded scan rather than skip
+            }
+            if (!maybeHasCandidate) continue;
             for (int y = 0; y < 16; y++) {
                 if (yBase + y > maxY) break;
                 for (int z = 0; z < 16; z++) {
                     for (int x = 0; x < 16; x++) {
-                        final BlockState state = section.getBlockState(x, y, z);
+                        final BlockState state = safeBlockState(section, x, y, z);
                         final Block block = state.getBlock();
                         final int wx = chunkX + x, wy = yBase + y, wz = chunkZ + z;
                         // Block-entities (chests, spawners, …) leak through walls via the client BE list,
@@ -724,6 +747,14 @@ public final class OreReveal implements Listener {
             new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
         final BlockState stoneState = fakeState(level, 0);
         final BlockState deepState = fakeState(level, -1);
+        // M3: accumulate reveals the SAME way as hides and flush BOTH only after the post-sweep epoch
+        // check. Previously reveals were sent inline in the loop, BEFORE the epoch guard — a teleport
+        // mid-sweep (which bumps the epoch and clears state.blocks) could not stop already-dispatched
+        // reveals from un-hiding ores visible from the STALE eye, and because those keys were just
+        // cleared from tracking they stayed revealed from the new position. Batching + guarding the
+        // reveal closes that leak-direction asymmetry (and coalesces reveals into per-section packets).
+        final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap<BlockState>> revealBySection =
+            new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
         // Collected mutations to apply back to the map after the sweep (keeps the lock off the rays).
         final LongArrayList reveals = new LongArrayList();   // key -> now visible (map=false)
         final LongArrayList rehides = new LongArrayList();   // key -> now hidden  (map=true)
@@ -746,7 +777,7 @@ public final class OreReveal implements Listener {
                     pos.set(bx, by, bz);
                     final net.minecraft.world.level.chunk.LevelChunk c = level.getChunkIfLoaded(bx >> 4, bz >> 4);
                     if (c != null) {
-                        player.connection.send(new ClientboundBlockUpdatePacket(pos.immutable(), c.getBlockState(pos)));
+                        accumulateHide(revealBySection, pos, c.getBlockState(pos)); // real state = reveal
                         reveals.add(key);
                     }
                 }
@@ -758,7 +789,12 @@ public final class OreReveal implements Listener {
         }
 
         // Teleport / world change / quit since the snapshot → discard (state may be cleared/replaced).
+        // Guards BOTH reveals and hides now, so a stale-eye reveal is never delivered post-teleport.
         if (state.epoch != epoch) return;
+        for (final var e : revealBySection.long2ObjectEntrySet()) {
+            player.connection.send(new net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket(
+                net.minecraft.core.SectionPos.of(e.getLongKey()), e.getValue()));
+        }
         for (final var e : hideBySection.long2ObjectEntrySet()) {
             player.connection.send(new net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket(
                 net.minecraft.core.SectionPos.of(e.getLongKey()), e.getValue()));
