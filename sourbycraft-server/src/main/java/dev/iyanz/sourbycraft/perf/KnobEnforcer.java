@@ -136,6 +136,13 @@ public final class KnobEnforcer {
                 + interval + " distance=" + distance + ", goal-selector-knob=" + goalSelectorKnob
                 + ") -> EntityGoalSelectorInactiveTickConfig.enabled=" + gate);
         }
+        // Real in-tick actuator for the distance throttle (r29): previously distance/interval were
+        // "set-only theater" — the gate above consumed only the DERIVED boolean. Now Mob#serverAiStep
+        // reads these fields to run distant active mobs' AI decisions every N ticks. Disabled at
+        // GREEN (distance default 0), so no behaviour change until a load tier raises it.
+        dev.iyanz.sourbycraft.perf.knob.ActiveAiThrottle.enabled = aiThrottle;
+        dev.iyanz.sourbycraft.perf.knob.ActiveAiThrottle.distance = distance;
+        dev.iyanz.sourbycraft.perf.knob.ActiveAiThrottle.interval = Math.max(1, interval);
     }
 
     /**

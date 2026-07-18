@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Sat, 18 Jul 2026 15:22:27 +0700
+Subject: [PATCH] SourbyCraft: real distance AI-throttle actuator in
+ Mob#serverAiStep
+
+
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+index 03ff2b3b8fd8d722d6bf0f6291c2a5688942f455..4603731460e7ca224ad03e243d571082ff0793ef 100644
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -845,12 +845,30 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+         }
+         // Paper end - Allow nerfed mobs to jump and float
+         int idBasedTickCount = this.tickCount + this.getId(); // Luminol - Petal - Move up
++        // SourbyCraft start - distance AI throttle (real actuator for perf.ai.throttle-beyond-distance).
++        // For a mob still ACTIVE but with no player within the throttle radius, run the EXPENSIVE AI
++        // decisions (sensing + full goal/target selectors) only once every N ticks; keep the cheap
++        // running-goal tick + navigation + controls every tick so the mob still moves/paths smoothly
++        // and never freezes mid-air. Load-gated (ActiveAiThrottle.enabled is off at GREEN), so no
++        // behaviour change until the perf engine escalates a tier. getNearestPlayer(this, radius) is
++        // region-local + radius-bounded, so it short-circuits cheaply; null = beyond the radius.
++        boolean sourbyAiThrottledThisTick = false;
++        if (dev.iyanz.sourbycraft.perf.knob.ActiveAiThrottle.enabled) {
++            final int sourbyIv = dev.iyanz.sourbycraft.perf.knob.ActiveAiThrottle.interval;
++            if (sourbyIv > 1 && idBasedTickCount % sourbyIv != 0) {
++                final double sourbyRadius = dev.iyanz.sourbycraft.perf.knob.ActiveAiThrottle.distance;
++                if (sourbyRadius > 0.0 && this.level().getNearestPlayer(this, sourbyRadius) == null) {
++                    sourbyAiThrottledThisTick = true;
++                }
++            }
++        }
++        // SourbyCraft end - distance AI throttle
+         ProfilerFiller profiler = Profiler.get();
+         profiler.push("sensing");
+-        if (idBasedTickCount % me.earthme.luminol.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !me.earthme.luminol.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled) this.sensing.tick(); // Luminol - Petal - Reduce sensor work
++        if (!sourbyAiThrottledThisTick && (idBasedTickCount % me.earthme.luminol.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !me.earthme.luminol.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled)) this.sensing.tick(); // Luminol - Petal - Reduce sensor work; SourbyCraft - skip while distance-throttled
+         profiler.pop();
+         //int idBasedTickCount = this.tickCount + this.getId(); // Luminol - Petal - Move up
+-        if (idBasedTickCount % 2 != 0 && this.tickCount > 1) {
++        if (sourbyAiThrottledThisTick || (idBasedTickCount % 2 != 0 && this.tickCount > 1)) { // SourbyCraft - distance-throttled mobs take the cheap running-goals path
+             profiler.push("targetSelector");
+             this.targetSelector.tickRunningGoals(false);
+             profiler.pop();
