@@ -160,13 +160,13 @@ public final class HudBars {
         final long container = ContainerMemory.limitBytes();
         final var name = Component.text()
             .append(Component.text("RAM ", NamedTextColor.GRAY))
-            .append(Component.text(ContainerMemory.fmt(used) + " / " + ContainerMemory.fmt(max),
+            .append(Component.text(ContainerMemory.fmt(used) + "/" + ContainerMemory.fmt(max),
                 pct < 0.60 ? NamedTextColor.GREEN : pct < 0.85 ? NamedTextColor.YELLOW : NamedTextColor.RED))
-            .append(Component.text(String.format(java.util.Locale.ROOT, "  (%.0f%%)", pct * 100), NamedTextColor.GRAY));
-        // Panel allocation differs meaningfully from the heap -> show it (the missing-Xmx case).
+            .append(Component.text(String.format(java.util.Locale.ROOT, " (%.0f%%)", pct * 100), NamedTextColor.GRAY));
+        // Panel allocation meaningfully larger than the heap -> flag it compactly (the missing-Xmx case).
+        // Kept short so the boss-bar name never overflows the screen; the full note is in the boot log.
         if (container > 0 && max > 0 && container > max * 2) {
-            name.append(Component.text("   panel " + ContainerMemory.fmt(container), NamedTextColor.GOLD))
-                .append(Component.text(" (heap not sized to it — see boot log)", NamedTextColor.DARK_GRAY));
+            name.append(Component.text(" · panel " + ContainerMemory.fmt(container) + " ⚠", NamedTextColor.GOLD));
         }
         RAM_BAR.name(name.build());
         RAM_BAR.progress((float) Math.max(0.0, Math.min(1.0, pct)));
