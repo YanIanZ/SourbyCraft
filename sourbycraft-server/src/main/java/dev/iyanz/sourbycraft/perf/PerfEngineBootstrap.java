@@ -221,6 +221,15 @@ public final class PerfEngineBootstrap {
             SourbyLogger.error("perf-engine: ViewThrottle.register failed", t);
         }
 
+        // F-perfup3: invisible simulation-distance throttle — sheds per-player tick load under load
+        // (default ON; engages from YELLOW). The high-view-distance TPS lever the chunk knobs can't reach.
+        try {
+            SimulationThrottle.register(owner);
+            registered.add("simulation-throttle");
+        } catch (Throwable t) {
+            SourbyLogger.error("perf-engine: SimulationThrottle.register failed", t);
+        }
+
         // MaxPlayersBypass — let sourbycraft.maxplayers.bypass holders (+ ops) join a full server.
         // OPT-IN, default OFF: registering the PlayerLoginEvent listener disables the config-phase
         // fast join path (HorriblePlayerLoginEventHack) and slows every join, so it only registers

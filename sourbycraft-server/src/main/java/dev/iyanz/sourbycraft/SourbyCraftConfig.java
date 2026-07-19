@@ -150,6 +150,13 @@ public class SourbyCraftConfig {
     // operators who accept the flicker for the extra headroom; when on it only engages at RED+.
     public static boolean autoThrottleView = false;
     public static int minViewDistance = 4;
+    // F-perfup3 simulation-distance throttle — the INVISIBLE tick-load lever (default ON). Lowering
+    // simulation-distance under load cuts per-player ticking area (entities/blocks/redstone/fluids/
+    // mob-spawn) without any client-visible flicker (far chunks still render at view-distance). Engages
+    // from YELLOW; floors at min-simulation-distance so mobs still spawn/tick within that radius of
+    // every player. See {@link dev.iyanz.sourbycraft.perf.SimulationThrottle}.
+    public static boolean autoThrottleSim = true;
+    public static int minSimulationDistance = 4;
     /** On world load, bump a world still at the old vanilla "unlimited" border (59,999,968) up to the
      *  raised max (65,999,968 / ±33M) so the expanded limit actually applies to existing worlds. An
      *  operator's deliberately-set finite border is left untouched. */
@@ -307,6 +314,8 @@ public class SourbyCraftConfig {
 
         autoThrottleView = cfgBool("network.auto-throttle-view", autoThrottleView);
         minViewDistance = cfgInt("network.min-view-distance", minViewDistance);
+        autoThrottleSim = cfgBool("network.auto-throttle-simulation", autoThrottleSim);
+        minSimulationDistance = cfgInt("network.min-simulation-distance", minSimulationDistance);
         expandBorderToMax = cfgBool("world.expand-border-to-max", expandBorderToMax);
         compressionLevel = clamp(cfgInt("network.compression-level", compressionLevel), 0, 9);
         // S5: bridge compression level to Paper's live engine when non-default.
