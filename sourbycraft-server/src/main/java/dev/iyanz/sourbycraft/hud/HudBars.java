@@ -157,17 +157,23 @@ public final class HudBars {
         final long max = rt.maxMemory();
         final long used = rt.totalMemory() - rt.freeMemory();
         final double pct = max > 0 ? (double) used / max : 0.0;
-        final long container = ContainerMemory.limitBytes();
         final var name = Component.text()
             .append(Component.text("RAM ", NamedTextColor.GRAY))
             .append(Component.text(ContainerMemory.fmt(used) + "/" + ContainerMemory.fmt(max),
                 pct < 0.60 ? NamedTextColor.GREEN : pct < 0.85 ? NamedTextColor.YELLOW : NamedTextColor.RED))
             .append(Component.text(String.format(java.util.Locale.ROOT, " (%.0f%%)", pct * 100), NamedTextColor.GRAY));
-        // Panel allocation meaningfully larger than the heap -> flag it compactly (the missing-Xmx case).
-        // Kept short so the boss-bar name never overflows the screen; the full note is in the boot log.
-        if (container > 0 && max > 0 && container > max * 2) {
-            name.append(Component.text(" · panel " + ContainerMemory.fmt(container) + " ⚠", NamedTextColor.GOLD));
-        }
+        // Swap usage (host-level), shown like the RAM readout: used/total. Only when swap exists.
+        try {
+            final var os = (com.sun.management.OperatingSystemMXBean) java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+            final long swapTotal = os.getTotalSwapSpaceSize();
+            if (swapTotal > 0) {
+                final long swapUsed = swapTotal - os.getFreeSwapSpaceSize();
+                final double swapPct = (double) swapUsed / swapTotal;
+                name.append(Component.text("  Swap ", NamedTextColor.GRAY))
+                    .append(Component.text(ContainerMemory.fmt(swapUsed) + "/" + ContainerMemory.fmt(swapTotal),
+                        swapPct < 0.30 ? NamedTextColor.GREEN : swapPct < 0.70 ? NamedTextColor.YELLOW : NamedTextColor.RED));
+            }
+        } catch (Throwable ignored) { /* swap metrics unavailable on this JVM/OS */ }
         RAM_BAR.name(name.build());
         RAM_BAR.progress((float) Math.max(0.0, Math.min(1.0, pct)));
         RAM_BAR.color(pct < 0.60 ? BossBar.Color.GREEN : pct < 0.85 ? BossBar.Color.YELLOW : BossBar.Color.RED);
