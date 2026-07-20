@@ -36,7 +36,9 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 public final class Sourbyclip {
-    private static final boolean ENABLE_LEAVES_PLUGIN = Boolean.getBoolean("leavesclip.enable.mixin") || Boolean.getBoolean("sourbyclip.enable.mixin");
+    // Cherry — SourbyCraft's unified mixin engine (Leavesclip base + Horizon access-transformers).
+    // Enable with -Dcherry.enable.mixin (aliases: sourbyclip.enable.mixin / leavesclip.enable.mixin).
+    private static final boolean ENABLE_LEAVES_PLUGIN = dev.iyanz.sourbyclip.cherry.Cherry.enabled();
     public static final String[] ALL_MAVEN_REPO_LINK_BASE = new String[]{
             "https://maven.aliyun.com/repository/central",
             "https://repo.papermc.io/repository/maven-public",
@@ -71,12 +73,15 @@ public final class Sourbyclip {
 
     private static @NotNull ClassLoader getClassLoaderForLaunch(URL[] setupClasspathUrls) {
         if (ENABLE_LEAVES_PLUGIN) {
-            logger.info("Leaves plugin has been enabled. Bootstrapping with mixin environment.");
+            logger.info("Cherry mixin engine enabled (Leavesclip mixins + Horizon access-transformers). Bootstrapping mixin environment.");
 
             BuildInfoInjector.inject();
             overrideAsmVersion();
             PluginResolver.extractMixins();
             MixinJarResolver.resolveMixinJars();
+            // Cherry — discover + register plugin access-transformers (.at) before the transforming
+            // classloader starts loading server classes.
+            dev.iyanz.sourbyclip.cherry.Cherry.initAccessTransformers();
 
             System.setProperty("mixin.bootstrapService", MixinServiceKnotBootstrap.class.getName());
             System.setProperty("mixin.service", MixinServiceKnot.class.getName());
@@ -109,6 +114,12 @@ public final class Sourbyclip {
 
             logger.info("Loading accesswideners");
             AccessWidenerManager.initAccessWidener(createdClassLoader);
+
+            logger.info("Cherry ready: {} mixin plugin(s), {} mixin config(s), {} access-widener(s), {} access-transformer(s).",
+                    org.leavesmc.leavesclip.mixin.PluginResolver.leavesPluginMetas.size(),
+                    MixinJarResolver.mixinConfigs.size(),
+                    MixinJarResolver.accessWidenerConfigs.size(),
+                    dev.iyanz.sourbyclip.cherry.at.CherryAccessTransformers.INSTANCE.registeredCount());
 
             return createdClassLoader;
         } else {

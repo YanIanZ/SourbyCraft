@@ -13,6 +13,13 @@ public class LeavesPluginMeta {
     private String name;
     private MixinConfig mixin;
 
+    // SourbyCraft/Cherry — Horizon-style access-transformer (.at) file names declared by the
+    // plugin. Read by dev.iyanz.sourbyclip.cherry.CherryPluginResolver; ignored by the Leaves
+    // mixin pipeline (which only consumes the `mixin` block). Populated from the unified
+    // cherry-plugin.json (or a leaves-plugin.json that also carries this key).
+    @SerializedName("access-transformers")
+    private List<String> accessTransformers;
+
     public String getName() {
         return name;
     }
@@ -27,6 +34,15 @@ public class LeavesPluginMeta {
 
     public void setMixin(MixinConfig mixin) {
         this.mixin = mixin;
+    }
+
+    // SourbyCraft/Cherry
+    public List<String> getAccessTransformers() {
+        return accessTransformers;
+    }
+
+    public void setAccessTransformers(List<String> accessTransformers) {
+        this.accessTransformers = accessTransformers;
     }
 
     public File getMixinJarFile() {
