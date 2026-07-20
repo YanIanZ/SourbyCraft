@@ -50,7 +50,7 @@
                      }));
                  }
              },
-@@ -239,17 +_,10 @@
+@@ -239,25 +_,19 @@
                  }
              }
  
@@ -72,3 +72,40 @@
          }
  
          // we do not want to allow larger unit values, nobody should autosave in units larger than
+         // days, like who tf would use time units like "1 week"??
+         AUTOSAVE_SPAN.swapValue((_) -> TimeSpan.parse(configuration.autosave.autosaveFrequency).verifyIsntLargeUnit());
+ 
+-        broadcast("Server will autosave enabled selection every " + configuration.autosave.autosaveFrequency, INFO);
+-        broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
++        // SourbyCraft - trim startup log noise: the autosave-frequency and default-tick-rate INFO
++        // broadcasts are redundant (both values live in config/canvas-server.yml). Dropped to reduce
++        // boot spam; warnings/errors are kept.
+     }
+ 
+     public static GlobalConfiguration getInstance() {
+@@ -391,7 +_,12 @@
+ 
+         public long overloadedLogMillis = 5_000L;
+         public float defaultTickRate = 20.0F;
+-        public GuardSeverity guardSeverity = GuardSeverity.THROW;
++        // SourbyCraft - stabilize default: Canvas ships THROW ("Throws an exception, can crash the
++        // server"), which is a correctness/dev default. On a real server a plugin doing an
++        // off-region operation should be logged, not crash the whole server, so default to LOG
++        // ("logs a warning in console, but continues the operation"). Operators can still set THROW
++        // in config/canvas-server.yml for strict correctness testing.
++        public GuardSeverity guardSeverity = GuardSeverity.LOG;
+ 
+         public enum GuardSeverity {
+             SILENT,
+@@ -645,7 +_,10 @@
+ 
+         private boolean enableLogCleaner = false;
+         private String cleanerTimeSpan = "30d";
+-        public boolean logEnderPearlRewriteActions = true;
++        // SourbyCraft - stabilize default: this is a debug-logging flag that logs on every ender
++        // pearl save/load from Canvas' pearl-save rewrite (frequent on an active server = console
++        // spam). Default it off; operators can flip it on in config/canvas-server.yml to debug.
++        public boolean logEnderPearlRewriteActions = false;
+     }
+ 
+     public EnchantCommand enchantCommand = new EnchantCommand();
