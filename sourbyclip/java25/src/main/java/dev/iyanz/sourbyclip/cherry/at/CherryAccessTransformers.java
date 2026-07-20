@@ -15,6 +15,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,9 +40,27 @@ import java.util.regex.Pattern;
  * </ul>
  * The AT line grammar + the ASM access-flag maths are preserved verbatim, so an {@code .at} file
  * authored for Horizon parses and applies identically under Cherry.
+ *
+ * <p><b>Thread-safety.</b> {@link #register(String, BufferedReader)} and {@link #lock()} are
+ * expected to run once, sequentially, during the single-threaded plugin-discovery phase, before any
+ * class is loaded — both are {@code synchronized} against a private staging map that no other
+ * method ever touches. {@link #applyToBytes(byte[])} (and {@link #isEmpty()}/{@link #registeredCount()}/
+ * {@link #targetClassCount()}), by contrast, are called from the transforming classloader's
+ * {@code findClass}, which can run concurrently across multiple class-loading threads. To make that
+ * safe without any locking on the hot path, {@link #lock()} builds one fully immutable snapshot of
+ * the resolved registry and publishes it through a single {@code volatile} reference; every reader
+ * takes exactly one volatile read of that reference and then only ever sees a finished, unmodifiable
+ * {@link Map} of unmodifiable {@link Set}s — there is no shared mutable state on the read path, and
+ * no way for a reader to observe a partially-built registry.
  */
 public final class CherryAccessTransformers {
 
+    /**
+     * The single, process-wide AT registry. Cherry has no per-plugin or per-classloader isolation:
+     * every {@code access-transformers} declaration discovered by
+     * {@link dev.iyanz.sourbyclip.cherry.CherryPluginResolver} is registered into this one instance,
+     * which is then {@linkplain #lock() locked} once before class loading begins.
+     */
     public static final CherryAccessTransformers INSTANCE = new CherryAccessTransformers();
 
     private static final Logger LOGGER = new SimpleLogger("Cherry/AT");
@@ -64,30 +83,49 @@ public final class CherryAccessTransformers {
     private static final int VIS_PROTECTED = 2;
     private static final int VIS_PRIVATE = 1;
 
-    /** internal class name (a/b/C) -> its AT definitions. */
-    private final Map<String, Set<AtDefinition>> registry = new HashMap<>();
+    /** internal class name (a/b/C) -> its AT definitions, mutated only under this instance's monitor, pre-lock. */
+    private final Map<String, Set<AtDefinition>> staging = new HashMap<>();
+
+    /** Immutable, fully-resolved snapshot published by {@link #lock()}; empty until then. */
+    private volatile Map<String, Set<AtDefinition>> committed = Map.of();
+
     private volatile boolean locked = false;
-    private int registered = 0;
+    private final AtomicInteger registeredCounter = new AtomicInteger();
 
     private CherryAccessTransformers() {
     }
 
+    /** @return true if no access-transformer definitions have been registered (yet). Safe from any thread. */
     public boolean isEmpty() {
-        return registry.isEmpty();
+        return registeredCounter.get() == 0;
     }
 
+    /** @return the total number of AT definitions registered across all target classes so far. Safe from any thread. */
     public int registeredCount() {
-        return registered;
+        return registeredCounter.get();
+    }
+
+    /** @return the number of distinct target classes with at least one AT definition. Safe from any thread. */
+    public synchronized int targetClassCount() {
+        return locked ? committed.size() : staging.size();
+    }
+
+    /** @return true once {@link #lock()} has run and the registry is a frozen, read-only snapshot. */
+    public boolean isLocked() {
+        return locked;
     }
 
     /**
      * Parse one access-transformer file (one definition per line, {@code #} comments allowed) and
-     * add its definitions to the registry.
+     * add its definitions to the registry. Never throws for a malformed line - each line is
+     * compiled independently, and a line that cannot be parsed (or throws unexpectedly while being
+     * parsed) is logged and skipped, leaving every other line in this file, and every other file,
+     * completely unaffected.
      *
      * @param sourceName human-readable name for logging (e.g. {@code MyPlugin:widener.at})
      * @param reader     the AT file contents
      */
-    public void register(String sourceName, BufferedReader reader) {
+    public synchronized void register(String sourceName, BufferedReader reader) {
         if (locked) {
             throw new IllegalStateException("Cherry AT registry is locked");
         }
@@ -108,6 +146,11 @@ public final class CherryAccessTransformers {
                     }
                 } catch (CompileError e) {
                     LOGGER.error("Cherry: invalid AT line ({}) in {}: {}", idx, sourceName, e.getMessage());
+                } catch (RuntimeException e) {
+                    // Belt-and-braces: an AT line must never be able to abort loading every other
+                    // declaration in this file (or any other plugin's), no matter what it contains.
+                    LOGGER.error("Cherry: unexpected error parsing AT line ({}) in {}: \"{}\" ({}: {})",
+                        idx, sourceName, line, e.getClass().getSimpleName(), e.getMessage());
                 }
             }
         } catch (IOException e) {
@@ -116,14 +159,19 @@ public final class CherryAccessTransformers {
     }
 
     private void addDefinition(String internalClassName, AtDefinition def) {
-        registry.computeIfAbsent(internalClassName, k -> new HashSet<>()).add(def);
-        registered++;
+        staging.computeIfAbsent(internalClassName, k -> new HashSet<>()).add(def);
+        registeredCounter.incrementAndGet();
     }
 
-    /** Resolve intra-class conflicts (keep the widest access, drop finality) and freeze the registry. */
-    public void lock() {
+    /**
+     * Resolve intra-class conflicts (keep the widest access, drop finality), publish one immutable
+     * snapshot of the result, and freeze the registry. Idempotent - a second call is a no-op.
+     */
+    public synchronized void lock() {
         if (locked) return;
-        for (Map.Entry<String, Set<AtDefinition>> e : registry.entrySet()) {
+
+        Map<String, Set<AtDefinition>> resolved = new HashMap<>();
+        for (Map.Entry<String, Set<AtDefinition>> e : staging.entrySet()) {
             Set<AtDefinition> defs = e.getValue();
             if (defs == null || defs.isEmpty()) continue;
 
@@ -151,36 +199,50 @@ public final class CherryAccessTransformers {
                     .build();
                 cleaned.add(new AtDefinition(op, d.data(), d.nodeTarget()));
             }
-            e.setValue(cleaned);
+            if (!cleaned.isEmpty()) {
+                resolved.put(e.getKey(), Set.copyOf(cleaned));
+            }
         }
-        registry.values().removeIf(v -> v == null || v.isEmpty());
-        locked = true;
-        LOGGER.info("Cherry: locked {} access-transformer definition(s) across {} target class(es)", registered, registry.size());
+
+        // Publish the fully-built, immutable snapshot in one volatile write, then flip the flag.
+        // Any thread that later calls applyToBytes/targetClassCount sees either the old (empty)
+        // state or this complete one - never a partially populated map.
+        this.committed = Map.copyOf(resolved);
+        this.locked = true;
+        LOGGER.info("Cherry: locked {} access-transformer definition(s) across {} target class(es)",
+            registeredCounter.get(), committed.size());
     }
 
-    /** @return the transformed bytes if this class has AT definitions, else the input unchanged. */
+    /**
+     * @return the transformed bytes if this class has AT definitions, else the input unchanged.
+     * Safe to call from any thread, concurrently, including before {@link #lock()} has run (in
+     * which case it is always a no-op, since {@link #committed} starts out empty).
+     */
     public byte[] applyToBytes(byte[] classBytes) {
+        Map<String, Set<AtDefinition>> snapshot = committed;
+        if (snapshot.isEmpty()) {
+            return classBytes;
+        }
         ClassReader reader = new ClassReader(classBytes);
         String internalName = reader.getClassName();
-        if (!registry.containsKey(internalName)) {
+        Set<AtDefinition> mods = snapshot.get(internalName);
+        if (mods == null) {
             return classBytes;
         }
         ClassNode node = new ClassNode();
         reader.accept(node, 0);
-        transformNode(node);
+        transformNode(node, mods);
         ClassWriter writer = new ClassWriter(reader, 0);
         node.accept(writer);
         return writer.toByteArray();
     }
 
-    private void transformNode(ClassNode toTransform) {
-        Set<AtDefinition> mods = registry.get(toTransform.name);
-        if (mods == null) return;
+    private void transformNode(ClassNode toTransform, Set<AtDefinition> mods) {
         for (AtDefinition def : mods) {
             switch (def.data()) {
                 case AtDefinition.ClassData ignored -> {
                     toTransform.access = def.operation().apply(toTransform.access);
-                    LOGGER.info("Cherry: access-transformed class {}", toTransform.name);
+                    LOGGER.debug("Cherry: access-transformed class {}", toTransform.name);
                 }
                 case AtDefinition.FieldData fdata -> {
                     FieldNode target = find(toTransform.fields, f -> f.name.equals(fdata.fieldName()));
@@ -188,7 +250,7 @@ public final class CherryAccessTransformers {
                         LOGGER.warn("Cherry: AT target field '{}' not found in {}", fdata.fieldName(), toTransform.name);
                     } else {
                         target.access = def.operation().apply(target.access);
-                        LOGGER.info("Cherry: access-transformed field {}.{}", toTransform.name, target.name);
+                        LOGGER.debug("Cherry: access-transformed field {}.{}", toTransform.name, target.name);
                     }
                 }
                 case AtDefinition.MethodData mdata -> {
@@ -201,7 +263,7 @@ public final class CherryAccessTransformers {
                         LOGGER.warn("Cherry: AT target method '{}' not found in {}", descriptor, toTransform.name);
                     } else {
                         target.access = def.operation().apply(target.access);
-                        LOGGER.info("Cherry: access-transformed method {}.{}", toTransform.name, target.name);
+                        LOGGER.debug("Cherry: access-transformed method {}.{}", toTransform.name, target.name);
                     }
                 }
                 default -> {

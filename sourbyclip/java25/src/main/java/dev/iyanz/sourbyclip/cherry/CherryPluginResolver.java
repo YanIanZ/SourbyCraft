@@ -1,10 +1,12 @@
 package dev.iyanz.sourbyclip.cherry;
 
-import com.google.gson.Gson;
 import dev.iyanz.sourbyclip.cherry.at.CherryAccessTransformers;
+import dev.iyanz.sourbyclip.cherry.discovery.CherryDiscovery;
+import dev.iyanz.sourbyclip.cherry.discovery.DiscoveredAccessTransformer;
+import dev.iyanz.sourbyclip.cherry.discovery.DiscoveryReport;
+import dev.iyanz.sourbyclip.cherry.discovery.SkippedItem;
 import org.leavesmc.leavesclip.logger.Logger;
 import org.leavesmc.leavesclip.logger.SimpleLogger;
-import org.leavesmc.leavesclip.mixin.LeavesPluginMeta;
 import org.leavesmc.leavesclip.mixin.PluginResolver;
 
 import java.io.BufferedReader;
@@ -12,7 +14,6 @@ import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
@@ -38,69 +39,66 @@ import java.util.jar.JarFile;
  *
  * The {@code mixin} block continues to be handled by the Leaves engine (Fabric mixins + access
  * wideners); the {@code access-transformers} list is Cherry's Horizon-grafted addition.
+ *
+ * <p>As of Cherry's multi-format discovery pipeline, the actual manifest scanning (including
+ * de-duplication and the per-plugin {@code -Dcherry.disable.plugins} kill-switch) is delegated to
+ * {@link CherryDiscovery}; this class's own job is narrowed to committing the AT files a
+ * {@link DiscoveryReport} found into {@link CherryAccessTransformers} and locking the registry. See
+ * {@link Cherry#status()}/{@link Cherry#dryRun()} for a read-only view of the same discovery that
+ * never registers or locks anything.
  */
 public final class CherryPluginResolver {
 
     private static final Logger LOGGER = new SimpleLogger("Cherry");
-    private static final Gson GSON = new Gson();
-    private static final String CHERRY_MANIFEST = "cherry-plugin.json";
-    private static final String LEAVES_MANIFEST = PluginResolver.LEAVES_PLUGIN_JSON_FILE;
 
     private CherryPluginResolver() {
     }
 
     /** Scan {@code plugins/} for AT declarations, register + lock them. Safe to call with none. */
     public static void resolveAccessTransformers() {
-        File pluginsDir = new File(PluginResolver.PLUGIN_DIRECTORY);
-        File[] jars = pluginsDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".jar"));
-        if (jars == null || jars.length == 0) {
-            CherryAccessTransformers.INSTANCE.lock();
-            return;
-        }
+        DiscoveryReport report = CherryDiscovery.scan(new File(PluginResolver.PLUGIN_DIRECTORY));
+        commitAccessTransformers(report);
+    }
 
-        for (File jar : jars) {
-            try (JarFile jarFile = new JarFile(jar)) {
-                LeavesPluginMeta meta = readManifest(jarFile);
-                if (meta == null) continue;
-                List<String> atFiles = meta.getAccessTransformers();
-                if (atFiles == null || atFiles.isEmpty()) continue;
-
-                String pluginName = meta.getName() == null ? jar.getName() : meta.getName();
-                for (String atFile : atFiles) {
-                    JarEntry entry = jarFile.getJarEntry(atFile);
-                    if (entry == null) {
-                        LOGGER.warn("Cherry: plugin '{}' declares access-transformer '{}' but it is missing from the jar",
-                            pluginName, atFile);
-                        continue;
-                    }
-                    try (InputStream in = jarFile.getInputStream(entry);
-                         BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-                        LOGGER.info("Cherry: loading access-transformer {}:{}", pluginName, atFile);
-                        CherryAccessTransformers.INSTANCE.register(pluginName + ":" + atFile, reader);
-                    }
+    /**
+     * Register every access-transformer file a discovery pass found into
+     * {@link CherryAccessTransformers}, then lock the registry. Each file is read and registered
+     * independently: a jar that cannot be re-opened, or an AT file whose content cannot be read,
+     * is logged and skipped without affecting any other plugin's access-transformers.
+     *
+     * <p>Logging here is scoped to access-transformers only (both per-file DEBUG detail and any
+     * {@code "access-transformer ..."}-prefixed skip WARNs) — it deliberately does not re-log the
+     * rest of {@code report}'s skipped items, since a caller that also drives the Fabric mixin
+     * bridge (see {@link Cherry#init(java.io.File, java.io.File)}) logs those itself; this avoids
+     * every skip reason being logged twice when both engines run against the same report.
+     *
+     * @param report a discovery report, typically from {@code CherryDiscovery.scan(pluginsDir)}
+     */
+    public static void commitAccessTransformers(DiscoveryReport report) {
+        for (DiscoveredAccessTransformer at : report.accessTransformers()) {
+            try (JarFile jarFile = new JarFile(at.jarFile())) {
+                JarEntry entry = jarFile.getJarEntry(at.entryName());
+                if (entry == null) {
+                    // Discovery already verified this existed; a concurrent modification of the jar
+                    // between scan and commit is exceedingly unlikely, but still handled, not fatal.
+                    LOGGER.warn("Cherry: access-transformer '{}' declared by '{}' vanished before it could be read",
+                        at.entryName(), at.pluginName());
+                    continue;
+                }
+                try (InputStream in = jarFile.getInputStream(entry);
+                     BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                    LOGGER.debug("Cherry: loading access-transformer {}:{}", at.pluginName(), at.entryName());
+                    CherryAccessTransformers.INSTANCE.register(at.pluginName() + ":" + at.entryName(), reader);
                 }
             } catch (Throwable t) {
-                LOGGER.error("Cherry: failed scanning plugin jar for access-transformers: " + jar.getName(), t);
+                LOGGER.error("Cherry: failed loading access-transformer '" + at.entryName() + "' from '" + at.pluginName() + "'", t);
             }
         }
-
         CherryAccessTransformers.INSTANCE.lock();
-    }
-
-    private static LeavesPluginMeta readManifest(JarFile jarFile) {
-        LeavesPluginMeta meta = parse(jarFile, CHERRY_MANIFEST);
-        if (meta != null) return meta;
-        return parse(jarFile, LEAVES_MANIFEST);
-    }
-
-    private static LeavesPluginMeta parse(JarFile jarFile, String manifestName) {
-        JarEntry entry = jarFile.getJarEntry(manifestName);
-        if (entry == null) return null;
-        try (InputStream in = jarFile.getInputStream(entry)) {
-            return GSON.fromJson(new String(in.readAllBytes(), StandardCharsets.UTF_8), LeavesPluginMeta.class);
-        } catch (Exception e) {
-            LOGGER.warn("Cherry: failed reading {} from {}", manifestName, jarFile.getName());
-            return null;
+        for (SkippedItem item : report.skipped()) {
+            if (item.item().startsWith("access-transformer")) {
+                LOGGER.warn("Cherry: skipped {}", item.describe());
+            }
         }
     }
 }
