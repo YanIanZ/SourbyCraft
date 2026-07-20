@@ -104,6 +104,7 @@ public final class HudBars {
         if (!isOptedOut(player, false)) setShown(player, false, true);
     }
 
+    /** Evicts a departing player from both viewer sets. No-op if they had no bar shown. */
     public static void onQuit(final Player player) {
         final UUID id = player.getUniqueId();
         if (ANY.remove(id) == null) return;
@@ -191,6 +192,7 @@ public final class HudBars {
     /** Bukkit listener holder — registered once by the command registrar. Handles the admin
      *  auto-HUD on join and viewer cleanup on quit. */
     public static final class QuitListener implements org.bukkit.event.Listener {
+        /** Delays 1s, then runs {@link HudBars#autoShowOnJoin} on the player's own region scheduler. */
         @org.bukkit.event.EventHandler
         public void onJoin(org.bukkit.event.player.PlayerJoinEvent e) {
             // Hop to the player's region for the audience/bossbar op (Folia). A small delay lets the
@@ -200,6 +202,7 @@ public final class HudBars {
                 task -> { try { HudBars.autoShowOnJoin(p); } catch (Throwable ignored) {} }, null, 20L);
         }
 
+        /** Forwards to {@link HudBars#onQuit} to evict the departing viewer. */
         @org.bukkit.event.EventHandler
         public void onQuit(org.bukkit.event.player.PlayerQuitEvent e) {
             HudBars.onQuit(e.getPlayer());

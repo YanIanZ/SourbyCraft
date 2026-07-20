@@ -42,6 +42,12 @@ public class MaxpCommand extends Command {
         this.setPermission("sourbycraft.command.maxp");
     }
 
+    /**
+     * With no argument, renders the current max/online readout. With a positive integer argument,
+     * validates it against {@link #MAX_ALLOWED}, applies it live via
+     * {@link org.bukkit.Server#setMaxPlayers(int)}, and persists it via
+     * {@link MaxPlayersConfig#persist(int)} so it survives a restart.
+     */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;

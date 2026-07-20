@@ -38,6 +38,7 @@ public class UpdateCommand extends Command {
         this.setPermission("sourbycraft.command.update");
     }
 
+    /** Dispatches {@code check}/{@code apply}/{@code status} (default {@code check} with no argument). */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
@@ -111,6 +112,7 @@ public class UpdateCommand extends Command {
         }
     }
 
+    /** Suggests {@code check}/{@code apply}/{@code status} for the first argument only. */
     @Override
     public List<String> tabComplete(CommandSender sender, String alias, String[] args) {
         if (args.length == 1) {

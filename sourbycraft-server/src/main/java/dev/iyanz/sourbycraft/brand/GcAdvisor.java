@@ -22,6 +22,12 @@ import java.util.List;
  */
 public final class GcAdvisor {
 
+    /**
+     * Outcome of a GC/flag evaluation.
+     *
+     * @param acceptable true when no warning applies (nothing to print)
+     * @param warnings   one human-readable line per flag/GC issue found; empty when acceptable
+     */
     public record Result(boolean acceptable, List<String> warnings) {}
 
     /**
@@ -42,6 +48,11 @@ public final class GcAdvisor {
 
     private GcAdvisor() {}
 
+    /**
+     * Inspects the running JVM's GC beans and input arguments and evaluates them via
+     * {@link #evaluate(List, List, long, long)}. Returns an "acceptable" empty-warnings result
+     * without inspecting anything when {@code branding.gc-advisor.enabled} is {@code false}.
+     */
     public static Result run() {
         // gate — if operator disabled gc-advisor in baked yml, skip.
         if (!enabled()) {

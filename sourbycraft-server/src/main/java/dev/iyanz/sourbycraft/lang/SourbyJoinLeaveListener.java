@@ -34,10 +34,12 @@ public final class SourbyJoinLeaveListener implements Listener {
 
     private SourbyJoinLeaveListener() {}
 
+    /** Registers this listener against {@code plugin} (the internal plugin handle). */
     public static void register(Plugin plugin) {
         Bukkit.getPluginManager().registerEvents(new SourbyJoinLeaveListener(), plugin);
     }
 
+    /** Replaces the join broadcast with a random {@link SourbyMessages#JOIN} variant, unless another plugin already suppressed it. */
     @EventHandler(priority = EventPriority.NORMAL)
     public void onJoin(PlayerJoinEvent e) {
         // Only override when a broadcast would have been sent (null = another plugin suppressed it).
@@ -47,6 +49,7 @@ public final class SourbyJoinLeaveListener implements Listener {
             Placeholder.unparsed("player", e.getPlayer().getName())));
     }
 
+    /** Replaces the quit broadcast with a random {@link SourbyMessages#LEAVE} variant, unless another plugin already suppressed it. */
     @EventHandler(priority = EventPriority.NORMAL)
     public void onQuit(PlayerQuitEvent e) {
         if (e.quitMessage() == null) return;

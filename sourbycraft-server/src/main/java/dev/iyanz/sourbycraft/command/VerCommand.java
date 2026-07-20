@@ -42,6 +42,7 @@ public class VerCommand extends Command {
         this.setAliases(java.util.List.of("version", "about"));
     }
 
+    /** Renders the branded version panel: SourbyCraft version/build date, MC/Bukkit API, uptime, git ref. */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;

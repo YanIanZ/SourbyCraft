@@ -51,6 +51,11 @@ public final class StartupBanner {
 
     private StartupBanner() {}
 
+    /**
+     * Prints the branded banner + GC advisor warning (if any) to the UTF-8 console stream. Only
+     * the first call in the process prints anything; every later call is a no-op. Never throws —
+     * a failure is logged as a warning instead of aborting boot.
+     */
     public static synchronized void printOnce() {
         if (printed) return;
         printed = true;

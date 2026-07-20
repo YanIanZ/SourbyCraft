@@ -117,6 +117,7 @@ public final class SourbyCraftConfig {
         return defaultValue;
     }
 
+    /** Read a boolean by dotted path. Falls back to {@code defaultValue} when absent or not a boolean. */
     public static boolean cfgBool(String dottedPath, boolean defaultValue) {
         Object v = lookup(dottedPath);
         if (v instanceof Boolean b) return b;
@@ -124,6 +125,7 @@ public final class SourbyCraftConfig {
         return defaultValue;
     }
 
+    /** Read an int by dotted path. Accepts any {@link Number}; falls back to {@code defaultValue} otherwise. */
     public static int cfgInt(String dottedPath, int defaultValue) {
         Object v = lookup(dottedPath);
         if (v instanceof Number n) return n.intValue();
@@ -131,6 +133,7 @@ public final class SourbyCraftConfig {
         return defaultValue;
     }
 
+    /** Read a double by dotted path. Accepts any {@link Number}; falls back to {@code defaultValue} otherwise. */
     public static double cfgDouble(String dottedPath, double defaultValue) {
         Object v = lookup(dottedPath);
         if (v instanceof Number n) return n.doubleValue();

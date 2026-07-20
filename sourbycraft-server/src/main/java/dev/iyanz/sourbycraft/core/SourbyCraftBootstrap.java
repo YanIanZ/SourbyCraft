@@ -38,6 +38,12 @@ public final class SourbyCraftBootstrap {
 
     private SourbyCraftBootstrap() {}
 
+    /**
+     * Runs every utility-layer boot step in order (config, ViaVersion config seeding, startup
+     * banner, plugin-load diagnostics, command registration, join/leave messages, max-players,
+     * the virtual-thread executor, the auto-updater). Idempotent — a second call is a no-op. Each
+     * step is individually wrapped so one failure never aborts the rest or the server boot.
+     */
     public static synchronized void init() {
         if (started) return;
         started = true;

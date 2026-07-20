@@ -11,6 +11,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 
+/**
+ * Fetches a single {@link BootstrapManifest.Entry} into the paperclip {@code libraries/} directory,
+ * verifying it against its pinned SHA-256 before (and, on a cache hit, without re-downloading)
+ * trusting it. Used by {@link SourbyBootstrap} to materialize every library the slim jar omits.
+ */
 final class LibDownloader {
 
     private static final HttpClient HTTP = HttpClient.newBuilder()

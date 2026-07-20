@@ -73,6 +73,7 @@ public final class BarUtil {
             .build();
     }
 
+    /** Human-readable byte count (B/KB/MB/GB, 1024-based); {@link #INFINITY} for {@code <= 0} or {@link Long#MAX_VALUE}. */
     public static String formatBytes(long bytes) {
         if (bytes <= 0 || bytes == Long.MAX_VALUE) return INFINITY + " MB";
         if (bytes < 1024) return bytes + " B";

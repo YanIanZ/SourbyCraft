@@ -28,6 +28,7 @@ public class MsptCommand extends Command {
         this.setPermission("sourbycraft.command.mspt");
     }
 
+    /** Renders the current MSPT reading as a budget bar with adaptive-precision formatting. */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
