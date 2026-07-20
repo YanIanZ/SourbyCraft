@@ -1,5 +1,14 @@
 --- a/src/main/java/io/canvasmc/canvas/GlobalConfiguration.java
 +++ b/src/main/java/io/canvasmc/canvas/GlobalConfiguration.java
+@@ -56,7 +_,7 @@
+ 
+     protected static final int CHAR_LIM = 90;
+ 
+-    public static final Logger LOGGER = LoggerFactory.getLogger("CanvasMC");
++    public static final Logger LOGGER = LoggerFactory.getLogger("SourbyCraft"); // SourbyCraft - rebrand console prefix [CanvasMC] -> [SourbyCraft]
+     public static final LockedReference<TimeSpan> AUTOSAVE_SPAN = new LockedReference<>(null);
+ 
+     public static final int INFO = 0;
 @@ -118,13 +_,13 @@
                          return buildStatus;
                      }).thenAccept(buildStatus -> RegionizedServer.getInstance().addTask(() -> {
