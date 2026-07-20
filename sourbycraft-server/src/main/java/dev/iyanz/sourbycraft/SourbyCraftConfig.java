@@ -25,8 +25,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * (see the PR #12 task brief) — their config trees, {@code seed()} calls and live-apply bridges
  * are gone with them. What remains is exactly what the kept utility layer reads: varied messages,
  * {@code /maxp} persistence + bypass, the auto-updater, and the GC-advisor toggle — plus, as of
- * r40, a standalone memory-management feature deliberately NOT part of the deferred perf-engine:
- * {@code perf.smart-swap.*} ({@link dev.iyanz.sourbycraft.perf.SmartSwap}, adaptive heap reclaim).
+ * r40, two standalone memory-management features that are deliberately NOT part of the deferred
+ * perf-engine: {@code perf.smart-swap.*} ({@link dev.iyanz.sourbycraft.perf.SmartSwap}, adaptive
+ * heap reclaim) and {@code swap.auto-create.*} ({@link dev.iyanz.sourbycraft.swap.AutoSwap},
+ * optional OS swapfile creation on boot).
  */
 public final class SourbyCraftConfig {
 
@@ -242,6 +244,19 @@ public final class SourbyCraftConfig {
             "Usage % at which SmartSwap reclaims on a shorter throttle (acts more often while critical).");
         seed(f, changed, "perf.smart-swap.sample-interval-ticks", 20,
             "How often (in ticks) SmartSwap samples heap/RSS usage. 20 = once per second.");
+
+        // Auto-swap (r40) — optional OS swapfile creation on boot when the host has none. Off by
+        // default: creating a multi-gigabyte file and mutating host swap state is more invasive than
+        // SourbyCraft's other boot defaults, and it needs root/CAP_SYS_ADMIN (usually unavailable to a
+        // server process) to actually take effect — see dev.iyanz.sourbycraft.swap.AutoSwap.
+        seed(f, changed, "swap.auto-create.enabled", false,
+            "Attempt to create + enable a Linux swapfile on boot if the host has none (spill headroom "
+            + "against a hard OOM-kill). Needs root/CAP_SYS_ADMIN; skips gracefully with a log line "
+            + "otherwise (the common case on unprivileged panels/containers). Linux-only; no-op elsewhere.");
+        seed(f, changed, "swap.auto-create.path", "cache/sourbycraft.swap",
+            "Where to create the auto-swap file.");
+        seed(f, changed, "swap.auto-create.max-size-mb", 8192,
+            "Cap on the auto-created swapfile size in MB. Actual size is min(detected RAM/container limit, this cap).");
 
         dev.iyanz.sourbycraft.lang.SourbyMessages.seedDefaults(f, changed);
         dev.iyanz.sourbycraft.update.AutoUpdateSettings.seedDefaults(f, changed);
