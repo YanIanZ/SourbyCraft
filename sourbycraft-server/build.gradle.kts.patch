@@ -15,7 +15,7 @@
      `maven-publish`
      idea
 -    id("io.canvasmc.weaver.core")
-+    id("dev.iyanz.sourbypatcher.core")
++    id("io.canvasmc.weaver.core")
      id("io.papermc.fill.gradle") version "1.0.12"
  }
  
@@ -24,7 +24,10 @@
  dependencies {
      mache("io.papermc:mache:26.2+build.1")
 -    paperclip("io.papermc:paperclip:3.0.4")
-+    sourbyclip("dev.iyanz:sourbyclip:${providers.gradleProperty("clipVersion").get()}")
++    // weaver-core keeps the stock "paperclip" Configuration name (PAPERCLIP_CONFIG = "paperclip";
++    // sourbypatcher's OWN fork had renamed this constant to "sourbyclip" — weaver did not, so we
++    // just point the standard `paperclip` configuration at our own artifact coordinates instead).
++    paperclip("dev.iyanz:sourbyclip:${providers.gradleProperty("clipVersion").get()}")
  }
  
 +// SourbyCraft-on-Canvas - this must resolve against the "canvas" fork specifically (Canvas's
@@ -57,15 +60,15 @@
 +        // mirrors exactly how the previous Folia base wired `forks.register("folia")`.
 +        rootDirectory = upstreamsDirectory().map { it.dir("canvas") }
          additionalAts.set(mergeMinecraftATs.flatMap { it.outputFile })
-+        // Canvas is a THREE-STAGE fork (its weaver splits Minecraft patches into base/ git-format
-+        // foundational patches → sources/ diffpatch file patches → features/ git-format patches).
-+        // sourbypatcher 2.0.17 added base/ support (ForkConfig.basePatchDir + SetupForkMinecraftSources)
-+        // so runCanvasSetup applies canvas-server/minecraft-patches/base FIRST (git am), creating the
-+        // region-threading files + context the sources/ file patches then modify. The sources/ patches
-+        // are codechicken-diffpatch format (`@@ -12,23 +_,23 @@`) which `git apply` cannot parse, so
-+        // they MUST run through the internal diff-utils applier — i.e. gitFilePatches stays at the
-+        // project-wide default (false) for this fork. (The per-fork gitFilePatches override also added
-+        // in 2.0.17 is available if ever needed, but Canvas does not need it once base/ is applied.)
++        // Canvas is a THREE-STAGE fork (Minecraft patches split into base/ git-format foundational
++        // patches → sources/ diffpatch file patches → features/ git-format patches). weaver's OWN
++        // ForkConfig (unlike upstream paperweight, and unlike sourbypatcher's earlier hand-rolled
++        // reconstruction of this — the thing that hit the git-am ordering wall on Path A) has
++        // native base/ support (basePatchDir) applied FIRST (git am), creating the region-threading
++        // files/context the sources/ file patches then modify — by construction, no extra wiring
++        // needed here. The sources/ patches are codechicken-diffpatch format (`@@ -12,23 +_,23 @@`)
++        // which `git apply` cannot parse, so gitFilePatches stays at the project-wide default
++        // (false) for this fork.
          upstream.patchDir("paperServer") {
              upstreamPath = "paper-server"
              excludes = setOf("src/minecraft", "patches", "build.gradle.kts")
@@ -275,7 +278,7 @@
 +// own explicit import list (root build-data/canvas-dev-imports.txt) instead of the upstream
 +// checkout's empty one. See that file for the full rationale.
 +// afterEvaluate: the fork-setup wiring (setupFork -> CoreTasks, applied by the
-+// dev.iyanz.sourbypatcher.core plugin) configures importCanvasLibraryFiles's devImports itself
++// io.canvasmc.weaver.core plugin) configures importCanvasLibraryFiles's devImports itself
 +// from project.afterEvaluate, which runs AFTER plain top-level script statements — a top-level
 +// .configure{}/configureEach{} here would be clobbered right back to the upstream checkout's
 +// (empty) dev-imports.txt. Registering our own afterEvaluate later in script order runs after the

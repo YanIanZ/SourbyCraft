@@ -1,16 +1,25 @@
 pluginManagement {
-    val weightVersion: String by settings
+    // PR #12 "Path B": weaver-consumes-Canvas. io.canvasmc.weaver.patcher (root, upstream
+    // checkout + recursive resolution) and io.canvasmc.weaver.core (used unversioned inside the
+    // materialized sourbycraft-server/sourbycraft-api build scripts, exactly like Canvas's own
+    // canvas-server/canvas-api do — the version is resolved once here and shared across the
+    // multi-project build) are CanvasMC's own paperweight-core fork; it applies Canvas's base
+    // patches + ATs by construction, replacing dev.iyanz.sourbypatcher (our own paperweight fork,
+    // which hit a hard git-am ordering wall trying to reconstruct that sequencing generically).
 
     repositories {
         gradlePluginPortal()
         mavenLocal()
         maven("https://repo.papermc.io/repository/maven-public/")
+        maven("https://maven.canvasmc.io/public/")
+        maven("https://maven.canvasmc.io/releases")
         maven { url = uri("${rootDir}/sourby-maven") }
     }
 
     plugins {
-        id("dev.iyanz.sourbypatcher.patcher") version weightVersion
-        id("dev.iyanz.sourbypatcher.core") version weightVersion
+        id("io.canvasmc.weaver.patcher") version "2.4.5"
+        id("io.canvasmc.weaver.core") version "2.4.5"
+        id("io.canvasmc.weaver.dependency-bridge") version "2.4.5"
     }
 }
 

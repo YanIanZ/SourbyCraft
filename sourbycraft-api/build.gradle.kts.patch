@@ -5,10 +5,10 @@
      `maven-publish`
      idea
 -    id("io.canvasmc.weaver.dependency-bridge")
-+    // SourbyCraft-on-Canvas - io.canvasmc.weaver.dependency-bridge has no sourbypatcher
-+    // equivalent (sourbypatcher only ships "core"/"patcher", mirroring upstream
-+    // paperweight-core). It is a Canvas-internal convention plugin for
-+    // server/api dependency-version syncing; dropped here, not required to compile.
++    // SourbyCraft-on-Canvas - io.canvasmc.weaver.dependency-bridge is a Canvas-internal
++    // convention plugin that keeps canvas-server/canvas-api dependency versions in sync during
++    // Canvas's OWN release process; it is not needed for our downstream build (we pin our own
++    // versions directly) and is dropped here, not required to compile.
  }
  
  java {
