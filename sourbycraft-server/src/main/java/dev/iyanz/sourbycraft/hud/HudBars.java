@@ -1,8 +1,6 @@
 package dev.iyanz.sourbycraft.hud;
 
-import dev.iyanz.sourbycraft.perf.sensor.PerfSensor;
-import dev.iyanz.sourbycraft.perf.sensor.SensorSnapshot;
-import dev.iyanz.sourbycraft.perf.sensor.Tier;
+import dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin;
 import dev.iyanz.sourbycraft.util.ContainerMemory;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
@@ -24,8 +22,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * bar objects mutated by ONE global-region task (no per-player bar churn, no per-player timers).
  * Show/hide hops to the player's owning region via the entity scheduler (Folia rule 1).
  *
- * <p>TPS reads the perf sensor's aggregate snapshot (min-region TPS / max-region MSPT — the same
- * numbers self-tune reacts to). RAM shows heap used/max, plus the container/panel allocation when
+ * <p>TPS reads {@link Bukkit#getTPS()} / {@link Bukkit#getAverageTickTime()} directly — no custom
+ * sensor class, no sampling loop. RAM shows heap used/max, plus the container/panel allocation when
  * it is meaningfully larger than the heap (the "panel gave me 10G, spark shows 2G" case — that
  * gap is a JVM flag issue, and the bar makes it visible).
  *
@@ -89,7 +87,7 @@ public final class HudBars {
         if (show) viewers.add(id); else viewers.remove(id);
         ANY.compute(id, (k, v) -> TPS_VIEWERS.contains(k) || RAM_VIEWERS.contains(k) ? Boolean.TRUE : null);
         // Show/hide on the player's owning region thread (packet-adjacent audience op).
-        player.getScheduler().run(org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
+        player.getScheduler().run(MinecraftInternalPlugin.INSTANCE,
             task -> { if (show) player.showBossBar(bar); else player.hideBossBar(bar); }, null);
         ensureTask();
         return show;
@@ -118,7 +116,7 @@ public final class HudBars {
         if (taskStarted) return;
         taskStarted = true;
         Bukkit.getGlobalRegionScheduler().runAtFixedRate(
-            org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
+            MinecraftInternalPlugin.INSTANCE,
             task -> update(), 20L, 20L);
     }
 
@@ -132,11 +130,22 @@ public final class HudBars {
     }
 
     private static void updateTps() {
-        final SensorSnapshot s = PerfSensor.snapshot();
-        final double tps = Math.min(20.0, s.tps1s());
-        final double mspt = s.msptAvg();
-        final BossBar.Color color = s.tier() == Tier.GREEN ? BossBar.Color.GREEN
-            : s.tier() == Tier.YELLOW ? BossBar.Color.YELLOW : BossBar.Color.RED;
+        double rawTps;
+        try {
+            rawTps = Bukkit.getTPS()[0];
+        } catch (Throwable ignored) {
+            rawTps = 20.0;
+        }
+        double rawMspt;
+        try {
+            rawMspt = Bukkit.getAverageTickTime();
+        } catch (Throwable ignored) {
+            rawMspt = 0.0;
+        }
+        final double tps = Math.min(20.0, rawTps);
+        final double mspt = rawMspt;
+        final BossBar.Color color = tps >= 18 ? BossBar.Color.GREEN
+            : tps >= 15 ? BossBar.Color.YELLOW : BossBar.Color.RED;
         final TextColor valueColor = tps >= 18 ? NamedTextColor.GREEN
             : tps >= 15 ? NamedTextColor.YELLOW : NamedTextColor.RED;
         TPS_BAR.name(Component.text()
@@ -187,7 +196,7 @@ public final class HudBars {
             // Hop to the player's region for the audience/bossbar op (Folia). A small delay lets the
             // client finish the join handshake before the bar is added.
             final Player p = e.getPlayer();
-            p.getScheduler().runDelayed(org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
+            p.getScheduler().runDelayed(MinecraftInternalPlugin.INSTANCE,
                 task -> { try { HudBars.autoShowOnJoin(p); } catch (Throwable ignored) {} }, null, 20L);
         }
 

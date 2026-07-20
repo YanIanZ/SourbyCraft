@@ -30,8 +30,8 @@ import java.util.List;
  *       plugin scan. JDK-only (no server classes are on the classpath yet); downloads +
  *       SHA-256-verifies the pinned jars into {@code plugins/}. This is the load-bearing part:
  *       it makes the jars visible to that first scan, so Via loads + enables this same boot.</li>
- *   <li>{@link #provisionConfigs()} runs from
- *       {@link dev.iyanz.sourbycraft.perf.PerfEngineBootstrap#start()} — the post-config hook,
+ *   <li>{@link #provisionConfigs(boolean)} runs from
+ *       {@link dev.iyanz.sourbycraft.core.SourbyCraftBootstrap#init()} — the post-config hook,
  *       which precedes {@code CraftServer.enablePlugins()} (where a legacy Bukkit plugin reads its
  *       config in {@code onEnable}). It writes the shipped default {@code config.yml} (with the
  *       1.20 floor) from a server-jar resource, only if absent.</li>
@@ -297,7 +297,7 @@ public final class PluginProvisioner {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Phase 2: default config seeding — server-jar resources, called from PerfEngineBootstrap.start().
+    // Phase 2: default config seeding — server-jar resources, called from SourbyCraftBootstrap.init().
     // ---------------------------------------------------------------------------------------------
 
     /**

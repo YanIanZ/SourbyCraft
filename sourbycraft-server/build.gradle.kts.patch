@@ -1,6 +1,6 @@
 --- a/canvas-server/build.gradle.kts
 +++ b/canvas-server/build.gradle.kts
-@@ -2,13 +2,17 @@
+@@ -2,13 +_,17 @@
  import io.papermc.paperweight.attribute.DevBundleOutput
  import io.papermc.paperweight.util.*
  import java.time.Instant
@@ -19,7 +19,7 @@
      id("io.papermc.fill.gradle") version "1.0.12"
  }
  
-@@ -16,21 +20,46 @@
+@@ -16,21 +_,46 @@
  
  dependencies {
      mache("io.papermc:mache:26.2+build.1")
@@ -69,7 +69,7 @@
          upstream.patchDir("paperServer") {
              upstreamPath = "paper-server"
              excludes = setOf("src/minecraft", "patches", "build.gradle.kts")
-@@ -39,8 +68,27 @@
+@@ -39,7 +_,26 @@
          }
      }
  
@@ -84,7 +84,7 @@
 +            patchesDir = rootDirectory.dir("sourbycraft-server/paper-patches")
 +            outputDir = rootDirectory.dir("paper-server")
 +        }
- 
++
 +        upstream.patchDir("canvasServer") {
 +            upstreamPath = "canvas-server"
 +            excludes = setOf("src/minecraft", "paper-patches", "minecraft-patches", "build.gradle.kts", "build.gradle.kts.patch")
@@ -94,11 +94,10 @@
 +    }
 +
 +    activeFork = sourbycraft
-+
+ 
      updatingMinecraft {
          // oldPaperCommit = "d4fe85375af18bfa88f44d7c1e6a61904ae550cc"
-         // oldForkCommit = "58d6715718521ea774b786fa9ca1e6fc2db14702"
-@@ -110,14 +158,23 @@
+@@ -110,14 +_,23 @@
      main {
          java { srcDir("../paper-server/src/main/java"); srcDir("../paper-server/src/generated/java") }
          resources { srcDir("../paper-server/src/main/resources") }
@@ -122,7 +121,7 @@
  }
  configurations.named(log4jPlugins.compileClasspathConfigurationName) {
      extendsFrom(configurations.compileClasspath.get())
-@@ -141,7 +198,7 @@
+@@ -141,7 +_,7 @@
  }
  
  dependencies {
@@ -131,7 +130,7 @@
      implementation("ca.spottedleaf:leafpile:1.0.0")
      implementation("org.jline:jline-terminal-ffm:3.29.0") // use ffm on java 22+
      implementation("org.jline:jline-terminal-jni:3.29.0") // fall back to jni on java 21
-@@ -150,6 +207,11 @@
+@@ -150,6 +_,11 @@
      implementation("net.openhft:affinity:2026.2")
      implementation("io.canvasmc.httpclient:httpclient:1.0.1")
  
@@ -143,7 +142,7 @@
      /*
        Required to add the missing Log4j2Plugins.dat file from log4j-core
        which has been removed by Mojang. Without it, log4j has to classload
-@@ -191,9 +253,13 @@
+@@ -191,9 +_,13 @@
      testImplementation("org.ow2.asm:asm-tree:9.9.1")
      testImplementation("org.junit-pioneer:junit-pioneer:2.3.0") // CartesianTest
  
@@ -159,7 +158,7 @@
  }
  
  tasks.jar {
-@@ -201,35 +267,62 @@
+@@ -201,35 +_,62 @@
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
@@ -240,7 +239,7 @@
          )
          for (tld in setOf("net", "com", "org")) {
              attributes("$tld/bukkit", "Sealed" to true)
-@@ -373,23 +466,6 @@
+@@ -373,26 +_,39 @@
      mainClass.set(null as String?)
  }
  
@@ -264,3 +263,36 @@
  val sortFoliaATs = tasks.register<SortATs>("sortFoliaATs") {
      atFile.set(mergeMinecraftATs.flatMap { it.secondFile })
      atFileOut.set(mergeMinecraftATs.flatMap { it.secondFile })
++}
++
++// SourbyCraft - Canvas's base/ Minecraft patches USE several ca.spottedleaf.concurrentutil.*
++// classes (SchedulableTick, etc.) without any patch actually creating/modifying those files, so
++// the generic importCanvasLibraryFiles patch-scan (which only auto-imports a class when some
++// patch's diff contains a matching "+++ b/<path>" line) never vendors them as editable source —
++// they stay resolved from the plain "leafpile" library dependency, whose access modifiers don't
++// match what canvas.at widens, so canvas-server code that reads e.g. SchedulableTick.state fails
++// to compile ("is not public ... cannot be accessed from outside package"). Point the task at our
++// own explicit import list (root build-data/canvas-dev-imports.txt) instead of the upstream
++// checkout's empty one. See that file for the full rationale.
++// afterEvaluate: the fork-setup wiring (setupFork -> CoreTasks, applied by the
++// dev.iyanz.sourbypatcher.core plugin) configures importCanvasLibraryFiles's devImports itself
++// from project.afterEvaluate, which runs AFTER plain top-level script statements — a top-level
++// .configure{}/configureEach{} here would be clobbered right back to the upstream checkout's
++// (empty) dev-imports.txt. Registering our own afterEvaluate later in script order runs after the
++// plugin's, so it applies last and wins.
++afterEvaluate {
++    tasks.withType<io.papermc.paperweight.core.tasks.ImportLibraryFiles>().matching { it.name == "importCanvasLibraryFiles" }.configureEach {
++        devImports.set(rootProject.layout.projectDirectory.file("build-data/canvas-dev-imports.txt"))
++    }
++}
++
++// SourbyCraft - sortFoliaATs rewrites mergeMinecraftATs' secondFile (folia.at) in place, but
++// mergeMinecraftATs also reads that same file as an input; without this explicit edge Gradle
++// can schedule them in either order (or flag the missing dependency as a validation error when
++// both end up in the same task graph, e.g. under rebuildMinecraftFeaturePatches). sortFoliaATs
++// must normalize the file before mergeMinecraftATs merges it.
++mergeMinecraftATs.configure {
++    dependsOn(sortFoliaATs)
+ }
+ 
+ afterEvaluate {

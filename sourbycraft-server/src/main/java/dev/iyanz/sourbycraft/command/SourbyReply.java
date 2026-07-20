@@ -1,5 +1,6 @@
 package dev.iyanz.sourbycraft.command;
 
+import dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
@@ -23,7 +24,7 @@ import org.bukkit.entity.Player;
  *       thread-independent sender.</li>
  * </ul>
  *
- * <p>Owned by {@link org.leavesmc.leaves.plugin.MinecraftInternalPlugin#INSTANCE} — the always-enabled
+ * <p>Owned by {@link MinecraftInternalPlugin#INSTANCE} — the always-enabled
  * internal plugin handle the other SourbyCraft actuators use, since server-internal code has no SDK
  * plugin handle. Any failure to schedule is logged and swallowed so a reply hop can never crash the
  * off-thread worker.
@@ -37,7 +38,7 @@ public final class SourbyReply {
         try {
             if (sender instanceof Player p) {
                 p.getScheduler().run(
-                    org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
+                    MinecraftInternalPlugin.INSTANCE,
                     task -> reply.run(),
                     null);
             } else {

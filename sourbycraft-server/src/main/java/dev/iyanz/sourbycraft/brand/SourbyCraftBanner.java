@@ -7,9 +7,9 @@ import net.kyori.adventure.text.format.TextColor;
  * Branded startup banner printed to the console at server start.
  *
  * <p>Ported from the Paper tag {@code paper-26.2-pre-folia} (where it was a plain
- * monochrome box). On the Folia base it is emitted from the authored-source
- * post-config hook ({@link me.earthme.luminol.commands.CommandRegister#register()})
- * instead of an NMS patch, so no {@code net/minecraft} patch has to be rebuilt.
+ * monochrome box). On this Canvas re-platform it is emitted from
+ * {@link dev.iyanz.sourbycraft.core.SourbyCraftBootstrap}, itself called from a small
+ * hand-authored {@code minecraft-patch} to {@code DedicatedServer#initServer}.
  *
  * <p>The box is colored with ANSI 24-bit truecolor escapes derived from
  * {@link SourbyCraftColors} (PRIMARY {@code #FFB347} for the frame, SUCCESS

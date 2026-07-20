@@ -1,10 +1,10 @@
 package dev.iyanz.sourbycraft.update;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
+import dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
-import org.leavesmc.leaves.plugin.MinecraftInternalPlugin;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
