@@ -31,6 +31,9 @@ import org.bukkit.plugin.Plugin;
  * anti-xray raytrace reveal and proxy-forwarding/hardening-advisor security layer that the archived
  * {@code PerfEngineBootstrap} also wired are DEFERRED on this benchmark build — see the PR #12 task
  * brief. Every step is wrapped so a single failure can never abort boot.
+ *
+ * <p>r40 adds a standalone memory-management step (9) that is NOT part of the deferred
+ * perf-engine: {@link dev.iyanz.sourbycraft.perf.SmartSwap} (adaptive heap reclaim).
  */
 public final class SourbyCraftBootstrap {
 
@@ -41,8 +44,9 @@ public final class SourbyCraftBootstrap {
     /**
      * Runs every utility-layer boot step in order (config, ViaVersion config seeding, startup
      * banner, plugin-load diagnostics, command registration, join/leave messages, max-players,
-     * the virtual-thread executor, the auto-updater). Idempotent — a second call is a no-op. Each
-     * step is individually wrapped so one failure never aborts the rest or the server boot.
+     * the virtual-thread executor, the auto-updater, SmartSwap). Idempotent — a second call is a
+     * no-op. Each step is individually wrapped so one failure never aborts the rest or the server
+     * boot.
      */
     public static synchronized void init() {
         if (started) return;
@@ -118,6 +122,15 @@ public final class SourbyCraftBootstrap {
             AutoUpdateSettings.startUpdater();
         } catch (Throwable t) {
             SourbyLogger.error("AutoUpdateSettings.startUpdater failed", t);
+        }
+
+        // 9. SmartSwap — standalone adaptive heap-reclaim sensor (r40; config-gated, reloadable).
+        //    Always started; the task itself checks perf.smart-swap.enabled per-sample so a live
+        //    /sourbycraft reload can flip it on/off without a restart.
+        try {
+            dev.iyanz.sourbycraft.perf.SmartSwap.ensureStarted();
+        } catch (Throwable t) {
+            SourbyLogger.error("SmartSwap.ensureStarted failed", t);
         }
     }
 }
