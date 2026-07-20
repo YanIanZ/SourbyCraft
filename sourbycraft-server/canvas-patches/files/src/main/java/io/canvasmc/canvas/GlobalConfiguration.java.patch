@@ -1,0 +1,23 @@
+--- a/src/main/java/io/canvasmc/canvas/GlobalConfiguration.java
++++ b/src/main/java/io/canvasmc/canvas/GlobalConfiguration.java
+@@ -118,13 +_,13 @@
+                         return buildStatus;
+                     }).thenAccept(buildStatus -> RegionizedServer.getInstance().addTask(() -> {
+                         BUILD_STATUS = buildStatus;
+-                        switch (buildStatus) {
+-                            case UNKNOWN -> broadcast("Running unknown build channel, proceed with caution", WARN);
+-                            case EXPERIMENTAL ->
+-                                broadcast("Running a beta build, there may be bugs, proceed with caution!", WARN);
+-                            case LOCAL ->
+-                                broadcast("You are running a development version of Canvas, which may not be production-ready, be very careful!", WARN);
+-                        }
++                        // SourbyCraft - suppress Canvas's build-channel nag. Our build is never a
++                        // recognized CanvasMC release/beta/local channel, so Canvas would otherwise
++                        // warn on every startup ("Running unknown build channel...", "Running a beta
++                        // build...", "You are running a development version of Canvas, which may not be
++                        // production-ready, be very careful!"). A SourbyCraft release must not advertise
++                        // Canvas's build status. BUILD_STATUS is still assigned above so getBuildStatus()
++                        // keeps working for any code that reads it.
+                     }));
+                 }
+             },
