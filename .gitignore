@@ -420,11 +420,18 @@ paper-api-generator/
 /sourbycraft-server/build.gradle.kts
 /sourbycraft-server/src/minecraft
 /sourbycraft-api/build.gradle.kts
+# Folia base (release/26.2) — kept for reference/rollback
 /folia-server/build.gradle.kts
 /folia-server/src/minecraft
 /folia-api/build.gradle.kts
 /folia-api/
 /folia-server/
+# Canvas base (feat/canvas-engine)
+/canvas-server/build.gradle.kts
+/canvas-server/src/minecraft
+/canvas-api/build.gradle.kts
+/canvas-api/
+/canvas-server/
 docs/superpowers/
 graphify-out/
 sourbycraft-server/src/main/resources/GeoLite2-City.mmdb

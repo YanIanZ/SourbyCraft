@@ -9,19 +9,25 @@ plugins {
 
 paperweight {
     filterPatches = false
-    upstreams.register("folia") {
-        repo = github("PaperMC", "Folia")
-        ref = providers.gradleProperty("foliaRef")
+    // SourbyCraft-on-Canvas (feat/canvas-engine, PR #12): upstream swapped from PaperMC/Folia to
+    // CraftCanvasMC/Canvas. Canvas is itself a paperweight/weaver-style fork of Paper (its own
+    // build.gradle.kts registers `upstreams.paper { ... }` with an identical patchFile/patchDir
+    // DSL shape), so it is registered here exactly the way Folia was: a downstream upstream whose
+    // OWN nested Paper layer is resolved recursively by the nested build, with our own
+    // paper-api patches layered on top via patchRepo("paperApi") same as before.
+    upstreams.register("canvas") {
+        repo = github("CraftCanvasMC", "Canvas")
+        ref = providers.gradleProperty("canvasRef")
 
         println("Upstream commit ref: " + ref.get())
 
         patchFile {
-            path = "folia-server/build.gradle.kts"
+            path = "canvas-server/build.gradle.kts"
             outputFile = file("sourbycraft-server/build.gradle.kts")
             patchFile = file("sourbycraft-server/build.gradle.kts.patch")
         }
         patchFile {
-            path = "folia-api/build.gradle.kts"
+            path = "canvas-api/build.gradle.kts"
             outputFile = file("sourbycraft-api/build.gradle.kts")
             patchFile = file("sourbycraft-api/build.gradle.kts.patch")
         }
@@ -30,11 +36,11 @@ paperweight {
             patchesDir = file("sourbycraft-api/paper-patches")
             outputDir = file("paper-api")
         }
-        patchDir("foliaApi") {
-            upstreamPath = "folia-api"
+        patchDir("canvasApi") {
+            upstreamPath = "canvas-api"
             excludes = listOf("build.gradle.kts", "build.gradle.kts.patch", "paper-patches")
-            patchesDir = file("sourbycraft-api/folia-patches")
-            outputDir = file("folia-api")
+            patchesDir = file("sourbycraft-api/canvas-patches")
+            outputDir = file("canvas-api")
         }
     }
 
@@ -89,6 +95,7 @@ tasks.named<io.papermc.paperweight.tasks.SlimPaperclipJar>("slimPaperclipJar") {
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
+val canvasMavenPublicUrl = "https://maven.canvasmc.io/public/"
 
 // SourbyCraft — resolve the human-facing suffix version once (banner + /ver read this
 // through META-INF/sourbycraft-build.properties). Branch is read via providers.exec so
@@ -130,6 +137,7 @@ subprojects {
     repositories {
         mavenCentral()
         maven(paperMavenPublicUrl)
+        maven(canvasMavenPublicUrl)
         maven { url = uri("${rootDir}/sourby-maven") }
     }
 
