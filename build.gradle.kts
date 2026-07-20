@@ -1,4 +1,7 @@
 import java.time.Instant
+import java.util.jar.JarEntry
+import java.util.jar.JarFile
+import java.util.jar.JarOutputStream
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 
@@ -56,12 +59,117 @@ paperweight {
     }
 }
 
-// NOTE: the SourbyLoader lib-slimming optimization (externalLib(...) DSL + SlimPaperclipJar task)
-// was a custom addition to sourbypatcher's OWN fork of paperweight-core and has no equivalent in
-// weaver. Dropped for this benchmark build (goal is a small utilities-only jar to compare Canvas
-// vs the old Folia base, not to re-ship the lib-slimming optimization) — createPaperclipJar ships
-// a normal fat jar. Revisit porting externalLib/SlimPaperclipJar onto weaver if this graduates
-// past a benchmark.
+// ---------------------------------------------------------------------------
+// SourbyCraft server-jar SLIMMING (Path B / weaver) — restores the old
+// sourbypatcher SlimPaperclipJar size win WITHOUT any sourbypatcher/paperweight
+// dependency. Plain Gradle task; runs on weaver's stock createPaperclipJar output.
+//
+// How it works (no new manifest needed — this is the key vs the old approach):
+// weaver's createPaperclipJar already writes META-INF/libraries.list (one line per
+// library: `sha256 <TAB> maven-coordinate <TAB> relpath`) AND bundles each library
+// under META-INF/libraries/<relpath>. SourbyClip (our Leavesclip fork) reads that
+// same libraries.list at boot via FileEntry.downloadFromMvnRepo: for each entry it
+//   (1) uses the on-disk copy if present + sha256-valid, else
+//   (2) extracts it from inside the jar / the vanilla Mojang bundle, else
+//   (3) downloads it BY COORDINATE from Sourbyclip.ALL_MAVEN_REPO_LINK_BASE
+//       (aliyun central mirror, repo.papermc.io, menthamc, spongepowered).
+// So simply DELETING a library jar from META-INF/libraries/ — while leaving its
+// libraries.list line intact — turns it into a first-boot download. The coordinate
+// in libraries.list IS the download key; no separate coordinate+sha+URL manifest is
+// required (the old SlimPaperclipJar wrote sourby-bootstrap-manifest.json only
+// because it drove a SEPARATE pre-SourbyClip bootstrap downloader; SourbyClip's
+// native Leavesclip path makes that redundant).
+//
+// We externalize only libraries that are (a) heavy and (b) resolvable by coordinate
+// on those public repos. Deliberately kept BUNDLED: paperclip/plugin-loader
+// bootstrap deps (maven-resolver*, sisu, plexus*, commons-codec, apache httpclient),
+// our own non-public artifacts (dev.iyanz.sourbycraft:sourbycraft-api,
+// io.canvasmc.httpclient, ca.spottedleaf:leafpile, net.openhft:affinity), and jline
+// (console-critical). Versions are matched at task-execution time by artifact-dir
+// prefix, so a weaver version bump doesn't silently no-op the strip.
+val externalizeArtifactDirs = listOf(
+    "org/xerial/sqlite-jdbc",
+    "com/github/luben/zstd-jni",
+    "me/lucko/spark-paper",
+    "com/mysql/mysql-connector-j",
+    "com/google/protobuf/protobuf-java",
+    "net/kyori/adventure-api",
+    "net/kyori/adventure-text-minimessage",
+    "org/spongepowered/configurate-yaml",
+    "org/spongepowered/configurate-core",
+    "org/yaml/snakeyaml",
+    "commons-lang/commons-lang",
+    "com/electronwill/night-config/core",
+    "com/electronwill/night-config/toml",
+    "com/maxmind/geoip2/geoip2",
+    "com/maxmind/db/maxmind-db",
+    "com/fasterxml/jackson/core/jackson-databind",
+    "com/fasterxml/jackson/core/jackson-core",
+    "com/fasterxml/jackson/core/jackson-annotations",
+    "com/fasterxml/jackson/datatype/jackson-datatype-jsr310",
+)
+
+val slimServerJar = tasks.register("slimServerJar") {
+    group = "sourbycraft"
+    description = "Strip independently-resolvable libraries from the fat paperclip jar; " +
+        "SourbyClip re-downloads them by coordinate on first boot."
+
+    val serverProj = project(":sourbycraft-server")
+    dependsOn("${serverProj.path}:createPaperclipJar")
+
+    // Capture the fat jar as an input FILE (config-cache safe: read back via inputs.files
+    // in doLast rather than dereferencing the other project's task at execution time).
+    inputs.files(
+        serverProj.tasks.named("createPaperclipJar").map { t ->
+            t.outputs.files.files.first { it.name.contains("paperclip") && it.name.endsWith(".jar") }
+        }
+    )
+    val prefixes = externalizeArtifactDirs
+    inputs.property("externalizeArtifactDirs", prefixes)
+    val outFileProvider = layout.buildDirectory.file("libs/SourbyCraft-slim.jar")
+    outputs.file(outFileProvider)
+
+    doLast {
+        val fatJar = inputs.files.singleFile
+        val out = outFileProvider.get().asFile
+        out.parentFile.mkdirs()
+
+        val normalizedPrefixes = prefixes.map { "META-INF/libraries/$it/" }
+        var strippedCount = 0
+        var strippedBytes = 0L
+
+        JarFile(fatJar).use { jar ->
+            JarOutputStream(out.outputStream().buffered()).use { jos ->
+                val entries = jar.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    val name = entry.name
+                    val strip = name.endsWith(".jar") && normalizedPrefixes.any { name.startsWith(it) }
+                    if (strip) {
+                        strippedCount++
+                        if (entry.size >= 0) strippedBytes += entry.size
+                        continue
+                    }
+                    jos.putNextEntry(JarEntry(name))
+                    if (!entry.isDirectory) {
+                        jar.getInputStream(entry).use { it.copyTo(jos) }
+                    }
+                    jos.closeEntry()
+                }
+            }
+        }
+        if (strippedCount == 0) {
+            throw GradleException(
+                "slimServerJar stripped 0 libraries — externalizeArtifactDirs no longer match the " +
+                    "paperclip layout (weaver version/library set changed?). Refusing to emit a non-slim jar."
+            )
+        }
+        logger.lifecycle(
+            "slimServerJar: stripped $strippedCount lib jar(s) (~${strippedBytes / 1024 / 1024}M of libraries) " +
+                "-> ${out.name} (${out.length() / 1024 / 1024}M, fat was ${fatJar.length() / 1024 / 1024}M)"
+        )
+    }
+}
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 val canvasMavenPublicUrl = "https://maven.canvasmc.io/public/"
