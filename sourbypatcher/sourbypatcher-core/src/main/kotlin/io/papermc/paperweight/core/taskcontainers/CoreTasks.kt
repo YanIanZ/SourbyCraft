@@ -225,7 +225,10 @@ class CoreTasks(
                 cfg.additionalAts,
                 upstreamTasks.first.applyFeaturePatches.flatMap { it.repo },
                 upstreamTasks.first.applyResourcePatches.flatMap { it.output },
-                project.coreExt.gitFilePatches,
+                // Per-fork gitFilePatches override (see ForkConfig.gitFilePatches): a fork may force
+                // real `git apply` for ITS OWN Minecraft file patches without flipping the project-wide
+                // flag (which would regress other layers). Unset -> inherit the project-wide value.
+                cfg.gitFilePatches.orElse(project.coreExt.gitFilePatches),
                 project.coreExt.filterPatches,
                 outputRoot,
             )

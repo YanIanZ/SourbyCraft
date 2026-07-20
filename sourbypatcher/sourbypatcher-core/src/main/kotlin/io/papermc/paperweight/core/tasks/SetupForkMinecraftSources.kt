@@ -63,6 +63,25 @@ abstract class SetupForkMinecraftSources : JavaLauncherTask() {
     @get:InputDirectory
     abstract val libraryImports: DirectoryProperty
 
+    /**
+     * Optional directory of git-format ("git format-patch" style, with `From`/`Subject` headers)
+     * "base" feature patches applied to the fork's Minecraft sources AFTER access-transformers +
+     * library imports but BEFORE the diffpatch-format `sources/` file patches.
+     *
+     * This mirrors the three-stage patch model of forks whose own build tool (e.g. CanvasMC's
+     * weaver) splits Minecraft patches into `base/` (foundational git-format patches that may
+     * CREATE new files — e.g. region-threading — and are relied on for context by the later file
+     * patches), `sources/` (per-file diffpatch patches) and `features/` (git-format feature
+     * patches). Upstream paperweight only had the sources+features stages, so when such a fork is
+     * consumed as a read-only upstream its `base/` patches were silently dropped, leaving the
+     * `sources/` file patches without the files/context they expect. Setting this makes the fork's
+     * `base/` patches materialise before the file patches. Unset (the default) = no base stage,
+     * fully backward compatible with forks that have no `base/` dir.
+     */
+    @get:Optional
+    @get:InputDirectory
+    abstract val basePatchDir: DirectoryProperty
+
     @get:Input
     abstract val identifier: Property<String>
 
@@ -102,6 +121,46 @@ abstract class SetupForkMinecraftSources : JavaLauncherTask() {
             commitAndTag(git, "Imports", "${identifier.get()} Imports")
         }
 
+        // Fork "base" feature patches (git format-patch style), applied last so the later
+        // diffpatch-format sources/ file patches see the files + context these create. See the
+        // basePatchDir kdoc for the three-stage-fork rationale. git am handles the format natively.
+        if (basePatchDir.isPresent) {
+            applyBasePatches(outputDir.path)
+        }
+
         git.close()
+    }
+
+    private fun applyBasePatches(repoPath: java.nio.file.Path) {
+        val patchFiles = basePatchDir.path.useDirectoryEntries("*.patch") { it.sorted().toMutableList() }
+        if (patchFiles.isEmpty()) {
+            return
+        }
+        println("Applying ${patchFiles.size} ${identifier.get()} base patches...")
+        // Use the command-line git wrapper (io.papermc.paperweight.util.Git) for `git am`, matching
+        // ApplyFeaturePatches; the file already binds the bare `Git` name to org.eclipse.jgit, so
+        // the util one is fully qualified here.
+        val cmdGit = io.papermc.paperweight.util.Git(repoPath)
+        cmdGit("am", "--abort").runSilently(silenceErr = true)
+
+        layout.cache.createDirectories()
+        val tempDir = createTempDirectory(layout.cache, "paperweight-base")
+        try {
+            val mailDir = tempDir.resolve("new")
+            mailDir.createDirectories()
+            for (patch in patchFiles) {
+                patch.copyTo(mailDir.resolve(patch.fileName))
+            }
+            val result = cmdGit("am", "--3way", "--ignore-whitespace", tempDir.absolutePathString()).captureOut(false)
+            if (result.exit != 0) {
+                cmdGit("am", "--abort").runSilently(silenceErr = true)
+                logger.lifecycle(result.out)
+                throw io.papermc.paperweight.PaperweightException(
+                    "Failed to apply ${identifier.get()} base patches"
+                )
+            }
+        } finally {
+            tempDir.deleteRecursive()
+        }
     }
 }

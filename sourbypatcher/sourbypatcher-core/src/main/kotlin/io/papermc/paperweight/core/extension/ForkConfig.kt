@@ -53,6 +53,17 @@ abstract class ForkConfig @Inject constructor(
     val resourcePatchDir: DirectoryProperty = objects.dirFrom(serverPatchesDir, "resources")
     val featurePatchDir: DirectoryProperty = objects.dirFrom(serverPatchesDir, "features")
 
+    /**
+     * Foundational git-format "base" Minecraft patches (`minecraft-patches/base`), applied by
+     * [io.papermc.paperweight.core.tasks.SetupForkMinecraftSources] AFTER ATs + library imports and
+     * BEFORE the diffpatch-format `sources/` file patches. See
+     * [io.papermc.paperweight.core.tasks.SetupForkMinecraftSources.basePatchDir] for the full
+     * three-stage-fork rationale (e.g. consuming CanvasMC, whose weaver splits Minecraft patches
+     * into base/sources/features). No-op when the directory is absent, so forks with only the
+     * classic sources+features layout are unaffected.
+     */
+    val basePatchDir: DirectoryProperty = objects.dirFrom(serverPatchesDir, "base")
+
     val buildDataDir: DirectoryProperty = objects.dirFrom(rootDirectory, "build-data")
     val devImports: RegularFileProperty = objects.fileFrom(buildDataDir, "dev-imports.txt")
     val additionalAts: RegularFileProperty = objects.fileFrom(buildDataDir, providers.provider { "$name.at" })
@@ -60,6 +71,26 @@ abstract class ForkConfig @Inject constructor(
 
     val forks: Property<ForkConfig> = objects.property()
     val forksPaper: Property<Boolean> = objects.property<Boolean>().convention(forks.map { false }.orElse(true))
+
+    /**
+     * Per-fork override for the project-wide `gitFilePatches` flag
+     * ([io.papermc.paperweight.core.extension.PaperweightCoreExtension.gitFilePatches]).
+     *
+     * When set, THIS fork's Minecraft file-patch tasks (`apply<Name>MinecraftSourcePatches` /
+     * `...ResourcePatches`) route through the chosen applier independently of the global flag:
+     * `true` = real `git apply --3way` ([io.papermc.paperweight.core.tasks.patching.ApplyFilePatches.applyWithGit]),
+     * `false` = the internal java-diff-utils applier. **Unset (the default) inherits the
+     * project-wide value**, so existing forks are unaffected.
+     *
+     * Motivation: a downstream that consumes a Paper fork as a read-only upstream (e.g.
+     * SourbyCraft-on-Canvas) can hit cases where the fork's own Minecraft patches apply 100%
+     * cleanly under `git apply` but the stricter diff-utils applier rejects a fraction of hunks
+     * (context drift from re-deriving the tree against a different mache/AT pipeline). Flipping the
+     * project-wide flag would also force `git apply` on OTHER layers (e.g. the Paper resource
+     * patches) that regress under it — so the override is scoped to exactly the one fork that needs
+     * it, leaving every other layer on the default applier.
+     */
+    val gitFilePatches: Property<Boolean> = objects.property()
 
     private val upstreamProvider: Provider<UpstreamConfig> = forks.map<UpstreamConfig> {
         objects.newInstance(it.name, false)
