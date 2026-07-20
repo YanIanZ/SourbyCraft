@@ -129,7 +129,7 @@
  
  dependencies {
 -    implementation(projects.canvasApi)
-+    implementation(project(":sourbycraft-api"))
++    implementation(project(":sourbyapi"))
      implementation("ca.spottedleaf:leafpile:1.0.0")
      implementation("org.jline:jline-terminal-ffm:3.29.0") // use ffm on java 22+
      implementation("org.jline:jline-terminal-jni:3.29.0") // fall back to jni on java 21

@@ -35,8 +35,8 @@ paperweight {
         }
         patchFile {
             path = "canvas-api/build.gradle.kts"
-            outputFile = file("sourbycraft-api/build.gradle.kts")
-            patchFile = file("sourbycraft-api/build.gradle.kts.patch")
+            outputFile = file("sourbyapi/build.gradle.kts")
+            patchFile = file("sourbyapi/build.gradle.kts.patch")
         }
         // Two levels deep (sourbycraft -> canvas -> paper): paper-api does not exist in Canvas's
         // raw checkout, only as CANVAS's OWN nested-build output, so this must be a patchRepo
@@ -44,7 +44,7 @@ paperweight {
         // (which only reads a literal path inside the immediate "canvas" checkout).
         patchRepo("paperApi") {
             upstreamPath = "paper-api"
-            patchesDir = file("sourbycraft-api/paper-patches")
+            patchesDir = file("sourbyapi/paper-patches")
             outputDir = file("paper-api")
         }
         // One level deep: canvas-api is a literal folder in Canvas's raw checkout, so a plain
@@ -53,7 +53,7 @@ paperweight {
         patchDir("canvasApi") {
             upstreamPath = "canvas-api"
             excludes = listOf("build.gradle.kts", "build.gradle.kts.patch", "paper-patches")
-            patchesDir = file("sourbycraft-api/canvas-patches")
+            patchesDir = file("sourbyapi/canvas-patches")
             outputDir = file("canvas-api")
         }
     }
@@ -83,7 +83,7 @@ paperweight {
 // We externalize only libraries that are (a) heavy and (b) resolvable by coordinate
 // on those public repos. Deliberately kept BUNDLED: paperclip/plugin-loader
 // bootstrap deps (maven-resolver*, sisu, plexus*, commons-codec, apache httpclient),
-// our own non-public artifacts (dev.iyanz.sourbycraft:sourbycraft-api,
+// our own non-public artifacts (dev.iyanz.sourbycraft:sourbyapi,
 // io.canvasmc.httpclient, ca.spottedleaf:leafpile, net.openhft:affinity), and jline
 // (console-critical). Versions are matched at task-execution time by artifact-dir
 // prefix, so a weaver version bump doesn't silently no-op the strip.

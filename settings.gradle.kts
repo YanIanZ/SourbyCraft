@@ -1,7 +1,7 @@
 pluginManagement {
     // PR #12 "Path B": weaver-consumes-Canvas. io.canvasmc.weaver.patcher (root, upstream
     // checkout + recursive resolution) and io.canvasmc.weaver.core (used unversioned inside the
-    // materialized sourbycraft-server/sourbycraft-api build scripts, exactly like Canvas's own
+    // materialized sourbycraft-server/sourbyapi build scripts, exactly like Canvas's own
     // canvas-server/canvas-api do — the version is resolved once here and shared across the
     // multi-project build) are CanvasMC's own paperweight-core fork; it applies Canvas's base
     // patches + ATs by construction, replacing dev.iyanz.sourbypatcher (our own paperweight fork,
@@ -29,7 +29,7 @@ plugins {
 
 rootProject.name = "sourbycraft"
 
-for (name in listOf("sourbycraft-api", "sourbycraft-server")) {
+for (name in listOf("sourbyapi", "sourbycraft-server")) {
     include(name)
     file(name).mkdirs()
 }
