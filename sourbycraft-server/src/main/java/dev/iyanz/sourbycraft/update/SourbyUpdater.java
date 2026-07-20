@@ -79,8 +79,9 @@ public final class SourbyUpdater {
 
     /**
      * Start (or restart) the updater. Idempotent within a boot: schedules one async daily check per
-     * configured time on the Folia async scheduler. Called from the boot hook once the config is
-     * loaded and the internal plugin handle is available.
+     * configured time on Paper's region-safe AsyncScheduler (works unchanged on Folia/Canvas region
+     * threading and on plain Paper). Called from the boot hook once the config is loaded and the
+     * internal plugin handle is available.
      */
     public synchronized void start() {
         stop();
@@ -157,7 +158,7 @@ public final class SourbyUpdater {
             + " mode=" + mode.name().toLowerCase(Locale.ROOT)
             + " times=" + times
             + (Config.checkIntervalMinutes() > 0 ? " interval=" + Config.checkIntervalMinutes() + "m" : "")
-            + " (Folia async scheduler)");
+            + " (AsyncScheduler)");
     }
 
     /** Cancel any scheduled checks. */
@@ -308,7 +309,9 @@ public final class SourbyUpdater {
         return m.find() ? Integer.parseInt(m.group(1)) : -1;
     }
 
-    /** This jar's stamped build number ({@code "7f"} -> 7); -1 when unknown/dev. */
+    /** This jar's stamped build number ({@code "7c"} -> 7); -1 when unknown/dev. Suffix-agnostic
+     *  (reads only the leading digits), so it doesn't care whether the platform suffix is "c"
+     *  (Canvas, current) or the archived "f" (Folia). */
     static int ownBuildNumber() {
         try {
             String b = BuildInfo.load().build();

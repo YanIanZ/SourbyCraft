@@ -44,8 +44,8 @@ public final class SourbyCraftBanner {
           .append("─".repeat(Math.max(0, 44 - shownVersion.length())))
           .append(' ').append(OK).append(shownVersion).append(' ').append(FRAME).append("─┐").append(RESET).append('\n');
         sb.append(FRAME).append("   │  ").append(BODY).append(pad(info.tagline(), 58)).append(FRAME).append("│").append(RESET).append('\n');
-        sb.append(FRAME).append("   │  ").append(BODY).append(pad("survival · self-tuning perf · anti-xray · 150+ ready", 58)).append(FRAME).append("│").append(RESET).append('\n');
-        sb.append(FRAME).append("   │  ").append(BODY).append(pad("Folia " + info.mcVersion() + "  ·  Java " + java + "  ·  " + cores + " cores", 58)).append(FRAME).append("│").append(RESET).append('\n');
+        sb.append(FRAME).append("   │  ").append(BODY).append(pad("Canvas engine benchmark · utilities only", 58)).append(FRAME).append("│").append(RESET).append('\n');
+        sb.append(FRAME).append("   │  ").append(BODY).append(pad("Canvas " + info.mcVersion() + "  ·  Java " + java + "  ·  " + cores + " cores", 58)).append(FRAME).append("│").append(RESET).append('\n');
         sb.append(FRAME).append("   └").append("─".repeat(62)).append("┘").append(RESET).append('\n');
         return sb.toString();
     }

@@ -12,7 +12,7 @@ public record BuildInfo(
     String buildTimestamp
 ) {
     /**
-     * Human-facing Folia build id, e.g. {@code "build 1f"} — the channel version
+     * Human-facing build id, e.g. {@code "build 4c"} (c = Canvas base) — the channel version
      * ({@code 26.2-REL}) is deliberately NOT shown here (it stays on the
      * "Implementing API version" line as the protocol version). Falls back to the
      * bare channel version only when no build id is present.
