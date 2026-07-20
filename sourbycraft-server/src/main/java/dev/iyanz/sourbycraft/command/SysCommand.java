@@ -51,6 +51,11 @@ public class SysCommand extends Command {
         });
     }
 
+    /**
+     * Renders the full system panel: uptime, CPU identity/load, RAM, Java runtime, per-world
+     * chunk counts, and a plugin roster including {@link PluginLoadDiagnostics#recent()} entries
+     * for plugins that never reached the plugin manager.
+     */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;

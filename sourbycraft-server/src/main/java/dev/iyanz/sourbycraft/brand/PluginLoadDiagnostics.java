@@ -30,15 +30,27 @@ public final class PluginLoadDiagnostics {
     private static final List<Entry> ENTRIES = new CopyOnWriteArrayList<>();
     private static volatile boolean installed = false;
 
+    /** One captured plugin-load failure: the jar name and a short human-readable reason. */
     public record Entry(String pluginJar, String reason) {}
 
     private PluginLoadDiagnostics() {}
 
+    /**
+     * Install the root-logger tailing handler that captures plugin-load failures. Idempotent —
+     * safe to call more than once; only the first call attaches the handler. Must run before
+     * {@code CraftServer#loadPlugins} so no load-failure log record is missed.
+     */
     public static synchronized void install() {
         if (installed) return;
         installed = true;
         Logger root = LogManager.getLogManager().getLogger("");
         root.addHandler(new Handler() {
+            /**
+             * Matches every emitted {@link LogRecord} against {@link #LOAD_FAILURE}; on a hit,
+             * records the plugin jar name plus the deepest-cause line of the attached throwable
+             * (or the raw message when there is none), evicting the oldest entry past
+             * {@link #MAX_ENTRIES}.
+             */
             @Override
             public void publish(LogRecord record) {
                 if (record == null || record.getMessage() == null) return;
@@ -53,15 +65,19 @@ public final class PluginLoadDiagnostics {
                 }
                 ENTRIES.add(new Entry(jar, reason));
             }
+            /** No-op — this handler holds no buffered/flushable state. */
             @Override public void flush() {}
+            /** No-op — this handler is never detached; nothing to release. */
             @Override public void close() {}
         });
     }
 
+    /** Every captured plugin-load failure so far, oldest first, capped at {@link #MAX_ENTRIES}. */
     public static List<Entry> recent() {
         return Collections.unmodifiableList(ENTRIES);
     }
 
+    /** Count of captured plugin-load failures so far (may be less than the true count if capped). */
     public static int failedCount() {
         return ENTRIES.size();
     }

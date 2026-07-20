@@ -28,6 +28,11 @@ public final class SourbyCraftCommands {
     private static volatile boolean registered = false;
     private static final Map<String, Command> OURS = new LinkedHashMap<>();
 
+    /**
+     * Builds every SourbyCraft styled command, drops any foreign command-map entry for the same
+     * bare/namespaced name, claims the bare name in the command map, and registers the HUD
+     * quit-listener. Idempotent — a second call is a no-op.
+     */
     public static synchronized void registerAll() {
         if (registered) return;
         CommandMap commandMap = Bukkit.getServer().getCommandMap();

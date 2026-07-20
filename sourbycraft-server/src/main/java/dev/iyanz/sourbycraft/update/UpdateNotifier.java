@@ -52,6 +52,10 @@ public final class UpdateNotifier {
      * the join spam. Registered once from the updater start.
      */
     public static final class JoinListener implements org.bukkit.event.Listener {
+        /**
+         * Delivers the pending banner (if any) to a joining op/{@link #NOTIFY_PERMISSION} holder,
+         * 2s after join on their own region scheduler, so it does not land under join spam.
+         */
         @org.bukkit.event.EventHandler
         public void onJoin(org.bukkit.event.player.PlayerJoinEvent e) {
             final Component banner = pendingBanner;

@@ -17,7 +17,7 @@ import org.bukkit.entity.Player;
  * crash in the boot log. This helper replaces that call with a region-correct hop:
  *
  * <ul>
- *   <li>a {@link Player} sender → its own {@link org.bukkit.entity.Entity.Scheduler entity scheduler}
+ *   <li>a {@link Player} sender → its own {@link io.papermc.paper.threadedregions.scheduler.EntityScheduler entity scheduler}
  *       ({@code player.getScheduler().run(...)}), the Folia-correct thread for touching that player;</li>
  *   <li>a non-player sender (console / command block / RCON) → run directly. Console sends are
  *       thread-safe, so no hop is needed and we avoid pinning a region scheduler for a

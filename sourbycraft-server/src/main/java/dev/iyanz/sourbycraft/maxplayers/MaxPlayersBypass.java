@@ -61,6 +61,11 @@ public final class MaxPlayersBypass implements Listener {
         return true;
     }
 
+    /**
+     * Flips a {@code KICK_FULL} result to {@code ALLOWED} for a bypass holder / op; otherwise
+     * (when the kick stands) swaps the vanilla "server is full" message for a
+     * {@link SourbyMessages#SERVER_FULL} variant. Leaves every other kick reason untouched.
+     */
     @EventHandler(priority = EventPriority.HIGH)
     public void onLogin(PlayerLoginEvent e) {
         if (e.getResult() != PlayerLoginEvent.Result.KICK_FULL) return;

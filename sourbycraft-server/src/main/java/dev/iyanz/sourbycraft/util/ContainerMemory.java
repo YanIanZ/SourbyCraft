@@ -71,6 +71,7 @@ public final class ContainerMemory {
         return false;
     }
 
+    /** Human-readable size: {@code "1.5G"} above 1 GiB, otherwise whole megabytes; {@code "?"} for {@code <= 0}. */
     public static String fmt(long bytes) {
         if (bytes <= 0) return "?";
         double g = bytes / (1024.0 * 1024 * 1024);

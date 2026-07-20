@@ -34,6 +34,10 @@ public final class SourbyCraftBanner {
     private static final String BODY  = fg(SourbyCraftColors.INFO);
     private static final String OK    = fg(SourbyCraftColors.SUCCESS);
 
+    /**
+     * Renders the branded ANSI-truecolor startup box for {@code info} as a single multi-line
+     * string (leading newline included), ready to print straight to a console stream.
+     */
     public static String render(BuildInfo info) {
         final String java = System.getProperty("java.specification.version");
         final int cores = Runtime.getRuntime().availableProcessors();

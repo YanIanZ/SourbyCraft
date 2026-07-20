@@ -48,6 +48,10 @@ public class TpsCommand extends Command {
         this.setAliases(java.util.List.of("lag"));
     }
 
+    /**
+     * Renders the full TPS panel: rolling 1m/5m/15m TPS bars, MSPT, an engine/loaded-worlds line,
+     * and a display-only {@link Tier} + memory readout derived inline from the numbers above.
+     */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
