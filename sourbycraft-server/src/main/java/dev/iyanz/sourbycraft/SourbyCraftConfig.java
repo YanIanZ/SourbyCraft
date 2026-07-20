@@ -24,7 +24,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * forwarding / hardening-advisor security layer. All three are DEFERRED on this benchmark build
  * (see the PR #12 task brief) — their config trees, {@code seed()} calls and live-apply bridges
  * are gone with them. What remains is exactly what the kept utility layer reads: varied messages,
- * {@code /maxp} persistence + bypass, the auto-updater, and the GC-advisor toggle.
+ * {@code /maxp} persistence + bypass, the auto-updater, and the GC-advisor toggle — plus, as of
+ * r40, a standalone memory-management feature deliberately NOT part of the deferred perf-engine:
+ * {@code perf.smart-swap.*} ({@link dev.iyanz.sourbycraft.perf.SmartSwap}, adaptive heap reclaim).
  */
 public final class SourbyCraftConfig {
 
@@ -81,6 +83,18 @@ public final class SourbyCraftConfig {
             dev.iyanz.sourbycraft.update.AutoUpdateSettings.loadFromToml();
         } catch (Throwable t) {
             SourbyLogger.error("AutoUpdateSettings.loadFromToml failed; using defaults", t);
+        }
+
+        // SmartSwap (adaptive heap reclaim, r40) operator bridge — reloadable, no restart needed.
+        try {
+            dev.iyanz.sourbycraft.perf.SmartSwap.configure(
+                cfgBool("perf.smart-swap.enabled", true),
+                cfgDouble("perf.smart-swap.soft-percent", 82.0),
+                cfgDouble("perf.smart-swap.medium-percent", 90.0),
+                cfgDouble("perf.smart-swap.hard-percent", 95.0),
+                cfgInt("perf.smart-swap.sample-interval-ticks", 20));
+        } catch (Throwable t) {
+            SourbyLogger.error("SmartSwap.configure failed; using defaults", t);
         }
     }
 
@@ -212,6 +226,22 @@ public final class SourbyCraftConfig {
         seed(f, changed, "viaversion.auto-provision", true,
             "Whether ViaVersion/ViaBackwards (auto-provisioned by SourbyBootstrap on first boot) are also "
             + "kept up to date by the auto-updater's cadence. false = manage Via yourself.");
+
+        // SmartSwap (r40) — standalone, trend-aware adaptive heap reclaim. Trims rebuildable soft
+        // caches + requests a concurrent GC (ZGC/Shenandoah uncommit) as usage climbs, so RSS stays
+        // under the container limit WITHOUT touching TPS. Percentages are of max(heap%, container-RSS%).
+        // Independent of the deferred self-tuning perf-engine — see dev.iyanz.sourbycraft.perf.SmartSwap.
+        seed(f, changed, "perf.smart-swap.enabled", true,
+            "Adaptive heap reclaim: trim soft caches + concurrent-GC hint as memory usage rises, so RSS "
+            + "stays under the container limit without touching TPS. Trend-aware (acts early when climbing fast).");
+        seed(f, changed, "perf.smart-swap.soft-percent", 82.0,
+            "Usage % at which SmartSwap starts trimming rebuildable soft caches.");
+        seed(f, changed, "perf.smart-swap.medium-percent", 90.0,
+            "Usage % at which SmartSwap also requests a concurrent GC to hand freed pages back to the OS.");
+        seed(f, changed, "perf.smart-swap.hard-percent", 95.0,
+            "Usage % at which SmartSwap reclaims on a shorter throttle (acts more often while critical).");
+        seed(f, changed, "perf.smart-swap.sample-interval-ticks", 20,
+            "How often (in ticks) SmartSwap samples heap/RSS usage. 20 = once per second.");
 
         dev.iyanz.sourbycraft.lang.SourbyMessages.seedDefaults(f, changed);
         dev.iyanz.sourbycraft.update.AutoUpdateSettings.seedDefaults(f, changed);
