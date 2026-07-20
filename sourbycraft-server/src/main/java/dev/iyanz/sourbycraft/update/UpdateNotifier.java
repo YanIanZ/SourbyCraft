@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.update;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
+import dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -58,7 +59,7 @@ public final class UpdateNotifier {
             final org.bukkit.entity.Player p = e.getPlayer();
             if (!(p.isOp() || p.hasPermission(NOTIFY_PERMISSION))) return;
             // Hop to the player's region + small delay so the banner isn't buried by join messages.
-            p.getScheduler().runDelayed(org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
+            p.getScheduler().runDelayed(MinecraftInternalPlugin.INSTANCE,
                 task -> { if (pendingBanner != null) p.sendMessage(pendingBanner); }, null, 40L);
         }
     }

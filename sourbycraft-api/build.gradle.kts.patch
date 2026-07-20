@@ -1,6 +1,6 @@
 --- a/canvas-api/build.gradle.kts
 +++ b/canvas-api/build.gradle.kts
-@@ -4,7 +4,10 @@
+@@ -4,7 +_,10 @@
      `java-library`
      `maven-publish`
      idea
@@ -12,7 +12,7 @@
  }
  
  java {
-@@ -107,17 +110,21 @@
+@@ -107,17 +_,21 @@
          java {
              srcDir(generatedDir)
              srcDir(file("../paper-api/src/main/java"))

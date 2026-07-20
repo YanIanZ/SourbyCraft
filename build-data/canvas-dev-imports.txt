@@ -1,0 +1,17 @@
+# SourbyCraft-on-Canvas (feat/canvas-engine, PR #12) - explicit library-file import list for the
+# "canvas" upstream fork's importCanvasLibraryFiles task.
+#
+# Canvas's base/ Minecraft patches (e.g. minecraft-patches/base/0004-Region-Threading.patch,
+# 0006-Replace-Moonrise-Executor.patch) USE several ca.spottedleaf.concurrentutil.* classes
+# (imports + field/method references) without any patch actually CREATING or MODIFYING those
+# class files. The generic paperweight ImportLibraryFiles heuristic only auto-imports a library
+# class when some patch's diff contains a matching "+++ b/<path>" line (i.e. the class itself is
+# patched) — it does not follow transitive references, so classes that are only USED (never
+# patched) are silently skipped and left resolving to the plain "leafpile" library dependency,
+# whose access modifiers do not match what canvas.at (build-data/canvas.at) widens.
+#
+# CraftCanvasMC's own build (its "weaver" paperweight fork) evidently has extra logic that catches
+# this case — Canvas's own standalone checkout has these files vendored as decompiled/patchable
+# source. Ours does not, so they are listed explicitly here instead (format documented in the
+# project-root build-data/dev-imports.txt header).
+leafpile ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java

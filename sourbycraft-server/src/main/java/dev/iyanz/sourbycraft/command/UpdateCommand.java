@@ -2,9 +2,9 @@ package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
 import dev.iyanz.sourbycraft.brand.BuildInfo;
+import dev.iyanz.sourbycraft.update.AutoUpdateSettings;
 import dev.iyanz.sourbycraft.update.SourbyUpdater;
 import dev.iyanz.sourbycraft.util.VirtualExecutor;
-import me.earthme.luminol.config.modules.misc.AutoUpdateConfig;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 
@@ -52,7 +52,7 @@ public class UpdateCommand extends Command {
     }
 
     private void runCheck(CommandSender s, SourbyUpdater.@org.jetbrains.annotations.Nullable ApplyMode override) {
-        SourbyUpdater updater = AutoUpdateConfig.updater();
+        SourbyUpdater updater = AutoUpdateSettings.updater();
         if (updater == null) {
             s.sendMessage(text("Updater unavailable (config module not loaded).", SourbyCraftColors.DANGER));
             return;
@@ -87,10 +87,10 @@ public class UpdateCommand extends Command {
             .build());
         s.sendMessage(text()
             .append(text("Updater: ", SourbyCraftColors.LABEL))
-            .append(text((AutoUpdateConfig.enabled ? "enabled" : "disabled")
-                + " mode=" + AutoUpdateConfig.applyMode
-                + " interval=" + AutoUpdateConfig.checkIntervalMinutes + "m"
-                + " repo=" + AutoUpdateConfig.repo, SourbyCraftColors.VALUE))
+            .append(text((AutoUpdateSettings.enabled ? "enabled" : "disabled")
+                + " mode=" + AutoUpdateSettings.applyMode
+                + " interval=" + AutoUpdateSettings.checkIntervalMinutes + "m"
+                + " repo=" + AutoUpdateSettings.repo, SourbyCraftColors.VALUE))
             .build());
         appendMarker(s, "Applied", Path.of("auto_update", "applied.tag"));
         appendMarker(s, "Pending", Path.of("auto_update", "pending.tag"));

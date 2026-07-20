@@ -25,10 +25,10 @@ import org.bukkit.plugin.Plugin;
  * it is region-safe. {@link SourbyMessages#get} uses {@link java.util.concurrent.ThreadLocalRandom}
  * for variant selection, so concurrent joins on different regions are safe.
  *
- * <p>Registered against {@link org.leavesmc.leaves.plugin.MinecraftInternalPlugin#INSTANCE} from
- * {@link dev.iyanz.sourbycraft.perf.PerfEngineBootstrap}, like the other SourbyCraft actuators.
- * {@link EventPriority#NORMAL} — after most plugins have set their own message but before MONITOR
- * observers read the final one.
+ * <p>Registered against {@link dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin#INSTANCE}
+ * from {@link dev.iyanz.sourbycraft.core.SourbyCraftBootstrap}, like the other SourbyCraft
+ * utility-layer listeners. {@link EventPriority#NORMAL} — after most plugins have set their own
+ * message but before MONITOR observers read the final one.
  */
 public final class SourbyJoinLeaveListener implements Listener {
 

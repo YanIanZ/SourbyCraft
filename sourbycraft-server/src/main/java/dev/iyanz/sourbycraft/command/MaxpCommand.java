@@ -1,7 +1,7 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
-import dev.iyanz.sourbycraft.perf.MaxPlayersConfig;
+import dev.iyanz.sourbycraft.maxplayers.MaxPlayersConfig;
 import dev.iyanz.sourbycraft.util.BarUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
