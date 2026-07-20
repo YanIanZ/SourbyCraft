@@ -79,15 +79,27 @@ public final class Sourbyclip {
             overrideAsmVersion();
             PluginResolver.extractMixins();
             MixinJarResolver.resolveMixinJars();
-            // Cherry — discover + register plugin access-transformers (.at) before the transforming
-            // classloader starts loading server classes.
-            dev.iyanz.sourbyclip.cherry.Cherry.initAccessTransformers();
+            // Cherry — one-shot discovery of ALL plugin manifests (cherry-plugin.json /
+            // leaves-plugin.json / fabric.mod.json + the *.mixins.json they point at). Commits the
+            // access-transformer engine AND stages the Fabric-format mixin/refmap/widener bridge in
+            // a single scan. MUST run here, before the transforming classloader is constructed,
+            // because Cherry.fabricJarUrls() below has to be merged into that classloader's classpath
+            // at construction time — exactly how Leaves' own extracted .mixins.jar URLs
+            // (MixinJarResolver.jarUrls, populated by resolveMixinJars() just above) are merged.
+            dev.iyanz.sourbyclip.cherry.Cherry.init();
 
             System.setProperty("mixin.bootstrapService", MixinServiceKnotBootstrap.class.getName());
             System.setProperty("mixin.service", MixinServiceKnot.class.getName());
 
-            final URL[] classpathUrls = Arrays.copyOf(setupClasspathUrls, setupClasspathUrls.length + MixinJarResolver.jarUrls.length);
+            // Classpath = base + Leaves-extracted mixin jars + Cherry's Fabric-extracted jars
+            // (Leaves first, then Fabric — matching the order their configs are registered below).
+            final URL[] fabricJarUrls = dev.iyanz.sourbyclip.cherry.Cherry.fabricJarUrls().toArray(new URL[0]);
+            final URL[] classpathUrls = Arrays.copyOf(
+                    setupClasspathUrls,
+                    setupClasspathUrls.length + MixinJarResolver.jarUrls.length + fabricJarUrls.length);
             System.arraycopy(MixinJarResolver.jarUrls, 0, classpathUrls, setupClasspathUrls.length, MixinJarResolver.jarUrls.length);
+            System.arraycopy(fabricJarUrls, 0, classpathUrls,
+                    setupClasspathUrls.length + MixinJarResolver.jarUrls.length, fabricJarUrls.length);
 
             final ClassLoader parentClassLoader = Sourbyclip.class.getClassLoader();
             MixinServiceKnot.classLoader = Sourbyclip.class.getClassLoader();
@@ -101,6 +113,9 @@ public final class Sourbyclip {
             Mixins.addConfiguration("mixin-extras.init.mixins.json");
             MixinServiceKnot.classLoader = createdClassLoader;
             MixinJarResolver.mixinConfigs.forEach(Mixins::addConfiguration);
+            // Cherry — register the Fabric-format mixin configs the bridge extracted, after the
+            // Leaves configs (matching the classloader classpath order above).
+            dev.iyanz.sourbyclip.cherry.Cherry.fabricMixinConfigNames().forEach(Mixins::addConfiguration);
             Mixins.getConfigs().forEach(config -> {
                 final String mixinConfigName = config.getName();
                 final String pluginId = MixinJarResolver.getPluginId(mixinConfigName);
@@ -112,12 +127,24 @@ public final class Sourbyclip {
                 mixinConfig.decorate(FabricUtil.KEY_COMPATIBILITY, FabricUtil.COMPATIBILITY_LATEST);
             });
 
+            // Cherry — fold the Fabric-declared access wideners into the single list
+            // AccessWidenerManager iterates (MixinJarResolver.accessWidenerConfigs), so Leaves- and
+            // Fabric-sourced wideners are applied in one pass. (The widener resources live inside the
+            // Fabric jars already added to the classloader classpath above.)
+            final java.util.List<String> fabricWideners = dev.iyanz.sourbyclip.cherry.Cherry.fabricAccessWidenerConfigs();
+            if (!fabricWideners.isEmpty()) {
+                final java.util.List<String> combinedWideners = new java.util.ArrayList<>(MixinJarResolver.accessWidenerConfigs);
+                combinedWideners.addAll(fabricWideners);
+                MixinJarResolver.accessWidenerConfigs = combinedWideners;
+            }
+
             logger.info("Loading accesswideners");
             AccessWidenerManager.initAccessWidener(createdClassLoader);
 
-            logger.info("Cherry ready: {} mixin plugin(s), {} mixin config(s), {} access-widener(s), {} access-transformer(s).",
+            logger.info("Cherry ready: {} Leaves mixin plugin(s), {} Leaves + {} Fabric mixin config(s), {} access-widener(s), {} access-transformer(s).",
                     org.leavesmc.leavesclip.mixin.PluginResolver.leavesPluginMetas.size(),
                     MixinJarResolver.mixinConfigs.size(),
+                    dev.iyanz.sourbyclip.cherry.Cherry.fabricMixinConfigNames().size(),
                     MixinJarResolver.accessWidenerConfigs.size(),
                     dev.iyanz.sourbyclip.cherry.at.CherryAccessTransformers.INSTANCE.registeredCount());
 

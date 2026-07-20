@@ -1,0 +1,60 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.iyanz",
+    "module": "sourbyclip",
+    "version": "3.0.21",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.5.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "files": [
+        {
+          "name": "sourbyclip-3.0.21.jar",
+          "url": "sourbyclip-3.0.21.jar",
+          "size": 3119438,
+          "sha512": "b1aa40d5cfc74a845c0d470370fb8293d9ac6bb1e75f9966abaf8c42c87b8c820b396aa918b8400d896d206d31521f2d997308aa971f77bad5cc151abbe08641",
+          "sha256": "4a39463dcc7c614c52ed0b47d2a3b60e310994e846488f2e8ba71dfe38ba4e1a",
+          "sha1": "40b59d38e1fd8dc929408b4d1e5e9a3ec698f3ad",
+          "md5": "ef115354888f0fb0d9889a83b0fdf8c1"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "sourbyclip-3.0.21.jar",
+          "url": "sourbyclip-3.0.21.jar",
+          "size": 3119438,
+          "sha512": "b1aa40d5cfc74a845c0d470370fb8293d9ac6bb1e75f9966abaf8c42c87b8c820b396aa918b8400d896d206d31521f2d997308aa971f77bad5cc151abbe08641",
+          "sha256": "4a39463dcc7c614c52ed0b47d2a3b60e310994e846488f2e8ba71dfe38ba4e1a",
+          "sha1": "40b59d38e1fd8dc929408b4d1e5e9a3ec698f3ad",
+          "md5": "ef115354888f0fb0d9889a83b0fdf8c1"
+        }
+      ]
+    }
+  ]
+}
