@@ -150,7 +150,14 @@
      testImplementation("org.junit-pioneer:junit-pioneer:2.3.0") // CartesianTest
  
 -    // Spark
-+    // Spark (Canvas built-in; bumped to match the SourbyLoader externalLib manifest pin)
++    // Spark (Canvas built-in). Bumped to the latest spark-paper (1.10.172, per repo.papermc.io —
++    // spark-api has published only one build ever, 0.1-20240720.200737-2, so that stays pinned).
++    // spark-paper's shaded me.lucko.spark.paper.common.* ABI moved between these two releases:
++    // SparkPlatform.getAllSparkPermissions() -> platform.getCommandManager().getAllSparkPermissions(),
++    // and TickStatistics gained the abstract gameTargetTps(). Both call sites are Canvas's OWN
++    // vendored spark bridge (io.canvasmc.canvas.spark.*), fixed via our canvasServer patch layer
++    // (sourbycraft-server/canvas-patches) rather than reverting the version — see
++    // FoliaSparkPlugin.java / FoliaTickStatistics.java patches for the actual fix.
      implementation("me.lucko:spark-api:0.1-20240720.200737-2")
 -    implementation("me.lucko:spark-paper:1.10.152")
 +    implementation("me.lucko:spark-paper:1.10.172")
