@@ -154,7 +154,10 @@ class MinecraftPatchingTasks(
         }
 
         val importLibFiles = tasks.register<ImportLibraryFiles>("import${configName.capitalized()}LibraryFiles") {
-            patches.from(config.featurePatchDir, config.sourcePatchDir)
+            // Include basePatchDir so library files referenced ONLY by the fork's base/ patches
+            // (e.g. a concurrentutil executor class a base patch modifies) get imported before
+            // SetupForkMinecraftSources git-am's the base patches. Absent dir -> contributes nothing.
+            patches.from(config.featurePatchDir, config.sourcePatchDir, config.basePatchDir)
             devImports.set(config.devImports.fileExists())
             libraryFileIndex.set(coreTasks.indexLibraryFiles.flatMap { it.outputFile })
             libraries.from(coreTasks.indexLibraryFiles.map { it.libraries })
@@ -171,6 +174,10 @@ class MinecraftPatchingTasks(
             atFile.set(mergeCollectedAts.flatMap { it.outputFile })
             ats.jst.from(project.configurations.named(JST_CONFIG))
             ats.jstClasspath.from(project.configurations.named(MACHE_MINECRAFT_LIBRARIES_CONFIG))
+            // Three-stage forks (e.g. CanvasMC): apply the fork's git-format base/ Minecraft patches
+            // here — after ATs + imports, before the diffpatch sources/ file patches below. No-op when
+            // the fork has no minecraft-patches/base dir. See ForkConfig.basePatchDir.
+            basePatchDir.set(config.basePatchDir.fileExists())
         }
 
         applySourcePatches.configure {

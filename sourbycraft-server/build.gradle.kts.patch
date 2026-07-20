@@ -19,7 +19,7 @@
      id("io.papermc.fill.gradle") version "1.0.12"
  }
  
-@@ -16,20 +20,43 @@
+@@ -16,21 +20,46 @@
  
  dependencies {
      mache("io.papermc:mache:26.2+build.1")
@@ -42,18 +42,11 @@
  paperweight {
      minecraftVersion = providers.gradleProperty("mcVersion")
      filterPatches = false
-+    // SourbyCraft-on-Canvas - Canvas's own native minecraft-patches (Region-Threading etc.) fail
-+    // ~13% of hunks under paperweight-core's internal java-diff-utils applier (ApplyFilePatches.
-+    // applyWithDiffPatch) when re-derived independently against our own mache/AT pipeline, even
-+    // with the Fuzzy variant (373/380). Verified by hand with plain `git apply --whitespace=fix`:
-+    // ALL 380 hunks (all 9 canvas-server/minecraft-patches) apply 100% cleanly. gitFilePatches
-+    // routes ApplyFilePatches through applyWithGit (real git apply) instead — but it is a
-+    // PROJECT-WIDE flag (project.coreExt.gitFilePatches, no per-fork override in sourbypatcher's
-+    // current API) and flipping it globally regresses the paperServer / Paper-resource layer
-+    // (its many small sources/*.patch + resources/*.patch files fail under `git apply --3way`
-+    // with exit 128, unrelated to this problem). Left false here; the canvasServer-specific
-+    // tasks are force-configured to gitFilePatches=true individually below instead, scoping the
-+    // fix to exactly the patch set that needs it.
++    // Keep the internal java-diff-utils applier project-wide: the Paper base, Canvas's diffpatch
++    // sources/ file patches, and our own sourbycraft layers all apply cleanly under it (and the
++    // Paper layer regresses under `git apply --3way`). Canvas's git-format base/ + features/ patches
++    // are applied by their own git-am stages (SetupForkMinecraftSources / ApplyFeaturePatches), so
++    // nothing here needs the git-apply file-patch path.
      gitFilePatches = false
  
      val canvas = forks.register("canvas") {
@@ -64,9 +57,19 @@
 +        // mirrors exactly how the previous Folia base wired `forks.register("folia")`.
 +        rootDirectory = upstreamsDirectory().map { it.dir("canvas") }
          additionalAts.set(mergeMinecraftATs.flatMap { it.outputFile })
++        // Canvas is a THREE-STAGE fork (its weaver splits Minecraft patches into base/ git-format
++        // foundational patches → sources/ diffpatch file patches → features/ git-format patches).
++        // sourbypatcher 2.0.17 added base/ support (ForkConfig.basePatchDir + SetupForkMinecraftSources)
++        // so runCanvasSetup applies canvas-server/minecraft-patches/base FIRST (git am), creating the
++        // region-threading files + context the sources/ file patches then modify. The sources/ patches
++        // are codechicken-diffpatch format (`@@ -12,23 +_,23 @@`) which `git apply` cannot parse, so
++        // they MUST run through the internal diff-utils applier — i.e. gitFilePatches stays at the
++        // project-wide default (false) for this fork. (The per-fork gitFilePatches override also added
++        // in 2.0.17 is available if ever needed, but Canvas does not need it once base/ is applied.)
          upstream.patchDir("paperServer") {
              upstreamPath = "paper-server"
-@@ -39,14 +66,46 @@
+             excludes = setOf("src/minecraft", "patches", "build.gradle.kts")
+@@ -39,8 +68,27 @@
          }
      }
  
@@ -95,26 +98,7 @@
      updatingMinecraft {
          // oldPaperCommit = "d4fe85375af18bfa88f44d7c1e6a61904ae550cc"
          // oldForkCommit = "58d6715718521ea774b786fa9ca1e6fc2db14702"
-     }
- }
- 
-+// SourbyCraft-on-Canvas - scope gitFilePatches=true to ONLY the canvasServer minecraft-source
-+// patch task (see the comment on `gitFilePatches = false` above for the full rationale). This
-+// forces just Canvas's own native minecraft-patches (Region-Threading etc.) through the real
-+// `git apply` codepath (ApplyFilePatches.applyWithGit) instead of paperweight-core's stricter
-+// internal java-diff-utils applier, without touching the working paperServer/Paper-resource
-+// patch tasks which regress under gitFilePatches=true (git apply --3way, exit 128, unrelated
-+// failure mode against their many small sources/*.patch and resources/*.patch files).
-+tasks.withType<io.papermc.paperweight.core.tasks.patching.ApplyFilePatches>().configureEach {
-+    if (name == "applyCanvasMinecraftSourcePatches" || name == "applyCanvasMinecraftResourcePatches") {
-+        gitFilePatches.set(true)
-+    }
-+}
-+
- tasks.generateDevelopmentBundle {
-     libraryRepositories.addAll(
-         "https://repo.maven.apache.org/maven2/",
-@@ -110,14 +169,23 @@
+@@ -110,14 +158,23 @@
      main {
          java { srcDir("../paper-server/src/main/java"); srcDir("../paper-server/src/generated/java") }
          resources { srcDir("../paper-server/src/main/resources") }
@@ -138,7 +122,7 @@
  }
  configurations.named(log4jPlugins.compileClasspathConfigurationName) {
      extendsFrom(configurations.compileClasspath.get())
-@@ -141,7 +209,7 @@
+@@ -141,7 +198,7 @@
  }
  
  dependencies {
@@ -147,7 +131,7 @@
      implementation("ca.spottedleaf:leafpile:1.0.0")
      implementation("org.jline:jline-terminal-ffm:3.29.0") // use ffm on java 22+
      implementation("org.jline:jline-terminal-jni:3.29.0") // fall back to jni on java 21
-@@ -150,6 +218,11 @@
+@@ -150,6 +207,11 @@
      implementation("net.openhft:affinity:2026.2")
      implementation("io.canvasmc.httpclient:httpclient:1.0.1")
  
@@ -159,7 +143,7 @@
      /*
        Required to add the missing Log4j2Plugins.dat file from log4j-core
        which has been removed by Mojang. Without it, log4j has to classload
-@@ -191,9 +264,13 @@
+@@ -191,9 +253,13 @@
      testImplementation("org.ow2.asm:asm-tree:9.9.1")
      testImplementation("org.junit-pioneer:junit-pioneer:2.3.0") // CartesianTest
  
@@ -175,7 +159,7 @@
  }
  
  tasks.jar {
-@@ -201,35 +278,62 @@
+@@ -201,35 +267,62 @@
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
@@ -256,7 +240,7 @@
          )
          for (tld in setOf("net", "com", "org")) {
              attributes("$tld/bukkit", "Sealed" to true)
-@@ -373,23 +477,6 @@
+@@ -373,23 +466,6 @@
      mainClass.set(null as String?)
  }
  
