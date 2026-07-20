@@ -1,0 +1,54 @@
+--- a/src/main/java/com/destroystokyo/paper/Metrics.java
++++ b/src/main/java/com/destroystokyo/paper/Metrics.java
+@@ -93,20 +_,27 @@
+      * Starts the Scheduler which submits our data every 30 minutes.
+      */
+     private void startSubmitting() {
+-        final Runnable submitTask = () -> {
+-            if (!MinecraftServer.getServer().hasStopped()) {
+-                submitData();
+-            }
+-        };
++        // SourbyCraft - remove bStats phone-home: never schedule the submit task, so this server never
++        // POSTs server-implementation telemetry to https://bstats.org/submitData/server-implementation.
++        // The class + its public API are kept intact (nothing else needs to change) — only the two
++        // methods that actually cause network I/O are neutered; see submitData() below for the second,
++        // defense-in-depth guard in case some other path ever reaches it directly.
++        if (false) {
++            final Runnable submitTask = () -> {
++                if (!MinecraftServer.getServer().hasStopped()) {
++                    submitData();
++                }
++            };
+ 
+-        // Many servers tend to restart at a fixed time at xx:00 which causes an uneven distribution of requests on the
+-        // bStats backend. To circumvent this problem, we introduce some randomness into the initial and second delay.
+-        // WARNING: You must not modify any part of this Metrics class, including the submit delay or frequency!
+-        // WARNING: Modifying this code will get your plugin banned on bStats. Just don't do it!
+-        long initialDelay = (long) (1000 * 60 * (3 + Math.random() * 3));
+-        long secondDelay = (long) (1000 * 60 * (Math.random() * 30));
+-        scheduler.schedule(submitTask, initialDelay, TimeUnit.MILLISECONDS);
+-        scheduler.scheduleAtFixedRate(submitTask, initialDelay + secondDelay, 1000 * 60 * 30, TimeUnit.MILLISECONDS);
++            // Many servers tend to restart at a fixed time at xx:00 which causes an uneven distribution of requests on the
++            // bStats backend. To circumvent this problem, we introduce some randomness into the initial and second delay.
++            // WARNING: You must not modify any part of this Metrics class, including the submit delay or frequency!
++            // WARNING: Modifying this code will get your plugin banned on bStats. Just don't do it!
++            long initialDelay = (long) (1000 * 60 * (3 + Math.random() * 3));
++            long secondDelay = (long) (1000 * 60 * (Math.random() * 30));
++            scheduler.schedule(submitTask, initialDelay, TimeUnit.MILLISECONDS);
++            scheduler.scheduleAtFixedRate(submitTask, initialDelay + secondDelay, 1000 * 60 * 30, TimeUnit.MILLISECONDS);
++        }
+     }
+ 
+     /**
+@@ -160,6 +_,10 @@
+      * Collects the data and sends it afterwards.
+      */
+     private void submitData() {
++        // SourbyCraft - remove bStats phone-home (defense in depth: startSubmitting() above already
++        // never schedules a call here, but this guard means even a future/reflective caller can never
++        // trigger an outbound https://bstats.org/submitData/server-implementation POST).
++        if (true) return;
+         final JSONObject data = getServerData();
+ 
+         JSONArray pluginData = new JSONArray();
