@@ -4,19 +4,23 @@ import org.gradle.api.tasks.testing.logging.TestLogEvent
 
 plugins {
     java // TODO java launcher tasks
-    id("dev.iyanz.sourbypatcher.patcher")
+    id("io.canvasmc.weaver.patcher") version "2.4.5"
 }
 
 paperweight {
     filterPatches = false
-    // SourbyCraft-on-Canvas (feat/canvas-engine, PR #12): upstream swapped from PaperMC/Folia to
-    // CraftCanvasMC/Canvas. Canvas is itself a paperweight/weaver-style fork of Paper (its own
-    // build.gradle.kts registers `upstreams.paper { ... }` with an identical patchFile/patchDir
-    // DSL shape), so it is registered here exactly the way Folia was: a downstream upstream whose
-    // OWN nested Paper layer is resolved recursively by the nested build, with our own
-    // paper-api patches layered on top via patchRepo("paperApi") same as before.
-    upstreams.register("canvas") {
-        repo = github("CraftCanvasMC", "Canvas")
+    // SourbyCraft-on-Canvas (feat/canvas-engine, PR #12) — "Path B": build on Canvas's OWN weaver
+    // toolchain instead of forcing our paperweight fork (sourbypatcher) to consume Canvas.
+    // sourbypatcher got 90% there but hit a hard wall: Canvas's weaver sequences ATs + base
+    // patches differently than paperweight does, and reconciling that generically caused git-am
+    // conflicts (TickThread.java/CraftServer.java). `upstreams.canvas { ... }` is a BUILT-IN
+    // convenience on weaver's own PaperweightPatcherExtension (alongside `paper` and `folia`),
+    // added by CanvasMC specifically so downstream forks of Canvas can consume it — it defaults
+    // `applyUpstreamNested = true`, meaning the checked-out Canvas repo (which itself applies
+    // `io.canvasmc.weaver.patcher` with `upstreams.paper { ... }`) is resolved recursively by
+    // weaver's native nested-build mechanism: the exact same code path Canvas already uses
+    // successfully to consume Paper, one level further down.
+    upstreams.canvas {
         ref = providers.gradleProperty("canvasRef")
 
         println("Upstream commit ref: " + ref.get())
@@ -31,11 +35,18 @@ paperweight {
             outputFile = file("sourbycraft-api/build.gradle.kts")
             patchFile = file("sourbycraft-api/build.gradle.kts.patch")
         }
+        // Two levels deep (sourbycraft -> canvas -> paper): paper-api does not exist in Canvas's
+        // raw checkout, only as CANVAS's OWN nested-build output, so this must be a patchRepo
+        // (wires a proper task dependency on that nested output) rather than a plain patchDir
+        // (which only reads a literal path inside the immediate "canvas" checkout).
         patchRepo("paperApi") {
             upstreamPath = "paper-api"
             patchesDir = file("sourbycraft-api/paper-patches")
             outputDir = file("paper-api")
         }
+        // One level deep: canvas-api is a literal folder in Canvas's raw checkout, so a plain
+        // patchDir is correct (mirrors the server-side canvasServer patchDir wired inside
+        // sourbycraft-server/build.gradle.kts.patch's own forks.register("sourbycraft") block).
         patchDir("canvasApi") {
             upstreamPath = "canvas-api"
             excludes = listOf("build.gradle.kts", "build.gradle.kts.patch", "paper-patches")
@@ -43,56 +54,14 @@ paperweight {
             outputDir = file("canvas-api")
         }
     }
-
-    // SourbyLoader — libs stripped from the fat paperclip jar + fetched on first boot
-    // (SourbyBootstrap). Paths are relative to META-INF/libraries/; the download URL is
-    // baseUrl + path. Only independently-resolvable libs are externalized — paperclip's own
-    // downloader deps (maven-resolver/sisu/httpclient/commons-codec) and our modules stay bundled.
-    val mavenCentral = "https://repo1.maven.org/maven2"
-    val paperRepo = "https://repo.papermc.io/repository/maven-public"
-    externalLib("org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar", mavenCentral)
-    externalLib("com/github/luben/zstd-jni/1.5.7-11/zstd-jni-1.5.7-11.jar", mavenCentral)
-    externalLib("me/lucko/spark-paper/1.10.172/spark-paper-1.10.172.jar", paperRepo)
-    externalLib("com/mysql/mysql-connector-j/9.2.0/mysql-connector-j-9.2.0.jar", mavenCentral)
-    externalLib("com/google/protobuf/protobuf-java/4.29.0/protobuf-java-4.29.0.jar", mavenCentral)
-    externalLib("io/sentry/sentry/8.0.0-rc.2/sentry-8.0.0-rc.2.jar", mavenCentral)
-    externalLib("net/kyori/adventure-api/5.2.0/adventure-api-5.2.0.jar", mavenCentral)
-    externalLib("net/kyori/adventure-text-minimessage/5.2.0/adventure-text-minimessage-5.2.0.jar", mavenCentral)
-    externalLib("org/spongepowered/configurate-yaml/4.2.0/configurate-yaml-4.2.0.jar", mavenCentral)
-    externalLib("org/spongepowered/configurate-core/4.2.0/configurate-core-4.2.0.jar", mavenCentral)
-    externalLib("org/yaml/snakeyaml/2.6/snakeyaml-2.6.jar", mavenCentral)
-    externalLib("commons-lang/commons-lang/2.6/commons-lang-2.6.jar", mavenCentral)
-    externalLib("io/github/classgraph/classgraph/4.8.158/classgraph-4.8.158.jar", mavenCentral)
-    externalLib("com/electronwill/night-config/core/3.9.0/core-3.9.0.jar", mavenCentral)
-    externalLib("com/electronwill/night-config/toml/3.9.0/toml-3.9.0.jar", mavenCentral)
-    externalLib("org/jline/jline-terminal/3.27.1/jline-terminal-3.27.1.jar", mavenCentral)
-    externalLib("org/jline/jline-native/3.27.1/jline-native-3.27.1.jar", mavenCentral)
-    externalLib("org/jline/jline-reader/3.20.0/jline-reader-3.20.0.jar", mavenCentral)
-    // Offline geoip for /ping (com.maxmind.geoip2:geoip2 + its runtime closure).
-    externalLib("com/maxmind/geoip2/geoip2/5.1.0/geoip2-5.1.0.jar", mavenCentral)
-    externalLib("com/maxmind/db/maxmind-db/4.1.0/maxmind-db-4.1.0.jar", mavenCentral)
-    externalLib("com/fasterxml/jackson/core/jackson-databind/2.21.3/jackson-databind-2.21.3.jar", mavenCentral)
-    externalLib("com/fasterxml/jackson/core/jackson-core/2.21.3/jackson-core-2.21.3.jar", mavenCentral)
-    externalLib("com/fasterxml/jackson/core/jackson-annotations/2.21/jackson-annotations-2.21.jar", mavenCentral)
-    externalLib("com/fasterxml/jackson/datatype/jackson-datatype-jsr310/2.21.3/jackson-datatype-jsr310-2.21.3.jar", mavenCentral)
 }
 
-// Wire the SourbyPatcher slim task to this build's server paperclip + server jars.
-tasks.named<io.papermc.paperweight.tasks.SlimPaperclipJar>("slimPaperclipJar") {
-    val serverProj = project(":sourbycraft-server")
-    dependsOn("${serverProj.path}:createPaperclipJar", "${serverProj.path}:jar")
-    fatJar.fileProvider(
-        serverProj.tasks.named("createPaperclipJar").map { t ->
-            t.outputs.files.files.first { it.name.contains("paperclip") && it.name.endsWith(".jar") }
-        }
-    )
-    serverJar.fileProvider(
-        serverProj.tasks.named("jar").map { t ->
-            t.outputs.files.files.first { it.name.endsWith(".jar") }
-        }
-    )
-    outputJar.set(layout.buildDirectory.file("libs/SourbyCraft-slim.jar"))
-}
+// NOTE: the SourbyLoader lib-slimming optimization (externalLib(...) DSL + SlimPaperclipJar task)
+// was a custom addition to sourbypatcher's OWN fork of paperweight-core and has no equivalent in
+// weaver. Dropped for this benchmark build (goal is a small utilities-only jar to compare Canvas
+// vs the old Folia base, not to re-ship the lib-slimming optimization) — createPaperclipJar ships
+// a normal fat jar. Revisit porting externalLib/SlimPaperclipJar onto weaver if this graduates
+// past a benchmark.
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 val canvasMavenPublicUrl = "https://maven.canvasmc.io/public/"
@@ -168,10 +137,12 @@ subprojects {
     val internalVersionProvider = sourbycraftSuffixProvider
     val writeBuildInfoTask = tasks.register("writeBuildInfo") {
         val mcVersion = providers.gradleProperty("mcVersion").getOrElse("unknown")
-        // SourbyCraft — Folia build number: gradle.properties `sourbyBuild=1` -> effective id "1f"
-        // (f = Folia). Surfaced as `build=1f` here so BuildInfo (banner + /ver) can render
-        // "26.2-REL (build 1f)". Bump sourbyBuild per release -> 2f, 3f, ...
-        val sourbyBuild = providers.gradleProperty("sourbyBuild").getOrElse("1").trim() + "f"
+        // SourbyCraft-on-Canvas build number: gradle.properties `sourbyBuild=4` -> effective id
+        // "4c" (c = Canvas base, replacing the old "f" = Folia suffix). Surfaced as `build=4c`
+        // here so BuildInfo (banner + /ver) can render "26.2-EXP (build 4c)", matching the
+        // sourbycraft-server jar manifest's own Implementation-Version (same "c" suffix, see
+        // sourbycraft-server/build.gradle.kts.patch). Bump sourbyBuild per release -> 5, 6, ...
+        val sourbyBuild = providers.gradleProperty("sourbyBuild").getOrElse("1").trim() + "c"
         val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
 
         inputs.property("internalVersion", internalVersionProvider)
