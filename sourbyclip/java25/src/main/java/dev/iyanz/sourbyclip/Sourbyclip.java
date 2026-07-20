@@ -141,7 +141,7 @@ public final class Sourbyclip {
             logger.info("Loading accesswideners");
             AccessWidenerManager.initAccessWidener(createdClassLoader);
 
-            logger.info("Cherry ready: {} Leaves mixin plugin(s), {} Leaves + {} Fabric mixin config(s), {} access-widener(s), {} access-transformer(s).",
+            logger.info("Cherry wired into the mixin environment: {} Leaves mixin plugin(s), {} Leaves + {} Fabric mixin config(s), {} access-widener(s), {} access-transformer(s).",
                     org.leavesmc.leavesclip.mixin.PluginResolver.leavesPluginMetas.size(),
                     MixinJarResolver.mixinConfigs.size(),
                     dev.iyanz.sourbyclip.cherry.Cherry.fabricMixinConfigNames().size(),
