@@ -1,0 +1,52 @@
+--- a/src/main/java/io/papermc/paper/PaperBootstrap.java
++++ b/src/main/java/io/papermc/paper/PaperBootstrap.java
+@@ -48,12 +_,43 @@
+                 osVersion,
+                 osArch
+             ),
+-            String.format(
+-                "Loading %s %s for Minecraft %s",
+-                bi.brandName(),
+-                bi.asString(ServerBuildInfo.StringRepresentation.VERSION_FULL),
+-                bi.minecraftVersionId()
+-            )
++            sourbyLoadingLine(bi) // SourbyCraft: branded bootstrap line (build id + GMT+7 build date)
++        );
++    }
++
++    // SourbyCraft: replace the base "Loading <brand> 26.2-DEV-<branch>@<hash> (ts)" version string
++    // (ServerBuildInfo.VERSION_FULL renders "-DEV" whenever the CI Build-Number is absent + appends
++    // the git branch/commit) with a clean, branded line: "Loading SourbyCraft Build 38c
++    // <Tuesday, 21 July 2026 04:30> for Minecraft 26.2". Build id + build timestamp come from
++    // SourbyCraft's own BuildInfo (sourbycraft-build.properties); the date is formatted GMT+7
++    // day-name, matching /ver and the GitHub release-title convention. Defensive: any missing/
++    // unparseable field degrades gracefully, never throwing on the boot path.
++    private static String sourbyLoadingLine(final ServerBuildInfo bi) {
++        String buildId = "?";
++        String when = "";
++        try {
++            final dev.iyanz.sourbycraft.brand.BuildInfo sb = dev.iyanz.sourbycraft.brand.BuildInfo.load();
++            if (sb != null) {
++                if (sb.build() != null && !sb.build().isEmpty()) {
++                    buildId = sb.build();
++                }
++                final String ts = sb.buildTimestamp();
++                if (ts != null && !ts.isEmpty()) {
++                    when = " " + java.time.format.DateTimeFormatter
++                        .ofPattern("EEEE, d MMMM yyyy HH:mm", java.util.Locale.ENGLISH)
++                        .format(java.time.ZonedDateTime.ofInstant(
++                            java.time.Instant.parse(ts), java.time.ZoneId.of("Asia/Jakarta")));
++                }
++            }
++        } catch (final Throwable ignored) {
++            // never break boot over a version string
++        }
++        return String.format(
++            "Loading %s Build %s%s for Minecraft %s",
++            bi.brandName(),
++            buildId,
++            when,
++            bi.minecraftVersionId()
+         );
+     }
+ }
