@@ -172,16 +172,24 @@ public final class HudBars {
             .append(Component.text(ContainerMemory.fmt(used) + "/" + ContainerMemory.fmt(max),
                 pct < 0.60 ? NamedTextColor.GREEN : pct < 0.85 ? NamedTextColor.YELLOW : NamedTextColor.RED))
             .append(Component.text(String.format(java.util.Locale.ROOT, " (%.0f%%)", pct * 100), NamedTextColor.GRAY));
-        // Swap usage (host-level), shown like the RAM readout: used/total. Only when swap exists.
+        // Swap usage (host/container-level), shown like the RAM readout: used/total. Only when swap
+        // exists. Robust against the common container bug where the platform bean's free-swap figure
+        // is unreliable (negative, or larger than the total) while the total itself is fine — see
+        // ContainerMemory#swapUsedBytes. Never renders "?": an untrustworthy used figure falls back
+        // to a graceful "n/a" instead of a bogus/clamped number.
         try {
-            final var os = (com.sun.management.OperatingSystemMXBean) java.lang.management.ManagementFactory.getOperatingSystemMXBean();
-            final long swapTotal = os.getTotalSwapSpaceSize();
+            final long swapTotal = ContainerMemory.swapTotalBytes();
             if (swapTotal > 0) {
-                final long swapUsed = swapTotal - os.getFreeSwapSpaceSize();
-                final double swapPct = (double) swapUsed / swapTotal;
-                name.append(Component.text("  Swap ", NamedTextColor.GRAY))
-                    .append(Component.text(ContainerMemory.fmt(swapUsed) + "/" + ContainerMemory.fmt(swapTotal),
-                        swapPct < 0.30 ? NamedTextColor.GREEN : swapPct < 0.70 ? NamedTextColor.YELLOW : NamedTextColor.RED));
+                final long swapUsed = ContainerMemory.swapUsedBytes(swapTotal);
+                final Component swapValue;
+                if (swapUsed < 0) {
+                    swapValue = Component.text(ContainerMemory.fmt(swapTotal) + " total (used n/a)", NamedTextColor.GRAY);
+                } else {
+                    final double swapPct = (double) swapUsed / swapTotal;
+                    swapValue = Component.text(ContainerMemory.fmt(swapUsed) + "/" + ContainerMemory.fmt(swapTotal),
+                        swapPct < 0.30 ? NamedTextColor.GREEN : swapPct < 0.70 ? NamedTextColor.YELLOW : NamedTextColor.RED);
+                }
+                name.append(Component.text("  Swap ", NamedTextColor.GRAY)).append(swapValue);
             }
         } catch (Throwable ignored) { /* swap metrics unavailable on this JVM/OS */ }
         RAM_BAR.name(name.build());

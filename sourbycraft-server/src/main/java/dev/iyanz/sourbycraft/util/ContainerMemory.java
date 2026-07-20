@@ -58,6 +58,49 @@ public final class ContainerMemory {
         }
     }
 
+    /**
+     * Host/container swap TOTAL bytes. Prefers the cgroup v2 swap cap ({@code memory.swap.max};
+     * {@code "max"} = unlimited, falls through) since that is the figure that actually bounds this
+     * container's swap; otherwise the platform bean's total. -1 unknown.
+     */
+    public static long swapTotalBytes() {
+        long v = parseLimit(Path.of("/sys/fs/cgroup/memory.swap.max"));
+        if (v > 0) return v;
+        try {
+            var os = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+            if (os instanceof com.sun.management.OperatingSystemMXBean sun) {
+                long t = sun.getTotalSwapSpaceSize();
+                if (t > 0) return t;
+            }
+        } catch (Throwable ignored) {
+        }
+        return UNKNOWN;
+    }
+
+    /**
+     * Swap USED bytes for the given {@code totalBytes} (as returned by {@link #swapTotalBytes()}).
+     * Robust against the common container bug where {@code getFreeSwapSpaceSize()} returns a bogus
+     * value (negative, or larger than the total) — cgroups often report the total correctly but not
+     * the free figure. Prefers the cgroup v2 swap-current counter (exact, and consistent with the
+     * total this was paired with); otherwise trusts the platform bean's free-swap figure ONLY when it
+     * passes a sanity check (0 &le; free &le; total). Returns -1 ("n/a") when nothing here is
+     * trustworthy — callers must show a graceful placeholder, never a raw negative/oversized value.
+     */
+    public static long swapUsedBytes(long totalBytes) {
+        if (totalBytes <= 0) return UNKNOWN;
+        long v = parseLimit(Path.of("/sys/fs/cgroup/memory.swap.current"));
+        if (v >= 0) return Math.max(0, Math.min(v, totalBytes));
+        try {
+            var os = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+            if (os instanceof com.sun.management.OperatingSystemMXBean sun) {
+                long free = sun.getFreeSwapSpaceSize();
+                if (free >= 0 && free <= totalBytes) return totalBytes - free;
+            }
+        } catch (Throwable ignored) {
+        }
+        return UNKNOWN;
+    }
+
     /** True when the JVM was launched with an explicit -Xmx. */
     public static boolean explicitXmx() {
         try {
