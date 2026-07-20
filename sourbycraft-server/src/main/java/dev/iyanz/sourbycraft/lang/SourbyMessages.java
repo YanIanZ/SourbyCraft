@@ -80,7 +80,7 @@ public final class SourbyMessages {
         ),
         MOTD, List.of(
             "<#FFB347><bold>SourbyCraft</bold></#FFB347> <gray>»</gray> <#AEC6CF>Ngebut, mulus, bebas lag.</#AEC6CF>\n<#77DD77>Gabung sekarang, seru-seruan bareng!</#77DD77>",
-            "<#CBA6F7><bold>✦ SourbyCraft ✦</bold></#CBA6F7>\n<#AEC6CF>Powered by Folia — tiap region jalan sendiri, TPS anti drop.</#AEC6CF>",
+            "<#CBA6F7><bold>✦ SourbyCraft ✦</bold></#CBA6F7>\n<#AEC6CF>Powered by Canvas — tiap region jalan sendiri, TPS anti drop.</#AEC6CF>",
             "<gradient:#FFB347:#CBA6F7><bold>SourbyCraft Network</bold></gradient>\n<gray>Performa kelas atas, komunitas kelas satu.</gray>",
             "<#FFB347><bold>SourbyCraft</bold></#FFB347> <#77DD77>ONLINE</#77DD77>\n<gray>Mari main, jangan cuma ngintip MOTD doang :)</gray>"
         ),
