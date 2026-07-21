@@ -65,17 +65,60 @@ public class TpsCommand extends Command {
             .append(text("TPS", SourbyCraftColors.LABEL))
             .build());
 
+        dev.iyanz.sourbycraft.perf.PerfMetrics.Snapshot m;
+        try {
+            m = dev.iyanz.sourbycraft.perf.PerfMetrics.snapshot();
+        } catch (Throwable ignored) {
+            m = dev.iyanz.sourbycraft.perf.PerfMetrics.Snapshot.EMPTY;
+        }
+
         double[] tps = safeTps();
         double mspt = safeMspt();
 
         renderTps(s, tps);
-        renderMspt(s, mspt);
+        renderMspt(s, mspt, m);
+        renderRegionsAndGc(s, m);
         renderEngine(s);
         renderTierAndMem(s, tps[0], mspt);
 
         s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
         return true;
     }
+
+    /**
+     * The accurate region-threaded extras — utilisation (real load, not TPS-capped), CPU starvation,
+     * and GC overhead (a lag source invisible to both TPS and MSPT). Silent when there is no data.
+     */
+    private static void renderRegionsAndGc(CommandSender s, dev.iyanz.sourbycraft.perf.PerfMetrics.Snapshot m) {
+        if (m == null) return;
+        if (m.regionCount() > 0 && !Double.isNaN(m.maxUtilisation())) {
+            s.sendMessage(text()
+                .append(text("  Region load ", SourbyCraftColors.DIM))
+                .append(BarUtil.coloredBar(m.maxUtilisation(), TPS_BAR_WIDTH))
+                .append(text("  busiest " + pct(m.maxUtilisation()) + " / avg " + pct(m.avgUtilisation())
+                    + "  (" + m.regionCount() + " region" + (m.regionCount() == 1 ? "" : "s") + ")", SourbyCraftColors.DIM))
+                .build());
+            if (m.totalMissingCpuMs() > 1.0) {
+                s.sendMessage(text()
+                    .append(text("  ! CPU starvation: ", SourbyCraftColors.DANGER))
+                    .append(text(fmtMspt(m.totalMissingCpuMs()) + "/tick owed — raise threaded-regions.threads", SourbyCraftColors.DIM))
+                    .build());
+            }
+        }
+        final dev.iyanz.sourbycraft.perf.GcTracker.Gc gc = m.gc();
+        if (gc != null && gc.hasData()) {
+            TextColor gcColor = gc.gcTimePercent() < 3.0 ? SourbyCraftColors.SUCCESS
+                : gc.gcTimePercent() < 8.0 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
+            s.sendMessage(text()
+                .append(text("  GC: ", SourbyCraftColors.LABEL))
+                .append(text(String.format(Locale.ROOT, "%.1f%% time", gc.gcTimePercent()), gcColor))
+                .append(text("  " + String.format(Locale.ROOT, "%.0f/min", gc.collectionsPerMin())
+                    + "  ~" + String.format(Locale.ROOT, "%.1fms", gc.avgPauseMs()) + " avg", SourbyCraftColors.DIM))
+                .build());
+        }
+    }
+
+    private static String pct(double p) { return Double.isNaN(p) ? "?" : String.format(Locale.ROOT, "%.0f%%", p); }
 
     private static void renderTps(CommandSender s, double[] tps) {
         String[] labels = {"1m ", "5m ", "15m"};
@@ -96,7 +139,7 @@ public class TpsCommand extends Command {
         }
     }
 
-    private static void renderMspt(CommandSender s, double mspt) {
+    private static void renderMspt(CommandSender s, double mspt, dev.iyanz.sourbycraft.perf.PerfMetrics.Snapshot m) {
         if (Double.isNaN(mspt)) {
             s.sendMessage(text()
                 .append(text("  MSPT: ", SourbyCraftColors.DIM))
@@ -114,6 +157,16 @@ public class TpsCommand extends Command {
             .append(text("  (" + (budgetPct < 1.0 ? String.format(Locale.ROOT, "%.1f", budgetPct) : String.valueOf((int) Math.round(budgetPct)))
                 + "% of 50ms budget)", SourbyCraftColors.DIM))
             .build());
+        // Distribution: worst region's average is the headline above; median across regions + the
+        // worst region's p95 tail tell whether it's one bad region and how spiky it really is.
+        if (m != null && m.regionCount() > 1 && !Double.isNaN(m.medianRegionMspt())) {
+            s.sendMessage(text()
+                .append(text("    median ", SourbyCraftColors.DIM))
+                .append(text(fmtMspt(m.medianRegionMspt()), SourbyCraftColors.VALUE))
+                .append(text("   p95 tail ", SourbyCraftColors.DIM))
+                .append(text(fmtMspt(m.worstRegionP95Mspt()), SourbyCraftColors.VALUE))
+                .build());
+        }
     }
 
     /** A healthy region ticks in tens of microseconds; %.1f would floor that to "0.0ms". */

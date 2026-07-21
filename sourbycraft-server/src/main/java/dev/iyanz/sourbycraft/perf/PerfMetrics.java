@@ -52,7 +52,7 @@ public final class PerfMetrics {
             }
 
             final int regionCount = regions.size();
-            double worstAvg = 0, worstP95 = 0, worstSingle = 0, maxUtil = 0, sumUtil = 0, totalMissingCpu = 0;
+            double worstAvg = 0, worstP95 = 0, worstSingle = 0, maxUtil = 0, sumUtil = 0, totalMissingCpu = 0, sumTps = 0, minTps = Double.NaN;
             final double[] avgs = new double[Math.max(1, regionCount)];
             for (int i = 0; i < regionCount; i++) {
                 final double[] r = regions.get(i);
@@ -63,17 +63,28 @@ public final class PerfMetrics {
                 maxUtil = Math.max(maxUtil, r[3]);
                 sumUtil += r[3];
                 totalMissingCpu += r[4];
+                final double rTps = r[5];
+                if (!Double.isNaN(rTps)) {
+                    sumTps += rTps;
+                    minTps = Double.isNaN(minTps) ? rTps : Math.min(minTps, rTps);
+                }
             }
             final double medianAvg = median(avgs, regionCount);
             final double avgUtil = regionCount > 0 ? sumUtil / regionCount : 0.0;
 
-            // scheduler rate (caller region view — fine for the headline TPS number)
+            // TPS surveyed from the regions' own tick reports — accurate from ANY thread (console/RCON
+            // included), unlike Bukkit.getTPS() which only sees the caller's region and throws off one.
+            // Report the WORST region's TPS: if any region is behind, that's the honest headline.
             double tps1m = Double.NaN;
-            try {
-                final double[] t = Bukkit.getTPS();
-                if (t.length > 0) tps1m = Math.min(20.0, t[0]);
-            } catch (final Throwable ignored) {
-                // off any region / very early boot
+            if (regionCount > 0 && !Double.isNaN(minTps)) {
+                tps1m = Math.min(20.0, minTps);
+            } else {
+                try {
+                    final double[] t = Bukkit.getTPS();
+                    if (t.length > 0) tps1m = Math.min(20.0, t[0]);
+                } catch (final Throwable ignored) {
+                    // off any region / very early boot
+                }
             }
             final int tickThreads = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
 
@@ -100,7 +111,7 @@ public final class PerfMetrics {
         }
     }
 
-    /** Extract [avgMspt, p95Mspt, worstMspt, utilPct, missingCpuMs] from one region's 15s report. */
+    /** Extract [avgMspt, p95Mspt, worstMspt, utilPct, missingCpuMs, tps] from one region's 15s report. */
     private static void addRegion(final List<double[]> out, final TickData.TickReportData report) {
         if (report == null) return;
         final TickData.SegmentedAverage mspt = report.timePerTickData();
@@ -115,7 +126,12 @@ public final class PerfMetrics {
         if (missing != null && missing.segmentAll() != null) {
             missingCpuMs = Math.max(0.0, missing.segmentAll().average() / 1.0E6);
         }
-        out.add(new double[]{avg, p95, worst, utilPct, missingCpuMs});
+        double tps = Double.NaN;
+        final TickData.SegmentedAverage tpsData = report.tpsData();
+        if (tpsData != null && tpsData.segmentAll() != null) {
+            tps = tpsData.segmentAll().average();
+        }
+        out.add(new double[]{avg, p95, worst, utilPct, missingCpuMs, tps});
     }
 
     private static double median(final double[] a, final int len) {
