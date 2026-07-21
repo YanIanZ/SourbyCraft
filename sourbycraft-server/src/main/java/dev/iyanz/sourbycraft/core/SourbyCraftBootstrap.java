@@ -138,6 +138,15 @@ public final class SourbyCraftBootstrap {
             SourbyLogger.error("SmartSwap.ensureStarted failed", t);
         }
 
+        // 9b. GcTracker — always-on, lightweight GC-health sampler feeding /sys and the perf readout.
+        //     GC pauses are invisible in TPS/MSPT, so this rolling-window tracker is the only source
+        //     for collections/min + GC-time%. One daemon thread; never throws.
+        try {
+            dev.iyanz.sourbycraft.perf.GcTracker.start();
+        } catch (Throwable t) {
+            SourbyLogger.error("GcTracker.start failed", t);
+        }
+
         // 10. Auto-swap — optional OS swapfile creation on boot (r40; config-gated, default off).
         //     Dispatched on the virtual-thread executor so a slow fallocate/dd fallback on an unusual
         //     filesystem can never delay boot; AutoSwap.attempt() itself never throws.
