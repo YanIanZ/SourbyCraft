@@ -3,8 +3,8 @@ package dev.iyanz.sourbycraft.command;
 import dev.iyanz.sourbycraft.SourbyCraftColors;
 import dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics;
 import dev.iyanz.sourbycraft.util.BarUtil;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
-import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
@@ -111,14 +111,7 @@ public class SysCommand extends Command {
             .append(text("  (" + System.getProperty("java.vm.name") + ")", SourbyCraftColors.DIM))
             .build());
 
-        int rec = Math.max(3, (Runtime.getRuntime().availableProcessors() * 3) / Math.max(1, Bukkit.getWorlds().size()));
-        for (World w : Bukkit.getWorlds()) {
-            s.sendMessage(text()
-                .append(text("  " + w.getName() + ": ", SourbyCraftColors.LABEL))
-                .append(text(w.getChunkCount() + " chunks", SourbyCraftColors.VALUE))
-                .append(text("  ~" + rec + " threads", SourbyCraftColors.DIM))
-                .build());
-        }
+        renderPerformance(s);
 
         Plugin[] pl = Bukkit.getPluginManager().getPlugins();
         int active = 0;
@@ -158,5 +151,129 @@ public class SysCommand extends Command {
 
         s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
         return true;
+    }
+
+    /**
+     * The accurate, region-threading-aware performance block — the "hitungan baru" that goes beyond
+     * the single TPS/MSPT pair: a distilled health score, per-region distribution (worst vs median vs
+     * tail), region utilisation and CPU starvation, GC overhead (invisible to TPS/MSPT), and load.
+     */
+    private static void renderPerformance(CommandSender s) {
+        final dev.iyanz.sourbycraft.perf.PerfMetrics.Snapshot m;
+        try {
+            m = dev.iyanz.sourbycraft.perf.PerfMetrics.snapshot();
+        } catch (Throwable ignored) {
+            return; // never break /sys over the perf readout
+        }
+
+        s.sendMessage(text()
+            .append(text("  Performance ", SourbyCraftColors.HEADER))
+            .append(text("(region-threaded)", SourbyCraftColors.DIM))
+            .build());
+
+        // Health score — one honest number distilled from utilisation + tail MSPT + GC + heap.
+        final int health = m.healthScore();
+        final TextColor hColor = health >= 80 ? SourbyCraftColors.SUCCESS
+            : health >= 50 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
+        s.sendMessage(text()
+            .append(text("  Health ", SourbyCraftColors.LABEL))
+            .append(text(BarUtil.bar(health, BarUtil.DEFAULT_WIDTH), hColor))
+            .append(text("  " + health + "/100", hColor))
+            .build());
+
+        // TPS (scheduler) + worst-region MSPT with its p95 tail — the pair that tells the real story.
+        if (!Double.isNaN(m.tps1m())) {
+            s.sendMessage(text()
+                .append(text("  TPS: ", SourbyCraftColors.LABEL))
+                .append(text(fmt2(m.tps1m()), tpsColor(m.tps1m())))
+                .append(text("  (scheduler rate)", SourbyCraftColors.DIM))
+                .build());
+        }
+        if (!Double.isNaN(m.worstRegionMspt())) {
+            s.sendMessage(text()
+                .append(text("  MSPT: ", SourbyCraftColors.LABEL))
+                .append(text("worst " + fmtMs(m.worstRegionMspt()), msptColor(m.worstRegionMspt())))
+                .append(text("  median " + fmtMs(m.medianRegionMspt()), SourbyCraftColors.VALUE))
+                .append(text("  p95 " + fmtMs(m.worstRegionP95Mspt()), SourbyCraftColors.DIM))
+                .build());
+        }
+
+        // Region spread + utilisation — one bad region vs a systemically loaded box look identical on /tps.
+        if (m.regionCount() > 0 && !Double.isNaN(m.maxUtilisation())) {
+            s.sendMessage(text()
+                .append(text("  Regions: ", SourbyCraftColors.LABEL))
+                .append(text(m.regionCount() + " ticking", SourbyCraftColors.VALUE))
+                .append(text("  on " + m.tickThreads() + " threads", SourbyCraftColors.DIM))
+                .build());
+            s.sendMessage(text()
+                .append(text("  Region load ", SourbyCraftColors.LABEL))
+                .append(BarUtil.coloredBar(m.maxUtilisation(), BarUtil.DEFAULT_WIDTH))
+                .append(text("  busiest " + fmtPct(m.maxUtilisation()) + " / avg " + fmtPct(m.avgUtilisation()),
+                    SourbyCraftColors.DIM))
+                .build());
+            // CPU starvation: a region owed CPU it didn't get = too few tick threads for the live regions.
+            if (m.totalMissingCpuMs() > 1.0) {
+                s.sendMessage(text()
+                    .append(text("  ! CPU starvation: ", SourbyCraftColors.DANGER))
+                    .append(text(fmtMs(m.totalMissingCpuMs()) + "/tick owed but not scheduled", SourbyCraftColors.VALUE))
+                    .append(text("  (raise threaded-regions.threads)", SourbyCraftColors.DIM))
+                    .build());
+            }
+        }
+
+        // GC overhead — the lag source that TPS and MSPT never show.
+        final dev.iyanz.sourbycraft.perf.GcTracker.Gc gc = m.gc();
+        if (gc != null && gc.hasData()) {
+            final TextColor gcColor = gc.gcTimePercent() < 3.0 ? SourbyCraftColors.SUCCESS
+                : gc.gcTimePercent() < 8.0 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
+            s.sendMessage(text()
+                .append(text("  GC: ", SourbyCraftColors.LABEL))
+                .append(text(fmt1(gc.gcTimePercent()) + "% time", gcColor))
+                .append(text("  " + fmt1(gc.collectionsPerMin()) + "/min", SourbyCraftColors.VALUE))
+                .append(text("  ~" + fmt1(gc.avgPauseMs()) + "ms avg", SourbyCraftColors.DIM))
+                .build());
+        }
+
+        // Container RSS (if in a container) — the real number a panel OOM-kills on, not heap %.
+        if (!Double.isNaN(m.rssPercent())) {
+            final TextColor rColor = m.rssPercent() < 80.0 ? SourbyCraftColors.SUCCESS
+                : m.rssPercent() < 92.0 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
+            s.sendMessage(text()
+                .append(text("  Container RSS ", SourbyCraftColors.LABEL))
+                .append(BarUtil.ramBar(m.rssPercent(), BarUtil.DEFAULT_WIDTH))
+                .append(text("  " + fmt1(m.rssPercent()) + "%", rColor))
+                .build());
+        }
+
+        // Load line — players / chunks / entities.
+        final StringBuilder load = new StringBuilder();
+        if (m.players() >= 0) load.append(m.players()).append(" players");
+        if (m.loadedChunks() >= 0) load.append(load.length() > 0 ? "  " : "").append(m.loadedChunks()).append(" chunks");
+        if (m.entities() >= 0) load.append(load.length() > 0 ? "  " : "").append(m.entities()).append(" entities");
+        if (load.length() > 0) {
+            s.sendMessage(text()
+                .append(text("  Load: ", SourbyCraftColors.LABEL))
+                .append(text(load.toString(), SourbyCraftColors.VALUE))
+                .build());
+        }
+    }
+
+    private static String fmtMs(double ms) {
+        if (Double.isNaN(ms)) return "?";
+        if (ms >= 10.0) return String.format(java.util.Locale.ROOT, "%.1fms", ms);
+        if (ms >= 0.1) return String.format(java.util.Locale.ROOT, "%.2fms", ms);
+        return String.format(java.util.Locale.ROOT, "%.3fms", ms);
+    }
+
+    private static String fmtPct(double p) { return Double.isNaN(p) ? "?" : String.format(java.util.Locale.ROOT, "%.0f%%", p); }
+    private static String fmt1(double v) { return String.format(java.util.Locale.ROOT, "%.1f", v); }
+    private static String fmt2(double v) { return String.format(java.util.Locale.ROOT, "%.2f", v); }
+
+    private static TextColor tpsColor(double t) {
+        return t >= 19.0 ? SourbyCraftColors.SUCCESS : t >= 17.0 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
+    }
+
+    private static TextColor msptColor(double m) {
+        return m < 40.0 ? SourbyCraftColors.SUCCESS : m < 50.0 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
     }
 }

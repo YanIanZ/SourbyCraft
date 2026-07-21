@@ -28,6 +28,25 @@ public final class ContainerMemory {
         return v;
     }
 
+    /** Current container memory usage in bytes (cgroup memory.current / usage_in_bytes); -1 unknown. */
+    public static long currentBytes() {
+        long v = parseLimit(Path.of("/sys/fs/cgroup/memory.current"));            // cgroup v2
+        if (v > 0) return v;
+        v = parseLimit(Path.of("/sys/fs/cgroup/memory/memory.usage_in_bytes"));   // cgroup v1
+        return v > 0 ? v : UNKNOWN;
+    }
+
+    /**
+     * Container RSS as a percentage of the memory limit, or {@link Double#NaN} outside a container /
+     * when the cgroup files are unreadable. Not on any hot path — reads the cgroup file per call.
+     */
+    public static double usagePercentOrNaN() {
+        final long limit = limitBytes();
+        final long current = currentBytes();
+        if (limit <= 0 || current <= 0) return Double.NaN;
+        return 100.0 * current / limit;
+    }
+
     private static long detect() {
         // cgroup v2 (unified): "max" means unlimited.
         long v = parseLimit(Path.of("/sys/fs/cgroup/memory.max"));
