@@ -139,7 +139,10 @@ public final class HudBars {
         }
         double rawMspt;
         try {
-            rawMspt = Bukkit.getAverageTickTime();
+            // Worst region (region-threading): Bukkit.getAverageTickTime() only sees this task's
+            // region, so the bar would read healthy while the spawn region chokes. See RegionMspt.
+            rawMspt = dev.iyanz.sourbycraft.perf.RegionMspt.worstMsptMs();
+            if (Double.isNaN(rawMspt)) rawMspt = 0.0;
         } catch (Throwable ignored) {
             rawMspt = 0.0;
         }
