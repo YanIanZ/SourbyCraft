@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 21 Jul 2026 21:34:35 +0700
+Subject: [PATCH] SourbyCraft - POI consistency scan without per-block BlockPos
+ allocation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PoiManager.checkConsistencyWithBlocks runs for every section of every
+chunk on load; updateFromSection used pos.blocksInside().forEach which
+allocates a BlockPos per block and boxes 4096 stream elements per section.
+On a fast-exploring 500-player crowd this was the #1 real region-thread
+frame after the spawner fix (~20s of a 60s spark window across its
+frames). Replaced with a raw int triple-loop reading the section palette
+directly (getBlockState(dx,dy,dz)); a BlockPos is materialised only when
+a POI-capable block is actually found (rare). PoiTypes.forState returns
+the cached Optional.empty() for misses, so the common path is now
+allocation-free. Behaviour identical — mayHavePoi() still gates entry.
+
+diff --git a/net/minecraft/world/entity/ai/village/poi/PoiManager.java b/net/minecraft/world/entity/ai/village/poi/PoiManager.java
+index 816fae86e0ff6e7a7abe330dd8df3928f8309307..0d3699e8ea2681c51e614f605a77ca9137a038b6 100644
+--- a/net/minecraft/world/entity/ai/village/poi/PoiManager.java
++++ b/net/minecraft/world/entity/ai/village/poi/PoiManager.java
+@@ -480,15 +480,26 @@ public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> im
+     }
+ 
+     private void updateFromSection(final LevelChunkSection blockSection, final SectionPos pos, final BiConsumer<BlockPos, Holder<PoiType>> output) {
+-        pos.blocksInside()
+-            .forEach(
+-                blockPos -> {
+-                    BlockState state = blockSection.getBlockState(
+-                        SectionPos.sectionRelative(blockPos.getX()), SectionPos.sectionRelative(blockPos.getY()), SectionPos.sectionRelative(blockPos.getZ())
+-                    );
+-                    PoiTypes.forState(state).ifPresent(type -> output.accept(blockPos, (Holder<PoiType>)type));
++        // SourbyCraft - raw int scan instead of pos.blocksInside().forEach
++        // The vanilla stream allocates a BlockPos per block and boxes 4096 elements PER SECTION,
++        // for every section of every chunk on load — profiled as the #1 real region-thread frame
++        // (~20s/60s window) on a fast-exploring 500-player crowd. POI-capable blocks are rare, so
++        // scan the palette with plain ints and only materialise a BlockPos when one is actually
++        // found. mayHavePoi() already gated us in via the section palette; behaviour is identical.
++        final int baseX = pos.minBlockX();
++        final int baseY = pos.minBlockY();
++        final int baseZ = pos.minBlockZ();
++        for (int dy = 0; dy < 16; ++dy) {
++            for (int dz = 0; dz < 16; ++dz) {
++                for (int dx = 0; dx < 16; ++dx) {
++                    final BlockState state = blockSection.getBlockState(dx, dy, dz);
++                    final java.util.Optional<Holder<PoiType>> type = PoiTypes.forState(state);
++                    if (type.isPresent()) {
++                        output.accept(new BlockPos(baseX + dx, baseY + dy, baseZ + dz), type.get());
++                    }
+                 }
+-            );
++            }
++        }
+     }
+ 
+     public void ensureLoadedAndValid(final LevelReader reader, final BlockPos center, final int radius) {
