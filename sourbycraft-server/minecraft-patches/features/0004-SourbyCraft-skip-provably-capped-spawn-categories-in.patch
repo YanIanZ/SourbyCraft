@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 21 Jul 2026 17:21:03 +0700
+Subject: [PATCH] SourbyCraft - skip provably-capped spawn categories in the
+ per-player spawn pass
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Deep-profiled the hot crowd region (500 colocated players, spark proto
+parsed offline): NaturalSpawner was 46.5% of ALL tick work (31068ms of
+66868ms runTick over a 65s window) — more than mob AI (20%) and 20x the
+entity tracker (2.3%). The cost is spawnForChunk's inner loop: for every
+spawning chunk, for every category, it scans EVERY in-range player's
+getMobCountNear to find minDiff. A wandering 500-player crowd unions
+thousands of spawning chunks x ~500 players x 6 categories = tens of
+millions of reads per tick — and in a cap-saturated crowd every single
+one concludes canSpawn=false.
+
+Fix: SpawnState (fresh each tick per region) lazily computes, once per
+category, max over region-local players of (limit - mobCountNear). If
+that max is <= 0 no chunk subset can have a positive minDiff (subset min
+<= regional max), and per-player counts only increase during the pass,
+so the verdict is final: skip the category for the whole tick. Saturated
+cost drops from O(chunks x players x categories) to O(players x
+categories). When any player has headroom the exact per-chunk logic runs
+unchanged — zero behavior difference, only provably-no-op work removed.
+
+Folia border note: section merge radius exceeds tick view distance, so
+players within view of a region's chunks are already region-local
+(transient splits aside); skipping can also only ever PREVENT a spawn,
+never exceed a cap.
+
+diff --git a/net/minecraft/world/level/NaturalSpawner.java b/net/minecraft/world/level/NaturalSpawner.java
+index 3795ad9bc5cce82805e7e0ca0486ec7669c173b2..56d55349514ea7c2de63f96c7ca25085dad0b8f5 100644
+--- a/net/minecraft/world/level/NaturalSpawner.java
++++ b/net/minecraft/world/level/NaturalSpawner.java
+@@ -208,6 +208,7 @@ public final class NaturalSpawner {
+             final boolean canSpawn;
+             int maxSpawns = Integer.MAX_VALUE;
+             if (level.paperConfig().entities.spawning.perPlayerMobSpawns) {
++                if (!state.sourbyCanCategorySpawnAnywhere(mobCategory, level)) continue; // SourbyCraft - skip provably-capped spawn categories (O(players) once per tick instead of O(chunks x players))
+                 // Copied from getFilteredSpawningCategories
+                 int limit = mobCategory.getMaxInstancesPerChunk();
+                 org.bukkit.entity.SpawnCategory spawnCategory = org.bukkit.craftbukkit.util.CraftSpawnCategory.toBukkit(mobCategory);
+@@ -715,6 +716,52 @@ public final class NaturalSpawner {
+         public final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData; // Canvas - optimize natural spawning
+         public final int[] limits; // Canvas - optimize natural spawning
+ 
++        // SourbyCraft start - skip provably-capped spawn categories
++        private long sourbySkipComputedBits = 0L; // bit i set = category i evaluated this tick
++        private long sourbySkipBits = 0L;         // bit i set = category i provably cannot spawn this tick
++
++        /**
++         * False when NO player in this region can accept another mob of this category this tick,
++         * i.e. max over local players of (limit - mobCountNear) <= 0. A chunk's per-player minDiff
++         * over any in-range subset can never exceed that regional max, and per-player counts only
++         * INCREASE during the spawn pass, so a negative verdict is provably final for the whole
++         * tick: every chunk's O(players) scan for this category would conclude canSpawn=false
++         * anyway. Computed once per tick per region (SpawnState is per-tick), turning the
++         * saturated-crowd cost from O(spawningChunks x players x categories) into O(players x
++         * categories). Profiled on the operator's box: NaturalSpawner was 46.5% of the hot
++         * region's tick with 500 colocated players, almost all of it these no-op scans.
++         *
++         * <p>Region-border note: a chunk's in-range list could in principle include a player from
++         * a neighbouring region, but Folia's section merge radius exceeds tick view distance, so
++         * (transient splits aside) any player within view of this region's chunks is already in
++         * its local player list. Skipping also only ever PREVENTS spawns, never exceeds a cap.
++         */
++        public boolean sourbyCanCategorySpawnAnywhere(final MobCategory category, final ServerLevel level) {
++            final int ord = category.ordinal();
++            final long bit = 1L << ord;
++            if ((this.sourbySkipComputedBits & bit) == 0L) {
++                this.sourbySkipComputedBits |= bit;
++                int limit = category.getMaxInstancesPerChunk();
++                final org.bukkit.entity.SpawnCategory spawnCategory = org.bukkit.craftbukkit.util.CraftSpawnCategory.toBukkit(category);
++                if (org.bukkit.craftbukkit.util.CraftSpawnCategory.isValidForLimits(spawnCategory)) {
++                    limit = level.getWorld().getSpawnLimit(spawnCategory);
++                }
++                final net.minecraft.server.level.ChunkMap chunkMap = level.getChunkSource().chunkMap;
++                boolean any = false;
++                for (final net.minecraft.server.level.ServerPlayer player : level.getLocalPlayers()) {
++                    if (limit - chunkMap.getMobCountNear(player, category) > 0) {
++                        any = true;
++                        break;
++                    }
++                }
++                if (!any) {
++                    this.sourbySkipBits |= bit;
++                }
++            }
++            return (this.sourbySkipBits & bit) == 0L;
++        }
++        // SourbyCraft end - skip provably-capped spawn categories
++
+         private SpawnState(
+             final int spawnableChunkCount,
+             final Object2IntOpenHashMap<MobCategory> mobCategoryCounts,
