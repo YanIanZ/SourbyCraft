@@ -101,11 +101,44 @@ public final class SmartSwap {
         if (started) return;
         started = true;
         startRssSampler();
+        if (enabled) applySoftHeapCap();
         Bukkit.getGlobalRegionScheduler().runAtFixedRate(MinecraftInternalPlugin.INSTANCE,
             task -> sample(), intervalTicks, intervalTicks);
         SourbyLogger.info(String.format(Locale.ROOT,
             "SmartSwap: sensor started (every %d ticks; soft/medium/hard %.0f%%/%.0f%%/%.0f%%)",
             intervalTicks, softPct, mediumPct, hardPct));
+    }
+
+    // ------------------------------------------------------------------ runtime soft heap cap
+
+    /**
+     * When the operator launched with a near-container-sized max heap (the common panel egg default
+     * {@code -XX:MaxRAMPercentage=95}), the GC happily grows the heap into the container's memory
+     * limit, leaving no headroom for JVM native memory (netty buffers for hundreds of connections,
+     * metaspace, GC bookkeeping, thread stacks) — the cgroup then OOM-kills the whole server, which
+     * we observed live at 500 players. {@code SoftMaxHeapSize} is a <b>manageable</b> HotSpot flag
+     * (writable at runtime; honored by G1 since JDK 22), so when SmartSwap is enabled inside a
+     * container whose max heap exceeds 80% of the memory limit, set it to 72% of the limit. This is
+     * a GC <i>target</i>, not a hard cap: G1 concurrent-collects and uncommits toward it but will
+     * still grow past it rather than throw OOME. Fails soft on any unsupported VM.
+     */
+    private static void applySoftHeapCap() {
+        try {
+            final long limit = ContainerMemory.limitBytes();
+            if (limit <= 0) return; // not containerized
+            final long maxHeap = Runtime.getRuntime().maxMemory();
+            if (maxHeap <= (long) (0.80 * limit)) return; // operator already left sane headroom
+            final long target = (long) (0.72 * limit);
+            final com.sun.management.HotSpotDiagnosticMXBean bean =
+                java.lang.management.ManagementFactory.getPlatformMXBean(com.sun.management.HotSpotDiagnosticMXBean.class);
+            bean.setVMOption("SoftMaxHeapSize", Long.toString(target));
+            SourbyLogger.info(String.format(Locale.ROOT,
+                "SmartSwap: max heap (%.1fG) exceeds 80%% of the container limit (%.1fG) — set SoftMaxHeapSize to %.1fG "
+                    + "(runtime G1 target; prevents the heap from growing into the cgroup OOM-kill zone)",
+                maxHeap / 1e9, limit / 1e9, target / 1e9));
+        } catch (final Throwable t) {
+            SourbyLogger.warn("SmartSwap: could not set SoftMaxHeapSize (unsupported VM?): " + t.getMessage());
+        }
     }
 
     // ------------------------------------------------------------------ soft-cache trim registry
