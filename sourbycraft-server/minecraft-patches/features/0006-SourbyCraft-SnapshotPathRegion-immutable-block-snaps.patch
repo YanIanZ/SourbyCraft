@@ -1,0 +1,233 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 21 Jul 2026 21:58:04 +0700
+Subject: [PATCH] SourbyCraft - SnapshotPathRegion: immutable block snapshot
+ for off-thread pathfinding
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Foundation for async pathfinding (Phase 1a of the async-offload MT uplift).
+A PathNavigationRegion subclass that, at construction (on the region
+thread), copies each occupied LevelChunkSection's block PalettedContainer
+via getStates().copy() and serves every block/fluid/collision read from
+those immutable copies. Vanilla PathNavigationRegion snapshots only chunk
+REFERENCES and dereferences the live mutable palettes per read, which is
+unsafe off the owning region thread (the Level.getBlockState-off-region
+race). Fluids derive from block state; block entities are not captured
+(mutable, unsafe) so getBlockEntity returns null — negligible pathfinding
+inaccuracy. Once built the instance is fully immutable and thread-safe.
+
+Also de-finals PathNavigationRegion.getBlockStateIfLoaded/getFluidIfLoaded
+so the subclass can serve those reads from the snapshot too (WalkNode-
+Evaluator's terminal PathType read goes through getBlockStateIfLoaded).
+
+Not yet wired into PathNavigation — the AI-tick wiring is the next gated
+step (needs a live mob-behaviour soak before default-on).
+
+diff --git a/net/minecraft/world/level/PathNavigationRegion.java b/net/minecraft/world/level/PathNavigationRegion.java
+index 24e82cff2bc2908852bcd4f1367b54690a65e2da..dfd54287295e9c1e51a78dc4e51de4d0a7f788fb 100644
+--- a/net/minecraft/world/level/PathNavigationRegion.java
++++ b/net/minecraft/world/level/PathNavigationRegion.java
+@@ -89,14 +89,14 @@ public class PathNavigationRegion implements CollisionGetter {
+ 
+     @Nullable
+     @Override
+-    public final FluidState getFluidIfLoaded(BlockPos pos) {
++    public FluidState getFluidIfLoaded(BlockPos pos) { // SourbyCraft - de-final so SnapshotPathRegion can serve reads from its immutable copy
+         ChunkAccess chunk = getChunkIfLoaded(pos.getX() >> 4, pos.getZ() >> 4);
+         return chunk == null ? null : chunk.getFluidState(pos);
+     }
+ 
+     @Nullable
+     @Override
+-    public final BlockState getBlockStateIfLoaded(BlockPos pos) {
++    public BlockState getBlockStateIfLoaded(BlockPos pos) { // SourbyCraft - de-final so SnapshotPathRegion can serve reads from its immutable copy
+         ChunkAccess chunk = getChunkIfLoaded(pos.getX() >> 4, pos.getZ() >> 4);
+         return chunk == null ? null : chunk.getBlockState(pos);
+     }
+diff --git a/net/minecraft/world/level/SnapshotPathRegion.java b/net/minecraft/world/level/SnapshotPathRegion.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..bad3b9e77a16d86495c02f31fa30873c4f98326c
+--- /dev/null
++++ b/net/minecraft/world/level/SnapshotPathRegion.java
+@@ -0,0 +1,179 @@
++package net.minecraft.world.level;
++
++import net.minecraft.core.BlockPos;
++import net.minecraft.core.SectionPos;
++import net.minecraft.world.level.block.Blocks;
++import net.minecraft.world.level.block.entity.BlockEntity;
++import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.level.chunk.ChunkAccess;
++import net.minecraft.world.level.chunk.LevelChunkSection;
++import net.minecraft.world.level.chunk.PalettedContainerRO;
++import net.minecraft.world.level.material.FluidState;
++import net.minecraft.world.level.material.Fluids;
++import org.jspecify.annotations.Nullable;
++
++/**
++ * SourbyCraft - async pathfinding: a {@link PathNavigationRegion} that captures an <b>immutable</b>
++ * copy of the block data in its volume, so the A* solve can run off the region tick thread without
++ * racing the live world.
++ *
++ * <p>Vanilla {@code PathNavigationRegion} snapshots only chunk <i>references</i> and dereferences the
++ * live, mutable section palettes on every read — reading those off the owning region thread is exactly
++ * the {@code Level.getBlockState}-off-region race that must be avoided on Folia. This subclass copies
++ * each occupied {@link LevelChunkSection}'s block {@link net.minecraft.world.level.chunk.PalettedContainer}
++ * (via {@code getStates().copy()}) at construction time — which happens on the region thread — and serves
++ * every read from those copies. Copies are cheap: air / single-block sections are single-value palettes.
++ *
++ * <p>Fluids are derived from block state ({@code getBlockState(pos).getFluidState()}), so no separate
++ * fluid snapshot is needed. Block entities are intentionally not captured (mutable, unsafe off-thread);
++ * {@link #getBlockEntity} returns {@code null}, which only affects the handful of blocks whose collision
++ * shape depends on a block entity — a negligible pathfinding inaccuracy. Once constructed the instance is
++ * fully immutable and safe to read from any thread.
++ */
++public final class SnapshotPathRegion extends PathNavigationRegion {
++
++    // [gridX][gridZ][sectionIndex] — null entry = read as air.
++    private final PalettedContainerRO<BlockState> @Nullable [][][] sectionStates;
++    private final int minSectionY;
++    private final int sectionsPerColumn;
++    private final int gridSizeX;
++    private final int gridSizeZ;
++    private final CollisionView collisionView = new CollisionView();
++
++    @SuppressWarnings("unchecked")
++    public SnapshotPathRegion(final Level level, final BlockPos start, final BlockPos end) {
++        super(level, start, end);
++        this.minSectionY = level.getMinSectionY();
++        this.sectionsPerColumn = level.getSectionsCount();
++        this.gridSizeX = this.chunks.length;
++        this.gridSizeZ = this.gridSizeX == 0 ? 0 : this.chunks[0].length;
++        this.sectionStates =
++            (PalettedContainerRO<BlockState>[][][]) new PalettedContainerRO[this.gridSizeX][this.gridSizeZ][];
++
++        for (int gx = 0; gx < this.gridSizeX; gx++) {
++            for (int gz = 0; gz < this.gridSizeZ; gz++) {
++                final ChunkAccess chunk = this.chunks[gx][gz];
++                if (chunk == null) {
++                    continue;
++                }
++                final PalettedContainerRO<BlockState>[] column =
++                    (PalettedContainerRO<BlockState>[]) new PalettedContainerRO[this.sectionsPerColumn];
++                final LevelChunkSection[] sections = chunk.getSections();
++                for (int i = 0; i < sections.length && i < this.sectionsPerColumn; i++) {
++                    final LevelChunkSection section = sections[i];
++                    // hasOnlyAir sections need no copy — a null entry already reads as air.
++                    if (section != null && !section.hasOnlyAir()) {
++                        column[i] = section.getStates().copy();
++                    }
++                }
++                this.sectionStates[gx][gz] = column;
++            }
++        }
++    }
++
++    private @Nullable PalettedContainerRO<BlockState> sectionAt(final int blockX, final int blockY, final int blockZ) {
++        final int gx = SectionPos.blockToSectionCoord(blockX) - this.centerX;
++        final int gz = SectionPos.blockToSectionCoord(blockZ) - this.centerZ;
++        if (gx < 0 || gx >= this.gridSizeX || gz < 0 || gz >= this.gridSizeZ) {
++            return null;
++        }
++        final PalettedContainerRO<BlockState>[] column = this.sectionStates[gx][gz];
++        if (column == null) {
++            return null;
++        }
++        final int sectionIndex = SectionPos.blockToSectionCoord(blockY) - this.minSectionY;
++        if (sectionIndex < 0 || sectionIndex >= column.length) {
++            return null;
++        }
++        return column[sectionIndex];
++    }
++
++    private BlockState snapshotState(final int blockX, final int blockY, final int blockZ) {
++        final PalettedContainerRO<BlockState> section = this.sectionAt(blockX, blockY, blockZ);
++        if (section == null) {
++            return Blocks.AIR.defaultBlockState();
++        }
++        return section.get(blockX & 15, blockY & 15, blockZ & 15);
++    }
++
++    @Override
++    public BlockState getBlockState(final BlockPos pos) {
++        if (this.isOutsideBuildHeight(pos)) {
++            return Blocks.AIR.defaultBlockState();
++        }
++        return this.snapshotState(pos.getX(), pos.getY(), pos.getZ());
++    }
++
++    @Override
++    public FluidState getFluidState(final BlockPos pos) {
++        if (this.isOutsideBuildHeight(pos)) {
++            return Fluids.EMPTY.defaultFluidState();
++        }
++        return this.snapshotState(pos.getX(), pos.getY(), pos.getZ()).getFluidState();
++    }
++
++    @Override
++    public @Nullable BlockState getBlockStateIfLoaded(final BlockPos pos) {
++        if (this.isOutsideBuildHeight(pos)) {
++            return Blocks.AIR.defaultBlockState();
++        }
++        return this.snapshotState(pos.getX(), pos.getY(), pos.getZ());
++    }
++
++    @Override
++    public @Nullable FluidState getFluidIfLoaded(final BlockPos pos) {
++        if (this.isOutsideBuildHeight(pos)) {
++            return Fluids.EMPTY.defaultFluidState();
++        }
++        return this.snapshotState(pos.getX(), pos.getY(), pos.getZ()).getFluidState();
++    }
++
++    @Override
++    public @Nullable BlockEntity getBlockEntity(final BlockPos pos) {
++        return null; // block entities are mutable and unsafe to read off-thread; see class doc
++    }
++
++    @Override
++    public BlockGetter getChunkForCollisions(final int chunkX, final int chunkZ) {
++        // Positions already encode their chunk, so a single by-position delegate serves every chunk.
++        return this.collisionView;
++    }
++
++    /** A {@link BlockGetter} view over the immutable snapshot; all reads route back through the region. */
++    private final class CollisionView implements BlockGetter {
++        @Override
++        public @Nullable BlockEntity getBlockEntity(final BlockPos pos) {
++            return null;
++        }
++
++        @Override
++        public BlockState getBlockState(final BlockPos pos) {
++            return SnapshotPathRegion.this.getBlockState(pos);
++        }
++
++        @Override
++        public @Nullable BlockState getBlockStateIfLoaded(final BlockPos pos) {
++            return SnapshotPathRegion.this.getBlockStateIfLoaded(pos);
++        }
++
++        @Override
++        public FluidState getFluidState(final BlockPos pos) {
++            return SnapshotPathRegion.this.getFluidState(pos);
++        }
++
++        @Override
++        public @Nullable FluidState getFluidIfLoaded(final BlockPos pos) {
++            return SnapshotPathRegion.this.getFluidIfLoaded(pos);
++        }
++
++        @Override
++        public int getHeight() {
++            return SnapshotPathRegion.this.getHeight();
++        }
++
++        @Override
++        public int getMinY() {
++            return SnapshotPathRegion.this.getMinY();
++        }
++    }
++}
