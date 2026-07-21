@@ -101,6 +101,15 @@ public final class SourbyCraftConfig {
             SourbyLogger.error("SmartSwap.configure failed; using defaults", t);
         }
 
+        // Async pathfinding (MT uplift phase 1a) — offload the periodic path recompute off the region
+        // thread. Default OFF; reloadable. Starts the worker pool the first time it is enabled.
+        try {
+            dev.iyanz.sourbycraft.perf.AsyncPathProcessor.setEnabled(
+                cfgBool("perf.ai.async-pathfinding", false));
+        } catch (Throwable t) {
+            SourbyLogger.error("AsyncPathProcessor.setEnabled failed; leaving pathfinding synchronous", t);
+        }
+
         // Canvas server + world configs (canvas-server.yml / canvas-worlds.yml) — fold the canonical
         // Canvas reload (the same GlobalConfiguration.reload() + WorldConfig.reload() the removed
         // /canvas reload ran) into /sourbycraft reload so operators have ONE reload command. Each is

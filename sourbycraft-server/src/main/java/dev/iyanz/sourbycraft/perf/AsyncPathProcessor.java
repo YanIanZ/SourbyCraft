@@ -28,7 +28,20 @@ public final class AsyncPathProcessor {
 
     private AsyncPathProcessor() {}
 
+    private static volatile boolean enabled = false;
     private static volatile ThreadPoolExecutor pool;
+
+    /** Live toggle (reloadable). Starts the pool the first time it is turned on. */
+    public static void setEnabled(final boolean on) {
+        enabled = on;
+        if (on) {
+            ensureStarted();
+        }
+    }
+
+    public static boolean isEnabled() {
+        return enabled;
+    }
 
     /** Idempotent. Sizes the pool to a quarter of the cores (min 1) — pathfinding is a background cost. */
     public static synchronized void ensureStarted() {
