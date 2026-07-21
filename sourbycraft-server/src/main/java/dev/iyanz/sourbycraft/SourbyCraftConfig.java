@@ -76,8 +76,10 @@ public final class SourbyCraftConfig {
             return "reload FAILED during apply: " + t.getMessage();
         }
         SourbyLogger.info("config reloaded from disk (/sourbycraft reload)");
-        return "reloaded — messages, /maxp persistence and the auto-updater settings applied live. "
-            + "A scheduled auto-update check interval only takes effect on the next restart.";
+        return "reloaded — messages, /maxp persistence, auto-updater and SmartSwap settings applied "
+            + "live, plus the Canvas server/world configs (canvas-server.yml / canvas-worlds.yml). "
+            + "Options cached at construction (and a scheduled auto-update interval) only take effect "
+            + "on the next restart.";
     }
 
     private static void applyLiveConfig() {
@@ -97,6 +99,24 @@ public final class SourbyCraftConfig {
                 cfgInt("perf.smart-swap.sample-interval-ticks", 20));
         } catch (Throwable t) {
             SourbyLogger.error("SmartSwap.configure failed; using defaults", t);
+        }
+
+        // Canvas server + world configs (canvas-server.yml / canvas-worlds.yml) — fold the canonical
+        // Canvas reload (the same GlobalConfiguration.reload() + WorldConfig.reload() the removed
+        // /canvas reload ran) into /sourbycraft reload so operators have ONE reload command. Each is
+        // isolated: a failure re-reading the Canvas yml never aborts the rest of the SourbyCraft
+        // reload. Note: options cached at construction (e.g. a per-world value read once into a field)
+        // update the config object but only take effect on the next restart — matching Canvas's own
+        // "some options cannot change at runtime" contract.
+        try {
+            io.canvasmc.canvas.GlobalConfiguration.reload();
+        } catch (Throwable t) {
+            SourbyLogger.error("Canvas GlobalConfiguration.reload() failed; keeping the previous values", t);
+        }
+        try {
+            io.canvasmc.canvas.WorldConfig.reload();
+        } catch (Throwable t) {
+            SourbyLogger.error("Canvas WorldConfig.reload() failed; keeping the previous values", t);
         }
     }
 
