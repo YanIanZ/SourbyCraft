@@ -90,7 +90,7 @@ public final class SourbyCraftConfig {
         // SmartSwap (adaptive heap reclaim, r40) operator bridge — reloadable, no restart needed.
         try {
             dev.iyanz.sourbycraft.perf.SmartSwap.configure(
-                cfgBool("perf.smart-swap.enabled", true),
+                cfgBool("perf.smart-swap.enabled", false),
                 cfgDouble("perf.smart-swap.soft-percent", 82.0),
                 cfgDouble("perf.smart-swap.medium-percent", 90.0),
                 cfgDouble("perf.smart-swap.hard-percent", 95.0),
@@ -233,9 +233,10 @@ public final class SourbyCraftConfig {
         // caches + requests a concurrent GC (ZGC/Shenandoah uncommit) as usage climbs, so RSS stays
         // under the container limit WITHOUT touching TPS. Percentages are of max(heap%, container-RSS%).
         // Independent of the deferred self-tuning perf-engine — see dev.iyanz.sourbycraft.perf.SmartSwap.
-        seed(f, changed, "perf.smart-swap.enabled", true,
+        seed(f, changed, "perf.smart-swap.enabled", false,
             "Adaptive heap reclaim: trim soft caches + concurrent-GC hint as memory usage rises, so RSS "
-            + "stays under the container limit without touching TPS. Trend-aware (acts early when climbing fast).");
+            + "stays under the container limit without touching TPS. Trend-aware (acts early when climbing fast). "
+            + "DEFAULT OFF: SourbyCraft ships with no automatic perf-tuning; the operator opts in explicitly.");
         seed(f, changed, "perf.smart-swap.soft-percent", 82.0,
             "Usage % at which SmartSwap starts trimming rebuildable soft caches.");
         seed(f, changed, "perf.smart-swap.medium-percent", 90.0,

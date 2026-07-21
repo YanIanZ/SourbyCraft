@@ -34,6 +34,27 @@ public record BuildInfo(
             : "build " + build;
     }
 
+    /**
+     * Branded server-version string for every version-reporting surface — the Folia watchdog line,
+     * {@code CraftServer.getVersion()}/{@code Bukkit.getVersion()}, {@code getVersionMessage()},
+     * crash reports and {@code ServerBuildInfoImpl.asString(...)}. Returns e.g.
+     * {@code "SourbyCraft build 40c"}, replacing the raw upstream {@code "26.2-DEV-<gitHash>"} so no
+     * surface leaks the dev/commit string. Never throws — degrades to {@code "SourbyCraft build ?"}
+     * when the build id is absent (mirrors {@code PaperBootstrap.sourbyLoadingLine}'s fallback).
+     */
+    public static String serverVersionString() {
+        String id = "?";
+        try {
+            final BuildInfo bi = load();
+            if (bi != null && bi.build() != null && !bi.build().isEmpty()) {
+                id = bi.build();
+            }
+        } catch (final Throwable ignored) {
+            // never break a version-reporting path over the build id
+        }
+        return "SourbyCraft build " + id;
+    }
+
     private static final String RESOURCE = "/META-INF/sourbycraft-build.properties";
 
     private static volatile BuildInfo CACHED;

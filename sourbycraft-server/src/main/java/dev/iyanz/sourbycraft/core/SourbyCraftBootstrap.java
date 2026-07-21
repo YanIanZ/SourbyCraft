@@ -126,10 +126,14 @@ public final class SourbyCraftBootstrap {
         }
 
         // 9. SmartSwap — standalone adaptive heap-reclaim sensor (r40; config-gated, reloadable).
-        //    Always started; the task itself checks perf.smart-swap.enabled per-sample so a live
-        //    /sourbycraft reload can flip it on/off without a restart.
+        //    DEFAULT OFF: SourbyCraft ships with no automatic perf-tuning (operator opts in). The
+        //    repeating sensor loop is only scheduled when explicitly enabled, so when off there is no
+        //    background task at all — not merely a per-sample no-op. A later /sourbycraft reload that
+        //    flips it on will schedule it via SmartSwap.configure()'s start path.
         try {
-            dev.iyanz.sourbycraft.perf.SmartSwap.ensureStarted();
+            if (SourbyCraftConfig.cfgBool("perf.smart-swap.enabled", false)) {
+                dev.iyanz.sourbycraft.perf.SmartSwap.ensureStarted();
+            }
         } catch (Throwable t) {
             SourbyLogger.error("SmartSwap.ensureStarted failed", t);
         }

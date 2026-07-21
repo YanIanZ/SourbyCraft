@@ -14,8 +14,13 @@ import static net.kyori.adventure.text.Component.text;
 /**
  * {@code /mspt} — SourbyCraft styled MSPT panel, replacing Paper's plain
  * "Server tick times (avg/min/max) ... 0.0/0.0/0.0" (which floors sub-millisecond values to 0.0).
- * Reads {@link Bukkit#getAverageTickTime()} directly (no custom sensor class) and renders it with
- * adaptive precision and a budget bar, matching the look of {@code /tps}.
+ *
+ * <p>Reports the <b>worst region's</b> tick time via {@link dev.iyanz.sourbycraft.perf.RegionMspt}
+ * (no custom sensor class) rather than {@link Bukkit#getAverageTickTime()}, which on the
+ * region-threaded engine only sees the caller's own region — so a console/quiet-region reading
+ * showed a healthy {@code 0.88ms} while the spawn region choked at seconds per tick. The worst
+ * region is the one an operator needs to see; TPS (in {@code /tps}) stays the scheduler rate.
+ * Rendered with adaptive precision and a budget bar, matching the look of {@code /tps}.
  */
 public class MsptCommand extends Command {
 
@@ -23,7 +28,7 @@ public class MsptCommand extends Command {
 
     public MsptCommand(String name) {
         super(name);
-        this.description = "MSPT (tick execution time)";
+        this.description = "MSPT (worst region tick time)";
         this.usageMessage = "/mspt";
         this.setPermission("sourbycraft.command.mspt");
     }
@@ -34,7 +39,7 @@ public class MsptCommand extends Command {
         if (!testPermission(s)) return true;
         double mspt;
         try {
-            mspt = Bukkit.getAverageTickTime();
+            mspt = dev.iyanz.sourbycraft.perf.RegionMspt.worstMsptMs();
         } catch (Throwable ignored) {
             mspt = Double.NaN;
         }
@@ -53,7 +58,7 @@ public class MsptCommand extends Command {
         final double budgetPct = Math.clamp(mspt / 50.0, 0.0, 1.0) * 100.0;
         final TextColor color = mspt < 25 ? SourbyCraftColors.SUCCESS : mspt < 40 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
         s.sendMessage(text()
-            .append(text("  now   ", SourbyCraftColors.DIM))
+            .append(text("  worst ", SourbyCraftColors.DIM))
             .append(text(BarUtil.bar(budgetPct, BAR_WIDTH), color))
             .append(text("  " + fmt(mspt), color))
             .append(text("  (" + (budgetPct < 1.0 ? String.format(Locale.ROOT, "%.1f", budgetPct) : String.valueOf((int) Math.round(budgetPct)))

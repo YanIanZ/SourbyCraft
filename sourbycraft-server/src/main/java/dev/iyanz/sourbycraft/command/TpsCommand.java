@@ -19,8 +19,10 @@ import static net.kyori.adventure.text.Component.text;
  * native server API — no custom sensor class, no sampling loop:
  * <ul>
  *   <li>Rolling TPS 1m / 5m / 15m from {@link Bukkit#getTPS()} — each window drawn as a
- *       {@code ▰▱} bar and coloured to a simple display ladder (green ≥19, yellow ≥17, red &lt;17).</li>
- *   <li>MSPT from {@link Bukkit#getAverageTickTime()}, coloured to the MSPT band.</li>
+ *       {@code ▰▱} bar and coloured to a simple display ladder (green ≥19, yellow ≥17, red &lt;17).
+ *       This is the region-scheduler rate, so it stays ~19-20 while individual regions choke.</li>
+ *   <li>MSPT = the <b>worst region</b> ({@link dev.iyanz.sourbycraft.perf.RegionMspt}), not the
+ *       caller's region, so a choking spawn region actually shows here even when TPS looks healthy.</li>
  *   <li>Region-threading context line: Canvas ticks regions independently, so the
  *       loaded-world count is shown as a cheap proxy for tick-region spread (an
  *       exact per-region count needs the NMS regioniser and is intentionally not
@@ -170,7 +172,9 @@ public class TpsCommand extends Command {
 
     private static double safeMspt() {
         try {
-            return Bukkit.getAverageTickTime();
+            // Worst region, not the caller's region: on region-threading Bukkit.getAverageTickTime()
+            // only sees the local region, so a healthy region hides a choking spawn region.
+            return dev.iyanz.sourbycraft.perf.RegionMspt.worstMsptMs();
         } catch (Throwable ignored) {
             return Double.NaN;
         }

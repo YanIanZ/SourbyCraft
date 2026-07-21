@@ -64,7 +64,7 @@ public final class SmartSwap {
 
     // ------------------------------------------------------------------ config (reloadable)
 
-    private static volatile boolean enabled = true;
+    private static volatile boolean enabled = false; // SourbyCraft: auto perf-tuning OFF by default (operator opts in)
     private static volatile double softPct = 82.0;
     private static volatile double mediumPct = 90.0;
     private static volatile double hardPct = 95.0;
