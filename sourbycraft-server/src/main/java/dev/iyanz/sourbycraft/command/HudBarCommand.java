@@ -25,6 +25,7 @@ public class HudBarCommand extends Command {
         this.setPermission("sourbycraft.command." + name);
     }
 
+    /** Toggles the bar for the invoking player via {@link HudBars#toggle}. Players only. */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;

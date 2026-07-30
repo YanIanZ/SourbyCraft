@@ -1,7 +1,5 @@
 package dev.iyanz.sourbycraft.brand;
 
-import dev.iyanz.sourbycraft.security.HardeningAdvisor;
-
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
@@ -10,21 +8,21 @@ import java.nio.charset.StandardCharsets;
 /**
  * Orchestrates SourbyCraft's branded console startup output.
  *
- * <p>Bundles the three pieces the Paper tag {@code paper-26.2-pre-folia} ran from
- * an NMS patch in {@code MinecraftServer#runServer}:
+ * <p>Bundles the two pieces the archived Paper tag {@code paper-26.2-pre-folia} ran from an NMS
+ * patch in {@code MinecraftServer#runServer}:
  * <ol>
- *   <li>the branded {@link SourbyCraftBanner} box,</li>
+ *   <li>the branded {@link SourbyCraftBanner} box, and</li>
  *   <li>the {@link GcAdvisor} JVM/GC warning banner (warn-only, empty when the JVM
- *       is already tuned), and</li>
- *   <li>the {@link HardeningAdvisor} paper-global.yml scan (warn-only).</li>
+ *       is already tuned).</li>
  * </ol>
  *
- * <p>On the Folia base this is invoked once from the authored post-config hook
- * {@link me.earthme.luminol.commands.CommandRegister#register()} rather than a
- * {@code net/minecraft} patch, so the 82 minecraft / 17 paper patch series stay
- * untouched. Banner + GC advisor go straight to {@code System.out} (JLine renders
- * the embedded ANSI truecolor); the hardening advisor logs through the normal
- * SourbyCraft logger.
+ * <p>The third archived piece — a {@code HardeningAdvisor} paper-global.yml exploit-setting scan —
+ * lived under the {@code security} package, which is DEFERRED on this Canvas re-platform benchmark
+ * build (feat/canvas-engine, PR #12) along with proxy-forwarding.
+ *
+ * <p>On this base this is invoked once from {@link dev.iyanz.sourbycraft.core.SourbyCraftBootstrap},
+ * itself called from a hand-authored {@code minecraft-patch} to {@code DedicatedServer#initServer}.
+ * Banner + GC advisor go straight to {@code System.out} (JLine renders the embedded ANSI truecolor).
  */
 public final class StartupBanner {
 
@@ -53,6 +51,11 @@ public final class StartupBanner {
 
     private StartupBanner() {}
 
+    /**
+     * Prints the branded banner + GC advisor warning (if any) to the UTF-8 console stream. Only
+     * the first call in the process prints anything; every later call is a no-op. Never throws —
+     * a failure is logged as a warning instead of aborting boot.
+     */
     public static synchronized void printOnce() {
         if (printed) return;
         printed = true;
@@ -68,8 +71,6 @@ public final class StartupBanner {
                 UTF8_OUT.print(gcWarn);
             }
             UTF8_OUT.flush();
-            // 3. paper-global.yml hardening advisor (warn-only, logs each finding)
-            HardeningAdvisor.run();
         } catch (Throwable t) {
             // Branding must never take the server down.
             dev.iyanz.sourbycraft.util.SourbyLogger.warn(

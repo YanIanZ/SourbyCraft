@@ -22,6 +22,19 @@ import java.util.zip.GZIPInputStream;
 
 import static net.kyori.adventure.text.Component.text;
 
+/**
+ * {@code /speedtest} — runs the pinned, SHA-256-verified Ookla Speedtest CLI 1.2.0 binary and
+ * reports download/upload/ping as a hex-coloured panel matching the rest of the SourbyCraft suite.
+ *
+ * <p>The platform-specific binary is lazy-downloaded on first use into
+ * {@code libraries/speedtest/<os>/<arch>/} and verified against a hard-coded SHA-256 pin (see
+ * {@link #OOKLA_SHA256}) before it is ever extracted or executed — the same download-integrity
+ * discipline as {@code LibDownloader}/{@code SourbyUpdater}. Runs on a
+ * {@link dev.iyanz.sourbycraft.util.VirtualExecutor virtual thread}; only one speedtest may be
+ * in flight at a time so repeated invocations cannot stack OS processes that would themselves
+ * saturate the bandwidth being measured. The reply is delivered back through
+ * {@link SourbyReply#run} since Folia has no global main thread to bounce it through.
+ */
 public class SpeedtestCommand extends Command {
     private static final Logger LOG = LoggerFactory.getLogger("SourbyCraft:Speedtest");
     private static final String OOKLA_BASE_URL = "https://install.speedtest.net/app/cli/";
@@ -101,6 +114,11 @@ public class SpeedtestCommand extends Command {
     private static final java.util.concurrent.atomic.AtomicBoolean IN_FLIGHT =
         new java.util.concurrent.atomic.AtomicBoolean();
 
+    /**
+     * Runs the Ookla CLI on a virtual thread (downloading it first if absent), then replies with
+     * a coloured download/upload/ping panel. Rejects a second invocation while one is in flight
+     * and reports the platform as unsupported when no pinned binary exists for it.
+     */
     @Override
     public boolean execute(CommandSender sender, String alias, String[] args) {
         LOG.info("Speedtest invoked. OS={} arch={} binPath={} binExists={} binaryName={}",

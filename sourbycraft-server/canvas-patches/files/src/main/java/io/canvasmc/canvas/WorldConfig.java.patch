@@ -1,0 +1,30 @@
+--- a/src/main/java/io/canvasmc/canvas/WorldConfig.java
++++ b/src/main/java/io/canvasmc/canvas/WorldConfig.java
+@@ -47,7 +_,7 @@
+     // we have a logger internally here for level-config related things, and should not be used globally. the global
+     // config class should be the logger publicly used
+ 
+-    private static final Logger LOGGER = LoggerFactory.getLogger("CanvasWorlds");
++    private static final Logger LOGGER = LoggerFactory.getLogger("SourbyCraft"); // SourbyCraft - rebrand console prefix [CanvasWorlds] -> [SourbyCraft]
+ 
+     private static final Path BASE_FILE = Path.of("config/canvas-worlds.yml").toAbsolutePath().normalize();
+ 
+@@ -223,10 +_,16 @@
+                 ).greedyString();
+         }
+ 
+-        public boolean enableTpsBar = true;
++        // SourbyCraft - coexistence: the SourbyCraft utility layer owns the TPS/RAM boss bars
++        // (dev.iyanz.sourbycraft.hud.HudBars, exposed via /tpsbar and /rambar). Canvas' own
++        // regionized TPS/RAM bars are a duplicate of that feature, and their toggle command
++        // (/canvas region-bar) has been removed with the rest of /canvas. Default them OFF so
++        // there is a single owner and no competing/stacked bars. Operators who specifically want
++        // Canvas' per-region bars can re-enable them in config/canvas-worlds.yml.
++        public boolean enableTpsBar = false;
+         public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
+ 
+-        public boolean enableRamBar = true;
++        public boolean enableRamBar = false;
+         public String ramBarFormat = DEFAULT_RAMBAR_FORMAT;
+     }
+ 

@@ -102,10 +102,26 @@ abstract class UpstreamConfig @Inject constructor(
 
         abstract val outputDir: DirectoryProperty
 
+        /**
+         * Optional access-transformer file (JST format) applied to this patch set's checkout before
+         * its base/ + files/ patches — replicates the per-layer AT application a fork's own build
+         * tool performs (e.g. CanvasMC weaver's {@code build-data/paperServer.at} on the paper-server
+         * layer). See [io.papermc.paperweight.core.tasks.patching.ApplyFilePatches.atFile].
+         */
+        abstract val additionalAts: RegularFileProperty
+
         abstract val patchesDir: DirectoryProperty
         val rejectsDir: DirectoryProperty = objects.dirFrom(patchesDir, "rejected")
         val filePatchDir: DirectoryProperty = objects.dirFrom(patchesDir, "files")
         val featurePatchDir: DirectoryProperty = objects.dirFrom(patchesDir, "features")
+
+        /**
+         * Optional git-format "base" patches ({@code <patchesDir>/base}) applied before the {@code
+         * files/} file patches. Supports three-stage forks (e.g. CanvasMC's base/files/features
+         * paper-patch layout). No-op when the directory is absent. See
+         * [io.papermc.paperweight.core.tasks.patching.ApplyFilePatches.basePatchDir].
+         */
+        val basePatchDir: DirectoryProperty = objects.dirFrom(patchesDir, "base")
     }
 
     abstract class RepoPatchSet @Inject constructor(

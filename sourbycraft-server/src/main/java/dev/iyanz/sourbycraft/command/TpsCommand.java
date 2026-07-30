@@ -1,11 +1,8 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
-import dev.iyanz.sourbycraft.perf.sensor.PerfSensor;
-import dev.iyanz.sourbycraft.perf.sensor.SensorSnapshot;
-import dev.iyanz.sourbycraft.perf.sensor.Tier;
+import dev.iyanz.sourbycraft.perf.Tier;
 import dev.iyanz.sourbycraft.util.BarUtil;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
@@ -16,23 +13,22 @@ import java.util.Locale;
 import static net.kyori.adventure.text.Component.text;
 
 /**
- * /tps — compact hex TPS panel for SourbyCraft (Folia 26.2).
+ * /tps — compact hex TPS panel for SourbyCraft (Canvas re-platform, feat/canvas-engine).
  *
- * <p>Renders one boxed, hex-coloured readout consistent with /perf /sys /ver:
+ * <p>Renders one boxed, hex-coloured readout consistent with /sys /ver, reading straight off the
+ * native server API — no custom sensor class, no sampling loop:
  * <ul>
- *   <li>Aggregate rolling TPS 1m / 5m / 15m from {@link Bukkit#getTPS()} (Folia
- *       aggregates these server-wide across every region thread) — each window
- *       drawn as a {@code ▰▱} bar and coloured to the perf-engine's TPS ladder
- *       (green ≥19, yellow ≥17, red &lt;17).</li>
- *   <li>Aggregate MSPT from {@link Bukkit#getAverageTickTime()} (Folia averages
- *       tick time across region threads), coloured to the MSPT band.</li>
- *   <li>Folia context line: this build ticks every region on its own thread, so
- *       the numbers above are the server-wide aggregate; the loaded-world count
- *       is shown as a cheap proxy for tick-region spread (an exact per-region
- *       region count needs the NMS regioniser and is intentionally not walked
- *       here to keep this command allocation-light).</li>
- *   <li>Current perf {@link Tier} + heap % straight off {@link PerfSensor#snapshot()},
- *       with the sensor warmup state noted while the rolling averages settle.</li>
+ *   <li>Rolling TPS 1m / 5m / 15m from {@link Bukkit#getTPS()} — each window drawn as a
+ *       {@code ▰▱} bar and coloured to a simple display ladder (green ≥19, yellow ≥17, red &lt;17).
+ *       This is the region-scheduler rate, so it stays ~19-20 while individual regions choke.</li>
+ *   <li>MSPT = the <b>worst region</b> ({@link dev.iyanz.sourbycraft.perf.RegionMspt}), not the
+ *       caller's region, so a choking spawn region actually shows here even when TPS looks healthy.</li>
+ *   <li>Region-threading context line: Canvas ticks regions independently, so the
+ *       loaded-world count is shown as a cheap proxy for tick-region spread (an
+ *       exact per-region count needs the NMS regioniser and is intentionally not
+ *       walked here to keep this command allocation-light).</li>
+ *   <li>A display-only {@link Tier} derived inline from the TPS/MSPT numbers above, + heap %.
+ *       The self-tuning perf-engine this used to read from is DEFERRED on this benchmark build.</li>
  * </ul>
  *
  * <p>Console-runnable and player-runnable. Guarded by
@@ -48,12 +44,16 @@ public class TpsCommand extends Command {
 
     public TpsCommand(String name) {
         super(name);
-        this.description = "SourbyCraft TPS panel (aggregate TPS/MSPT, perf tier, memory)";
+        this.description = "SourbyCraft TPS panel (TPS/MSPT, tier, memory)";
         this.usageMessage = "/tps";
         this.setPermission("sourbycraft.command.tps");
         this.setAliases(java.util.List.of("lag"));
     }
 
+    /**
+     * Renders the full TPS panel: rolling 1m/5m/15m TPS bars, MSPT, an engine/loaded-worlds line,
+     * and a display-only {@link Tier} + memory readout derived inline from the numbers above.
+     */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
@@ -65,26 +65,66 @@ public class TpsCommand extends Command {
             .append(text("TPS", SourbyCraftColors.LABEL))
             .build());
 
-        renderTps(s);
-        renderMspt(s);
-        renderFolia(s);
-        renderTierAndMem(s);
+        dev.iyanz.sourbycraft.perf.PerfMetrics.Snapshot m;
+        try {
+            m = dev.iyanz.sourbycraft.perf.PerfMetrics.snapshot();
+        } catch (Throwable ignored) {
+            m = dev.iyanz.sourbycraft.perf.PerfMetrics.Snapshot.EMPTY;
+        }
+
+        double[] tps = safeTps();
+        double mspt = safeMspt();
+
+        renderTps(s, tps);
+        renderMspt(s, mspt, m);
+        renderRegionsAndGc(s, m);
+        renderEngine(s);
+        renderTierAndMem(s, tps[0], mspt);
 
         s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
         return true;
     }
 
-    private static void renderTps(CommandSender s) {
-        // Worst-region windows from the perf sensor (NOT Bukkit.getTPS(), which is only the
-        // CALLING region's report on Folia). "now" = 15s window: recovers within seconds of a
-        // join/chunk-load burst instead of dragging sub-20 for a whole minute.
-        dev.iyanz.sourbycraft.perf.sensor.SensorSnapshot snap =
-            dev.iyanz.sourbycraft.perf.sensor.PerfSensor.snapshot();
-        double[] tps = {snap.tps1s(), snap.tps30s(), snap.tps5m()};
-        String[] labels = {"now", "1m ", "5m "};
-        s.sendMessage(text("  Worst-region TPS (15s / 1m / 5m):", SourbyCraftColors.LABEL));
+    /**
+     * The accurate region-threaded extras — utilisation (real load, not TPS-capped), CPU starvation,
+     * and GC overhead (a lag source invisible to both TPS and MSPT). Silent when there is no data.
+     */
+    private static void renderRegionsAndGc(CommandSender s, dev.iyanz.sourbycraft.perf.PerfMetrics.Snapshot m) {
+        if (m == null) return;
+        if (m.regionCount() > 0 && !Double.isNaN(m.maxUtilisation())) {
+            s.sendMessage(text()
+                .append(text("  Region load ", SourbyCraftColors.DIM))
+                .append(BarUtil.coloredBar(m.maxUtilisation(), TPS_BAR_WIDTH))
+                .append(text("  busiest " + pct(m.maxUtilisation()) + " / avg " + pct(m.avgUtilisation())
+                    + "  (" + m.regionCount() + " region" + (m.regionCount() == 1 ? "" : "s") + ")", SourbyCraftColors.DIM))
+                .build());
+            if (m.totalMissingCpuMs() > 1.0) {
+                s.sendMessage(text()
+                    .append(text("  ! CPU starvation: ", SourbyCraftColors.DANGER))
+                    .append(text(fmtMspt(m.totalMissingCpuMs()) + "/tick owed — raise threaded-regions.threads", SourbyCraftColors.DIM))
+                    .build());
+            }
+        }
+        final dev.iyanz.sourbycraft.perf.GcTracker.Gc gc = m.gc();
+        if (gc != null && gc.hasData()) {
+            TextColor gcColor = gc.gcTimePercent() < 3.0 ? SourbyCraftColors.SUCCESS
+                : gc.gcTimePercent() < 8.0 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
+            s.sendMessage(text()
+                .append(text("  GC: ", SourbyCraftColors.LABEL))
+                .append(text(String.format(Locale.ROOT, "%.1f%% time", gc.gcTimePercent()), gcColor))
+                .append(text("  " + String.format(Locale.ROOT, "%.0f/min", gc.collectionsPerMin())
+                    + "  ~" + String.format(Locale.ROOT, "%.1fms", gc.avgPauseMs()) + " avg", SourbyCraftColors.DIM))
+                .build());
+        }
+    }
+
+    private static String pct(double p) { return Double.isNaN(p) ? "?" : String.format(Locale.ROOT, "%.0f%%", p); }
+
+    private static void renderTps(CommandSender s, double[] tps) {
+        String[] labels = {"1m ", "5m ", "15m"};
+        s.sendMessage(text("  TPS (1m / 5m / 15m):", SourbyCraftColors.LABEL));
         for (int i = 0; i < labels.length; i++) {
-            double v = (tps != null && i < tps.length) ? clampTps(tps[i]) : Double.NaN;
+            double v = i < tps.length ? tps[i] : Double.NaN;
             if (Double.isNaN(v)) {
                 s.sendMessage(text("    " + labels[i] + "  (unavailable)", SourbyCraftColors.DIM));
                 continue;
@@ -99,11 +139,12 @@ public class TpsCommand extends Command {
         }
     }
 
-    private static void renderMspt(CommandSender s) {
-        // Worst-region 15s MSPT from the sensor (Bukkit.getAverageTickTime is calling-region only).
-        double mspt = dev.iyanz.sourbycraft.perf.sensor.PerfSensor.snapshot().msptAvg();
+    private static void renderMspt(CommandSender s, double mspt, dev.iyanz.sourbycraft.perf.PerfMetrics.Snapshot m) {
         if (Double.isNaN(mspt)) {
-            s.sendMessage(line("  MSPT", "(unavailable)", SourbyCraftColors.DIM));
+            s.sendMessage(text()
+                .append(text("  MSPT: ", SourbyCraftColors.DIM))
+                .append(text("(unavailable)", SourbyCraftColors.DIM))
+                .build());
             return;
         }
         TextColor color = msptColor(mspt);
@@ -116,16 +157,26 @@ public class TpsCommand extends Command {
             .append(text("  (" + (budgetPct < 1.0 ? String.format(Locale.ROOT, "%.1f", budgetPct) : String.valueOf((int) Math.round(budgetPct)))
                 + "% of 50ms budget)", SourbyCraftColors.DIM))
             .build());
+        // Distribution: worst region's average is the headline above; median across regions + the
+        // worst region's p95 tail tell whether it's one bad region and how spiky it really is.
+        if (m != null && m.regionCount() > 1 && !Double.isNaN(m.medianRegionMspt())) {
+            s.sendMessage(text()
+                .append(text("    median ", SourbyCraftColors.DIM))
+                .append(text(fmtMspt(m.medianRegionMspt()), SourbyCraftColors.VALUE))
+                .append(text("   p95 tail ", SourbyCraftColors.DIM))
+                .append(text(fmtMspt(m.worstRegionP95Mspt()), SourbyCraftColors.VALUE))
+                .build());
+        }
     }
 
-    /** A healthy Folia region ticks in tens of microseconds; %.1f would floor that to "0.0ms". */
+    /** A healthy region ticks in tens of microseconds; %.1f would floor that to "0.0ms". */
     private static String fmtMspt(double mspt) {
         if (mspt >= 10.0) return String.format(Locale.ROOT, "%.1fms", mspt);
         if (mspt >= 0.1)  return String.format(Locale.ROOT, "%.2fms", mspt);
         return String.format(Locale.ROOT, "%.3fms", mspt);
     }
 
-    private static void renderFolia(CommandSender s) {
+    private static void renderEngine(CommandSender s) {
         int worlds = 0;
         try {
             worlds = Bukkit.getWorlds().size();
@@ -133,9 +184,8 @@ public class TpsCommand extends Command {
             // Very early boot — leave at 0.
         }
         s.sendMessage(text()
-            .append(text("  Folia: ", SourbyCraftColors.LABEL))
-            .append(text("per-region threading", SourbyCraftColors.VALUE))
-            .append(text("  —  values above are the server-wide aggregate", SourbyCraftColors.DIM))
+            .append(text("  Engine: ", SourbyCraftColors.LABEL))
+            .append(text("Canvas (region-threading)", SourbyCraftColors.VALUE))
             .build());
         s.sendMessage(text()
             .append(text("    Loaded worlds: ", SourbyCraftColors.DIM))
@@ -144,21 +194,16 @@ public class TpsCommand extends Command {
             .build());
     }
 
-    private static void renderTierAndMem(CommandSender s) {
-        SensorSnapshot snap = PerfSensor.snapshot();
-        Tier tier = snap == null ? Tier.GREEN : snap.tier();
+    private static void renderTierAndMem(CommandSender s, double tps1m, double mspt) {
+        Tier tier = tierFor(tps1m, mspt);
         TextColor tierColor = tierColor(tier);
-        int warmup = PerfSensor.warmupRemainingTicks();
 
         s.sendMessage(text()
-            .append(text("  Perf tier: ", SourbyCraftColors.LABEL))
+            .append(text("  Tier: ", SourbyCraftColors.LABEL))
             .append(text(tier.name(), tierColor))
-            .append(warmup > 0
-                ? text("  (sensor warmup " + (int) Math.ceil(warmup / 20.0) + "s)", SourbyCraftColors.WARNING)
-                : text("  (sensor live)", SourbyCraftColors.DIM))
             .build());
 
-        double memPct = snap != null ? snap.memPct() : memUsagePercent();
+        double memPct = memUsagePercent();
         TextColor memColor = memColor(memPct);
         s.sendMessage(text()
             .append(text("  Memory ", SourbyCraftColors.DIM))
@@ -169,6 +214,24 @@ public class TpsCommand extends Command {
 
     // --- signal readers (defensive; the Bukkit API can throw very early at boot) ---
 
+    private static double[] safeTps() {
+        try {
+            double[] t = Bukkit.getTPS();
+            return new double[]{clampTps(t[0]), clampTps(t.length > 1 ? t[1] : t[0]), clampTps(t.length > 2 ? t[2] : t[0])};
+        } catch (Throwable ignored) {
+            return new double[]{Double.NaN, Double.NaN, Double.NaN};
+        }
+    }
+
+    private static double safeMspt() {
+        try {
+            // Worst region, not the caller's region: on region-threading Bukkit.getAverageTickTime()
+            // only sees the local region, so a healthy region hides a choking spawn region.
+            return dev.iyanz.sourbycraft.perf.RegionMspt.worstMsptMs();
+        } catch (Throwable ignored) {
+            return Double.NaN;
+        }
+    }
 
     private static double memUsagePercent() {
         Runtime rt = Runtime.getRuntime();
@@ -182,14 +245,17 @@ public class TpsCommand extends Command {
         return Math.min(20.0, v);
     }
 
-    private static Component line(String label, String value, TextColor color) {
-        return text()
-            .append(text(label + ": ", SourbyCraftColors.DIM))
-            .append(text(value, color))
-            .build();
+    /** Display-only tier derived inline from the TPS/MSPT readout — no sensor, no state. */
+    private static Tier tierFor(double tps1m, double mspt) {
+        if (Double.isNaN(tps1m)) return Tier.GREEN;
+        boolean msptOk40 = Double.isNaN(mspt) || mspt < 40.0;
+        boolean msptOk50 = Double.isNaN(mspt) || mspt < 50.0;
+        if (tps1m >= 18.0 && msptOk40) return Tier.GREEN;
+        if (tps1m >= 15.0 && msptOk50) return Tier.YELLOW;
+        return Tier.RED;
     }
 
-    // --- colour ladders: aligned to PerfSensor thresholds (green >=19, yellow >=17, red <17) ---
+    // --- colour ladders: display-only (green >=19, yellow >=17, red <17) ---
 
     private static TextColor tpsColor(double t) {
         return t >= 19.0 ? SourbyCraftColors.SUCCESS
@@ -198,7 +264,6 @@ public class TpsCommand extends Command {
     }
 
     private static TextColor msptColor(double m) {
-        // 40 ms mirrors the sensor's YELLOW MSPT threshold; 50 ms is the full tick budget.
         return m < 40.0 ? SourbyCraftColors.SUCCESS
             : m < 50.0 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
     }
@@ -210,11 +275,9 @@ public class TpsCommand extends Command {
 
     private static TextColor tierColor(Tier tier) {
         return switch (tier) {
-            case GREEN     -> SourbyCraftColors.SUCCESS;
-            case YELLOW    -> SourbyCraftColors.PRIMARY;
-            case ORANGE    -> SourbyCraftColors.WARNING;
-            case RED       -> SourbyCraftColors.DANGER;
-            case EMERGENCY -> SourbyCraftColors.ACCENT;
+            case GREEN  -> SourbyCraftColors.SUCCESS;
+            case YELLOW -> SourbyCraftColors.PRIMARY;
+            case RED    -> SourbyCraftColors.DANGER;
         };
     }
 }

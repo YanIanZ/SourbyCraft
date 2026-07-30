@@ -1,0 +1,149 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 21 Jul 2026 15:14:44 +0700
+Subject: [PATCH] SourbyCraft - throttle waypoint (locator bar) updates + cap
+ crowd connections
+
+The vanilla setPosRaw hook refreshes waypoint connections on EVERY position
+change, and Canvas's RegionizedWaypointManager fans each refresh out over
+every player in the world (plus an O(n) MultiThreadedQueue.contains per
+call). A crowd of n moving players is O(n^2) connection updates per tick on
+one region thread: profiled at 1.1s -> 3.5s/tick during a 500-bot ramp on a
+32-core host, with 17/17 Folia watchdog dumps pointing at
+RegionizedWaypointManager (waypoint frames in 100% of stall samples).
+
+Fixes:
+- Entity#setPosRaw: only refresh waypoints when the entity crosses a chunk
+  boundary (connection state is chunk-granular) or after a 250ms heartbeat
+  (azimuth smoothness for the locator bar, a 4Hz UI at most).
+- RegionizedWaypointManager: ConcurrentHashMap.newKeySet() membership
+  instead of MultiThreadedQueue linear scans; distanceToSqr instead of
+  distanceTo; probability math on squared distance (identical distribution).
+- Cap connections per receiver (canvas world config
+  waypointMaxConnectionsPerReceiver, default 128, <=0 = vanilla unlimited):
+  a full locator bar stops taking new needles until a slot frees, bounding
+  crowd upkeep at O(n*K) instead of O(n^2). Invisible below 128 nearby
+  players.
+
+diff --git a/io/canvasmc/canvas/threadedregions/waypoints/RegionizedWaypointManager.java b/io/canvasmc/canvas/threadedregions/waypoints/RegionizedWaypointManager.java
+index 3fd785d6237c39fe0318256c5364f284dee34079..a7a079ea409c354fc930eef3013cee312d7e6a60 100644
+--- a/io/canvasmc/canvas/threadedregions/waypoints/RegionizedWaypointManager.java
++++ b/io/canvasmc/canvas/threadedregions/waypoints/RegionizedWaypointManager.java
+@@ -1,6 +1,5 @@
+ package io.canvasmc.canvas.threadedregions.waypoints;
+ 
+-import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
+ import ca.spottedleaf.moonrise.common.util.TickThread;
+ import io.canvasmc.canvas.GlobalConfiguration;
+ import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
+@@ -49,19 +48,28 @@ public class RegionizedWaypointManager extends ServerWaypointManager {
+      */
+     private final double scale;
+ 
+-    private final MultiThreadedQueue<WaypointTransmitter> waypoints = new MultiThreadedQueue<>();
+-    private final MultiThreadedQueue<ServerPlayer> players = new MultiThreadedQueue<>();
++    // SourbyCraft start - O(1) membership; MultiThreadedQueue.contains is a linear scan that sat in
++    // the per-movement hot path (see Entity#setPosRaw waypoint throttle)
++    private final Set<WaypointTransmitter> waypoints = java.util.concurrent.ConcurrentHashMap.newKeySet();
++    private final Set<ServerPlayer> players = java.util.concurrent.ConcurrentHashMap.newKeySet();
++    // SourbyCraft end
+     private final ServerLevel level;
+ 
++    // SourbyCraft start - cap pairwise locator-bar upkeep in crowds
++    private final int maxConnectionsPerReceiver;
++    // SourbyCraft end
++
+     public RegionizedWaypointManager(final ServerLevel level) {
+         super(level);
+         this.level = level;
+         this.scale = level.canvasConfig().waypointUpdateScale;
++        this.maxConnectionsPerReceiver = level.canvasConfig().waypointMaxConnectionsPerReceiver; // SourbyCraft
+     }
+ 
+     private boolean shouldScheduleBasedOnDistance(final LivingEntity origin, final ServerPlayer target) {
+-        final double scaled = origin.distanceTo(target) / scale;
+-        return origin.getRandom().nextDouble() < (1.0 / (1.0 + (scaled * scaled)));
++        // SourbyCraft - avoid the sqrt: 1/(1+(d/s)^2) == 1/(1+dSqr/sSqr)
++        final double scaledSqr = origin.distanceToSqr(target) / (scale * scale);
++        return origin.getRandom().nextDouble() < (1.0 / (1.0 + scaledSqr));
+     }
+ 
+     public boolean isLocatorBarDisabled() {
+@@ -93,7 +101,7 @@ public class RegionizedWaypointManager extends ServerWaypointManager {
+         for (final ServerPlayer trackedPlayer : players) {
+             if (trackedPlayer == updating) continue;
+ 
+-            if (updating.distanceTo(trackedPlayer) > 332.0F && !shouldScheduleBasedOnDistance(updating, trackedPlayer)) {
++            if (updating.distanceToSqr(trackedPlayer) > 332.0 * 332.0 && !shouldScheduleBasedOnDistance(updating, trackedPlayer)) { // SourbyCraft - avoid sqrt in the hot path
+                 continue;
+             }
+ 
+@@ -225,6 +233,16 @@ public class RegionizedWaypointManager extends ServerWaypointManager {
+ 
+         final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
+ 
++        // SourbyCraft start - cap pairwise locator-bar upkeep in crowds: n colocated players is
++        // O(n^2) connection churn on one region thread without a bound. A full bar stops taking
++        // new needles until an existing connection breaks (range/disconnect frees a slot).
++        if (this.maxConnectionsPerReceiver > 0
++            && map.size() >= this.maxConnectionsPerReceiver
++            && !map.containsKey(waypoint)) {
++            return;
++        }
++        // SourbyCraft end
++
+         waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(connection -> {
+             map.put(waypoint, connection);
+             connection.connect();
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index f6a9fb2c053f39e6208daa6d006a55ed481b1816..46be74612490cc29fb0dc30057ad4a758cdba1d8 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -272,6 +272,10 @@ public abstract class Entity
+     private Vec3 position;
+     private BlockPos blockPosition;
+     private ChunkPos chunkPosition;
++    // SourbyCraft start - throttle waypoint (locator bar) updates
++    private long sourbyLastWaypointChunk = Long.MIN_VALUE;
++    private long sourbyLastWaypointUpdateNs;
++    // SourbyCraft end - throttle waypoint (locator bar) updates
+     private Vec3 deltaMovement = Vec3.ZERO;
+     private float yRot;
+     private float xRot;
+@@ -6213,13 +6217,31 @@ public abstract class Entity
+ 
+             this.levelCallback.onMove();
+             if (!this.firstTick && this.level instanceof ServerLevel serverLevel && !this.isRemoved()) {
+-                if (this instanceof WaypointTransmitter waypoint && waypoint.isTransmittingWaypoint()) {
+-                    serverLevel.getWaypointManager().updateWaypoint(waypoint);
+-                }
++                // SourbyCraft start - throttle waypoint (locator bar) updates
++                // Vanilla refreshes waypoint connections on EVERY position change. The region-threaded
++                // waypoint manager fans each refresh out over every player in the world, so a crowd of
++                // n moving players costs O(n^2) connection updates per tick on one region thread —
++                // profiled at seconds/tick with 500 colocated players. Connection state is chunk-
++                // granular (EntityChunkConnection) and the locator bar is a low-resolution UI, so
++                // refresh only on chunk crossings, with a 250ms heartbeat for azimuth smoothness.
++                final boolean transmitting = this instanceof WaypointTransmitter waypointCheck && waypointCheck.isTransmittingWaypoint();
++                final boolean receiving = this instanceof ServerPlayer playerCheck && playerCheck.isReceivingWaypoints() && playerCheck.connection != null;
++                if (transmitting || receiving) {
++                    final long waypointChunk = ChunkPos.pack(SectionPos.blockToSectionCoord(fx), SectionPos.blockToSectionCoord(fz));
++                    final long waypointNow = System.nanoTime();
++                    if (waypointChunk != this.sourbyLastWaypointChunk || waypointNow - this.sourbyLastWaypointUpdateNs >= 250_000_000L) {
++                        this.sourbyLastWaypointChunk = waypointChunk;
++                        this.sourbyLastWaypointUpdateNs = waypointNow;
++                        if (this instanceof WaypointTransmitter waypoint && waypoint.isTransmittingWaypoint()) {
++                            serverLevel.getWaypointManager().updateWaypoint(waypoint);
++                        }
+ 
+-                if (this instanceof ServerPlayer player && player.isReceivingWaypoints() && player.connection != null) {
+-                    serverLevel.getWaypointManager().updatePlayer(player);
++                        if (this instanceof ServerPlayer player && player.isReceivingWaypoints() && player.connection != null) {
++                            serverLevel.getWaypointManager().updatePlayer(player);
++                        }
++                    }
+                 }
++                // SourbyCraft end - throttle waypoint (locator bar) updates
+             }
+             // Paper start - Fix MC-44654
+             if (this.getType().updateInterval() == Integer.MAX_VALUE) {

@@ -25,19 +25,21 @@ import org.bukkit.plugin.Plugin;
  * it is region-safe. {@link SourbyMessages#get} uses {@link java.util.concurrent.ThreadLocalRandom}
  * for variant selection, so concurrent joins on different regions are safe.
  *
- * <p>Registered against {@link org.leavesmc.leaves.plugin.MinecraftInternalPlugin#INSTANCE} from
- * {@link dev.iyanz.sourbycraft.perf.PerfEngineBootstrap}, like the other SourbyCraft actuators.
- * {@link EventPriority#NORMAL} — after most plugins have set their own message but before MONITOR
- * observers read the final one.
+ * <p>Registered against {@link dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin#INSTANCE}
+ * from {@link dev.iyanz.sourbycraft.core.SourbyCraftBootstrap}, like the other SourbyCraft
+ * utility-layer listeners. {@link EventPriority#NORMAL} — after most plugins have set their own
+ * message but before MONITOR observers read the final one.
  */
 public final class SourbyJoinLeaveListener implements Listener {
 
     private SourbyJoinLeaveListener() {}
 
+    /** Registers this listener against {@code plugin} (the internal plugin handle). */
     public static void register(Plugin plugin) {
         Bukkit.getPluginManager().registerEvents(new SourbyJoinLeaveListener(), plugin);
     }
 
+    /** Replaces the join broadcast with a random {@link SourbyMessages#JOIN} variant, unless another plugin already suppressed it. */
     @EventHandler(priority = EventPriority.NORMAL)
     public void onJoin(PlayerJoinEvent e) {
         // Only override when a broadcast would have been sent (null = another plugin suppressed it).
@@ -47,6 +49,7 @@ public final class SourbyJoinLeaveListener implements Listener {
             Placeholder.unparsed("player", e.getPlayer().getName())));
     }
 
+    /** Replaces the quit broadcast with a random {@link SourbyMessages#LEAVE} variant, unless another plugin already suppressed it. */
     @EventHandler(priority = EventPriority.NORMAL)
     public void onQuit(PlayerQuitEvent e) {
         if (e.quitMessage() == null) return;

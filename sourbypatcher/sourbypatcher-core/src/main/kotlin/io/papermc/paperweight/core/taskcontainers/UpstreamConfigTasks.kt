@@ -127,6 +127,8 @@ class UpstreamConfigTasks(
             cfg.filePatchDir,
             cfg.rejectsDir,
             cfg.featurePatchDir,
+            cfg.basePatchDir,
+            cfg.additionalAts,
             base,
             gitFilePatches,
             filterPatches,

@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 21 Jul 2026 00:18:48 +0700
+Subject: [PATCH] SourbyCraft - boot hook in DedicatedServer#initServer
+
+Calls dev.iyanz.sourbycraft.core.SourbyCraftBootstrap.init() right after
+Paper's PaperCommands.registerCommands(this), before CraftServer#loadPlugins.
+Replaces the archived Folia build's me.earthme.luminol.commands.CommandRegister
+post-config hook (Luminol is not part of the Canvas re-platform).
+
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index c4d100e223cd4a20f147b19ea3e76007f8b3ead0..d6bce8fa3a38b5b98b68793e547ea4719fb028fe 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -262,6 +262,13 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+         org.spigotmc.WatchdogThread.doStart(org.spigotmc.SpigotConfig.timeoutTime, org.spigotmc.SpigotConfig.restartOnCrash); // Paper - start watchdog thread
+         consoleThread.start(); // Paper - Enhance console tab completions for brigadier commands; start console thread after MinecraftServer.console & PaperConfig are initialized
+         io.papermc.paper.command.PaperCommands.registerCommands(this); // Paper - setup /paper command
++        // SourbyCraft start - boot hook (utility layer: commands, banner, updater, /maxp, messages)
++        // Runs right after Paper's own command registration so our bare-name claims (/tps, /ping,
++        // /ver, ...) are not re-stolen afterwards, and before CraftServer#loadPlugins/enablePlugins
++        // below so PluginLoadDiagnostics can observe a plugin load failure and the ViaVersion config
++        // floor is written before Via reads it in onEnable.
++        dev.iyanz.sourbycraft.core.SourbyCraftBootstrap.init();
++        // SourbyCraft end
+         this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
+         com.destroystokyo.paper.Metrics.PaperMetrics.startMetrics(); // Paper - start metrics
+         com.destroystokyo.paper.VersionHistoryManager.INSTANCE.getClass(); // Paper - load version history now

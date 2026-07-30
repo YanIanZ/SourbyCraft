@@ -27,6 +27,7 @@ public class PluginsCommand extends Command {
         this.setPermission("sourbycraft.command.plugins");
     }
 
+    /** Renders the branded plugin roster as one comma-separated "Name vX" line per plugin. */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;

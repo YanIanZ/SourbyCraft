@@ -5,12 +5,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
+import dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin;
 import dev.iyanz.sourbycraft.brand.BuildInfo;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.Nullable;
-import org.leavesmc.leaves.plugin.MinecraftInternalPlugin;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -35,7 +35,7 @@ import java.util.zip.ZipFile;
  * the archived upstream updater the Folia base shipped (which pointed at a now-dead feed).
  *
  * <p>Design (all knobs live in the unified operator config under {@code misc.auto_update.*}, wired
- * by {@link me.earthme.luminol.config.modules.misc.AutoUpdateConfig}):
+ * by {@link dev.iyanz.sourbycraft.update.AutoUpdateSettings}):
  *
  * <ol>
  *   <li><b>Retarget.</b> Hits {@code https://api.github.com/repos/<owner>/<repo>/releases}
@@ -79,8 +79,9 @@ public final class SourbyUpdater {
 
     /**
      * Start (or restart) the updater. Idempotent within a boot: schedules one async daily check per
-     * configured time on the Folia async scheduler. Called from the boot hook once the config is
-     * loaded and the internal plugin handle is available.
+     * configured time on Paper's region-safe AsyncScheduler (works unchanged on Folia/Canvas region
+     * threading and on plain Paper). Called from the boot hook once the config is loaded and the
+     * internal plugin handle is available.
      */
     public synchronized void start() {
         stop();
@@ -157,7 +158,7 @@ public final class SourbyUpdater {
             + " mode=" + mode.name().toLowerCase(Locale.ROOT)
             + " times=" + times
             + (Config.checkIntervalMinutes() > 0 ? " interval=" + Config.checkIntervalMinutes() + "m" : "")
-            + " (Folia async scheduler)");
+            + " (AsyncScheduler)");
     }
 
     /** Cancel any scheduled checks. */
@@ -308,7 +309,9 @@ public final class SourbyUpdater {
         return m.find() ? Integer.parseInt(m.group(1)) : -1;
     }
 
-    /** This jar's stamped build number ({@code "7f"} -> 7); -1 when unknown/dev. */
+    /** This jar's stamped build number ({@code "7c"} -> 7); -1 when unknown/dev. Suffix-agnostic
+     *  (reads only the leading digits), so it doesn't care whether the platform suffix is "c"
+     *  (Canvas, current) or the archived "f" (Folia). */
     static int ownBuildNumber() {
         try {
             String b = BuildInfo.load().build();
@@ -579,23 +582,23 @@ public final class SourbyUpdater {
     }
 
     /**
-     * Config bridge — reads the {@code misc.auto_update.*} keys through the rebranded
-     * {@link me.earthme.luminol.config.modules.misc.AutoUpdateConfig} static fields. Kept as a tiny
-     * indirection so {@link SourbyUpdater} never imports the config class field-by-field at every
-     * call site and so it degrades to safe defaults if the config module failed to load.
+     * Config bridge — reads the {@code misc.auto_update.*} keys through
+     * {@link AutoUpdateSettings}'s static fields. Kept as a tiny indirection so
+     * {@link SourbyUpdater} never imports the config class field-by-field at every call site and
+     * so it degrades to safe defaults if the settings failed to load.
      */
     private static final class Config {
-        static String repo()            { return valueOr(me.earthme.luminol.config.modules.misc.AutoUpdateConfig.repo, "YanIanZ/SourbyCraft"); }
-        static String channel()         { return me.earthme.luminol.config.modules.misc.AutoUpdateConfig.channel; }
-        static String mode()            { return valueOr(me.earthme.luminol.config.modules.misc.AutoUpdateConfig.applyMode, "notify"); }
-        static boolean allowPrerelease(){ return me.earthme.luminol.config.modules.misc.AutoUpdateConfig.allowPrerelease; }
+        static String repo()            { return valueOr(AutoUpdateSettings.repo, "YanIanZ/SourbyCraft"); }
+        static String channel()         { return AutoUpdateSettings.channel; }
+        static String mode()            { return valueOr(AutoUpdateSettings.applyMode, "notify"); }
+        static boolean allowPrerelease(){ return AutoUpdateSettings.allowPrerelease; }
         static java.util.List<String> checkTimes() {
-            java.util.List<String> t = me.earthme.luminol.config.modules.misc.AutoUpdateConfig.checkTimes;
+            java.util.List<String> t = AutoUpdateSettings.checkTimes;
             return t == null ? java.util.List.of() : t;
         }
-        static int checkIntervalMinutes() { return Math.max(0, me.earthme.luminol.config.modules.misc.AutoUpdateConfig.checkIntervalMinutes); }
-        static String restartMode()       { return valueOr(me.earthme.luminol.config.modules.misc.AutoUpdateConfig.restartMode, "auto"); }
-        static int restartDelaySeconds()  { return Math.max(5, me.earthme.luminol.config.modules.misc.AutoUpdateConfig.restartDelaySeconds); }
+        static int checkIntervalMinutes() { return Math.max(0, AutoUpdateSettings.checkIntervalMinutes); }
+        static String restartMode()       { return valueOr(AutoUpdateSettings.restartMode, "auto"); }
+        static int restartDelaySeconds()  { return Math.max(5, AutoUpdateSettings.restartDelaySeconds); }
         private static String valueOr(String v, String def) { return v == null || v.isBlank() ? def : v.trim(); }
         private Config() {}
     }

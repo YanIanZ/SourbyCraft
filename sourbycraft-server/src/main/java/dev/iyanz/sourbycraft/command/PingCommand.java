@@ -27,6 +27,11 @@ public class PingCommand extends Command {
         this.usageMessage = "/ping [player]";
     }
 
+    /**
+     * Renders the target's latency as a coloured bar, then resolves + appends their approximate
+     * location asynchronously via {@link GeoUtil#lookup}. Targets self by default; targeting
+     * another player requires {@code sourbycraft.command.ping.other}.
+     */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         boolean other = args.length > 0 && !args[0].equalsIgnoreCase(s.getName());

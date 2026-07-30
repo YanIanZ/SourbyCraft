@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.update;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
+import dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -51,6 +52,10 @@ public final class UpdateNotifier {
      * the join spam. Registered once from the updater start.
      */
     public static final class JoinListener implements org.bukkit.event.Listener {
+        /**
+         * Delivers the pending banner (if any) to a joining op/{@link #NOTIFY_PERMISSION} holder,
+         * 2s after join on their own region scheduler, so it does not land under join spam.
+         */
         @org.bukkit.event.EventHandler
         public void onJoin(org.bukkit.event.player.PlayerJoinEvent e) {
             final Component banner = pendingBanner;
@@ -58,7 +63,7 @@ public final class UpdateNotifier {
             final org.bukkit.entity.Player p = e.getPlayer();
             if (!(p.isOp() || p.hasPermission(NOTIFY_PERMISSION))) return;
             // Hop to the player's region + small delay so the banner isn't buried by join messages.
-            p.getScheduler().runDelayed(org.leavesmc.leaves.plugin.MinecraftInternalPlugin.INSTANCE,
+            p.getScheduler().runDelayed(MinecraftInternalPlugin.INSTANCE,
                 task -> { if (pendingBanner != null) p.sendMessage(pendingBanner); }, null, 40L);
         }
     }

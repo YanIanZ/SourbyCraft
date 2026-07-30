@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yan <Yan>
+Date: Tue, 21 Jul 2026 14:44:46 +0700
+Subject: [PATCH] SourbyCraft - sane default region tick-thread count
+
+Upstream resolved threads: -1 to totalCores/2 then /4 (<=4 -> 1), which
+serialises every region onto ONE tick thread on any host with <= 8 cores
+(and only 2 threads on 16 cores). Match Folia upstream: half the available
+processors, at least 1, using availableProcessors() so container CPU quotas
+are respected. Explicit threads: N overrides are untouched.
+
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index abcc8ae0a5ab4d089c6e888519b1b094a9ddcc4d..93893d5bc2a4cb4ff2e4c92cc4195adb7aad2b86 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -1,7 +1,6 @@
+ package io.papermc.paper.threadedregions;
+ 
+ import ca.spottedleaf.common.util.TimeUtil;
+-import ca.spottedleaf.concurrentutil.numa.OSNuma;
+ import ca.spottedleaf.moonrise.common.util.TickThread;
+ import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
+ import com.mojang.logging.LogUtils;
+@@ -59,12 +58,13 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+     private static int getTickThreads(final GlobalConfiguration.@NonNull ThreadedRegions config) {
+         int tickThreads;
+         if (config.threads <= 0) {
+-            tickThreads = OSNuma.getNativeInstance().getTotalCores() / 2;
+-            if (tickThreads <= 4) {
+-                tickThreads = 1;
+-            } else {
+-                tickThreads =  tickThreads / 4;
+-            }
++            // SourbyCraft - sane default region tick-thread count
++            // Upstream resolved -1 to totalCores/2 then /4 (<=4 -> 1), which gives ONE region tick
++            // thread on any host with <= 8 cores and only 2 on 16 cores — the whole region-threaded
++            // engine ends up serialised onto a single thread while the remaining cores idle.
++            // Match Folia upstream instead: half the available processors, at least 1.
++            // availableProcessors() (not OSNuma total cores) so container CPU quotas are respected.
++            tickThreads = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
+         } else {
+             tickThreads = config.threads;
+         }

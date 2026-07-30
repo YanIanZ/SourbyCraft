@@ -18,12 +18,12 @@ import java.util.concurrent.ThreadLocalRandom;
  * class replaces that with a single, extensible layer where every message KEY maps to a
  * <b>list of variant strings</b> in the one unified operator config
  * ({@code sourbycraft_config/sourbycraft_global_config.toml}, under {@code messages.<key>}).
- * {@link #get(String)} returns <b>one variant chosen at random</b> — that is the
+ * {@link #get(String, TagResolver...)} returns <b>one variant chosen at random</b> — that is the
  * "lebih bervariasi" (more varied) requirement: the same touchpoint shows a different
  * SourbyCraft-flavored, hex-colored line each time.
  *
  * <h2>Variant selection</h2>
- * Each call to {@link #get(String)} picks a uniformly-random index into the variant list
+ * Each call to {@link #get(String, TagResolver...)} picks a uniformly-random index into the variant list
  * with {@link ThreadLocalRandom} — no shared {@code Random} state, so it is safe to call
  * from any Folia region thread, the login/network thread, or the global-region scheduler
  * concurrently. The chosen raw string is parsed with {@link MiniMessage} (hex + MiniMessage
@@ -38,7 +38,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * leave       = [ ... ]
  * </pre>
  * Keys are read through {@link SourbyCraftConfig#cfgGet} which already consults the unified
- * TOML first. When a key is absent/empty (or every entry is blank), {@link #get(String)}
+ * TOML first. When a key is absent/empty (or every entry is blank), {@link #get(String, TagResolver...)}
  * falls back to a sane built-in default variant registered in {@link #DEFAULTS} — the server
  * never renders an empty message and boot never depends on the operator having seeded the file.
  *
@@ -80,7 +80,7 @@ public final class SourbyMessages {
         ),
         MOTD, List.of(
             "<#FFB347><bold>SourbyCraft</bold></#FFB347> <gray>»</gray> <#AEC6CF>Ngebut, mulus, bebas lag.</#AEC6CF>\n<#77DD77>Gabung sekarang, seru-seruan bareng!</#77DD77>",
-            "<#CBA6F7><bold>✦ SourbyCraft ✦</bold></#CBA6F7>\n<#AEC6CF>Powered by Folia — tiap region jalan sendiri, TPS anti drop.</#AEC6CF>",
+            "<#CBA6F7><bold>✦ SourbyCraft ✦</bold></#CBA6F7>\n<#AEC6CF>Powered by Canvas — tiap region jalan sendiri, TPS anti drop.</#AEC6CF>",
             "<gradient:#FFB347:#CBA6F7><bold>SourbyCraft Network</bold></gradient>\n<gray>Performa kelas atas, komunitas kelas satu.</gray>",
             "<#FFB347><bold>SourbyCraft</bold></#FFB347> <#77DD77>ONLINE</#77DD77>\n<gray>Mari main, jangan cuma ngintip MOTD doang :)</gray>"
         ),

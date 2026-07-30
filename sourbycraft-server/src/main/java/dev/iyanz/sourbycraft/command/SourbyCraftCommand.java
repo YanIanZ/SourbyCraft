@@ -28,6 +28,7 @@ public class SourbyCraftCommand extends Command {
         this.setPermission("sourbycraft.command.admin");
     }
 
+    /** Dispatches {@code reload}/{@code version} (default {@code version} with no argument). */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
@@ -55,6 +56,7 @@ public class SourbyCraftCommand extends Command {
         return true;
     }
 
+    /** Suggests {@code reload}/{@code version} for the first argument only. */
     @Override
     public List<String> tabComplete(CommandSender sender, String alias, String[] args) {
         if (args.length == 1) return List.of("reload", "version");

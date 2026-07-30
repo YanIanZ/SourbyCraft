@@ -7,10 +7,16 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
+/**
+ * Shared SHA-256 helper for the bootstrap phase's download-integrity checks (library fetch,
+ * ViaVersion/ViaBackwards provisioning). JDK-only, matching the rest of {@code bootstrap} — this
+ * runs before any external library is on the classpath.
+ */
 final class Sha256Verifier {
 
     private Sha256Verifier() {}
 
+    /** Hex-encoded (lowercase) SHA-256 digest of a file's full contents. */
     static String ofFile(Path file) throws IOException {
         try (InputStream in = Files.newInputStream(file)) {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -23,6 +29,7 @@ final class Sha256Verifier {
         }
     }
 
+    /** True when {@code file}'s SHA-256 equals {@code expected} (case-insensitive hex compare). */
     static boolean matches(Path file, String expected) throws IOException {
         return expected.equalsIgnoreCase(ofFile(file));
     }

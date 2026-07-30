@@ -49,8 +49,8 @@ public final class ViaAutoUpdate {
 
     /** Best-effort: check + update both Via plugins. Never throws. */
     public static void check() {
-        if (!me.earthme.luminol.config.modules.misc.AutoUpdateConfig.viaAutoUpdate) return;
-        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.viaVersionAutoProvision) return;
+        if (!AutoUpdateSettings.viaAutoUpdate) return;
+        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool("viaversion.auto-provision", true)) return;
         final String mc = BuildInfo.load().mcVersion();
         final Path pluginsDir = Path.of("plugins");
         for (final Project p : PROJECTS) {

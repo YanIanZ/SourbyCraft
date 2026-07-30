@@ -91,6 +91,14 @@ public final class SourbyBootstrap {
         "-XX:+UseShenandoahGC", "-XX:+UseSerialGC", "-XX:+UseEpsilonGC",
     };
 
+    /**
+     * Entry point of the slim SourbyCraft jar. In order: auto-accept the EULA, finish any
+     * fallback-staged auto-update swap, self-heal a GC-stale CDS archive, run the Auto-CDS layer
+     * (which may re-exec into a forked child and never return), download+verify any manifest
+     * libraries the slim jar omitted, provision the built-in ViaVersion/ViaBackwards jars, then
+     * delegate to {@code dev.iyanz.sourbyclip.Main}. Hard-fails with actionable diagnostics on any
+     * unrecoverable error (missing manifest, library fetch failure).
+     */
     public static void main(String[] args) throws Throwable {
         // Auto-accept the Mojang EULA. SourbyCraft accepts it on the operator's behalf so first
         // boot is not blocked on hand-editing eula.txt. Idempotent: an existing eula=true is left
