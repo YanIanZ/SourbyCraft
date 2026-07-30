@@ -50,7 +50,15 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
 
     private static final String BRAND = "SourbyCraft";
 
-    /** Logger-name prefixes that belong to the fork and should collapse to the brand tag. */
+    /**
+     * Logger-name prefixes that belong to the fork and should collapse to the brand tag.
+     *
+     * <p>The Folia-era entries ({@code me.earthme.luminol.}, {@code org.leavesmc.},
+     * {@code org.dreeam.leaf.}, {@code org.purpurmc.}, {@code org.leaf.}, {@code abomination.},
+     * {@code com.kiocg.}) are kept even though that vendored source was stripped on the Canvas
+     * re-platform (feat/canvas-engine, PR #12) — they are inert string prefixes (never match
+     * anything now) and cost nothing to leave for anyone diffing against the archived Folia line.
+     */
     private static final String[] INTERNAL_PREFIXES = {
         "me.earthme.luminol.",
         "org.leavesmc.",
@@ -59,6 +67,7 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
         "org.leaf.",
         "dev.iyanz.sourbycraft.",
         "io.papermc.paper.",
+        "io.canvasmc.",
         "com.destroystokyo.paper.",
         "abomination.",
         "com.kiocg.",

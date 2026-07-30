@@ -51,7 +51,11 @@ public class MixinURLClassLoader extends URLClassLoader {
 
             byte[] original = in.readAllBytes();
             byte[] mixin = transformer.transformClass(MixinEnvironment.getCurrentEnvironment(), name, original);
-            byte[] transformed = AccessWidenerManager.applyAccessWidener(mixin);
+            // Cherry — Horizon-grafted access-transformer (.at) pass, between the SpongePowered mixin
+            // transform and the Fabric access-widener pass. No-op for classes with no AT definition,
+            // so it is cheap on the hot class-loading path.
+            byte[] accessTransformed = dev.iyanz.sourbyclip.cherry.Cherry.applyAccessTransformers(mixin);
+            byte[] transformed = AccessWidenerManager.applyAccessWidener(accessTransformed);
 
             return defineClass(name, transformed, 0, transformed.length, dummyDomain);
         } catch (Exception e) {

@@ -29,12 +29,13 @@ import io.papermc.paperweight.core.tasks.patching.FixupFilePatches
 import io.papermc.paperweight.core.tasks.patching.RebuildFilePatches
 import io.papermc.paperweight.tasks.*
 import io.papermc.paperweight.util.*
-import io.papermc.paperweight.util.constants.paperTaskOutput
+import io.papermc.paperweight.util.constants.*
 import java.nio.file.Path
 import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.file.Directory
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.TaskContainer
 import org.gradle.kotlin.dsl.*
@@ -48,6 +49,8 @@ class PatchingTasks(
     private val filePatchDir: DirectoryProperty,
     private val rejectsDir: DirectoryProperty,
     private val featurePatchDir: DirectoryProperty,
+    private val basePatchDir: DirectoryProperty,
+    private val additionalAts: RegularFileProperty,
     private val baseDir: Provider<Directory>,
     private val gitFilePatches: Provider<Boolean>,
     private val filterPatches: Provider<Boolean>,
@@ -69,6 +72,22 @@ class PatchingTasks(
         patches.set(filePatchDir.fileExists())
         rejectsDir.set(this@PatchingTasks.rejectsDir)
         gitFilePatches.set(this@PatchingTasks.gitFilePatches)
+        // Apply the fork's git-format base/ patches (if any) before the files/ patches — supports
+        // three-stage forks (e.g. CanvasMC paper-patches: base/ Region-Threading -> files/). No-op
+        // when the fork has no base/ dir. See ApplyFilePatches.basePatchDir / ForkConfig discussion.
+        basePatchDir.set(this@PatchingTasks.basePatchDir.fileExists())
+        // Per-layer access transformer (e.g. CanvasMC weaver's build-data/<name>.at), applied to the
+        // fresh checkout BEFORE base/file patches so the fork's exact-context patches — generated
+        // against the AT'd tree — line up. No-op when the fork has no <name>.at. See ApplyFilePatches.atFile.
+        // Only the server layer carries the mache/JST configurations; the API layer has neither (and no
+        // ATs), so wire the JST runner only when its configurations exist — else this task fails to
+        // configure on the API patchset (which never needs an AT).
+        if (project.configurations.findByName(MACHE_MINECRAFT_LIBRARIES_CONFIG) != null
+            && project.configurations.findByName(JST_CONFIG) != null) {
+            atFile.set(additionalAts.fileExists())
+            ats.jstClasspath.from(project.configurations.named(MACHE_MINECRAFT_LIBRARIES_CONFIG))
+            ats.jst.from(project.configurations.named(JST_CONFIG))
+        }
         baseRef.set("base")
         identifier = "$forkName $patchSetName"
     }

@@ -7,9 +7,9 @@ import net.kyori.adventure.text.format.TextColor;
  * Branded startup banner printed to the console at server start.
  *
  * <p>Ported from the Paper tag {@code paper-26.2-pre-folia} (where it was a plain
- * monochrome box). On the Folia base it is emitted from the authored-source
- * post-config hook ({@link me.earthme.luminol.commands.CommandRegister#register()})
- * instead of an NMS patch, so no {@code net/minecraft} patch has to be rebuilt.
+ * monochrome box). On this Canvas re-platform it is emitted from
+ * {@link dev.iyanz.sourbycraft.core.SourbyCraftBootstrap}, itself called from a small
+ * hand-authored {@code minecraft-patch} to {@code DedicatedServer#initServer}.
  *
  * <p>The box is colored with ANSI 24-bit truecolor escapes derived from
  * {@link SourbyCraftColors} (PRIMARY {@code #FFB347} for the frame, SUCCESS
@@ -34,6 +34,10 @@ public final class SourbyCraftBanner {
     private static final String BODY  = fg(SourbyCraftColors.INFO);
     private static final String OK    = fg(SourbyCraftColors.SUCCESS);
 
+    /**
+     * Renders the branded ANSI-truecolor startup box for {@code info} as a single multi-line
+     * string (leading newline included), ready to print straight to a console stream.
+     */
     public static String render(BuildInfo info) {
         final String java = System.getProperty("java.specification.version");
         final int cores = Runtime.getRuntime().availableProcessors();
@@ -44,8 +48,8 @@ public final class SourbyCraftBanner {
           .append("─".repeat(Math.max(0, 44 - shownVersion.length())))
           .append(' ').append(OK).append(shownVersion).append(' ').append(FRAME).append("─┐").append(RESET).append('\n');
         sb.append(FRAME).append("   │  ").append(BODY).append(pad(info.tagline(), 58)).append(FRAME).append("│").append(RESET).append('\n');
-        sb.append(FRAME).append("   │  ").append(BODY).append(pad("survival · self-tuning perf · anti-xray · 150+ ready", 58)).append(FRAME).append("│").append(RESET).append('\n');
-        sb.append(FRAME).append("   │  ").append(BODY).append(pad("Folia " + info.mcVersion() + "  ·  Java " + java + "  ·  " + cores + " cores", 58)).append(FRAME).append("│").append(RESET).append('\n');
+        sb.append(FRAME).append("   │  ").append(BODY).append(pad("Canvas engine benchmark · utilities only", 58)).append(FRAME).append("│").append(RESET).append('\n');
+        sb.append(FRAME).append("   │  ").append(BODY).append(pad("Canvas " + info.mcVersion() + "  ·  Java " + java + "  ·  " + cores + " cores", 58)).append(FRAME).append("│").append(RESET).append('\n');
         sb.append(FRAME).append("   └").append("─".repeat(62)).append("┘").append(RESET).append('\n');
         return sb.toString();
     }

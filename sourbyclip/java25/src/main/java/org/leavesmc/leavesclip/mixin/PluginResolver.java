@@ -30,6 +30,10 @@ public class PluginResolver {
     public static final String MIXINS_DIRECTORY = PLUGIN_DIRECTORY + File.separator + ".mixins";
     public static final String PLUGIN_JAR_HASH_FILE = "plugin-jar-hash";
     public static final String LEAVES_PLUGIN_JSON_FILE = "leaves-plugin.json";
+    // SourbyCraft/Cherry — unified manifest name, preferred over the legacy Leaves one so a single
+    // cherry-plugin.json drives BOTH the Leaves mixin block (here) and Cherry's access-transformers
+    // (CherryPluginResolver). leaves-plugin.json stays supported for back-compat.
+    public static final String CHERRY_PLUGIN_JSON_FILE = "cherry-plugin.json";
     public static final String MIXINS_JAR_SUFFIX = ".mixins.jar";
     public static List<LeavesPluginMeta> leavesPluginMetas = new ArrayList<>();
     private static final Logger logger = new SimpleLogger("Mixin");
@@ -152,7 +156,11 @@ public class PluginResolver {
     }
 
     private static @Nullable LeavesPluginMeta getPluginMeta(@NotNull JarFile jarFile) {
-        JarEntry entry = jarFile.getJarEntry(LEAVES_PLUGIN_JSON_FILE);
+        // SourbyCraft/Cherry — prefer the unified cherry-plugin.json, fall back to leaves-plugin.json.
+        JarEntry entry = jarFile.getJarEntry(CHERRY_PLUGIN_JSON_FILE);
+        if (entry == null) {
+            entry = jarFile.getJarEntry(LEAVES_PLUGIN_JSON_FILE);
+        }
         if (entry == null) {
             return null;
         }

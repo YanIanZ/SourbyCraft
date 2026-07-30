@@ -5,7 +5,7 @@ repositories {
 }
 
 dependencies {
-    findProject(":sourbycraft-api")?.also { implementation(it) }
+    findProject(":sourbyapi")?.also { implementation(it) }
 }
 
 tasks.processResources {

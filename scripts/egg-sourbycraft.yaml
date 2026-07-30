@@ -19,8 +19,19 @@ docker_images:
   'Java 25': 'ghcr.io/pelican-eggs/yolks:java_25'
   'Java 21': 'ghcr.io/pelican-eggs/yolks:java_21'
 file_denylist: {}
+# Heap sizing: gc-tuner.sh was removed in v10.3 — its flags set -Xmx to the FULL container
+# allocation, leaving no headroom for off-heap (netty/Geyser direct buffers, metaspace, threads,
+# ZGC bookkeeping); the panel then kills the container on RSS with no Java OOM in the log ("crash
+# out of memory" with a healthy-looking heap). Heap = 70% of SERVER_MEMORY (panel MiB), ZGC
+# generational with uncommit so idle pages return to the OS, direct memory capped.
+# --add-modules=jdk.incubator.vector: resolves the SIMD incubator module so Luminol's SIMDConfig
+#   (enabled by default) actually vectorizes map-color/mob-AI math — without it the module is
+#   unresolvable and SIMD silently no-ops with a "not configured" warning. MUST be before -jar.
+# -XX:+ExplicitGCInvokesConcurrent: makes the perf engine's memory-EMERGENCY System.gc() a
+#   CONCURRENT ZGC cycle (ms pause) rather than risk a stop-the-world, so the container-RSS relief
+#   valve is safe to fire under load.
 startup_commands:
-  Default: './gc-tuner.sh --start'
+  Default: 'HEAP_MB=$(( ${SERVER_MEMORY:-4096} * 70 / 100 )); SOFT_MB=$(( HEAP_MB * 80 / 100 )); java --add-modules=jdk.incubator.vector -Xms1G -Xmx${HEAP_MB}M -XX:+UseZGC -XX:+ZGenerational -XX:+ExplicitGCInvokesConcurrent -XX:SoftMaxHeapSize=${SOFT_MB}M -XX:ZUncommitDelay=60 -XX:MaxDirectMemorySize=1G -jar server.jar nogui'
 config:
   files:
     server.properties:
@@ -98,12 +109,9 @@ scripts:
       fi
       
       echo "SourbyCraft installation complete"
-      
-      # Download gc-tuner.sh for GC auto-tuning
-      if [ ! -f gc-tuner.sh ]; then
-        curl -sL "https://raw.githubusercontent.com/${REPO}/main/scripts/gc-tuner.sh" -o gc-tuner.sh
-        chmod +x gc-tuner.sh
-      fi
+      # gc-tuner.sh removed in v10.3 — JVM flags now live in the startup command (70%-of-container
+      # heap + ZGC uncommit). A stale downloaded copy is deleted so nothing re-runs it.
+      rm -f gc-tuner.sh
     container: 'ghcr.io/pelican-eggs/installers:alpine'
     entrypoint: ash
 variables:

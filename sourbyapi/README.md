@@ -1,0 +1,96 @@
+# sourbyapi
+
+SourbyCraft's plugin API artifact — `dev.iyanz.sourbycraft:sourbyapi`. This is the module every
+SourbyCraft plugin (and any Bukkit/Paper plugin running on SourbyCraft) compiles against.
+
+## What this actually is
+
+**`sourbyapi` is the Canvas/Paper API surface, republished under the SourbyCraft group id — it is
+not a separate reimplementation.** There is no `sourbyapi/src/` directory: this project contributes
+zero custom source of its own. Its `build.gradle.kts` (materialized from Canvas's own
+`canvas-api/build.gradle.kts` by the weaver patcher — see `sourbyapi/build.gradle.kts.patch` and the
+`upstreams.canvas { ... }` block in the root `build.gradle.kts`) points its Gradle source sets
+directly at:
+
+- `../paper-api/src/main/java` — upstream Paper's public API (`org.bukkit.*`, `io.papermc.paper.*`)
+- `../canvas-api/src/main/java` — Canvas's additions on top of Paper's API
+
+A repo-wide search for `dev.iyanz` classes inside `sourbyapi/` (excluding generated `build/`
+output) finds **none**. Every class a plugin imports from this artifact still lives in `org.bukkit`,
+`io.papermc.paper`, or Canvas's own API packages — SourbyCraft has not renamed, wrapped, or added to
+any of it. The `paper-patches/` directory holds patches Canvas/SourbyCraft applies to the *upstream
+Paper API sources* before they land in `paper-api/` (e.g. Javadoc/behavioral fixes), not new
+SourbyCraft-authored classes.
+
+What SourbyCraft *does* change is the packaging:
+
+- **Group id**: published as `dev.iyanz.sourbycraft:sourbyapi` instead of `io.papermc.paper:paper-api`.
+- **Automatic-Module-Name**: still `org.bukkit` — deliberately, so the module name plugins see on the
+  module path is unchanged.
+- **Capability aliases**: the jar declares the same Gradle module capabilities as
+  `io.papermc.paper:paper-mojangapi`, `com.destroystokyo.paper:paper-api`,
+  `org.spigotmc:spigot-api` and `org.bukkit:bukkit`, so it can substitute for any of those
+  coordinates in a dependency graph without a conflict.
+
+In short: **this is the branded API surface, not a new API.** A plugin built against `sourbyapi`
+compiles against the exact same `org.bukkit`/`io.papermc.paper` classes it would against upstream
+Paper — only the artifact coordinates (and, for SourbyCraft's own `sourbycraft-server` module, the
+runtime behind them) are SourbyCraft's.
+
+## Artifact coordinates
+
+```
+group:    dev.iyanz.sourbycraft
+artifact: sourbyapi
+version:  <releaseVersion>-<CHANNEL>   e.g. 26.2-REL on a release/* branch, 26.2-DEV otherwise
+```
+
+`version` is computed at configuration time from the current git branch (see the root
+`settings.gradle.kts`), matching the same `REL`/`DEV`/`EXP` channel suffix reported by `/ver` and the
+auto-updater. CI (`jitpack.yml`) builds and `publishToMavenLocal`s this module for external
+consumption.
+
+## Consuming it
+
+**From inside this repo** (e.g. `test-plugin`), reference the Gradle project directly:
+
+```kotlin
+dependencies {
+    implementation(project(":sourbyapi"))
+}
+```
+
+**From an external plugin project**, depend on the published artifact:
+
+```kotlin
+dependencies {
+    compileOnly("dev.iyanz.sourbycraft:sourbyapi:26.2-REL")
+}
+```
+
+### `api-version` in your plugin descriptor
+
+The Bukkit API version a plugin declares in `paper-plugin.yml` / `plugin.yml` comes from the
+`apiVersion` Gradle property in the root `gradle.properties`, currently:
+
+```
+apiVersion=26.2
+```
+
+so a plugin's descriptor should declare:
+
+```yaml
+api-version: '26.2'
+```
+
+(`test-plugin/src/main/resources/paper-plugin.yml` does exactly this, substituting
+`${api_version}` at build time from the same property.)
+
+## Directory contents
+
+- `build.gradle.kts` / `build.gradle.kts.patch` — the weaver-materialized build script + the patch
+  that produced it from `canvas-api/build.gradle.kts`.
+- `paper-patches/` — patches applied to the upstream `paper-api` sources before they land in the
+  sibling `paper-api/` project that this module's source set reads from.
+
+No other source lives here; the compiled classes come entirely from `paper-api/` and `canvas-api/`.

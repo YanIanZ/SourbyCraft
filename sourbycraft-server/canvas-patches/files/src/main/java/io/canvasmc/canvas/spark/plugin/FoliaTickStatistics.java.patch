@@ -1,0 +1,17 @@
+--- a/src/main/java/io/canvasmc/canvas/spark/plugin/FoliaTickStatistics.java
++++ b/src/main/java/io/canvasmc/canvas/spark/plugin/FoliaTickStatistics.java
+@@ -15,6 +_,14 @@
+     private static final AverageInfo EMPTY_AVERAGE_INFO = new AverageInfo();
+ 
+     @Override
++    public int gameTargetTps() {
++        // SourbyCraft - spark-paper 1.10.172 added this abstract method (target/ideal TPS used
++        // for %/health formatting). Canvas's region ticker exposes the configured tick rate the
++        // same way getTpsFor()'s own "no data yet" fallback already does below.
++        return (int) TickRegionScheduler.getTickRate();
++    }
++
++    @Override
+     public double tps5Sec() {
+         return getTpsFor(TimeSpan.TPS_5_SEC);
+     }
