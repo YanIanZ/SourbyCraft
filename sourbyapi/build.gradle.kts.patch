@@ -1,18 +1,6 @@
 --- a/canvas-api/build.gradle.kts
 +++ b/canvas-api/build.gradle.kts
-@@ -4,7 +_,10 @@
-     `java-library`
-     `maven-publish`
-     idea
--    id("io.canvasmc.weaver.dependency-bridge")
-+    // SourbyCraft-on-Canvas - io.canvasmc.weaver.dependency-bridge is a Canvas-internal
-+    // convention plugin that keeps canvas-server/canvas-api dependency versions in sync during
-+    // Canvas's OWN release process; it is not needed for our downstream build (we pin our own
-+    // versions directly) and is dropped here, not required to compile.
- }
- 
- java {
-@@ -107,17 +_,21 @@
+@@ -121,17 +_,21 @@
          java {
              srcDir(generatedDir)
              srcDir(file("../paper-api/src/main/java"))

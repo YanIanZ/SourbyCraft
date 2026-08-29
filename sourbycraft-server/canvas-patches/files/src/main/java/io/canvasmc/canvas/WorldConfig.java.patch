@@ -1,6 +1,6 @@
 --- a/src/main/java/io/canvasmc/canvas/WorldConfig.java
 +++ b/src/main/java/io/canvasmc/canvas/WorldConfig.java
-@@ -47,7 +_,7 @@
+@@ -48,7 +_,7 @@
      // we have a logger internally here for level-config related things, and should not be used globally. the global
      // config class should be the logger publicly used
  
@@ -9,7 +9,7 @@
  
      private static final Path BASE_FILE = Path.of("config/canvas-worlds.yml").toAbsolutePath().normalize();
  
-@@ -223,10 +_,16 @@
+@@ -224,10 +_,16 @@
                  ).greedyString();
          }
  

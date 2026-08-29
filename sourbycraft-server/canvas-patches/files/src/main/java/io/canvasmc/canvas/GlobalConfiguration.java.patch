@@ -1,26 +1,6 @@
 --- a/src/main/java/io/canvasmc/canvas/GlobalConfiguration.java
 +++ b/src/main/java/io/canvasmc/canvas/GlobalConfiguration.java
-@@ -1,18 +_,13 @@
- package io.canvasmc.canvas;
- 
- import ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom;
--import io.canvasmc.canvas.commands.CanvasCommands;
-+// SourbyCraft - /canvas command removed: CanvasCommands + *SubCommand imports dropped (see below).
- import io.canvasmc.canvas.configuration.ConfigurationProvider;
- import io.canvasmc.canvas.configuration.Part;
- import io.canvasmc.canvas.configuration.Resolver;
- import io.canvasmc.canvas.configuration.Style;
- import io.canvasmc.canvas.configuration.Validator;
- import io.canvasmc.canvas.simd.SIMDDetection;
--import io.canvasmc.canvas.subcommands.RegionBarSubCommand;
--import io.canvasmc.canvas.subcommands.RegionTickSubCommand;
--import io.canvasmc.canvas.subcommands.ReloadSubCommand;
--import io.canvasmc.canvas.subcommands.SetMaxPlayersSubCommand;
--import io.canvasmc.canvas.subcommands.WorldDistanceSubCommand;
- import io.canvasmc.canvas.threadedregions.scheduler.AffinitySchedulerThreadPool;
- import io.canvasmc.canvas.util.FasterRandomSource;
- import io.canvasmc.canvas.util.LockedReference;
-@@ -56,7 +_,7 @@
+@@ -58,7 +_,7 @@
  
      protected static final int CHAR_LIM = 90;
  
@@ -29,7 +9,7 @@
      public static final LockedReference<TimeSpan> AUTOSAVE_SPAN = new LockedReference<>(null);
  
      public static final int INFO = 0;
-@@ -118,13 +_,13 @@
+@@ -120,13 +_,13 @@
                          return buildStatus;
                      }).thenAccept(buildStatus -> RegionizedServer.getInstance().addTask(() -> {
                          BUILD_STATUS = buildStatus;
@@ -50,40 +30,7 @@
                      }));
                  }
              },
-@@ -239,25 +_,19 @@
-                 }
-             }
- 
--            // register our commands to the Canvas command tree
--            CanvasCommands.register(
--                SetMaxPlayersSubCommand.class,
--                RegionBarSubCommand.class,
--                WorldDistanceSubCommand.class,
--                ReloadSubCommand.class,
--                RegionTickSubCommand.class // TODO - merge this into regiondata command
--                // RegionDataCommand.class // TODO - regiondata command
--            );
--
--            broadcast("Registered all Canvas commands", INFO);
-+            // SourbyCraft - /canvas command removed. The subcommand registration (SetMaxPlayers,
-+            // RegionBar, WorldDistance, Reload, RegionTick) and its "Registered all Canvas commands"
-+            // broadcast are dropped; the actual dispatcher registration (CanvasCommands.build in
-+            // net.minecraft.commands.Commands) is also removed, so no /canvas command exists at boot.
-         }
- 
-         // we do not want to allow larger unit values, nobody should autosave in units larger than
-         // days, like who tf would use time units like "1 week"??
-         AUTOSAVE_SPAN.swapValue((_) -> TimeSpan.parse(configuration.autosave.autosaveFrequency).verifyIsntLargeUnit());
- 
--        broadcast("Server will autosave enabled selection every " + configuration.autosave.autosaveFrequency, INFO);
--        broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
-+        // SourbyCraft - trim startup log noise: the autosave-frequency and default-tick-rate INFO
-+        // broadcasts are redundant (both values live in config/canvas-server.yml). Dropped to reduce
-+        // boot spam; warnings/errors are kept.
-     }
- 
-     public static GlobalConfiguration getInstance() {
-@@ -391,7 +_,12 @@
+@@ -384,7 +_,12 @@
  
          public long overloadedLogMillis = 5_000L;
          public float defaultTickRate = 20.0F;
@@ -97,7 +44,7 @@
  
          public enum GuardSeverity {
              SILENT,
-@@ -645,7 +_,10 @@
+@@ -618,7 +_,10 @@
  
          private boolean enableLogCleaner = false;
          private String cleanerTimeSpan = "30d";
