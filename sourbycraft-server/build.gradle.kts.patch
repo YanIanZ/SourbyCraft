@@ -1,6 +1,6 @@
 --- a/canvas-server/build.gradle.kts
 +++ b/canvas-server/build.gradle.kts
-@@ -2,13 +_,17 @@
+@@ -2,6 +_,10 @@
  import io.papermc.paperweight.attribute.DevBundleOutput
  import io.papermc.paperweight.util.*
  import java.time.Instant
@@ -11,15 +11,7 @@
  import io.papermc.paperweight.tasks.MergeAccessTransforms
  
  plugins {
-     `java-library`
-     `maven-publish`
-     idea
--    id("io.canvasmc.weaver.core")
-+    id("io.canvasmc.weaver.core")
-     id("io.papermc.fill.gradle") version "1.0.12"
- }
- 
-@@ -16,21 +_,46 @@
+@@ -16,21 +_,49 @@
  
  dependencies {
      mache("io.papermc:mache:26.2+build.1")
@@ -130,44 +122,9 @@
  dependencies {
 -    implementation(projects.canvasApi)
 +    implementation(project(":sourbyapi"))
-     implementation("ca.spottedleaf:leafpile:1.0.0")
+     implementation("ca.spottedleaf:leafpile:1.2.0")
      implementation("org.jline:jline-terminal-ffm:3.29.0") // use ffm on java 22+
      implementation("org.jline:jline-terminal-jni:3.29.0") // fall back to jni on java 21
-@@ -150,6 +_,11 @@
-     implementation("net.openhft:affinity:2026.2")
-     implementation("io.canvasmc.httpclient:httpclient:1.0.1")
- 
-+    // SourbyCraft - unified TOML config (own nightconfig CommentedFileConfig, resolved directly
-+    // by SourbyCraftConfig — no Luminol ConfigManager dependency on this base).
-+    implementation("com.electronwill.night-config:toml:3.9.0")
-+    implementation("com.github.luben:zstd-jni:1.5.7-11")
-+
-     /*
-       Required to add the missing Log4j2Plugins.dat file from log4j-core
-       which has been removed by Mojang. Without it, log4j has to classload
-@@ -191,9 +_,13 @@
-     testImplementation("org.ow2.asm:asm-tree:9.9.1")
-     testImplementation("org.junit-pioneer:junit-pioneer:2.3.0") // CartesianTest
- 
--    // Spark
-+    // Spark (Canvas built-in). Bumped to the latest spark-paper (1.10.172, per repo.papermc.io —
-+    // spark-api has published only one build ever, 0.1-20240720.200737-2, so that stays pinned).
-+    // spark-paper's shaded me.lucko.spark.paper.common.* ABI moved between these two releases:
-+    // SparkPlatform.getAllSparkPermissions() -> platform.getCommandManager().getAllSparkPermissions(),
-+    // and TickStatistics gained the abstract gameTargetTps(). Both call sites are Canvas's OWN
-+    // vendored spark bridge (io.canvasmc.canvas.spark.*), fixed via our canvasServer patch layer
-+    // (sourbycraft-server/canvas-patches) rather than reverting the version — see
-+    // FoliaSparkPlugin.java / FoliaTickStatistics.java patches for the actual fix.
-     implementation("me.lucko:spark-api:0.1-20240720.200737-2")
--    implementation("me.lucko:spark-paper:1.10.152")
-+    implementation("me.lucko:spark-paper:1.10.172")
-+
-+    // SourbyCraft - offline geoip for /ping (reads a local MaxMind-DB .mmdb; no player IP
-+    // leaves the server). Pulls maxmind-db + jackson (databind/core/annotations/jsr310) transitively.
-+    implementation("com.maxmind.geoip2:geoip2:5.1.0")
- }
- 
- tasks.jar {
 @@ -201,35 +_,62 @@
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
@@ -249,7 +206,7 @@
          )
          for (tld in setOf("net", "com", "org")) {
              attributes("$tld/bukkit", "Sealed" to true)
-@@ -373,26 +_,39 @@
+@@ -378,26 +_,39 @@
      mainClass.set(null as String?)
  }
  
