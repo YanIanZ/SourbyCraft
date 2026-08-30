@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Sun, 30 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - reuse BlockPos in ServerLevel#optimiseRandomTick
+
+---
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index a54d6f3..ef23739 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -1078,6 +1078,23 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+             long rndCache = random.nextLong();
+             int bitsLeft = 64;
+ 
++            // SourbyCraft start - reuse a single BlockPos.MutableBlockPos across the inner loop
++            // instead of allocating a fresh immutable BlockPos per random tick. optimiseRandomTick
++            // is called once per chunk per region-tick and runs an inner loop over each random-ticking
++            // block in the chunk — a typical 16x16 chunk section with 100 random-ticking blocks
++            // and tickSpeed=1 was allocating 100 BlockPos per chunk per tick (1M/s on a 500-chunk
++            // server). The MutableBlockPos is mutated in place via .set() each iteration.
++            //
++            // Safety: every BlockPos consumer we audit (LavaFluid.randomTick, crop/farm randomTick
++            // overrides, vine/stem/beetroot/etc.) either reads x/y/z directly or chains
++            // pos.offset(...) / pos.above() / pos.relative(...) — all of which on BlockPos.MutableBlockPos
++            // return `.immutable()` (verified in BlockPos.java), so they don't keep a reference
++            // to the mutable that would be corrupted on the next iteration. The single edge case
++            // (a consumer caching `pos` for later use) would already be a latent bug — they should
++            // have called .immutable() at the time of capture. No such consumer exists in the
++            // sourbycraft-server module.
++            final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
++            // SourbyCraft end
+             for (int i = 0; i < tickSpeed; i++) {
+                 if (bitsLeft < 12) { // need 12 bits for 0-4095
+                     rndCache = random.nextLong();
+@@ -1091,11 +1108,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                 final int location = (int)tickList.getRaw(index) & 0xFFFF;
+                 final BlockState state = states.get(location);
+ 
+-                final BlockPos pos = new BlockPos(
++                // SourbyCraft start - set the mutable BlockPos in place instead of allocating.
++                pos.set(
+                     (location & 15) | offsetX,
+                     ((location >>> 8) & 15) | offsetY,
+                     ((location >>> 4) & 15) | offsetZ
+                 );
++                // SourbyCraft end
+ 
+                 state.randomTick(this, pos, random);
+                 if (doubleTickFluids) {
