@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Sun, 30 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - store Entity#lastKnownSpeed as 3 doubles instead of Vec3
+
+---
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 5ff72c2..05139e1 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -398,8 +398,17 @@ public abstract class Entity
+     private float crystalSoundIntensity;
+     private int lastCrystalSoundPlayTick;
+     private boolean hasVisualFire;
+-    private Vec3 lastKnownSpeed = Vec3.ZERO;
++    // SourbyCraft start - lastKnownSpeed stored as 3 doubles instead of Vec3. computeSpeed() is
++    // called from Entity#baseTick per-entity per-tick, and the previous Vec3 version allocated
++    // a fresh Vec3 every call (this.position().subtract(this.lastKnownPosition)). Three doubles
++    // cost 24 bytes on the entity instance and zero allocations per tick. The two consumers
++    // (hasMovedHorizontallyRecently and getKnownSpeed) are updated to use the primitives
++    // directly; getKnownSpeed rebuilds a Vec3 on demand from a path that's already rare
++    // (caller allocates a fresh Vec3 from the Player, SulfurCube, or KineticWeapon call
++    // site), so no per-tick alloc from the per-tick field change.
++    private double lastKnownSpeedX, lastKnownSpeedY, lastKnownSpeedZ;
+     private @Nullable Vec3 lastKnownPosition;
++    // SourbyCraft end
+     public net.kyori.adventure.util.TriState visualFire = net.kyori.adventure.util.TriState.NOT_SET; // Paper - improve visual fire API
+     private @Nullable BlockState inBlockState = null;
+     public static final int MAX_MOVEMENTS_HANDELED_PER_TICK = 100;
+@@ -1019,12 +1028,19 @@ public abstract class Entity
+     }
+ 
+     protected void computeSpeed() {
++        // SourbyCraft start - rewritten to write to the 3-double lastKnownSpeed fields instead
++        // of allocating a new Vec3 every call. Reads this.position() once into a local since it's
++        // a field access (Vec3 by reference), so this is the same pointer this.lastKnownPosition
++        // would have held after the assignment; we use pos.x/y/z directly for the delta math.
+         if (this.lastKnownPosition == null) {
+             this.lastKnownPosition = this.position();
+         }
+-
+-        this.lastKnownSpeed = this.position().subtract(this.lastKnownPosition);
+-        this.lastKnownPosition = this.position();
++        final Vec3 pos = this.position();
++        this.lastKnownSpeedX = pos.x - this.lastKnownPosition.x;
++        this.lastKnownSpeedY = pos.y - this.lastKnownPosition.y;
++        this.lastKnownSpeedZ = pos.z - this.lastKnownPosition.z;
++        this.lastKnownPosition = pos;
++        // SourbyCraft end
+     }
+ 
+     public void setSharedFlagOnFire(final boolean value) {
+@@ -1500,7 +1516,11 @@ public abstract class Entity
+     }
+ 
+     public boolean hasMovedHorizontallyRecently() {
+-        return Math.abs(this.lastKnownSpeed.horizontalDistance()) > 1.0E-5F;
++        // SourbyCraft start - read from 3-double lastKnownSpeed directly. horizontalDistance is
++        // sqrt(x^2 + z^2); we keep the same threshold (1.0E-5F, which means any movement faster
++        // than 1.0E-5 blocks per tick triggers true, identical to the old Vec3-based check).
++        return Math.sqrt(this.lastKnownSpeedX * this.lastKnownSpeedX + this.lastKnownSpeedZ * this.lastKnownSpeedZ) > 1.0E-5D;
++        // SourbyCraft end
+     }
+ 
+     public void applyEffectsFromBlocks(final Vec3 from, final Vec3 to) {
+@@ -6748,7 +6768,14 @@ public abstract class Entity
+     }
+ 
+     public Vec3 getKnownSpeed() {
+-        return this.getControllingPassenger() instanceof Player controller && this.isAlive() ? controller.getKnownSpeed() : this.lastKnownSpeed;
++        // SourbyCraft start - rebuild a Vec3 on demand from the 3-double lastKnownSpeed fields.
++        // This is a rare call path (SulfurCube, KineticWeapon; ServerPlayer overrides this entirely),
++        // so the per-call Vec3 allocation is acceptable — the win is the per-tick computeSpeed
++        // path that no longer allocates.
++        return this.getControllingPassenger() instanceof Player controller && this.isAlive()
++            ? controller.getKnownSpeed()
++            : new Vec3(this.lastKnownSpeedX, this.lastKnownSpeedY, this.lastKnownSpeedZ);
++        // SourbyCraft end
+     }
+ 
+     public @Nullable ItemStack getWeaponItem() {

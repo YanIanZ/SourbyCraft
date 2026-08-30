@@ -63,7 +63,13 @@ jobs:
         run: |
           # Release number == build number from r6 onward: the auto-updater compares the tag's rN
           # against the running jar's own build Nf, so the two MUST be stamped from the same counter.
-          ./gradlew slimPaperclipJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.next }}
+          #
+          # NOTE: the task is `slimServerJar` (registered in root build.gradle.kts:112) — not the
+          # `slimPaperclipJar` name this workflow used pre-Canvas rebase. The Folia line at
+          # release/26.2 had its own paperweight fork (`sourbypatcher/`) register a task under the
+          # old name; this Canvas line uses the stock weaver toolchain, and the slim-jar task
+          # was renamed to drop the paperclip assumption.
+          ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.next }}
           mkdir -p release
           cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-REL.jar
 
