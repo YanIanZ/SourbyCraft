@@ -222,6 +222,20 @@ subprojects {
         "testRuntimeOnly"("org.junit.platform:junit-platform-launcher")
     }
 
+    if (project.name == "sourbycraft-server") {
+        dependencies {
+            // SourbyCraft - unified TOML config (own nightconfig CommentedFileConfig, resolved
+            // directly by SourbyCraftConfig). Added here instead of via build.gradle.kts.patch
+            // because the weaver patcher rejects the surrounding hunk after Canvas ref bumps
+            // (the patch hunk count drifts as upstream hunks shift line offsets).
+            "implementation"("com.electronwill.night-config:toml:3.9.0")
+            // SourbyCraft - offline GeoIP for /ping (reads a local MaxMind-DB .mmdb; no player IP
+            // leaves the server). Pulls maxmind-db + jackson (databind/core/annotations/jsr310)
+            // transitively.
+            "implementation"("com.maxmind.geoip2:geoip2:5.1.0")
+        }
+    }
+
     tasks.withType<AbstractArchiveTask>().configureEach {
         isPreserveFileTimestamps = false
         isReproducibleFileOrder = true

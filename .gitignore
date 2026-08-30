@@ -478,3 +478,13 @@ Metal/.gradle/
 # packages named "world" (base Leaves/Leaf/Lithium source). Re-include source trees.
 !**/src/main/java/**/world/
 !**/src/main/java/**/world/**
+
+# SourbyCraft - agent tooling (Claude/OpenCode) caches; local-only
+.claude/
+.superpowers/
+
+# Local patch parking lot — not tracked; put patches that need rebase/manual port here
+sourbycraft-server/minecraft-patches/features/.skipped/
+sourbycraft-server/canvas-patches/files/.skipped/
+sourbycraft-server/paper-patches/.skipped/
+sourbyapi/paper-patches/.skipped/
