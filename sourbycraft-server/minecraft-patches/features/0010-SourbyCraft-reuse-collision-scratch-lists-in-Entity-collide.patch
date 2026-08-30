@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Sun, 30 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - reuse collision scratch lists in Entity#collide
+
+---
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 5cd3b13..5ff72c2 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -405,6 +405,14 @@ public abstract class Entity
+     public static final int MAX_MOVEMENTS_HANDELED_PER_TICK = 100;
+     private final ArrayDeque<Entity.Movement> movementThisTick = new ArrayDeque<>(100);
+     private final List<Entity.Movement> finalMovementsThisTick = new ObjectArrayList<>();
++    // SourbyCraft start - reuse collision scratch lists in Entity#collide. Per-entity per-tick when
++    // moving: avoids 3 fresh ArrayList (VoxelShape + AABB + AABB) allocations per call by clearing
++    // and re-filling the same backing arrays. The collision utilities only add() + iterate, never
++    // retain references, so re-cleared lists are observationally identical to fresh ones.
++    private final List<VoxelShape> collisionScratchVoxels = new ArrayList<>();
++    private final List<AABB> collisionScratchAabbs = new ArrayList<>();
++    private final List<AABB> collisionScratchEntityAabbs = new ArrayList<>();
++    // SourbyCraft end
+     private final LongSet visitedBlocks = new LongOpenHashSet();
+     private final InsideBlockEffectApplier.StepBasedCollector insideEffectCollector = new InsideBlockEffectApplier.StepBasedCollector();
+     private CustomData customData = CustomData.EMPTY;
+@@ -1699,11 +1707,18 @@ public abstract class Entity
+         if (xZero & yZero & zZero) {
+             return movement;
+         }
++        // SourbyCraft start - reuse scratch lists across calls (see declaration above). Clearing up
++        // front (not after the early-return above) so the lists are always empty before refilling
++        // and we never leak entries from a previous call.
++        this.collisionScratchVoxels.clear();
++        this.collisionScratchAabbs.clear();
++        this.collisionScratchEntityAabbs.clear();
++        // SourbyCraft end
+ 
+         final AABB currentBox = this.getBoundingBox();
+ 
+-        final List<VoxelShape> potentialCollisionsVoxel = new ArrayList<>();
+-        final List<AABB> potentialCollisionsBB = new ArrayList<>();
++        final List<VoxelShape> potentialCollisionsVoxel = this.collisionScratchVoxels;
++        final List<AABB> potentialCollisionsBB = this.collisionScratchAabbs;
+ 
+         final AABB initialCollisionBox;
+         if (xZero & zZero) {
+@@ -1715,7 +1730,7 @@ public abstract class Entity
+             initialCollisionBox = currentBox.expandTowards(movement);
+         }
+ 
+-        final List<AABB> entityAABBs = new ArrayList<>();
++        final List<AABB> entityAABBs = this.collisionScratchEntityAabbs;
+         ca.spottedleaf.moonrise.patches.collisions.CollisionUtil.getEntityHardCollisions(
+             this.level, (Entity)(Object)this, initialCollisionBox, entityAABBs, 0, null
+         );
