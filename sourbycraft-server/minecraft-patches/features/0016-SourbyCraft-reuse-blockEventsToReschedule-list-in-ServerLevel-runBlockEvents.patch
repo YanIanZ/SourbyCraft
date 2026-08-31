@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Sun, 30 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - reuse blockEventsToReschedule list in ServerLevel#runBlockEvents
+
+---
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index c5b1a68..ce9832a 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -774,6 +774,14 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     // mutable BlockPos (0013). Saves 1 ReferenceOpenHashSet allocation per region per tick.
+     private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<WorldBorder> worldBordersScratch = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
+     // SourbyCraft end
++    // SourbyCraft start - reuse a single ArrayList across runBlockEvents calls. Called once per
++    // region per tick; the previous code allocated a fresh `new ArrayList<>(64)` every call. The
++    // list is local to one method call (built up in the loop, then handed to pushBlockEvents
++    // which iterates and copies each element into the region's pending queue — see
++    // RegionizedWorldData.pushBlockEvents), so reuse via .clear() at the top of the method is
++    // safe. Same pattern as 0010/0013/0014/0015. Saves 1 ArrayList allocation per region per tick.
++    private final List<BlockEventData> blockEventsToRescheduleScratch = new ArrayList<>(64);
++    // SourbyCraft end
+ 
+     public long lastMapAutoSave = System.nanoTime();
+ 
+@@ -2223,7 +2231,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     }
+ 
+     private void runBlockEvents() {
+-        List<BlockEventData> blockEventsToReschedule = new ArrayList<>(64); // Folia - region threading
++        // SourbyCraft start - reuse the blockEventsToRescheduleScratch field (see declaration
++        // above). .clear() at the top so the loop only sees fresh entries; the list is local to
++        // this method (passed to pushBlockEvents at the end which iterates and copies each element).
++        this.blockEventsToRescheduleScratch.clear();
++        // SourbyCraft end
+ 
+         // Folia start - region threading
+         final io.papermc.paper.threadedregions.RegionizedWorldData worldRegionData = this.getCurrentWorldData();
+@@ -2245,11 +2257,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                         );
+                 }
+             } else {
+-                blockEventsToReschedule.add(eventData); // Folia - region threading
++                this.blockEventsToRescheduleScratch.add(eventData); // Folia - region threading
+             }
+         }
+ 
+-        worldRegionData.pushBlockEvents(blockEventsToReschedule); // Folia - region threading
++        worldRegionData.pushBlockEvents(this.blockEventsToRescheduleScratch); // Folia - region threading
+     }
+ 
+     private boolean doBlockEvent(final BlockEventData eventData) {
