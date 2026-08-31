@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Sun, 30 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - reuse WorldBorder scratch set in ServerLevel#tick
+
+---
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index ef23739..c5b1a68 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -767,6 +767,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+ 
+     public static final record PendingTeleport(Entity.EntityTreeNode rootVehicle, Vec3 to) {}
+     private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<PendingTeleport> pendingTeleports = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
++    // SourbyCraft start - reuse a single ReferenceOpenHashSet across region ticks. ServerLevel#tick
++    // is called once per region per tick; the per-player world-border dedup set was allocated
++    // fresh every call, then thrown away. Cleared at the top of the build loop and re-filled
++    // — same pattern as the entity-collision scratch lists (0010) and the optimiseRandomTick
++    // mutable BlockPos (0013). Saves 1 ReferenceOpenHashSet allocation per region per tick.
++    private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<WorldBorder> worldBordersScratch = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
++    // SourbyCraft end
+ 
+     public long lastMapAutoSave = System.nanoTime();
+ 
+@@ -869,14 +876,17 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+             // Folia start - region threading
+             // this.getWorldBorder().tick();
+             // tick per-player world borders here so we can detect duplicates and avoid double ticking
+-            it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<WorldBorder> worldBorders = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
++            // SourbyCraft start - reuse the worldBordersScratch field across region ticks (see
++            // declaration above). Cleared before the build loop so previous tick's entries
++            // don't leak into this tick's tick() iteration.
++            this.worldBordersScratch.clear();
+             for (ServerPlayer player : regionizedWorldData.getLocalPlayers()) {
+                 org.bukkit.craftbukkit.CraftWorldBorder worldBorder = (org.bukkit.craftbukkit.CraftWorldBorder)player.getBukkitEntity().getWorldBorder();
+                 if (worldBorder != null) {
+-                    worldBorders.add(worldBorder.getHandle());
++                    this.worldBordersScratch.add(worldBorder.getHandle());
+                 }
+             }
+-            for (WorldBorder worldBorder : worldBorders) {
++            for (WorldBorder worldBorder : this.worldBordersScratch) {
+                 worldBorder.tick();
+             }
+             // this.advanceWeatherCycle();
