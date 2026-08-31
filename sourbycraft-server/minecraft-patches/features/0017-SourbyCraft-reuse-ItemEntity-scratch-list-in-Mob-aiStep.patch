@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Sun, 30 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - reuse ItemEntity scratch list in Mob#aiStep
+
+---
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+index b52e114..fb0f5c2 100644
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -109,6 +109,15 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+     private static final int MOB_FLAG_AGGRESSIVE = 4;
+     protected static final int PICKUP_REACH = 1;
+     private static final Vec3i ITEM_PICKUP_REACH = new Vec3i(1, 0, 1);
++    // SourbyCraft start - reuse a single List<ItemEntity> across Mob#aiStep calls. aiStep is
++    // called per-mob per-tick (with MOB_GRIEFING + canPickUpLoot gates), and the previous code
++    // called level.getEntitiesOfClass(ItemEntity.class, AABB) which allocated a fresh
++    // ObjectArrayList per call. Same pattern as 0010/0013/0014/0015/0016: pre-allocate the list
++    // as a per-Mob-instance field, fill it via the new 4-arg Level.getEntitiesOfClass overload,
++    // and iterate. Saves 1 ObjectArrayList allocation per mob per tick when MOB_GRIEFING and
++    // canPickUpLoot are both true.
++    private final List<ItemEntity> itemEntitiesScratch = new ArrayList<>();
++    // SourbyCraft end
+     private static final List<EquipmentSlot> EQUIPMENT_POPULATION_ORDER = List.of(
+         EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET
+     );
+@@ -548,8 +557,18 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+             && serverLevel.getGameRules().get(GameRules.MOB_GRIEFING)) {
+             Vec3i pickupReach = this.getPickupReach();
+ 
+-            for (ItemEntity entity : this.level()
+-                .getEntitiesOfClass(ItemEntity.class, this.getBoundingBox().inflate(pickupReach.getX(), pickupReach.getY(), pickupReach.getZ()))) {
++            // SourbyCraft start - reuse the itemEntitiesScratch list (see declaration above).
++            // .clear() so the loop only sees fresh entries from this tick; the 4-arg overload
++            // fills the list in place instead of allocating a new ObjectArrayList.
++            this.itemEntitiesScratch.clear();
++            this.level().getEntitiesOfClass(
++                ItemEntity.class,
++                this.getBoundingBox().inflate(pickupReach.getX(), pickupReach.getY(), pickupReach.getZ()),
++                null,
++                this.itemEntitiesScratch
++            );
++            for (ItemEntity entity : this.itemEntitiesScratch) {
++            // SourbyCraft end
+                 if (!entity.isRemoved() && !entity.getItem().isEmpty() && !entity.hasPickUpDelay() && this.wantsToPickUp(serverLevel, entity.getItem())) {
+                     // Paper start - Item#canEntityPickup
+                     if (!entity.canMobPickup) {
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index aa82f0d..2d69f3e 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -229,6 +229,19 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         return ret;
+     }
+ 
++    // SourbyCraft start - 4-arg overload of getEntitiesOfClass that fills a caller-provided
++    // output list instead of allocating a new ObjectArrayList per call. Mirrors the existing
++    // getEntities(type, bb, selector, output) 4-arg overload (line ~1937). The Mob.aiStep hot
++    // path uses this overload with a per-instance scratch list, so it no longer allocates a
++    // fresh ObjectArrayList per mob per tick.
++    public final <T extends Entity> void getEntitiesOfClass(
++        final Class<T> entityClass, final AABB boundingBox, final Predicate<? super T> predicate,
++        final List<? super T> output
++    ) {
++        ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getEntities(entityClass, null, boundingBox, output, predicate);
++    }
++    // SourbyCraft end
++
+     @Override
+     public final List<Entity> moonrise$getHardCollidingEntities(final Entity entity, final AABB box, final Predicate<? super Entity> predicate) {
+         final List<Entity> ret = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // Canvas - use optimized collection
