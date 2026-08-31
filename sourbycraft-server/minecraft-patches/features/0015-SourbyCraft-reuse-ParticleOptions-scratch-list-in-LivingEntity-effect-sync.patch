@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Sun, 30 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - reuse ParticleOptions scratch list in LivingEntity effect sync
+
+---
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 39080d2..433b225 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -991,6 +991,15 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+ 
+     private boolean tickingEffects = false; // CraftBukkit
+     private final java.util.Queue<Runnable> deferredEffectUpdates = new java.util.concurrent.ConcurrentLinkedQueue<>(); // CraftBukkit
++    // SourbyCraft start - reuse a single List<ParticleOptions> across calls. updateSynchronizedMobEffectParticles
++    // is called from updateInvisibilityStatus which runs per-entity per-tick via updateDirtyEffects
++    // (LivingEntity#updateDataBeforeSync). The previous code allocated a fresh ArrayList per call;
++    // now the field is cleared at the top of the method and reused. The list is local to one call
++    // (passed to entityData.set() which stores the value; the next call's .clear() repopulates it),
++    // so reuse is safe — same pattern as 0010/0013/0014. Saves 1 ArrayList allocation per
++    // living-entity per-tick when the entity has any active effects.
++    private final List<ParticleOptions> effectParticlesScratch = new java.util.ArrayList<>();
++    // SourbyCraft end
+ 
+     protected void tickEffects() {
+         if (this.level() instanceof ServerLevel serverLevel) {
+@@ -1060,8 +1069,11 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     }
+ 
+     private void updateSynchronizedMobEffectParticles() {
+-        // Canvas start - remove streams
+-        List<ParticleOptions> visibleEffectParticles = new java.util.ArrayList<>();
++        // SourbyCraft start - reuse the effectParticlesScratch field across calls (see declaration above).
++        // .clear() at the top so previous tick's entries don't leak; the entityData.set() below stores
++        // the list as the new synced value, and the next call's .clear() wipes that for reuse.
++        this.effectParticlesScratch.clear();
++        final List<ParticleOptions> visibleEffectParticles = this.effectParticlesScratch;
+         final Collection<MobEffectInstance> effectsValues = this.activeEffects.values(); // Canvas - optimized collection
+ 
+         for (MobEffectInstance effect : effectsValues) { // Canvas - optimized collection
+@@ -1069,7 +1081,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                 visibleEffectParticles.add(effect.getParticleOptions());
+             }
+         }
+-        // Canvas end - remove streams
++        // SourbyCraft end
+         this.entityData.set(DATA_EFFECT_PARTICLES, visibleEffectParticles);
+         this.entityData.set(DATA_EFFECT_AMBIENCE_ID, areAllEffectsAmbient(effectsValues)); // Canvas - optimized collection
+     }
