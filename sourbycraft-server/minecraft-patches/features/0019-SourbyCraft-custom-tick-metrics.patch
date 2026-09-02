@@ -8,7 +8,7 @@ diff --git a/ca/spottedleaf/common/time/RegionTickMetrics.java b/ca/spottedleaf/
 new file mode 100644
 --- /dev/null
 +++ b/ca/spottedleaf/common/time/RegionTickMetrics.java
-@@ -0,0 +1,571 @@
+@@ -0,0 +1,634 @@
 +package ca.spottedleaf.common.time;
 +
 +import java.util.Arrays;
@@ -31,6 +31,7 @@ new file mode 100644
 +    private static final long HISTOGRAM_MIN = 250_000L;
 +    private static final long HISTOGRAM_MAX = 16L * SECOND;
 +    private static final double HISTOGRAM_LOG_RATIO = Math.log((double)HISTOGRAM_MAX / HISTOGRAM_MIN) / 62.0;
++    private static final long[] EMPTY_RAW_DATA = new long[0];
 +
 +    private final long[] rawStarts = new long[RAW_CAPACITY];
 +    private final long[] rawEnds = new long[RAW_CAPACITY];
@@ -91,6 +92,9 @@ new file mode 100644
 +
 +    public synchronized TickData.TickReportData report(final long windowNanos, final TickTime inProgress,
 +                                                       final long nowNanos, final long targetIntervalNanos) {
++        if (windowNanos > FIFTEEN_SECONDS) {
++            return this.aggregateReport(windowNanos, inProgress, nowNanos, targetIntervalNanos);
++        }
 +        int count = 0;
 +        final long cutoff = subtractFloor(nowNanos, windowNanos);
 +        for (int i = 0; i < this.rawSize; ++i) {
@@ -146,6 +150,65 @@ new file mode 100644
 +        return new TickData.TickReportData(count, intervalStart, intervalEnd, totalExecution,
 +            Math.min(1.0, (double)utilised / (double)windowNanos),
 +            segmented(intervals, true), segmented(executions, false), segmented(missingCpu, false));
++    }
++
++    private TickData.TickReportData aggregateReport(final long windowNanos, final TickTime inProgress,
++                                                    final long nowNanos, final long targetIntervalNanos) {
++        final WindowSnapshot completed = this.bucketWindow(nowNanos, windowNanos);
++        long count = completed.sampleCount();
++        long interval = completed.intervalNanos();
++        long execution = completed.executionNanos();
++        long missingCpu = completed.missingCpuNanos();
++        long minimum = completed.minimumNanos();
++        double median = completed.medianNanos();
++        long maximum = completed.maximumNanos();
++        double utilisation = completed.utilisation();
++        if (inProgress != null) {
++            final long inProgressExecution = executionNanos(inProgress);
++            interval = saturatingAdd(interval, intervalNanos(inProgress, targetIntervalNanos));
++            execution = saturatingAdd(execution, inProgressExecution);
++            missingCpu = saturatingAdd(missingCpu, missingCpuNanos(inProgress, inProgressExecution));
++            minimum = count == 0L ? inProgressExecution : Math.min(minimum, inProgressExecution);
++            maximum = Math.max(maximum, inProgressExecution);
++            median = count == 0L ? inProgressExecution : median;
++            count = saturatingAdd(count, 1L);
++            utilisation = Math.min(1.0, utilisation
++                + (double)overlap(inProgress.tickStart(), inProgress.tickEnd(),
++                    subtractFloor(nowNanos, windowNanos), nowNanos) / (double)windowNanos);
++        }
++        if (count == 0L) {
++            return null;
++        }
++
++        final int reportCount = (int)Math.min(Integer.MAX_VALUE, count);
++        final double tpsAverage = interval == 0L || interval == Long.MAX_VALUE
++            ? Double.NaN : (double)count * 1.0E9 / (double)interval;
++        final double executionAverage = execution == Long.MAX_VALUE
++            ? Double.NaN : (double)execution / (double)count;
++        final double missingCpuAverage = missingCpu == Long.MAX_VALUE
++            ? Double.NaN : (double)missingCpu / (double)count;
++        return new TickData.TickReportData(reportCount, subtractFloor(nowNanos, windowNanos), nowNanos,
++            execution, utilisation,
++            aggregateSegments(reportCount, tpsAverage, tpsAverage, tpsAverage, tpsAverage),
++            aggregateSegments(reportCount, executionAverage, median, minimum, maximum),
++            aggregateSegments(reportCount, missingCpuAverage, missingCpuAverage, missingCpuAverage, missingCpuAverage));
++    }
++
++    private static TickData.SegmentedAverage aggregateSegments(final int count, final double average,
++                                                               final double median, final double least,
++                                                               final double greatest) {
++        final TickData.SegmentData all = new TickData.SegmentData(count, average, median, least, greatest);
++        final TickData.SegmentData best99 = aggregateSegment(Math.max(1, (int)(0.99 * count)), average, median, least, greatest);
++        final TickData.SegmentData best95 = aggregateSegment(Math.max(1, (int)(0.95 * count)), average, median, least, greatest);
++        final TickData.SegmentData worst5 = aggregateSegment(Math.max(1, count - (int)(0.95 * count)), average, median, least, greatest);
++        final TickData.SegmentData worst1 = aggregateSegment(Math.max(1, count - (int)(0.99 * count)), average, median, least, greatest);
++        return new TickData.SegmentedAverage(all, best99, best95, worst5, worst1, EMPTY_RAW_DATA);
++    }
++
++    private static TickData.SegmentData aggregateSegment(final int count, final double average,
++                                                         final double median, final double least,
++                                                         final double greatest) {
++        return new TickData.SegmentData(count, average, median, least, greatest);
 +    }
 +
 +    public synchronized Double tps(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
@@ -583,7 +646,35 @@ new file mode 100644
 diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/time/TickData.java
 --- a/ca/spottedleaf/common/time/TickData.java
 +++ b/ca/spottedleaf/common/time/TickData.java
-@@ -91,8 +91,8 @@ public final class TickData {
+@@ -4,16 +4,26 @@ import ca.spottedleaf.common.util.TimeUtil;
+ import java.util.ArrayDeque;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.List;
++import java.util.Objects;
+ 
+ public final class TickData {
+ 
+     private final long interval; // ns
++    private final RegionTickMetrics shared;
+ 
+-    private final ArrayDeque<TickTime> timeData = new ArrayDeque<>();
++    private final ArrayDeque<TickTime> timeData;
+ 
+     public TickData(final long intervalNS) {
+         this.interval = intervalNS;
++        this.shared = null;
++        this.timeData = new ArrayDeque<>();
++    }
++
++    public TickData(final RegionTickMetrics shared, final long intervalNS) {
++        this.interval = intervalNS;
++        this.shared = Objects.requireNonNull(shared);
++        this.timeData = null;
+     }
+ 
+     public void addDataFrom(final TickTime time) {
+@@ -91,8 +101,8 @@ public final class TickData {
              computeSegmentData(data, allStart, allEnd, inverse),
              computeSegmentData(data, percent99BestStart, percent99BestEnd, inverse),
              computeSegmentData(data, percent95BestStart, percent95BestEnd, inverse),
@@ -593,3 +684,92 @@ diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/ti
              data
          );
      }
+@@ -100,4 +110,8 @@ public final class TickData {
+     public Double getTPSAverage(final TickTime inProgress, final long tickInterval) {
++        if (this.shared != null) {
++            return this.shared.tps(this.interval, inProgress, tickInterval);
++        }
++
+         if (this.timeData.isEmpty() && inProgress == null) {
+             return null;
+         }
+@@ -119,6 +133,10 @@ public final class TickData {
+     public record MSPTData(double avg, long[] rawData) {}
+ 
+     public MSPTData getMSPTData(final TickTime inProgress, final long tickInterval) {
++        if (this.shared != null) {
++            return this.shared.mspt(this.interval, inProgress, tickInterval);
++        }
++
+         if (this.timeData.isEmpty() && inProgress == null) {
+             return null;
+         }
+@@ -143,6 +161,10 @@ public final class TickData {
+ 
+     // rets null if there is no data
+     public TickReportData generateTickReport(final TickTime inProgress, final long endTime, final long tickInterval) {
++        if (this.shared != null) {
++            return this.shared.report(this.interval, inProgress, endTime, tickInterval);
++        }
++
+         if (this.timeData.isEmpty() && inProgress == null) {
+             return null;
+         }
+diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+--- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+@@ -1,6 +1,7 @@
+ package io.papermc.paper.threadedregions;
+ 
++import ca.spottedleaf.common.time.RegionTickMetrics;
+ import ca.spottedleaf.common.time.Schedule;
+ import ca.spottedleaf.common.time.TickData;
+ import ca.spottedleaf.common.time.TickTime;
+ import ca.spottedleaf.common.util.TimeUtil;
+@@ -410,6 +411,7 @@ public final class TickRegionScheduler {
+     public static abstract class RegionScheduleHandle extends SchedulableTick {
+ 
+         protected long currentTick;
++        public final RegionTickMetrics sourbyTickMetrics = new RegionTickMetrics();
+         protected long lastTickStart;
+ 
+         public final TickData tickTimes5s;
+@@ -439,11 +441,11 @@ public final class TickRegionScheduler {
+         public RegionScheduleHandle(final TickRegions.TickRegionData region, final long firstStart) {
+             this.currentTick = 0L;
+             this.lastTickStart = TimeUtil.DEADLINE_NOT_SET;
+-            this.tickTimes5s = new TickData(TimeUnit.SECONDS.toNanos(5L));
+-            this.tickTimes15s = new TickData(TimeUnit.SECONDS.toNanos(15L));
+-            this.tickTimes1m = new TickData(TimeUnit.MINUTES.toNanos(1L));
+-            this.tickTimes5m = new TickData(TimeUnit.MINUTES.toNanos(5L));
+-            this.tickTimes15m = new TickData(TimeUnit.MINUTES.toNanos(15L));
++            this.tickTimes5s = new TickData(this.sourbyTickMetrics, TimeUnit.SECONDS.toNanos(5L));
++            this.tickTimes15s = new TickData(this.sourbyTickMetrics, TimeUnit.SECONDS.toNanos(15L));
++            this.tickTimes1m = new TickData(this.sourbyTickMetrics, TimeUnit.MINUTES.toNanos(1L));
++            this.tickTimes5m = new TickData(this.sourbyTickMetrics, TimeUnit.MINUTES.toNanos(5L));
++            this.tickTimes15m = new TickData(this.sourbyTickMetrics, TimeUnit.MINUTES.toNanos(15L));
+             this.region = region;
+ 
+             this.setScheduledStart(firstStart);
+@@ -598,7 +600,8 @@ public final class TickRegionScheduler {
+             }
+ 
+             final FoliaWatchdogThread.RunningTick runningTick = new FoliaWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()); // Folia - region threading
+             WATCHDOG_THREAD.addTick(runningTick); // Folia - region threading
+             try {
+                 // next start isn't updated until the end of this tick
++                this.sourbyTickMetrics.tickStarted(tickStart);
+                 this.tickRegion(tickCount, tickStart, scheduledEnd);
+@@ -643,11 +646,7 @@ public final class TickRegionScheduler {
+         protected void addTickTime(final TickTime time) {
+             synchronized (this) {
+                 this.currentTickData = null;
+                 this.currentTickingThread = null;
+-                this.tickTimes5s.addDataFrom(time);
+-                this.tickTimes15s.addDataFrom(time);
+-                this.tickTimes1m.addDataFrom(time);
+-                this.tickTimes5m.addDataFrom(time);
+-                this.tickTimes15m.addDataFrom(time);
++                this.sourbyTickMetrics.tickCompleted(time, getTimeBetweenTicks());
+             }
+         }
