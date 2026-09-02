@@ -6,6 +6,7 @@ import org.junit.platform.suite.api.Suite;
 @Suite
 @SelectClasses({
     TickDataCompatibilityTest.class,
+    TickDataBinaryCompatibilityTest.class,
     RegionTickMetricsTest.class,
     RegionTickMetricsConcurrencyTest.class
 })
