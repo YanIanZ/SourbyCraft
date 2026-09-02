@@ -9,11 +9,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RegionMetricsRegistryTest {
@@ -24,7 +27,7 @@ class RegionMetricsRegistryTest {
     @Test
     void inactiveThenDestroyRetiresOneGenerationIdempotently() {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
-        final long generation = registry.activate(registry.newWorldId(), 7L, new RegionTickMetrics(), 0L);
+        final long generation = registry.activate(registry.newWorldId(), 7L, new RegionTickMetricsHolder(), 0L);
 
         registry.retire(generation, RegionMetricsRegistry.RetirementReason.INACTIVE, 10L);
         registry.retire(generation, RegionMetricsRegistry.RetirementReason.DESTROYED, 20L);
@@ -39,12 +42,12 @@ class RegionMetricsRegistryTest {
     void splitRetiresParentAndPublishesFreshChildren() {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
         final long world = registry.newWorldId();
-        final RegionTickMetrics parentMetrics = sampledMetrics(2L * SECOND);
+        final RegionTickMetricsHolder parentMetrics = sampledHolder(2L * SECOND);
         final long parent = registry.activate(world, 1L, parentMetrics, 0L);
 
         registry.retire(parent, RegionMetricsRegistry.RetirementReason.SPLIT, 3L * SECOND);
-        final long firstChild = registry.activate(world, 2L, new RegionTickMetrics(), 3L * SECOND);
-        final long secondChild = registry.activate(world, 3L, new RegionTickMetrics(), 3L * SECOND);
+        final long firstChild = registry.activate(world, 2L, new RegionTickMetricsHolder(), 3L * SECOND);
+        final long secondChild = registry.activate(world, 3L, new RegionTickMetricsHolder(), 3L * SECOND);
 
         final List<RegionMetricsRegistry.GenerationView> views = views(registry, 3L * SECOND);
         assertEquals(3, views.size());
@@ -57,12 +60,12 @@ class RegionMetricsRegistryTest {
     void mergeRetiresSourcesAndImmediatelyRotatesActiveTarget() {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
         final long world = registry.newWorldId();
-        final long source = registry.activate(world, 10L, sampledMetrics(SECOND), 0L);
-        final long target = registry.activate(world, 20L, sampledMetrics(SECOND), 0L);
+        final long source = registry.activate(world, 10L, sampledHolder(SECOND), 0L);
+        final RegionTickMetricsHolder targetHolder = sampledHolder(SECOND);
+        final long target = registry.activate(world, 20L, targetHolder, 0L);
 
         registry.retire(source, RegionMetricsRegistry.RetirementReason.MERGE, 2L * SECOND);
-        final long successor = registry.rotateForMerge(
-            target, world, 20L, new RegionTickMetrics(), 2L * SECOND);
+        final long successor = registry.rotateForMerge(target, world, 20L, targetHolder, 2L * SECOND);
 
         final List<RegionMetricsRegistry.GenerationView> views = views(registry, 2L * SECOND);
         assertNotEquals(target, successor);
@@ -75,11 +78,11 @@ class RegionMetricsRegistryTest {
     void mergePublishesSuccessorWhenTargetWasAlreadyRetired() {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
         final long world = registry.newWorldId();
-        final long target = registry.activate(world, 20L, sampledMetrics(SECOND), 0L);
-        registry.retire(target, RegionMetricsRegistry.RetirementReason.INACTIVE, 2L * SECOND);
+        final RegionTickMetricsHolder targetHolder = sampledHolder(SECOND);
+        final long target = registry.activate(world, 20L, targetHolder, 0L);
+        registry.retire(targetHolder, RegionMetricsRegistry.RetirementReason.INACTIVE, 2L * SECOND);
 
-        final long successor = registry.rotateForMerge(
-            target, world, 20L, new RegionTickMetrics(), 3L * SECOND);
+        final long successor = registry.rotateForMerge(target, world, 20L, targetHolder, 3L * SECOND);
 
         final List<RegionMetricsRegistry.GenerationView> views = views(registry, 3L * SECOND);
         assertGeneration(views, target, false, 1L);
@@ -89,7 +92,7 @@ class RegionMetricsRegistryTest {
     @Test
     void retiredHistoryRemainsThroughMaximumWindowAndGraceThenExpires() {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
-        final long generation = registry.activate(registry.newWorldId(), 7L, sampledMetrics(SECOND), 0L);
+        final long generation = registry.activate(registry.newWorldId(), 7L, sampledHolder(SECOND), 0L);
         registry.retire(generation, RegionMetricsRegistry.RetirementReason.INACTIVE, 2L * SECOND);
 
         assertEquals(1, views(registry, 2L * SECOND + RETENTION).size());
@@ -99,21 +102,67 @@ class RegionMetricsRegistryTest {
     @Test
     void latestSampleExtendsRetiredHistoryLifetime() {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
-        final RegionTickMetrics metrics = sampledMetrics(100L * SECOND);
+        final RegionTickMetricsHolder metrics = new RegionTickMetricsHolder();
         final long generation = registry.activate(registry.newWorldId(), 7L, metrics, 0L);
         registry.retire(generation, RegionMetricsRegistry.RetirementReason.INACTIVE, SECOND);
+        metrics.tickCompleted(new TickTime(TimeUtil.DEADLINE_NOT_SET, 100L * SECOND - 1L,
+            100L * SECOND - 1L, 0L, 100L * SECOND, 0L, 0L, 0L, false), 50_000_000L);
 
         assertEquals(1, views(registry, 100L * SECOND + RETENTION).size());
         assertTrue(views(registry, 100L * SECOND + RETENTION + 1L).isEmpty());
     }
 
     @Test
+    void duplicateActivationOfSameHolderKeepsOneActiveGeneration() {
+        final RegionMetricsRegistry registry = new RegionMetricsRegistry();
+        final RegionTickMetricsHolder holder = new RegionTickMetricsHolder();
+
+        final long first = registry.activate(1L, 7L, holder, 0L);
+        final long duplicate = registry.activate(1L, 7L, holder, SECOND);
+
+        assertEquals(first, duplicate);
+        assertEquals(1, views(registry, SECOND).size());
+        assertEquals(1L, views(registry, SECOND).stream().filter(RegionMetricsRegistry.GenerationView::active).count());
+    }
+
+    @Test
+    void idSequencesFailClosedBeforeOverflowOrReuse() throws Exception {
+        final RegionMetricsRegistry registry = new RegionMetricsRegistry();
+        sequence(registry, "nextWorldId").set(Long.MAX_VALUE);
+        assertThrows(IllegalStateException.class, registry::newWorldId);
+
+        final RegionMetricsRegistry second = new RegionMetricsRegistry();
+        final RegionTickMetricsHolder holder = new RegionTickMetricsHolder();
+        sequence(second, "nextGenerationId").set(Long.MAX_VALUE);
+        assertThrows(IllegalStateException.class, () -> second.activate(1L, 2L, holder, 0L));
+        assertEquals(0L, holder.generationId());
+        assertTrue(views(second, 0L).isEmpty());
+    }
+
+    @Test
+    void mergeRetiresOldOwnerBeforeHolderPublishesFreshOwner() {
+        final RegionMetricsRegistry registry = new RegionMetricsRegistry();
+        final RegionTickMetricsHolder holder = new RegionTickMetricsHolder();
+        final RegionTickMetrics originalOwner = holder.current();
+        final long original = registry.activate(1L, 2L, holder, 0L);
+        originalOwner.tickCompleted(new TickTime(TimeUtil.DEADLINE_NOT_SET, 0L, 0L,
+            0L, 1L, 0L, 0L, 0L, false), 50_000_000L);
+
+        final long successor = registry.rotateForMerge(original, 1L, 2L, holder, SECOND);
+
+        assertNotEquals(original, successor);
+        assertNotSame(originalOwner, holder.current());
+        assertGeneration(views(registry, SECOND), original, false, 1L);
+        assertGeneration(views(registry, SECOND), successor, true, 0L);
+    }
+
+    @Test
     void retiredGenerationsAreExcludedFromActiveTopology() {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
         final long world = registry.newWorldId();
-        final long retired = registry.activate(world, 1L, new RegionTickMetrics(), 0L);
+        final long retired = registry.activate(world, 1L, new RegionTickMetricsHolder(), 0L);
         registry.retire(retired, RegionMetricsRegistry.RetirementReason.INACTIVE, SECOND);
-        registry.activate(world, 2L, new RegionTickMetrics(), SECOND);
+        registry.activate(world, 2L, new RegionTickMetricsHolder(), SECOND);
 
         assertEquals(1L, views(registry, SECOND).stream().filter(RegionMetricsRegistry.GenerationView::active).count());
     }
@@ -122,9 +171,9 @@ class RegionMetricsRegistryTest {
     void expiryOfOldGenerationCannotRemoveNewGenerationForSameRegion() {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
         final long world = registry.newWorldId();
-        final long oldGeneration = registry.activate(world, 7L, new RegionTickMetrics(), 0L);
+        final long oldGeneration = registry.activate(world, 7L, new RegionTickMetricsHolder(), 0L);
         registry.retire(oldGeneration, RegionMetricsRegistry.RetirementReason.INACTIVE, 0L);
-        final long currentGeneration = registry.activate(world, 7L, new RegionTickMetrics(), SECOND);
+        final long currentGeneration = registry.activate(world, 7L, new RegionTickMetricsHolder(), SECOND);
 
         final List<RegionMetricsRegistry.GenerationView> views = views(registry, RETENTION + 1L);
         assertEquals(1, views.size());
@@ -147,8 +196,8 @@ class RegionMetricsRegistryTest {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
         final long firstWorld = registry.newWorldId();
         final long secondWorld = registry.newWorldId();
-        registry.activate(firstWorld, 1L, new RegionTickMetrics(), 0L);
-        registry.activate(secondWorld, 2L, new RegionTickMetrics(), 0L);
+        registry.activate(firstWorld, 1L, new RegionTickMetricsHolder(), 0L);
+        registry.activate(secondWorld, 2L, new RegionTickMetricsHolder(), 0L);
 
         registry.retireWorld(firstWorld, SECOND);
 
@@ -171,11 +220,11 @@ class RegionMetricsRegistryTest {
         }
     }
 
-    private static RegionTickMetrics sampledMetrics(final long endNanos) {
-        final RegionTickMetrics metrics = new RegionTickMetrics();
-        metrics.tickCompleted(new TickTime(TimeUtil.DEADLINE_NOT_SET, endNanos - 1L, endNanos - 1L,
+    private static RegionTickMetricsHolder sampledHolder(final long endNanos) {
+        final RegionTickMetricsHolder holder = new RegionTickMetricsHolder();
+        holder.tickCompleted(new TickTime(TimeUtil.DEADLINE_NOT_SET, endNanos - 1L, endNanos - 1L,
             0L, endNanos, 0L, 0L, 0L, false), 50_000_000L);
-        return metrics;
+        return holder;
     }
 
     private static List<RegionMetricsRegistry.GenerationView> views(
@@ -194,5 +243,11 @@ class RegionMetricsRegistryTest {
             .findFirst().orElseThrow();
         assertEquals(active, view.active());
         assertEquals(sampleCount, view.snapshot().fifteenMinutes().sampleCount());
+    }
+
+    private static AtomicLong sequence(final RegionMetricsRegistry registry, final String name) throws Exception {
+        final Field field = RegionMetricsRegistry.class.getDeclaredField(name);
+        field.setAccessible(true);
+        return (AtomicLong)field.get(registry);
     }
 }
