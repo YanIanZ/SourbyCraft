@@ -85,17 +85,51 @@ class TickDataBinaryCompatibilityTest {
     }
 
     @Test
-    void directSharedViewInsertionRecordsOneOwnerSample() {
+    void directSharedViewInsertionMatchesStandaloneFirstAndContinuingTickTps() {
         final RegionTickMetrics owner = new RegionTickMetrics();
-        final List<TickData> views = views(owner);
+        final TickData shared = new TickData(owner, TimeUnit.SECONDS.toNanos(5L));
+        final TickData standalone = new TickData(TimeUnit.SECONDS.toNanos(5L));
+        final TickTime first = tick(TimeUtil.DEADLINE_NOT_SET, 0L, 2L * MILLISECOND);
+        shared.addDataFrom(first);
+        standalone.addDataFrom(first);
 
-        views.getFirst().addDataFrom(tick(0L, TARGET_INTERVAL, 2L * MILLISECOND));
+        assertEquals(20.0, shared.getTPSAverage(null, TARGET_INTERVAL), 0.0);
+        assertEquals(standalone.getTPSAverage(null, TARGET_INTERVAL), shared.getTPSAverage(null, TARGET_INTERVAL));
+        assertArrayEquals(standalone.generateTickReport(null, 2L * MILLISECOND, TARGET_INTERVAL).tpsData().rawData(),
+            shared.generateTickReport(null, 2L * MILLISECOND, TARGET_INTERVAL).tpsData().rawData());
 
-        for (final TickData view : views) {
-            final TickData.TickReportData report = view.generateTickReport(null, 52L * MILLISECOND, TARGET_INTERVAL);
-            assertNotNull(report);
-            assertEquals(1, report.collectedTicks());
+        final TickTime second = tick(0L, TARGET_INTERVAL, 3L * MILLISECOND);
+        shared.addDataFrom(second);
+        standalone.addDataFrom(second);
+
+        assertEquals(20.0, shared.getTPSAverage(null, TARGET_INTERVAL), 0.0);
+        assertEquals(standalone.getTPSAverage(null, TARGET_INTERVAL), shared.getTPSAverage(null, TARGET_INTERVAL));
+        assertArrayEquals(standalone.generateTickReport(null, 53L * MILLISECOND, TARGET_INTERVAL).tpsData().rawData(),
+            shared.generateTickReport(null, 53L * MILLISECOND, TARGET_INTERVAL).tpsData().rawData());
+    }
+
+    @Test
+    void directSharedFirstIntervalIsResolvedInsideLongBucketReports() {
+        final RegionTickMetrics owner = new RegionTickMetrics();
+        final TickData shared = new TickData(owner, TimeUnit.MINUTES.toNanos(1L));
+        final TickData standalone = new TickData(TimeUnit.MINUTES.toNanos(1L));
+        long previous = TimeUtil.DEADLINE_NOT_SET;
+        for (int i = 0; i < 500; ++i) {
+            final long start = i * MILLISECOND;
+            final TickTime sample = tick(previous, start, 100_000L);
+            shared.addDataFrom(sample);
+            standalone.addDataFrom(sample);
+            previous = start;
         }
+        final long now = 499L * MILLISECOND + 100_000L;
+        final TickData.TickReportData expected = standalone.generateTickReport(null, now, TARGET_INTERVAL);
+        final TickData.TickReportData actual = shared.generateTickReport(null, now, TARGET_INTERVAL);
+
+        assertNotNull(actual);
+        assertEquals(500, actual.collectedTicks());
+        assertEquals(expected.tpsData().segmentAll().average(), actual.tpsData().segmentAll().average(), 1.0E-9);
+        assertEquals(expected.tpsData().segmentAll().average(), shared.getTPSAverage(null, TARGET_INTERVAL), 1.0E-9);
+        assertEquals(0, actual.tpsData().rawData().length);
     }
 
     @Test

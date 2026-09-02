@@ -8,7 +8,7 @@ diff --git a/ca/spottedleaf/common/time/RegionTickMetrics.java b/ca/spottedleaf/
 new file mode 100644
 --- /dev/null
 +++ b/ca/spottedleaf/common/time/RegionTickMetrics.java
-@@ -0,0 +1,650 @@
+@@ -0,0 +1,674 @@
 +package ca.spottedleaf.common.time;
 +
 +import java.util.Arrays;
@@ -44,6 +44,8 @@ new file mode 100644
 +    private int rawSize;
 +    private long lastDroppedEnd = INACTIVE;
 +    private long lastCompletedEnd;
++    private long unknownIntervalEnd = INACTIVE;
++    private long unknownIntervalNanos;
 +    private long lastPromotionEpoch = Long.MIN_VALUE;
 +
 +    private final BucketStore seconds = new BucketStore(61, SECOND);
@@ -80,6 +82,10 @@ new file mode 100644
 +
 +    public void tickStarted(final long startNanos) {
 +        this.activeTickStartNanos = startNanos;
++    }
++
++    synchronized void tickCompletedWithoutTarget(final TickTime tick) {
++        this.tickCompleted(tick, INACTIVE);
 +    }
 +
 +    public synchronized void tickCompleted(final TickTime tick, final long targetIntervalNanos) {
@@ -139,7 +145,9 @@ new file mode 100644
 +            if (end < cutoff || end > nowNanos) {
 +                continue;
 +            }
-+            intervals[resultIndex] = this.rawIntervals[index];
++            intervals[resultIndex] = this.rawTargets[index] == INACTIVE
++                ? Math.max(Math.max(0L, targetIntervalNanos), this.rawIntervals[index])
++                : this.rawIntervals[index];
 +            executions[resultIndex] = this.rawExecutions[index];
 +            missingCpu[resultIndex] = this.rawMissingCpu[index];
 +            totalExecution = saturatingAdd(totalExecution, this.rawExecutions[index]);
@@ -171,7 +179,8 @@ new file mode 100644
 +                                                    final long nowNanos, final long targetIntervalNanos) {
 +        final WindowSnapshot completed = this.bucketWindow(nowNanos, windowNanos);
 +        long count = completed.sampleCount();
-+        long interval = completed.intervalNanos();
++        long interval = this.resolveAggregateInterval(completed.intervalNanos(), windowNanos,
++            nowNanos, targetIntervalNanos);
 +        long execution = completed.executionNanos();
 +        long missingCpu = completed.missingCpuNanos();
 +        long minimum = completed.minimumNanos();
@@ -224,6 +233,16 @@ new file mode 100644
 +        return new TickData.SegmentData(count, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
 +    }
 +
++    private long resolveAggregateInterval(final long interval, final long windowNanos,
++                                          final long nowNanos, final long targetIntervalNanos) {
++        final long cutoff = subtractFloor(nowNanos, windowNanos);
++        if (this.unknownIntervalEnd < cutoff || this.unknownIntervalEnd > nowNanos || interval == Long.MAX_VALUE) {
++            return interval;
++        }
++        return saturatingAdd(interval,
++            Math.max(Math.max(0L, targetIntervalNanos), this.unknownIntervalNanos) - this.unknownIntervalNanos);
++    }
++
 +    public synchronized Double tps(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
 +        final long now = inProgress == null ? this.lastCompletedEnd : inProgress.tickEnd();
 +        final TickData.TickReportData report = this.report(windowNanos, inProgress, now, targetIntervalNanos);
@@ -247,6 +266,7 @@ new file mode 100644
 +        final long tickLength = nonNegativeDifference(tick.tickEnd(), tick.tickStart());
 +        final long execution = saturatingAdd(tickLength, Math.max(0L, tick.intermediateTaskExecutionTime()));
 +        final boolean overflow = execution == Long.MAX_VALUE && tickLength != Long.MAX_VALUE;
++        final boolean unknownInterval = targetIntervalNanos == INACTIVE && !tick.hasLastTick();
 +        final long interval = intervalNanos(tick, targetIntervalNanos);
 +        final long missingCpu = missingCpuNanos(tick, execution);
 +        final int index;
@@ -263,9 +283,13 @@ new file mode 100644
 +        this.rawIntervals[index] = interval;
 +        this.rawExecutions[index] = execution;
 +        this.rawMissingCpu[index] = missingCpu;
-+        this.rawTargets[index] = Math.max(0L, targetIntervalNanos);
++        this.rawTargets[index] = unknownInterval ? INACTIVE : Math.max(0L, targetIntervalNanos);
 +        this.rawOverflow[index] = (byte)(overflow ? 1 : 0);
 +        this.lastCompletedEnd = tick.tickEnd();
++        if (unknownInterval) {
++            this.unknownIntervalEnd = tick.tickEnd();
++            this.unknownIntervalNanos = interval;
++        }
 +
 +        this.promoteExpiredSeconds(tick.tickEnd());
 +        this.seconds.add(tick.tickStart(), tick.tickEnd(), interval, execution, missingCpu, overflow);
@@ -691,7 +715,7 @@ diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/ti
  
      public void addDataFrom(final TickTime time) {
 +        if (this.shared != null) {
-+            this.shared.tickCompleted(time, 0L);
++            this.shared.tickCompletedWithoutTarget(time);
 +            return;
 +        }
 +
