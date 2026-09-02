@@ -64,6 +64,41 @@ class TickDataBinaryCompatibilityTest {
     }
 
     @Test
+    void truncatedShortCompatibilityViewsReturnNullInsteadOfPartialRawArrays() {
+        final RegionTickMetrics owner = new RegionTickMetrics();
+        long previous = TimeUtil.DEADLINE_NOT_SET;
+        for (int i = 0; i < 500; ++i) {
+            final long start = i * MILLISECOND;
+            owner.tickCompleted(tick(previous, start, 100_000L), MILLISECOND);
+            previous = start;
+        }
+        owner.tickCompleted(tick(previous, TimeUnit.SECONDS.toNanos(1L), 100_000L), MILLISECOND);
+
+        assertTrue(owner.snapshot(TimeUnit.SECONDS.toNanos(1L) + 100_000L).fiveSeconds().truncated());
+        assertTrue(owner.snapshot(TimeUnit.SECONDS.toNanos(1L) + 100_000L).fifteenSeconds().truncated());
+        for (final long window : new long[] {5L, 15L}) {
+            final TickData view = new TickData(owner, TimeUnit.SECONDS.toNanos(window));
+            assertNull(view.generateTickReport(null, TimeUnit.SECONDS.toNanos(1L) + 100_000L, MILLISECOND));
+            assertNull(view.getMSPTData(null, MILLISECOND));
+            assertNull(view.getTPSAverage(null, MILLISECOND));
+        }
+    }
+
+    @Test
+    void directSharedViewInsertionRecordsOneOwnerSample() {
+        final RegionTickMetrics owner = new RegionTickMetrics();
+        final List<TickData> views = views(owner);
+
+        views.getFirst().addDataFrom(tick(0L, TARGET_INTERVAL, 2L * MILLISECOND));
+
+        for (final TickData view : views) {
+            final TickData.TickReportData report = view.generateTickReport(null, 52L * MILLISECOND, TARGET_INTERVAL);
+            assertNotNull(report);
+            assertEquals(1, report.collectedTicks());
+        }
+    }
+
+    @Test
     void bucketedLongViewsKeepAggregateCountsAndAveragesWithoutFabricatedRawSamples() {
         final RegionTickMetrics owner = new RegionTickMetrics();
         final long interval = MILLISECOND;
@@ -90,6 +125,28 @@ class TickDataBinaryCompatibilityTest {
             assertEquals(0, report.timePerTickData().rawData().length);
             assertEquals(0, report.missingCPUTimeData().rawData().length);
         }
+    }
+
+    @Test
+    void nonuniformLongViewsExposeOnlyTheAggregateSegment() {
+        final RegionTickMetrics owner = new RegionTickMetrics();
+        long previous = TimeUtil.DEADLINE_NOT_SET;
+        long totalExecution = 0L;
+        for (int i = 0; i < 500; ++i) {
+            final long start = i * MILLISECOND;
+            final long duration = (i & 1) == 0 ? 100_000L : 900_000L;
+            owner.tickCompleted(tick(previous, start, duration), MILLISECOND);
+            previous = start;
+            totalExecution += duration;
+        }
+
+        final TickData.TickReportData report = new TickData(owner, TimeUnit.MINUTES.toNanos(5L))
+            .generateTickReport(null, 499L * MILLISECOND + 900_000L, MILLISECOND);
+        assertNotNull(report);
+        assertEquals((double)totalExecution / 500.0, report.timePerTickData().segmentAll().average(), 0.0);
+        assertUnavailableTail(report.tpsData(), 495, 475, 25, 5);
+        assertUnavailableTail(report.timePerTickData(), 495, 475, 25, 5);
+        assertUnavailableTail(report.missingCPUTimeData(), 495, 475, 25, 5);
     }
 
     @Test
@@ -128,6 +185,23 @@ class TickDataBinaryCompatibilityTest {
             new TickData(owner, TimeUnit.MINUTES.toNanos(5L)),
             new TickData(owner, TimeUnit.MINUTES.toNanos(15L))
         );
+    }
+
+    private static void assertUnavailableTail(final TickData.SegmentedAverage data, final int best99,
+                                              final int best95, final int worst5, final int worst1) {
+        assertUnavailableSegment(data.segment99PercentBest(), best99);
+        assertUnavailableSegment(data.segment95PercentBest(), best95);
+        assertUnavailableSegment(data.segment5PercentWorst(), worst5);
+        assertUnavailableSegment(data.segment1PercentWorst(), worst1);
+        assertEquals(0, data.rawData().length);
+    }
+
+    private static void assertUnavailableSegment(final TickData.SegmentData segment, final int count) {
+        assertEquals(count, segment.count());
+        assertTrue(Double.isNaN(segment.average()));
+        assertTrue(Double.isNaN(segment.median()));
+        assertTrue(Double.isNaN(segment.least()));
+        assertTrue(Double.isNaN(segment.greatest()));
     }
 
     private static TickTime tick(final long previousStart, final long start, final long duration) {
