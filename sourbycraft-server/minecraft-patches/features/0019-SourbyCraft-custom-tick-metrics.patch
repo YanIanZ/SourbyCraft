@@ -8,7 +8,7 @@ diff --git a/ca/spottedleaf/common/time/RegionTickMetrics.java b/ca/spottedleaf/
 new file mode 100644
 --- /dev/null
 +++ b/ca/spottedleaf/common/time/RegionTickMetrics.java
-@@ -0,0 +1,674 @@
+@@ -0,0 +1,681 @@
 +package ca.spottedleaf.common.time;
 +
 +import java.util.Arrays;
@@ -44,8 +44,6 @@ new file mode 100644
 +    private int rawSize;
 +    private long lastDroppedEnd = INACTIVE;
 +    private long lastCompletedEnd;
-+    private long unknownIntervalEnd = INACTIVE;
-+    private long unknownIntervalNanos;
 +    private long lastPromotionEpoch = Long.MIN_VALUE;
 +
 +    private final BucketStore seconds = new BucketStore(61, SECOND);
@@ -177,10 +175,9 @@ new file mode 100644
 +
 +    private TickData.TickReportData aggregateReport(final long windowNanos, final TickTime inProgress,
 +                                                    final long nowNanos, final long targetIntervalNanos) {
-+        final WindowSnapshot completed = this.bucketWindow(nowNanos, windowNanos);
++        final WindowSnapshot completed = this.bucketWindow(nowNanos, windowNanos, targetIntervalNanos);
 +        long count = completed.sampleCount();
-+        long interval = this.resolveAggregateInterval(completed.intervalNanos(), windowNanos,
-+            nowNanos, targetIntervalNanos);
++        long interval = completed.intervalNanos();
 +        long execution = completed.executionNanos();
 +        long missingCpu = completed.missingCpuNanos();
 +        long minimum = completed.minimumNanos();
@@ -233,16 +230,6 @@ new file mode 100644
 +        return new TickData.SegmentData(count, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
 +    }
 +
-+    private long resolveAggregateInterval(final long interval, final long windowNanos,
-+                                          final long nowNanos, final long targetIntervalNanos) {
-+        final long cutoff = subtractFloor(nowNanos, windowNanos);
-+        if (this.unknownIntervalEnd < cutoff || this.unknownIntervalEnd > nowNanos || interval == Long.MAX_VALUE) {
-+            return interval;
-+        }
-+        return saturatingAdd(interval,
-+            Math.max(Math.max(0L, targetIntervalNanos), this.unknownIntervalNanos) - this.unknownIntervalNanos);
-+    }
-+
 +    public synchronized Double tps(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
 +        final long now = inProgress == null ? this.lastCompletedEnd : inProgress.tickEnd();
 +        final TickData.TickReportData report = this.report(windowNanos, inProgress, now, targetIntervalNanos);
@@ -268,6 +255,7 @@ new file mode 100644
 +        final boolean overflow = execution == Long.MAX_VALUE && tickLength != Long.MAX_VALUE;
 +        final boolean unknownInterval = targetIntervalNanos == INACTIVE && !tick.hasLastTick();
 +        final long interval = intervalNanos(tick, targetIntervalNanos);
++        final long bucketInterval = unknownInterval ? 0L : interval;
 +        final long missingCpu = missingCpuNanos(tick, execution);
 +        final int index;
 +        if (this.rawSize == RAW_CAPACITY) {
@@ -286,13 +274,10 @@ new file mode 100644
 +        this.rawTargets[index] = unknownInterval ? INACTIVE : Math.max(0L, targetIntervalNanos);
 +        this.rawOverflow[index] = (byte)(overflow ? 1 : 0);
 +        this.lastCompletedEnd = tick.tickEnd();
-+        if (unknownInterval) {
-+            this.unknownIntervalEnd = tick.tickEnd();
-+            this.unknownIntervalNanos = interval;
-+        }
 +
 +        this.promoteExpiredSeconds(tick.tickEnd());
-+        this.seconds.add(tick.tickStart(), tick.tickEnd(), interval, execution, missingCpu, overflow);
++        this.seconds.add(tick.tickStart(), tick.tickEnd(), bucketInterval, execution, missingCpu,
++            overflow, unknownInterval);
 +    }
 +
 +    private void promoteExpiredSeconds(final long nowNanos) {
@@ -321,9 +306,9 @@ new file mode 100644
 +            this.rawWindow(nowNanos, FIVE_SECONDS),
 +            this.rawWindow(nowNanos, TEN_SECONDS),
 +            this.rawWindow(nowNanos, FIFTEEN_SECONDS),
-+            this.bucketWindow(nowNanos, MINUTE),
-+            this.bucketWindow(nowNanos, FIVE_MINUTES),
-+            this.bucketWindow(nowNanos, FIFTEEN_MINUTES));
++            this.bucketWindow(nowNanos, MINUTE, 0L),
++            this.bucketWindow(nowNanos, FIVE_MINUTES, 0L),
++            this.bucketWindow(nowNanos, FIFTEEN_MINUTES, 0L));
 +        this.published = next;
 +    }
 +
@@ -360,7 +345,8 @@ new file mode 100644
 +            windowNanos, histogram, true, truncated);
 +    }
 +
-+    private WindowSnapshot bucketWindow(final long nowNanos, final long windowNanos) {
++    private WindowSnapshot bucketWindow(final long nowNanos, final long windowNanos,
++                                        final long targetIntervalNanos) {
 +        final long cutoff = subtractFloor(nowNanos, windowNanos);
 +        final long newestCutoff = Math.max(cutoff, subtractFloor(nowNanos, MINUTE));
 +        long count = 0L;
@@ -370,6 +356,7 @@ new file mode 100644
 +        long utilised = 0L;
 +        long minimum = Long.MAX_VALUE;
 +        long maximum = 0L;
++        long unresolvedIntervals = 0L;
 +        boolean truncated = false;
 +        final long[] histogram = this.histogramScratch;
 +        Arrays.fill(histogram, 0L);
@@ -387,6 +374,7 @@ new file mode 100644
 +                }
 +                count = saturatingAdd(count, store.counts[slot]);
 +                interval = saturatingAdd(interval, store.intervals[slot]);
++                unresolvedIntervals = saturatingAdd(unresolvedIntervals, store.unresolvedIntervals[slot]);
 +                execution = saturatingAdd(execution, store.executions[slot]);
 +                missingCpu = saturatingAdd(missingCpu, store.missingCpu[slot]);
 +                utilised = saturatingAdd(utilised, store.utilised[slot]);
@@ -403,6 +391,8 @@ new file mode 100644
 +                }
 +            }
 +        }
++        interval = saturatingAdd(interval,
++            saturatingMultiply(unresolvedIntervals, Math.max(0L, targetIntervalNanos)));
 +        return window(count, interval, execution, minimum, maximum, missingCpu, utilised,
 +            windowNanos, histogram, true, truncated);
 +    }
@@ -508,6 +498,13 @@ new file mode 100644
 +        return first + second;
 +    }
 +
++    private static long saturatingMultiply(final long first, final long second) {
++        if (first < 0L || second < 0L || first != 0L && second > Long.MAX_VALUE / first) {
++            return Long.MAX_VALUE;
++        }
++        return first * second;
++    }
++
 +    private static long ceilDiv(final long value, final long divisor) {
 +        final long floor = Math.floorDiv(value, divisor);
 +        return floor * divisor == value ? floor : floor + 1L;
@@ -552,6 +549,7 @@ new file mode 100644
 +        private final long[] epochs;
 +        private final long[] counts;
 +        private final long[] intervals;
++        private final long[] unresolvedIntervals;
 +        private final long[] executions;
 +        private final long[] missingCpu;
 +        private final long[] utilised;
@@ -569,6 +567,7 @@ new file mode 100644
 +            Arrays.fill(this.epochs, Long.MIN_VALUE);
 +            this.counts = new long[slots];
 +            this.intervals = new long[slots];
++            this.unresolvedIntervals = new long[slots];
 +            this.executions = new long[slots];
 +            this.missingCpu = new long[slots];
 +            this.utilised = new long[slots];
@@ -582,18 +581,23 @@ new file mode 100644
 +        }
 +
 +        private void add(final long start, final long end, final long interval, final long execution,
-+                         final long missingCpu, final boolean sampleOverflow) {
++                         final long missingCpu, final boolean sampleOverflow,
++                         final boolean unresolvedInterval) {
 +            final long epoch = Math.floorDiv(end, this.width);
 +            final int slot = Math.floorMod(epoch, this.slots);
 +            this.prepare(slot, epoch);
 +            this.counts[slot] = saturatingAdd(this.counts[slot], 1L);
 +            this.intervals[slot] = saturatingAdd(this.intervals[slot], interval);
++            if (unresolvedInterval) {
++                this.unresolvedIntervals[slot] = saturatingAdd(this.unresolvedIntervals[slot], 1L);
++            }
 +            this.executions[slot] = saturatingAdd(this.executions[slot], execution);
 +            this.missingCpu[slot] = saturatingAdd(this.missingCpu[slot], missingCpu);
 +            this.minimums[slot] = Math.min(this.minimums[slot], execution);
 +            this.maximums[slot] = Math.max(this.maximums[slot], execution);
 +            this.overflow[slot] |= (byte)(sampleOverflow || this.counts[slot] == Long.MAX_VALUE
-+                || this.intervals[slot] == Long.MAX_VALUE || this.executions[slot] == Long.MAX_VALUE ? 1 : 0);
++                || this.intervals[slot] == Long.MAX_VALUE || this.unresolvedIntervals[slot] == Long.MAX_VALUE
++                || this.executions[slot] == Long.MAX_VALUE ? 1 : 0);
 +            this.addHistogramCount(slot, histogramBin(execution), 1);
 +            this.addUtilisation(start, end, epoch);
 +        }
@@ -604,6 +608,8 @@ new file mode 100644
 +            this.prepare(slot, epoch);
 +            this.counts[slot] = saturatingAdd(this.counts[slot], source.counts[sourceSlot]);
 +            this.intervals[slot] = saturatingAdd(this.intervals[slot], source.intervals[sourceSlot]);
++            this.unresolvedIntervals[slot] = saturatingAdd(this.unresolvedIntervals[slot],
++                source.unresolvedIntervals[sourceSlot]);
 +            this.executions[slot] = saturatingAdd(this.executions[slot], source.executions[sourceSlot]);
 +            this.missingCpu[slot] = saturatingAdd(this.missingCpu[slot], source.missingCpu[sourceSlot]);
 +            this.utilised[slot] = saturatingAdd(this.utilised[slot], source.utilised[sourceSlot]);
@@ -669,6 +675,7 @@ new file mode 100644
 +            this.epochs[slot] = epoch;
 +            this.counts[slot] = 0L;
 +            this.intervals[slot] = 0L;
++            this.unresolvedIntervals[slot] = 0L;
 +            this.executions[slot] = 0L;
 +            this.missingCpu[slot] = 0L;
 +            this.utilised[slot] = 0L;
