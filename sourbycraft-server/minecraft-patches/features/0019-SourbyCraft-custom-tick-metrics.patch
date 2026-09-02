@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Wed, 2 Sep 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - correct TickData percentile segments
+
+---
+diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/time/TickData.java
+--- a/ca/spottedleaf/common/time/TickData.java
++++ b/ca/spottedleaf/common/time/TickData.java
+@@ -91,8 +91,8 @@ public final class TickData {
+             computeSegmentData(data, allStart, allEnd, inverse),
+             computeSegmentData(data, percent99BestStart, percent99BestEnd, inverse),
+             computeSegmentData(data, percent95BestStart, percent95BestEnd, inverse),
+-            computeSegmentData(data, percent1WorstStart, percent1WorstEnd, inverse),
+             computeSegmentData(data, percent5WorstStart, percent5WorstEnd, inverse),
++            computeSegmentData(data, percent1WorstStart, percent1WorstEnd, inverse),
+             data
+         );
+     }
