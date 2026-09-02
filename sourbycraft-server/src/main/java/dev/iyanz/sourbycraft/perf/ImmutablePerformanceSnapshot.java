@@ -13,7 +13,8 @@ record ImmutablePerformanceSnapshot(long sequence, long sampledAtEpochMillis, do
                                     Freshness freshness, WindowMetrics fiveSeconds,
                                     WindowMetrics tenSeconds, WindowMetrics oneMinute,
                                     WindowMetrics fiveMinutes, WindowMetrics fifteenMinutes,
-                                    RuntimeMetrics runtime) implements PerformanceSnapshot {
+                                    RuntimeMetrics runtime,
+                                    ImmutableGlobalMetrics global) implements PerformanceSnapshot {
 
     ImmutablePerformanceSnapshot {
         Objects.requireNonNull(freshness, "freshness");
@@ -23,6 +24,7 @@ record ImmutablePerformanceSnapshot(long sequence, long sampledAtEpochMillis, do
         Objects.requireNonNull(fiveMinutes, "fiveMinutes");
         Objects.requireNonNull(fifteenMinutes, "fifteenMinutes");
         Objects.requireNonNull(runtime, "runtime");
+        Objects.requireNonNull(global, "global");
     }
 
     static ImmutablePerformanceSnapshot warming() {
@@ -37,7 +39,8 @@ record ImmutablePerformanceSnapshot(long sequence, long sampledAtEpochMillis, do
         final ImmutableFreshness freshness = new ImmutableFreshness(state, 0L, 0L, 0L, diagnostic);
         return new ImmutablePerformanceSnapshot(0L, 0L, Double.NaN, 0, 0, freshness,
             ImmutableWindowMetrics.EMPTY, ImmutableWindowMetrics.EMPTY, ImmutableWindowMetrics.EMPTY,
-            ImmutableWindowMetrics.EMPTY, ImmutableWindowMetrics.EMPTY, ImmutableRuntimeMetrics.UNAVAILABLE);
+            ImmutableWindowMetrics.EMPTY, ImmutableWindowMetrics.EMPTY, ImmutableRuntimeMetrics.UNAVAILABLE,
+            ImmutableGlobalMetrics.EMPTY);
     }
 
     ImmutablePerformanceSnapshot stale(final long nextSequence, final long nowEpochMillis,
@@ -48,7 +51,7 @@ record ImmutablePerformanceSnapshot(long sequence, long sampledAtEpochMillis, do
             this.activeRegionCount, this.retainedGenerationCount,
             new ImmutableFreshness(MetricState.STALE, age, latenessMillis, scanDurationNanos, diagnostic),
             this.fiveSeconds, this.tenSeconds, this.oneMinute, this.fiveMinutes, this.fifteenMinutes,
-            this.runtime);
+            this.runtime, this.global);
     }
 
     @Override

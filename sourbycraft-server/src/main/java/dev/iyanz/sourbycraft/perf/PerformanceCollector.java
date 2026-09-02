@@ -4,6 +4,7 @@ import ca.spottedleaf.common.time.RegionTickMetrics;
 import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
 import dev.iyanz.sourbycraft.util.ContainerMemory;
+import io.papermc.paper.threadedregions.RegionizedServer;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
@@ -28,8 +29,14 @@ public final class PerformanceCollector implements AutoCloseable {
         void forEach(long nowNanos, Consumer<RegionMetricsRegistry.GenerationView> consumer);
     }
 
+    @FunctionalInterface
+    interface GlobalSource {
+        RegionTickMetrics.Snapshot snapshot(long nowNanos);
+    }
+
     private final SourbyMetricsProvider provider;
     private final GenerationSource generations;
+    private final GlobalSource globalSource;
     private final Supplier<ImmutableRuntimeMetrics> runtimeSource;
     private final LongSupplier nanoClock;
     private final LongSupplier epochClock;
@@ -46,16 +53,18 @@ public final class PerformanceCollector implements AutoCloseable {
 
     public PerformanceCollector(final SourbyMetricsProvider provider, final RegionMetricsRegistry registry,
                                 final Supplier<ImmutableRuntimeMetrics> runtimeSource) {
-        this(provider, registry::forEachUnexpired, runtimeSource,
+        this(provider, registry::forEachUnexpired,
+            now -> RegionizedServer.getGlobalTickData().sourbyTickMetrics.current().snapshot(now), runtimeSource,
             System::nanoTime, System::currentTimeMillis, 20.0);
     }
 
     PerformanceCollector(final SourbyMetricsProvider provider, final GenerationSource generations,
-                         final Supplier<ImmutableRuntimeMetrics> runtimeSource,
+                         final GlobalSource globalSource, final Supplier<ImmutableRuntimeMetrics> runtimeSource,
                          final LongSupplier nanoClock, final LongSupplier epochClock,
                          final double targetTps) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.generations = Objects.requireNonNull(generations, "generations");
+        this.globalSource = Objects.requireNonNull(globalSource, "globalSource");
         this.runtimeSource = Objects.requireNonNull(runtimeSource, "runtimeSource");
         this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
         this.epochClock = Objects.requireNonNull(epochClock, "epochClock");
@@ -88,44 +97,58 @@ public final class PerformanceCollector implements AutoCloseable {
         if (this.closed) {
             return;
         }
+        final ImmutablePerformanceSnapshot previous = (ImmutablePerformanceSnapshot)this.provider.snapshot();
         final long scanStarted = this.nanoClock.getAsLong();
         try {
             this.reset();
             this.generations.forEach(nowNanos, view -> this.accept(view, nowNanos));
+            final RegionTickMetrics.Snapshot globalSnapshot = this.globalSource.snapshot(nowNanos);
             final ImmutableRuntimeMetrics runtime = this.runtimeSource.get();
             final ImmutableWindowMetrics[] windows = new ImmutableWindowMetrics[WINDOWS.length];
+            final ImmutableWindowMetrics[] globalWindows = new ImmutableWindowMetrics[WINDOWS.length];
             boolean warming = false;
             for (int i = 0; i < windows.length; ++i) {
                 windows[i] = this.accumulators[i].finish(i, this.activeRegions);
+                globalWindows[i] = globalWindow(window(globalSnapshot, WINDOWS[i]),
+                    globalSnapshot.activeTickStartNanos(), nowNanos, WINDOWS[i]);
                 warming |= windows[i].coverageMillis() < windowMillis(WINDOWS[i]);
             }
             final long duration = elapsed(this.nanoClock.getAsLong(), scanStarted);
             final long latenessMillis = TimeUnit.NANOSECONDS.toMillis(Math.max(0L, latenessNanos));
+            if (latenessNanos >= PERIOD_NANOS || duration > PERIOD_NANOS) {
+                final String diagnostic = duration > PERIOD_NANOS
+                    ? "Collection exceeded one-second period" : "Collection started over one period late";
+                this.publishUnlessClosed(previous.stale(
+                    ++this.sequence, completedAtEpochMillis(nowEpochMillis, duration),
+                    latenessMillis, duration, diagnostic));
+                return;
+            }
             final MetricState state = warming ? MetricState.WARMING : MetricState.AVAILABLE;
+            final ImmutableGlobalMetrics global = new ImmutableGlobalMetrics(
+                globalWindows[0], globalWindows[1], globalWindows[2], globalWindows[3], globalWindows[4]);
             final ImmutablePerformanceSnapshot next = new ImmutablePerformanceSnapshot(
                 ++this.sequence, nowEpochMillis, this.targetTps, this.activeRegions,
                 this.retainedGenerations,
                 new ImmutableFreshness(state, 0L, latenessMillis, duration, ""),
-                windows[0], windows[1], windows[2], windows[3], windows[4], runtime);
+                windows[0], windows[1], windows[2], windows[3], windows[4], runtime, global);
             this.publishUnlessClosed(next);
         } catch (final Throwable failure) {
             final long duration = elapsed(this.nanoClock.getAsLong(), scanStarted);
             final long latenessMillis = TimeUnit.NANOSECONDS.toMillis(Math.max(0L, latenessNanos));
             final String message = failure.getMessage() == null
                 ? failure.getClass().getSimpleName() : failure.getClass().getSimpleName() + ": " + failure.getMessage();
-            final ImmutablePerformanceSnapshot previous = (ImmutablePerformanceSnapshot)this.provider.snapshot();
             final ImmutablePerformanceSnapshot stale = previous.stale(
-                ++this.sequence, nowEpochMillis, latenessMillis, duration, message);
+                ++this.sequence, completedAtEpochMillis(nowEpochMillis, duration),
+                latenessMillis, duration, message);
             this.publishUnlessClosed(stale);
         }
     }
 
     private void run() {
-        long deadline = saturatingAdd(this.nanoClock.getAsLong(), PERIOD_NANOS);
+        long deadline = this.nanoClock.getAsLong() + PERIOD_NANOS;
         while (!this.closed) {
-            final long before = this.nanoClock.getAsLong();
-            final long wait = deadline - before;
-            if (wait > 0L) {
+            long wait;
+            while (!this.closed && (wait = delayUntil(deadline, this.nanoClock.getAsLong())) > 0L) {
                 LockSupport.parkNanos(this, wait);
             }
             if (this.closed || Thread.interrupted()) {
@@ -133,8 +156,7 @@ public final class PerformanceCollector implements AutoCloseable {
             }
             final long now = this.nanoClock.getAsLong();
             this.collect(now, this.epochClock.getAsLong(), Math.max(0L, now - deadline));
-            final long periods = Math.max(1L, Math.floorDiv(Math.max(0L, now - deadline), PERIOD_NANOS) + 1L);
-            deadline = saturatingAdd(deadline, saturatingMultiply(periods, PERIOD_NANOS));
+            deadline = advanceDeadline(deadline, this.nanoClock.getAsLong());
         }
     }
 
@@ -206,18 +228,28 @@ public final class PerformanceCollector implements AutoCloseable {
     }
 
     private static long elapsed(final long end, final long start) {
-        final long difference = end - start;
-        return difference < 0L ? (end >= start ? Long.MAX_VALUE : 0L) : difference;
+        return Math.max(0L, end - start);
+    }
+
+    private static long completedAtEpochMillis(final long startedAtEpochMillis, final long durationNanos) {
+        return saturatingAdd(startedAtEpochMillis, TimeUnit.NANOSECONDS.toMillis(durationNanos));
+    }
+
+    static long delayUntil(final long deadline, final long now) {
+        return Math.max(0L, deadline - now);
+    }
+
+    static long advanceDeadline(final long deadline, final long now) {
+        final long behind = now - deadline;
+        if (behind < 0L) {
+            return deadline;
+        }
+        return deadline + (behind / PERIOD_NANOS + 1L) * PERIOD_NANOS;
     }
 
     private static long saturatingAdd(final long first, final long second) {
         return first < 0L || second < 0L || first > Long.MAX_VALUE - second
             ? Long.MAX_VALUE : first + second;
-    }
-
-    private static long saturatingMultiply(final long first, final long second) {
-        return first == 0L || second == 0L ? 0L
-            : first > Long.MAX_VALUE / second ? Long.MAX_VALUE : first * second;
     }
 
     private void publishUnlessClosed(final ImmutablePerformanceSnapshot next) {
@@ -265,6 +297,7 @@ public final class PerformanceCollector implements AutoCloseable {
         private boolean approximate;
         private boolean truncated;
         private boolean overflow;
+        private boolean hasMaximum;
 
         private WindowAccumulator(final MetricWindow window) {
             this.window = window;
@@ -287,6 +320,7 @@ public final class PerformanceCollector implements AutoCloseable {
             this.approximate = false;
             this.truncated = false;
             this.overflow = false;
+            this.hasMaximum = false;
         }
 
         private void accept(final RegionTickMetrics.WindowSnapshot source, final boolean active,
@@ -301,6 +335,7 @@ public final class PerformanceCollector implements AutoCloseable {
             if (source.sampleCount() > 0L) {
                 this.minimum = Math.min(this.minimum, source.minimumNanos());
                 this.maximum = Math.max(this.maximum, source.maximumNanos());
+                this.hasMaximum = true;
                 this.medianMspt = maxFinite(this.medianMspt, source.medianNanos() * 1.0E-6);
                 this.p95 = maxFinite(this.p95, source.estimatedP95Mspt());
                 this.p99 = maxFinite(this.p99, source.estimatedP99Mspt());
@@ -322,10 +357,11 @@ public final class PerformanceCollector implements AutoCloseable {
                 activeMaximum = Math.max(activeMaximum, stalled);
                 utilisation = Math.min(1.0, utilisation + (double)stalled / windowNanos(this.window));
                 this.maximum = Math.max(this.maximum, activeMaximum);
+                this.hasMaximum = true;
             }
             final double tps = source.intervalNanos() > 0L && source.intervalNanos() != Long.MAX_VALUE
                 ? (double)source.sampleCount() * 1.0E9 / source.intervalNanos() : Double.NaN;
-            final double mspt = activeCount > 0L && activeExecution != Long.MAX_VALUE
+            final double mspt = source.sampleCount() > 0L && activeCount > 0L && activeExecution != Long.MAX_VALUE
                 ? (double)activeExecution / activeCount * 1.0E-6 : Double.NaN;
             PerformanceCollector.this.medianBuffer[windowIndex * 2 * PerformanceCollector.this.medianCapacity + activeIndex] = tps;
             PerformanceCollector.this.medianBuffer[(windowIndex * 2 + 1) * PerformanceCollector.this.medianCapacity + activeIndex] = mspt;
@@ -359,13 +395,44 @@ public final class PerformanceCollector implements AutoCloseable {
                 this.approximate, this.truncated || this.overflow,
                 worstTps, medianTps, aggregateTps, worstAverageMspt, medianAverageMspt,
                 this.count == 0L ? Double.NaN : this.minimum * 1.0E-6,
-                this.count == 0L ? Double.NaN : this.maximum * 1.0E-6,
+                this.hasMaximum ? this.maximum * 1.0E-6 : Double.NaN,
                 this.truncated || this.overflow ? Double.NaN : this.medianMspt,
                 this.truncated || this.overflow ? Double.NaN : this.p95,
                 this.truncated || this.overflow ? Double.NaN : this.p99,
                 this.busiestUtilisation, averageUtilisation,
                 this.overflow || this.missingCpu == Long.MAX_VALUE ? Double.NaN : this.missingCpu * 1.0E-6);
         }
+    }
+
+    private static ImmutableWindowMetrics globalWindow(final RegionTickMetrics.WindowSnapshot source,
+                                                       final long activeTickStart, final long nowNanos,
+                                                       final MetricWindow window) {
+        final boolean completed = source.sampleCount() > 0L;
+        final boolean stalled = activeTickStart != RegionTickMetrics.INACTIVE;
+        final long stallNanos = stalled ? Math.min(windowNanos(window), elapsed(nowNanos, activeTickStart)) : 0L;
+        final long averageCount = completed ? saturatingAdd(source.sampleCount(), stalled ? 1L : 0L) : 0L;
+        final long averageExecution = completed ? saturatingAdd(source.executionNanos(), stallNanos) : 0L;
+        final boolean overflow = source.intervalNanos() == Long.MAX_VALUE
+            || source.executionNanos() == Long.MAX_VALUE || source.missingCpuNanos() == Long.MAX_VALUE;
+        final double tps = overflow || source.intervalNanos() == 0L ? Double.NaN
+            : (double)source.sampleCount() * 1.0E9 / source.intervalNanos();
+        final double averageMspt = averageCount == 0L || averageExecution == Long.MAX_VALUE
+            ? Double.NaN : (double)averageExecution / averageCount * 1.0E-6;
+        final double utilisation = completed || stalled
+            ? Math.min(1.0, source.utilisation() + (double)stallNanos / windowNanos(window)) : Double.NaN;
+        final double maximum = completed || stalled
+            ? Math.max(source.maximumNanos(), stallNanos) * 1.0E-6 : Double.NaN;
+        final boolean truncated = source.truncated() || overflow;
+        return new ImmutableWindowMetrics(
+            TimeUnit.NANOSECONDS.toMillis(Math.min(windowNanos(window), source.intervalNanos())),
+            source.sampleCount(), source.approximate(), truncated,
+            tps, tps, tps, averageMspt, averageMspt,
+            completed ? source.minimumNanos() * 1.0E-6 : Double.NaN, maximum,
+            truncated ? Double.NaN : source.medianNanos() * 1.0E-6,
+            truncated ? Double.NaN : source.estimatedP95Mspt(),
+            truncated ? Double.NaN : source.estimatedP99Mspt(),
+            utilisation, utilisation,
+            overflow ? Double.NaN : source.missingCpuNanos() * 1.0E-6);
     }
 
     private static double minimumFinite(final double[] values, final int offset, final int length) {
