@@ -147,9 +147,9 @@ public final class HudBars {
     private static TpsDisplay renderTps(final PerformanceSnapshot snapshot) {
         final WindowMetrics recent = snapshot.window(MetricWindow.FIVE_SECONDS);
         final double target = snapshot.targetTps();
-        final double tps = recent.worstTps();
+        final double tps = TpsCommand.cappedTps(recent.worstTps(), target);
         final double mspt = recent.worstAverageMspt();
-        if (!TpsCommand.available(tps) || !TpsCommand.available(target) || target <= 0.0
+        if (!TpsCommand.available(tps)
             || snapshot.freshness().state() == MetricState.UNAVAILABLE
             || snapshot.freshness().state() == MetricState.WARMING) {
             return new TpsDisplay(Component.text("TPS " + snapshot.freshness().state().name(), NamedTextColor.GRAY),
@@ -172,7 +172,7 @@ public final class HudBars {
             .append(Component.text(TpsCommand.ms(mspt), msptColor))
             .append(Component.text(stale, NamedTextColor.GRAY))
             .build();
-        return new TpsDisplay(name, (float)Math.clamp(ratio, 0.0, 1.0), color);
+        return new TpsDisplay(name, (float)ratio, color);
     }
 
     private static void applyTps(final TpsDisplay display) {

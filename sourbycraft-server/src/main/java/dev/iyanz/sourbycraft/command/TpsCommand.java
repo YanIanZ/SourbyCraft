@@ -72,15 +72,16 @@ public class TpsCommand extends Command {
                 topologyAvailable ? SourbyCraftColors.VALUE : SourbyCraftColors.DIM)).build());
 
         final WindowMetrics global = MetricsRuntime.globalWindow(snapshot, MetricWindow.FIVE_SECONDS);
-        final String globalStatus = available(global.worstTps()) || available(global.worstAverageMspt())
-            ? "TPS " + value(global.worstTps(), 2) + " / MSPT " + ms(global.worstAverageMspt())
+        final double globalTps = cappedTps(global.worstTps(), target);
+        final String globalStatus = available(globalTps) || available(global.worstAverageMspt())
+            ? "TPS " + value(globalTps, 2) + " / MSPT " + ms(global.worstAverageMspt())
             : "unavailable";
         lines.add(text().append(text("  Global: ", SourbyCraftColors.LABEL))
             .append(text(globalStatus, SourbyCraftColors.VALUE)).build());
 
         renderRuntime(lines, snapshot.runtime());
-        final double worstTps = recent.worstTps();
-        if (available(worstTps) && available(target) && target > 0.0) {
+        final double worstTps = cappedTps(recent.worstTps(), target);
+        if (available(worstTps) && available(recent.worstAverageMspt())) {
             final Tier tier = tierFor(worstTps, recent.worstAverageMspt(), target);
             lines.add(text().append(text("  Tier: ", SourbyCraftColors.LABEL))
                 .append(text(tier.name(), tierColor(tier))).build());
@@ -94,17 +95,20 @@ public class TpsCommand extends Command {
 
     private static void renderWindow(final List<Component> lines, final String label,
                                      final WindowMetrics window, final double target) {
-        if (!available(window.worstTps()) || !available(target) || target <= 0.0) {
+        final double worstTps = cappedTps(window.worstTps(), target);
+        if (!available(worstTps)) {
             lines.add(text("  " + label + "  unavailable", SourbyCraftColors.DIM));
             return;
         }
-        final double progress = Math.clamp(window.worstTps() / target, 0.0, 1.0) * 100.0;
-        final TextColor color = tpsColor(window.worstTps(), target);
+        final double medianTps = cappedTps(window.medianTps(), target);
+        final double aggregateTps = cappedTps(window.aggregateTps(), target);
+        final double progress = worstTps / target * 100.0;
+        final TextColor color = tpsColor(worstTps, target);
         lines.add(text().append(text("  " + label + " ", SourbyCraftColors.DIM))
             .append(text(BarUtil.bar(progress, TPS_BAR_WIDTH), color))
-            .append(text("  Worst " + value(window.worstTps(), 2), color))
-            .append(text(" / Median " + value(window.medianTps(), 2)
-                + " / Aggregate " + value(window.aggregateTps(), 2), SourbyCraftColors.DIM)).build());
+            .append(text("  Worst " + value(worstTps, 2), color))
+            .append(text(" / Median " + value(medianTps, 2)
+                + " / Aggregate " + value(aggregateTps, 2), SourbyCraftColors.DIM)).build());
     }
 
     private static void renderRuntime(final List<Component> lines, final RuntimeMetrics runtime) {
@@ -143,6 +147,11 @@ public class TpsCommand extends Command {
         return Double.isFinite(value);
     }
 
+    public static double cappedTps(final double tps, final double target) {
+        if (!available(tps) || !available(target) || target <= 0.0) return Double.NaN;
+        return Math.clamp(tps, 0.0, target);
+    }
+
     public static TextColor tpsColor(final double tps, final double target) {
         if (!available(tps) || !available(target) || target <= 0.0) return SourbyCraftColors.DIM;
         return tps >= target * 0.95 ? SourbyCraftColors.SUCCESS
@@ -157,10 +166,10 @@ public class TpsCommand extends Command {
     }
 
     private static Tier tierFor(final double tps, final double mspt, final double target) {
-        if (!available(tps) || !available(target) || target <= 0.0) return Tier.RED;
+        if (!available(tps) || !available(mspt) || !available(target) || target <= 0.0) return Tier.RED;
         final double budget = 1_000.0 / target;
-        if (tps >= target * 0.9 && (!available(mspt) || mspt < budget * 0.8)) return Tier.GREEN;
-        if (tps >= target * 0.75 && (!available(mspt) || mspt < budget)) return Tier.YELLOW;
+        if (tps >= target * 0.9 && mspt < budget * 0.8) return Tier.GREEN;
+        if (tps >= target * 0.75 && mspt < budget) return Tier.YELLOW;
         return Tier.RED;
     }
 

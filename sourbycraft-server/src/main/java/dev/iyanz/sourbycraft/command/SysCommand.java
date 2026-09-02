@@ -180,13 +180,15 @@ public class SysCommand extends Command {
         final List<Component> lines = new ArrayList<>();
         final WindowMetrics recent = snapshot.window(MetricWindow.FIVE_SECONDS);
         final RuntimeMetrics runtime = snapshot.runtime();
+        final double busiestPercent = percent(recent.busiestUtilisation());
+        final double averagePercent = percent(recent.averageUtilisation());
         lines.add(text()
             .append(text("  Performance ", SourbyCraftColors.HEADER))
             .append(text("(region-threaded)", SourbyCraftColors.DIM))
             .build());
 
-        if (hasHealthData(recent)) {
-            final int health = healthScore(recent, runtime);
+        if (hasHealthData(recent, snapshot.targetTps())) {
+            final int health = healthScore(recent, runtime, snapshot.targetTps(), busiestPercent);
             final TextColor hColor = health >= 80 ? SourbyCraftColors.SUCCESS
                 : health >= 50 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
             lines.add(text()
@@ -198,11 +200,12 @@ public class SysCommand extends Command {
             lines.add(text("  Health unavailable", SourbyCraftColors.DIM));
         }
 
-        if (TpsCommand.available(recent.worstTps())) {
+        final double worstTps = TpsCommand.cappedTps(recent.worstTps(), snapshot.targetTps());
+        if (TpsCommand.available(worstTps)) {
             lines.add(text()
                 .append(text("  TPS: ", SourbyCraftColors.LABEL))
-                .append(text(TpsCommand.value(recent.worstTps(), 2),
-                    TpsCommand.tpsColor(recent.worstTps(), snapshot.targetTps())))
+                .append(text(TpsCommand.value(worstTps, 2),
+                    TpsCommand.tpsColor(worstTps, snapshot.targetTps())))
                 .append(text("  worst active", SourbyCraftColors.DIM))
                 .build());
         }
@@ -223,12 +226,12 @@ public class SysCommand extends Command {
                 .append(text("  / " + snapshot.retainedGenerationCount() + " retained", SourbyCraftColors.DIM))
                 .build());
         }
-        if (TpsCommand.available(recent.busiestUtilisation())) {
+        if (TpsCommand.available(busiestPercent)) {
             lines.add(text()
                 .append(text("  Region load ", SourbyCraftColors.LABEL))
-                .append(BarUtil.coloredBar(recent.busiestUtilisation(), BarUtil.DEFAULT_WIDTH))
-                .append(text("  busiest " + fmtPct(recent.busiestUtilisation())
-                    + " / avg " + fmtPct(recent.averageUtilisation()),
+                .append(BarUtil.coloredBar(busiestPercent, BarUtil.DEFAULT_WIDTH))
+                .append(text("  busiest " + fmtPct(busiestPercent)
+                    + " / avg " + fmtPct(averagePercent),
                     SourbyCraftColors.DIM))
                 .build());
             if (recent.totalMissingCpuMs() > 1.0) {
@@ -272,18 +275,26 @@ public class SysCommand extends Command {
     private static String fmtPct(double p) { return Double.isNaN(p) ? "?" : String.format(java.util.Locale.ROOT, "%.0f%%", p); }
     private static String fmt1(double v) { return String.format(java.util.Locale.ROOT, "%.1f", v); }
 
-    private static boolean hasHealthData(final WindowMetrics window) {
-        return TpsCommand.available(window.busiestUtilisation())
-            || TpsCommand.available(window.estimatedP95Mspt());
+    private static double percent(final double fraction) {
+        return TpsCommand.available(fraction) ? fraction * 100.0 : Double.NaN;
     }
 
-    private static int healthScore(final WindowMetrics window, final RuntimeMetrics runtime) {
+    private static boolean hasHealthData(final WindowMetrics window, final double targetTps) {
+        return TpsCommand.available(window.busiestUtilisation())
+            || TpsCommand.available(window.estimatedP95Mspt())
+                && TpsCommand.available(targetTps) && targetTps > 0.0;
+    }
+
+    private static int healthScore(final WindowMetrics window, final RuntimeMetrics runtime,
+                                   final double targetTps, final double busiestPercent) {
         double score = 100.0;
-        if (TpsCommand.available(window.busiestUtilisation())) {
-            score -= Math.max(0.0, window.busiestUtilisation() - 70.0);
+        if (TpsCommand.available(busiestPercent)) {
+            score -= Math.max(0.0, busiestPercent - 70.0);
         }
-        if (TpsCommand.available(window.estimatedP95Mspt())) {
-            score -= Math.min(30.0, Math.max(0.0, window.estimatedP95Mspt() - 40.0) * 0.5);
+        if (TpsCommand.available(window.estimatedP95Mspt())
+            && TpsCommand.available(targetTps) && targetTps > 0.0) {
+            final double budget = 1_000.0 / targetTps;
+            score -= Math.min(30.0, Math.max(0.0, window.estimatedP95Mspt() / budget - 0.8) * 25.0);
         }
         if (TpsCommand.available(runtime.gcTimePercent())) {
             score -= Math.min(20.0, runtime.gcTimePercent() * 2.0);
