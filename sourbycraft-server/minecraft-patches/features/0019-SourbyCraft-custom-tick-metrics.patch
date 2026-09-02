@@ -8,7 +8,7 @@ diff --git a/ca/spottedleaf/common/time/RegionTickMetrics.java b/ca/spottedleaf/
 new file mode 100644
 --- /dev/null
 +++ b/ca/spottedleaf/common/time/RegionTickMetrics.java
-@@ -0,0 +1,513 @@
+@@ -0,0 +1,571 @@
 +package ca.spottedleaf.common.time;
 +
 +import java.util.Arrays;
@@ -43,9 +43,11 @@ new file mode 100644
 +    private int rawSize;
 +    private long lastDroppedEnd = INACTIVE;
 +    private long lastCompletedEnd;
++    private long lastPromotionEpoch = Long.MIN_VALUE;
 +
 +    private final BucketStore seconds = new BucketStore(61, SECOND);
 +    private final BucketStore fiveSeconds = new BucketStore(169, FIVE_SECONDS);
++    private final long[] histogramScratch = new long[HISTOGRAM_BINS];
 +
 +    private volatile long activeTickStartNanos = INACTIVE;
 +    private long sequence;
@@ -70,7 +72,7 @@ new file mode 100644
 +        this.activeTickStartNanos = startNanos;
 +    }
 +
-+    public void tickCompleted(final TickTime tick, final long targetIntervalNanos) {
++    public synchronized void tickCompleted(final TickTime tick, final long targetIntervalNanos) {
 +        this.recordCompletedSample(tick, targetIntervalNanos);
 +        this.activeTickStartNanos = INACTIVE;
 +        this.publishSnapshotIfDue(tick.tickEnd());
@@ -87,8 +89,8 @@ new file mode 100644
 +            current.oneMinute(), current.fiveMinutes(), current.fifteenMinutes());
 +    }
 +
-+    public TickData.TickReportData report(final long windowNanos, final TickTime inProgress,
-+                                          final long nowNanos, final long targetIntervalNanos) {
++    public synchronized TickData.TickReportData report(final long windowNanos, final TickTime inProgress,
++                                                       final long nowNanos, final long targetIntervalNanos) {
 +        int count = 0;
 +        final long cutoff = subtractFloor(nowNanos, windowNanos);
 +        for (int i = 0; i < this.rawSize; ++i) {
@@ -146,13 +148,13 @@ new file mode 100644
 +            segmented(intervals, true), segmented(executions, false), segmented(missingCpu, false));
 +    }
 +
-+    public Double tps(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
++    public synchronized Double tps(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
 +        final long now = inProgress == null ? this.lastCompletedEnd : inProgress.tickEnd();
 +        final TickData.TickReportData report = this.report(windowNanos, inProgress, now, targetIntervalNanos);
 +        return report == null ? null : report.tpsData().segmentAll().average();
 +    }
 +
-+    public TickData.MSPTData mspt(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
++    public synchronized TickData.MSPTData mspt(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
 +        final long now = inProgress == null ? this.lastCompletedEnd : inProgress.tickEnd();
 +        final TickData.TickReportData report = this.report(windowNanos, inProgress, now, targetIntervalNanos);
 +        if (report == null) {
@@ -186,8 +188,24 @@ new file mode 100644
 +        this.rawOverflow[index] = (byte)(overflow ? 1 : 0);
 +        this.lastCompletedEnd = tick.tickEnd();
 +
++        this.promoteExpiredSeconds(tick.tickEnd());
 +        this.seconds.add(tick.tickStart(), tick.tickEnd(), interval, execution, missingCpu, overflow);
-+        this.fiveSeconds.add(tick.tickStart(), tick.tickEnd(), interval, execution, missingCpu, overflow);
++    }
++
++    private void promoteExpiredSeconds(final long nowNanos) {
++        final long currentEpoch = Math.floorDiv(nowNanos, SECOND);
++        if (currentEpoch == this.lastPromotionEpoch) {
++            return;
++        }
++        this.lastPromotionEpoch = currentEpoch;
++        final long latestPromotable = currentEpoch - 60L;
++        for (int slot = 0; slot < this.seconds.slots; ++slot) {
++            final long epoch = this.seconds.epochs[slot];
++            if (epoch != Long.MIN_VALUE && epoch <= latestPromotable && this.seconds.promoted[slot] == 0) {
++                this.fiveSeconds.addFrom(this.seconds, slot);
++                this.seconds.promoted[slot] = 1;
++            }
++        }
 +    }
 +
 +    private void publishSnapshotIfDue(final long nowNanos) {
@@ -200,9 +218,9 @@ new file mode 100644
 +            this.rawWindow(nowNanos, FIVE_SECONDS),
 +            this.rawWindow(nowNanos, TEN_SECONDS),
 +            this.rawWindow(nowNanos, FIFTEEN_SECONDS),
-+            this.bucketWindow(this.seconds, nowNanos, MINUTE),
-+            this.bucketWindow(this.fiveSeconds, nowNanos, FIVE_MINUTES),
-+            this.bucketWindow(this.fiveSeconds, nowNanos, FIFTEEN_MINUTES));
++            this.bucketWindow(nowNanos, MINUTE),
++            this.bucketWindow(nowNanos, FIVE_MINUTES),
++            this.bucketWindow(nowNanos, FIFTEEN_MINUTES));
 +        this.published = next;
 +    }
 +
@@ -216,7 +234,8 @@ new file mode 100644
 +        long minimum = Long.MAX_VALUE;
 +        long maximum = 0L;
 +        boolean truncated = this.lastDroppedEnd != INACTIVE && this.lastDroppedEnd >= cutoff;
-+        final long[] histogram = new long[HISTOGRAM_BINS];
++        final long[] histogram = this.histogramScratch;
++        Arrays.fill(histogram, 0L);
 +        for (int i = 0; i < this.rawSize; ++i) {
 +            final int index = (this.rawStart + i) % RAW_CAPACITY;
 +            final long end = this.rawEnds[index];
@@ -238,10 +257,9 @@ new file mode 100644
 +            windowNanos, histogram, true, truncated);
 +    }
 +
-+    private WindowSnapshot bucketWindow(final BucketStore store, final long nowNanos, final long windowNanos) {
++    private WindowSnapshot bucketWindow(final long nowNanos, final long windowNanos) {
 +        final long cutoff = subtractFloor(nowNanos, windowNanos);
-+        final long firstEpoch = ceilDiv(cutoff, store.width);
-+        final long lastEpoch = Math.floorDiv(nowNanos, store.width);
++        final long newestCutoff = Math.max(cutoff, subtractFloor(nowNanos, MINUTE));
 +        long count = 0L;
 +        long interval = 0L;
 +        long execution = 0L;
@@ -250,26 +268,35 @@ new file mode 100644
 +        long minimum = Long.MAX_VALUE;
 +        long maximum = 0L;
 +        boolean truncated = false;
-+        final long[] histogram = new long[HISTOGRAM_BINS];
-+        for (int slot = 0; slot < store.slots; ++slot) {
-+            final long epoch = store.epochs[slot];
-+            if (epoch < firstEpoch || epoch > lastEpoch) {
-+                continue;
-+            }
-+            count = saturatingAdd(count, store.counts[slot]);
-+            interval = saturatingAdd(interval, store.intervals[slot]);
-+            execution = saturatingAdd(execution, store.executions[slot]);
-+            missingCpu = saturatingAdd(missingCpu, store.missingCpu[slot]);
-+            utilised = saturatingAdd(utilised, store.utilised[slot]);
-+            minimum = Math.min(minimum, store.minimums[slot]);
-+            maximum = Math.max(maximum, store.maximums[slot]);
-+            truncated |= store.overflow[slot] != 0;
-+            final int histogramOffset = slot * HISTOGRAM_VALUES_PER_SLICE;
-+            for (int i = 0; i < HISTOGRAM_VALUES_PER_SLICE; ++i) {
-+                final byte storedBin = store.histogramBins[histogramOffset + i];
-+                if (storedBin >= 0) {
-+                    final int bin = Byte.toUnsignedInt(storedBin);
-+                    histogram[bin] = saturatingAdd(histogram[bin], store.histogramCounts[histogramOffset + i]);
++        final long[] histogram = this.histogramScratch;
++        Arrays.fill(histogram, 0L);
++        final int stores = windowNanos == MINUTE ? 1 : 2;
++        for (int storeIndex = 0; storeIndex < stores; ++storeIndex) {
++            final BucketStore store = storeIndex == 0 ? this.seconds : this.fiveSeconds;
++            final long firstEpoch = ceilDiv(storeIndex == 0 ? newestCutoff : cutoff, store.width);
++            final long lastEpoch = storeIndex == 0
++                ? Math.floorDiv(nowNanos, store.width)
++                : Math.floorDiv(newestCutoff, store.width) - 1L;
++            for (int slot = 0; slot < store.slots; ++slot) {
++                final long epoch = store.epochs[slot];
++                if (epoch < firstEpoch || epoch > lastEpoch) {
++                    continue;
++                }
++                count = saturatingAdd(count, store.counts[slot]);
++                interval = saturatingAdd(interval, store.intervals[slot]);
++                execution = saturatingAdd(execution, store.executions[slot]);
++                missingCpu = saturatingAdd(missingCpu, store.missingCpu[slot]);
++                utilised = saturatingAdd(utilised, store.utilised[slot]);
++                minimum = Math.min(minimum, store.minimums[slot]);
++                maximum = Math.max(maximum, store.maximums[slot]);
++                truncated |= store.overflow[slot] != 0;
++                final int histogramOffset = slot * HISTOGRAM_VALUES_PER_SLICE;
++                for (int i = 0; i < HISTOGRAM_VALUES_PER_SLICE; ++i) {
++                    final byte storedBin = store.histogramBins[histogramOffset + i];
++                    if (storedBin >= 0) {
++                        final int bin = Byte.toUnsignedInt(storedBin);
++                        histogram[bin] = saturatingAdd(histogram[bin], store.histogramCounts[histogramOffset + i]);
++                    }
 +                }
 +            }
 +        }
@@ -285,13 +312,14 @@ new file mode 100644
 +            return emptyWindow(approximate);
 +        }
 +        final boolean invalid = interval == Long.MAX_VALUE || execution == Long.MAX_VALUE;
-+        final long median = Math.max(minimum, Math.min(maximum, histogramQuantile(histogram, count, 0.5)));
++        final long median = truncated ? 0L
++            : Math.max(minimum, Math.min(maximum, histogramQuantile(histogram, count, 0.5)));
 +        final double tps = invalid || interval == 0L ? Double.NaN : (double)count * 1.0E9 / (double)interval;
 +        final double mspt = invalid ? Double.NaN : (double)execution / (double)count * 1.0E-6;
 +        return new WindowSnapshot(count, interval, execution, minimum, median, maximum, missingCpu,
 +            tps, mspt, Math.min(1.0, (double)utilised / (double)windowNanos),
-+            Math.max(minimum, Math.min(maximum, histogramQuantile(histogram, count, 0.95))) * 1.0E-6,
-+            Math.max(minimum, Math.min(maximum, histogramQuantile(histogram, count, 0.99))) * 1.0E-6,
++            truncated ? Double.NaN : Math.max(minimum, Math.min(maximum, histogramQuantile(histogram, count, 0.95))) * 1.0E-6,
++            truncated ? Double.NaN : Math.max(minimum, Math.min(maximum, histogramQuantile(histogram, count, 0.99))) * 1.0E-6,
 +            approximate, truncated);
 +    }
 +
@@ -427,6 +455,7 @@ new file mode 100644
 +        private final long[] minimums;
 +        private final long[] maximums;
 +        private final byte[] overflow;
++        private final byte[] promoted;
 +        private final byte[] histogramBins;
 +        private final int[] histogramCounts;
 +
@@ -443,6 +472,7 @@ new file mode 100644
 +            this.minimums = new long[slots];
 +            this.maximums = new long[slots];
 +            this.overflow = new byte[slots];
++            this.promoted = new byte[slots];
 +            this.histogramBins = new byte[slots * HISTOGRAM_VALUES_PER_SLICE];
 +            Arrays.fill(this.histogramBins, (byte)-1);
 +            this.histogramCounts = new int[slots * HISTOGRAM_VALUES_PER_SLICE];
@@ -461,16 +491,44 @@ new file mode 100644
 +            this.maximums[slot] = Math.max(this.maximums[slot], execution);
 +            this.overflow[slot] |= (byte)(sampleOverflow || this.counts[slot] == Long.MAX_VALUE
 +                || this.intervals[slot] == Long.MAX_VALUE || this.executions[slot] == Long.MAX_VALUE ? 1 : 0);
-+            final int bin = histogramBin(execution);
++            this.addHistogramCount(slot, histogramBin(execution), 1);
++            this.addUtilisation(start, end, epoch);
++        }
++
++        private void addFrom(final BucketStore source, final int sourceSlot) {
++            final long epoch = Math.floorDiv(source.epochs[sourceSlot], 5L);
++            final int slot = Math.floorMod(epoch, this.slots);
++            this.prepare(slot, epoch);
++            this.counts[slot] = saturatingAdd(this.counts[slot], source.counts[sourceSlot]);
++            this.intervals[slot] = saturatingAdd(this.intervals[slot], source.intervals[sourceSlot]);
++            this.executions[slot] = saturatingAdd(this.executions[slot], source.executions[sourceSlot]);
++            this.missingCpu[slot] = saturatingAdd(this.missingCpu[slot], source.missingCpu[sourceSlot]);
++            this.utilised[slot] = saturatingAdd(this.utilised[slot], source.utilised[sourceSlot]);
++            if (source.counts[sourceSlot] != 0L) {
++                this.minimums[slot] = Math.min(this.minimums[slot], source.minimums[sourceSlot]);
++                this.maximums[slot] = Math.max(this.maximums[slot], source.maximums[sourceSlot]);
++            }
++            this.overflow[slot] |= source.overflow[sourceSlot];
++            final int sourceOffset = sourceSlot * HISTOGRAM_VALUES_PER_SLICE;
++            for (int i = 0; i < HISTOGRAM_VALUES_PER_SLICE; ++i) {
++                final byte bin = source.histogramBins[sourceOffset + i];
++                if (bin >= 0) {
++                    this.addHistogramCount(slot, Byte.toUnsignedInt(bin), source.histogramCounts[sourceOffset + i]);
++                }
++            }
++        }
++
++        private void addHistogramCount(final int slot, final int bin, final int count) {
 +            final int histogramOffset = slot * HISTOGRAM_VALUES_PER_SLICE;
 +            int free = -1;
 +            for (int i = 0; i < HISTOGRAM_VALUES_PER_SLICE; ++i) {
 +                final int histogramIndex = histogramOffset + i;
 +                if (this.histogramBins[histogramIndex] == (byte)bin) {
-+                    if (this.histogramCounts[histogramIndex] == Integer.MAX_VALUE) {
++                    if (this.histogramCounts[histogramIndex] > Integer.MAX_VALUE - count) {
 +                        this.overflow[slot] = 1;
++                        this.histogramCounts[histogramIndex] = Integer.MAX_VALUE;
 +                    } else {
-+                        ++this.histogramCounts[histogramIndex];
++                        this.histogramCounts[histogramIndex] += count;
 +                    }
 +                    free = -2;
 +                    break;
@@ -481,11 +539,10 @@ new file mode 100644
 +            }
 +            if (free >= 0) {
 +                this.histogramBins[free] = (byte)bin;
-+                this.histogramCounts[free] = 1;
++                this.histogramCounts[free] = count;
 +            } else if (free == -1) {
 +                this.overflow[slot] = 1;
 +            }
-+            this.addUtilisation(start, end, epoch);
 +        }
 +
 +        private void addUtilisation(final long start, final long end, final long completionEpoch) {
@@ -515,6 +572,7 @@ new file mode 100644
 +            this.minimums[slot] = Long.MAX_VALUE;
 +            this.maximums[slot] = 0L;
 +            this.overflow[slot] = 0;
++            this.promoted[slot] = 0;
 +            Arrays.fill(this.histogramBins, slot * HISTOGRAM_VALUES_PER_SLICE,
 +                (slot + 1) * HISTOGRAM_VALUES_PER_SLICE, (byte)-1);
 +            Arrays.fill(this.histogramCounts, slot * HISTOGRAM_VALUES_PER_SLICE,
