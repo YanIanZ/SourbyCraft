@@ -1029,3 +1029,14 @@ diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/
      private final List<ServerPlayer> players = new java.util.concurrent.CopyOnWriteArrayList<>(); // Folia - region threading
      private final ServerChunkCache chunkSource;
      private final MinecraftServer server;
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1064,6 +1064,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickT
+             this.server.spark.disable(); // Paper - spark
+             this.server.disablePlugins();
+             this.server.waitForAsyncTasksShutdown(); // Paper - Wait for Async Tasks during shutdown
++            dev.iyanz.sourbycraft.perf.MetricsRuntime.close(org.bukkit.Bukkit.getServicesManager());
+         }
+         // CraftBukkit end
+         this.isSaving = true; // Canvas - region threading

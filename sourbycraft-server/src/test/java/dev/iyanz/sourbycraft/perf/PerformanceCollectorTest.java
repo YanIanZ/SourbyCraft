@@ -1,0 +1,246 @@
+package dev.iyanz.sourbycraft.perf;
+
+import ca.spottedleaf.common.time.RegionTickMetrics;
+import ca.spottedleaf.common.time.TickTime;
+import ca.spottedleaf.common.util.TimeUtil;
+import dev.iyanz.sourbycraft.api.metrics.MetricState;
+import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
+import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
+import dev.iyanz.sourbycraft.api.metrics.WindowMetrics;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class PerformanceCollectorTest {
+
+    private static final long MILLISECOND = TimeUnit.MILLISECONDS.toNanos(1L);
+    private static final long SECOND = TimeUnit.SECONDS.toNanos(1L);
+
+    @Test
+    void unequalCoverageUsesAdditiveAggregateAndActiveWorstAndMedian() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final PerformanceCollector collector = collector(provider, source(
+            view(1L, true, window(1L, 100L * MILLISECOND, 10L * MILLISECOND, 0.1)),
+            view(2L, true, window(6L, 300L * MILLISECOND, 60L * MILLISECOND, 0.2)),
+            view(3L, true, window(4L, 250L * MILLISECOND, 80L * MILLISECOND, 0.4))
+        ));
+
+        collector.collect(SECOND, 1_000L, 0L);
+        final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        assertEquals(10.0, result.worstTps(), 1.0E-9);
+        assertEquals(16.0, result.medianTps(), 1.0E-9);
+        assertEquals(16.923076923076923, result.aggregateTps(), 1.0E-9);
+        assertEquals(20.0, result.worstAverageMspt(), 1.0E-9);
+        assertEquals(10.0, result.medianAverageMspt(), 1.0E-9);
+    }
+
+    @Test
+    void requiredUnequalCoverageExampleProducesSeventeenPointFiveAggregate() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final PerformanceCollector collector = collector(provider, source(
+            view(1L, true, window(1L, 100L * MILLISECOND, 10L * MILLISECOND, 0.1)),
+            view(2L, true, window(6L, 300L * MILLISECOND, 60L * MILLISECOND, 0.2))
+        ));
+
+        collector.collect(SECOND, 1_000L, 0L);
+        final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        assertEquals(17.5, result.aggregateTps(), 1.0E-9);
+        assertEquals(10.0, result.worstTps(), 1.0E-9);
+    }
+
+    @Test
+    void retiredGenerationContributesHistoryButNotActiveTopology() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final PerformanceCollector collector = collector(provider, source(
+            view(1L, true, window(1L, 50L * MILLISECOND, 5L * MILLISECOND, 0.1)),
+            view(2L, false, window(1L, 100L * MILLISECOND, 40L * MILLISECOND, 0.8))
+        ));
+
+        collector.collect(SECOND, 1_000L, 0L);
+        final PerformanceSnapshot snapshot = provider.snapshot();
+        final WindowMetrics result = snapshot.window(MetricWindow.FIVE_SECONDS);
+
+        assertEquals(1, snapshot.activeRegionCount());
+        assertEquals(2, snapshot.retainedGenerationCount());
+        assertEquals(20.0, result.worstTps(), 1.0E-9);
+        assertEquals(13.333333333333334, result.aggregateTps(), 1.0E-9);
+        assertEquals(40.0, result.maximumMspt(), 1.0E-9);
+        assertEquals(22.5, result.totalMissingCpuMs(), 1.0E-9);
+    }
+
+    @Test
+    void collectorUsesCanonicalRegistryIterationAndDoesNotInventGlobalRegion() {
+        final RegionMetricsRegistry registry = new RegionMetricsRegistry();
+        final RegionTickMetricsHolder holder = new RegionTickMetricsHolder();
+        holder.tickCompleted(new TickTime(TimeUtil.DEADLINE_NOT_SET, SECOND - MILLISECOND,
+            SECOND - MILLISECOND, 0L, SECOND, 0L, 0L, 0L, false), 50L * MILLISECOND);
+        registry.activate(registry.newWorldId(), 7L, holder, SECOND);
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+
+        new PerformanceCollector(provider, registry, () -> runtime()).collect(SECOND, 1_000L, 0L);
+
+        assertEquals(1, provider.snapshot().activeRegionCount());
+        assertEquals(1, provider.snapshot().retainedGenerationCount());
+    }
+
+    @Test
+    void stalledTickOverlaysActiveMsptMaximumAndUtilisationWithoutFabricatingCompletion() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final RegionTickMetrics.WindowSnapshot completed = window(
+            1L, 50L * MILLISECOND, 10L * MILLISECOND, 0.1);
+        final RegionTickMetrics.Snapshot stalled = snapshot(completed, SECOND - 500L * MILLISECOND);
+        final PerformanceCollector collector = collector(provider,
+            (now, consumer) -> consumer.accept(new RegionMetricsRegistry.GenerationView(1L, 1L, 1L, true, stalled)));
+
+        collector.collect(SECOND, 1_000L, 0L);
+        final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        assertEquals(1L, result.sampleCount());
+        assertEquals(255.0, result.worstAverageMspt(), 1.0E-9);
+        assertEquals(500.0, result.maximumMspt(), 1.0E-9);
+        assertEquals(0.2, result.busiestUtilisation(), 1.0E-9);
+    }
+
+    @Test
+    void truncationAndOverflowPropagateUnavailableAdditiveAndQuantileValues() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final RegionTickMetrics.WindowSnapshot overflow = new RegionTickMetrics.WindowSnapshot(
+            2L, Long.MAX_VALUE, Long.MAX_VALUE, MILLISECOND, Double.NaN, 10L * MILLISECOND,
+            Long.MAX_VALUE, Double.NaN, Double.NaN, 0.5, Double.NaN, Double.NaN, true, true);
+
+        collector(provider, source(view(1L, true, overflow))).collect(SECOND, 1_000L, 0L);
+        final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        assertTrue(result.truncated());
+        assertTrue(Double.isNaN(result.aggregateTps()));
+        assertTrue(Double.isNaN(result.medianMspt()));
+        assertTrue(Double.isNaN(result.estimatedP95Mspt()));
+        assertTrue(Double.isNaN(result.totalMissingCpuMs()));
+    }
+
+    @Test
+    void emptyHistoryIsWarmingAndNeverFabricatesHealthyZeros() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+
+        collector(provider, source()).collect(SECOND, 1_000L, 0L);
+        final PerformanceSnapshot snapshot = provider.snapshot();
+
+        assertEquals(MetricState.WARMING, snapshot.freshness().state());
+        assertTrue(Double.isNaN(snapshot.window(MetricWindow.FIVE_SECONDS).worstTps()));
+        assertTrue(Double.isNaN(snapshot.window(MetricWindow.FIVE_SECONDS).aggregateTps()));
+    }
+
+    @Test
+    void completeCoverageBecomesAvailable() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final long fifteenMinutes = TimeUnit.MINUTES.toNanos(15L);
+
+        collector(provider, source(view(1L, true,
+            window(1L, fifteenMinutes, MILLISECOND, 0.1)))).collect(fifteenMinutes, 900_000L, 0L);
+
+        assertEquals(MetricState.AVAILABLE, provider.snapshot().freshness().state());
+    }
+
+    @Test
+    void activeGenerationWithoutSamplesDoesNotFabricateHealthyUtilisation() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final RegionTickMetrics.WindowSnapshot empty = new RegionTickMetrics.WindowSnapshot(
+            0L, 0L, 0L, 0L, Double.NaN, 0L, 0L,
+            Double.NaN, Double.NaN, 0.0, Double.NaN, Double.NaN, true, false);
+
+        collector(provider, source(view(1L, true, empty))).collect(SECOND, 1_000L, 0L);
+        final PerformanceSnapshot snapshot = provider.snapshot();
+
+        assertEquals(1, snapshot.activeRegionCount());
+        assertTrue(Double.isNaN(snapshot.window(MetricWindow.FIVE_SECONDS).busiestUtilisation()));
+        assertTrue(Double.isNaN(snapshot.window(MetricWindow.FIVE_SECONDS).averageUtilisation()));
+    }
+
+    @Test
+    void failureRetainsPriorValuesAndPublishesStaleTimingDiagnostic() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final AtomicBoolean fail = new AtomicBoolean();
+        final PerformanceCollector.GenerationSource source = (now, consumer) -> {
+            consumer.accept(view(1L, true, window(1L, 50L * MILLISECOND, 5L * MILLISECOND, 0.1)));
+            if (fail.get()) throw new IllegalStateException("source failed");
+        };
+        final long[] clockValues = {100L, 137L, 200L, 245L};
+        final AtomicInteger clockIndex = new AtomicInteger();
+        final PerformanceCollector collector = new PerformanceCollector(provider, source,
+            PerformanceCollectorTest::runtime, () -> clockValues[clockIndex.getAndIncrement()],
+            System::currentTimeMillis, 20.0);
+        collector.collect(SECOND, 1_000L, 7L * MILLISECOND);
+        final WindowMetrics previous = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        fail.set(true);
+        collector.collect(3L * SECOND, 3_000L, 2L * SECOND);
+        final PerformanceSnapshot stale = provider.snapshot();
+
+        assertSame(previous, stale.window(MetricWindow.FIVE_SECONDS));
+        assertEquals(MetricState.STALE, stale.freshness().state());
+        assertEquals(2_000L, stale.freshness().ageMillis());
+        assertEquals(2_000L, stale.freshness().collectorLatenessMillis());
+        assertEquals(45L, stale.freshness().scanDurationNanos());
+        assertTrue(stale.freshness().diagnostic().contains("source failed"));
+    }
+
+    @Test
+    void closePreventsLaterPublicationAndWorkerIsDaemonAndTerminatesBoundedly() throws Exception {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final PerformanceCollector collector = collector(provider,
+            source(view(1L, true, window(1L, 50L * MILLISECOND, 5L * MILLISECOND, 0.1))));
+
+        collector.start();
+        assertTrue(collector.worker().isDaemon());
+        collector.close();
+        final PerformanceSnapshot closed = provider.snapshot();
+        collector.collect(10L * SECOND, 10_000L, 0L);
+
+        assertFalse(collector.worker().isAlive());
+        assertSame(closed, provider.snapshot());
+    }
+
+    private static PerformanceCollector collector(final SourbyMetricsProvider provider,
+                                                  final PerformanceCollector.GenerationSource source) {
+        return new PerformanceCollector(provider, source, PerformanceCollectorTest::runtime,
+            System::nanoTime, System::currentTimeMillis, 20.0);
+    }
+
+    private static PerformanceCollector.GenerationSource source(final RegionMetricsRegistry.GenerationView... views) {
+        final List<RegionMetricsRegistry.GenerationView> copy = List.of(views);
+        return (now, consumer) -> copy.forEach(consumer);
+    }
+
+    private static RegionMetricsRegistry.GenerationView view(final long id, final boolean active,
+                                                             final RegionTickMetrics.WindowSnapshot window) {
+        return new RegionMetricsRegistry.GenerationView(id, 1L, id, active, snapshot(window, RegionTickMetrics.INACTIVE));
+    }
+
+    private static RegionTickMetrics.Snapshot snapshot(final RegionTickMetrics.WindowSnapshot window,
+                                                       final long activeTickStart) {
+        return new RegionTickMetrics.Snapshot(1L, SECOND, activeTickStart,
+            window, window, window, window, window, window);
+    }
+
+    private static RegionTickMetrics.WindowSnapshot window(final long count, final long interval,
+                                                           final long execution, final double utilisation) {
+        final long average = count == 0L ? 0L : execution / count;
+        return new RegionTickMetrics.WindowSnapshot(count, interval, execution, average, average, average,
+            execution / 2L, count == 0L ? Double.NaN : count * 1.0E9 / interval,
+            count == 0L ? Double.NaN : (double)execution / count * 1.0E-6, utilisation,
+            average * 1.0E-6, average * 1.0E-6, true, false);
+    }
+
+    private static ImmutableRuntimeMetrics runtime() {
+        return new ImmutableRuntimeMetrics(100L, 200L, 25.0, 1.0, 2.0, 3.0);
+    }
+}
