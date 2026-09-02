@@ -9,6 +9,8 @@ import org.junit.platform.suite.api.Suite;
     TickDataBinaryCompatibilityTest.class,
     RegionTickMetricsTest.class,
     RegionTickMetricsConcurrencyTest.class,
-    RegionMetricsRegistryTest.class
+    RegionMetricsRegistryTest.class,
+    RegionTickMetricsHolderTest.class,
+    RegionMetricsLifecycleIntegrationTest.class
 })
 public class SourbyMetricsTestSuite {}

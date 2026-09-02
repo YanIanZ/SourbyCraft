@@ -27,7 +27,7 @@ class TickDataBinaryCompatibilityTest {
             assertEquals(TickData.class, TickRegionScheduler.RegionScheduleHandle.class.getField(name).getType());
         }
         assertEquals(1L, List.of(TickRegionScheduler.RegionScheduleHandle.class.getDeclaredFields()).stream()
-            .filter(field -> field.getType() == RegionTickMetrics.class)
+            .filter(field -> field.getType() == RegionTickMetricsHolder.class)
             .count());
         assertTrue(Modifier.isFinal(TickData.class.getModifiers()));
     }
