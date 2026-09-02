@@ -1,9 +1,527 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: SourbyCraft <agent@local>
 Date: Wed, 2 Sep 2026 00:00:00 +0000
-Subject: [PATCH] SourbyCraft - correct TickData percentile segments
+Subject: [PATCH] SourbyCraft - custom tick metrics
 
 ---
+diff --git a/ca/spottedleaf/common/time/RegionTickMetrics.java b/ca/spottedleaf/common/time/RegionTickMetrics.java
+new file mode 100644
+--- /dev/null
++++ b/ca/spottedleaf/common/time/RegionTickMetrics.java
+@@ -0,0 +1,513 @@
++package ca.spottedleaf.common.time;
++
++import java.util.Arrays;
++
++/** Bounded, single-writer tick telemetry for one region generation. */
++public final class RegionTickMetrics {
++
++    public static final long INACTIVE = Long.MIN_VALUE;
++
++    private static final long SECOND = 1_000_000_000L;
++    private static final long FIVE_SECONDS = 5L * SECOND;
++    private static final long TEN_SECONDS = 10L * SECOND;
++    private static final long FIFTEEN_SECONDS = 15L * SECOND;
++    private static final long MINUTE = 60L * SECOND;
++    private static final long FIVE_MINUTES = 5L * MINUTE;
++    private static final long FIFTEEN_MINUTES = 15L * MINUTE;
++    private static final int RAW_CAPACITY = 384;
++    private static final int HISTOGRAM_BINS = 64;
++    private static final int HISTOGRAM_VALUES_PER_SLICE = 4;
++    private static final long HISTOGRAM_MIN = 250_000L;
++    private static final long HISTOGRAM_MAX = 16L * SECOND;
++    private static final double HISTOGRAM_LOG_RATIO = Math.log((double)HISTOGRAM_MAX / HISTOGRAM_MIN) / 62.0;
++
++    private final long[] rawStarts = new long[RAW_CAPACITY];
++    private final long[] rawEnds = new long[RAW_CAPACITY];
++    private final long[] rawIntervals = new long[RAW_CAPACITY];
++    private final long[] rawExecutions = new long[RAW_CAPACITY];
++    private final long[] rawMissingCpu = new long[RAW_CAPACITY];
++    private final long[] rawTargets = new long[RAW_CAPACITY];
++    private final byte[] rawOverflow = new byte[RAW_CAPACITY];
++    private int rawStart;
++    private int rawSize;
++    private long lastDroppedEnd = INACTIVE;
++    private long lastCompletedEnd;
++
++    private final BucketStore seconds = new BucketStore(61, SECOND);
++    private final BucketStore fiveSeconds = new BucketStore(169, FIVE_SECONDS);
++
++    private volatile long activeTickStartNanos = INACTIVE;
++    private long sequence;
++    private long publishedEpoch = Long.MIN_VALUE;
++    private volatile Snapshot published = new Snapshot(0L, 0L, INACTIVE,
++        emptyWindow(false), emptyWindow(false), emptyWindow(false),
++        emptyWindow(true), emptyWindow(true), emptyWindow(true));
++
++    public record WindowSnapshot(long sampleCount, long intervalNanos, long executionNanos,
++                                 long minimumNanos, long medianNanos, long maximumNanos,
++                                 long missingCpuNanos, double tps, double mspt,
++                                 double utilisation, double estimatedP95Mspt,
++                                 double estimatedP99Mspt, boolean approximate,
++                                 boolean truncated) {}
++
++    public record Snapshot(long sequence, long sampledAtNanos, long activeTickStartNanos,
++                           WindowSnapshot fiveSeconds, WindowSnapshot tenSeconds,
++                           WindowSnapshot fifteenSeconds, WindowSnapshot oneMinute,
++                           WindowSnapshot fiveMinutes, WindowSnapshot fifteenMinutes) {}
++
++    public void tickStarted(final long startNanos) {
++        this.activeTickStartNanos = startNanos;
++    }
++
++    public void tickCompleted(final TickTime tick, final long targetIntervalNanos) {
++        this.recordCompletedSample(tick, targetIntervalNanos);
++        this.activeTickStartNanos = INACTIVE;
++        this.publishSnapshotIfDue(tick.tickEnd());
++    }
++
++    public Snapshot snapshot(final long nowNanos) {
++        final Snapshot current = this.published;
++        final long active = this.activeTickStartNanos;
++        if (active == current.activeTickStartNanos()) {
++            return current;
++        }
++        return new Snapshot(current.sequence(), current.sampledAtNanos(), active,
++            current.fiveSeconds(), current.tenSeconds(), current.fifteenSeconds(),
++            current.oneMinute(), current.fiveMinutes(), current.fifteenMinutes());
++    }
++
++    public TickData.TickReportData report(final long windowNanos, final TickTime inProgress,
++                                          final long nowNanos, final long targetIntervalNanos) {
++        int count = 0;
++        final long cutoff = subtractFloor(nowNanos, windowNanos);
++        for (int i = 0; i < this.rawSize; ++i) {
++            final int index = (this.rawStart + i) % RAW_CAPACITY;
++            if (this.rawEnds[index] >= cutoff && this.rawEnds[index] <= nowNanos) {
++                ++count;
++            }
++        }
++        if (inProgress != null) {
++            ++count;
++        }
++        if (count == 0) {
++            return null;
++        }
++
++        final long[] intervals = new long[count];
++        final long[] executions = new long[count];
++        final long[] missingCpu = new long[count];
++        long intervalStart = Long.MAX_VALUE;
++        long intervalEnd = Long.MIN_VALUE;
++        long totalExecution = 0L;
++        long utilised = 0L;
++        int resultIndex = 0;
++        for (int i = 0; i < this.rawSize; ++i) {
++            final int index = (this.rawStart + i) % RAW_CAPACITY;
++            final long end = this.rawEnds[index];
++            if (end < cutoff || end > nowNanos) {
++                continue;
++            }
++            intervals[resultIndex] = this.rawIntervals[index];
++            executions[resultIndex] = this.rawExecutions[index];
++            missingCpu[resultIndex] = this.rawMissingCpu[index];
++            totalExecution = saturatingAdd(totalExecution, this.rawExecutions[index]);
++            utilised = saturatingAdd(utilised, overlap(this.rawStarts[index], end, cutoff, nowNanos));
++            intervalStart = Math.min(intervalStart, this.rawStarts[index]);
++            intervalEnd = Math.max(intervalEnd, end);
++            ++resultIndex;
++        }
++        if (inProgress != null) {
++            final long execution = executionNanos(inProgress);
++            intervals[resultIndex] = intervalNanos(inProgress, targetIntervalNanos);
++            executions[resultIndex] = execution;
++            missingCpu[resultIndex] = missingCpuNanos(inProgress, execution);
++            totalExecution = saturatingAdd(totalExecution, execution);
++            utilised = saturatingAdd(utilised, overlap(inProgress.tickStart(), inProgress.tickEnd(), cutoff, nowNanos));
++            intervalStart = Math.min(intervalStart, inProgress.tickStart());
++            intervalEnd = Math.max(intervalEnd, inProgress.tickEnd());
++        }
++
++        Arrays.sort(intervals);
++        Arrays.sort(executions);
++        Arrays.sort(missingCpu);
++        return new TickData.TickReportData(count, intervalStart, intervalEnd, totalExecution,
++            Math.min(1.0, (double)utilised / (double)windowNanos),
++            segmented(intervals, true), segmented(executions, false), segmented(missingCpu, false));
++    }
++
++    public Double tps(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
++        final long now = inProgress == null ? this.lastCompletedEnd : inProgress.tickEnd();
++        final TickData.TickReportData report = this.report(windowNanos, inProgress, now, targetIntervalNanos);
++        return report == null ? null : report.tpsData().segmentAll().average();
++    }
++
++    public TickData.MSPTData mspt(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
++        final long now = inProgress == null ? this.lastCompletedEnd : inProgress.tickEnd();
++        final TickData.TickReportData report = this.report(windowNanos, inProgress, now, targetIntervalNanos);
++        if (report == null) {
++            return null;
++        }
++        return new TickData.MSPTData(report.timePerTickData().segmentAll().average() * 1.0E-6,
++            report.timePerTickData().rawData());
++    }
++
++    private void recordCompletedSample(final TickTime tick, final long targetIntervalNanos) {
++        final long tickLength = nonNegativeDifference(tick.tickEnd(), tick.tickStart());
++        final long execution = saturatingAdd(tickLength, Math.max(0L, tick.intermediateTaskExecutionTime()));
++        final boolean overflow = execution == Long.MAX_VALUE && tickLength != Long.MAX_VALUE;
++        final long interval = intervalNanos(tick, targetIntervalNanos);
++        final long missingCpu = missingCpuNanos(tick, execution);
++        final int index;
++        if (this.rawSize == RAW_CAPACITY) {
++            index = this.rawStart;
++            this.lastDroppedEnd = this.rawEnds[index];
++            this.rawStart = (this.rawStart + 1) % RAW_CAPACITY;
++        } else {
++            index = (this.rawStart + this.rawSize) % RAW_CAPACITY;
++            ++this.rawSize;
++        }
++        this.rawStarts[index] = tick.tickStart();
++        this.rawEnds[index] = tick.tickEnd();
++        this.rawIntervals[index] = interval;
++        this.rawExecutions[index] = execution;
++        this.rawMissingCpu[index] = missingCpu;
++        this.rawTargets[index] = Math.max(0L, targetIntervalNanos);
++        this.rawOverflow[index] = (byte)(overflow ? 1 : 0);
++        this.lastCompletedEnd = tick.tickEnd();
++
++        this.seconds.add(tick.tickStart(), tick.tickEnd(), interval, execution, missingCpu, overflow);
++        this.fiveSeconds.add(tick.tickStart(), tick.tickEnd(), interval, execution, missingCpu, overflow);
++    }
++
++    private void publishSnapshotIfDue(final long nowNanos) {
++        final long epoch = Math.floorDiv(nowNanos, SECOND);
++        if (epoch == this.publishedEpoch) {
++            return;
++        }
++        this.publishedEpoch = epoch;
++        final Snapshot next = new Snapshot(++this.sequence, nowNanos, INACTIVE,
++            this.rawWindow(nowNanos, FIVE_SECONDS),
++            this.rawWindow(nowNanos, TEN_SECONDS),
++            this.rawWindow(nowNanos, FIFTEEN_SECONDS),
++            this.bucketWindow(this.seconds, nowNanos, MINUTE),
++            this.bucketWindow(this.fiveSeconds, nowNanos, FIVE_MINUTES),
++            this.bucketWindow(this.fiveSeconds, nowNanos, FIFTEEN_MINUTES));
++        this.published = next;
++    }
++
++    private WindowSnapshot rawWindow(final long nowNanos, final long windowNanos) {
++        final long cutoff = subtractFloor(nowNanos, windowNanos);
++        long count = 0L;
++        long interval = 0L;
++        long execution = 0L;
++        long missingCpu = 0L;
++        long utilised = 0L;
++        long minimum = Long.MAX_VALUE;
++        long maximum = 0L;
++        boolean truncated = this.lastDroppedEnd != INACTIVE && this.lastDroppedEnd >= cutoff;
++        final long[] histogram = new long[HISTOGRAM_BINS];
++        for (int i = 0; i < this.rawSize; ++i) {
++            final int index = (this.rawStart + i) % RAW_CAPACITY;
++            final long end = this.rawEnds[index];
++            if (end < cutoff || end > nowNanos) {
++                continue;
++            }
++            ++count;
++            interval = saturatingAdd(interval, this.rawIntervals[index]);
++            execution = saturatingAdd(execution, this.rawExecutions[index]);
++            missingCpu = saturatingAdd(missingCpu, this.rawMissingCpu[index]);
++            utilised = saturatingAdd(utilised, overlap(this.rawStarts[index], end, cutoff, nowNanos));
++            minimum = Math.min(minimum, this.rawExecutions[index]);
++            maximum = Math.max(maximum, this.rawExecutions[index]);
++            final int bin = histogramBin(this.rawExecutions[index]);
++            histogram[bin] = saturatingAdd(histogram[bin], 1L);
++            truncated |= this.rawOverflow[index] != 0;
++        }
++        return window(count, interval, execution, minimum, maximum, missingCpu, utilised,
++            windowNanos, histogram, true, truncated);
++    }
++
++    private WindowSnapshot bucketWindow(final BucketStore store, final long nowNanos, final long windowNanos) {
++        final long cutoff = subtractFloor(nowNanos, windowNanos);
++        final long firstEpoch = ceilDiv(cutoff, store.width);
++        final long lastEpoch = Math.floorDiv(nowNanos, store.width);
++        long count = 0L;
++        long interval = 0L;
++        long execution = 0L;
++        long missingCpu = 0L;
++        long utilised = 0L;
++        long minimum = Long.MAX_VALUE;
++        long maximum = 0L;
++        boolean truncated = false;
++        final long[] histogram = new long[HISTOGRAM_BINS];
++        for (int slot = 0; slot < store.slots; ++slot) {
++            final long epoch = store.epochs[slot];
++            if (epoch < firstEpoch || epoch > lastEpoch) {
++                continue;
++            }
++            count = saturatingAdd(count, store.counts[slot]);
++            interval = saturatingAdd(interval, store.intervals[slot]);
++            execution = saturatingAdd(execution, store.executions[slot]);
++            missingCpu = saturatingAdd(missingCpu, store.missingCpu[slot]);
++            utilised = saturatingAdd(utilised, store.utilised[slot]);
++            minimum = Math.min(minimum, store.minimums[slot]);
++            maximum = Math.max(maximum, store.maximums[slot]);
++            truncated |= store.overflow[slot] != 0;
++            final int histogramOffset = slot * HISTOGRAM_VALUES_PER_SLICE;
++            for (int i = 0; i < HISTOGRAM_VALUES_PER_SLICE; ++i) {
++                final byte storedBin = store.histogramBins[histogramOffset + i];
++                if (storedBin >= 0) {
++                    final int bin = Byte.toUnsignedInt(storedBin);
++                    histogram[bin] = saturatingAdd(histogram[bin], store.histogramCounts[histogramOffset + i]);
++                }
++            }
++        }
++        return window(count, interval, execution, minimum, maximum, missingCpu, utilised,
++            windowNanos, histogram, true, truncated);
++    }
++
++    private static WindowSnapshot window(final long count, final long interval, final long execution,
++                                         final long minimum, final long maximum, final long missingCpu,
++                                         final long utilised, final long windowNanos, final long[] histogram,
++                                         final boolean approximate, final boolean truncated) {
++        if (count == 0L) {
++            return emptyWindow(approximate);
++        }
++        final boolean invalid = interval == Long.MAX_VALUE || execution == Long.MAX_VALUE;
++        final long median = Math.max(minimum, Math.min(maximum, histogramQuantile(histogram, count, 0.5)));
++        final double tps = invalid || interval == 0L ? Double.NaN : (double)count * 1.0E9 / (double)interval;
++        final double mspt = invalid ? Double.NaN : (double)execution / (double)count * 1.0E-6;
++        return new WindowSnapshot(count, interval, execution, minimum, median, maximum, missingCpu,
++            tps, mspt, Math.min(1.0, (double)utilised / (double)windowNanos),
++            Math.max(minimum, Math.min(maximum, histogramQuantile(histogram, count, 0.95))) * 1.0E-6,
++            Math.max(minimum, Math.min(maximum, histogramQuantile(histogram, count, 0.99))) * 1.0E-6,
++            approximate, truncated);
++    }
++
++    private static WindowSnapshot emptyWindow(final boolean approximate) {
++        return new WindowSnapshot(0L, 0L, 0L, 0L, 0L, 0L, 0L,
++            Double.NaN, Double.NaN, 0.0, Double.NaN, Double.NaN, approximate, false);
++    }
++
++    private static TickData.SegmentedAverage segmented(final long[] sorted, final boolean inverse) {
++        final int count = sorted.length;
++        final int best99End = count == 1 ? 1 : Math.max(1, (int)(0.99 * count));
++        final int best95End = count == 1 ? 1 : Math.max(1, (int)(0.95 * count));
++        final int worst1Start = (int)(0.99 * count);
++        final int worst5Start = (int)(0.95 * count);
++        return new TickData.SegmentedAverage(
++            segment(sorted, 0, count, inverse),
++            segment(sorted, 0, best99End, inverse),
++            segment(sorted, 0, best95End, inverse),
++            segment(sorted, worst5Start, count, inverse),
++            segment(sorted, worst1Start, count, inverse),
++            sorted
++        );
++    }
++
++    private static TickData.SegmentData segment(final long[] values, final int from, final int to,
++                                                final boolean inverse) {
++        final int count = to - from;
++        long sum = 0L;
++        for (int i = from; i < to; ++i) {
++            sum = saturatingAdd(sum, values[i]);
++        }
++        final int middle = from + (count >>> 1);
++        final double median = (count & 1) == 0
++            ? ((double)values[middle - 1] + (double)values[middle]) / 2.0
++            : values[middle];
++        if (inverse) {
++            return new TickData.SegmentData(count, (double)count * 1.0E9 / (double)sum,
++                1.0E9 / median, 1.0E9 / values[to - 1], 1.0E9 / values[from]);
++        }
++        return new TickData.SegmentData(count, (double)sum / count, median, values[from], values[to - 1]);
++    }
++
++    private static long executionNanos(final TickTime tick) {
++        return saturatingAdd(nonNegativeDifference(tick.tickEnd(), tick.tickStart()),
++            Math.max(0L, tick.intermediateTaskExecutionTime()));
++    }
++
++    private static long intervalNanos(final TickTime tick, final long targetIntervalNanos) {
++        if (!tick.hasLastTick()) {
++            return Math.max(Math.max(0L, targetIntervalNanos), nonNegativeDifference(tick.tickEnd(), tick.tickStart()));
++        }
++        return nonNegativeDifference(tick.tickStart(), tick.previousTickStart());
++    }
++
++    private static long missingCpuNanos(final TickTime tick, final long execution) {
++        if (!tick.supportCPUTime()) {
++            return 0L;
++        }
++        final long cpu = saturatingAdd(nonNegativeDifference(tick.tickEndCPU(), tick.tickStartCPU()),
++            Math.max(0L, tick.intermediateTaskExecutionTimeCPU()));
++        return Math.max(0L, execution - cpu);
++    }
++
++    private static long nonNegativeDifference(final long end, final long start) {
++        final long difference = end - start;
++        return difference < 0L ? (end >= start ? Long.MAX_VALUE : 0L) : difference;
++    }
++
++    private static long overlap(final long start, final long end, final long lower, final long upper) {
++        final long clippedStart = Math.max(start, lower);
++        final long clippedEnd = Math.min(end, upper);
++        return clippedEnd <= clippedStart ? 0L : nonNegativeDifference(clippedEnd, clippedStart);
++    }
++
++    private static long subtractFloor(final long value, final long amount) {
++        return value < Long.MIN_VALUE + amount ? Long.MIN_VALUE : value - amount;
++    }
++
++    private static long saturatingAdd(final long first, final long second) {
++        if (first < 0L || second < 0L || first > Long.MAX_VALUE - second) {
++            return Long.MAX_VALUE;
++        }
++        return first + second;
++    }
++
++    private static long ceilDiv(final long value, final long divisor) {
++        final long floor = Math.floorDiv(value, divisor);
++        return floor * divisor == value ? floor : floor + 1L;
++    }
++
++    private static int histogramBin(final long nanos) {
++        if (nanos <= HISTOGRAM_MIN) {
++            return 0;
++        }
++        if (nanos >= HISTOGRAM_MAX) {
++            return HISTOGRAM_BINS - 1;
++        }
++        return 1 + Math.min(61, (int)(Math.log((double)nanos / HISTOGRAM_MIN) / HISTOGRAM_LOG_RATIO));
++    }
++
++    private static long histogramUpperBound(final int bin) {
++        if (bin == 0) {
++            return HISTOGRAM_MIN;
++        }
++        if (bin == HISTOGRAM_BINS - 1) {
++            return HISTOGRAM_MAX;
++        }
++        return Math.min(HISTOGRAM_MAX,
++            (long)Math.ceil(HISTOGRAM_MIN * Math.exp(HISTOGRAM_LOG_RATIO * bin)));
++    }
++
++    private static long histogramQuantile(final long[] histogram, final long count, final double quantile) {
++        final long rank = Math.max(1L, (long)Math.ceil(quantile * count));
++        long seen = 0L;
++        for (int bin = 0; bin < HISTOGRAM_BINS; ++bin) {
++            seen = saturatingAdd(seen, histogram[bin]);
++            if (seen >= rank) {
++                return histogramUpperBound(bin);
++            }
++        }
++        return HISTOGRAM_MAX;
++    }
++
++    private static final class BucketStore {
++        private final int slots;
++        private final long width;
++        private final long[] epochs;
++        private final long[] counts;
++        private final long[] intervals;
++        private final long[] executions;
++        private final long[] missingCpu;
++        private final long[] utilised;
++        private final long[] minimums;
++        private final long[] maximums;
++        private final byte[] overflow;
++        private final byte[] histogramBins;
++        private final int[] histogramCounts;
++
++        private BucketStore(final int slots, final long width) {
++            this.slots = slots;
++            this.width = width;
++            this.epochs = new long[slots];
++            Arrays.fill(this.epochs, Long.MIN_VALUE);
++            this.counts = new long[slots];
++            this.intervals = new long[slots];
++            this.executions = new long[slots];
++            this.missingCpu = new long[slots];
++            this.utilised = new long[slots];
++            this.minimums = new long[slots];
++            this.maximums = new long[slots];
++            this.overflow = new byte[slots];
++            this.histogramBins = new byte[slots * HISTOGRAM_VALUES_PER_SLICE];
++            Arrays.fill(this.histogramBins, (byte)-1);
++            this.histogramCounts = new int[slots * HISTOGRAM_VALUES_PER_SLICE];
++        }
++
++        private void add(final long start, final long end, final long interval, final long execution,
++                         final long missingCpu, final boolean sampleOverflow) {
++            final long epoch = Math.floorDiv(end, this.width);
++            final int slot = Math.floorMod(epoch, this.slots);
++            this.prepare(slot, epoch);
++            this.counts[slot] = saturatingAdd(this.counts[slot], 1L);
++            this.intervals[slot] = saturatingAdd(this.intervals[slot], interval);
++            this.executions[slot] = saturatingAdd(this.executions[slot], execution);
++            this.missingCpu[slot] = saturatingAdd(this.missingCpu[slot], missingCpu);
++            this.minimums[slot] = Math.min(this.minimums[slot], execution);
++            this.maximums[slot] = Math.max(this.maximums[slot], execution);
++            this.overflow[slot] |= (byte)(sampleOverflow || this.counts[slot] == Long.MAX_VALUE
++                || this.intervals[slot] == Long.MAX_VALUE || this.executions[slot] == Long.MAX_VALUE ? 1 : 0);
++            final int bin = histogramBin(execution);
++            final int histogramOffset = slot * HISTOGRAM_VALUES_PER_SLICE;
++            int free = -1;
++            for (int i = 0; i < HISTOGRAM_VALUES_PER_SLICE; ++i) {
++                final int histogramIndex = histogramOffset + i;
++                if (this.histogramBins[histogramIndex] == (byte)bin) {
++                    if (this.histogramCounts[histogramIndex] == Integer.MAX_VALUE) {
++                        this.overflow[slot] = 1;
++                    } else {
++                        ++this.histogramCounts[histogramIndex];
++                    }
++                    free = -2;
++                    break;
++                }
++                if (free == -1 && this.histogramBins[histogramIndex] == (byte)-1) {
++                    free = histogramIndex;
++                }
++            }
++            if (free >= 0) {
++                this.histogramBins[free] = (byte)bin;
++                this.histogramCounts[free] = 1;
++            } else if (free == -1) {
++                this.overflow[slot] = 1;
++            }
++            this.addUtilisation(start, end, epoch);
++        }
++
++        private void addUtilisation(final long start, final long end, final long completionEpoch) {
++            final long earliestEpoch = Math.max(Math.floorDiv(start, this.width), completionEpoch - this.slots + 1L);
++            for (long epoch = earliestEpoch; epoch <= completionEpoch; ++epoch) {
++                final int slot = Math.floorMod(epoch, this.slots);
++                this.prepare(slot, epoch);
++                final long bucketStart = epoch * this.width;
++                final long bucketEnd = saturatingAdd(bucketStart, this.width);
++                this.utilised[slot] = saturatingAdd(this.utilised[slot], overlap(start, end, bucketStart, bucketEnd));
++                if (epoch == Long.MAX_VALUE) {
++                    break;
++                }
++            }
++        }
++
++        private void prepare(final int slot, final long epoch) {
++            if (this.epochs[slot] == epoch) {
++                return;
++            }
++            this.epochs[slot] = epoch;
++            this.counts[slot] = 0L;
++            this.intervals[slot] = 0L;
++            this.executions[slot] = 0L;
++            this.missingCpu[slot] = 0L;
++            this.utilised[slot] = 0L;
++            this.minimums[slot] = Long.MAX_VALUE;
++            this.maximums[slot] = 0L;
++            this.overflow[slot] = 0;
++            Arrays.fill(this.histogramBins, slot * HISTOGRAM_VALUES_PER_SLICE,
++                (slot + 1) * HISTOGRAM_VALUES_PER_SLICE, (byte)-1);
++            Arrays.fill(this.histogramCounts, slot * HISTOGRAM_VALUES_PER_SLICE,
++                (slot + 1) * HISTOGRAM_VALUES_PER_SLICE, 0);
++        }
++    }
++}
 diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/time/TickData.java
 --- a/ca/spottedleaf/common/time/TickData.java
 +++ b/ca/spottedleaf/common/time/TickData.java
