@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RegionTickMetricsTest {
@@ -257,6 +258,20 @@ class RegionTickMetricsTest {
             .getDeclaredMethod("tps", long.class, TickTime.class, long.class).getModifiers()));
         assertTrue(Modifier.isSynchronized(RegionTickMetrics.class
             .getDeclaredMethod("mspt", long.class, TickTime.class, long.class).getModifiers()));
+    }
+
+    @Test
+    void completionFailureAlwaysClearsActiveTickMarker() throws Exception {
+        final var constructor = RegionTickMetrics.class.getDeclaredConstructor(Runnable.class);
+        constructor.setAccessible(true);
+        final RegionTickMetrics metrics = constructor.newInstance((Runnable)() -> {
+            throw new IllegalStateException("injected completion failure");
+        });
+        metrics.tickStarted(123L);
+
+        assertThrows(IllegalStateException.class,
+            () -> metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 123L, 1L), TARGET_20_TPS));
+        assertEquals(RegionTickMetrics.INACTIVE, metrics.snapshot(124L).activeTickStartNanos());
     }
 
     @Test

@@ -8,7 +8,7 @@ diff --git a/ca/spottedleaf/common/time/RegionTickMetrics.java b/ca/spottedleaf/
 new file mode 100644
 --- /dev/null
 +++ b/ca/spottedleaf/common/time/RegionTickMetrics.java
-@@ -0,0 +1,634 @@
+@@ -0,0 +1,650 @@
 +package ca.spottedleaf.common.time;
 +
 +import java.util.Arrays;
@@ -56,6 +56,15 @@ new file mode 100644
 +    private volatile Snapshot published = new Snapshot(0L, 0L, INACTIVE,
 +        emptyWindow(false), emptyWindow(false), emptyWindow(false),
 +        emptyWindow(true), emptyWindow(true), emptyWindow(true));
++    private final Runnable completionFailure;
++
++    public RegionTickMetrics() {
++        this(null);
++    }
++
++    RegionTickMetrics(final Runnable completionFailure) {
++        this.completionFailure = completionFailure;
++    }
 +
 +    public record WindowSnapshot(long sampleCount, long intervalNanos, long executionNanos,
 +                                 long minimumNanos, double medianNanos, long maximumNanos,
@@ -74,8 +83,11 @@ new file mode 100644
 +    }
 +
 +    public synchronized void tickCompleted(final TickTime tick, final long targetIntervalNanos) {
-+        this.recordCompletedSample(tick, targetIntervalNanos);
-+        this.activeTickStartNanos = INACTIVE;
++        try {
++            this.recordCompletedSample(tick, targetIntervalNanos);
++        } finally {
++            this.activeTickStartNanos = INACTIVE;
++        }
 +        this.publishSnapshotIfDue(tick.tickEnd());
 +    }
 +
@@ -97,6 +109,9 @@ new file mode 100644
 +        }
 +        int count = 0;
 +        final long cutoff = subtractFloor(nowNanos, windowNanos);
++        if (this.lastDroppedEnd != INACTIVE && this.lastDroppedEnd >= cutoff) {
++            return null;
++        }
 +        for (int i = 0; i < this.rawSize; ++i) {
 +            final int index = (this.rawStart + i) % RAW_CAPACITY;
 +            if (this.rawEnds[index] >= cutoff && this.rawEnds[index] <= nowNanos) {
@@ -198,17 +213,15 @@ new file mode 100644
 +                                                               final double median, final double least,
 +                                                               final double greatest) {
 +        final TickData.SegmentData all = new TickData.SegmentData(count, average, median, least, greatest);
-+        final TickData.SegmentData best99 = aggregateSegment(Math.max(1, (int)(0.99 * count)), average, median, least, greatest);
-+        final TickData.SegmentData best95 = aggregateSegment(Math.max(1, (int)(0.95 * count)), average, median, least, greatest);
-+        final TickData.SegmentData worst5 = aggregateSegment(Math.max(1, count - (int)(0.95 * count)), average, median, least, greatest);
-+        final TickData.SegmentData worst1 = aggregateSegment(Math.max(1, count - (int)(0.99 * count)), average, median, least, greatest);
++        final TickData.SegmentData best99 = unavailableSegment(Math.max(1, (int)(0.99 * count)));
++        final TickData.SegmentData best95 = unavailableSegment(Math.max(1, (int)(0.95 * count)));
++        final TickData.SegmentData worst5 = unavailableSegment(Math.max(1, count - (int)(0.95 * count)));
++        final TickData.SegmentData worst1 = unavailableSegment(Math.max(1, count - (int)(0.99 * count)));
 +        return new TickData.SegmentedAverage(all, best99, best95, worst5, worst1, EMPTY_RAW_DATA);
 +    }
 +
-+    private static TickData.SegmentData aggregateSegment(final int count, final double average,
-+                                                         final double median, final double least,
-+                                                         final double greatest) {
-+        return new TickData.SegmentData(count, average, median, least, greatest);
++    private static TickData.SegmentData unavailableSegment(final int count) {
++        return new TickData.SegmentData(count, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
 +    }
 +
 +    public synchronized Double tps(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
@@ -228,6 +241,9 @@ new file mode 100644
 +    }
 +
 +    private void recordCompletedSample(final TickTime tick, final long targetIntervalNanos) {
++        if (this.completionFailure != null) {
++            this.completionFailure.run();
++        }
 +        final long tickLength = nonNegativeDifference(tick.tickEnd(), tick.tickStart());
 +        final long execution = saturatingAdd(tickLength, Math.max(0L, tick.intermediateTaskExecutionTime()));
 +        final boolean overflow = execution == Long.MAX_VALUE && tickLength != Long.MAX_VALUE;
@@ -646,7 +662,7 @@ new file mode 100644
 diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/time/TickData.java
 --- a/ca/spottedleaf/common/time/TickData.java
 +++ b/ca/spottedleaf/common/time/TickData.java
-@@ -4,16 +4,26 @@ import ca.spottedleaf.common.util.TimeUtil;
+@@ -4,18 +4,33 @@ import ca.spottedleaf.common.util.TimeUtil;
  import java.util.ArrayDeque;
  import java.util.ArrayList;
  import java.util.Arrays;
@@ -674,7 +690,14 @@ diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/ti
      }
  
      public void addDataFrom(final TickTime time) {
-@@ -91,8 +101,8 @@ public final class TickData {
++        if (this.shared != null) {
++            this.shared.tickCompleted(time, 0L);
++            return;
++        }
++
+         final long start = time.tickStart();
+ 
+@@ -91,8 +106,8 @@ public final class TickData {
              computeSegmentData(data, allStart, allEnd, inverse),
              computeSegmentData(data, percent99BestStart, percent99BestEnd, inverse),
              computeSegmentData(data, percent95BestStart, percent95BestEnd, inverse),
@@ -684,7 +707,7 @@ diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/ti
              data
          );
      }
-@@ -100,4 +110,8 @@ public final class TickData {
+@@ -100,4 +115,8 @@ public final class TickData {
      public Double getTPSAverage(final TickTime inProgress, final long tickInterval) {
 +        if (this.shared != null) {
 +            return this.shared.tps(this.interval, inProgress, tickInterval);
@@ -693,7 +716,7 @@ diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/ti
          if (this.timeData.isEmpty() && inProgress == null) {
              return null;
          }
-@@ -119,6 +133,10 @@ public final class TickData {
+@@ -119,6 +138,10 @@ public final class TickData {
      public record MSPTData(double avg, long[] rawData) {}
  
      public MSPTData getMSPTData(final TickTime inProgress, final long tickInterval) {
@@ -704,7 +727,7 @@ diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/ti
          if (this.timeData.isEmpty() && inProgress == null) {
              return null;
          }
-@@ -143,6 +161,10 @@ public final class TickData {
+@@ -143,6 +166,10 @@ public final class TickData {
  
      // rets null if there is no data
      public TickReportData generateTickReport(final TickTime inProgress, final long endTime, final long tickInterval) {
