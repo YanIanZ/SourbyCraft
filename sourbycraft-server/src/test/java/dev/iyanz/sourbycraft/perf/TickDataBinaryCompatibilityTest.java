@@ -133,6 +133,31 @@ class TickDataBinaryCompatibilityTest {
     }
 
     @Test
+    void multipleTargetlessSamplesAcrossLongWindowBucketsMatchStandaloneTps() {
+        final RegionTickMetrics owner = new RegionTickMetrics();
+        final TickData shared = new TickData(owner, TimeUnit.MINUTES.toNanos(5L));
+        final TickData standalone = new TickData(TimeUnit.MINUTES.toNanos(5L));
+        final TickTime[] samples = {
+            tick(TimeUtil.DEADLINE_NOT_SET, 0L, 2L * MILLISECOND),
+            tick(TimeUtil.DEADLINE_NOT_SET, TimeUnit.SECONDS.toNanos(70L), 3L * MILLISECOND),
+            tick(TimeUtil.DEADLINE_NOT_SET, TimeUnit.SECONDS.toNanos(140L), 4L * MILLISECOND)
+        };
+        for (final TickTime sample : samples) {
+            shared.addDataFrom(sample);
+            standalone.addDataFrom(sample);
+        }
+        final long now = TimeUnit.SECONDS.toNanos(140L) + 4L * MILLISECOND;
+        final TickData.TickReportData expected = standalone.generateTickReport(null, now, TARGET_INTERVAL);
+        final TickData.TickReportData actual = shared.generateTickReport(null, now, TARGET_INTERVAL);
+
+        assertNotNull(actual);
+        assertEquals(3, actual.collectedTicks());
+        assertEquals(20.0, actual.tpsData().segmentAll().average(), 0.0);
+        assertEquals(expected.tpsData().segmentAll().average(), actual.tpsData().segmentAll().average(), 0.0);
+        assertEquals(expected.tpsData().segmentAll().average(), shared.getTPSAverage(null, TARGET_INTERVAL), 0.0);
+    }
+
+    @Test
     void bucketedLongViewsKeepAggregateCountsAndAveragesWithoutFabricatedRawSamples() {
         final RegionTickMetrics owner = new RegionTickMetrics();
         final long interval = MILLISECOND;
