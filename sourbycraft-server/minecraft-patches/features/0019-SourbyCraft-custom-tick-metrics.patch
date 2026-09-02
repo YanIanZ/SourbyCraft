@@ -878,3 +878,179 @@ diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/pape
 +                this.sourbyTickMetrics.tickCompleted(time, getTimeBetweenTicks());
              }
          }
+diff --git a/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java b/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
+--- a/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
++++ b/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
+@@ -191,6 +191,8 @@ public class WorldShutdownThread extends RegionShutdownThread {
+ 
+         LOGGER.info("Saved {} level data", getWorldName());
+ 
++        dev.iyanz.sourbycraft.perf.RegionMetricsRegistry.INSTANCE.retireWorld(
++            this.level.sourbyTelemetryWorldId, System.nanoTime());
+         RegionizedServer.getInstance().worlds.remove(this.level);
+         MinecraftServer.getServer().removeLevel(this.level);
+         MinecraftServer.getServer().server.worlds.remove(this.level.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -5,6 +5,7 @@ import ca.spottedleaf.concurrentutil.numa.OSNuma;
+ import ca.spottedleaf.moonrise.common.util.TickThread;
+ import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
+ import com.mojang.logging.LogUtils;
++import dev.iyanz.sourbycraft.perf.RegionMetricsRegistry;
+ import io.canvasmc.canvas.region.RegionThreadingTickManager;
+ import io.canvasmc.canvas.region.RegionTickData;
+ import io.canvasmc.canvas.region.WorldRegionizer;
+@@ -38,6 +39,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Ti
+ 
+     private static final Logger LOGGER = LogUtils.getClassLogger(); // Canvas - region threading
+     private static int regionShift = 31;
++    private static final RegionMetricsRegistry SOURBY_METRICS = RegionMetricsRegistry.INSTANCE;
++
+ 
+     public static int getRegionChunkShift() {
+         return regionShift;
+@@ -104,6 +107,50 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Ti
+         return new TickRegionData(region);
+     }
+ 
++    private static void retireTelemetry(final TickRegionData data,
++                                        final RegionMetricsRegistry.RetirementReason reason,
++                                        final long nowNanos) {
++        SOURBY_METRICS.retire(data.sourbyTelemetryGenerationId, reason, nowNanos);
++        data.sourbyTelemetryActive = false;
++    }
++
++    private static void activateTelemetry(final TickRegionData data, final long nowNanos) {
++        if (data.sourbyTelemetryMergePending && data.sourbyTelemetryGenerationId != 0L) {
++            data.sourbyTelemetryGenerationId = SOURBY_METRICS.rotateForMerge(
++                data.sourbyTelemetryGenerationId, data.world.sourbyTelemetryWorldId, data.id,
++                data.tickHandle.sourbyTickMetrics, nowNanos
++            );
++        } else {
++            data.sourbyTelemetryGenerationId = SOURBY_METRICS.activate(
++                data.world.sourbyTelemetryWorldId, data.id, data.tickHandle.sourbyTickMetrics, nowNanos
++            );
++        }
++        data.sourbyTelemetryMergePending = false;
++        data.sourbyTelemetryActive = true;
++    }
++
++    private static void rotateMergeTargetTelemetry(final TickRegionData data, final long nowNanos) {
++        if (!data.sourbyTelemetryActive) {
++            data.sourbyTelemetryMergePending = true;
++            return;
++        }
++
++        scheduler.descheduleRegion(data.tickHandle);
++        data.tickHandle = data.tickHandle.copy();
++        data.sourbyTelemetryGenerationId = SOURBY_METRICS.rotateForMerge(
++            data.sourbyTelemetryGenerationId, data.world.sourbyTelemetryWorldId, data.id,
++            data.tickHandle.sourbyTickMetrics, nowNanos
++        );
++        data.tickHandle.checkInitialSchedule();
++        scheduler.scheduleRegion(data.tickHandle);
++    }
++
++    private static void destroyTelemetry(final TickRegionData data, final long nowNanos) {
++        retireTelemetry(data, RegionMetricsRegistry.RetirementReason.DESTROYED, nowNanos);
++        data.sourbyTelemetryGenerationId = 0L;
++        data.sourbyTelemetryMergePending = false;
++    }
++
+     @Override
+     public TickRegionSectionData createNewSectionData(final int sectionX, final int sectionZ, final int sectionShift) {
+         return null;
+@@ -119,6 +166,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Ti
+ 
+     @Override
+     public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
++        destroyTelemetry(region.getData(), System.nanoTime());
+         // nothing for now
+         io.canvasmc.canvas.threadedregions.SchedulerUtil.getHandle().onRegionDestroy(region); // Canvas - region profiler
+         // Canvas start - region threading
+@@ -139,6 +187,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Ti
+     @Override
+     public void onRegionActive(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+         final TickRegionData data = region.getData();
++        activateTelemetry(data, System.nanoTime());
+ 
+         data.tickHandle.checkInitialSchedule();
+         scheduler.scheduleRegion(data.tickHandle);
+@@ -149,6 +198,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Ti
+         final TickRegionData data = region.getData();
+ 
+         scheduler.descheduleRegion(data.tickHandle);
++        retireTelemetry(data, RegionMetricsRegistry.RetirementReason.INACTIVE, System.nanoTime());
++        data.sourbyTelemetryMergePending = false;
+         // we call inactive here, since unpinning needs to occur before copying, or else this will cause issues
+         io.canvasmc.canvas.threadedregions.SchedulerUtil.getHandle().onRegionInactive(region); // Canvas - region profiler
+         // old handle cannot be scheduled anymore, copy to a new handle
+@@ -158,13 +209,14 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Ti
+     @Override
+     public void preMerge(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
+                          final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
+-
++        final long now = System.nanoTime();
++        retireTelemetry(from.getData(), RegionMetricsRegistry.RetirementReason.MERGE, now);
+     }
+ 
+     @Override
+     public void preSplit(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
+                          final java.util.List<ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData>> into) {
+-
++        retireTelemetry(from.getData(), RegionMetricsRegistry.RetirementReason.SPLIT, System.nanoTime());
+     }
+ 
+     public static final class TickRegionSectionData implements ThreadedRegionizer.ThreadedRegionSectionData {}
+@@ -330,6 +385,11 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Ti
+ 
+         // tick data
+         public ConcreteRegionTickHandle tickHandle = new ConcreteRegionTickHandle(this, TimeUtil.DEADLINE_NOT_SET);
++        // Primitive lifecycle state only; the registry never retains this region data.
++        public long sourbyTelemetryGenerationId;
++        public boolean sourbyTelemetryActive;
++        public boolean sourbyTelemetryMergePending;
++
+ 
+         // queue data
+         private final RegionizedTaskQueue.RegionTaskQueueData taskQueueData;
+@@ -448,6 +507,9 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Ti
+             // and the other regions to split into are not scheduled yet.
+             for (final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region : regions) {
+                 final TickRegionData data = region.getData();
++                data.sourbyTelemetryGenerationId = 0L;
++                data.sourbyTelemetryActive = false;
++                data.sourbyTelemetryMergePending = false;
+                 data.tickHandle.copyDeadlineAndTickCount(this.tickHandle);
+                 // just be lazy about this one, it's not very important
+                 if (this.hasPackets.getOpaque()) {
+@@ -513,7 +575,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Ti
+         @Override
+         public void mergeInto(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
+             // note: merge target is always a region being released from ticking
+             final TickRegionData data = into.getData();
++            rotateMergeTargetTelemetry(data, System.nanoTime());
+             final long currentTickTo = data.getCurrentTick();
+             final long currentTickFrom = this.getCurrentTick();
+ 
+@@ -560,6 +623,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Ti
+ 
+         @NonNull
+         private ConcreteRegionTickHandle copy() {
++            // The constructor creates a fresh telemetry owner; only scheduling state is copied.
+             final ConcreteRegionTickHandle ret = new ConcreteRegionTickHandle(this.region, this.getScheduledStart());
+ 
+             ret.currentTick = this.currentTick;
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -190,6 +190,8 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGe
+     private static final int EMPTY_TIME_NO_TICK = 300;
+     private static final int MAX_SCHEDULED_TICKS_PER_TICK = 65536;
+     private static final AtomicInteger ENTITY_COUNTER = new AtomicInteger();
++    public final long sourbyTelemetryWorldId =
++        dev.iyanz.sourbycraft.perf.RegionMetricsRegistry.INSTANCE.newWorldId();
+     private final List<ServerPlayer> players = new java.util.concurrent.CopyOnWriteArrayList<>(); // Folia - region threading
+     private final ServerChunkCache chunkSource;
+     private final MinecraftServer server;

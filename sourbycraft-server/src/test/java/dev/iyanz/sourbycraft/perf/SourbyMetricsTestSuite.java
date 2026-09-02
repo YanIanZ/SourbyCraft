@@ -8,6 +8,7 @@ import org.junit.platform.suite.api.Suite;
     TickDataCompatibilityTest.class,
     TickDataBinaryCompatibilityTest.class,
     RegionTickMetricsTest.class,
-    RegionTickMetricsConcurrencyTest.class
+    RegionTickMetricsConcurrencyTest.class,
+    RegionMetricsRegistryTest.class
 })
 public class SourbyMetricsTestSuite {}
