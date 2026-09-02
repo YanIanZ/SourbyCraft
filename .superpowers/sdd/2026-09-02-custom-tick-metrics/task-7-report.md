@@ -108,3 +108,64 @@ committed. Public `sourbyapi` was not changed.
   must select `SourbyMetricsTestSuite`.
 - The initial forced rebuild needed more than the original 120-second tool timeout because it
   recompiled the large generated upstream API/server trees. Later incremental runs completed normally.
+
+## Fix Round 1/5
+
+### Findings Addressed
+
+- Converted cached utilisation fractions to percentages once in `/sys` before bar, text, and health
+  use. Test fixtures now use realistic `0.75` and `0.50` fractions.
+- Added one shared dynamic-target TPS clamp. `/tps` worst/median/aggregate/global values, `/sys`
+  worst TPS, and HUD worst TPS now display and derive progress/colors from the same capped value.
+- Made tier rendering unavailable unless target TPS, worst TPS, and worst average MSPT are all finite;
+  missing MSPT can no longer produce GREEN.
+- Replaced `/sys` health's fixed p95 threshold with a ratio of the dynamic `1000 / targetTps` budget.
+  Proportional low-target and high-target fixtures now produce the same score.
+- Exercised the real `/tps`, `/mspt`, and `/sys` command `execute` paths with a sequence-incrementing
+  canonical provider. A combined real HUD update populates both viewer sets directly, avoids scheduler
+  startup, updates both bars, and verifies exactly one snapshot read.
+- Updated `Tier` documentation to describe cached snapshots instead of direct Bukkit TPS/MSPT reads.
+
+### TDD Evidence
+
+- RED: the focused suite ran 91 tests with four expected failures covering utilisation units, TPS
+  clamping, unavailable tier inputs, and target-relative health thresholds.
+- GREEN: after the rendering fixes, the focused suite passed all 91 tests.
+- RED: entry-path tests initially failed test compilation because the canonical provider had no
+  controlled snapshot source.
+- Intermediate verification reached the real combined HUD update and exposed an over-specific RAM
+  byte-format expectation; the assertion was narrowed to the cached 25% signal.
+- GREEN: `./gradlew :sourbycraft-server:test --tests dev.iyanz.sourbycraft.perf.SourbyMetricsTestSuite --rerun-tasks`
+  executed 93 tests with zero failures, errors, or skipped tests.
+- `./gradlew :sourbycraft-server:compileJava` completed successfully.
+
+### Search And Review Evidence
+
+- Required search returned no matches under command/HUD/perf sources for
+  `computeForAllRegions|RegionMspt\.worstMsptMs|Bukkit\.getTPS\(\)`.
+- Additional command/HUD search returned no matches for direct average-tick reads, old
+  `PerfMetrics.snapshot()` calls, or tick-report generation.
+- `git diff --check` passed. No generated trees or public `sourbyapi` files changed.
+- The test snapshot override is package-private on the canonical server provider and is cleared after
+  every consumer test; production registration and the public API remain unchanged.
+
+### Backprop
+
+- Root causes were unit ambiguity at the consumer boundary, uncapped presentation values diverging
+  from capped progress, optional MSPT in tier classification, fixed-duration health thresholds, and
+  helper-only one-read tests.
+- The existing Task 7 brief already requires dynamic targets, explicit unavailable states, one-read
+  entry paths, and cached-only consumers. Regression tests now directly enforce those requirements,
+  so no additional project-spec invariant was added.
+
+### Fix Commit
+
+- `c78ec0954f99f27b53c94e9103fefe76e4e5560a`
+  `fix(metrics): normalize cached displays`
+
+### Fix-Round Concerns
+
+- Gradle continues to emit the pre-existing `writeBuildInfo` configuration-cache serialization
+  warning; the focused suite and standalone compilation succeed.
+- The package-private provider override exists only to exercise actual built-in entry paths and must
+  remain cleared by test cleanup.
