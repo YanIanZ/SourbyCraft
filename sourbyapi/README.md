@@ -5,22 +5,21 @@ SourbyCraft plugin (and any Bukkit/Paper plugin running on SourbyCraft) compiles
 
 ## What this actually is
 
-**`sourbyapi` is the Canvas/Paper API surface, republished under the SourbyCraft group id — it is
-not a separate reimplementation.** There is no `sourbyapi/src/` directory: this project contributes
-zero custom source of its own. Its `build.gradle.kts` (materialized from Canvas's own
+**`sourbyapi` republishes the Canvas/Paper API surface under the SourbyCraft group id and additionally
+owns `dev.iyanz.sourbycraft.api.metrics`.** It is not a reimplementation of the upstream APIs. Its
+`build.gradle.kts` (materialized from Canvas's own
 `canvas-api/build.gradle.kts` by the weaver patcher — see `sourbyapi/build.gradle.kts.patch` and the
 `upstreams.canvas { ... }` block in the root `build.gradle.kts`) points its Gradle source sets
 directly at:
 
 - `../paper-api/src/main/java` — upstream Paper's public API (`org.bukkit.*`, `io.papermc.paper.*`)
 - `../canvas-api/src/main/java` — Canvas's additions on top of Paper's API
+- `src/main/java` — SourbyCraft's read-only metrics service contract
 
-A repo-wide search for `dev.iyanz` classes inside `sourbyapi/` (excluding generated `build/`
-output) finds **none**. Every class a plugin imports from this artifact still lives in `org.bukkit`,
-`io.papermc.paper`, or Canvas's own API packages — SourbyCraft has not renamed, wrapped, or added to
-any of it. The `paper-patches/` directory holds patches Canvas/SourbyCraft applies to the *upstream
-Paper API sources* before they land in `paper-api/` (e.g. Javadoc/behavioral fixes), not new
-SourbyCraft-authored classes.
+Upstream classes retain their existing `org.bukkit`, `io.papermc.paper`, and Canvas package names.
+The `paper-patches/` directory holds patches Canvas/SourbyCraft applies to the *upstream Paper API
+sources* before they land in `paper-api/` (e.g. Javadoc/behavioral fixes); the metrics package is the
+SourbyCraft-owned addition.
 
 What SourbyCraft *does* change is the packaging:
 
@@ -32,10 +31,9 @@ What SourbyCraft *does* change is the packaging:
   `org.spigotmc:spigot-api` and `org.bukkit:bukkit`, so it can substitute for any of those
   coordinates in a dependency graph without a conflict.
 
-In short: **this is the branded API surface, not a new API.** A plugin built against `sourbyapi`
-compiles against the exact same `org.bukkit`/`io.papermc.paper` classes it would against upstream
-Paper — only the artifact coordinates (and, for SourbyCraft's own `sourbycraft-server` module, the
-runtime behind them) are SourbyCraft's.
+In short: **this is the branded upstream API surface plus SourbyCraft's metrics contract.** A plugin
+built against `sourbyapi` compiles against the exact same `org.bukkit`/`io.papermc.paper` classes it
+would against upstream Paper and may also consume the SourbyCraft metrics service.
 
 ## Artifact coordinates
 
@@ -68,6 +66,13 @@ dependencies {
 }
 ```
 
+Look up the read-only metrics service through Bukkit's existing `ServicesManager`:
+
+```java
+ServicesManager services = Bukkit.getServicesManager();
+SourbyMetrics metrics = services.load(SourbyMetrics.class);
+```
+
 ### `api-version` in your plugin descriptor
 
 The Bukkit API version a plugin declares in `paper-plugin.yml` / `plugin.yml` comes from the
@@ -92,5 +97,5 @@ api-version: '26.2'
   that produced it from `canvas-api/build.gradle.kts`.
 - `paper-patches/` — patches applied to the upstream `paper-api` sources before they land in the
   sibling `paper-api/` project that this module's source set reads from.
-
-No other source lives here; the compiled classes come entirely from `paper-api/` and `canvas-api/`.
+- `src/main/java/dev/iyanz/sourbycraft/api/metrics/` — SourbyCraft's public read-only metrics API.
+- `src/test/` — API contract tests.
