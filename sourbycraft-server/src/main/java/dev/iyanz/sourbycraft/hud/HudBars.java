@@ -1,6 +1,14 @@
 package dev.iyanz.sourbycraft.hud;
 
+import dev.iyanz.sourbycraft.api.metrics.MetricState;
+import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
+import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
+import dev.iyanz.sourbycraft.api.metrics.RuntimeMetrics;
+import dev.iyanz.sourbycraft.api.metrics.SourbyMetrics;
+import dev.iyanz.sourbycraft.api.metrics.WindowMetrics;
 import dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin;
+import dev.iyanz.sourbycraft.command.TpsCommand;
+import dev.iyanz.sourbycraft.perf.MetricsRuntime;
 import dev.iyanz.sourbycraft.util.ContainerMemory;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
@@ -22,8 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * bar objects mutated by ONE global-region task (no per-player bar churn, no per-player timers).
  * Show/hide hops to the player's owning region via the entity scheduler (Folia rule 1).
  *
- * <p>TPS reads {@link Bukkit#getTPS()} / {@link Bukkit#getAverageTickTime()} directly — no custom
- * sensor class, no sampling loop. RAM shows heap used/max, plus the container/panel allocation when
+ * <p>TPS and RAM read the immutable metrics cache once per update. RAM shows heap used/max, plus the container/panel allocation when
  * it is meaningfully larger than the heap (the "panel gave me 10G, spark shows 2G" case — that
  * gap is a JVM flag issue, and the bar makes it visible).
  *
@@ -123,52 +130,67 @@ public final class HudBars {
 
     private static void update() {
         try {
-            if (!TPS_VIEWERS.isEmpty()) updateTps();
-            if (!RAM_VIEWERS.isEmpty()) updateRam();
+            final PerformanceSnapshot snapshot = MetricsRuntime.provider().snapshot();
+            if (!TPS_VIEWERS.isEmpty()) applyTps(renderTps(snapshot));
+            if (!RAM_VIEWERS.isEmpty()) updateRam(snapshot);
         } catch (Throwable ignored) {
             // HUD must never break the global tick.
         }
     }
 
-    private static void updateTps() {
-        double rawTps;
-        try {
-            rawTps = Bukkit.getTPS()[0];
-        } catch (Throwable ignored) {
-            rawTps = 20.0;
-        }
-        double rawMspt;
-        try {
-            // Worst region (region-threading): Bukkit.getAverageTickTime() only sees this task's
-            // region, so the bar would read healthy while the spawn region chokes. See RegionMspt.
-            rawMspt = dev.iyanz.sourbycraft.perf.RegionMspt.worstMsptMs();
-            if (Double.isNaN(rawMspt)) rawMspt = 0.0;
-        } catch (Throwable ignored) {
-            rawMspt = 0.0;
-        }
-        final double tps = Math.min(20.0, rawTps);
-        final double mspt = rawMspt;
-        final BossBar.Color color = tps >= 18 ? BossBar.Color.GREEN
-            : tps >= 15 ? BossBar.Color.YELLOW : BossBar.Color.RED;
-        final TextColor valueColor = tps >= 18 ? NamedTextColor.GREEN
-            : tps >= 15 ? NamedTextColor.YELLOW : NamedTextColor.RED;
-        TPS_BAR.name(Component.text()
-            .append(Component.text("TPS ", NamedTextColor.GRAY))
-            .append(Component.text(String.format(java.util.Locale.ROOT, "%.2f", tps), valueColor))
-            .append(Component.text("   MSPT ", NamedTextColor.GRAY))
-            .append(Component.text((mspt >= 10.0 ? String.format(java.util.Locale.ROOT, "%.1fms", mspt)
-                    : mspt >= 0.1 ? String.format(java.util.Locale.ROOT, "%.2fms", mspt)
-                    : String.format(java.util.Locale.ROOT, "%.3fms", mspt)),
-                mspt < 40 ? NamedTextColor.GREEN : mspt < 60 ? NamedTextColor.YELLOW : NamedTextColor.RED))
-            .build());
-        TPS_BAR.progress((float) Math.max(0.0, Math.min(1.0, tps / 20.0)));
-        TPS_BAR.color(color);
+    /** Reads the provider once and builds the TPS bar from one immutable generation. */
+    public static TpsDisplay renderTps(final SourbyMetrics metrics) {
+        final PerformanceSnapshot snapshot = metrics.snapshot();
+        return renderTps(snapshot);
     }
 
-    private static void updateRam() {
-        final Runtime rt = Runtime.getRuntime();
-        final long max = rt.maxMemory();
-        final long used = rt.totalMemory() - rt.freeMemory();
+    private static TpsDisplay renderTps(final PerformanceSnapshot snapshot) {
+        final WindowMetrics recent = snapshot.window(MetricWindow.FIVE_SECONDS);
+        final double target = snapshot.targetTps();
+        final double tps = recent.worstTps();
+        final double mspt = recent.worstAverageMspt();
+        if (!TpsCommand.available(tps) || !TpsCommand.available(target) || target <= 0.0
+            || snapshot.freshness().state() == MetricState.UNAVAILABLE
+            || snapshot.freshness().state() == MetricState.WARMING) {
+            return new TpsDisplay(Component.text("TPS " + snapshot.freshness().state().name(), NamedTextColor.GRAY),
+                0.0F, BossBar.Color.YELLOW);
+        }
+        final double ratio = tps / target;
+        final BossBar.Color color = ratio >= 0.9 ? BossBar.Color.GREEN
+            : ratio >= 0.75 ? BossBar.Color.YELLOW : BossBar.Color.RED;
+        final TextColor valueColor = ratio >= 0.9 ? NamedTextColor.GREEN
+            : ratio >= 0.75 ? NamedTextColor.YELLOW : NamedTextColor.RED;
+        final double budget = 1_000.0 / target;
+        final TextColor msptColor = !TpsCommand.available(mspt) ? NamedTextColor.GRAY
+            : mspt < budget * 0.8 ? NamedTextColor.GREEN
+            : mspt < budget * 1.2 ? NamedTextColor.YELLOW : NamedTextColor.RED;
+        final String stale = snapshot.freshness().state() == MetricState.STALE ? "  STALE" : "";
+        final Component name = Component.text()
+            .append(Component.text("TPS ", NamedTextColor.GRAY))
+            .append(Component.text(String.format(java.util.Locale.ROOT, "%.2f/%.2f", tps, target), valueColor))
+            .append(Component.text("   MSPT ", NamedTextColor.GRAY))
+            .append(Component.text(TpsCommand.ms(mspt), msptColor))
+            .append(Component.text(stale, NamedTextColor.GRAY))
+            .build();
+        return new TpsDisplay(name, (float)Math.clamp(ratio, 0.0, 1.0), color);
+    }
+
+    private static void applyTps(final TpsDisplay display) {
+        TPS_BAR.name(display.name());
+        TPS_BAR.progress(display.progress());
+        TPS_BAR.color(display.color());
+    }
+
+    private static void updateRam(final PerformanceSnapshot snapshot) {
+        final RuntimeMetrics runtime = snapshot.runtime();
+        final long max = runtime.heapMaxBytes();
+        final long used = runtime.heapUsedBytes();
+        if (max <= 0L || used < 0L) {
+            RAM_BAR.name(Component.text("RAM " + snapshot.freshness().state().name(), NamedTextColor.GRAY));
+            RAM_BAR.progress(0.0F);
+            RAM_BAR.color(BossBar.Color.YELLOW);
+            return;
+        }
         final double pct = max > 0 ? (double) used / max : 0.0;
         final var name = Component.text()
             .append(Component.text("RAM ", NamedTextColor.GRAY))
@@ -199,6 +221,8 @@ public final class HudBars {
         RAM_BAR.progress((float) Math.max(0.0, Math.min(1.0, pct)));
         RAM_BAR.color(pct < 0.60 ? BossBar.Color.GREEN : pct < 0.85 ? BossBar.Color.YELLOW : BossBar.Color.RED);
     }
+
+    public record TpsDisplay(Component name, float progress, BossBar.Color color) {}
 
     /** Bukkit listener holder — registered once by the command registrar. Handles the admin
      *  auto-HUD on join and viewer cleanup on quit. */
