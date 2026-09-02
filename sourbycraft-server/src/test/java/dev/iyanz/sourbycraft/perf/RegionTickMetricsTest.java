@@ -43,7 +43,8 @@ class RegionTickMetricsTest {
         assertEquals(10.0, window.mspt(), 1.0E-9);
         assertEquals(0.2, window.utilisation(), 1.0E-9);
         assertEquals(10L * MILLISECOND, window.minimumNanos());
-        assertEquals(10L * MILLISECOND, window.medianNanos());
+        assertEquals(10.0 * MILLISECOND, window.medianNanos(), 0.0);
+        assertTrue(Double.isFinite(window.medianNanos()));
         assertEquals(10L * MILLISECOND, window.maximumNanos());
         assertTrue(window.approximate());
         assertFalse(window.truncated());
@@ -61,6 +62,7 @@ class RegionTickMetricsTest {
         assertEquals(50.0, window.mspt(), 1.0E-9);
         assertEquals(30L * MILLISECOND, window.missingCpuNanos());
         assertEquals(49L * MILLISECOND, window.minimumNanos());
+        assertTrue(Double.isFinite(window.medianNanos()));
         assertTrue(window.minimumNanos() <= window.medianNanos());
         assertTrue(window.medianNanos() <= window.maximumNanos());
         assertEquals(51L * MILLISECOND, window.maximumNanos());
@@ -210,7 +212,7 @@ class RegionTickMetricsTest {
 
         final RegionTickMetrics.WindowSnapshot window = metrics.snapshot(3L * SECOND).oneMinute();
         assertTrue(window.truncated());
-        assertEquals(0L, window.medianNanos());
+        assertTrue(Double.isNaN(window.medianNanos()));
         assertTrue(Double.isNaN(window.estimatedP95Mspt()));
         assertTrue(Double.isNaN(window.estimatedP99Mspt()));
         assertEquals(6L, window.sampleCount());

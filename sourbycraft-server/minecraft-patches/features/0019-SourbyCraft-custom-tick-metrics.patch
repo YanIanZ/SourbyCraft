@@ -57,7 +57,7 @@ new file mode 100644
 +        emptyWindow(true), emptyWindow(true), emptyWindow(true));
 +
 +    public record WindowSnapshot(long sampleCount, long intervalNanos, long executionNanos,
-+                                 long minimumNanos, long medianNanos, long maximumNanos,
++                                 long minimumNanos, double medianNanos, long maximumNanos,
 +                                 long missingCpuNanos, double tps, double mspt,
 +                                 double utilisation, double estimatedP95Mspt,
 +                                 double estimatedP99Mspt, boolean approximate,
@@ -312,7 +312,7 @@ new file mode 100644
 +            return emptyWindow(approximate);
 +        }
 +        final boolean invalid = interval == Long.MAX_VALUE || execution == Long.MAX_VALUE;
-+        final long median = truncated ? 0L
++        final double median = truncated ? Double.NaN
 +            : Math.max(minimum, Math.min(maximum, histogramQuantile(histogram, count, 0.5)));
 +        final double tps = invalid || interval == 0L ? Double.NaN : (double)count * 1.0E9 / (double)interval;
 +        final double mspt = invalid ? Double.NaN : (double)execution / (double)count * 1.0E-6;
@@ -324,7 +324,7 @@ new file mode 100644
 +    }
 +
 +    private static WindowSnapshot emptyWindow(final boolean approximate) {
-+        return new WindowSnapshot(0L, 0L, 0L, 0L, 0L, 0L, 0L,
++        return new WindowSnapshot(0L, 0L, 0L, 0L, Double.NaN, 0L, 0L,
 +            Double.NaN, Double.NaN, 0.0, Double.NaN, Double.NaN, approximate, false);
 +    }
 +
