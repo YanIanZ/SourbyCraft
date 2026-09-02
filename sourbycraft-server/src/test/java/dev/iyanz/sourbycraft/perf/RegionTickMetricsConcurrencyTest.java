@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RegionTickMetricsConcurrencyTest {
@@ -25,8 +26,9 @@ class RegionTickMetricsConcurrencyTest {
             started.countDown();
             try {
                 for (int i = 1; i <= TRANSITIONS; ++i) {
-                    metrics.tickStarted(i);
-                    metrics.tickCompleted(tick(i), 1L);
+                    final long start = (long)i * TimeUnit.MILLISECONDS.toNanos(1L);
+                    metrics.tickStarted(start);
+                    metrics.tickCompleted(tick(start), TimeUnit.MILLISECONDS.toNanos(1L));
                 }
             } catch (final Throwable throwable) {
                 failure.compareAndSet(null, throwable);
@@ -42,8 +44,8 @@ class RegionTickMetricsConcurrencyTest {
                 assertTrue(snapshot.sequence() >= lastSequence);
                 if (snapshot.activeTickStartNanos() != RegionTickMetrics.INACTIVE) {
                     assertTrue(snapshot.activeTickStartNanos() >= lastActive);
-                    assertTrue(snapshot.activeTickStartNanos() >= 1L);
-                    assertTrue(snapshot.activeTickStartNanos() <= TRANSITIONS);
+                    assertTrue(snapshot.activeTickStartNanos() > snapshot.sampledAtNanos(),
+                        "a completed published tick must not simultaneously remain active");
                     lastActive = snapshot.activeTickStartNanos();
                 }
                 lastSequence = snapshot.sequence();
@@ -56,20 +58,36 @@ class RegionTickMetricsConcurrencyTest {
             throw new AssertionError("publication observation failed", failure.get());
         }
         assertEquals(RegionTickMetrics.INACTIVE, metrics.snapshot(TRANSITIONS + 1L).activeTickStartNanos());
+        assertTrue(metrics.snapshot(Long.MAX_VALUE).sequence() >= 10_000L);
     }
 
     @Test
-    void stalledTickIsVisibleBeforeCompletionAndNeverDoubleCounted() {
+    void blockedWriterPublishesStallBeforeReleaseAndDoesNotDoubleCount() throws Exception {
         final RegionTickMetrics metrics = new RegionTickMetrics();
         final long start = TimeUnit.SECONDS.toNanos(10L);
-        metrics.tickStarted(start);
+        final CountDownLatch tickStarted = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        final Thread writer = Thread.ofPlatform().start(() -> {
+            metrics.tickStarted(start);
+            tickStarted.countDown();
+            try {
+                assertTrue(release.await(10L, TimeUnit.SECONDS));
+            } catch (final InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(interrupted);
+            }
+            metrics.tickCompleted(new TickTime(TimeUtil.DEADLINE_NOT_SET, start, start, 0L,
+                start + TimeUnit.MILLISECONDS.toNanos(60L), 0L, 0L, 0L, false), TICK_INTERVAL);
+        });
 
+        assertTrue(tickStarted.await(10L, TimeUnit.SECONDS));
         final RegionTickMetrics.Snapshot stalled = metrics.snapshot(start + TimeUnit.MILLISECONDS.toNanos(51L));
         assertEquals(start, stalled.activeTickStartNanos());
         assertEquals(0L, stalled.fiveSeconds().sampleCount());
 
-        metrics.tickCompleted(new TickTime(TimeUtil.DEADLINE_NOT_SET, start, start, 0L,
-            start + TimeUnit.MILLISECONDS.toNanos(60L), 0L, 0L, 0L, false), TICK_INTERVAL);
+        release.countDown();
+        writer.join(TimeUnit.SECONDS.toMillis(10L));
+        assertFalse(writer.isAlive());
 
         final RegionTickMetrics.Snapshot completed = metrics.snapshot(start + TimeUnit.MILLISECONDS.toNanos(60L));
         assertEquals(RegionTickMetrics.INACTIVE, completed.activeTickStartNanos());
@@ -78,6 +96,6 @@ class RegionTickMetricsConcurrencyTest {
     }
 
     private static TickTime tick(final long start) {
-        return new TickTime(start - 1L, start, start, 0L, start, 0L, 0L, 0L, false);
+        return new TickTime(start - TimeUnit.MILLISECONDS.toNanos(1L), start, start, 0L, start, 0L, 0L, 0L, false);
     }
 }
