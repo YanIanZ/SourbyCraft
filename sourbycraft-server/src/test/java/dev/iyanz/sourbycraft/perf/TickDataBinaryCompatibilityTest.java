@@ -165,11 +165,21 @@ class TickDataBinaryCompatibilityTest {
     void unresolvedSampleRingOverflowMakesLongCompatibilityViewsUnavailable() {
         final RegionTickMetrics owner = new RegionTickMetrics();
         final TickData shared = new TickData(owner, TimeUnit.MINUTES.toNanos(5L));
+        final TickData standalone = new TickData(TimeUnit.MINUTES.toNanos(5L));
         for (int i = 0; i < 1_000; ++i) {
-            shared.addDataFrom(tick(TimeUtil.DEADLINE_NOT_SET, i * MILLISECOND, MILLISECOND));
+            final TickTime sample = tick(TimeUtil.DEADLINE_NOT_SET, i * MILLISECOND, MILLISECOND);
+            shared.addDataFrom(sample);
+            standalone.addDataFrom(sample);
         }
+        final long now = TimeUnit.SECONDS.toNanos(1L);
+        final TickData.TickReportData standaloneReport = standalone.generateTickReport(null, now, TARGET_INTERVAL);
+        final Double standaloneTps = standalone.getTPSAverage(null, TARGET_INTERVAL);
 
-        assertNull(shared.generateTickReport(null, TimeUnit.SECONDS.toNanos(1L), TARGET_INTERVAL));
+        assertNotNull(standaloneReport);
+        assertEquals(1_000, standaloneReport.collectedTicks());
+        assertNotNull(standaloneTps);
+        assertTrue(Double.isFinite(standaloneTps));
+        assertNull(shared.generateTickReport(null, now, TARGET_INTERVAL));
         assertNull(shared.getTPSAverage(null, TARGET_INTERVAL));
     }
 
