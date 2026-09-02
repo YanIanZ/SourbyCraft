@@ -440,6 +440,7 @@ docs/superpowers/specs/*
 docs/superpowers/plans/*
 !docs/superpowers/plans/2026-09-02-custom-tick-metrics.md
 graphify-out/
+.worktrees/
 sourbycraft-server/src/main/resources/GeoLite2-City.mmdb
 
 # NMS-compat test-harness jars (downloaded by scripts/download-test-plugins.sh)
