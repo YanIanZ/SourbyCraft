@@ -133,28 +133,44 @@ class TickDataBinaryCompatibilityTest {
     }
 
     @Test
-    void multipleTargetlessSamplesAcrossLongWindowBucketsMatchStandaloneTps() {
+    void mixedTargetlessSamplesAcrossLongBucketTiersMatchStandaloneCountsAndTps() {
+        for (final long windowMinutes : new long[] {1L, 5L, 15L}) {
+            final long window = TimeUnit.MINUTES.toNanos(windowMinutes);
+            final RegionTickMetrics owner = new RegionTickMetrics();
+            final TickData shared = new TickData(owner, window);
+            final TickData standalone = new TickData(window);
+            final long olderOffset = TimeUnit.SECONDS.toNanos(windowMinutes == 1L ? 40L : 70L);
+            final TickTime[] samples = {
+                tick(TimeUtil.DEADLINE_NOT_SET, 0L, 20L * MILLISECOND),
+                tick(TimeUtil.DEADLINE_NOT_SET, window - olderOffset, 80L * MILLISECOND),
+                tick(TimeUtil.DEADLINE_NOT_SET, window - TimeUnit.SECONDS.toNanos(30L), 40L * MILLISECOND),
+                tick(TimeUtil.DEADLINE_NOT_SET, window - TimeUnit.SECONDS.toNanos(1L), 120L * MILLISECOND)
+            };
+            for (final TickTime sample : samples) {
+                shared.addDataFrom(sample);
+                standalone.addDataFrom(sample);
+            }
+            final long now = samples[samples.length - 1].tickEnd();
+            final TickData.TickReportData expected = standalone.generateTickReport(null, now, TARGET_INTERVAL);
+            final TickData.TickReportData actual = shared.generateTickReport(null, now, TARGET_INTERVAL);
+
+            assertNotNull(actual);
+            assertEquals(expected.collectedTicks(), actual.collectedTicks());
+            assertEquals(expected.tpsData().segmentAll().average(), actual.tpsData().segmentAll().average(), 0.0);
+            assertEquals(expected.tpsData().segmentAll().average(), shared.getTPSAverage(null, TARGET_INTERVAL), 0.0);
+        }
+    }
+
+    @Test
+    void unresolvedSampleRingOverflowMakesLongCompatibilityViewsUnavailable() {
         final RegionTickMetrics owner = new RegionTickMetrics();
         final TickData shared = new TickData(owner, TimeUnit.MINUTES.toNanos(5L));
-        final TickData standalone = new TickData(TimeUnit.MINUTES.toNanos(5L));
-        final TickTime[] samples = {
-            tick(TimeUtil.DEADLINE_NOT_SET, 0L, 2L * MILLISECOND),
-            tick(TimeUtil.DEADLINE_NOT_SET, TimeUnit.SECONDS.toNanos(70L), 3L * MILLISECOND),
-            tick(TimeUtil.DEADLINE_NOT_SET, TimeUnit.SECONDS.toNanos(140L), 4L * MILLISECOND)
-        };
-        for (final TickTime sample : samples) {
-            shared.addDataFrom(sample);
-            standalone.addDataFrom(sample);
+        for (int i = 0; i < 1_000; ++i) {
+            shared.addDataFrom(tick(TimeUtil.DEADLINE_NOT_SET, i * MILLISECOND, MILLISECOND));
         }
-        final long now = TimeUnit.SECONDS.toNanos(140L) + 4L * MILLISECOND;
-        final TickData.TickReportData expected = standalone.generateTickReport(null, now, TARGET_INTERVAL);
-        final TickData.TickReportData actual = shared.generateTickReport(null, now, TARGET_INTERVAL);
 
-        assertNotNull(actual);
-        assertEquals(3, actual.collectedTicks());
-        assertEquals(20.0, actual.tpsData().segmentAll().average(), 0.0);
-        assertEquals(expected.tpsData().segmentAll().average(), actual.tpsData().segmentAll().average(), 0.0);
-        assertEquals(expected.tpsData().segmentAll().average(), shared.getTPSAverage(null, TARGET_INTERVAL), 0.0);
+        assertNull(shared.generateTickReport(null, TimeUnit.SECONDS.toNanos(1L), TARGET_INTERVAL));
+        assertNull(shared.getTPSAverage(null, TARGET_INTERVAL));
     }
 
     @Test
