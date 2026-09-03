@@ -4,6 +4,7 @@ main: dev.iyanz.sourbycraft.testplugin.TestPlugin
 description: SourbyCraft Test Plugin
 author: iYanZ
 api-version: '${api_version}'
+folia-supported: true
 load: STARTUP
 bootstrapper: dev.iyanz.sourbycraft.testplugin.TestBootstrap
 loader: dev.iyanz.sourbycraft.testplugin.TestLoader
