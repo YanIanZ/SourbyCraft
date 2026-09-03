@@ -265,10 +265,13 @@ class RegionTickMetricsTest {
         metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 0L, MILLISECOND), TARGET_20_TPS);
         metrics.seal(2L * MILLISECOND);
 
-        final RegionTickMetrics.Snapshot promoted = metrics.refreshSnapshot(65L * SECOND);
+        final long[] histograms = new long[5 * 64];
+        final RegionTickMetrics.Snapshot promoted = metrics.acquireSnapshot(65L * SECOND, histograms, 0);
         assertEquals(1L, promoted.fiveMinutes().sampleCount());
         assertEquals(1L, promoted.fifteenMinutes().sampleCount());
-        assertSame(promoted, metrics.refreshSnapshot(65L * SECOND + MILLISECOND));
+        assertEquals(1L, java.util.Arrays.stream(histograms, 3 * 64, 4 * 64).sum());
+        assertEquals(1L, java.util.Arrays.stream(histograms, 4 * 64, 5 * 64).sum());
+        assertSame(promoted, metrics.acquireSnapshot(65L * SECOND + MILLISECOND, new long[5 * 64], 0));
 
         final RegionTickMetrics.Snapshot fiveMinuteBoundary = metrics.refreshSnapshot(300L * SECOND);
         assertEquals(1L, fiveMinuteBoundary.fiveMinutes().sampleCount());
