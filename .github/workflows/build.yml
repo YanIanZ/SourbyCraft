@@ -47,8 +47,8 @@ jobs:
       - name: Apply all patches (Luminol 26.2 -> Folia)
         run: ./gradlew applyAllPatches --no-daemon --stacktrace
 
-      - name: Compile server
-        run: ./gradlew :sourbycraft-server:compileJava --no-daemon --stacktrace
+      - name: Test API and server; build metrics fixture
+        run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:jar --no-daemon --stacktrace
 
       - name: Compute next release number (rN — also stamped as build Nf)
         id: relnum
@@ -86,6 +86,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Upload metrics fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: SourbyCraft-metrics-fixture
+          path: test-plugin/build/libs/test-plugin-1.0.0.jar
+          if-no-files-found: error
+          retention-days: 7
+
   boot-test:
     name: Boot test (server reaches Done)
     runs-on: ubuntu-24.04
@@ -103,11 +111,22 @@ jobs:
           name: SourbyCraft-26.2
           path: run
 
-      - name: Boot server, wait for Done, stop cleanly
+      - name: Download metrics fixture
+        uses: actions/download-artifact@v4
+        with:
+          name: SourbyCraft-metrics-fixture
+          path: fixture
+
+      - name: Boot server, verify metrics API, and stop cleanly
         working-directory: run
         run: |
-          set -u
-          jar=$(ls SourbyCraft-*-REL.jar | head -1)
+          set -euo pipefail
+          jar=$(find . -maxdepth 1 -type f -name 'SourbyCraft-*-REL.jar' -print -quit)
+          test -n "$jar"
+          fixture=../fixture/test-plugin-1.0.0.jar
+          test -f "$fixture"
+          mkdir -p plugins
+          cp "$fixture" plugins/test-plugin-1.0.0.jar
           echo "eula=true" > eula.txt
           # keep the console-log short and offline so CI runs deterministically
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
@@ -116,25 +135,58 @@ jobs:
           java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
           PID=$!
           exec 3> stdin.pipe   # hold the write end open so the server keeps reading stdin
-          booted=0
-          for i in $(seq 1 240); do
-            if grep -q 'Done (' server.log; then booted=1; break; fi
+          ready=0
+          for _ in $(seq 1 240); do
+            if grep -q 'Done (' server.log \
+              && grep -q 'SOURBY_METRICS_ONLOAD_OK' server.log \
+              && grep -q 'SOURBY_METRICS_ONENABLE_OK' server.log; then
+              ready=1
+              break
+            fi
             if ! kill -0 "$PID" 2>/dev/null; then echo "server process exited early"; break; fi
             sleep 1
           done
-          echo "stop" >&3 || true   # request a clean shutdown
-          exec 3>&-
-          # give it up to 60s to shut down, then force
-          for i in $(seq 1 60); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
-          kill "$PID" 2>/dev/null || true
-          echo "----- last 40 log lines -----"
-          tail -40 server.log
-          if [ "$booted" -eq 1 ]; then
-            echo "✅ Server reached Done and was asked to stop."
-          else
-            echo "❌ Server did not reach Done within 240s."
+
+          if [ "$ready" -ne 1 ]; then
+            exec 3>&-
+            kill "$PID" 2>/dev/null || true
+            wait "$PID" 2>/dev/null || true
+            echo "----- last 40 log lines -----"
+            tail -40 server.log
+            echo "Server did not reach Done with both metrics markers within 240s."
             exit 1
           fi
+
+          printf 'tps\nmspt\nspark profiler info\nstop\n' >&3
+          exec 3>&-
+
+          exited=0
+          for _ in $(seq 1 60); do
+            if ! kill -0 "$PID" 2>/dev/null; then exited=1; break; fi
+            sleep 1
+          done
+
+          if [ "$exited" -ne 1 ]; then
+            kill "$PID" 2>/dev/null || true
+            wait "$PID" 2>/dev/null || true
+            echo "----- last 40 log lines -----"
+            tail -40 server.log
+            echo "Server required forced cleanup after the 60s shutdown timeout."
+            exit 1
+          fi
+
+          if wait "$PID"; then
+            exit_code=0
+          else
+            exit_code=$?
+          fi
+          echo "----- last 40 log lines -----"
+          tail -40 server.log
+          if [ "$exit_code" -ne 0 ]; then
+            echo "Server exited with status $exit_code."
+            exit 1
+          fi
+          echo "Server reached Done, exposed metrics during load and enable, and exited cleanly."
 
   docker-build:
     name: Docker image builds
