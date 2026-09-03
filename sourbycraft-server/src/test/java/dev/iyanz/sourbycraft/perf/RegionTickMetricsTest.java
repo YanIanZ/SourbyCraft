@@ -260,6 +260,57 @@ class RegionTickMetricsTest {
     }
 
     @Test
+    void sealedOwnerRefreshPromotesExpiredSecondsUntilLongWindowBoundaries() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 0L, MILLISECOND), TARGET_20_TPS);
+        metrics.seal(2L * MILLISECOND);
+
+        final RegionTickMetrics.Snapshot promoted = metrics.refreshSnapshot(65L * SECOND);
+        assertEquals(1L, promoted.fiveMinutes().sampleCount());
+        assertEquals(1L, promoted.fifteenMinutes().sampleCount());
+        assertSame(promoted, metrics.refreshSnapshot(65L * SECOND + MILLISECOND));
+
+        final RegionTickMetrics.Snapshot fiveMinuteBoundary = metrics.refreshSnapshot(300L * SECOND);
+        assertEquals(1L, fiveMinuteBoundary.fiveMinutes().sampleCount());
+        final RegionTickMetrics.Snapshot afterFiveMinutes = metrics.refreshSnapshot(301L * SECOND);
+        assertEquals(0L, afterFiveMinutes.fiveMinutes().sampleCount());
+        assertEquals(1L, afterFiveMinutes.fifteenMinutes().sampleCount());
+
+        assertEquals(1L, metrics.refreshSnapshot(900L * SECOND).fifteenMinutes().sampleCount());
+        assertEquals(0L, metrics.refreshSnapshot(901L * SECOND).fifteenMinutes().sampleCount());
+    }
+
+    @Test
+    void stalledOwnerRefreshPromotesExpiredSecondsWithoutAnotherCompletion() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 0L, MILLISECOND), TARGET_20_TPS);
+        metrics.tickStarted(2L * SECOND);
+
+        final RegionTickMetrics.Snapshot promoted = metrics.refreshSnapshot(65L * SECOND);
+
+        assertEquals(1L, promoted.fiveMinutes().sampleCount());
+        assertEquals(1L, promoted.fifteenMinutes().sampleCount());
+        assertEquals(2L * SECOND, promoted.activeTickStartNanos());
+    }
+
+    @Test
+    void sealAndTickStartLinearizationOrdersBothRejectPostSealWrites() {
+        final RegionTickMetrics sealedFirst = new RegionTickMetrics();
+        sealedFirst.seal(100L);
+        sealedFirst.tickStarted(101L);
+        sealedFirst.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 101L, 1L), TARGET_20_TPS);
+        assertEquals(RegionTickMetrics.INACTIVE, sealedFirst.refreshSnapshot(102L).activeTickStartNanos());
+        assertEquals(0L, sealedFirst.refreshSnapshot(102L).fiveSeconds().sampleCount());
+
+        final RegionTickMetrics startedFirst = new RegionTickMetrics();
+        startedFirst.tickStarted(100L);
+        startedFirst.seal(101L);
+        startedFirst.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 100L, 1L), TARGET_20_TPS);
+        assertEquals(RegionTickMetrics.INACTIVE, startedFirst.refreshSnapshot(102L).activeTickStartNanos());
+        assertEquals(0L, startedFirst.refreshSnapshot(102L).fiveSeconds().sampleCount());
+    }
+
+    @Test
     void sealRacingTickStartNeverPublishesPostSealActivityOrAcceptsCompletion() throws Exception {
         for (int attempt = 0; attempt < 10_000; ++attempt) {
             final RegionTickMetrics metrics = new RegionTickMetrics();

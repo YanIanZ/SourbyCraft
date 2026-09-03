@@ -8,7 +8,7 @@ diff --git a/ca/spottedleaf/common/time/RegionTickMetrics.java b/ca/spottedleaf/
 new file mode 100644
 --- /dev/null
 +++ b/ca/spottedleaf/common/time/RegionTickMetrics.java
-@@ -0,0 +1,913 @@
+@@ -0,0 +1,915 @@
 +package ca.spottedleaf.common.time;
 +
 +import java.lang.invoke.MethodHandles;
@@ -38,7 +38,7 @@ new file mode 100644
 +    private static final long FIVE_MINUTES = 5L * MINUTE;
 +    private static final long FIFTEEN_MINUTES = 15L * MINUTE;
 +    private static final int RAW_CAPACITY = 384;
-+    private static final int UNRESOLVED_CAPACITY = 32;
++    private static final int UNRESOLVED_CAPACITY = 8;
 +    private static final int HISTOGRAM_BINS = 64;
 +    private static final int HISTOGRAM_VALUES_PER_SLICE = 4;
 +    private static final long HISTOGRAM_MIN = 250_000L;
@@ -443,7 +443,9 @@ new file mode 100644
 +
 +    private void refreshPublicationIfDue(final long nowNanos) {
 +        final long epoch = Math.floorDiv(nowNanos, SECOND);
-+        if (epoch == this.publishedEpoch && !this.publicationDirty) {
++        if (epoch != this.publishedEpoch) {
++            this.promoteExpiredSeconds(nowNanos);
++        } else if (!this.publicationDirty) {
 +            return;
 +        }
 +        this.publishSnapshot(nowNanos);
