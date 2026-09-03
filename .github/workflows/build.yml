@@ -134,7 +134,94 @@ jobs:
           mkfifo stdin.pipe
           java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
           PID=$!
-          exec 3> stdin.pipe   # hold the write end open so the server keeps reading stdin
+          stdin_open=0
+          java_status=
+          cleanup_required=1
+
+          close_stdin() {
+            if [ "$stdin_open" -eq 1 ]; then
+              exec 3>&- 2>/dev/null || true
+              stdin_open=0
+            fi
+          }
+
+          wait_for_exit() {
+            local attempts=$1
+            for _ in $(seq 1 "$attempts"); do
+              if ! kill -0 "$PID" 2>/dev/null; then
+                return 0
+              fi
+              sleep 1
+            done
+            # The process may exit during the final sleep.
+            ! kill -0 "$PID" 2>/dev/null
+          }
+
+          reap_if_exited() {
+            if kill -0 "$PID" 2>/dev/null; then
+              return 1
+            fi
+            if wait "$PID"; then
+              java_status=0
+            else
+              java_status=$?
+            fi
+            return 0
+          }
+
+          bounded_cleanup() {
+            close_stdin
+            if reap_if_exited; then
+              return
+            fi
+
+            kill -TERM "$PID" 2>/dev/null || true
+            if wait_for_exit 10; then
+              reap_if_exited || true
+              return
+            fi
+
+            kill -KILL "$PID" 2>/dev/null || true
+            if wait_for_exit 10; then
+              reap_if_exited || true
+            else
+              echo "Unable to confirm process $PID exited after SIGKILL."
+            fi
+          }
+
+          show_log() {
+            echo "----- last 40 log lines -----"
+            tail -40 server.log || true
+          }
+
+          fail_after_launch() {
+            local message=$1
+            bounded_cleanup
+            cleanup_required=0
+            show_log
+            if [ -n "$java_status" ]; then
+              echo "Java exit status: $java_status"
+            fi
+            echo "$message"
+            exit 1
+          }
+
+          cleanup_on_exit() {
+            local shell_status=$?
+            trap - EXIT
+            if [ "$cleanup_required" -eq 1 ]; then
+              bounded_cleanup
+            fi
+            exit "$shell_status"
+          }
+
+          trap cleanup_on_exit EXIT
+          if exec 3> stdin.pipe; then
+            stdin_open=1   # hold the write end open so the server keeps reading stdin
+          else
+            fail_after_launch "Could not open the server console FIFO."
+          fi
+
           ready=0
           for _ in $(seq 1 240); do
             if grep -q 'Done (' server.log \
@@ -148,42 +235,24 @@ jobs:
           done
 
           if [ "$ready" -ne 1 ]; then
-            exec 3>&-
-            kill "$PID" 2>/dev/null || true
-            wait "$PID" 2>/dev/null || true
-            echo "----- last 40 log lines -----"
-            tail -40 server.log
-            echo "Server did not reach Done with both metrics markers within 240s."
-            exit 1
+            fail_after_launch "Server did not reach Done with both metrics markers within 240s."
           fi
 
-          printf 'tps\nmspt\nspark profiler info\nstop\n' >&3
-          exec 3>&-
-
-          exited=0
-          for _ in $(seq 1 60); do
-            if ! kill -0 "$PID" 2>/dev/null; then exited=1; break; fi
-            sleep 1
-          done
-
-          if [ "$exited" -ne 1 ]; then
-            kill "$PID" 2>/dev/null || true
-            wait "$PID" 2>/dev/null || true
-            echo "----- last 40 log lines -----"
-            tail -40 server.log
-            echo "Server required forced cleanup after the 60s shutdown timeout."
-            exit 1
+          if ! printf 'tps\nmspt\nspark profiler info\nstop\n' >&3; then
+            fail_after_launch "Server console closed before accepting smoke-test commands."
           fi
+          close_stdin
 
-          if wait "$PID"; then
-            exit_code=0
-          else
-            exit_code=$?
+          if ! wait_for_exit 60; then
+            fail_after_launch "Server required forced cleanup after the 60s shutdown timeout."
           fi
-          echo "----- last 40 log lines -----"
-          tail -40 server.log
-          if [ "$exit_code" -ne 0 ]; then
-            echo "Server exited with status $exit_code."
+          if ! reap_if_exited; then
+            fail_after_launch "Server was still running after shutdown polling completed."
+          fi
+          cleanup_required=0
+          show_log
+          if [ "$java_status" -ne 0 ]; then
+            echo "Server exited with status $java_status."
             exit 1
           fi
           echo "Server reached Done, exposed metrics during load and enable, and exited cleanly."
