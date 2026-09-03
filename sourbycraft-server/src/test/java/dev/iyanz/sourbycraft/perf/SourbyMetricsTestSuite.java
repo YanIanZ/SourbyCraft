@@ -14,6 +14,7 @@ import org.junit.platform.suite.api.Suite;
     RegionMetricsLifecycleIntegrationTest.class,
     PerformanceCollectorTest.class,
     MetricsRuntimeTest.class,
-    MetricsConsumerTest.class
+    MetricsConsumerTest.class,
+    FoliaTickStatisticsTest.class
 })
 public class SourbyMetricsTestSuite {}
