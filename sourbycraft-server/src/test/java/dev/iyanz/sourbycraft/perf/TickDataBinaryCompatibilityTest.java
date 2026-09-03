@@ -184,6 +184,25 @@ class TickDataBinaryCompatibilityTest {
     }
 
     @Test
+    void targetlessCompatibilityRingIsExactThroughThirtyTwoAndUnavailableOnOverflow() {
+        final RegionTickMetrics owner = new RegionTickMetrics();
+        final TickData shared = new TickData(owner, TimeUnit.MINUTES.toNanos(5L));
+        final TickData standalone = new TickData(TimeUnit.MINUTES.toNanos(5L));
+        for (int i = 0; i < 32; ++i) {
+            final TickTime sample = tick(TimeUtil.DEADLINE_NOT_SET, i * MILLISECOND, MILLISECOND);
+            shared.addDataFrom(sample);
+            standalone.addDataFrom(sample);
+        }
+        final long now = 32L * MILLISECOND;
+        assertEquals(standalone.getTPSAverage(null, TARGET_INTERVAL),
+            shared.getTPSAverage(null, TARGET_INTERVAL), 0.0);
+
+        final TickTime overflow = tick(TimeUtil.DEADLINE_NOT_SET, now, MILLISECOND);
+        shared.addDataFrom(overflow);
+        assertNull(shared.getTPSAverage(null, TARGET_INTERVAL));
+    }
+
+    @Test
     void bucketedLongViewsKeepAggregateCountsAndAveragesWithoutFabricatedRawSamples() {
         final RegionTickMetrics owner = new RegionTickMetrics();
         final long interval = MILLISECOND;

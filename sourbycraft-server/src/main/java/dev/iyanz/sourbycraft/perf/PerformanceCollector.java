@@ -58,7 +58,7 @@ public final class PerformanceCollector implements AutoCloseable {
     private final Object lifecycleLock = new Object();
     private volatile boolean closed;
     private long sequence;
-    private double[] medianBuffer = new double[WINDOWS.length * 2 * 8];
+    private float[] medianBuffer = new float[WINDOWS.length * 2 * 8];
     private int medianCapacity = 8;
     private int activeRegions;
     private int retainedGenerations;
@@ -67,7 +67,7 @@ public final class PerformanceCollector implements AutoCloseable {
 
     public PerformanceCollector(final SourbyMetricsProvider provider, final RegionMetricsRegistry registry,
                                 final Supplier<ImmutableRuntimeMetrics> runtimeSource) {
-        this(provider, registry::forEachUnexpired,
+        this(provider, registry::forEachUnexpiredForCollection,
             now -> RegionizedServer.getGlobalTickData().sourbyTickMetrics.current().refreshSnapshot(now), runtimeSource,
             System::nanoTime, System::currentTimeMillis, TickRegionScheduler::getTickRate,
             (message, failure) -> SourbyLogger.error(message, failure));
@@ -199,6 +199,8 @@ public final class PerformanceCollector implements AutoCloseable {
     }
 
     private void accept(final RegionMetricsRegistry.GenerationView view, final long nowNanos) {
+        final RegionTickMetrics.Snapshot snapshot = view.metrics() == null ? view.snapshot()
+            : view.metrics().acquireSnapshot(nowNanos, this.pooledHistograms, 0);
         final int activeIndex;
         ++this.retainedGenerations;
         if (view.active()) {
@@ -208,12 +210,8 @@ public final class PerformanceCollector implements AutoCloseable {
             activeIndex = -1;
         }
         for (int i = 0; i < this.accumulators.length; ++i) {
-            this.accumulators[i].accept(window(view.snapshot(), WINDOWS[i]), view.active(), activeIndex,
-                i, view.snapshot().activeTickStartNanos(), nowNanos);
-            if (view.metrics() != null) {
-                view.metrics().mergeHistogram(windowNanos(WINDOWS[i]), nowNanos,
-                    this.pooledHistograms, i * HISTOGRAM_BINS);
-            }
+            this.accumulators[i].accept(window(snapshot, WINDOWS[i]), view.active(), activeIndex,
+                i, snapshot.activeTickStartNanos(), nowNanos);
         }
     }
 
@@ -234,7 +232,7 @@ public final class PerformanceCollector implements AutoCloseable {
         while (next < required) {
             next = Math.multiplyExact(next, 2);
         }
-        final double[] grown = new double[WINDOWS.length * 2 * next];
+        final float[] grown = new float[WINDOWS.length * 2 * next];
         for (int window = 0; window < WINDOWS.length; ++window) {
             System.arraycopy(this.medianBuffer, window * 2 * this.medianCapacity,
                 grown, window * 2 * next, this.activeRegions - 1);
@@ -410,8 +408,8 @@ public final class PerformanceCollector implements AutoCloseable {
                 ? (double)source.sampleCount() * 1.0E9 / source.intervalNanos() : Double.NaN;
             final double mspt = source.sampleCount() > 0L && activeCount > 0L && activeExecution != Long.MAX_VALUE
                 ? (double)activeExecution / activeCount * 1.0E-6 : Double.NaN;
-            PerformanceCollector.this.medianBuffer[windowIndex * 2 * PerformanceCollector.this.medianCapacity + activeIndex] = tps;
-            PerformanceCollector.this.medianBuffer[(windowIndex * 2 + 1) * PerformanceCollector.this.medianCapacity + activeIndex] = mspt;
+            PerformanceCollector.this.medianBuffer[windowIndex * 2 * PerformanceCollector.this.medianCapacity + activeIndex] = (float)tps;
+            PerformanceCollector.this.medianBuffer[(windowIndex * 2 + 1) * PerformanceCollector.this.medianCapacity + activeIndex] = (float)mspt;
             if ((source.sampleCount() > 0L || activeTickStart != RegionTickMetrics.INACTIVE)
                 && Double.isFinite(utilisation)) {
                 this.busiestUtilisation = maxFinite(this.busiestUtilisation, utilisation);
@@ -493,16 +491,16 @@ public final class PerformanceCollector implements AutoCloseable {
             overflow ? Double.NaN : source.missingCpuNanos() * 1.0E-6);
     }
 
-    private static double minimumFinite(final double[] values, final int offset, final int length) {
+    private static double minimumFinite(final float[] values, final int offset, final int length) {
         double result = Double.NaN;
         for (int i = 0; i < length; ++i) {
-            final double value = values[offset + i];
+            final float value = values[offset + i];
             if (Double.isFinite(value)) result = Double.isNaN(result) ? value : Math.min(result, value);
         }
         return result;
     }
 
-    private static double maximumFinite(final double[] values, final int offset, final int length) {
+    private static double maximumFinite(final float[] values, final int offset, final int length) {
         double result = Double.NaN;
         for (int i = 0; i < length; ++i) {
             result = maxFinite(result, values[offset + i]);
@@ -510,10 +508,10 @@ public final class PerformanceCollector implements AutoCloseable {
         return result;
     }
 
-    private static double medianFinite(final double[] values, final int offset, final int length) {
+    private static double medianFinite(final float[] values, final int offset, final int length) {
         int finite = 0;
         for (int i = 0; i < length; ++i) {
-            final double value = values[offset + i];
+            final float value = values[offset + i];
             if (Double.isFinite(value)) values[offset + finite++] = value;
         }
         if (finite == 0) return Double.NaN;
