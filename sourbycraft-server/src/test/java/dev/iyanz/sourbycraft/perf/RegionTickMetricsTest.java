@@ -253,6 +253,10 @@ class RegionTickMetricsTest {
         assertFalse(first == next);
         assertEquals(1L, first.fiveSeconds().sampleCount());
         assertEquals(0L, next.fiveSeconds().sampleCount());
+
+        metrics.tickStarted(7L * SECOND);
+        final RegionTickMetrics.Snapshot active = metrics.refreshSnapshot(7L * SECOND);
+        assertSame(active, metrics.refreshSnapshot(7L * SECOND + MILLISECOND));
     }
 
     @Test
@@ -323,19 +327,24 @@ class RegionTickMetricsTest {
     void ownerAcquisitionKeepsEveryHistogramConsistentWithItsSnapshot() throws Exception {
         final CountDownLatch completionEntered = new CountDownLatch(1);
         final CountDownLatch releaseCompletion = new CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicBoolean blockCompletion = new java.util.concurrent.atomic.AtomicBoolean();
         final var constructor = RegionTickMetrics.class.getDeclaredConstructor(Runnable.class);
         constructor.setAccessible(true);
         final RegionTickMetrics metrics = constructor.newInstance((Runnable)() -> {
-            completionEntered.countDown();
-            await(releaseCompletion);
+            if (blockCompletion.get()) {
+                completionEntered.countDown();
+                await(releaseCompletion);
+            }
         });
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 0L, MILLISECOND), TARGET_20_TPS);
+        blockCompletion.set(true);
         final Thread completion = Thread.ofPlatform().start(() -> metrics.tickCompleted(
-            tick(TimeUtil.DEADLINE_NOT_SET, 0L, MILLISECOND), TARGET_20_TPS));
+            tick(0L, 2L * MILLISECOND, MILLISECOND), TARGET_20_TPS));
         assertTrue(completionEntered.await(5L, TimeUnit.SECONDS));
         final long[] histograms = new long[5 * 64];
         final var acquired = new java.util.concurrent.atomic.AtomicReference<RegionTickMetrics.Snapshot>();
         final Thread collector = Thread.ofPlatform().start(() ->
-            acquired.set(metrics.acquireSnapshot(SECOND, histograms, 0)));
+            acquired.set(metrics.acquireSnapshot(3L * MILLISECOND, histograms, 0)));
 
         releaseCompletion.countDown();
         completion.join();
@@ -353,6 +362,10 @@ class RegionTickMetricsTest {
             for (int bin = 0; bin < 64; ++bin) rankMass += histograms[window * 64 + bin];
             assertEquals(counts[window], rankMass);
         }
+
+        final long[] repeatedHistograms = new long[5 * 64];
+        assertSame(snapshot, metrics.acquireSnapshot(3L * MILLISECOND, repeatedHistograms, 0));
+        assertArrayEquals(histograms, repeatedHistograms);
     }
 
     @Test

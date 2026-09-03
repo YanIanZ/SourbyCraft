@@ -8,7 +8,7 @@ diff --git a/ca/spottedleaf/common/time/RegionTickMetrics.java b/ca/spottedleaf/
 new file mode 100644
 --- /dev/null
 +++ b/ca/spottedleaf/common/time/RegionTickMetrics.java
-@@ -0,0 +1,888 @@
+@@ -0,0 +1,913 @@
 +package ca.spottedleaf.common.time;
 +
 +import java.lang.invoke.MethodHandles;
@@ -71,9 +71,12 @@ new file mode 100644
 +    private volatile long activeState = INACTIVE;
 +    private long sequence;
 +    private long publishedEpoch = Long.MIN_VALUE;
++    private boolean publicationDirty;
 +    private volatile Snapshot published = new Snapshot(0L, 0L, INACTIVE,
 +        emptyWindow(false), emptyWindow(false), emptyWindow(false),
 +        emptyWindow(true), emptyWindow(true), emptyWindow(true));
++    private long acquiredState = INACTIVE;
++    private Snapshot acquired = this.published;
 +    private final Runnable completionFailure;
 +
 +    public RegionTickMetrics() {
@@ -110,6 +113,7 @@ new file mode 100644
 +        }
 +        try {
 +            this.recordCompletedSample(tick, targetIntervalNanos);
++            this.publicationDirty = true;
 +        } finally {
 +            ACTIVE_STATE.compareAndSet(this, tick.tickStart(), INACTIVE);
 +        }
@@ -119,7 +123,7 @@ new file mode 100644
 +    /** Recomputes every bounded window against the supplied monotonic sampling boundary. */
 +    public synchronized Snapshot refreshSnapshot(final long nowNanos) {
 +        this.refreshPublicationIfDue(nowNanos);
-+        return this.snapshotWithActiveMarker();
++        return this.acquiredSnapshotWithActiveMarker();
 +    }
 +
 +    /** Seals this generation; every later start or completion is deliberately ignored. */
@@ -137,12 +141,13 @@ new file mode 100644
 +            throw new IndexOutOfBoundsException("histogram destination");
 +        }
 +        this.refreshPublicationIfDue(nowNanos);
-+        this.mergeHistogramUnchecked(FIVE_SECONDS, nowNanos, destination, offset);
-+        this.mergeHistogramUnchecked(TEN_SECONDS, nowNanos, destination, offset + HISTOGRAM_BINS);
-+        this.mergeHistogramUnchecked(MINUTE, nowNanos, destination, offset + 2 * HISTOGRAM_BINS);
-+        this.mergeHistogramUnchecked(FIVE_MINUTES, nowNanos, destination, offset + 3 * HISTOGRAM_BINS);
-+        this.mergeHistogramUnchecked(FIFTEEN_MINUTES, nowNanos, destination, offset + 4 * HISTOGRAM_BINS);
-+        return this.snapshotWithActiveMarker();
++        final long sampledAt = this.published.sampledAtNanos();
++        this.mergeHistogramUnchecked(FIVE_SECONDS, sampledAt, destination, offset);
++        this.mergeHistogramUnchecked(TEN_SECONDS, sampledAt, destination, offset + HISTOGRAM_BINS);
++        this.mergeHistogramUnchecked(MINUTE, sampledAt, destination, offset + 2 * HISTOGRAM_BINS);
++        this.mergeHistogramUnchecked(FIVE_MINUTES, sampledAt, destination, offset + 3 * HISTOGRAM_BINS);
++        this.mergeHistogramUnchecked(FIFTEEN_MINUTES, sampledAt, destination, offset + 4 * HISTOGRAM_BINS);
++        return this.acquiredSnapshotWithActiveMarker();
 +    }
 +
 +    /** Adds this owner's bounded histogram rank mass into collector-owned reusable storage. */
@@ -205,6 +210,21 @@ new file mode 100644
 +        return new Snapshot(current.sequence(), current.sampledAtNanos(), active,
 +            current.fiveSeconds(), current.tenSeconds(), current.fifteenSeconds(),
 +            current.oneMinute(), current.fiveMinutes(), current.fifteenMinutes());
++    }
++
++    private Snapshot acquiredSnapshotWithActiveMarker() {
++        final Snapshot current = this.published;
++        final long state = (long)ACTIVE_STATE.getAcquire(this);
++        if (this.acquiredState == state && this.acquired.sequence() == current.sequence()) {
++            return this.acquired;
++        }
++        final long active = state == SEALED ? INACTIVE : state;
++        this.acquired = active == current.activeTickStartNanos() ? current : new Snapshot(
++            current.sequence(), current.sampledAtNanos(), active,
++            current.fiveSeconds(), current.tenSeconds(), current.fifteenSeconds(),
++            current.oneMinute(), current.fiveMinutes(), current.fifteenMinutes());
++        this.acquiredState = state;
++        return this.acquired;
 +    }
 +
 +    public synchronized TickData.TickReportData report(final long windowNanos, final TickTime inProgress,
@@ -416,12 +436,14 @@ new file mode 100644
 +    }
 +
 +    private void publishSnapshotIfDue(final long nowNanos) {
-+        this.refreshPublicationIfDue(nowNanos);
++        if (Math.floorDiv(nowNanos, SECOND) != this.publishedEpoch) {
++            this.publishSnapshot(nowNanos);
++        }
 +    }
 +
 +    private void refreshPublicationIfDue(final long nowNanos) {
 +        final long epoch = Math.floorDiv(nowNanos, SECOND);
-+        if (epoch == this.publishedEpoch) {
++        if (epoch == this.publishedEpoch && !this.publicationDirty) {
 +            return;
 +        }
 +        this.publishSnapshot(nowNanos);
@@ -438,6 +460,9 @@ new file mode 100644
 +            this.bucketWindow(nowNanos, FIVE_MINUTES, 0L),
 +            this.bucketWindow(nowNanos, FIFTEEN_MINUTES, 0L));
 +        this.published = next;
++        this.publicationDirty = false;
++        this.acquiredState = INACTIVE;
++        this.acquired = next;
 +    }
 +
 +    private WindowSnapshot rawWindow(final long nowNanos, final long windowNanos) {
