@@ -5,6 +5,13 @@ import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import io.canvasmc.canvas.spark.plugin.FoliaTickStatistics;
 import io.canvasmc.canvas.threadedregions.profiler.RegionProfiler;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.classfile.ClassFile;
+import java.lang.classfile.constantpool.ClassEntry;
+import java.lang.classfile.constantpool.MemberRefEntry;
+import java.lang.classfile.constantpool.PoolEntry;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import me.lucko.spark.api.statistic.misc.DoubleAverageInfo;
@@ -12,6 +19,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FoliaTickStatisticsTest {
@@ -45,13 +53,20 @@ class FoliaTickStatisticsTest {
 
     @Test
     void durationStatisticsExposeMatchingWindowDistribution() {
-        provider().overrideSnapshotsForTesting(FoliaTickStatisticsTest::snapshot);
+        final AtomicInteger reads = new AtomicInteger();
+        provider().overrideSnapshotsForTesting(() -> {
+            reads.incrementAndGet();
+            return snapshot();
+        });
         final FoliaTickStatistics statistics = new FoliaTickStatistics();
 
         assertTrue(statistics.isDurationSupported());
         assertDuration(statistics.duration10Sec(), 11.0, 12.0, 13.0, 14.0, 15.0);
+        assertEquals(1, reads.get());
         assertDuration(statistics.duration1Min(), 61.0, 62.0, 63.0, 64.0, 65.0);
+        assertEquals(2, reads.get());
         assertDuration(statistics.duration5Min(), 301.0, 302.0, 303.0, 304.0, 305.0);
+        assertEquals(3, reads.get());
     }
 
     @Test
@@ -84,6 +99,40 @@ class FoliaTickStatisticsTest {
         });
 
         assertEquals(10.0, new FoliaTickStatistics().tps10Sec(), 1.0E-9);
+    }
+
+    @Test
+    void emptySelectedRegionDurationStatisticsRemainNan() {
+        final TestRegionScheduleHandle handle = new TestRegionScheduleHandle();
+        RegionProfiler.STATE.set(new RegionProfiler.ProfilingState(handle, null, null));
+        provider().overrideSnapshotsForTesting(() -> {
+            throw new AssertionError("selected-region statistics must not read the global provider");
+        });
+
+        final DoubleAverageInfo duration = new FoliaTickStatistics().duration10Sec();
+
+        assertTrue(Double.isNaN(duration.mean()));
+        assertTrue(Double.isNaN(duration.min()));
+        assertTrue(Double.isNaN(duration.max()));
+        assertTrue(Double.isNaN(duration.median()));
+        assertTrue(Double.isNaN(duration.percentile95th()));
+    }
+
+    @Test
+    void compiledAdapterContainsNoGlobalScanOrReportReferences() throws IOException {
+        final String resource = "/" + FoliaTickStatistics.class.getName().replace('.', '/') + ".class";
+        try (InputStream input = FoliaTickStatistics.class.getResourceAsStream(resource)) {
+            assertTrue(input != null);
+            for (final PoolEntry entry : ClassFile.of().parse(input.readAllBytes()).constantPool()) {
+                if (entry instanceof ClassEntry classEntry) {
+                    assertFalse(classEntry.asInternalName().equals("io/papermc/paper/threadedregions/RegionizedServer"));
+                }
+                if (entry instanceof MemberRefEntry member) {
+                    assertFalse(Set.of("computeForAllRegions", "computeForAllRegionsUnsynchronised",
+                        "getTPSAverage", "generateTickReport").contains(member.name().stringValue()));
+                }
+            }
+        }
     }
 
     private static void assertDuration(final DoubleAverageInfo actual, final double mean,

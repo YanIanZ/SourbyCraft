@@ -35,7 +35,7 @@
      @Override
      public int gameTargetTps() {
          // rounding is probably easier and more accurate tbh
-@@ -22,136 +_,101 @@
+@@ -22,136 +_,105 @@
  
      @Override
      public double tps5Sec() {
@@ -187,6 +187,9 @@
 -        public double max() {
 -            return 0;
 +        private static AverageInfo from(final RegionTickMetrics.WindowSnapshot window) {
++            if (window.sampleCount() == 0L) {
++                return new AverageInfo(Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
++            }
 +            return new AverageInfo(window.mspt(), window.minimumNanos() * 1.0E-6,
 +                window.maximumNanos() * 1.0E-6, window.medianNanos() * 1.0E-6,
 +                window.estimatedP95Mspt());
