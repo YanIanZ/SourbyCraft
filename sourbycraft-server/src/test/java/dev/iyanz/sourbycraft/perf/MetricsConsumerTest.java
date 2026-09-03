@@ -120,13 +120,33 @@ class MetricsConsumerTest {
             assertTrue(mspt.contains(state.name()));
             assertTrue(sys.contains(state.name()));
             assertTrue(tps.contains("unavailable"));
-            assertTrue(tps.contains("Active regions: unavailable"));
+            assertTrue(tps.contains(state == MetricState.WARMING
+                ? "Active regions: 3" : "Active regions: unavailable"));
             assertTrue(mspt.contains("unavailable"));
             assertTrue(sys.contains("Health unavailable"));
             assertFalse(sys.contains("100/100"));
             assertTrue(hud.contains(state.name()));
             assertFalse(hud.contains("0.00"));
         }
+    }
+
+    @Test
+    void warmingStillRendersFiniteFiveSecondMetricsAndActiveTopology() {
+        final PerformanceSnapshot snapshot = snapshot(MetricState.WARMING, 20.0,
+            window(18.0, 19.0, 19.5, 12.5, 22.0, 31.0, 47.0, false),
+            ImmutableWindowMetrics.EMPTY);
+
+        final String tps = plain(TpsCommand.render(() -> snapshot));
+        final String mspt = plain(MsptCommand.render(() -> snapshot));
+        final HudBars.TpsDisplay hud = HudBars.renderTps(() -> snapshot);
+
+        assertTrue(tps.contains("5s"));
+        assertTrue(tps.contains("Worst 18.00"));
+        assertTrue(tps.contains("Active regions: 3"));
+        assertTrue(tps.contains("WARMING"));
+        assertTrue(mspt.contains("Worst average 12.5ms"));
+        assertTrue(plain(hud.name()).contains("TPS 18.00/20.00"));
+        assertEquals(0.9F, hud.progress(), 1.0E-6F);
     }
 
     @Test
@@ -307,7 +327,7 @@ class MetricsConsumerTest {
                                                   final double maximumMspt, final double p95,
                                                   final double p99, final boolean approximate) {
         return new ImmutableWindowMetrics(5_000L, 100L, approximate, false,
-            worstTps, medianTps, aggregateTps, worstAverageMspt, worstAverageMspt,
+            worstTps, medianTps, aggregateTps, worstAverageMspt, worstAverageMspt, worstAverageMspt,
             1.0, maximumMspt, worstAverageMspt, p95, p99, 0.75, 0.50, 5.0);
     }
 

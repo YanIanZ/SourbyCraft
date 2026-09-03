@@ -201,7 +201,7 @@ class RegionTickMetricsTest {
     }
 
     @Test
-    void truncatedHistogramNeverPublishesMisleadingQuantiles() {
+    void sparseHistogramCompressesMoreThanFourBinsWithoutLosingRankMass() {
         final RegionTickMetrics metrics = new RegionTickMetrics();
         long previous = TimeUtil.DEADLINE_NOT_SET;
         for (int i = 1; i <= 5; ++i) {
@@ -211,12 +211,43 @@ class RegionTickMetricsTest {
         }
         metrics.tickCompleted(tick(previous, SECOND, 2L * SECOND), TARGET_20_TPS);
 
-        final RegionTickMetrics.WindowSnapshot window = metrics.snapshot(3L * SECOND).oneMinute();
-        assertTrue(window.truncated());
-        assertTrue(Double.isNaN(window.medianNanos()));
-        assertTrue(Double.isNaN(window.estimatedP95Mspt()));
-        assertTrue(Double.isNaN(window.estimatedP99Mspt()));
+        final RegionTickMetrics.Snapshot snapshot = metrics.refreshSnapshot(3L * SECOND);
+        final RegionTickMetrics.WindowSnapshot window = snapshot.oneMinute();
+        final long[] histogram = new long[64];
+        metrics.mergeHistogram(TimeUnit.MINUTES.toNanos(1L), 3L * SECOND, histogram, 0);
+
+        assertFalse(window.truncated());
+        assertTrue(Double.isFinite(window.medianNanos()));
+        assertTrue(Double.isFinite(window.estimatedP95Mspt()));
+        assertTrue(Double.isFinite(window.estimatedP99Mspt()));
         assertEquals(6L, window.sampleCount());
+        assertEquals(window.sampleCount(), java.util.Arrays.stream(histogram).sum());
+    }
+
+    @Test
+    void refreshExpiresShortWindowsWithoutAnotherCompletedTick() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 0L, MILLISECOND), TARGET_20_TPS);
+
+        assertEquals(1L, metrics.refreshSnapshot(5L * SECOND).fiveSeconds().sampleCount());
+        assertEquals(0L, metrics.refreshSnapshot(5L * SECOND + MILLISECOND + 1L).fiveSeconds().sampleCount());
+        assertEquals(0L, metrics.refreshSnapshot(10L * SECOND + MILLISECOND + 1L).tenSeconds().sampleCount());
+    }
+
+    @Test
+    void sealPublishesSameSecondCompletionsAndIgnoresEveryLaterWrite() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 10L, 1L), TARGET_20_TPS);
+        metrics.tickCompleted(tick(10L, 20L, 1L), TARGET_20_TPS);
+        assertEquals(1L, metrics.snapshot(21L).fiveSeconds().sampleCount());
+
+        final RegionTickMetrics.Snapshot sealed = metrics.seal(21L);
+        metrics.tickStarted(30L);
+        metrics.tickCompleted(tick(20L, 30L, 1L), TARGET_20_TPS);
+
+        assertEquals(2L, sealed.fiveSeconds().sampleCount());
+        assertEquals(2L, metrics.refreshSnapshot(31L).fiveSeconds().sampleCount());
+        assertEquals(RegionTickMetrics.INACTIVE, metrics.snapshot(31L).activeTickStartNanos());
     }
 
     @Test
@@ -250,6 +281,8 @@ class RegionTickMetricsTest {
 
     @Test
     void compatibilityAccessUsesTheWriterMonitor() throws Exception {
+        assertFalse(Modifier.isSynchronized(RegionTickMetrics.class
+            .getDeclaredMethod("tickStarted", long.class).getModifiers()));
         assertTrue(Modifier.isSynchronized(RegionTickMetrics.class
             .getDeclaredMethod("tickCompleted", TickTime.class, long.class).getModifiers()));
         assertTrue(Modifier.isSynchronized(RegionTickMetrics.class
@@ -258,6 +291,12 @@ class RegionTickMetricsTest {
             .getDeclaredMethod("tps", long.class, TickTime.class, long.class).getModifiers()));
         assertTrue(Modifier.isSynchronized(RegionTickMetrics.class
             .getDeclaredMethod("mspt", long.class, TickTime.class, long.class).getModifiers()));
+        assertTrue(Modifier.isSynchronized(RegionTickMetrics.class
+            .getDeclaredMethod("refreshSnapshot", long.class).getModifiers()));
+        assertTrue(Modifier.isSynchronized(RegionTickMetrics.class
+            .getDeclaredMethod("seal", long.class).getModifiers()));
+        assertTrue(Modifier.isSynchronized(RegionTickMetrics.class
+            .getDeclaredMethod("mergeHistogram", long.class, long.class, long[].class, int.class).getModifiers()));
     }
 
     @Test

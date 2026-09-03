@@ -32,7 +32,7 @@ public final class RegionMetricsRegistry {
     }
 
     public record GenerationView(long generationId, long worldId, long regionId, boolean active,
-                                 RegionTickMetrics.Snapshot snapshot) {}
+                                  RegionTickMetrics metrics, RegionTickMetrics.Snapshot snapshot) {}
 
     public long newWorldId() {
         return nextNonZero(this.nextWorldId);
@@ -101,25 +101,24 @@ public final class RegionMetricsRegistry {
     public void forEachUnexpired(final long nowNanos, final Consumer<GenerationView> consumer) {
         Objects.requireNonNull(consumer, "consumer");
         for (final Generation generation : this.generations.values()) {
-            final RegionTickMetrics.Snapshot snapshot = generation.metrics.snapshot(nowNanos);
+            final RegionTickMetrics.Snapshot snapshot = generation.metrics.refreshSnapshot(nowNanos);
             final boolean active = generation.isActive();
-            if (!active && expired(nowNanos, generation.retiredAtNanos, snapshot.sampledAtNanos())) {
+            if (!active && expired(nowNanos, generation.retiredAtNanos)) {
                 this.generations.remove(generation.generationId, generation);
                 continue;
             }
             consumer.accept(new GenerationView(generation.generationId, generation.worldId,
-                generation.regionId, active, snapshot));
+                generation.regionId, active, generation.metrics, snapshot));
         }
     }
 
-    private static boolean expired(final long nowNanos, final long retiredAtNanos,
-                                   final long sampledAtNanos) {
+    private static boolean expired(final long nowNanos, final long retiredAtNanos) {
         if (retiredAtNanos == Long.MIN_VALUE) {
             return false;
         }
-        final long anchor = Math.max(retiredAtNanos, sampledAtNanos);
         final long retention = MAXIMUM_WINDOW_NANOS + EXPIRY_GRACE_NANOS;
-        final long expiresAt = anchor > Long.MAX_VALUE - retention ? Long.MAX_VALUE : anchor + retention;
+        final long expiresAt = retiredAtNanos > Long.MAX_VALUE - retention
+            ? Long.MAX_VALUE : retiredAtNanos + retention;
         return nowNanos > expiresAt;
     }
 
@@ -175,6 +174,7 @@ public final class RegionMetricsRegistry {
             if (!STATE.compareAndSet(this, LIVE, RETIRING)) {
                 return;
             }
+            this.metrics.seal(nowNanos);
             this.retirementReason = reason;
             this.retiredAtNanos = nowNanos;
             STATE.setRelease(this, RETIRED);

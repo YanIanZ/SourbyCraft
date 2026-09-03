@@ -58,6 +58,7 @@ public class TpsCommand extends Command {
 
         final double target = snapshot.targetTps();
         lines.add(text("  Target " + value(target, 2) + " TPS", SourbyCraftColors.DIM));
+        renderWindow(lines, "5s ", snapshot.window(MetricWindow.FIVE_SECONDS), target);
         renderWindow(lines, "1m ", snapshot.window(MetricWindow.ONE_MINUTE), target);
         renderWindow(lines, "5m ", snapshot.window(MetricWindow.FIVE_MINUTES), target);
         renderWindow(lines, "15m", snapshot.window(MetricWindow.FIFTEEN_MINUTES), target);
@@ -65,13 +66,12 @@ public class TpsCommand extends Command {
         final WindowMetrics recent = snapshot.window(MetricWindow.FIVE_SECONDS);
         lines.add(text().append(text("  Worst average MSPT: ", SourbyCraftColors.LABEL))
             .append(text(ms(recent.worstAverageMspt()), msptColor(recent.worstAverageMspt(), target))).build());
-        final boolean topologyAvailable = snapshot.freshness().state() == MetricState.AVAILABLE
-            || snapshot.freshness().state() == MetricState.STALE;
+        final boolean topologyAvailable = snapshot.freshness().state() != MetricState.UNAVAILABLE;
         lines.add(text().append(text("  Active regions: ", SourbyCraftColors.LABEL))
             .append(text(topologyAvailable ? Integer.toString(snapshot.activeRegionCount()) : "unavailable",
                 topologyAvailable ? SourbyCraftColors.VALUE : SourbyCraftColors.DIM)).build());
 
-        final WindowMetrics global = MetricsRuntime.globalWindow(snapshot, MetricWindow.FIVE_SECONDS);
+        final WindowMetrics global = snapshot.globalWindow(MetricWindow.FIVE_SECONDS);
         final double globalTps = cappedTps(global.worstTps(), target);
         final String globalStatus = available(globalTps) || available(global.worstAverageMspt())
             ? "TPS " + value(globalTps, 2) + " / MSPT " + ms(global.worstAverageMspt())

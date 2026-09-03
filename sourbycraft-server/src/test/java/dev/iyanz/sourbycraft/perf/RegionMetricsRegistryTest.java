@@ -100,16 +100,30 @@ class RegionMetricsRegistryTest {
     }
 
     @Test
-    void latestSampleExtendsRetiredHistoryLifetime() {
+    void retiredWindowsAgeOutBeforeTheGenerationRegistryEntryExpires() {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
-        final RegionTickMetricsHolder metrics = new RegionTickMetricsHolder();
+        final RegionTickMetricsHolder metrics = sampledHolder(SECOND);
         final long generation = registry.activate(registry.newWorldId(), 7L, metrics, 0L);
-        registry.retire(generation, RegionMetricsRegistry.RetirementReason.INACTIVE, SECOND);
-        metrics.tickCompleted(new TickTime(TimeUtil.DEADLINE_NOT_SET, 100L * SECOND - 1L,
-            100L * SECOND - 1L, 0L, 100L * SECOND, 0L, 0L, 0L, false), 50_000_000L);
+        registry.retire(generation, RegionMetricsRegistry.RetirementReason.INACTIVE, 2L * SECOND);
 
-        assertEquals(1, views(registry, 100L * SECOND + RETENTION).size());
-        assertTrue(views(registry, 100L * SECOND + RETENTION + 1L).isEmpty());
+        final List<RegionMetricsRegistry.GenerationView> retained = views(registry, 12L * SECOND);
+        assertEquals(1, retained.size());
+        assertEquals(0L, retained.getFirst().snapshot().fiveSeconds().sampleCount());
+        assertEquals(0L, retained.getFirst().snapshot().tenSeconds().sampleCount());
+        assertTrue(views(registry, 2L * SECOND + RETENTION + 1L).isEmpty());
+    }
+
+    @Test
+    void retirementSealsOwnerAndRejectsPostRetirementSamples() {
+        final RegionMetricsRegistry registry = new RegionMetricsRegistry();
+        final RegionTickMetricsHolder holder = sampledHolder(SECOND);
+        final long generation = registry.activate(registry.newWorldId(), 7L, holder, 0L);
+        registry.retire(generation, RegionMetricsRegistry.RetirementReason.INACTIVE, SECOND + 1L);
+
+        holder.tickCompleted(new TickTime(SECOND, 2L * SECOND, 2L * SECOND,
+            0L, 2L * SECOND + 1L, 0L, 0L, 0L, false), 50_000_000L);
+
+        assertEquals(1L, views(registry, 2L * SECOND + 1L).getFirst().snapshot().fifteenMinutes().sampleCount());
     }
 
     @Test
