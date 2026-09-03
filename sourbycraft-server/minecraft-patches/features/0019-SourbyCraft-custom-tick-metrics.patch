@@ -8,7 +8,7 @@ diff --git a/ca/spottedleaf/common/time/RegionTickMetrics.java b/ca/spottedleaf/
 new file mode 100644
 --- /dev/null
 +++ b/ca/spottedleaf/common/time/RegionTickMetrics.java
-@@ -0,0 +1,732 @@
+@@ -0,0 +1,853 @@
 +package ca.spottedleaf.common.time;
 +
 +import java.util.Arrays;
@@ -59,6 +59,7 @@ new file mode 100644
 +    private volatile long activeTickStartNanos = INACTIVE;
 +    private long sequence;
 +    private long publishedEpoch = Long.MIN_VALUE;
++    private volatile boolean sealed;
 +    private volatile Snapshot published = new Snapshot(0L, 0L, INACTIVE,
 +        emptyWindow(false), emptyWindow(false), emptyWindow(false),
 +        emptyWindow(true), emptyWindow(true), emptyWindow(true));
@@ -85,7 +86,9 @@ new file mode 100644
 +                           WindowSnapshot fiveMinutes, WindowSnapshot fifteenMinutes) {}
 +
 +    public void tickStarted(final long startNanos) {
-+        this.activeTickStartNanos = startNanos;
++        if (!this.sealed) {
++            this.activeTickStartNanos = startNanos;
++        }
 +    }
 +
 +    synchronized void tickCompletedWithoutTarget(final TickTime tick) {
@@ -93,12 +96,73 @@ new file mode 100644
 +    }
 +
 +    public synchronized void tickCompleted(final TickTime tick, final long targetIntervalNanos) {
++        if (this.sealed) {
++            this.activeTickStartNanos = INACTIVE;
++            return;
++        }
 +        try {
 +            this.recordCompletedSample(tick, targetIntervalNanos);
 +        } finally {
 +            this.activeTickStartNanos = INACTIVE;
 +        }
 +        this.publishSnapshotIfDue(tick.tickEnd());
++    }
++
++    /** Recomputes every bounded window against the supplied monotonic sampling boundary. */
++    public synchronized Snapshot refreshSnapshot(final long nowNanos) {
++        this.promoteExpiredSeconds(nowNanos);
++        this.publishSnapshot(nowNanos);
++        return this.published;
++    }
++
++    /** Seals this generation; every later start or completion is deliberately ignored. */
++    public synchronized Snapshot seal(final long nowNanos) {
++        this.sealed = true;
++        this.activeTickStartNanos = INACTIVE;
++        this.promoteExpiredSeconds(nowNanos);
++        this.publishSnapshot(nowNanos);
++        return this.published;
++    }
++
++    /** Adds this owner's bounded histogram rank mass into collector-owned reusable storage. */
++    public synchronized void mergeHistogram(final long windowNanos, final long nowNanos,
++                                            final long[] destination, final int offset) {
++        if (offset < 0 || offset > destination.length - HISTOGRAM_BINS) {
++            throw new IndexOutOfBoundsException("histogram destination");
++        }
++        final long cutoff = subtractFloor(nowNanos, windowNanos);
++        if (windowNanos <= FIFTEEN_SECONDS) {
++            for (int i = 0; i < this.rawSize; ++i) {
++                final int index = (this.rawStart + i) % RAW_CAPACITY;
++                if (this.rawEnds[index] >= cutoff && this.rawEnds[index] <= nowNanos) {
++                    final int bin = histogramBin(this.rawExecutions[index]);
++                    destination[offset + bin] = saturatingAdd(destination[offset + bin], 1L);
++                }
++            }
++            return;
++        }
++        final long newestCutoff = Math.max(cutoff, subtractFloor(nowNanos, MINUTE));
++        final int stores = windowNanos == MINUTE ? 1 : 2;
++        for (int storeIndex = 0; storeIndex < stores; ++storeIndex) {
++            final BucketStore store = storeIndex == 0 ? this.seconds : this.fiveSeconds;
++            final long firstEpoch = ceilDiv(storeIndex == 0 ? newestCutoff : cutoff, store.width);
++            final long lastEpoch = storeIndex == 0
++                ? Math.floorDiv(nowNanos, store.width)
++                : Math.floorDiv(newestCutoff, store.width) - 1L;
++            for (int slot = 0; slot < store.slots; ++slot) {
++                final long epoch = store.epochs[slot];
++                if (epoch < firstEpoch || epoch > lastEpoch) continue;
++                final int histogramOffset = slot * HISTOGRAM_VALUES_PER_SLICE;
++                for (int i = 0; i < HISTOGRAM_VALUES_PER_SLICE; ++i) {
++                    final byte storedBin = store.histogramBins[histogramOffset + i];
++                    if (storedBin >= 0) {
++                        final int bin = Byte.toUnsignedInt(storedBin);
++                        destination[offset + bin] = saturatingAdd(destination[offset + bin],
++                            store.histogramCounts[histogramOffset + i]);
++                    }
++                }
++            }
++        }
 +    }
 +
 +    public Snapshot snapshot(final long nowNanos) {
@@ -325,6 +389,11 @@ new file mode 100644
 +        if (epoch == this.publishedEpoch) {
 +            return;
 +        }
++        this.publishSnapshot(nowNanos);
++    }
++
++    private void publishSnapshot(final long nowNanos) {
++        final long epoch = Math.floorDiv(nowNanos, SECOND);
 +        this.publishedEpoch = epoch;
 +        final Snapshot next = new Snapshot(++this.sequence, nowNanos, INACTIVE,
 +            this.rawWindow(nowNanos, FIVE_SECONDS),
@@ -702,8 +771,60 @@ new file mode 100644
 +                this.histogramBins[free] = (byte)bin;
 +                this.histogramCounts[free] = count;
 +            } else if (free == -1) {
-+                this.overflow[slot] = 1;
++                int first = -1;
++                int second = -1;
++                int distance = Integer.MAX_VALUE;
++                for (int left = 0; left < HISTOGRAM_VALUES_PER_SLICE; ++left) {
++                    final int leftIndex = histogramOffset + left;
++                    final int leftBin = Byte.toUnsignedInt(this.histogramBins[leftIndex]);
++                    for (int right = left + 1; right < HISTOGRAM_VALUES_PER_SLICE; ++right) {
++                        final int rightIndex = histogramOffset + right;
++                        final int rightBin = Byte.toUnsignedInt(this.histogramBins[rightIndex]);
++                        final int candidateDistance = mergeDistance(leftBin, rightBin);
++                        if (candidateDistance < distance) {
++                            distance = candidateDistance;
++                            first = leftIndex;
++                            second = rightIndex;
++                        }
++                    }
++                    final int candidateDistance = mergeDistance(leftBin, bin);
++                    if (candidateDistance < distance) {
++                        distance = candidateDistance;
++                        first = leftIndex;
++                        second = -1;
++                    }
++                }
++                if (second < 0) {
++                    this.mergeHistogramPair(slot, first, bin, count);
++                } else {
++                    this.mergeHistogramPair(slot, first, Byte.toUnsignedInt(this.histogramBins[second]),
++                        this.histogramCounts[second]);
++                    this.histogramBins[second] = (byte)bin;
++                    this.histogramCounts[second] = count;
++                }
 +            }
++        }
++
++        private void mergeHistogramPair(final int slot, final int destination, final int bin,
++                                        final int count) {
++            final int existingCount = this.histogramCounts[destination];
++            final long total = (long)existingCount + count;
++            final long weighted = (long)Byte.toUnsignedInt(this.histogramBins[destination]) * existingCount
++                + (long)bin * count;
++            this.histogramBins[destination] = (byte)Math.round((double)weighted / total);
++            if (total > Integer.MAX_VALUE) {
++                this.histogramCounts[destination] = Integer.MAX_VALUE;
++                this.overflow[slot] = 1;
++            } else {
++                this.histogramCounts[destination] = (int)total;
++            }
++        }
++
++        private static int mergeDistance(final int first, final int second) {
++            if (first == 0 || first == HISTOGRAM_BINS - 1 || second == 0 || second == HISTOGRAM_BINS - 1) {
++                return Integer.MAX_VALUE;
++            }
++            return Math.abs(first - second);
 +        }
 +
 +        private void addUtilisation(final long start, final long end, final long completionEpoch) {

@@ -1,9 +1,6 @@
 package dev.iyanz.sourbycraft.perf;
 
 import dev.iyanz.sourbycraft.api.metrics.SourbyMetrics;
-import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
-import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
-import dev.iyanz.sourbycraft.api.metrics.WindowMetrics;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import java.util.Objects;
 import org.bukkit.plugin.Plugin;
@@ -23,12 +20,6 @@ public final class MetricsRuntime {
 
     public static SourbyMetrics provider() {
         return PROVIDER;
-    }
-
-    /** Exposes the separately collected global-region window to built-in server consumers only. */
-    public static WindowMetrics globalWindow(final PerformanceSnapshot snapshot, final MetricWindow window) {
-        return snapshot instanceof ImmutablePerformanceSnapshot internal
-            ? internal.global().window(window) : ImmutableWindowMetrics.EMPTY;
     }
 
     public static RegionMetricsRegistry registry() {

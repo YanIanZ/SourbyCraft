@@ -26,5 +26,14 @@ public interface PerformanceSnapshot {
 
     WindowMetrics window(MetricWindow window);
 
+    /**
+     * Returns metrics for the process-wide global scheduler, which is measured separately and is
+     * never included in spatial region counts or {@link #window(MetricWindow) spatial aggregates}.
+     *
+     * @param window requested lookback window
+     * @return immutable global-scheduler metrics for that window
+     */
+    WindowMetrics globalWindow(MetricWindow window);
+
     RuntimeMetrics runtime();
 }

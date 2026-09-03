@@ -61,11 +61,11 @@ class FoliaTickStatisticsTest {
         final FoliaTickStatistics statistics = new FoliaTickStatistics();
 
         assertTrue(statistics.isDurationSupported());
-        assertDuration(statistics.duration10Sec(), 11.0, 12.0, 13.0, 14.0, 15.0);
+        assertDuration(statistics.duration10Sec(), 11.25, 12.0, 13.0, 14.0, 15.0);
         assertEquals(1, reads.get());
-        assertDuration(statistics.duration1Min(), 61.0, 62.0, 63.0, 64.0, 65.0);
+        assertDuration(statistics.duration1Min(), 61.25, 62.0, 63.0, 64.0, 65.0);
         assertEquals(2, reads.get());
-        assertDuration(statistics.duration5Min(), 301.0, 302.0, 303.0, 304.0, 305.0);
+        assertDuration(statistics.duration5Min(), 301.25, 302.0, 303.0, 304.0, 305.0);
         assertEquals(3, reads.get());
     }
 
@@ -174,7 +174,7 @@ class FoliaTickStatisticsTest {
                                                   final double minimum, final double maximum,
                                                   final double median, final double p95) {
         return new ImmutableWindowMetrics(5_000L, 100L, false, false,
-            aggregateTps - 1.0, aggregateTps - 0.5, aggregateTps, mean, mean - 0.5,
+            aggregateTps - 1.0, aggregateTps - 0.5, aggregateTps, mean, mean + 0.25, mean - 0.5,
             minimum, maximum, median, p95, p95 + 1.0, 0.5, 0.25, 0.0);
     }
 

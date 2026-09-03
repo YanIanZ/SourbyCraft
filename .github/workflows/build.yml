@@ -48,7 +48,7 @@ jobs:
         run: ./gradlew applyAllPatches --no-daemon --stacktrace
 
       - name: Test API and server; build metrics fixture
-        run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:jar --no-daemon --stacktrace
+        run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test :test-plugin:jar --no-daemon --stacktrace
 
       - name: Compute next release number (rN — also stamped as build Nf)
         id: relnum
@@ -255,6 +255,12 @@ jobs:
             echo "Server exited with status $java_status."
             exit 1
           fi
+          grep -Eq 'SourbyCraft .*TPS' server.log \
+            || { echo "TPS command output marker missing."; exit 1; }
+          grep -Eq 'SourbyCraft .*MSPT' server.log \
+            || { echo "MSPT command output marker missing."; exit 1; }
+          grep -q 'Profiler is already running' server.log \
+            || { echo "spark command output marker missing."; exit 1; }
           echo "Server reached Done, exposed metrics during load and enable, and exited cleanly."
 
   docker-build:

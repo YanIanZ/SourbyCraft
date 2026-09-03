@@ -73,6 +73,11 @@ ServicesManager services = Bukkit.getServicesManager();
 SourbyMetrics metrics = services.load(SourbyMetrics.class);
 ```
 
+`SourbyMetrics` is the intentional process-wide read-only accessor. `snapshot().window(...)`
+aggregates spatial region generations, while `snapshot().globalWindow(...)` returns the separately
+measured global scheduler and does not affect active-region counts. Snapshots and their window values
+are immutable and may be read safely from any thread.
+
 ### `api-version` in your plugin descriptor
 
 The Bukkit API version a plugin declares in `paper-plugin.yml` / `plugin.yml` comes from the

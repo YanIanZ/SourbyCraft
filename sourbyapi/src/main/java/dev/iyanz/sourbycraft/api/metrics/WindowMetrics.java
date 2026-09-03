@@ -28,6 +28,9 @@ public interface WindowMetrics {
 
     double worstAverageMspt();
 
+    /** Returns total completed execution time divided by total completed sample count. */
+    double aggregateAverageMspt();
+
     double medianAverageMspt();
 
     double minimumMspt();

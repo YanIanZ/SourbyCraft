@@ -4,7 +4,9 @@ import ca.spottedleaf.common.time.RegionTickMetrics;
 import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
 import dev.iyanz.sourbycraft.util.ContainerMemory;
+import dev.iyanz.sourbycraft.util.SourbyLogger;
 import io.papermc.paper.threadedregions.RegionizedServer;
+import io.papermc.paper.threadedregions.TickRegionScheduler;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
@@ -13,6 +15,8 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
+import java.util.function.BiConsumer;
+import java.util.function.DoubleSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -20,7 +24,13 @@ import java.util.function.Supplier;
 public final class PerformanceCollector implements AutoCloseable {
 
     private static final long PERIOD_NANOS = TimeUnit.SECONDS.toNanos(1L);
+    private static final long ERROR_LOG_INTERVAL_NANOS = TimeUnit.MINUTES.toNanos(1L);
     private static final long JOIN_MILLIS = 2_000L;
+    private static final int HISTOGRAM_BINS = 64;
+    private static final long HISTOGRAM_MIN_NANOS = 250_000L;
+    private static final long HISTOGRAM_MAX_NANOS = TimeUnit.SECONDS.toNanos(16L);
+    private static final double HISTOGRAM_LOG_RATIO = Math.log(
+        (double)HISTOGRAM_MAX_NANOS / HISTOGRAM_MIN_NANOS) / 62.0;
     private static final MemoryMXBean MEMORY = ManagementFactory.getMemoryMXBean();
     private static final MetricWindow[] WINDOWS = MetricWindow.values();
 
@@ -40,8 +50,10 @@ public final class PerformanceCollector implements AutoCloseable {
     private final Supplier<ImmutableRuntimeMetrics> runtimeSource;
     private final LongSupplier nanoClock;
     private final LongSupplier epochClock;
-    private final double targetTps;
+    private final DoubleSupplier targetTpsSource;
+    private final BiConsumer<String, Throwable> errorLogger;
     private final WindowAccumulator[] accumulators = new WindowAccumulator[WINDOWS.length];
+    private final long[] pooledHistograms = new long[WINDOWS.length * HISTOGRAM_BINS];
     private final Thread worker;
     private final Object lifecycleLock = new Object();
     private volatile boolean closed;
@@ -50,25 +62,38 @@ public final class PerformanceCollector implements AutoCloseable {
     private int medianCapacity = 8;
     private int activeRegions;
     private int retainedGenerations;
+    private boolean loggedCollectionError;
+    private long lastCollectionErrorNanos;
 
     public PerformanceCollector(final SourbyMetricsProvider provider, final RegionMetricsRegistry registry,
                                 final Supplier<ImmutableRuntimeMetrics> runtimeSource) {
         this(provider, registry::forEachUnexpired,
-            now -> RegionizedServer.getGlobalTickData().sourbyTickMetrics.current().snapshot(now), runtimeSource,
-            System::nanoTime, System::currentTimeMillis, 20.0);
+            now -> RegionizedServer.getGlobalTickData().sourbyTickMetrics.current().refreshSnapshot(now), runtimeSource,
+            System::nanoTime, System::currentTimeMillis, TickRegionScheduler::getTickRate,
+            (message, failure) -> SourbyLogger.error(message, failure));
     }
 
     PerformanceCollector(final SourbyMetricsProvider provider, final GenerationSource generations,
                          final GlobalSource globalSource, final Supplier<ImmutableRuntimeMetrics> runtimeSource,
                          final LongSupplier nanoClock, final LongSupplier epochClock,
-                         final double targetTps) {
+                         final DoubleSupplier targetTpsSource) {
+        this(provider, generations, globalSource, runtimeSource, nanoClock, epochClock,
+            targetTpsSource, (message, failure) -> SourbyLogger.error(message, failure));
+    }
+
+    PerformanceCollector(final SourbyMetricsProvider provider, final GenerationSource generations,
+                         final GlobalSource globalSource, final Supplier<ImmutableRuntimeMetrics> runtimeSource,
+                         final LongSupplier nanoClock, final LongSupplier epochClock,
+                         final DoubleSupplier targetTpsSource,
+                         final BiConsumer<String, Throwable> errorLogger) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.generations = Objects.requireNonNull(generations, "generations");
         this.globalSource = Objects.requireNonNull(globalSource, "globalSource");
         this.runtimeSource = Objects.requireNonNull(runtimeSource, "runtimeSource");
         this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
         this.epochClock = Objects.requireNonNull(epochClock, "epochClock");
-        this.targetTps = targetTps;
+        this.targetTpsSource = Objects.requireNonNull(targetTpsSource, "targetTpsSource");
+        this.errorLogger = Objects.requireNonNull(errorLogger, "errorLogger");
         for (int i = 0; i < this.accumulators.length; ++i) {
             this.accumulators[i] = new WindowAccumulator(WINDOWS[i]);
         }
@@ -104,6 +129,7 @@ public final class PerformanceCollector implements AutoCloseable {
             this.generations.forEach(nowNanos, view -> this.accept(view, nowNanos));
             final RegionTickMetrics.Snapshot globalSnapshot = this.globalSource.snapshot(nowNanos);
             final ImmutableRuntimeMetrics runtime = this.runtimeSource.get();
+            final double sampledTargetTps = validTarget(this.targetTpsSource.getAsDouble());
             final ImmutableWindowMetrics[] windows = new ImmutableWindowMetrics[WINDOWS.length];
             final ImmutableWindowMetrics[] globalWindows = new ImmutableWindowMetrics[WINDOWS.length];
             boolean warming = false;
@@ -127,7 +153,7 @@ public final class PerformanceCollector implements AutoCloseable {
             final ImmutableGlobalMetrics global = new ImmutableGlobalMetrics(
                 globalWindows[0], globalWindows[1], globalWindows[2], globalWindows[3], globalWindows[4]);
             final ImmutablePerformanceSnapshot next = new ImmutablePerformanceSnapshot(
-                ++this.sequence, nowEpochMillis, this.targetTps, this.activeRegions,
+                ++this.sequence, nowEpochMillis, sampledTargetTps, this.activeRegions,
                 this.retainedGenerations,
                 new ImmutableFreshness(state, 0L, latenessMillis, duration, ""),
                 windows[0], windows[1], windows[2], windows[3], windows[4], runtime, global);
@@ -141,6 +167,9 @@ public final class PerformanceCollector implements AutoCloseable {
                 ++this.sequence, completedAtEpochMillis(nowEpochMillis, duration),
                 latenessMillis, duration, message);
             this.publishUnlessClosed(stale);
+            if (this.shouldLogCollectionError(nowNanos)) {
+                this.errorLogger.accept("Metrics collection failed; retaining the previous snapshot as STALE", failure);
+            }
         }
     }
 
@@ -163,6 +192,7 @@ public final class PerformanceCollector implements AutoCloseable {
     private void reset() {
         this.activeRegions = 0;
         this.retainedGenerations = 0;
+        Arrays.fill(this.pooledHistograms, 0L);
         for (final WindowAccumulator accumulator : this.accumulators) {
             accumulator.reset();
         }
@@ -180,7 +210,20 @@ public final class PerformanceCollector implements AutoCloseable {
         for (int i = 0; i < this.accumulators.length; ++i) {
             this.accumulators[i].accept(window(view.snapshot(), WINDOWS[i]), view.active(), activeIndex,
                 i, view.snapshot().activeTickStartNanos(), nowNanos);
+            if (view.metrics() != null) {
+                view.metrics().mergeHistogram(windowNanos(WINDOWS[i]), nowNanos,
+                    this.pooledHistograms, i * HISTOGRAM_BINS);
+            }
         }
+    }
+
+    private boolean shouldLogCollectionError(final long nowNanos) {
+        if (!this.loggedCollectionError || nowNanos - this.lastCollectionErrorNanos >= ERROR_LOG_INTERVAL_NANOS) {
+            this.loggedCollectionError = true;
+            this.lastCollectionErrorNanos = nowNanos;
+            return true;
+        }
+        return false;
     }
 
     private void ensureMedianCapacity(final int required) {
@@ -250,6 +293,10 @@ public final class PerformanceCollector implements AutoCloseable {
     private static long saturatingAdd(final long first, final long second) {
         return first < 0L || second < 0L || first > Long.MAX_VALUE - second
             ? Long.MAX_VALUE : first + second;
+    }
+
+    private static double validTarget(final double targetTps) {
+        return Double.isFinite(targetTps) && targetTps > 0.0 ? targetTps : Double.NaN;
     }
 
     private void publishUnlessClosed(final ImmutablePerformanceSnapshot next) {
@@ -389,16 +436,27 @@ public final class PerformanceCollector implements AutoCloseable {
             final boolean invalid = this.overflow || this.interval == Long.MAX_VALUE || this.execution == Long.MAX_VALUE;
             final double aggregateTps = invalid || this.interval == 0L
                 ? Double.NaN : (double)this.count * 1.0E9 / this.interval;
+            final double aggregateAverageMspt = invalid || this.count == 0L
+                ? Double.NaN : (double)this.execution / this.count * 1.0E-6;
             final double averageUtilisation = this.utilisationCount == 0
                 ? Double.NaN : this.utilisationSum / this.utilisationCount;
+            final int histogramOffset = windowIndex * HISTOGRAM_BINS;
+            final long histogramCount = histogramCount(PerformanceCollector.this.pooledHistograms, histogramOffset);
+            final boolean pooled = histogramCount == this.count && histogramCount > 0L;
+            final double pooledMedian = pooled ? histogramQuantile(
+                PerformanceCollector.this.pooledHistograms, histogramOffset, histogramCount, 0.5) : this.medianMspt;
+            final double pooledP95 = pooled ? histogramQuantile(
+                PerformanceCollector.this.pooledHistograms, histogramOffset, histogramCount, 0.95) : this.p95;
+            final double pooledP99 = pooled ? histogramQuantile(
+                PerformanceCollector.this.pooledHistograms, histogramOffset, histogramCount, 0.99) : this.p99;
             return new ImmutableWindowMetrics(TimeUnit.NANOSECONDS.toMillis(this.coverageNanos), this.count,
                 this.approximate, this.truncated || this.overflow,
-                worstTps, medianTps, aggregateTps, worstAverageMspt, medianAverageMspt,
+                worstTps, medianTps, aggregateTps, worstAverageMspt, aggregateAverageMspt, medianAverageMspt,
                 this.count == 0L ? Double.NaN : this.minimum * 1.0E-6,
                 this.hasMaximum ? this.maximum * 1.0E-6 : Double.NaN,
-                this.truncated || this.overflow ? Double.NaN : this.medianMspt,
-                this.truncated || this.overflow ? Double.NaN : this.p95,
-                this.truncated || this.overflow ? Double.NaN : this.p99,
+                this.truncated || this.overflow ? Double.NaN : pooledMedian,
+                this.truncated || this.overflow ? Double.NaN : pooledP95,
+                this.truncated || this.overflow ? Double.NaN : pooledP99,
                 this.busiestUtilisation, averageUtilisation,
                 this.overflow || this.missingCpu == Long.MAX_VALUE ? Double.NaN : this.missingCpu * 1.0E-6);
         }
@@ -426,7 +484,7 @@ public final class PerformanceCollector implements AutoCloseable {
         return new ImmutableWindowMetrics(
             TimeUnit.NANOSECONDS.toMillis(Math.min(windowNanos(window), source.intervalNanos())),
             source.sampleCount(), source.approximate(), truncated,
-            tps, tps, tps, averageMspt, averageMspt,
+            tps, tps, tps, averageMspt, averageMspt, averageMspt,
             completed ? source.minimumNanos() * 1.0E-6 : Double.NaN, maximum,
             truncated ? Double.NaN : source.medianNanos() * 1.0E-6,
             truncated ? Double.NaN : source.estimatedP95Mspt(),
@@ -469,5 +527,33 @@ public final class PerformanceCollector implements AutoCloseable {
     private static double maxFinite(final double current, final double value) {
         if (!Double.isFinite(value)) return current;
         return Double.isNaN(current) ? value : Math.max(current, value);
+    }
+
+    private static long histogramCount(final long[] histogram, final int offset) {
+        long count = 0L;
+        for (int i = 0; i < HISTOGRAM_BINS; ++i) {
+            count = saturatingAdd(count, histogram[offset + i]);
+        }
+        return count;
+    }
+
+    private static double histogramQuantile(final long[] histogram, final int offset,
+                                            final long count, final double quantile) {
+        final long rank = Math.max(1L, (long)Math.ceil(quantile * count));
+        long seen = 0L;
+        for (int bin = 0; bin < HISTOGRAM_BINS; ++bin) {
+            seen = saturatingAdd(seen, histogram[offset + bin]);
+            if (seen >= rank) {
+                return histogramUpperBound(bin) * 1.0E-6;
+            }
+        }
+        return HISTOGRAM_MAX_NANOS * 1.0E-6;
+    }
+
+    private static long histogramUpperBound(final int bin) {
+        if (bin == 0) return HISTOGRAM_MIN_NANOS;
+        if (bin == HISTOGRAM_BINS - 1) return HISTOGRAM_MAX_NANOS;
+        return Math.min(HISTOGRAM_MAX_NANOS,
+            (long)Math.ceil(HISTOGRAM_MIN_NANOS * Math.exp(HISTOGRAM_LOG_RATIO * bin)));
     }
 }

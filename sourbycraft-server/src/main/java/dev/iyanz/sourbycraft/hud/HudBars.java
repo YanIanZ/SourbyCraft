@@ -150,8 +150,7 @@ public final class HudBars {
         final double tps = TpsCommand.cappedTps(recent.worstTps(), target);
         final double mspt = recent.worstAverageMspt();
         if (!TpsCommand.available(tps)
-            || snapshot.freshness().state() == MetricState.UNAVAILABLE
-            || snapshot.freshness().state() == MetricState.WARMING) {
+            || snapshot.freshness().state() == MetricState.UNAVAILABLE) {
             return new TpsDisplay(Component.text("TPS " + snapshot.freshness().state().name(), NamedTextColor.GRAY),
                 0.0F, BossBar.Color.YELLOW);
         }

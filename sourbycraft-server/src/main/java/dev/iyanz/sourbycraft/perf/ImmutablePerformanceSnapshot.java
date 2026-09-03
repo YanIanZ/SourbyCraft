@@ -64,4 +64,9 @@ record ImmutablePerformanceSnapshot(long sequence, long sampledAtEpochMillis, do
             case FIFTEEN_MINUTES -> this.fifteenMinutes;
         };
     }
+
+    @Override
+    public WindowMetrics globalWindow(final MetricWindow window) {
+        return this.global.window(Objects.requireNonNull(window, "window"));
+    }
 }

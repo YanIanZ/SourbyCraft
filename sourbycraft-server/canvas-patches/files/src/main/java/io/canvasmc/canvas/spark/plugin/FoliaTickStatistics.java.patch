@@ -179,7 +179,7 @@
 -        public double mean() {
 -            return 0;
 +        private static AverageInfo from(final WindowMetrics window) {
-+            return new AverageInfo(window.worstAverageMspt(), window.minimumMspt(), window.maximumMspt(),
++            return new AverageInfo(window.aggregateAverageMspt(), window.minimumMspt(), window.maximumMspt(),
 +                window.medianMspt(), window.estimatedP95Mspt());
          }
  

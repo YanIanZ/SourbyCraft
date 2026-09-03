@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,7 +40,50 @@ class PerformanceCollectorTest {
         assertEquals(16.0, result.medianTps(), 1.0E-9);
         assertEquals(16.923076923076923, result.aggregateTps(), 1.0E-9);
         assertEquals(20.0, result.worstAverageMspt(), 1.0E-9);
+        assertEquals(150.0 / 11.0, result.aggregateAverageMspt(), 1.0E-9);
         assertEquals(10.0, result.medianAverageMspt(), 1.0E-9);
+    }
+
+    @Test
+    void targetRateIsSampledOnEveryCollectionAndInvalidValuesStayUnavailable() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final AtomicReference<Double> target = new AtomicReference<>(10.0);
+        final PerformanceCollector collector = new PerformanceCollector(provider, source(),
+            PerformanceCollectorTest::emptyGlobal, PerformanceCollectorTest::runtime,
+            System::nanoTime, System::currentTimeMillis, target::get);
+
+        for (final double expected : new double[] {10.0, 20.0, 40.0}) {
+            target.set(expected);
+            collector.collect(SECOND, 1_000L, 0L);
+            assertEquals(expected, provider.snapshot().targetTps());
+        }
+        for (final double invalid : new double[] {0.0, -1.0, Double.NaN, Double.POSITIVE_INFINITY}) {
+            target.set(invalid);
+            collector.collect(SECOND, 1_000L, 0L);
+            assertTrue(Double.isNaN(provider.snapshot().targetTps()));
+        }
+    }
+
+    @Test
+    void pooledHistogramAndAggregateMeanWeightEveryCompletedTick() {
+        final RegionTickMetrics manyFast = metricsWithDurations(100, MILLISECOND);
+        final RegionTickMetrics oneSlow = metricsWithDurations(1, 100L * MILLISECOND);
+        final PerformanceCollector.GenerationSource generations = (now, consumer) -> {
+            consumer.accept(new RegionMetricsRegistry.GenerationView(
+                1L, 1L, 1L, true, manyFast, manyFast.refreshSnapshot(now)));
+            consumer.accept(new RegionMetricsRegistry.GenerationView(
+                2L, 1L, 2L, true, oneSlow, oneSlow.refreshSnapshot(now)));
+        };
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+
+        collector(provider, generations).collect(2L * SECOND, 2_000L, 0L);
+        final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        assertEquals(100.0, result.worstAverageMspt(), 1.0E-9);
+        assertEquals(200.0 / 101.0, result.aggregateAverageMspt(), 1.0E-9);
+        assertTrue(result.medianMspt() < 2.0, "pooled median must follow the 100 fast samples");
+        assertTrue(result.estimatedP95Mspt() < 2.0, "pooled p95 must not be the worst region p95");
+        assertEquals(101L, result.sampleCount());
     }
 
     @Test
@@ -88,7 +132,7 @@ class PerformanceCollectorTest {
 
         new PerformanceCollector(provider, registry::forEachUnexpired,
             PerformanceCollectorTest::emptyGlobal, PerformanceCollectorTest::runtime,
-            System::nanoTime, System::currentTimeMillis, 20.0).collect(SECOND, 1_000L, 0L);
+            System::nanoTime, System::currentTimeMillis, () -> 20.0).collect(SECOND, 1_000L, 0L);
 
         assertEquals(1, provider.snapshot().activeRegionCount());
         assertEquals(1, provider.snapshot().retainedGenerationCount());
@@ -102,7 +146,7 @@ class PerformanceCollectorTest {
         final PerformanceCollector collector = new PerformanceCollector(provider,
             source(view(1L, true, window(1L, 100L * MILLISECOND, 10L * MILLISECOND, 0.1))),
             now -> global, PerformanceCollectorTest::runtime,
-            System::nanoTime, System::currentTimeMillis, 20.0);
+            System::nanoTime, System::currentTimeMillis, () -> 20.0);
 
         collector.collect(SECOND, 1_000L, 0L);
         final ImmutablePerformanceSnapshot snapshot = (ImmutablePerformanceSnapshot)provider.snapshot();
@@ -121,7 +165,7 @@ class PerformanceCollectorTest {
             1L, 50L * MILLISECOND, 10L * MILLISECOND, 0.1);
         final RegionTickMetrics.Snapshot stalled = snapshot(completed, SECOND - 500L * MILLISECOND);
         final PerformanceCollector collector = collector(provider,
-            (now, consumer) -> consumer.accept(new RegionMetricsRegistry.GenerationView(1L, 1L, 1L, true, stalled)));
+            (now, consumer) -> consumer.accept(new RegionMetricsRegistry.GenerationView(1L, 1L, 1L, true, null, stalled)));
 
         collector.collect(SECOND, 1_000L, 0L);
         final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
@@ -139,7 +183,7 @@ class PerformanceCollectorTest {
         final RegionTickMetrics.Snapshot stalled = snapshot(empty, SECOND - 500L * MILLISECOND);
 
         collector(provider, (now, consumer) -> consumer.accept(
-            new RegionMetricsRegistry.GenerationView(1L, 1L, 1L, true, stalled)))
+            new RegionMetricsRegistry.GenerationView(1L, 1L, 1L, true, null, stalled)))
             .collect(SECOND, 1_000L, 0L);
         final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
 
@@ -217,7 +261,7 @@ class PerformanceCollectorTest {
         final PerformanceCollector collector = new PerformanceCollector(provider, source,
             PerformanceCollectorTest::emptyGlobal, PerformanceCollectorTest::runtime,
             () -> clockValues[clockIndex.getAndIncrement()],
-            System::currentTimeMillis, 20.0);
+            System::currentTimeMillis, () -> 20.0);
         collector.collect(SECOND, 1_000L, 7L * MILLISECOND);
         final WindowMetrics previous = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
 
@@ -231,6 +275,24 @@ class PerformanceCollectorTest {
         assertEquals(2_000L, stale.freshness().collectorLatenessMillis());
         assertEquals(45L, stale.freshness().scanDurationNanos());
         assertTrue(stale.freshness().diagnostic().contains("source failed"));
+    }
+
+    @Test
+    void repeatedCollectionFailuresAreLoggedAtMostOncePerMinute() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final AtomicInteger logs = new AtomicInteger();
+        final PerformanceCollector collector = new PerformanceCollector(provider,
+            (now, consumer) -> { throw new IllegalStateException("broken source"); },
+            PerformanceCollectorTest::emptyGlobal, PerformanceCollectorTest::runtime,
+            System::nanoTime, System::currentTimeMillis, () -> 20.0,
+            (message, failure) -> logs.incrementAndGet());
+
+        collector.collect(SECOND, 1_000L, 0L);
+        collector.collect(2L * SECOND, 2_000L, 0L);
+        collector.collect(61L * SECOND, 61_000L, 0L);
+
+        assertEquals(2, logs.get());
+        assertEquals(MetricState.STALE, provider.snapshot().freshness().state());
     }
 
     @Test
@@ -267,7 +329,7 @@ class PerformanceCollectorTest {
                 window(1L, newer.get() ? 100L * MILLISECOND : 50L * MILLISECOND,
                     5L * MILLISECOND, 0.1))),
             PerformanceCollectorTest::emptyGlobal, PerformanceCollectorTest::runtime,
-            () -> clockValues[clockIndex.getAndIncrement()], System::currentTimeMillis, 20.0);
+            () -> clockValues[clockIndex.getAndIncrement()], System::currentTimeMillis, () -> 20.0);
         collector.collect(SECOND, 1_000L, 0L);
         final WindowMetrics previous = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
 
@@ -311,7 +373,7 @@ class PerformanceCollectorTest {
     private static PerformanceCollector collector(final SourbyMetricsProvider provider,
                                                   final PerformanceCollector.GenerationSource source) {
         return new PerformanceCollector(provider, source, PerformanceCollectorTest::emptyGlobal,
-            PerformanceCollectorTest::runtime, System::nanoTime, System::currentTimeMillis, 20.0);
+            PerformanceCollectorTest::runtime, System::nanoTime, System::currentTimeMillis, () -> 20.0);
     }
 
     private static PerformanceCollector.GenerationSource source(final RegionMetricsRegistry.GenerationView... views) {
@@ -321,7 +383,8 @@ class PerformanceCollectorTest {
 
     private static RegionMetricsRegistry.GenerationView view(final long id, final boolean active,
                                                              final RegionTickMetrics.WindowSnapshot window) {
-        return new RegionMetricsRegistry.GenerationView(id, 1L, id, active, snapshot(window, RegionTickMetrics.INACTIVE));
+        return new RegionMetricsRegistry.GenerationView(id, 1L, id, active, null,
+            snapshot(window, RegionTickMetrics.INACTIVE));
     }
 
     private static RegionTickMetrics.Snapshot snapshot(final RegionTickMetrics.WindowSnapshot window,
@@ -345,6 +408,18 @@ class PerformanceCollectorTest {
 
     private static RegionTickMetrics.Snapshot emptyGlobal(final long nowNanos) {
         return snapshot(window(0L, 0L, 0L, 0.0), RegionTickMetrics.INACTIVE);
+    }
+
+    private static RegionTickMetrics metricsWithDurations(final int count, final long duration) {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        long previous = TimeUtil.DEADLINE_NOT_SET;
+        for (int i = 0; i < count; ++i) {
+            final long start = (long)i * 10L * MILLISECOND;
+            metrics.tickCompleted(new TickTime(previous, start, start, 0L, start + duration,
+                0L, 0L, 0L, false), 10L * MILLISECOND);
+            previous = start;
+        }
+        return metrics;
     }
 
     private static final class LongSupplierClock {
