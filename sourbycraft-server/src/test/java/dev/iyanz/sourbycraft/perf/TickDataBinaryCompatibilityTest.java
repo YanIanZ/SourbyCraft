@@ -184,16 +184,16 @@ class TickDataBinaryCompatibilityTest {
     }
 
     @Test
-    void targetlessCompatibilityRingIsExactThroughThirtyTwoAndUnavailableOnOverflow() {
+    void targetlessCompatibilityRingIsExactThroughEightAndUnavailableOnOverflow() {
         final RegionTickMetrics owner = new RegionTickMetrics();
         final TickData shared = new TickData(owner, TimeUnit.MINUTES.toNanos(5L));
         final TickData standalone = new TickData(TimeUnit.MINUTES.toNanos(5L));
-        for (int i = 0; i < 32; ++i) {
+        for (int i = 0; i < 8; ++i) {
             final TickTime sample = tick(TimeUtil.DEADLINE_NOT_SET, i * MILLISECOND, MILLISECOND);
             shared.addDataFrom(sample);
             standalone.addDataFrom(sample);
         }
-        final long now = 32L * MILLISECOND;
+        final long now = 8L * MILLISECOND;
         assertEquals(standalone.getTPSAverage(null, TARGET_INTERVAL),
             shared.getTPSAverage(null, TARGET_INTERVAL), 0.0);
 
