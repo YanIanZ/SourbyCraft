@@ -225,13 +225,16 @@ class RegionTickMetricsTest {
     }
 
     @Test
-    void refreshExpiresShortWindowsWithoutAnotherCompletedTick() {
+    void refreshExpiresShortWindowsWhileTheRegionTickIsStalled() {
         final RegionTickMetrics metrics = new RegionTickMetrics();
         metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 0L, MILLISECOND), TARGET_20_TPS);
+        metrics.tickStarted(2L * SECOND);
 
         assertEquals(1L, metrics.refreshSnapshot(5L * SECOND).fiveSeconds().sampleCount());
         assertEquals(0L, metrics.refreshSnapshot(5L * SECOND + MILLISECOND + 1L).fiveSeconds().sampleCount());
-        assertEquals(0L, metrics.refreshSnapshot(10L * SECOND + MILLISECOND + 1L).tenSeconds().sampleCount());
+        final RegionTickMetrics.Snapshot expired = metrics.refreshSnapshot(10L * SECOND + MILLISECOND + 1L);
+        assertEquals(0L, expired.tenSeconds().sampleCount());
+        assertEquals(2L * SECOND, metrics.snapshot(10L * SECOND + MILLISECOND + 1L).activeTickStartNanos());
     }
 
     @Test
