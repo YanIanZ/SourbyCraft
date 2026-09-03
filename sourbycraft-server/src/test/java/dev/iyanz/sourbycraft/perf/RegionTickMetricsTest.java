@@ -10,10 +10,12 @@ import java.lang.classfile.ClassFile;
 import java.lang.classfile.CodeElement;
 import java.lang.classfile.Instruction;
 import java.lang.classfile.MethodModel;
+import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
@@ -230,11 +232,127 @@ class RegionTickMetricsTest {
         metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 0L, MILLISECOND), TARGET_20_TPS);
         metrics.tickStarted(2L * SECOND);
 
-        assertEquals(1L, metrics.refreshSnapshot(5L * SECOND).fiveSeconds().sampleCount());
-        assertEquals(0L, metrics.refreshSnapshot(5L * SECOND + MILLISECOND + 1L).fiveSeconds().sampleCount());
-        final RegionTickMetrics.Snapshot expired = metrics.refreshSnapshot(10L * SECOND + MILLISECOND + 1L);
+        final RegionTickMetrics.Snapshot active = metrics.refreshSnapshot(5L * SECOND);
+        assertEquals(1L, active.fiveSeconds().sampleCount());
+        assertEquals(2L * SECOND, active.activeTickStartNanos());
+        assertEquals(0L, metrics.refreshSnapshot(6L * SECOND + MILLISECOND + 1L).fiveSeconds().sampleCount());
+        final RegionTickMetrics.Snapshot expired = metrics.refreshSnapshot(11L * SECOND + MILLISECOND + 1L);
         assertEquals(0L, expired.tenSeconds().sampleCount());
-        assertEquals(2L * SECOND, metrics.snapshot(10L * SECOND + MILLISECOND + 1L).activeTickStartNanos());
+        assertEquals(2L * SECOND, metrics.snapshot(11L * SECOND + MILLISECOND + 1L).activeTickStartNanos());
+    }
+
+    @Test
+    void sameEpochRefreshReusesPublicationAndNextEpochExpiresData() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 0L, MILLISECOND), TARGET_20_TPS);
+
+        final RegionTickMetrics.Snapshot first = metrics.refreshSnapshot(5L * SECOND + MILLISECOND);
+        assertSame(first, metrics.refreshSnapshot(5L * SECOND + 2L * MILLISECOND));
+        final RegionTickMetrics.Snapshot next = metrics.refreshSnapshot(6L * SECOND + 2L * MILLISECOND);
+
+        assertFalse(first == next);
+        assertEquals(1L, first.fiveSeconds().sampleCount());
+        assertEquals(0L, next.fiveSeconds().sampleCount());
+    }
+
+    @Test
+    void sealRacingTickStartNeverPublishesPostSealActivityOrAcceptsCompletion() throws Exception {
+        for (int attempt = 0; attempt < 10_000; ++attempt) {
+            final RegionTickMetrics metrics = new RegionTickMetrics();
+            final CountDownLatch ready = new CountDownLatch(2);
+            final CountDownLatch start = new CountDownLatch(1);
+            final Thread starter = Thread.ofPlatform().start(() -> {
+                ready.countDown();
+                await(start);
+                metrics.tickStarted(123L);
+            });
+            final Thread sealer = Thread.ofPlatform().start(() -> {
+                ready.countDown();
+                await(start);
+                metrics.seal(124L);
+            });
+            assertTrue(ready.await(5L, TimeUnit.SECONDS));
+            start.countDown();
+            starter.join();
+            sealer.join();
+
+            metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 123L, 1L), TARGET_20_TPS);
+            final RegionTickMetrics.Snapshot sealed = metrics.refreshSnapshot(125L);
+            assertEquals(RegionTickMetrics.INACTIVE, sealed.activeTickStartNanos());
+            assertEquals(0L, sealed.fiveSeconds().sampleCount());
+        }
+    }
+
+    @Test
+    void completionClearsOnlyItsOwnActiveStart() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickStarted(123L);
+
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 456L, 1L), TARGET_20_TPS);
+        assertEquals(123L, metrics.snapshot(457L).activeTickStartNanos());
+
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 123L, 1L), TARGET_20_TPS);
+        assertEquals(RegionTickMetrics.INACTIVE, metrics.snapshot(458L).activeTickStartNanos());
+    }
+
+    @Test
+    void activeAndSealedStateShareOneAtomicLongMarker() throws Exception {
+        final var state = RegionTickMetrics.class.getDeclaredField("activeState");
+        assertEquals(long.class, state.getType());
+        assertTrue(Modifier.isVolatile(state.getModifiers()));
+        assertThrows(NoSuchFieldException.class, () -> RegionTickMetrics.class.getDeclaredField("sealed"));
+
+        final String resource = "/" + RegionTickMetrics.class.getName().replace('.', '/') + ".class";
+        int compareAndSets = 0;
+        try (InputStream input = RegionTickMetrics.class.getResourceAsStream(resource)) {
+            assertNotNull(input);
+            for (final MethodModel method : ClassFile.of().parse(input.readAllBytes()).methods()) {
+                if (!method.methodName().stringValue().equals("tickStarted")) continue;
+                for (final CodeElement element : method.code().orElseThrow()) {
+                    if (element instanceof InvokeInstruction invocation
+                        && invocation.name().stringValue().equals("compareAndSet")) {
+                        ++compareAndSets;
+                    }
+                }
+            }
+        }
+        assertEquals(1, compareAndSets);
+    }
+
+    @Test
+    void ownerAcquisitionKeepsEveryHistogramConsistentWithItsSnapshot() throws Exception {
+        final CountDownLatch completionEntered = new CountDownLatch(1);
+        final CountDownLatch releaseCompletion = new CountDownLatch(1);
+        final var constructor = RegionTickMetrics.class.getDeclaredConstructor(Runnable.class);
+        constructor.setAccessible(true);
+        final RegionTickMetrics metrics = constructor.newInstance((Runnable)() -> {
+            completionEntered.countDown();
+            await(releaseCompletion);
+        });
+        final Thread completion = Thread.ofPlatform().start(() -> metrics.tickCompleted(
+            tick(TimeUtil.DEADLINE_NOT_SET, 0L, MILLISECOND), TARGET_20_TPS));
+        assertTrue(completionEntered.await(5L, TimeUnit.SECONDS));
+        final long[] histograms = new long[5 * 64];
+        final var acquired = new java.util.concurrent.atomic.AtomicReference<RegionTickMetrics.Snapshot>();
+        final Thread collector = Thread.ofPlatform().start(() ->
+            acquired.set(metrics.acquireSnapshot(SECOND, histograms, 0)));
+
+        releaseCompletion.countDown();
+        completion.join();
+        collector.join();
+
+        final RegionTickMetrics.Snapshot snapshot = acquired.get();
+        assertNotNull(snapshot);
+        final long[] counts = {
+            snapshot.fiveSeconds().sampleCount(), snapshot.tenSeconds().sampleCount(),
+            snapshot.oneMinute().sampleCount(), snapshot.fiveMinutes().sampleCount(),
+            snapshot.fifteenMinutes().sampleCount()
+        };
+        for (int window = 0; window < counts.length; ++window) {
+            long rankMass = 0L;
+            for (int bin = 0; bin < 64; ++bin) rankMass += histograms[window * 64 + bin];
+            assertEquals(counts[window], rankMass);
+        }
     }
 
     @Test
@@ -300,6 +418,8 @@ class RegionTickMetricsTest {
             .getDeclaredMethod("seal", long.class).getModifiers()));
         assertTrue(Modifier.isSynchronized(RegionTickMetrics.class
             .getDeclaredMethod("mergeHistogram", long.class, long.class, long[].class, int.class).getModifiers()));
+        assertTrue(Modifier.isSynchronized(RegionTickMetrics.class
+            .getDeclaredMethod("acquireSnapshot", long.class, long[].class, int.class).getModifiers()));
     }
 
     @Test
@@ -415,6 +535,15 @@ class RegionTickMetricsTest {
             metrics.tickCompleted(tick(previous, start, duration), interval);
             previous = start;
             start += interval;
+        }
+    }
+
+    private static void await(final CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (final InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(interrupted);
         }
     }
 

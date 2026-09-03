@@ -8,6 +8,12 @@ import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
 import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
 import dev.iyanz.sourbycraft.api.metrics.WindowMetrics;
 import java.util.List;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.classfile.ClassFile;
+import java.lang.classfile.CodeElement;
+import java.lang.classfile.MethodModel;
+import java.lang.classfile.instruction.InvokeInstruction;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -84,6 +90,47 @@ class PerformanceCollectorTest {
         assertTrue(result.medianMspt() < 2.0, "pooled median must follow the 100 fast samples");
         assertTrue(result.estimatedP95Mspt() < 2.0, "pooled p95 must not be the worst region p95");
         assertEquals(101L, result.sampleCount());
+    }
+
+    @Test
+    void floatMedianScratchPreservesFiniteOrderingAndExpectedMedian() throws Exception {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final PerformanceCollector collector = collector(provider, source(
+            view(1L, true, window(1L, 100L * MILLISECOND, 10L * MILLISECOND, 0.1)),
+            view(2L, true, window(1L, 50L * MILLISECOND, 20L * MILLISECOND, 0.2)),
+            view(3L, true, window(1L, 25L * MILLISECOND, 40L * MILLISECOND, 0.4))
+        ));
+
+        collector.collect(SECOND, 1_000L, 0L);
+        final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        assertEquals(float[].class, PerformanceCollector.class.getDeclaredField("medianBuffer").getType());
+        assertEquals(10.0, result.worstTps(), 1.0E-5);
+        assertEquals(20.0, result.medianTps(), 1.0E-5);
+        assertEquals(20.0, result.medianAverageMspt(), 1.0E-5);
+        assertEquals(40.0, result.worstAverageMspt(), 1.0E-5);
+    }
+
+    @Test
+    void collectorUsesOneOwnerAcquisitionInsteadOfSeparateHistogramCalls() throws Exception {
+        final String resource = "/" + PerformanceCollector.class.getName().replace('.', '/') + ".class";
+        int acquisitions = 0;
+        int separateMerges = 0;
+        try (InputStream input = PerformanceCollector.class.getResourceAsStream(resource)) {
+            assertTrue(input != null);
+            for (final MethodModel method : ClassFile.of().parse(input.readAllBytes()).methods()) {
+                if (!method.methodName().stringValue().equals("accept")) continue;
+                for (final CodeElement element : method.code().orElseThrow()) {
+                    if (element instanceof InvokeInstruction invocation) {
+                        final String name = invocation.name().stringValue();
+                        if (name.equals("acquireSnapshot")) ++acquisitions;
+                        if (name.equals("mergeHistogram")) ++separateMerges;
+                    }
+                }
+            }
+        }
+        assertEquals(1, acquisitions);
+        assertEquals(0, separateMerges);
     }
 
     @Test
@@ -174,6 +221,23 @@ class PerformanceCollectorTest {
         assertEquals(255.0, result.worstAverageMspt(), 1.0E-9);
         assertEquals(500.0, result.maximumMspt(), 1.0E-9);
         assertEquals(0.2, result.busiestUtilisation(), 1.0E-9);
+    }
+
+    @Test
+    void collectorAcquisitionPublishesLiveStallFromRealOwner() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickCompleted(new TickTime(TimeUtil.DEADLINE_NOT_SET, 0L, 0L, 0L,
+            10L * MILLISECOND, 0L, 0L, 0L, false), 50L * MILLISECOND);
+        metrics.tickStarted(500L * MILLISECOND);
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final PerformanceCollector collector = collector(provider, (now, consumer) -> consumer.accept(
+            new RegionMetricsRegistry.GenerationView(1L, 1L, 1L, true, metrics, null)));
+
+        collector.collect(SECOND, 1_000L, 0L);
+        final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        assertEquals(500.0, result.maximumMspt(), 1.0E-9);
+        assertEquals(0.102, result.busiestUtilisation(), 1.0E-9);
     }
 
     @Test

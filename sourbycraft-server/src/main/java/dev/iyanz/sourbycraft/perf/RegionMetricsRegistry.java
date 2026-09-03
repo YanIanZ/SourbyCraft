@@ -99,9 +99,19 @@ public final class RegionMetricsRegistry {
     }
 
     public void forEachUnexpired(final long nowNanos, final Consumer<GenerationView> consumer) {
+        this.forEachUnexpired(nowNanos, consumer, true);
+    }
+
+    void forEachUnexpiredForCollection(final long nowNanos, final Consumer<GenerationView> consumer) {
+        this.forEachUnexpired(nowNanos, consumer, false);
+    }
+
+    private void forEachUnexpired(final long nowNanos, final Consumer<GenerationView> consumer,
+                                  final boolean refresh) {
         Objects.requireNonNull(consumer, "consumer");
         for (final Generation generation : this.generations.values()) {
-            final RegionTickMetrics.Snapshot snapshot = generation.metrics.refreshSnapshot(nowNanos);
+            final RegionTickMetrics.Snapshot snapshot = refresh
+                ? generation.metrics.refreshSnapshot(nowNanos) : null;
             final boolean active = generation.isActive();
             if (!active && expired(nowNanos, generation.retiredAtNanos)) {
                 this.generations.remove(generation.generationId, generation);
