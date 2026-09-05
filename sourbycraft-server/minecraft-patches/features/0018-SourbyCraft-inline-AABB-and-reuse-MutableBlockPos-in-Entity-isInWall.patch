@@ -112,3 +112,8 @@ index 05139e1..7e890ef 100644
  
                                  if (collisionShape.isEmpty()) {
                                      continue;
+                                 }
+ 
+-                                final AABB toCollide = boundingBox.move(-(double)blockX, -(double)blockY, -(double)blockZ);
++                                // SourbyCraft - inline AABB.move using the 6 pre-computed doubles
++                                final AABB toCollide = new AABB(minX - (double)blockX, minY - (double)blockY, minZ - (double)blockZ, maxX - (double)blockX, maxY - (double)blockY, maxZ - (double)blockZ);
