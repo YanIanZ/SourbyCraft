@@ -1,11 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: SourbyCraft <agent@local>
 Date: Sun, 30 Aug 2026 00:00:00 +0000
-Subject: [PATCH] SourbyCraft - reuse WorldBorder scratch set in ServerLevel#tick
+Subject: [PATCH] SourbyCraft - reuse WorldBorder scratch set in
+ ServerLevel#tick
 
----
+
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index ef23739..c5b1a68 100644
+index ef237399886f984f2c221ca55ba6810593aa4056..c5b1a68f015f21e3811209120f50be64d3179ab6 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
 @@ -767,6 +767,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet

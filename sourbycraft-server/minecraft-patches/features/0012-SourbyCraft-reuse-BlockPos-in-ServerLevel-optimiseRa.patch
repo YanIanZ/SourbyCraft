@@ -1,11 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: SourbyCraft <agent@local>
 Date: Sun, 30 Aug 2026 00:00:00 +0000
-Subject: [PATCH] SourbyCraft - reuse BlockPos in ServerLevel#optimiseRandomTick
+Subject: [PATCH] SourbyCraft - reuse BlockPos in
+ ServerLevel#optimiseRandomTick
 
----
+
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index a54d6f3..ef23739 100644
+index a54d6f329fe221f5264a9e4f57eba1313f5fe5d6..ef237399886f984f2c221ca55ba6810593aa4056 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
 @@ -1078,6 +1078,23 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet

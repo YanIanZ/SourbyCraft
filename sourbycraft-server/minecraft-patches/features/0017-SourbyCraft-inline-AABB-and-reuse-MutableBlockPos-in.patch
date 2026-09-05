@@ -1,11 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: SourbyCraft <agent@local>
 Date: Sun, 30 Aug 2026 00:00:00 +0000
-Subject: [PATCH] SourbyCraft - inline AABB and reuse MutableBlockPos in Entity#isInWall
+Subject: [PATCH] SourbyCraft - inline AABB and reuse MutableBlockPos in
+ Entity#isInWall
 
----
+
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 05139e1..7e890ef 100644
+index 05139e18ccdca70ec1223e4f818254709bb5cb25..7e890efffdafe894b99545fbe8552db7eccab8c4 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -422,6 +422,12 @@ public abstract class Entity
@@ -112,8 +113,3 @@ index 05139e1..7e890ef 100644
  
                                  if (collisionShape.isEmpty()) {
                                      continue;
-                                 }
- 
--                                final AABB toCollide = boundingBox.move(-(double)blockX, -(double)blockY, -(double)blockZ);
-+                                // SourbyCraft - inline AABB.move using the 6 pre-computed doubles
-+                                final AABB toCollide = new AABB(minX - (double)blockX, minY - (double)blockY, minZ - (double)blockZ, maxX - (double)blockX, maxY - (double)blockY, maxZ - (double)blockZ);

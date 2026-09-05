@@ -3,9 +3,9 @@ From: SourbyCraft <agent@local>
 Date: Sun, 30 Aug 2026 00:00:00 +0000
 Subject: [PATCH] SourbyCraft - reuse collision scratch lists in Entity#collide
 
----
+
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 5cd3b13..5ff72c2 100644
+index 5cd3b13da55d39845a12398ffb75a1dd1d055322..5ff72c2a6a50039641ef90fd0c6f2f1c2a771231 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -405,6 +405,14 @@ public abstract class Entity

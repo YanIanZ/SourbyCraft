@@ -3,9 +3,9 @@ From: SourbyCraft <agent@local>
 Date: Sun, 30 Aug 2026 00:00:00 +0000
 Subject: [PATCH] SourbyCraft - eliminate elytra glide-slot stream allocation
 
----
+
 diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
-index 33dc433..39080d2 100644
+index 33dc433b5955cc7bace1457189ddf83547eca494..39080d25e83588c78c06d24046a4fda80b7ad5b1 100644
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
 @@ -3915,8 +3915,23 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
