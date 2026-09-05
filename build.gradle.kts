@@ -259,17 +259,18 @@ subprojects {
     val internalVersionProvider = sourbycraftSuffixProvider
     val writeBuildInfoTask = tasks.register("writeBuildInfo") {
         val mcVersion = providers.gradleProperty("mcVersion").getOrElse("unknown")
-        // SourbyCraft-on-Canvas build number: gradle.properties `sourbyBuild=4` -> effective id
-        // "4c" (c = Canvas base, replacing the old "f" = Folia suffix). Surfaced as `build=4c`
-        // here so BuildInfo (banner + /ver) can render "26.2-EXP (build 4c)", matching the
-        // sourbycraft-server jar manifest's own Implementation-Version (same "c" suffix, see
-        // sourbycraft-server/build.gradle.kts.patch). Bump sourbyBuild per release -> 5, 6, ...
-        val sourbyBuild = providers.gradleProperty("sourbyBuild").getOrElse("1").trim() + "c"
+        // SourbyCraft-on-Canvas build number: gradle.properties `sourbyBuild=43` -> effective id
+        // "43c" (c = Canvas base). Composite builds (e.g. `sourbyBuild=43.1` or `44-hotfix`)
+        // append the "c" suffix only to pure-numeric values; non-numeric builds use the raw string.
+        // The raw value is also stored as `buildNumber` for the auto-updater's comparison logic.
+        val rawBuild = providers.gradleProperty("sourbyBuild").getOrElse("1").trim()
+        val sourbyBuild = if (rawBuild.matches(Regex("\\d+(\\.\\d+)*"))) rawBuild + "c" else rawBuild
         val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
 
         inputs.property("internalVersion", internalVersionProvider)
         inputs.property("mcVersion", mcVersion)
         inputs.property("sourbyBuild", sourbyBuild)
+        inputs.property("rawBuild", rawBuild)
         outputs.file(outFile)
         // The branch provider is captured into the doLast closure below, which the
         // config-cache layer cannot serialise. Opting THIS task out is cheap and does
@@ -285,6 +286,7 @@ subprojects {
                 """
                 version=$resolved
                 build=$sourbyBuild
+                buildNumber=$rawBuild
                 mcVersion=$mcVersion
                 tagline=Lightning Fast Performance Feature Rich
                 buildTimestamp=$timestamp

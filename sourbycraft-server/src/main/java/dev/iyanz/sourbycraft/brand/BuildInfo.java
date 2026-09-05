@@ -11,6 +11,9 @@ import java.util.Properties;
  *
  * @param version        the channel version, e.g. {@code "26.2-REL"}
  * @param build          the human-facing build id, e.g. {@code "4c"} (c = Canvas base); may be empty
+ * @param buildNumber    the raw build number for update comparison, e.g. {@code "43.1"}, without
+ *                       the platform suffix; derived from {@code build} when the properties file
+ *                       predates the field
  * @param mcVersion       the Minecraft version this build targets
  * @param tagline        short marketing tagline shown in the startup banner
  * @param buildTimestamp ISO-8601 instant the jar was built, or empty if unknown
@@ -18,6 +21,7 @@ import java.util.Properties;
 public record BuildInfo(
     String version,
     String build,
+    String buildNumber,
     String mcVersion,
     String tagline,
     String buildTimestamp
@@ -91,12 +95,34 @@ public record BuildInfo(
                 // fall through to defaults
             }
         }
+        String build = p.getProperty("build", "");
+        String buildNumber = p.getProperty("buildNumber", "");
+        if (buildNumber.isEmpty() && !build.isEmpty()) {
+            buildNumber = stripPlatformSuffix(build);
+        }
         return new BuildInfo(
             p.getProperty("version", "dev"),
-            p.getProperty("build", ""),
+            build,
+            buildNumber,
             p.getProperty("mcVersion", "unknown"),
             p.getProperty("tagline", "Lightning Fast Performance · Feature Rich"),
             p.getProperty("buildTimestamp", "")
         );
+    }
+
+    /**
+     * Strip the trailing single-letter platform suffix ({@code c}=Canvas, {@code f}=Folia) from
+     * a build id when it follows a digit or dot, returning the raw build number for comparison.
+     * E.g. {@code "43c"} -> {@code "43"}, {@code "43.1c"} -> {@code "43.1"},
+     * {@code "44-hotfix"} -> {@code "44-hotfix"} (no known suffix).
+     */
+    private static String stripPlatformSuffix(String build) {
+        if (build.length() >= 2) {
+            char last = build.charAt(build.length() - 1);
+            if ((last == 'c' || last == 'f') && !Character.isLetter(build.charAt(build.length() - 2))) {
+                return build.substring(0, build.length() - 1);
+            }
+        }
+        return build;
     }
 }
