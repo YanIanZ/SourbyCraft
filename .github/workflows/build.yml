@@ -50,14 +50,16 @@ jobs:
       - name: Test API and server; build metrics fixture
         run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test :test-plugin:jar --no-daemon --stacktrace
 
-      - name: Compute next release number (rN — also stamped as build Nf)
+      - name: Compute next release number (rN — also stamped as build Nc)
         id: relnum
         run: |
-          # Highest existing v26.2-rN tag + 1. ls-remote needs no tag fetch and no auth (public).
+          # Highest existing v26.2-rN tag (integer only) + 1. Composite tags like v26.2-r43.1
+          # (hotfixes) are intentionally skipped — auto-releases always increment the integer
+          # counter; hotfix tags are created manually and sit between two integer releases.
           last=$(git ls-remote --tags origin 'v26.2-r*' | sed -n 's#.*refs/tags/v26\.2-r\([0-9]*\)$#\1#p' | sort -n | tail -1)
           next=$(( ${last:-0} + 1 ))
           echo "next=$next" >> "$GITHUB_OUTPUT"
-          echo "Next release: v26.2-r$next (build ${next}f)"
+          echo "Next release: v26.2-r$next (build ${next}c)"
 
       - name: Build slim release jar (SourbyLoader)
         run: |
@@ -321,7 +323,7 @@ jobs:
           echo "$sha  $(basename "$jar")" > "$jar.sha256"
           title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next [$(git log -1 --format=%s | cut -c1-80)]"
           {
-            echo "**Build ${next}f** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
+            echo "**Build ${next}c** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
             echo
             echo "Auto-published from \`release/26.2\` after a green build + boot test."
             echo

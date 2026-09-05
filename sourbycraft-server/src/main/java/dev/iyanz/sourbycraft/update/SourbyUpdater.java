@@ -223,7 +223,7 @@ public final class SourbyUpdater {
 
         if (!isNewerThanRunning(latest.tagName, currentVersion)) {
             SourbyLogger.info("auto-updater: already up to date on channel "
-                + channel.suffix() + " (current " + currentVersion + " build " + ownBuildNumber()
+                + channel.suffix() + " (current " + currentVersion + " build " + ownBuildVersion()
                 + ", latest " + latest.tagName + ").");
             UpdateNotifier.clearPending();
             return Outcome.UP_TO_DATE;
@@ -267,21 +267,22 @@ public final class SourbyUpdater {
 
     /**
      * Newer-ness for our per-release tags: cores compare first ({@code 26.11 > 26.2}); equal cores
-     * fall back to the tag's release number {@code rN} versus THIS jar's stamped build number
-     * ({@code Nf} — CI stamps both from the same counter since r6). Without this, every
-     * {@code v26.2-rN} tag compares equal to the running {@code 26.2-REL} and no update is ever
-     * taken on the same Minecraft version line.
+     * fall back to the tag's release version {@code rXXX} versus THIS jar's stamped build number.
+     * Supports composite release identifiers: {@code v26.2-r43}, {@code v26.2-r43.1} (hotfix),
+     * {@code v26.2-r44-hotfix}. Without this fallback, every tag on the same MC version line
+     * compares equal to the running version and no update is ever taken.
      */
     static boolean isNewerThanRunning(String tag, String currentVersion) {
         int coreCmp = SemVer.compare(coreOf(tag), coreOf(currentVersion));
         if (coreCmp != 0) return coreCmp > 0;
-        int tagRel = releaseNumberOf(tag);
-        int own = ownBuildNumber();
-        return tagRel > 0 && own > 0 && tagRel > own;
+        BuildVersion tagRel = releaseVersionOf(tag);
+        BuildVersion own = ownBuildVersion();
+        return !tagRel.isUnknown() && !own.isUnknown() && tagRel.compareTo(own) > 0;
     }
 
     /**
-     * Order two release TAGS: numeric core first, then the {@code -rN} release counter. NOT plain
+     * Order two release TAGS: numeric core first, then the composite release version. Supports
+     * dotted ({@code r43.1}) and suffixed ({@code r44-hotfix}) release identifiers. NOT plain
      * {@link SemVer#compare}, which tokenises {@code "26.2-r10"} into {@code [26,2,"r10"]} and then
      * compares {@code "r10"} vs {@code "r9"} LEXICALLY — {@code "r10" < "r9"} — so it ranks r10
      * BELOW r9. That made {@code fetchLatestForChannel} keep picking r9 as "latest" and the
@@ -290,37 +291,46 @@ public final class SourbyUpdater {
     static int compareTags(String a, String b) {
         int coreCmp = SemVer.compare(coreOf(a), coreOf(b));
         if (coreCmp != 0) return coreCmp;
-        return Integer.compare(releaseNumberOf(a), releaseNumberOf(b));
+        return releaseVersionOf(a).compareTo(releaseVersionOf(b));
     }
 
-    /** Version core with any {@code -rN} release counter AND channel suffix stripped. */
+    /** Version core with any {@code -rXXX} release counter AND channel suffix stripped. */
     private static String coreOf(String version) {
         String v = SemVer.stripChannel(version);
         return RELEASE_NUM.matcher(v).replaceFirst("");
     }
 
+    /**
+     * Matches a release identifier after {@code -r}: integer ({@code -r43}), dotted
+     * ({@code -r43.1}), or suffixed ({@code -r44-hotfix}). The captured group is the full
+     * composite release version string, parsed by {@link BuildVersion}.
+     */
     private static final java.util.regex.Pattern RELEASE_NUM =
-        java.util.regex.Pattern.compile("-r(\\d+)$", java.util.regex.Pattern.CASE_INSENSITIVE);
+        java.util.regex.Pattern.compile("-r(\\d[\\w.-]*)$", java.util.regex.Pattern.CASE_INSENSITIVE);
 
-    /** {@code v26.2-r7} -> 7; -1 when the tag has no release counter. */
-    static int releaseNumberOf(String tag) {
-        if (tag == null) return -1;
+    /**
+     * Extract the composite release version from a tag. {@code v26.2-r43} -> {@code 43},
+     * {@code v26.2-r43.1} -> {@code 43.1}, {@code v26.2-r44-hotfix} -> {@code 44-hotfix}.
+     * Returns {@link BuildVersion#UNKNOWN} when the tag has no release counter.
+     */
+    static BuildVersion releaseVersionOf(String tag) {
+        if (tag == null) return BuildVersion.UNKNOWN;
         var m = RELEASE_NUM.matcher(SemVer.stripChannel(tag));
-        return m.find() ? Integer.parseInt(m.group(1)) : -1;
+        return m.find() ? BuildVersion.parse(m.group(1)) : BuildVersion.UNKNOWN;
     }
 
-    /** This jar's stamped build number ({@code "7c"} -> 7); -1 when unknown/dev. Suffix-agnostic
-     *  (reads only the leading digits), so it doesn't care whether the platform suffix is "c"
-     *  (Canvas, current) or the archived "f" (Folia). */
-    static int ownBuildNumber() {
+    /**
+     * This jar's stamped build version for update comparison. Uses the raw {@code buildNumber}
+     * field from {@code sourbycraft-build.properties} (e.g. {@code "43.1"}), which is the build
+     * number without the platform suffix. Supports composite versions: {@code "43"}, {@code "43.1"},
+     * {@code "44-hotfix"}.
+     */
+    static BuildVersion ownBuildVersion() {
         try {
-            String b = BuildInfo.load().build();
-            if (b == null) return -1;
-            int i = 0;
-            while (i < b.length() && Character.isDigit(b.charAt(i))) i++;
-            return i > 0 ? Integer.parseInt(b.substring(0, i)) : -1;
+            String bn = BuildInfo.load().buildNumber();
+            return BuildVersion.parse(bn);
         } catch (Throwable t) {
-            return -1;
+            return BuildVersion.UNKNOWN;
         }
     }
 
