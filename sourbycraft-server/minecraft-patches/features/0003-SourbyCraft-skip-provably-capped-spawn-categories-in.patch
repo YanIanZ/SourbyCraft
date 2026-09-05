@@ -32,7 +32,7 @@ players within view of a region's chunks are already region-local
 never exceed a cap.
 
 diff --git a/net/minecraft/world/level/NaturalSpawner.java b/net/minecraft/world/level/NaturalSpawner.java
-index 3795ad9bc5cce82805e7e0ca0486ec7669c173b2..56d55349514ea7c2de63f96c7ca25085dad0b8f5 100644
+index f622453b9304996074fa55f99f19999cfe62367e..62fdf504ce239dd2960a080fe5822cf62b9bdd38 100644
 --- a/net/minecraft/world/level/NaturalSpawner.java
 +++ b/net/minecraft/world/level/NaturalSpawner.java
 @@ -208,6 +208,7 @@ public final class NaturalSpawner {
@@ -43,7 +43,7 @@ index 3795ad9bc5cce82805e7e0ca0486ec7669c173b2..56d55349514ea7c2de63f96c7ca25085
                  // Copied from getFilteredSpawningCategories
                  int limit = mobCategory.getMaxInstancesPerChunk();
                  org.bukkit.entity.SpawnCategory spawnCategory = org.bukkit.craftbukkit.util.CraftSpawnCategory.toBukkit(mobCategory);
-@@ -715,6 +716,52 @@ public final class NaturalSpawner {
+@@ -711,6 +712,52 @@ public final class NaturalSpawner {
          public final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData; // Canvas - optimize natural spawning
          public final int[] limits; // Canvas - optimize natural spawning
  

@@ -28,7 +28,7 @@ async. Degrades to sync on any failure. Needs a live mob-behaviour soak
 before default-on.
 
 diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 03b14d05eed81de5dc5de1c86e102b1b1fdde9c2..efb60a8ac340f999e42fa5779140726a72e5e469 100644
+index 0b5fab274d9471472ffe81dead60e4d0906b0f31..88fb734f31d8e92d5e4417af75f455c4ccbad533 100644
 --- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 +++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 @@ -100,6 +100,17 @@ public abstract class PathNavigation {

@@ -1,11 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: SourbyCraft <agent@local>
 Date: Sun, 30 Aug 2026 00:00:00 +0000
-Subject: [PATCH] SourbyCraft - store Entity#lastKnownSpeed as 3 doubles instead of Vec3
+Subject: [PATCH] SourbyCraft - store Entity#lastKnownSpeed as 3 doubles
+ instead of Vec3
 
----
+
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 5ff72c2..05139e1 100644
+index 5ff72c2a6a50039641ef90fd0c6f2f1c2a771231..05139e18ccdca70ec1223e4f818254709bb5cb25 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -398,8 +398,17 @@ public abstract class Entity

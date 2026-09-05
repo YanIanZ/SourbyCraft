@@ -3,9 +3,9 @@ From: SourbyCraft <agent@local>
 Date: Sun, 30 Aug 2026 00:00:00 +0000
 Subject: [PATCH] SourbyCraft - reuse ItemEntity scratch list in Mob#aiStep
 
----
+
 diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
-index b52e114..fb0f5c2 100644
+index b52e11404b1d256d3ddf9c30b965efdd5688224c..fb0f5c2089c28baea332361996ea6b7b40b5e462 100644
 --- a/net/minecraft/world/entity/Mob.java
 +++ b/net/minecraft/world/entity/Mob.java
 @@ -109,6 +109,15 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
@@ -46,7 +46,7 @@ index b52e114..fb0f5c2 100644
                      // Paper start - Item#canEntityPickup
                      if (!entity.canMobPickup) {
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index aa82f0d..2d69f3e 100644
+index aa82f0d0db479b1283339896a5d57de9738fa76d..2d69f3e96c971c6f867c30e262289a2181cbc969 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
 @@ -229,6 +229,19 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl

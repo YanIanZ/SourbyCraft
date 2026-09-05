@@ -1,11 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: SourbyCraft <agent@local>
 Date: Sun, 30 Aug 2026 00:00:00 +0000
-Subject: [PATCH] SourbyCraft - fix Projectile tick ticket typo and drop dead section-cache code
+Subject: [PATCH] SourbyCraft - fix Projectile tick ticket typo and drop dead
+ section-cache code
 
----
+
 diff --git a/net/minecraft/world/entity/projectile/Projectile.java b/net/minecraft/world/entity/projectile/Projectile.java
-index 2799099..da5102f 100644
+index 279909963808fdd35b29aa0718e983ff69ef543d..8fad153e5232ff1b015af28c3a3172057edbc6a3 100644
 --- a/net/minecraft/world/entity/projectile/Projectile.java
 +++ b/net/minecraft/world/entity/projectile/Projectile.java
 @@ -169,17 +169,31 @@ public abstract class Projectile extends Entity implements TraceableEntity {
@@ -40,10 +41,9 @@ index 2799099..da5102f 100644
 -                    || sectionPosZ != net.minecraft.core.SectionPos.blockToSectionCoord(blockPos.getZ())
 -            )
 -                && this.getOwner() instanceof net.minecraft.server.level.ServerPlayer) {
--                this.canvas$ticketTimer = net.minecraft.server.level.ServerPlayer.placeEnderPearlTicket((ServerLevel) this.level(), this.chunkPosition()) - 1L;
 +                && this.getOwner() instanceof net.minecraft.server.level.ServerPlayer
 +            ) {
-+                this.canvas$ticketTimer = net.minecraft.server.level.ServerPlayer.placeEnderPearlTicket((ServerLevel) this.level(), this.chunkPosition()) - 1L;
+                 this.canvas$ticketTimer = net.minecraft.server.level.ServerPlayer.placeEnderPearlTicket((ServerLevel) this.level(), this.chunkPosition()) - 1L;
              }
 +            // SourbyCraft end
          }

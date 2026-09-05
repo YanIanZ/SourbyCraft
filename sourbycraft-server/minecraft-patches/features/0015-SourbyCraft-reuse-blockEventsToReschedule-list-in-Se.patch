@@ -1,11 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: SourbyCraft <agent@local>
 Date: Sun, 30 Aug 2026 00:00:00 +0000
-Subject: [PATCH] SourbyCraft - reuse blockEventsToReschedule list in ServerLevel#runBlockEvents
+Subject: [PATCH] SourbyCraft - reuse blockEventsToReschedule list in
+ ServerLevel#runBlockEvents
 
----
+
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index c5b1a68..ce9832a 100644
+index c5b1a68f015f21e3811209120f50be64d3179ab6..ce9832a119884ffb42353e231dab96dbe60a0279 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
 @@ -774,6 +774,14 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
