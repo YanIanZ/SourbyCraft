@@ -55,6 +55,13 @@ public final class SourbyCraftBootstrap {
 
         final Plugin owner = MinecraftInternalPlugin.INSTANCE;
 
+        // Register before command and plugin loading; shutdown keeps it readable through plugin disable.
+        try {
+            dev.iyanz.sourbycraft.perf.MetricsRuntime.start(org.bukkit.Bukkit.getServicesManager(), owner);
+        } catch (Throwable t) {
+            SourbyLogger.error("MetricsRuntime.start failed", t);
+        }
+
         // 1. Load + seed the unified TOML (messages, /maxp, auto-updater settings).
         try {
             SourbyCraftConfig.init();
