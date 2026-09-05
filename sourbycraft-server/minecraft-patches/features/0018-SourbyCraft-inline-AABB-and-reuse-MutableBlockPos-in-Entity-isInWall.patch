@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Sun, 30 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - inline AABB and reuse MutableBlockPos in Entity#isInWall
+
+---
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 05139e1..7e890ef 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -422,6 +422,12 @@ public abstract class Entity
+     private final List<AABB> collisionScratchAabbs = new ArrayList<>();
+     private final List<AABB> collisionScratchEntityAabbs = new ArrayList<>();
+     // SourbyCraft end
++    // SourbyCraft start - reuse a single BlockPos.MutableBlockPos across isInWall calls. isInWall
++    // is called from LivingEntity.baseTick per-entity per-tick (gated by shouldCheckForSuffocation,
++    // default true — see WorldConfig#enableSuffocationOptimization = false). The previous code
++    // allocated a fresh MutableBlockPos per call. Same pattern as 0010/0013/0014/0015/0016/0017.
++    private final BlockPos.MutableBlockPos isInWallScratch = new BlockPos.MutableBlockPos();
++    // SourbyCraft end
+     private final LongSet visitedBlocks = new LongOpenHashSet();
+     private final InsideBlockEffectApplier.StepBasedCollector insideEffectCollector = new InsideBlockEffectApplier.StepBasedCollector();
+     private CustomData customData = CustomData.EMPTY;
+@@ -3142,22 +3148,42 @@ public abstract class Entity
+             return false;
+         }
+ 
+-        // Paper start - optimise collisions
+-        final double reducedWith = (double)(this.dimensions.width() * 0.8F);
+-        final AABB boundingBox = AABB.ofSize(this.getEyePosition(), reducedWith, 1.0E-6D, reducedWith);
++        // SourbyCraft start - inline the AABB construction. isInWall allocated a fresh
++        // AABB.ofSize(eyePos, w, h, w) per call, then read 6 doubles (minX..maxZ) and passed
++        // the box to CollisionUtil.isEmpty(AABB). CollisionUtil.isEmpty has a 6-double overload
++        // that's observationally identical — the AABB wrapper adds no information. We compute
++        // the 6 doubles directly from getX() / getEyeY() / getZ() and pass them to the
++        // 6-double overload, eliminating the AABB allocation entirely. Also use the per-instance
++        // isInWallScratch field for the local BlockPos.MutableBlockPos (was a fresh allocation
++        // on every call). isInWall is called from LivingEntity.baseTick per-entity per-tick
++        // (gated by shouldCheckForSuffocation; WorldConfig#enableSuffocationOptimization defaults
++        // to false so the gate is always true). For 1000 living entities per tick: 1000 AABB +
++        // 1000 MutableBlockPos = 2000 allocations/tick = 40K/s saved.
++        final double eyeX = this.getX();
++        final double eyeY = this.getEyeY();
++        final double eyeZ = this.getZ();
++        final double reducedWidth = (double)(this.dimensions.width() * 0.8F);
++        final double halfWidth = reducedWidth * 0.5D;
++        final double halfHeight = 1.0E-6D * 0.5D;
++        final double minX = eyeX - halfWidth;
++        final double minY = eyeY - halfHeight;
++        final double minZ = eyeZ - halfWidth;
++        final double maxX = eyeX + halfWidth;
++        final double maxY = eyeY + halfHeight;
++        final double maxZ = eyeZ + halfWidth;
+         final Level world = this.level;
+ 
+-        if (ca.spottedleaf.moonrise.patches.collisions.CollisionUtil.isEmpty(boundingBox)) {
++        if (ca.spottedleaf.moonrise.patches.collisions.CollisionUtil.isEmpty(minX, minY, minZ, maxX, maxY, maxZ)) {
+             return false;
+         }
+ 
+-        final int minBlockX = Mth.floor(boundingBox.minX);
+-        final int minBlockY = Mth.floor(boundingBox.minY);
+-        final int minBlockZ = Mth.floor(boundingBox.minZ);
++        final int minBlockX = Mth.floor(minX);
++        final int minBlockY = Mth.floor(minY);
++        final int minBlockZ = Mth.floor(minZ);
+ 
+-        final int maxBlockX = Mth.floor(boundingBox.maxX);
+-        final int maxBlockY = Mth.floor(boundingBox.maxY);
+-        final int maxBlockZ = Mth.floor(boundingBox.maxZ);
++        final int maxBlockX = Mth.floor(maxX);
++        final int maxBlockY = Mth.floor(maxY);
++        final int maxBlockZ = Mth.floor(maxZ);
+ 
+         final int minChunkX = minBlockX >> 4;
+         final int minChunkY = minBlockY >> 4;
+@@ -3169,7 +3195,7 @@ public abstract class Entity
+ 
+         final int minSection = ca.spottedleaf.moonrise.common.util.WorldUtil.getMinSection(world);
+         final net.minecraft.world.level.chunk.ChunkSource chunkSource = world.getChunkSource();
+-        final BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
++        // SourbyCraft end
+ 
+         for (int currChunkZ = minChunkZ; currChunkZ <= maxChunkZ; ++currChunkZ) {
+             for (int currChunkX = minChunkX; currChunkX <= maxChunkX; ++currChunkX) {
+@@ -3197,23 +3223,23 @@ public abstract class Entity
+ 
+                     for (int currY = minYIterate; currY <= maxYIterate; ++currY) {
+                         final int blockY = currY | (currChunkY << 4);
+-                        mutablePos.setY(blockY);
++                        this.isInWallScratch.setY(blockY);
+                         for (int currZ = minZIterate; currZ <= maxZIterate; ++currZ) {
+                             final int blockZ = currZ | (currChunkZ << 4);
+-                            mutablePos.setZ(blockZ);
++                            this.isInWallScratch.setZ(blockZ);
+                             for (int currX = minXIterate; currX <= maxXIterate; ++currX) {
+                                 final int blockX = currX | (currChunkX << 4);
+-                                mutablePos.setX(blockX);
++                                this.isInWallScratch.setX(blockX);
+ 
+                                 final BlockState blockState = blocks.get((currX) | (currZ << 4) | ((currY) << 8));
+ 
+                                 if (((ca.spottedleaf.moonrise.patches.collisions.block.CollisionBlockState)blockState).moonrise$emptyCollisionShape()
+-                                    || !blockState.isSuffocating(world, mutablePos)) {
++                                    || !blockState.isSuffocating(world, this.isInWallScratch)) {
+                                     continue;
+                                 }
+ 
+                                 // Yes, it does not use the Entity context stuff.
+-                                final VoxelShape collisionShape = blockState.getCollisionShape(world, mutablePos);
++                                final VoxelShape collisionShape = blockState.getCollisionShape(world, this.isInWallScratch);
+ 
+                                 if (collisionShape.isEmpty()) {
+                                     continue;
