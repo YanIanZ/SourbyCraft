@@ -1,0 +1,27 @@
+--- a/src/main/java/io/canvasmc/canvas/spark/FoliaSparkPlugin.java
++++ b/src/main/java/io/canvasmc/canvas/spark/FoliaSparkPlugin.java
+@@ -1,5 +_,6 @@
+ package io.canvasmc.canvas.spark;
+ 
++import dev.iyanz.sourbycraft.perf.MetricsRuntime;
+ import io.canvasmc.canvas.spark.plugin.FoliaTickHook;
+ import io.canvasmc.canvas.spark.plugin.FoliaTickReporter;
+ import io.canvasmc.canvas.spark.plugin.FoliaTickStatistics;
+@@ -93,7 +_,7 @@
+ 
+     @Override
+     public Collection<String> getPermissions() {
+-        return this.platform.getCommandManager().getAllSparkPermissions();
++        return this.platform.getCommandManager().getAllSparkPermissions(); // SourbyCraft - spark-paper 1.10.172 compatibility
+     }
+ 
+     @Override
+@@ -153,7 +_,7 @@
+ 
+     @Override
+     public TickStatistics createTickStatistics() {
+-        return new FoliaTickStatistics();
++        return new FoliaTickStatistics(MetricsRuntime.provider());
+     }
+ 
+     @Override

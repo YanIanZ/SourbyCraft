@@ -1,77 +1,78 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
+import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
+import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
+import dev.iyanz.sourbycraft.api.metrics.SourbyMetrics;
+import dev.iyanz.sourbycraft.api.metrics.WindowMetrics;
+import dev.iyanz.sourbycraft.perf.MetricsRuntime;
 import dev.iyanz.sourbycraft.util.BarUtil;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 
-import java.util.Locale;
-
 import static net.kyori.adventure.text.Component.text;
 
-/**
- * {@code /mspt} — SourbyCraft styled MSPT panel, replacing Paper's plain
- * "Server tick times (avg/min/max) ... 0.0/0.0/0.0" (which floors sub-millisecond values to 0.0).
- *
- * <p>Reports the <b>worst region's</b> tick time via {@link dev.iyanz.sourbycraft.perf.RegionMspt}
- * (no custom sensor class) rather than {@link Bukkit#getAverageTickTime()}, which on the
- * region-threaded engine only sees the caller's own region — so a console/quiet-region reading
- * showed a healthy {@code 0.88ms} while the spawn region choked at seconds per tick. The worst
- * region is the one an operator needs to see; TPS (in {@code /tps}) stays the scheduler rate.
- * Rendered with adaptive precision and a budget bar, matching the look of {@code /tps}.
- */
+/** Region-aware MSPT panel rendered from one cached performance snapshot. */
 public class MsptCommand extends Command {
 
     private static final int BAR_WIDTH = 20;
 
-    public MsptCommand(String name) {
+    public MsptCommand(final String name) {
         super(name);
         this.description = "MSPT (worst region tick time)";
         this.usageMessage = "/mspt";
         this.setPermission("sourbycraft.command.mspt");
     }
 
-    /** Renders the current MSPT reading as a budget bar with adaptive-precision formatting. */
     @Override
-    public boolean execute(CommandSender s, String alias, String[] args) {
-        if (!testPermission(s)) return true;
-        double mspt;
-        try {
-            mspt = dev.iyanz.sourbycraft.perf.RegionMspt.worstMsptMs();
-        } catch (Throwable ignored) {
-            mspt = Double.NaN;
-        }
-        s.sendMessage(text(BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH), SourbyCraftColors.PRIMARY));
-        s.sendMessage(text()
-            .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
-            .append(text("SourbyCraft ", SourbyCraftColors.HEADER))
-            .append(text("MSPT", SourbyCraftColors.LABEL))
-            .append(text("  (tick execution time)", SourbyCraftColors.DIM))
-            .build());
-        if (Double.isNaN(mspt)) {
-            s.sendMessage(text("  (unavailable)", SourbyCraftColors.DIM));
-            s.sendMessage(text(BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH), SourbyCraftColors.DIM));
-            return true;
-        }
-        final double budgetPct = Math.clamp(mspt / 50.0, 0.0, 1.0) * 100.0;
-        final TextColor color = mspt < 25 ? SourbyCraftColors.SUCCESS : mspt < 40 ? SourbyCraftColors.PRIMARY : SourbyCraftColors.DANGER;
-        s.sendMessage(text()
-            .append(text("  worst ", SourbyCraftColors.DIM))
-            .append(text(BarUtil.bar(budgetPct, BAR_WIDTH), color))
-            .append(text("  " + fmt(mspt), color))
-            .append(text("  (" + (budgetPct < 1.0 ? String.format(Locale.ROOT, "%.1f", budgetPct) : String.valueOf((int) Math.round(budgetPct)))
-                + "% of the 50ms tick budget)", SourbyCraftColors.DIM))
-            .build());
-        s.sendMessage(text(BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH), SourbyCraftColors.DIM));
+    public boolean execute(final CommandSender sender, final String alias, final String[] args) {
+        if (!this.testPermission(sender)) return true;
+        final PerformanceSnapshot snapshot = MetricsRuntime.provider().snapshot();
+        render(snapshot).forEach(sender::sendMessage);
         return true;
     }
 
-    /** A healthy region ticks in tens of microseconds; %.1f would floor that to "0.0ms". */
-    private static String fmt(double mspt) {
-        if (mspt >= 10.0) return String.format(Locale.ROOT, "%.1fms", mspt);
-        if (mspt >= 0.1)  return String.format(Locale.ROOT, "%.2fms", mspt);
-        return String.format(Locale.ROOT, "%.3fms", mspt);
+    /** Reads the provider once, then renders every line from that immutable generation. */
+    public static List<Component> render(final SourbyMetrics metrics) {
+        final PerformanceSnapshot snapshot = metrics.snapshot();
+        return render(snapshot);
+    }
+
+    private static List<Component> render(final PerformanceSnapshot snapshot) {
+        final WindowMetrics recent = snapshot.window(MetricWindow.FIVE_SECONDS);
+        final List<Component> lines = new ArrayList<>();
+        lines.add(text(BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH), SourbyCraftColors.PRIMARY));
+        lines.add(text().append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
+            .append(text("SourbyCraft ", SourbyCraftColors.HEADER))
+            .append(text("MSPT", SourbyCraftColors.LABEL))
+            .append(text("  (tick execution time)", SourbyCraftColors.DIM)).build());
+
+        final double average = recent.worstAverageMspt();
+        final double target = snapshot.targetTps();
+        if (!TpsCommand.available(average) || !TpsCommand.available(target) || target <= 0.0) {
+            lines.add(text("  Worst average unavailable", SourbyCraftColors.DIM));
+        } else {
+            final double budget = 1_000.0 / target;
+            final double budgetPercent = Math.clamp(average / budget, 0.0, 1.0) * 100.0;
+            final TextColor color = TpsCommand.msptColor(average, target);
+            lines.add(text().append(text("  Worst average ", SourbyCraftColors.DIM))
+                .append(text(TpsCommand.ms(average), color))
+                .append(text("  " + BarUtil.bar(budgetPercent, BAR_WIDTH), color))
+                .append(text("  (" + String.format(Locale.ROOT, "%.0f", budgetPercent)
+                    + "% of " + TpsCommand.ms(budget) + " budget)", SourbyCraftColors.DIM)).build());
+        }
+
+        lines.add(text("  Estimated p95 " + TpsCommand.ms(recent.estimatedP95Mspt())
+            + " / p99 " + TpsCommand.ms(recent.estimatedP99Mspt()) + " (approximate)",
+            SourbyCraftColors.VALUE));
+        lines.add(text("  Exact recent max " + TpsCommand.ms(recent.maximumMspt()), SourbyCraftColors.VALUE));
+        lines.add(TpsCommand.freshness(snapshot.freshness()));
+        lines.add(text(BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH), SourbyCraftColors.DIM));
+        return List.copyOf(lines);
     }
 }

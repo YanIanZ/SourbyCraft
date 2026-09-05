@@ -15,3 +15,4 @@
 # source. Ours does not, so they are listed explicitly here instead (format documented in the
 # project-root build-data/dev-imports.txt header).
 leafpile ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java
+leafpile ca/spottedleaf/common/time/TickData.java
