@@ -2,7 +2,7 @@
   <img src="assets/SourbyCraft.png" alt="SourbyCraft" width="380">
 </p>
 
-<h1 align="center">SourbyCraft — 26.2 Pulse</h1>
+<h1 align="center">SourbyCraft — 26.2 Aurora</h1>
 
 <p align="center"><strong>Region-threaded Minecraft 26.2 · CanvasMC engine · Cherry server-side mixins · lean SourbyLoader slim jar</strong></p>
 
@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/minecraft-26.2-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/engine-CanvasMC%20(region--threading)-8a2be2?style=flat-square">
-  <img src="https://img.shields.io/badge/version-26.2--REL%20build%2044c-brightgreen?style=flat-square">
+  <img src="https://img.shields.io/badge/version-26.2--REL%20build%2045c-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/jar-~34M%20(SourbyLoader)-green?style=flat-square">
   <img src="https://img.shields.io/badge/mixins-Cherry-e83e8c?style=flat-square">
   <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
@@ -26,9 +26,9 @@ On top of the Canvas engine it adds SourbyCraft's **utility & UX layer** — a h
 
 > **This is the Canvas benchmark line.** The self-tuning **perf engine**, **anti-xray** (SourbyEngine), and the **proxy/forwarding** config surface from the Folia line are **deferred / not present in this build** — they may be ported to Canvas later. The `release/26.2` Folia line still carries them.
 
-Build id **44c** (`c` = Canvas), REL channel, codename **Pulse**.
+Build id **45c** (`c` = Canvas), REL channel, codename **Aurora**.
 
-[Build 44 changes and compatibility notes](docs/releases/44.md) · [JFR and IntelliJ profiling](docs/PROFILING.md)
+[Build 45 changes and compatibility notes](docs/releases/45.md) · [JFR and IntelliJ profiling](docs/PROFILING.md)
 
 ---
 

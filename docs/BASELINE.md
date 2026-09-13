@@ -49,10 +49,11 @@ python3 scripts/compare_baseline.py \
     build/baselines/main-players-50 build/baselines/candidate-players-50
 ```
 
-Exits non-zero when a gated metric regresses past `--threshold` (default `0.03`), and
+Exits non-zero if either input is uncertified, when a gated metric regresses past `--threshold` (default `0.03`), and
 also when the two runs differ in pinned provenance — Java version, platform, CPU
 count, heap, JVM flags, JFR settings, warmup, duration, asserted client count. Pass
-`--allow-provenance-drift` to print the report anyway; the drift stays in the output.
+`--allow-provenance-drift` to allow descriptive comparison despite drift; the report
+still labels the gate blocked. This option never permits uncertified inputs.
 Narrow the gate to the metrics a change actually targets with repeated `--gate`.
 
 Variance is real. Repeat a run before trusting a delta near the threshold; a developer
