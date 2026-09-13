@@ -32,7 +32,7 @@ entries; it is not repeated per row.
 
 ## Inventory
 
-### `minecraft-patches/features/` — 19 patches, 1,466 added lines
+### `minecraft-patches/features/` — 17 patches (0013 and 0015 removed by action 2)
 
 | Patch | Category | Upstream dependency | Lines | Status | Action |
 | --- | --- | --- | ---: | --- | --- |
@@ -44,14 +44,14 @@ entries; it is not repeated per row.
 | 0006 async pathfinding: offload periodic path | 500-entity | `PathNavigation` | +66 −3 | KEEP | Default off. Benchmark and threading review before enabling. |
 | 0007 async pathfinding: don't touch regionized state | 500-entity | `PathfindingContext` | +7 −1 | **MERGE** | Fold into 0006. Seven lines of the same feature, meaningless alone. |
 | 0008 eliminate elytra glide-slot stream allocation | 200-performance | `LivingEntity` | +17 −2 | KEEP | Benchmark. |
-| 0009 reuse collision scratch lists in `Entity#collide` | 200-performance | `Entity` | +18 −3 | KEEP | **Region-thread safety review.** See the scratch-reuse cluster below. |
+| 0009 reuse collision scratch lists in `Entity#collide` | 200-performance | `Entity` | +18 −3 | KEEP | Reviewed: entity-owned, no escape. Benchmark still missing. |
 | 0010 fix `Projectile` tick-ticket typo, drop dead projectiles | *correctness* | `Projectile` | +22 −8 | KEEP | Recategorize — this is a bug fix, not an optimization. |
 | 0011 store `Entity#lastKnownSpeed` as three doubles | 200-performance | `Entity` | +33 −5 | KEEP | Benchmark. |
-| 0012 reuse `BlockPos` in `ServerLevel` random tick | 200-performance | `ServerLevel` | +20 −1 | KEEP | Scratch-reuse cluster. |
-| 0013 reuse `WorldBorder` scratch set | 200-performance | `ServerLevel` | +13 −3 | KEEP | Scratch-reuse cluster. |
-| 0014 reuse `ParticleOptions` scratch list | 200-performance | `LivingEntity` | +15 −3 | KEEP | Scratch-reuse cluster. |
-| 0015 reuse `blockEventsToReschedule` list | 200-performance | `ServerLevel` | +15 −3 | KEEP | Scratch-reuse cluster. |
-| 0016 reuse `ItemEntity` scratch list in `Mob#aiStep` | 200-performance | `Mob`, `Level` | +33 −2 | KEEP | Scratch-reuse cluster. |
+| 0012 reuse `BlockPos` in `ServerLevel` random tick | 200-performance | `ServerLevel` | +20 −1 | KEEP | Reviewed: method-local, shares nothing. |
+
+| 0014 reuse `ParticleOptions` scratch list | 200-performance | `LivingEntity` | +23 −4 | **REWORKED** | Published the buffer into `SynchedEntityData`; fixed to copy-on-change. |
+
+| 0016 reuse `ItemEntity` scratch list in `Mob#aiStep` | 200-performance | `Mob`, `Level` | +33 −2 | KEEP | Reviewed: mob-owned, filled in place. |
 | 0017 inline AABB, reuse `MutableBlockPos` in `isInWall` | 200-performance | `Entity` | +46 −17 | **REWORK** | Needed three follow-up fixes after landing. Add a regression test. |
 | 0018 custom tick metrics | 100-runtime | 6 files | +85 −12 | KEEP | **Done.** Class relocated to the Sourby source tree; 1,229 → 309 lines. |
 | 0019 close lifecycle-owned runtime services | 100-runtime | `MinecraftServer` | +1 −1 | **MERGE** | One line. Belongs with 0018's lifecycle wiring. |
@@ -128,7 +128,7 @@ The change is behaviour-neutral by construction. A certified before/after baseli
 needs the full 600-second runs on a quiet machine; the short runs available here vary by
 more than any real signal would.
 
-### 2. Region-thread safety review of the scratch-reuse cluster (section 108)
+### 2. Region-thread safety review of the scratch-reuse cluster (section 108) — DONE
 
 Patches 0009 and 0012–0016 are six variations on one mechanism: replace a
 per-invocation collection with a reused scratch collection. They share one failure
@@ -136,16 +136,25 @@ mode — if a scratch instance is reachable from more than one region thread, or
 reentrant call reuses a buffer mid-iteration, the result is silent cross-region state
 corruption, not a crash.
 
-They are the highest-risk cluster in the set and the least covered by tests. Review
-them together, as one piece of work, against the ownership question: what guarantees
-each scratch instance is confined to one region thread? Section 54's ThreadLocal audit
-is the same question from the other direction.
+**Outcome — three of the six were unsafe.** Full review in
+[threading.md](threading.md).
 
-Whether to also **MERGE** them into one patch is a real trade-off: one patch matches
-their shared risk profile and single review, but six patches keep individual call
-sites revertable. Recommendation: keep them separate, and add a shared comment block
-naming the confinement invariant, so the connection is not implicit — which is exactly
-the hidden-dependency failure section 20 warns about.
+* **0013 and 0015 held their buffer on `ServerLevel`**, which every region thread ticks
+  concurrently — a data race on a non-thread-safe collection that could drop block
+  events or hand one region's events to another. Both **removed**: each saved about 20
+  allocations per second per region, neither carried a benchmark, and section 116 lists
+  correctness risk as grounds for removal. `ServerLevel` is back to Folia's per-call
+  locals.
+* **0014 published its buffer into `SynchedEntityData`**, which stores the reference and
+  only marks an entry dirty when the new value is `notEqual` to the stored one — so after
+  the first publish every comparison was the list against itself and clients stopped being
+  told the effect particles changed. **Fixed** by publishing an immutable copy only on a
+  real change, which allocates less than upstream did.
+* **0009, 0012 and 0016 are safe.** Their buffers are entity-owned or method-local and
+  never escape. Reentrancy is argued by inspection, not proven.
+
+`ScratchBufferConfinementTest` now pins both rules and was mutation-checked against the
+original 0014 bug.
 
 ### 3. Merge the two fragments
 
@@ -172,7 +181,7 @@ Applying the proposed banding to the current set:
 ```text
 000-bootstrap    0001, PaperBootstrap
 100-runtime      0002, 0018, 0019
-200-performance  0003, 0004, 0008, 0009, 0011, 0012, 0013, 0014, 0015, 0016, 0017
+200-performance  0003, 0004, 0008, 0009, 0011, 0012, 0014, 0016, 0017
 300-region       0005
 500-entity       0006, 0007
 700-api          FoliaSparkPlugin, FoliaTickStatistics
