@@ -1,6 +1,5 @@
 package dev.iyanz.sourbycraft.perf;
 
-import ca.spottedleaf.common.time.RegionTickMetrics;
 import ca.spottedleaf.common.time.TickTime;
 import ca.spottedleaf.common.util.TimeUtil;
 import java.util.concurrent.CountDownLatch;

@@ -3,7 +3,7 @@
 @@ -1,19 +_,27 @@
  package io.canvasmc.canvas.spark.plugin;
  
-+import ca.spottedleaf.common.time.RegionTickMetrics;
++import dev.iyanz.sourbycraft.perf.RegionTickMetrics;
 +import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
 +import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
 +import dev.iyanz.sourbycraft.api.metrics.SourbyMetrics;
