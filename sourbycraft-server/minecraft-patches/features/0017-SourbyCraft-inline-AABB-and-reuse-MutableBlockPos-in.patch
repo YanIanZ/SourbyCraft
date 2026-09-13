@@ -113,3 +113,15 @@ index 05139e18ccdca70ec1223e4f818254709bb5cb25..7e890efffdafe894b99545fbe8552db7
  
                                  if (collisionShape.isEmpty()) {
                                      continue;
+@@ -3221,7 +3247,10 @@ public abstract class Entity
+                                 }
+ 
+-                                final AABB toCollide = boundingBox.move(-(double)blockX, -(double)blockY, -(double)blockZ);
++                                // SourbyCraft - translate the scalar eye bounds into block-local space.
++                                final AABB toCollide = new AABB(
++                                    minX - blockX, minY - blockY, minZ - blockZ,
++                                    maxX - blockX, maxY - blockY, maxZ - blockZ);
+ 
+                                 final AABB singleAABB = ((ca.spottedleaf.moonrise.patches.collisions.shape.CollisionVoxelShape)collisionShape).moonrise$getSingleAABBRepresentation();
+                                 if (singleAABB != null) {
+                                     if (ca.spottedleaf.moonrise.patches.collisions.CollisionUtil.voxelShapeIntersect(singleAABB, toCollide)) {
