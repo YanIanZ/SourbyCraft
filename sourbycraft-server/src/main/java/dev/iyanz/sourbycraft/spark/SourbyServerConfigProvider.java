@@ -19,6 +19,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import me.lucko.spark.paper.common.platform.serverconfig.ConfigParser;
 import me.lucko.spark.paper.common.platform.serverconfig.ExcludedConfigFilter;
@@ -41,7 +42,7 @@ import org.jspecify.annotations.Nullable;
 public final class SourbyServerConfigProvider extends ServerConfigProvider {
 
     private static final Map<String, ConfigParser> FILES;
-    private static final Collection<String> HIDDEN_PATHS;
+    static final Collection<String> HIDDEN_PATHS;
 
     static {
         final ImmutableMap.Builder<String, ConfigParser> files = ImmutableMap.<String, ConfigParser>builder()
@@ -60,6 +61,7 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
         }
 
         final ImmutableSet.Builder<String> hiddenPaths = ImmutableSet.<String>builder()
+            .addAll(BASE_HIDDEN_PATHS)
             .add("database")
             .add("settings.bungeecord-addresses")
             .add("settings.velocity-support.secret")
@@ -85,12 +87,36 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
         super(FILES, HIDDEN_PATHS);
     }
 
+    /** Operates only on freshly parsed report JSON, never on live config or files. */
+    private static JsonElement removeSecrets(final JsonElement value) {
+        if (value.isJsonObject()) {
+            final var entries = value.getAsJsonObject().entrySet().iterator();
+            while (entries.hasNext()) {
+                final var entry = entries.next();
+                final String key = entry.getKey().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+                if (key.endsWith("password") || key.endsWith("passwd") || key.endsWith("secret")
+                    || key.endsWith("token") || key.endsWith("apikey") || key.endsWith("accesskey")
+                    || key.endsWith("privatekey") || key.endsWith("webhook") || key.endsWith("webhookurl")
+                    || key.equals("credentials") || key.equals("authorization") || key.equals("connectionstring")) {
+                    entries.remove();
+                } else {
+                    removeSecrets(entry.getValue());
+                }
+            }
+        } else if (value.isJsonArray()) {
+            for (final JsonElement element : value.getAsJsonArray()) {
+                removeSecrets(element);
+            }
+        }
+        return value;
+    }
+
     @Unmodifiable
     private static List<String> getTimingsHiddenConfigs() {
         return Collections.emptyList();
     }
 
-    private static class YamlConfigParser implements ConfigParser {
+    static class YamlConfigParser implements ConfigParser {
         static final YamlConfigParser INSTANCE = new YamlConfigParser();
         static final Gson GSON = new GsonBuilder()
             .registerTypeAdapter(MemorySection.class,
@@ -104,7 +130,7 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
             if (values == null) {
                 return null;
             }
-            return filter.apply(GSON.toJsonTree(values));
+            return removeSecrets(filter.apply(GSON.toJsonTree(values)));
         }
 
         @Override
@@ -114,7 +140,7 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
         }
     }
 
-    private static final class TomlConfigParser implements ConfigParser {
+    static final class TomlConfigParser implements ConfigParser {
         static final TomlConfigParser INSTANCE = new TomlConfigParser();
         private static final Gson GSON = new Gson();
 
@@ -126,7 +152,7 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
                 return null;
             }
             try (BufferedReader reader = Files.newBufferedReader(path)) {
-                return filter.apply(GSON.toJsonTree(this.parse(reader)));
+                return removeSecrets(filter.apply(GSON.toJsonTree(this.parse(reader))));
             }
         }
 
@@ -157,17 +183,26 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
         }
     }
 
-    private static final class SourbyCraftSplitParser implements ConfigParser {
+    static final class SourbyCraftSplitParser implements ConfigParser {
         static final SourbyCraftSplitParser INSTANCE = new SourbyCraftSplitParser();
+        private final Path directory;
+
+        SourbyCraftSplitParser() {
+            this(Path.of("."));
+        }
+
+        SourbyCraftSplitParser(final Path directory) {
+            this.directory = directory;
+        }
 
         @Nullable
         @Override
         public JsonElement load(final String ignored, final ExcludedConfigFilter filter) throws IOException {
             final JsonObject root = new JsonObject();
 
-            add(root, "global.toml", Path.of("sourbycraft_config", "sourbycraft_global_config.toml"),
+            add(root, "global.toml", this.directory.resolve("sourbycraft_config/sourbycraft_global_config.toml"),
                 TomlConfigParser.INSTANCE, filter);
-            add(root, "security.yml", Path.of("sourbycraft-security.yml"),
+            add(root, "security.yml", this.directory.resolve("sourbycraft-security.yml"),
                 YamlConfigParser.INSTANCE, filter);
 
             return root.size() == 0 ? null : root;
@@ -210,7 +245,7 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
             for (final Map.Entry<String, Path> entry : getNestedFiles(configDir).entrySet()) {
                 final Map<String, Object> values = this.parse(entry.getValue());
                 if (values != null) {
-                    root.add(entry.getKey(), filter.apply(GSON.toJsonTree(values)));
+                    root.add(entry.getKey(), removeSecrets(filter.apply(GSON.toJsonTree(values))));
                 }
             }
             return root;
@@ -243,7 +278,7 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
             for (final Map.Entry<String, Path> entry : getNestedFiles(configDir, prefix).entrySet()) {
                 final Map<String, Object> values = this.parse(entry.getValue());
                 if (values != null) {
-                    root.add(entry.getKey(), filter.apply(GSON.toJsonTree(values)));
+                    root.add(entry.getKey(), removeSecrets(filter.apply(GSON.toJsonTree(values))));
                 }
             }
             return root;
