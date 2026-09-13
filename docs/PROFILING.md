@@ -1,5 +1,8 @@
 # SourbyCraft profiling
 
+For comparison baselines and the regression gate, see [BASELINE.md](BASELINE.md).
+This document covers ad-hoc profiling and the single-run boot smoke test.
+
 Use Java 25, an isolated test directory, and the same JVM, world, plugin hashes,
 configuration, warmup, and workload for both builds. Boot and idle recordings are
 smoke tests; they do not establish the heavy-workload targets in SPEC.md.
