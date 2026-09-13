@@ -1,6 +1,5 @@
 package dev.iyanz.sourbycraft.perf;
 
-import ca.spottedleaf.common.time.RegionTickMetrics;
 import ca.spottedleaf.common.time.TickData;
 import ca.spottedleaf.common.time.TickTime;
 import ca.spottedleaf.common.util.TimeUtil;
@@ -463,7 +462,7 @@ class RegionTickMetricsTest {
             Set.of("tickCompleted", "recordCompletedSample"), true);
         assertNoAllocationOpcodes(RegionTickMetrics.class,
             Set.of("publishSnapshotIfDue", "rawWindow", "bucketWindow"), false);
-        assertNoAllocationOpcodes(Class.forName("ca.spottedleaf.common.time.RegionTickMetrics$BucketStore"),
+        assertNoAllocationOpcodes(Class.forName("dev.iyanz.sourbycraft.perf.RegionTickMetrics$BucketStore"),
             Set.of("add", "addUtilisation", "prepare"), true);
     }
 

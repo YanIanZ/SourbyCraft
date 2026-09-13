@@ -1,6 +1,5 @@
 package dev.iyanz.sourbycraft.perf;
 
-import ca.spottedleaf.common.time.RegionTickMetrics;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.Objects;

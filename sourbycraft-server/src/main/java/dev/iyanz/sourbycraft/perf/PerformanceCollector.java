@@ -1,6 +1,5 @@
 package dev.iyanz.sourbycraft.perf;
 
-import ca.spottedleaf.common.time.RegionTickMetrics;
 import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
 import dev.iyanz.sourbycraft.util.SourbyLogger;

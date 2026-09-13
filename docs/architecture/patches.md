@@ -15,11 +15,10 @@ optimization, and no patch mixes unrelated systems in the way section 16 warns a
 the Folia-era patch line lives on the unused `sourbypatcher` branch, not here. That
 item of the Definition of Done is satisfied by construction.
 
-**Patch 0018 is not actually a large patch.** It reads as 1,229 lines, but 915 of them
-create one new file, `ca/spottedleaf/common/time/RegionTickMetrics.java`, from
-`/dev/null`. Its actual modification of upstream code is 96 added lines across six
-files. See "Recommended actions" — this is the one patch worth restructuring, and the
-fix is a file move, not a rewrite.
+**Patch 0018 was not actually a large patch — and is no longer one.** It read as 1,229
+lines, but 915 of them created one new file, `RegionTickMetrics.java`, from `/dev/null`;
+its real modification of upstream code was 96 lines across six files. Action 1 below
+has been carried out: the patch is now **309 lines, +85 −12 across six files**.
 
 **The section 113 integration pattern is already followed.** Consumers reach Sourby
 code through `dev.iyanz.sourbycraft.perf.RegionTickMetricsHolder`,
@@ -54,7 +53,7 @@ entries; it is not repeated per row.
 | 0015 reuse `blockEventsToReschedule` list | 200-performance | `ServerLevel` | +15 −3 | KEEP | Scratch-reuse cluster. |
 | 0016 reuse `ItemEntity` scratch list in `Mob#aiStep` | 200-performance | `Mob`, `Level` | +33 −2 | KEEP | Scratch-reuse cluster. |
 | 0017 inline AABB, reuse `MutableBlockPos` in `isInWall` | 200-performance | `Entity` | +46 −17 | **REWORK** | Needed three follow-up fixes after landing. Add a regression test. |
-| 0018 custom tick metrics | 100-runtime | 7 files | +931 −12 | **SPLIT** | Move the new class into the Sourby source tree. See below. |
+| 0018 custom tick metrics | 100-runtime | 6 files | +85 −12 | KEEP | **Done.** Class relocated to the Sourby source tree; 1,229 → 309 lines. |
 | 0019 close lifecycle-owned runtime services | 100-runtime | `MinecraftServer` | +1 −1 | **MERGE** | One line. Belongs with 0018's lifecycle wiring. |
 
 ### `minecraft-patches/sources/` — 1 patch
@@ -82,7 +81,7 @@ entries; it is not repeated per row.
 
 ## Recommended actions, in priority order
 
-### 1. Move `RegionTickMetrics` out of the upstream tree (section 112)
+### 1. Move `RegionTickMetrics` out of the upstream tree (section 112) — DONE
 
 Patch 0018 creates a 915-line SourbyCraft class inside `ca.spottedleaf.common.time`,
 the vendored Metal namespace. It does not belong there, and nothing forces it:
@@ -101,8 +100,33 @@ lets those three drop the import, and takes patch 0018 from 1,229 lines to about
 — inside the section 19 threshold — while leaving the genuine upstream work (the
 48-line `TickData` change and 48 lines of hooks) in the patch where it belongs.
 
-This is a file move plus an import change. It alters no behaviour, so the Phase 0
-harness should show no delta; that makes it a good first exercise of the gate.
+**Outcome.** `RegionTickMetrics.java` now lives at
+`sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/perf/RegionTickMetrics.java`.
+Patch 0018 went from 1,229 lines to 309, +85 −12 across six files — inside the section
+19 threshold. Its three Sourby consumers and five test classes dropped the now-redundant
+import; `FoliaTickStatistics`, which is in another package, was repointed to the new FQN,
+as was a reflective nested-class lookup in `RegionTickMetricsTest`.
+
+One visibility change was required: `tickCompletedWithoutTarget` was package-private so
+the vendored `ca.spottedleaf.common.time.TickData` could call it, and that call now
+crosses a package boundary, so the method is public with a comment saying why. The
+package-private `RegionTickMetrics(Runnable)` constructor stayed package-private — it is
+only reached through the public no-arg constructor, and it is now reachable from the perf
+tests, which previously could not see it.
+
+`TickData` gained one import. It already imported `RegionTickMetricsHolder` from the same
+Sourby package, so the dependency direction is unchanged, and `canvas-dev-imports.txt`
+needed no edit because `RegionTickMetrics` was never a vendored import.
+
+**Verified:** `applyAllPatches` clean, `compileJava` clean, 129 perf tests passing
+(including the classfile allocation-opcode assertions and the binary-compatibility suite
+that both cross the new boundary), `slimServerJar` builds, and the server boots, ticks
+and shuts down cleanly — TPS 19.9999, 60 telemetry samples published through the
+relocated class, no new log errors.
+
+The change is behaviour-neutral by construction. A certified before/after baseline still
+needs the full 600-second runs on a quiet machine; the short runs available here vary by
+more than any real signal would.
 
 ### 2. Region-thread safety review of the scratch-reuse cluster (section 108)
 
