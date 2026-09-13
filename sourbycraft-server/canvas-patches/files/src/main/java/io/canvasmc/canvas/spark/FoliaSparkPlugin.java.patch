@@ -1,9 +1,10 @@
 --- a/src/main/java/io/canvasmc/canvas/spark/FoliaSparkPlugin.java
 +++ b/src/main/java/io/canvasmc/canvas/spark/FoliaSparkPlugin.java
-@@ -1,5 +_,6 @@
+@@ -1,5 +_,7 @@
  package io.canvasmc.canvas.spark;
  
 +import dev.iyanz.sourbycraft.perf.MetricsRuntime;
++import dev.iyanz.sourbycraft.spark.SourbyServerConfigProvider;
  import io.canvasmc.canvas.spark.plugin.FoliaTickHook;
  import io.canvasmc.canvas.spark.plugin.FoliaTickReporter;
  import io.canvasmc.canvas.spark.plugin.FoliaTickStatistics;
@@ -22,6 +23,15 @@
      public TickStatistics createTickStatistics() {
 -        return new FoliaTickStatistics();
 +        return new FoliaTickStatistics(MetricsRuntime.provider());
+     }
+ 
+     @Override
+@@ -189,7 +_,7 @@
+ 
+     @Override
+     public ServerConfigProvider createServerConfigProvider() {
+-        return new FoliaServerConfigProvider();
++        return new SourbyServerConfigProvider();
      }
  
      @Override
