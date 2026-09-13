@@ -35,7 +35,7 @@ PINNED = ("java_version", "platform", "machine", "cpu_count", "heap_mib", "jvm_a
 
 
 def dig(record, path):
-    node = record.get("metrics", {})
+    node = record if path[0] == "network" else record.get("metrics", {})
     for key in path:
         if not isinstance(node, dict) or key not in node:
             return None
@@ -64,6 +64,10 @@ def provenance_drift(reference, candidate):
 
 def compare(reference, candidate, threshold, gated):
     rows, blocking = [], []
+    for role, record in (("Reference", reference), ("Candidate", candidate)):
+        if not record.get("certified"):
+            blocking.append(f"{role} is not a certified baseline: "
+                            f"{record.get('certification', 'certification missing')}")
     for label, (path, lower_is_better, form) in METRICS.items():
         before, after = dig(reference, path), dig(candidate, path)
         if before is None or after is None:
@@ -84,6 +88,12 @@ def compare(reference, candidate, threshold, gated):
 
 
 def render(reference, candidate, rows, blocking, drift, threshold):
+    blocking = list(blocking)
+    for role, record in (("Reference", reference), ("Candidate", candidate)):
+        if not record.get("certified"):
+            blocking.append(f"{role} is not a certified baseline")
+    if drift:
+        blocking.append("provenance differs; comparison is descriptive only")
     lines = [f"# Baseline comparison — {candidate['workload']['name']}", "",
              f"{candidate['workload']['summary']}", "",
              "| Field | Reference | Candidate |", "| --- | --- | --- |",

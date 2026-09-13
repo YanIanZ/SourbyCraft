@@ -260,6 +260,21 @@ def scaled(factor, **overrides):
 
 
 class CompareTest(unittest.TestCase):
+    def test_v8_uncertified_input_blocks_the_gate(self):
+        candidate = record(certified=False, certification="short window")
+        _, blocking = compare.compare(record(), candidate, 0.03, {"CPU"})
+        self.assertTrue(any("certified" in reason for reason in blocking))
+
+    def test_v8_network_regression_uses_top_level_report(self):
+        before = record(network={"round_trips_per_second": 100.0})
+        after = record(network={"round_trips_per_second": 80.0})
+        _, blocking = compare.compare(before, after, 0.03, {"Network round-trips"})
+        self.assertTrue(any("Network" in reason for reason in blocking))
+
+    def test_v8_report_cannot_pass_with_provenance_drift(self):
+        report = compare.render(record(), record(), [], [], ["cpu_count differs"], 0.03)
+        self.assertNotIn("**Gate (3%):** PASS", report)
+
     def test_blocks_a_regression_beyond_the_threshold(self):
         rows, blocking = compare.compare(record(), scaled(1.05), 0.03, set(compare.METRICS))
         self.assertTrue(blocking)

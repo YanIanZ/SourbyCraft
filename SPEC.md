@@ -2313,6 +2313,8 @@ V4: Existing utility TOML bytes unchanged on boot/default seeding; runtime snaps
 V5: Commands/HUD read one immutable metrics generation; unsupported metrics remain unavailable (§73, §81–82).
 V6: Release tag number = JAR build number; legacy/composite tags reserve their integer; publish only after all CI gates (§83–87).
 V7: SourbyCraft-owned services do not set runtime JVM options or inject hardware-selected heap/GC flags (§2, §106–107).
+V8: Baseline comparison refuses uncertified inputs; report cannot claim PASS under provenance drift; network gate reads captured top-level network values (§9–10, §85).
+V9: Reused entity buffers remain owner-confined; shared ServerLevel holds no downstream scratch buffers; synced entity data receives a detached copy (§108).
 
 # 153. Regression Log (§B)
 
@@ -2327,6 +2329,8 @@ V7: SourbyCraft-owned services do not set runtime JVM options or inject hardware
 | B7 | 2026-09-13 | Profiling script assumed Python 3.11 hashlib.file_digest on macOS Python 3.9 | Stream hash with explicit resource closure |
 | B8 | 2026-09-13 | SmartSwap changed SoftMaxHeapSize from host memory; legacy launcher injected GC/heap flags | V7; retire tuning and default automatic CDS fork |
 | B9 | 2026-09-13 | CallerRunsPolicy discarded shutdown submissions; shutdownNow discarded queued path futures | V2; explicit rejection and cancellation of drained futures |
+| B10 | 2026-09-13 | Baseline gate ignored certification, rendered PASS despite provenance drift, and searched network values below metrics | V8; reject uncertified comparisons, label drift blocked, read actual network report; regression tests |
+| B11 | 2026-09-13 | ServerLevel scratch collections shared across region threads; particle scratch aliased synchronized data | V9; Claude removed patches 0013/0015 and detached particle publication; ScratchBufferConfinementTest |
 
 # 154. Delivery Scope
 
