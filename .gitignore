@@ -495,3 +495,7 @@ sourbycraft-server/minecraft-patches/features/.skipped/
 sourbycraft-server/canvas-patches/files/.skipped/
 sourbycraft-server/paper-patches/.skipped/
 sourbyapi/paper-patches/.skipped/
+
+# Python bytecode from scripts/
+__pycache__/
+*.py[cod]

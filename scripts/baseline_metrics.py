@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Derive the Phase 0 baseline metric set from a JFR recording and process samples.
+
+Every metric carries its own source so a reader can tell a measured value from a
+derived estimate, and an unsupported metric is reported as unavailable rather than
+defaulted to zero. See docs/BASELINE.md.
+"""
+import json
+import re
+import subprocess
+
+_DURATION = re.compile(r"^PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?$")
+
+UNAVAILABLE = {"available": False}
+
+
+def duration_seconds(text):
+    """Convert a JFR ISO-8601 duration such as 'PT0.003590667S' to seconds."""
+    match = _DURATION.match(text)
+    if match is None or text == "PT":
+        raise ValueError(f"Not a JFR duration: {text!r}")
+    hours, minutes, seconds = (float(part) if part else 0.0 for part in match.groups())
+    return hours * 3600.0 + minutes * 60.0 + seconds
+
+
+def percentile(values, fraction):
+    """Linear-interpolated percentile over an unsorted sample list."""
+    if not values:
+        raise ValueError("percentile of an empty sample")
+    if not 0.0 <= fraction <= 1.0:
+        raise ValueError(f"fraction out of range: {fraction}")
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = fraction * (len(ordered) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
+
+def distribution(values):
+    """Summarize a sample list into the distribution PRD section 9 requires."""
+    if not values:
+        return dict(UNAVAILABLE, reason="no samples recorded")
+    return {"available": True, "samples": len(values),
+            "mean": sum(values) / len(values), "min": min(values),
+            "p50": percentile(values, 0.50), "p95": percentile(values, 0.95),
+            "p99": percentile(values, 0.99), "max": max(values)}
+
+
+def read_events(jfr_tool, recording, event):
+    """Return the ``values`` mapping of every event of one type in a recording.
+
+    Only small, field-bounded event types belong here; printing a sampled event
+    type such as jdk.ObjectAllocationSample also serializes every stack trace.
+    """
+    output = subprocess.run([str(jfr_tool), "print", "--json", "--events", event, str(recording)],
+                            check=True, capture_output=True, text=True).stdout
+    return [item["values"] for item in json.loads(output)["recording"]["events"]]
+
+
+def gc_metrics(pauses, collections):
+    """Collector identity plus the stop-the-world pause distribution."""
+    if not pauses:
+        return dict(UNAVAILABLE, reason="no jdk.GCPhasePause events in recording")
+    milliseconds = [duration_seconds(event["duration"]) * 1000.0 for event in pauses]
+    collectors = sorted({event["name"] for event in collections})
+    return {"available": True, "source": "jdk.GCPhasePause",
+            "collectors": collectors, "collections": len(collections),
+            "pause_count": len(milliseconds),
+            "total_pause_ms": sum(milliseconds),
+            "pause_ms": distribution(milliseconds)}
+
+
+def allocation_metrics(heap_summaries, window_seconds):
+    """Estimate the allocation rate from heap occupancy across collection pairs.
+
+    Bytes allocated between two collections are the heap used before a collection
+    minus the heap used after the preceding one. This uses bounded events rather
+    than jdk.ObjectAllocationSample, whose weights are a sampled extrapolation.
+    """
+    if window_seconds <= 0:
+        raise ValueError("window_seconds must be positive")
+    before, after = {}, {}
+    for event in heap_summaries:
+        (before if event["when"] == "Before GC" else after)[event["gcId"]] = event["heapUsed"]
+    identifiers = sorted(before.keys() & after.keys())
+    if len(identifiers) < 2:
+        return dict(UNAVAILABLE, reason="fewer than two complete collections in recording")
+    allocated = sum(max(0, before[current] - after[previous])
+                    for previous, current in zip(identifiers, identifiers[1:]))
+    return {"available": True, "source": "jdk.GCHeapSummary pairs",
+            "collection_pairs": len(identifiers) - 1,
+            "allocated_bytes": allocated,
+            "bytes_per_second": allocated / window_seconds,
+            "heap_used_after_gc": distribution([after[key] for key in identifiers])}
+
+
+def cpu_metrics(loads):
+    """Process and machine CPU load as fractions of total machine capacity."""
+    if not loads:
+        return dict(UNAVAILABLE, reason="no jdk.CPULoad events in recording")
+    process = [event["jvmUser"] + event["jvmSystem"] for event in loads]
+    return {"available": True, "source": "jdk.CPULoad",
+            "process_fraction": distribution(process),
+            "machine_fraction": distribution([event["machineTotal"] for event in loads])}
+
+
+# MetricState values whose sample carries its own freshly collected values.
+# WARMING only means some longer window is not yet fully covered — the collector
+# publishes real five-second data from its first minute, and the JFR event reads the
+# five-second window. STALE republishes the previous sample's values, so counting it
+# would weight a duplicate; UNAVAILABLE carries nothing.
+USABLE_STATES = ("AVAILABLE", "WARMING")
+
+
+def snapshot_metrics(snapshots):
+    """Tick metrics from the server's own one-per-second telemetry publication.
+
+    ``mspt`` is the distribution of the worst region's average MSPT across the
+    published samples; it is not a per-tick histogram, and the separately reported
+    ``reported_estimated_p95``/``p99`` are the server's own in-window estimates.
+    """
+    if not snapshots:
+        return dict(UNAVAILABLE,
+                    reason="no dev.iyanz.sourbycraft.PerformanceSnapshot events; "
+                           "server predates build 44 or the event was disabled")
+    usable = [event for event in snapshots if event["state"] in USABLE_STATES]
+    if not usable:
+        states = sorted({event["state"] for event in snapshots})
+        return dict(UNAVAILABLE, reason=f"no usable telemetry samples; states seen: {states}")
+    counts = {state: sum(1 for event in snapshots if event["state"] == state)
+              for state in sorted({event["state"] for event in snapshots})}
+    targets = sorted({event["targetTps"] for event in usable})
+    return {"available": True, "source": "dev.iyanz.sourbycraft.PerformanceSnapshot",
+            "builds": sorted({event["build"] for event in usable}),
+            "published_samples": len(snapshots), "usable_samples": len(usable),
+            "samples_by_state": counts,
+            "long_windows_covered": counts.get("WARMING", 0) == 0,
+            "target_tps": targets[0] if len(targets) == 1 else targets,
+            "active_regions": distribution([event["activeRegions"] for event in usable]),
+            "tps": distribution([event["worstTps"] for event in usable]),
+            "mspt": distribution([event["worstAverageMspt"] for event in usable]),
+            "reported_estimated_p95_mspt": distribution([event["estimatedP95Mspt"] for event in usable]),
+            "reported_estimated_p99_mspt": distribution([event["estimatedP99Mspt"] for event in usable]),
+            "heap_used_bytes": distribution([event["heapUsedBytes"] for event in usable])}
+
+
+def rss_metrics(samples_kib):
+    """Resident set size sampled from the operating system, not from the JVM."""
+    if not samples_kib:
+        return dict(UNAVAILABLE, reason="no resident memory samples collected")
+    return {"available": True, "source": "ps -o rss=",
+            "bytes": distribution([value * 1024 for value in samples_kib])}
+
+
+def collect(jfr_tool, recording, window_seconds, rss_samples_kib):
+    """Assemble the full baseline metric set for one workload run."""
+    return {
+        "tick": snapshot_metrics(read_events(jfr_tool, recording, "dev.iyanz.sourbycraft.PerformanceSnapshot")),
+        "cpu": cpu_metrics(read_events(jfr_tool, recording, "jdk.CPULoad")),
+        "gc": gc_metrics(read_events(jfr_tool, recording, "jdk.GCPhasePause"),
+                         read_events(jfr_tool, recording, "jdk.GarbageCollection")),
+        "allocation": allocation_metrics(read_events(jfr_tool, recording, "jdk.GCHeapSummary"), window_seconds),
+        "rss": rss_metrics(rss_samples_kib),
+    }
