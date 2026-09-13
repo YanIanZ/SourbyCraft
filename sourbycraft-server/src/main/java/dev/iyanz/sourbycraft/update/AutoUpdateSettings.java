@@ -99,6 +99,12 @@ public final class AutoUpdateSettings {
         instance.start();
     }
 
+    /** Stop without creating an updater during shutdown. */
+    public static void stopUpdater() {
+        final SourbyUpdater current = instance;
+        if (current != null) current.stop();
+    }
+
     /** Live updater instance for on-demand checks ({@code /update}). Creates one when needed. */
     public static @Nullable SourbyUpdater updater() {
         if (instance == null) instance = new SourbyUpdater();

@@ -45,53 +45,6 @@ public final class SourbyBootstrap {
     private static final long FORK_SAFE_XMS_BYTES = 256L * 1024 * 1024;
 
     /**
-     * At/above this committed initial heap (-Xms) the forked child prefers ZGC generational over
-     * G1 — this is {@link dev.iyanz.sourbycraft.brand.GcAdvisor}'s advice (SourbyCraft is tuned for
-     * ZGC generational). Below it, large-heap-oriented Aikar G1 is the safer default.
-     */
-    private static final long ZGC_PREFER_XMS_BYTES = 8L * 1024 * 1024 * 1024;
-
-    /**
-     * Aikar-style G1 flags — a verbatim mirror of {@code GC_FLAGS} in {@code docker/entrypoint.sh}.
-     * Heap-agnostic, pure-efficiency GC tuning with zero gameplay impact; applied to the forked
-     * bare-metal child when the operator has NOT chosen a GC. Docker already bakes these in at
-     * launch, so this closes the bare-metal parity gap (previously the fork ran an untuned GC).
-     */
-    private static final String[] AIKAR_G1_FLAGS = {
-        "-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis=200",
-        "-XX:+UnlockExperimentalVMOptions", "-XX:+DisableExplicitGC", "-XX:+AlwaysPreTouch",
-        "-XX:G1NewSizePercent=30", "-XX:G1MaxNewSizePercent=40", "-XX:G1HeapRegionSize=8M",
-        "-XX:G1ReservePercent=20", "-XX:G1HeapWastePercent=5", "-XX:G1MixedGCCountTarget=4",
-        "-XX:InitiatingHeapOccupancyPercent=15", "-XX:G1MixedGCLiveThresholdPercent=90",
-        "-XX:G1RSetUpdatingPauseTimePercent=5", "-XX:SurvivorRatio=32",
-        "-XX:+PerfDisableSharedMem", "-XX:MaxTenuringThreshold=1",
-    };
-
-    /**
-     * ZGC generational flags (GcAdvisor's recommended GC). {@code -XX:+ZGenerational} needs
-     * {@code -XX:+UnlockExperimentalVMOptions} on some JDKs; harmless when already unlocked.
-     * Preferred over G1 when the committed heap is large ({@code -Xms >= 8G}).
-     */
-    private static final String[] ZGC_GENERATIONAL_FLAGS = {
-        // ZGC is generational-by-default since JDK 23 and -XX:+ZGenerational was REMOVED in 24
-        // (passing it only produces a boot warning on our Java 25 floor). No AlwaysPreTouch here:
-        // pre-touching commits the whole heap as resident up-front, which is exactly what panel
-        // operators read as "RAM usage" — let ZGC commit on demand and RETURN idle pages to the
-        // OS (ZUncommit is on by default; the delay just makes it responsive).
-        "-XX:+UnlockExperimentalVMOptions", "-XX:+UseZGC",
-        "-XX:+DisableExplicitGC", "-XX:ZUncommitDelay=60",
-    };
-
-    /**
-     * Prefixes that mean the operator has already chosen a garbage collector. When ANY is present
-     * in the launch args, the fork inherits it untouched — we never override an explicit GC choice.
-     */
-    private static final String[] OPERATOR_GC_PREFIXES = {
-        "-XX:+UseG1GC", "-XX:+UseZGC", "-XX:+UseZ", "-XX:+UseParallelGC",
-        "-XX:+UseShenandoahGC", "-XX:+UseSerialGC", "-XX:+UseEpsilonGC",
-    };
-
-    /**
      * Entry point of the slim SourbyCraft jar. In order: auto-accept the EULA, finish any
      * fallback-staged auto-update swap, self-heal a GC-stale CDS archive, run the Auto-CDS layer
      * (which may re-exec into a forked child and never return), download+verify any manifest
@@ -293,13 +246,17 @@ public final class SourbyBootstrap {
      * </ul>
      *
      * <p>Modes via {@code -Dsourbycraft.cds.mode} / {@code $SOURBYCRAFT_CDS_MODE}:
-     * {@code auto} (default), {@code flag} (never fork, always print the hint),
-     * {@code fork} (always fork, legacy/bare-metal), {@code off} (no CDS).
+     * {@code off} (default), {@code flag} (never fork, always print the hint),
+     * {@code fork} (explicit legacy/bare-metal fork). Legacy {@code auto} is disabled.
      */
     private static Integer runCds(String[] args) throws Throwable {
-        String mode = firstNonNull(System.getProperty(CDS_MODE_PROP), System.getenv(CDS_MODE_ENV), "auto")
+        String mode = firstNonNull(System.getProperty(CDS_MODE_PROP), System.getenv(CDS_MODE_ENV), "off")
                 .trim().toLowerCase(Locale.ROOT);
         if (mode.equals("off")) return null;
+        if (mode.equals("auto")) {
+            System.out.println("[SourbyBootstrap] automatic CDS tuning is retired; use explicit JVM CDS flags.");
+            return null;
+        }
 
         java.lang.management.RuntimeMXBean rt = java.lang.management.ManagementFactory.getRuntimeMXBean();
         List<String> jvmArgs = rt.getInputArguments();
@@ -396,13 +353,12 @@ public final class SourbyBootstrap {
 
         List<String> cmd = new ArrayList<>();
         cmd.add(javaCmd);
-        boolean haveStdoutEnc = false, haveStderrEnc = false, haveFileEnc = false, haveSimdModule = false;
+        boolean haveStdoutEnc = false, haveStderrEnc = false, haveFileEnc = false;
         for (String a : jvmArgs) {
             if (a.startsWith("-agentlib:jdwp")) continue; // port re-use on re-exec
             if (a.startsWith("-Dstdout.encoding=")) haveStdoutEnc = true;
             else if (a.startsWith("-Dstderr.encoding=")) haveStderrEnc = true;
             else if (a.startsWith("-Dfile.encoding=")) haveFileEnc = true;
-            else if (mentionsSimdModule(a)) haveSimdModule = true;
             cmd.add(a);
         }
         // Force UTF-8 console + file encoding in the forked child. The child is launched from
@@ -413,28 +369,7 @@ public final class SourbyBootstrap {
         if (!haveStdoutEnc) cmd.add("-Dstdout.encoding=UTF-8");
         if (!haveStderrEnc) cmd.add("-Dstderr.encoding=UTF-8");
         if (!haveFileEnc) cmd.add("-Dfile.encoding=UTF-8");
-        // Resolve the SIMD incubator module in the forked child so Luminol's SIMDConfig
-        // auto-uses vectorized ops (map colors, mob AI). The module ships with the JDK; it
-        // is only unavailable to code until --add-modules makes it resolvable. Fork boots
-        // (bare metal) thus get SIMD for free, silencing the "not configured" warning. Only
-        // add it when the operator did not already pass an --add-modules for it.
-        if (!haveSimdModule) cmd.add(SIMD_ADD_MODULES_FLAG);
-        // Bare-metal GC parity with Docker. docker/entrypoint.sh launches java with Aikar G1 flags,
-        // but this bare-metal fork path historically added only CDS + encoding + SIMD, leaving the
-        // child on an untuned default GC (GcAdvisor only *recommended* a better one). Apply GC tuning
-        // to the child ONLY when the operator has not chosen a GC (an explicit choice always wins).
-        // Pure-efficiency, zero gameplay impact.
-        applyGcFlags(cmd, jvmArgs);
-        // RAM right-sizing for the child: with no explicit heap cap the JVM defaults to 25% of
-        // container/host RAM (tiny heap, wasted allocation). 75% leaves OS/off-heap headroom.
-        boolean haveXmx = false;
-        for (String a : jvmArgs) {
-            if (a.startsWith("-Xmx") || a.startsWith("-XX:MaxHeapSize") || a.startsWith("-XX:MaxRAMPercentage")) {
-                haveXmx = true;
-                break;
-            }
-        }
-        if (!haveXmx) cmd.add("-XX:MaxRAMPercentage=75");
+        // The operator explicitly requested a CDS fork. Preserve all performance JVM arguments.
         // JDK 19+: create-on-miss, use-on-hit, and recreate automatically when the
         // archive is stale (jar/JDK changed). No manual fingerprint bookkeeping.
         cmd.add("-XX:+AutoCreateSharedArchive");
@@ -464,55 +399,6 @@ public final class SourbyBootstrap {
             } catch (Throwable ignored) {}
         }, "SourbyBootstrap-Shutdown-Forwarder"));
         return child.waitFor();
-    }
-
-    /**
-     * Add GC tuning to the forked child command when the operator has NOT already chosen a GC.
-     *
-     * <p>Bare-metal parity with {@code docker/entrypoint.sh}: Docker ships Aikar G1 at launch, but
-     * the bare-metal fork previously ran an untuned default GC. This appends a real GC to the child:
-     * <ul>
-     *   <li>a large committed heap ({@code -Xms >= 8G}) → <b>ZGC generational</b> (GcAdvisor's
-     *       recommended GC — SourbyCraft is tuned for it, low pause on big heaps);</li>
-     *   <li>otherwise → <b>Aikar-style G1</b>, a verbatim mirror of the Docker {@code GC_FLAGS}
-     *       (heap-agnostic, predictable pauses on typical heaps).</li>
-     * </ul>
-     * Either choice is a pure-efficiency GC change with zero gameplay effect. An operator-provided
-     * GC (any of {@link #OPERATOR_GC_PREFIXES}) is respected untouched — those args are already in
-     * {@code cmd} from the inherited {@code jvmArgs}, so we simply skip adding ours. Logs the choice.
-     */
-    private static void applyGcFlags(List<String> cmd, List<String> jvmArgs) {
-        if (operatorHasGc(jvmArgs)) {
-            System.out.println("[SourbyBootstrap] fork: operator GC flag present — leaving GC tuning to the operator");
-            return;
-        }
-        long xms = committedInitialHeapBytes(jvmArgs);
-        final String[] flags;
-        final String which;
-        if (xms >= ZGC_PREFER_XMS_BYTES) {
-            flags = ZGC_GENERATIONAL_FLAGS;
-            which = "ZGC generational (committed heap -Xms=" + human(xms) + " >= 8G; GcAdvisor's advice)";
-        } else {
-            flags = AIKAR_G1_FLAGS;
-            which = "Aikar-style G1 (mirrors docker/entrypoint.sh GC_FLAGS)";
-        }
-        for (String f : flags) {
-            // -XX:+UnlockExperimentalVMOptions may appear in both the ZGC set and inherited args;
-            // the JVM tolerates the duplicate, but avoid re-adding one already inherited to stay tidy.
-            if (f.equals("-XX:+UnlockExperimentalVMOptions") && cmd.contains(f)) continue;
-            cmd.add(f);
-        }
-        System.out.println("[SourbyBootstrap] fork: applied GC tuning — " + which);
-    }
-
-    /** True when the launch args already select a garbage collector (any {@link #OPERATOR_GC_PREFIXES}). */
-    private static boolean operatorHasGc(List<String> jvmArgs) {
-        for (String a : jvmArgs) {
-            for (String p : OPERATOR_GC_PREFIXES) {
-                if (a.startsWith(p)) return true;
-            }
-        }
-        return false;
     }
 
     /** Prints the copy-paste single-JVM CDS flag exactly once (marker-suppressed). */

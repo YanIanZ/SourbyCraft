@@ -32,9 +32,7 @@ import org.bukkit.plugin.Plugin;
  * {@code PerfEngineBootstrap} also wired are DEFERRED on this benchmark build — see the PR #12 task
  * brief. Every step is wrapped so a single failure can never abort boot.
  *
- * <p>r40 adds two standalone memory-management steps (9-10) that are NOT part of the deferred
- * perf-engine: {@link dev.iyanz.sourbycraft.perf.SmartSwap} (adaptive heap reclaim) and
- * {@link dev.iyanz.sourbycraft.swap.AutoSwap} (optional OS swapfile creation).
+ * <p>Build 44 retires automatic JVM/OS memory tuning. Diagnostics remain read-only.
  */
 public final class SourbyCraftBootstrap {
 
@@ -42,10 +40,26 @@ public final class SourbyCraftBootstrap {
 
     private SourbyCraftBootstrap() {}
 
+    /** Server stop hook after plugin disable; each optional service has isolated cleanup. */
+    public static void close() {
+        try { dev.iyanz.sourbycraft.hud.HudBars.close(); }
+        catch (Throwable failure) { SourbyLogger.error("HUD shutdown failed", failure); }
+        try { AutoUpdateSettings.stopUpdater(); }
+        catch (Throwable failure) { SourbyLogger.error("Updater shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.perf.MetricsRuntime.close(org.bukkit.Bukkit.getServicesManager()); }
+        catch (Throwable failure) { SourbyLogger.error("Metrics shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.perf.GcTracker.stop(); }
+        catch (Throwable failure) { SourbyLogger.error("GC sampler shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.perf.AsyncPathProcessor.shutdown(); }
+        catch (Throwable failure) { SourbyLogger.error("Path worker shutdown failed", failure); }
+        try { VirtualExecutor.shutdown(); }
+        catch (Throwable failure) { SourbyLogger.error("I/O shutdown failed", failure); }
+    }
+
     /**
      * Runs every utility-layer boot step in order (config, ViaVersion config seeding, startup
      * banner, plugin-load diagnostics, command registration, join/leave messages, max-players,
-     * the virtual-thread executor, the auto-updater, SmartSwap, auto-swap). Idempotent — a second
+     * the virtual-thread executor, the auto-updater, GC telemetry). Idempotent — a second
      * call is a no-op. Each step is individually wrapped so one failure never aborts the rest or the
      * server boot.
      */
@@ -132,19 +146,6 @@ public final class SourbyCraftBootstrap {
             SourbyLogger.error("AutoUpdateSettings.startUpdater failed", t);
         }
 
-        // 9. SmartSwap — standalone adaptive heap-reclaim sensor (r40; config-gated, reloadable).
-        //    DEFAULT OFF: SourbyCraft ships with no automatic perf-tuning (operator opts in). The
-        //    repeating sensor loop is only scheduled when explicitly enabled, so when off there is no
-        //    background task at all — not merely a per-sample no-op. A later /sourbycraft reload that
-        //    flips it on will schedule it via SmartSwap.configure()'s start path.
-        try {
-            if (SourbyCraftConfig.cfgBool("perf.smart-swap.enabled", false)) {
-                dev.iyanz.sourbycraft.perf.SmartSwap.ensureStarted();
-            }
-        } catch (Throwable t) {
-            SourbyLogger.error("SmartSwap.ensureStarted failed", t);
-        }
-
         // 9b. GcTracker — always-on, lightweight GC-health sampler feeding /sys and the perf readout.
         //     GC pauses are invisible in TPS/MSPT, so this rolling-window tracker is the only source
         //     for collections/min + GC-time%. One daemon thread; never throws.
@@ -154,16 +155,5 @@ public final class SourbyCraftBootstrap {
             SourbyLogger.error("GcTracker.start failed", t);
         }
 
-        // 10. Auto-swap — optional OS swapfile creation on boot (r40; config-gated, default off).
-        //     Dispatched on the virtual-thread executor so a slow fallocate/dd fallback on an unusual
-        //     filesystem can never delay boot; AutoSwap.attempt() itself never throws.
-        try {
-            final boolean swapEnabled = SourbyCraftConfig.cfgBool("swap.auto-create.enabled", false);
-            final String swapPath = SourbyCraftConfig.cfgGet("swap.auto-create.path", "cache/sourbycraft.swap");
-            final int swapMaxMb = SourbyCraftConfig.cfgInt("swap.auto-create.max-size-mb", 8192);
-            VirtualExecutor.run(() -> dev.iyanz.sourbycraft.swap.AutoSwap.attempt(swapEnabled, swapPath, swapMaxMb));
-        } catch (Throwable t) {
-            SourbyLogger.error("AutoSwap.attempt dispatch failed", t);
-        }
     }
 }

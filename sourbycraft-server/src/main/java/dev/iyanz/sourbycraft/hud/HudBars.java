@@ -41,14 +41,20 @@ public final class HudBars {
 
     private static final Set<UUID> TPS_VIEWERS = ConcurrentHashMap.newKeySet();
     private static final Set<UUID> RAM_VIEWERS = ConcurrentHashMap.newKeySet();
+    private static final Set<UUID> PERF_VIEWERS = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, Boolean> ANY = new ConcurrentHashMap<>(); // quick "has any bar" check
 
     private static final BossBar TPS_BAR =
         BossBar.bossBar(Component.text("TPS"), 1.0f, BossBar.Color.GREEN, BossBar.Overlay.NOTCHED_20);
     private static final BossBar RAM_BAR =
         BossBar.bossBar(Component.text("RAM"), 0.0f, BossBar.Color.GREEN, BossBar.Overlay.NOTCHED_10);
+    private static final BossBar PERF_BAR =
+        BossBar.bossBar(Component.text("Performance"), 0.0f, BossBar.Color.GREEN, BossBar.Overlay.NOTCHED_20);
+    private static final org.bukkit.NamespacedKey PERF_ENABLED =
+        new org.bukkit.NamespacedKey("sourbycraft", "hud_perf_enabled");
 
     private static volatile boolean taskStarted;
+    private static io.papermc.paper.threadedregions.scheduler.ScheduledTask updater;
 
     private HudBars() {}
 
@@ -79,10 +85,29 @@ public final class HudBars {
 
     /** Toggle a bar for the player; returns true when the bar is now SHOWN. */
     public static boolean toggle(final Player player, final boolean tps) {
-        final boolean show = setShown(player, tps, !(tps ? TPS_VIEWERS : RAM_VIEWERS).contains(player.getUniqueId()));
+        return setPreference(player, tps, !(tps ? TPS_VIEWERS : RAM_VIEWERS).contains(player.getUniqueId()));
+    }
+
+    public static boolean setPreference(final Player player, final boolean tps, final boolean enabled) {
+        final boolean show = setShown(player, tps, enabled);
         // Manual toggle records the choice so the admin auto-HUD respects it on the next join: hiding
         // opts out (stays hidden), showing opts back in (auto-shows again).
         setOptedOut(player, tps, !show);
+        return show;
+    }
+
+    /** Called by commands on the player region; null toggles, explicit values are idempotent. */
+    public static boolean setPerf(final Player player, final Boolean enabled) {
+        final UUID id = player.getUniqueId();
+        final boolean show = enabled == null ? !PERF_VIEWERS.contains(id) : enabled;
+        if (show) PERF_VIEWERS.add(id); else PERF_VIEWERS.remove(id);
+        player.getPersistentDataContainer().set(PERF_ENABLED, org.bukkit.persistence.PersistentDataType.BYTE,
+            (byte)(show ? 1 : 0));
+        player.getScheduler().run(MinecraftInternalPlugin.INSTANCE, task -> {
+            if (PERF_VIEWERS.contains(id)) player.showBossBar(PERF_BAR);
+            else player.hideBossBar(PERF_BAR);
+        }, () -> PERF_VIEWERS.remove(id));
+        ensureTask();
         return show;
     }
 
@@ -106,6 +131,9 @@ public final class HudBars {
      * with /tpsbar /rambar). Regular players never get the bars automatically.
      */
     public static void autoShowOnJoin(final Player player) {
+        if (player.hasPermission("sourbycraft.command.perfbar")
+            && Byte.valueOf((byte)1).equals(player.getPersistentDataContainer().get(
+                PERF_ENABLED, org.bukkit.persistence.PersistentDataType.BYTE))) setPerf(player, true);
         if (!player.hasPermission(AUTO_PERMISSION)) return;
         if (!isOptedOut(player, true)) setShown(player, true, true);
         if (!isOptedOut(player, false)) setShown(player, false, true);
@@ -114,18 +142,29 @@ public final class HudBars {
     /** Evicts a departing player from both viewer sets. No-op if they had no bar shown. */
     public static void onQuit(final Player player) {
         final UUID id = player.getUniqueId();
+        if (PERF_VIEWERS.remove(id)) player.hideBossBar(PERF_BAR);
         if (ANY.remove(id) == null) return;
-        TPS_VIEWERS.remove(id);
-        RAM_VIEWERS.remove(id);
+        if (TPS_VIEWERS.remove(id)) player.hideBossBar(TPS_BAR);
+        if (RAM_VIEWERS.remove(id)) player.hideBossBar(RAM_BAR);
         // Viewer-side state dies with the connection; hiding explicitly is unnecessary.
     }
 
     private static synchronized void ensureTask() {
         if (taskStarted) return;
-        taskStarted = true;
-        Bukkit.getGlobalRegionScheduler().runAtFixedRate(
+        updater = Bukkit.getGlobalRegionScheduler().runAtFixedRate(
             MinecraftInternalPlugin.INSTANCE,
             task -> update(), 20L, 20L);
+        taskStarted = true;
+    }
+
+    public static synchronized void close() {
+        if (updater != null) updater.cancel();
+        updater = null;
+        taskStarted = false;
+        TPS_VIEWERS.clear();
+        RAM_VIEWERS.clear();
+        PERF_VIEWERS.clear();
+        ANY.clear();
     }
 
     private static void update() {
@@ -133,6 +172,12 @@ public final class HudBars {
             final PerformanceSnapshot snapshot = MetricsRuntime.provider().snapshot();
             if (!TPS_VIEWERS.isEmpty()) applyTps(renderTps(snapshot));
             if (!RAM_VIEWERS.isEmpty()) updateRam(snapshot);
+            if (!PERF_VIEWERS.isEmpty()) {
+                final TpsDisplay display = renderPerf(snapshot);
+                PERF_BAR.name(display.name());
+                PERF_BAR.progress(display.progress());
+                PERF_BAR.color(display.color());
+            }
         } catch (Throwable ignored) {
             // HUD must never break the global tick.
         }
@@ -142,6 +187,21 @@ public final class HudBars {
     public static TpsDisplay renderTps(final SourbyMetrics metrics) {
         final PerformanceSnapshot snapshot = metrics.snapshot();
         return renderTps(snapshot);
+    }
+
+    public static TpsDisplay renderPerf(final SourbyMetrics metrics) {
+        return renderPerf(metrics.snapshot());
+    }
+
+    private static TpsDisplay renderPerf(final PerformanceSnapshot snapshot) {
+        final TpsDisplay tick = renderTps(snapshot);
+        final RuntimeMetrics runtime = snapshot.runtime();
+        final String heap = runtime.heapUsedBytes() < 0 || runtime.heapMaxBytes() <= 0 ? "unavailable"
+            : TpsCommand.value(100.0 * runtime.heapUsedBytes() / runtime.heapMaxBytes(), 0) + "%";
+        final String cpu = Double.isFinite(runtime.processCpuPercent())
+            ? TpsCommand.value(runtime.processCpuPercent(), 0) + "%" : "unavailable";
+        return new TpsDisplay(tick.name().append(Component.text("  RAM " + heap + "  CPU " + cpu,
+            NamedTextColor.GRAY)), tick.progress(), tick.color());
     }
 
     private static TpsDisplay renderTps(final PerformanceSnapshot snapshot) {
