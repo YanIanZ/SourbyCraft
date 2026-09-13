@@ -48,9 +48,7 @@ entries; it is not repeated per row.
 | 0010 fix `Projectile` tick-ticket typo, drop dead projectiles | *correctness* | `Projectile` | +22 −8 | KEEP | Recategorize — this is a bug fix, not an optimization. |
 | 0011 store `Entity#lastKnownSpeed` as three doubles | 200-performance | `Entity` | +33 −5 | KEEP | Benchmark. |
 | 0012 reuse `BlockPos` in `ServerLevel` random tick | 200-performance | `ServerLevel` | +20 −1 | KEEP | Reviewed: method-local, shares nothing. |
-
 | 0014 reuse `ParticleOptions` scratch list | 200-performance | `LivingEntity` | +23 −4 | **REWORKED** | Published the buffer into `SynchedEntityData`; fixed to copy-on-change. |
-
 | 0016 reuse `ItemEntity` scratch list in `Mob#aiStep` | 200-performance | `Mob`, `Level` | +33 −2 | KEEP | Reviewed: mob-owned, filled in place. |
 | 0017 inline AABB, reuse `MutableBlockPos` in `isInWall` | 200-performance | `Entity` | +46 −17 | **REWORK** | Needed three follow-up fixes after landing. Add a regression test. |
 | 0018 custom tick metrics | 100-runtime | 6 files | +85 −12 | KEEP | **Done.** Class relocated to the Sourby source tree; 1,229 → 309 lines. |
