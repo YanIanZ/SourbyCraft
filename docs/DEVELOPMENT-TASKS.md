@@ -97,7 +97,7 @@ No major new optimization batch should be accepted before the missing representa
 - [x] **P2** report SourbyCraft platform identity
 - [x] **P2** add SourbyCraft configuration provider
 - [-] **P1** verify SourbyCraft config renders correctly in Spark web report
-- [ ] **P0** verify secret filtering for Sourby config
+- [x] **P0** verify secret filtering for Sourby config — parser/provider regression tests; see [scope and limits](SPARK.md)
 - [ ] **P1** add Sourby runtime metadata without duplicating expensive scans
 - [ ] **P1** improve region-thread classification
 - [ ] **P1** expose useful region context to profiles where supported
@@ -267,3 +267,12 @@ Before marking the next performance release stable:
 ```
 
 Do not invert this order by doing broad low-level optimization before baseline and stability work are complete.
+
+## Phase 46 continuation evidence (2026-09-14)
+
+Spark secret filtering: inherited upstream base exclusions and recursive TOML/YAML
+credential removal are covered by six parser/provider tests. Full local verification:
+patch regeneration, 9867 Java tests (24 skipped, no failures/errors), slim JAR build,
+and saved-world boot/JFR with unchanged utility configuration and clean shutdown.
+See [Spark reporting](SPARK.md) for scope. This does not close Spark web-viewer
+verification, representative workloads, restart inventory persistence, or soak gates.

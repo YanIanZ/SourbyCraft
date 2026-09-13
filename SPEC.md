@@ -2315,6 +2315,7 @@ V6: Release tag number = JAR build number; legacy/composite tags reserve their i
 V7: SourbyCraft-owned services do not set runtime JVM options or inject hardware-selected heap/GC flags (§2, §106–107).
 V8: Baseline comparison refuses uncertified inputs; report cannot claim PASS under provenance drift; network gate reads captured top-level network values (§9–10, §85).
 V9: Reused entity buffers remain owner-confined; shared ServerLevel holds no downstream scratch buffers; synced entity data receives a detached copy (§108).
+V10: Spark metadata retains upstream base secret exclusions; Sourby TOML/YAML credential keys are removed recursively through objects/arrays; report collection leaves operator files unchanged (DEVELOPMENT §11).
 
 # 153. Regression Log (§B)
 
@@ -2331,6 +2332,8 @@ V9: Reused entity buffers remain owner-confined; shared ServerLevel holds no dow
 | B9 | 2026-09-13 | CallerRunsPolicy discarded shutdown submissions; shutdownNow discarded queued path futures | V2; explicit rejection and cancellation of drained futures |
 | B10 | 2026-09-13 | Baseline gate ignored certification, rendered PASS despite provenance drift, and searched network values below metrics | V8; reject uncertified comparisons, label drift blocked, read actual network report; regression tests |
 | B11 | 2026-09-13 | ServerLevel scratch collections shared across region threads; particle scratch aliased synchronized data | V9; Claude removed patches 0013/0015 and detached particle publication; ScratchBufferConfinementTest |
+| B12 | 2026-09-13 | Copied Spark hidden-path list omitted current management secrets; path filter did not traverse arrays or identify nested Sourby credentials | V10; inherit BASE_HIDDEN_PATHS and recursively remove credential keys from report JSON; synthetic-secret parser/group tests |
+| B13 | 2026-09-13 | Focused --tests filter left two forcibly included existing JUnit suites empty | Run full server suite for integration; invocation issue, no runtime invariant change |
 
 # 154. Delivery Scope
 
