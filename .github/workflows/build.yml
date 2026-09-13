@@ -2,9 +2,9 @@ name: Build & Boot Test
 
 on:
   push:
-    branches: [ release/26.2, main ]
+    branches: [ release/26.2-canvas, main ]
   pull_request:
-    branches: [ release/26.2, main ]
+    branches: [ release/26.2-canvas, main ]
   workflow_dispatch:
 
 concurrency:
@@ -15,6 +15,9 @@ jobs:
   build:
     name: Build 26.2 jar
     runs-on: ubuntu-24.04
+    outputs:
+      number: ${{ steps.relnum.outputs.number }}
+      tag: ${{ steps.relnum.outputs.tag }}
     if: "!contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'ci skip')"
     steps:
       - name: Checkout code
@@ -44,22 +47,18 @@ jobs:
       - name: Setup Metal (vendored — gen sources)
         run: bash scripts/setup_metal.sh
 
-      - name: Apply all patches (Luminol 26.2 -> Folia)
+      - name: Apply all patches (Paper -> Canvas -> SourbyCraft)
         run: ./gradlew applyAllPatches --no-daemon --stacktrace
 
       - name: Test API and server; build metrics fixture
         run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test :test-plugin:jar --no-daemon --stacktrace
 
-      - name: Compute next release number (rN — also stamped as build Nc)
+      - name: Validate release identity and profiling scripts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Resolve release identity once
         id: relnum
-        run: |
-          # Highest existing v26.2-rN tag (integer only) + 1. Composite tags like v26.2-r43.1
-          # (hotfixes) are intentionally skipped — auto-releases always increment the integer
-          # counter; hotfix tags are created manually and sit between two integer releases.
-          last=$(git ls-remote --tags origin 'v26.2-r*' | sed -n 's#.*refs/tags/v26\.2-r\([0-9]*\)$#\1#p' | sort -n | tail -1)
-          next=$(( ${last:-0} + 1 ))
-          echo "next=$next" >> "$GITHUB_OUTPUT"
-          echo "Next release: v26.2-r$next (build ${next}c)"
+        run: python3 scripts/release_version.py >> "$GITHUB_OUTPUT"
 
       - name: Build slim release jar (SourbyLoader)
         run: |
@@ -71,13 +70,14 @@ jobs:
           # release/26.2 had its own paperweight fork (`sourbypatcher/`) register a task under the
           # old name; this Canvas line uses the stock weaver toolchain, and the slim-jar task
           # was renamed to drop the paperclip assumption.
-          ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.next }}
+          ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.number }}
           mkdir -p release
+          python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-REL.jar "${{ steps.relnum.outputs.number }}"
           cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-REL.jar
 
       - name: Show build info
         run: |
-          jar=$(ls release/SourbyCraft-*-REL.jar 2>/dev/null | head -1)
+          jar=release/SourbyCraft-26.2-REL.jar
           echo "Built: $jar ($(du -h "$jar" | cut -f1))"
 
       - name: Upload jar
@@ -134,7 +134,7 @@ jobs:
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
           echo "Booting $jar ..."
           mkfifo stdin.pipe
-          java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
+          java -Xmx2G -XX:+UseG1GC -XX:StartFlightRecording=settings=profile,filename=boot.jfr,dumponexit=true -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
           PID=$!
           stdin_open=0
           java_status=
@@ -240,7 +240,7 @@ jobs:
             fail_after_launch "Server did not reach Done with both metrics markers within 240s."
           fi
 
-          if ! printf 'tps\nmspt\nspark profiler info\nstop\n' >&3; then
+          if ! printf 'tps\nmspt\nram\nperf\nperf cpu\nperf gc\nspark profiler info\nstop\n' >&3; then
             fail_after_launch "Server console closed before accepting smoke-test commands."
           fi
           close_stdin
@@ -263,7 +263,20 @@ jobs:
             || { echo "MSPT command output marker missing."; exit 1; }
           grep -q 'Profiler is already running' server.log \
             || { echo "spark command output marker missing."; exit 1; }
+          grep -q 'SourbyCraft Memory' server.log || { echo "RAM marker missing"; exit 1; }
+          grep -q 'SourbyCraft Performance' server.log || { echo "PERF marker missing"; exit 1; }
+          jfr summary boot.jfr
           echo "Server reached Done, exposed metrics during load and enable, and exited cleanly."
+
+      - name: Upload boot diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SourbyCraft-boot-diagnostics
+          path: |
+            run/server.log
+            run/boot.jfr
+          retention-days: 7
 
   docker-build:
     name: Docker image builds
@@ -281,7 +294,7 @@ jobs:
 
       - name: Build image (Dockerfile + entrypoint COPY paths)
         run: |
-          jar=$(ls release/SourbyCraft-*-REL.jar | head -1)
+          jar=release/SourbyCraft-26.2-REL.jar
           echo "Building image with $jar"
           docker build --build-arg JAR="$jar" -t sourbycraft:ci .
 
@@ -294,7 +307,7 @@ jobs:
     name: Publish release (auto)
     runs-on: ubuntu-24.04
     needs: [build, boot-test, docker-build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/release/26.2'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/release/26.2-canvas'
     permissions:
       contents: write
     steps:
@@ -313,20 +326,27 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_NUMBER: ${{ needs.build.outputs.number }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
         run: |
           set -eu
           last=$(git tag -l 'v26.2-r*' | sed -n 's#^v26\.2-r\([0-9]*\)$#\1#p' | sort -n | tail -1)
-          next=$(( ${last:-0} + 1 ))
-          tag="v26.2-r$next"
-          jar=$(ls release/SourbyCraft-*-REL.jar | head -1)
+          next="$RELEASE_NUMBER"
+          tag="$RELEASE_TAG"
+          jar=release/SourbyCraft-26.2-REL.jar
           sha=$(sha256sum "$jar" | cut -d' ' -f1)
           echo "$sha  $(basename "$jar")" > "$jar.sha256"
-          title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next [$(git log -1 --format=%s | cut -c1-80)]"
+          codename=$(sed -n 's/^codename=//p' gradle.properties)
+          title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next $codename [$(git log -1 --format=%s | cut -c1-80)]"
           {
             echo "**Build ${next}c** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
             echo
-            echo "Auto-published from \`release/26.2\` after a green build + boot test."
+            echo "Auto-published from \`release/26.2-canvas\` after a green build + boot test."
             echo
+            if [ -f "docs/releases/$next.md" ]; then
+              cat "docs/releases/$next.md"
+              echo
+            fi
             echo "## Commits"
             if [ -n "${last:-}" ]; then
               git log "v26.2-r$last"..HEAD --format='- %s' | head -40
@@ -334,4 +354,4 @@ jobs:
               git log -10 --format='- %s'
             fi
           } > notes.md
-          gh release create "$tag" --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$jar" "$jar.sha256"
+          gh release create "$tag" --latest --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$jar" "$jar.sha256"

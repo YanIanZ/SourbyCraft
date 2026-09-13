@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="SourbyCraft JFR" type="JarApplication">
+    <option name="JAR_PATH" value="$PROJECT_DIR$/build/libs/SourbyCraft-slim.jar" />
+    <option name="VM_PARAMETERS" value="-Xmx2G -XX:+UseG1GC -XX:StartFlightRecording=name=SourbyCraft,settings=profile,delay=60s,duration=120s,filename=profile.jfr,dumponexit=true -Xlog:gc*:file=gc.log:time,uptime,level,tags" />
+    <option name="PROGRAM_PARAMETERS" value="--nogui" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/build/profile-idea" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="false" />
+    <method v="2" />
+  </configuration>
+</component>
