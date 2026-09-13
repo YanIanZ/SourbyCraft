@@ -21,7 +21,7 @@ public class HudBarCommand extends Command {
         super(name);
         this.tps = tps;
         this.description = tps ? "Toggle the TPS/MSPT boss bar" : "Toggle the RAM boss bar";
-        this.usageMessage = "/" + name;
+        this.usageMessage = "/" + name + " [on|off]";
         this.setPermission("sourbycraft.command." + name);
     }
 
@@ -33,7 +33,13 @@ public class HudBarCommand extends Command {
             s.sendMessage(text("Players only — the bar is a client HUD.", SourbyCraftColors.DANGER));
             return true;
         }
-        final boolean shown = HudBars.toggle(p, this.tps);
+        if (args.length > 1 || args.length == 1
+            && !args[0].equalsIgnoreCase("on") && !args[0].equalsIgnoreCase("off")) {
+            s.sendMessage(text(this.usageMessage, SourbyCraftColors.DIM));
+            return true;
+        }
+        final boolean shown = args.length == 0 ? HudBars.toggle(p, this.tps)
+            : HudBars.setPreference(p, this.tps, args[0].equalsIgnoreCase("on"));
         s.sendMessage(text()
             .append(text((this.tps ? "TPS" : "RAM") + " bar ", SourbyCraftColors.LABEL))
             .append(text(shown ? "shown" : "hidden", shown ? SourbyCraftColors.SUCCESS : SourbyCraftColors.DIM))

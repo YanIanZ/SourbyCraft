@@ -3,13 +3,9 @@ package dev.iyanz.sourbycraft.perf;
 import ca.spottedleaf.common.time.RegionTickMetrics;
 import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
-import dev.iyanz.sourbycraft.util.ContainerMemory;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
-import java.lang.management.ManagementFactory;
-import java.lang.management.MemoryMXBean;
-import java.lang.management.MemoryUsage;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
@@ -31,7 +27,6 @@ public final class PerformanceCollector implements AutoCloseable {
     private static final long HISTOGRAM_MAX_NANOS = TimeUnit.SECONDS.toNanos(16L);
     private static final double HISTOGRAM_LOG_RATIO = Math.log(
         (double)HISTOGRAM_MAX_NANOS / HISTOGRAM_MIN_NANOS) / 62.0;
-    private static final MemoryMXBean MEMORY = ManagementFactory.getMemoryMXBean();
     private static final MetricWindow[] WINDOWS = MetricWindow.values();
 
     @FunctionalInterface
@@ -102,12 +97,7 @@ public final class PerformanceCollector implements AutoCloseable {
     }
 
     static ImmutableRuntimeMetrics runtimeSnapshot() {
-        final MemoryUsage heap = MEMORY.getHeapMemoryUsage();
-        final GcTracker.Gc gc = GcTracker.snapshot();
-        return new ImmutableRuntimeMetrics(heap.getUsed(), heap.getMax(), ContainerMemory.usagePercentOrNaN(),
-            gc.hasData() ? gc.gcTimePercent() : Double.NaN,
-            gc.hasData() ? gc.collectionsPerMin() : Double.NaN,
-            gc.hasData() ? gc.avgPauseMs() : Double.NaN);
+        return RuntimeSampler.sample();
     }
 
     void start() {
@@ -301,6 +291,7 @@ public final class PerformanceCollector implements AutoCloseable {
         synchronized (this.lifecycleLock) {
             if (!this.closed) {
                 this.provider.publish(next);
+                TelemetryEvent.record(next);
             }
         }
     }

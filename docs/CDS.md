@@ -1,3 +1,8 @@
+> Build 44 update: automatic CDS forking is disabled by default, and legacy `auto`
+> mode no longer forks. Explicit `fork` only adds the requested CDS settings and
+> preserves operator heap/GC flags. The environment-detection tables below describe
+> the legacy launcher; prefer explicit JVM CDS flags for current deployments.
+
 # Auto-CDS — faster JVM startup, everywhere
 
 SourbyCraft ships **Class Data Sharing (CDS)** so the JVM loads its class metadata
@@ -123,7 +128,7 @@ Control the layer with a system property or env var:
 
 | `sourbycraft.cds.mode` / `$SOURBYCRAFT_CDS_MODE` | Behaviour |
 |---|---|
-| `auto` *(default)* | Fork only when safe (no committed `-Xms`, not a container/panel); otherwise boot inline + hint the flag. |
+| `auto` *(retired)* | Boot inline; print the retirement notice. |
 | `flag` | Never fork; always print the flag hint and boot inline. |
 | `fork` | Always fork (legacy bare-metal behaviour). |
 | `off` | No CDS layer at all. |

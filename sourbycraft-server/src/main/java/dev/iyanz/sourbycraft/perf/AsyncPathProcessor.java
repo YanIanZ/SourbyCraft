@@ -1,6 +1,8 @@
 package dev.iyanz.sourbycraft.perf;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -61,7 +63,10 @@ public final class AsyncPathProcessor {
                 t.setPriority(Thread.NORM_PRIORITY - 1); // yield to region tick threads under contention
                 return t;
             },
-            new ThreadPoolExecutor.CallerRunsPolicy());
+            (task, executor) -> {
+                if (executor.isShutdown()) throw new RejectedExecutionException("Path executor stopped");
+                task.run();
+            });
         p.allowCoreThreadTimeOut(true);
         pool = p;
         LOGGER.info("AsyncPath: worker pool started (" + threads + " thread(s))");
@@ -86,31 +91,32 @@ public final class AsyncPathProcessor {
             }
         }
         final CompletableFuture<T> future = new CompletableFuture<>();
-        try {
-            p.execute(() -> {
-                try {
-                    future.complete(solve.get());
-                } catch (final Throwable t) {
-                    LOGGER.log(Level.WARNING, "AsyncPath solve failed", t);
+        final FutureTask<T> task = new FutureTask<>(solve::get) {
+            @Override protected void done() {
+                if (isCancelled()) { future.complete(null); return; }
+                try { future.complete(get()); }
+                catch (Exception failure) {
+                    LOGGER.log(Level.WARNING, "AsyncPath solve failed", failure);
                     future.complete(null);
                 }
-            });
-        } catch (final Throwable rejected) {
-            // CallerRunsPolicy already handles saturation; this covers shutdown races.
-            try {
-                future.complete(solve.get());
-            } catch (final Throwable t) {
-                future.complete(null);
             }
-        }
+        };
+        future.whenComplete((result, failure) -> {
+            if (future.isCancelled()) task.cancel(true);
+        });
+        try { p.execute(task); }
+        catch (RejectedExecutionException rejected) { task.cancel(false); }
         return future;
     }
 
-    public static void shutdown() {
+    public static synchronized void shutdown() {
+        enabled = false;
         final ThreadPoolExecutor p = pool;
         pool = null;
         if (p != null) {
-            p.shutdownNow();
+            for (final Runnable pending : p.shutdownNow()) {
+                if (pending instanceof FutureTask<?> task) task.cancel(false);
+            }
         }
     }
 }

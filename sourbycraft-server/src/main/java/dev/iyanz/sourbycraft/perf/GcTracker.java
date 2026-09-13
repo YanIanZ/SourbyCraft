@@ -5,15 +5,9 @@ import java.lang.management.ManagementFactory;
 import java.util.List;
 
 /**
- * SourbyCraft runtime GC-health tracker. GC pauses are invisible in TPS and MSPT — the scheduler
- * rate stays ~20 and a region's tick time doesn't include a stop-the-world pause that froze every
- * thread — yet they are one of the most common real causes of "the server feels laggy". This samples
- * the JVM's {@link GarbageCollectorMXBean}s on a fixed cadence and keeps a rolling ~60s window so
- * {@link #snapshot()} can report the honest GC overhead: collections/min, wall-clock %, and the
- * average/worst pause.
- *
- * <p>Self-contained: a single daemon thread, no allocation on the sample path beyond the ring writes,
- * and every read degrades to zeros rather than throwing.
+ * Lifecycle-owned sampler of cumulative MXBean collection counters over a bounded 60s window.
+ * Collection time can include concurrent collector work; it is not a stop-the-world pause metric.
+ * The worker owns the ring under the class monitor and publishes an immutable result to readers.
  */
 public final class GcTracker {
 
@@ -30,14 +24,16 @@ public final class GcTracker {
     private static volatile int head = -1;      // index of the newest sample, -1 until first sample
     private static volatile int filled = 0;      // number of valid samples (<= SLOTS)
     private static volatile boolean started = false;
+    private static volatile Thread worker;
+    private static volatile Gc published = Gc.EMPTY;
 
-    /** Idempotent. Starts the sampler daemon. Pass a nanoTime supplier so scripts/tests stay pure. */
+    /** Idempotent. Starts the sampler daemon. */
     public static synchronized void start() {
         if (started) return;
         started = true;
         sampleOnce(System.nanoTime()); // seed slot 0 immediately so an early snapshot has a baseline
         final Thread t = new Thread(() -> {
-            while (true) {
+            while (Thread.currentThread() == worker) {
                 try {
                     Thread.sleep(SAMPLE_PERIOD_SECONDS * 1000L);
                 } catch (final InterruptedException e) {
@@ -51,10 +47,30 @@ public final class GcTracker {
             }
         }, "SourbyCraft-GcTracker");
         t.setDaemon(true);
+        worker = t;
         t.start();
     }
 
-    private static void sampleOnce(final long nowNanos) {
+    /** Called during server shutdown. No collector thread survives an explicit stop. */
+    public static void stop() {
+        final Thread closing;
+        synchronized (GcTracker.class) {
+            closing = worker;
+            worker = null;
+            started = false;
+            head = -1;
+            filled = 0;
+            published = Gc.EMPTY;
+        }
+        if (closing != null) {
+            closing.interrupt();
+            try { closing.join(2_000L); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        }
+    }
+
+    private static synchronized void sampleOnce(final long nowNanos) {
+        if (!started) return;
         long totalCount = 0L;
         long totalTimeMs = 0L;
         final List<GarbageCollectorMXBean> beans = ManagementFactory.getGarbageCollectorMXBeans();
@@ -70,10 +86,15 @@ public final class GcTracker {
         ringNanos[next] = nowNanos;
         head = next;
         if (filled < SLOTS) filled++;
+        published = calculateSnapshot();
     }
 
     /** @return GC health over the rolling window; all-zero (never null) when there is no data yet. */
     public static Gc snapshot() {
+        return published;
+    }
+
+    private static Gc calculateSnapshot() {
         try {
             final int h = head;
             final int f = filled;
@@ -90,7 +111,7 @@ public final class GcTracker {
             }
             final double windowSec = dNanos / 1.0E9;
             final double collectionsPerMin = dCount * 60.0 / windowSec;
-            final double gcTimePercent = 100.0 * (dTimeMs / 1000.0) / windowSec; // total STW ms as % of wall
+            final double gcTimePercent = 100.0 * (dTimeMs / 1000.0) / windowSec; // collection time as % of elapsed wall time
             final double avgPauseMs = dCount > 0 ? (double) dTimeMs / dCount : 0.0;
             return new Gc(collectionsPerMin, gcTimePercent, avgPauseMs, windowSec);
         } catch (final Throwable t) {
@@ -100,9 +121,9 @@ public final class GcTracker {
 
     /**
      * @param collectionsPerMin GC cycles per minute over the window
-     * @param gcTimePercent      total stop-the-world time as a percentage of wall-clock (the honest
-     *                           "how much of real time is lost to GC")
-     * @param avgPauseMs         mean pause length across the window's collections
+     * @param gcTimePercent      total collection time as a percentage of wall-clock (not a pause metric;
+     *                           includes concurrent collector work)
+     * @param avgPauseMs         legacy accessor name for mean MXBean collection time
      * @param windowSeconds      the actual window the figures were computed over
      */
     public record Gc(double collectionsPerMin, double gcTimePercent, double avgPauseMs, double windowSeconds) {

@@ -24,17 +24,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * forwarding / hardening-advisor security layer. All three are DEFERRED on this benchmark build
  * (see the PR #12 task brief) — their config trees, {@code seed()} calls and live-apply bridges
  * are gone with them. What remains is exactly what the kept utility layer reads: varied messages,
- * {@code /maxp} persistence + bypass, the auto-updater, and the GC-advisor toggle — plus, as of
- * r40, two standalone memory-management features that are deliberately NOT part of the deferred
- * perf-engine: {@code perf.smart-swap.*} ({@link dev.iyanz.sourbycraft.perf.SmartSwap}, adaptive
- * heap reclaim) and {@code swap.auto-create.*} ({@link dev.iyanz.sourbycraft.swap.AutoSwap},
- * optional OS swapfile creation on boot).
+ * {@code /maxp} persistence + bypass, the auto-updater, and the GC-advisor toggle. Since
+ * build 44, immutable utility snapshots and read-only performance diagnostics. Legacy automatic
+ * memory tuning is retired; existing keys remain in operator files.
  */
 public final class SourbyCraftConfig {
 
     private static final Path CONFIG_PATH = Path.of("sourbycraft_config", "sourbycraft_global_config.toml");
 
     private static volatile CommentedFileConfig FILE;
+    private static boolean newFile;
+    private static volatile dev.iyanz.sourbycraft.config.ConfigSnapshot snapshot =
+        new dev.iyanz.sourbycraft.config.ConfigSnapshot(java.util.Map.of());
 
     private SourbyCraftConfig() {}
 
@@ -54,7 +55,8 @@ public final class SourbyCraftConfig {
         } catch (Throwable t) {
             SourbyLogger.error("seedDefaults failed; utility layer will use hardcoded defaults", t);
         }
-        applyLiveConfig();
+        snapshot = dev.iyanz.sourbycraft.config.ConfigSnapshot.copyOf(f);
+        applyLiveConfig(false);
     }
 
     /**
@@ -70,35 +72,30 @@ public final class SourbyCraftConfig {
             return "reload FAILED: could not re-read the config file: " + t.getMessage();
         }
         try {
-            applyLiveConfig();
+            snapshot = dev.iyanz.sourbycraft.config.ConfigSnapshot.copyOf(f);
+            applyLiveConfig(true);
         } catch (Throwable t) {
             SourbyLogger.error("config reload apply failed", t);
             return "reload FAILED during apply: " + t.getMessage();
         }
         SourbyLogger.info("config reloaded from disk (/sourbycraft reload)");
-        return "reloaded — messages, /maxp persistence, auto-updater and SmartSwap settings applied "
+        return "reloaded — messages, /maxp persistence, auto-updater settings applied "
             + "live, plus the Canvas server/world configs (canvas-server.yml / canvas-worlds.yml). "
             + "Options cached at construction (and a scheduled auto-update interval) only take effect "
             + "on the next restart.";
     }
 
-    private static void applyLiveConfig() {
+    private static void applyLiveConfig(final boolean reloadEngine) {
         try {
             dev.iyanz.sourbycraft.update.AutoUpdateSettings.loadFromToml();
         } catch (Throwable t) {
             SourbyLogger.error("AutoUpdateSettings.loadFromToml failed; using defaults", t);
         }
 
-        // SmartSwap (adaptive heap reclaim, r40) operator bridge — reloadable, no restart needed.
-        try {
-            dev.iyanz.sourbycraft.perf.SmartSwap.configure(
-                cfgBool("perf.smart-swap.enabled", false),
-                cfgDouble("perf.smart-swap.soft-percent", 82.0),
-                cfgDouble("perf.smart-swap.medium-percent", 90.0),
-                cfgDouble("perf.smart-swap.hard-percent", 95.0),
-                cfgInt("perf.smart-swap.sample-interval-ticks", 20));
-        } catch (Throwable t) {
-            SourbyLogger.error("SmartSwap.configure failed; using defaults", t);
+        // Legacy automatic memory tuning is retired. Preserve operator files and explain the change.
+        if (cfgBool("perf.smart-swap.enabled", false) || cfgBool("swap.auto-create.enabled", false)) {
+            SourbyLogger.warn("SmartSwap and automatic swap creation are retired in build 44. "
+                + "JVM memory and OS swap remain operator-owned; legacy config keys were not modified.");
         }
 
         // Async pathfinding (MT uplift phase 1a) — offload the periodic path recompute off the region
@@ -117,6 +114,7 @@ public final class SourbyCraftConfig {
         // reload. Note: options cached at construction (e.g. a per-world value read once into a field)
         // update the config object but only take effect on the next restart — matching Canvas's own
         // "some options cannot change at runtime" contract.
+        if (!reloadEngine) return;
         try {
             io.canvasmc.canvas.GlobalConfiguration.reload();
         } catch (Throwable t) {
@@ -135,6 +133,7 @@ public final class SourbyCraftConfig {
             if (CONFIG_PATH.getParent() != null) {
                 Files.createDirectories(CONFIG_PATH.getParent());
             }
+            newFile = !Files.exists(CONFIG_PATH);
             CommentedFileConfig f = CommentedFileConfig.builder(CONFIG_PATH)
                 .onFileNotFound(FileNotFoundAction.CREATE_EMPTY)
                 .build();
@@ -204,13 +203,7 @@ public final class SourbyCraftConfig {
     }
 
     private static Object lookup(String dottedPath) {
-        CommentedFileConfig f = file();
-        if (f == null) return null;
-        try {
-            return f.get(dottedPath);
-        } catch (Throwable ignored) {
-            return null;
-        }
+        return snapshot.values().get(dottedPath);
     }
 
     // ------------------------------------------------------------------------------- typed writes
@@ -219,7 +212,7 @@ public final class SourbyCraftConfig {
      * Set + persist a single key (e.g. {@code /maxp <n>}). Never throws. Returns {@code true} on a
      * successful write+save.
      */
-    public static boolean setAndSave(String dottedPath, Object value, String commentIfNew) {
+    public static synchronized boolean setAndSave(String dottedPath, Object value, String commentIfNew) {
         CommentedFileConfig f = file();
         if (f == null) return false;
         try {
@@ -228,6 +221,7 @@ public final class SourbyCraftConfig {
                 f.setComment(dottedPath, commentIfNew);
             }
             f.save();
+            snapshot = dev.iyanz.sourbycraft.config.ConfigSnapshot.copyOf(f);
             return true;
         } catch (Throwable t) {
             SourbyLogger.warn("could not persist " + dottedPath + ": " + t.getMessage());
@@ -258,42 +252,13 @@ public final class SourbyCraftConfig {
             "Whether ViaVersion/ViaBackwards (auto-provisioned by SourbyBootstrap on first boot) are also "
             + "kept up to date by the auto-updater's cadence. false = manage Via yourself.");
 
-        // SmartSwap (r40) — standalone, trend-aware adaptive heap reclaim. Trims rebuildable soft
-        // caches + requests a concurrent GC (ZGC/Shenandoah uncommit) as usage climbs, so RSS stays
-        // under the container limit WITHOUT touching TPS. Percentages are of max(heap%, container-RSS%).
-        // Independent of the deferred self-tuning perf-engine — see dev.iyanz.sourbycraft.perf.SmartSwap.
-        seed(f, changed, "perf.smart-swap.enabled", false,
-            "Adaptive heap reclaim: trim soft caches + concurrent-GC hint as memory usage rises, so RSS "
-            + "stays under the container limit without touching TPS. Trend-aware (acts early when climbing fast). "
-            + "DEFAULT OFF: SourbyCraft ships with no automatic perf-tuning; the operator opts in explicitly.");
-        seed(f, changed, "perf.smart-swap.soft-percent", 82.0,
-            "Usage % at which SmartSwap starts trimming rebuildable soft caches.");
-        seed(f, changed, "perf.smart-swap.medium-percent", 90.0,
-            "Usage % at which SmartSwap also requests a concurrent GC to hand freed pages back to the OS.");
-        seed(f, changed, "perf.smart-swap.hard-percent", 95.0,
-            "Usage % at which SmartSwap reclaims on a shorter throttle (acts more often while critical).");
-        seed(f, changed, "perf.smart-swap.sample-interval-ticks", 20,
-            "How often (in ticks) SmartSwap samples heap/RSS usage. 20 = once per second.");
-
-        // Auto-swap (r40) — optional OS swapfile creation on boot when the host has none. Off by
-        // default: creating a multi-gigabyte file and mutating host swap state is more invasive than
-        // SourbyCraft's other boot defaults, and it needs root/CAP_SYS_ADMIN (usually unavailable to a
-        // server process) to actually take effect — see dev.iyanz.sourbycraft.swap.AutoSwap.
-        seed(f, changed, "swap.auto-create.enabled", false,
-            "Attempt to create + enable a Linux swapfile on boot if the host has none (spill headroom "
-            + "against a hard OOM-kill). Needs root/CAP_SYS_ADMIN; skips gracefully with a log line "
-            + "otherwise (the common case on unprivileged panels/containers). Linux-only; no-op elsewhere.");
-        seed(f, changed, "swap.auto-create.path", "cache/sourbycraft.swap",
-            "Where to create the auto-swap file.");
-        seed(f, changed, "swap.auto-create.max-size-mb", 8192,
-            "Cap on the auto-created swapfile size in MB. Actual size is min(detected RAM/container limit, this cap).");
-
         dev.iyanz.sourbycraft.lang.SourbyMessages.seedDefaults(f, changed);
         dev.iyanz.sourbycraft.update.AutoUpdateSettings.seedDefaults(f, changed);
 
-        if (changed[0]) {
+        if (changed[0] && newFile) {
             try {
                 f.save();
+                newFile = false;
                 SourbyLogger.info("seeded defaults into sourbycraft_config/sourbycraft_global_config.toml");
             } catch (Throwable t) {
                 SourbyLogger.warn("could not save unified config after seeding: " + t.getMessage());

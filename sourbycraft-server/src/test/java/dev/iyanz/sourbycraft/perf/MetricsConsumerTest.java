@@ -39,14 +39,18 @@ class MetricsConsumerTest {
         provider().overrideSnapshotsForTesting(null);
         viewers("TPS_VIEWERS").clear();
         viewers("RAM_VIEWERS").clear();
+        viewers("PERF_VIEWERS").clear();
     }
 
     @Test
     void eachMetricsRendererReadsExactlyOneImmutableSnapshot() {
         assertSingleRead(TpsCommand::render);
+        assertSingleRead(metrics -> dev.iyanz.sourbycraft.command.PerfCommand.render(metrics, "overview"));
+        assertSingleRead(metrics -> dev.iyanz.sourbycraft.command.PerfCommand.render(metrics, "memory"), "Heap used");
         assertSingleRead(MsptCommand::render);
         assertSingleRead(SysCommand::renderPerformance);
         assertSingleRead(HudBars::renderTps);
+        assertSingleRead(HudBars::renderPerf);
     }
 
     @Test
@@ -222,6 +226,10 @@ class MetricsConsumerTest {
     }
 
     private static void assertSingleRead(final Renderer renderer) {
+        assertSingleRead(renderer, "8.00");
+    }
+
+    private static void assertSingleRead(final Renderer renderer, final String marker) {
         final AtomicInteger reads = new AtomicInteger();
         final SourbyMetrics metrics = () -> snapshotForSequence(reads.incrementAndGet());
 
@@ -229,7 +237,7 @@ class MetricsConsumerTest {
 
         assertEquals(1, reads.get());
         assertTrue(plain(rendered instanceof HudBars.TpsDisplay display ? display.name() : rendered)
-            .contains("8.00"));
+            .contains(marker));
     }
 
     private static void assertCommandSingleRead(final Command command, final String marker) {
