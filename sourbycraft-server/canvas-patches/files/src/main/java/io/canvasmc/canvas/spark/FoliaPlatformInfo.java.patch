@@ -1,0 +1,12 @@
+--- a/src/main/java/io/canvasmc/canvas/spark/FoliaPlatformInfo.java
++++ b/src/main/java/io/canvasmc/canvas/spark/FoliaPlatformInfo.java
+@@ -14,8 +_,7 @@
+     @Contract(pure = true)
+     @Override
+     public String getName() {
+-        // TODO - should we change this to "Canvas"? We have an entirely custom implementation, may be worth it
+-        return "Folia";
++        return "SourbyCraft";
+     }
+ 
+     @Override
