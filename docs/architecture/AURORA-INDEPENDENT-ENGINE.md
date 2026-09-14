@@ -835,6 +835,17 @@ A custom Spark web viewer is explicitly deferred.
 - contention analysis,
 - multi-hour soak.
 
+Contention analysis is done: all measurable blocking is region thread against region
+thread on `EDFSchedulerThreadPool$TickThreadRunner.takeTask`, with safepoints
+negligible.
+
+The first multi-hour soak is captured and **not** certified. Fifty players on a 6 GiB
+heap exhausted it inside sixteen minutes and spent 40.7 of its 120 minutes in GC pause;
+tick drifted from 4.0 ms to 2519 ms and 33 of 50 clients timed out. The heap ceiling is
+the root and everything else is downstream of it. Whether that is a leak or simply a
+working set larger than the box is unresolved — see `docs/BASELINE.md`. Phase 0 does not
+close until a soak certifies.
+
 ## Phase 1 — Aurora configuration ownership
 
 - typed config,
