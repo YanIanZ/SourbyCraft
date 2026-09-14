@@ -23,9 +23,22 @@ public record BuildInfo(
     String build,
     String buildNumber,
     String mcVersion,
+    String codename,
     String tagline,
     String buildTimestamp
 ) {
+
+    /**
+     * The engine name shown to operators, derived from the release codename in
+     * {@code gradle.properties} so the banner cannot drift from the release it ships in.
+     * Falls back to the product name when no codename is stamped.
+     */
+    public String engineName() {
+        if (this.codename == null || this.codename.isBlank() || "dev".equals(this.codename)) {
+            return "SourbyCraft";
+        }
+        return Character.toUpperCase(this.codename.charAt(0)) + this.codename.substring(1);
+    }
     /**
      * Human-facing build id, e.g. {@code "build 4c"} (c = Canvas base) — the channel version
      * ({@code 26.2-REL}) is deliberately NOT shown here (it stays on the
@@ -105,6 +118,7 @@ public record BuildInfo(
             build,
             buildNumber,
             p.getProperty("mcVersion", "unknown"),
+            p.getProperty("codename", ""),
             p.getProperty("tagline", "Lightning Fast Performance · Feature Rich"),
             p.getProperty("buildTimestamp", "")
         );

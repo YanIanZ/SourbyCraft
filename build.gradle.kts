@@ -267,8 +267,10 @@ subprojects {
         val sourbyBuild = if (rawBuild.matches(Regex("\\d+(\\.\\d+)*"))) rawBuild + "c" else rawBuild
         val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
 
+        val engineCodename = providers.gradleProperty("codename").getOrElse("dev")
         inputs.property("internalVersion", internalVersionProvider)
         inputs.property("mcVersion", mcVersion)
+        inputs.property("codename", engineCodename)
         inputs.property("sourbyBuild", sourbyBuild)
         inputs.property("rawBuild", rawBuild)
         outputs.file(outFile)
@@ -288,6 +290,7 @@ subprojects {
                 build=$sourbyBuild
                 buildNumber=$rawBuild
                 mcVersion=$mcVersion
+                codename=$engineCodename
                 tagline=Lightning Fast Performance Feature Rich
                 buildTimestamp=$timestamp
                 """.trimIndent()

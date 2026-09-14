@@ -194,20 +194,30 @@ class Server:
         self._log.close()
 
 
-def seed_cache(directory, source):
-    """Copy a previously downloaded bootstrap cache into a fresh run directory.
+# Both bootstrap downloads: the Mojang jar lands in cache/, the externalized libraries
+# in libraries/. Seeding only the first still leaves a boot fetching a few hundred jars.
+BOOTSTRAP_DIRS = ("cache", "libraries")
 
-    A baseline should not depend on a 60 MB download succeeding. Seeding makes the run
-    offline, deterministic and faster, and removes a failure mode that has already
-    truncated two runs on this machine.
+
+def seed_cache(directory, source):
+    """Copy a previously downloaded bootstrap tree into a fresh run directory.
+
+    A baseline should not depend on downloads succeeding. Seeding makes the run offline,
+    deterministic and faster, and removes a failure mode that has already truncated two
+    runs on this machine.
     """
     source = source.resolve(strict=True)
-    if source.name != "cache":
-        source = source / "cache"
-    if not source.is_dir():
-        raise RuntimeError(f"No cache directory at {source}")
-    shutil.copytree(source, directory / "cache")
-    return sorted(item.name for item in (directory / "cache").iterdir())
+    if source.name in BOOTSTRAP_DIRS:            # Pointed straight at cache/ or libraries/.
+        source = source.parent
+    copied = []
+    for name in BOOTSTRAP_DIRS:
+        origin = source / name
+        if origin.is_dir():
+            shutil.copytree(origin, directory / name)
+            copied.append(name)
+    if not copied:
+        raise RuntimeError(f"No bootstrap directories ({', '.join(BOOTSTRAP_DIRS)}) under {source}")
+    return copied
 
 
 def prepare(directory, plan, port, heap_mib):
