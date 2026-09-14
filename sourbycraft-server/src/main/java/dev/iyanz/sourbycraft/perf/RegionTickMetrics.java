@@ -498,6 +498,29 @@ public final class RegionTickMetrics {
             windowNanos, histogram, true, truncated);
     }
 
+    /**
+     * The most coverage a window of this length can lose to bucket alignment.
+     *
+     * <p>Windows longer than the raw ring are summed from whole buckets: {@code bucketWindow}
+     * counts epochs from {@code ceilDiv(cutoff, width)} to {@code floorDiv(now, width)}, so the
+     * partially elapsed bucket at each end is excluded and the total falls short of the nominal
+     * window by up to one bucket width per store it reads. A minute reads the one-second store
+     * alone; longer windows read the one-second store for the newest minute and the five-second
+     * store for the remainder, and so can lose a bucket at each boundary.</p>
+     *
+     * <p>Callers deciding whether enough history exists must allow for this. Requiring coverage
+     * to equal the window exactly is a condition the bucket layout can never satisfy.</p>
+     *
+     * @param windowNanos the nominal window length
+     * @return the maximum coverage shortfall, in nanoseconds
+     */
+    public static long coverageQuantisationNanos(final long windowNanos) {
+        if (windowNanos <= FIFTEEN_SECONDS) {
+            return 0L;                            // Summed from raw ticks, so exact.
+        }
+        return windowNanos == MINUTE ? SECOND : SECOND + FIVE_SECONDS;
+    }
+
     private WindowSnapshot bucketWindow(final long nowNanos, final long windowNanos,
                                         final long targetIntervalNanos) {
         final long cutoff = subtractFloor(nowNanos, windowNanos);
