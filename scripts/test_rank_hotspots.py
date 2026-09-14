@@ -125,6 +125,36 @@ class AllocationHotspotTest(unittest.TestCase):
         self.assertFalse(ranker.allocation_hotspots([], 10)["available"])
 
 
+class OverstatementTest(unittest.TestCase):
+    """The sampled allocation total, checked against a counter-based one.
+
+    On a real recording these disagreed 6.5-fold and the site at the top of the table
+    turned out not to be a meaningful allocator at all: JFR's allocation sampler favours
+    large objects, so a site allocating big arrays dominates out of proportion.
+    """
+
+    def test_reports_the_factor_when_a_measured_total_is_supplied(self):
+        result = ranker.allocation_hotspots([allocation("A", 1000)], 5, measured_bytes=250)
+        self.assertEqual(result["overstatement_factor"], 4.0)
+        self.assertEqual(result["measured_bytes"], 250)
+
+    def test_absent_when_no_measured_total_is_available(self):
+        result = ranker.allocation_hotspots([allocation("A", 1000)], 5)
+        self.assertNotIn("overstatement_factor", result)
+
+    def test_a_large_divergence_is_called_out_prominently(self):
+        report = ranker.render(Path("p.jfr"), ranker.cpu_hotspots([], 5),
+                               ranker.allocation_hotspots([allocation("A", 1000)], 5, 100), None)
+        self.assertIn("10.0x the allocation the counters actually measured", report)
+        self.assertIn("hint", report)
+
+    def test_agreement_is_noted_without_alarm(self):
+        report = ranker.render(Path("p.jfr"), ranker.cpu_hotspots([], 5),
+                               ranker.allocation_hotspots([allocation("A", 1000)], 5, 900), None)
+        self.assertIn("Cross-checked against the counters", report)
+        self.assertNotIn("out of proportion", report)
+
+
 class RenderTest(unittest.TestCase):
     def test_states_every_caveat_that_limits_the_ranking(self):
         report = ranker.render(Path("profile.jfr"),

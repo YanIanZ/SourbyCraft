@@ -83,6 +83,48 @@ class SourbyServerConfigProviderTest {
     }
 
     @Test
+    void composedGroupReportsAuroraNamespacesWithoutRewritingOperatorFile() throws Exception {
+        final Path config = directory.resolve("sourbycraft_config/sourbycraft_global_config.toml");
+        Files.createDirectories(config.getParent());
+        final String original = "# operator comment: aurora keys win, legacy stays for reference\n"
+            + "[perf.ai]\nasync-pathfinding=true\n"
+            + "[aurora.entity]\nasync-pathfinding=false\n"
+            + "[aurora.diagnostics]\nhud-refresh-ticks=20\nspark-include-sourby-config=true\n"
+            + "[aurora.diagnostics.export]\nenabled=true\nwebhook-url='synthetic-aurora-webhook'\n"
+            + "api_key='synthetic-aurora-key'\n";
+        Files.writeString(config, original);
+        final byte[] before = Files.readAllBytes(config);
+
+        final JsonObject out = new SourbyServerConfigProvider.SourbyCraftSplitParser(directory)
+            .load("sourbycraft/", filter()).getAsJsonObject();
+
+        assertEquals(1, out.size());
+        final JsonObject aurora = out.getAsJsonObject("global.toml").getAsJsonObject("aurora");
+        assertFalse(aurora.getAsJsonObject("entity").get("async-pathfinding").getAsBoolean());
+
+        final JsonObject diagnostics = aurora.getAsJsonObject("diagnostics");
+        assertEquals(20, diagnostics.get("hud-refresh-ticks").getAsInt());
+        assertTrue(diagnostics.get("spark-include-sourby-config").getAsBoolean());
+
+        final JsonObject export = diagnostics.getAsJsonObject("export");
+        assertTrue(export.get("enabled").getAsBoolean());
+        assertFalse(export.has("webhook-url"));
+        assertFalse(export.has("api_key"));
+        assertFalse(out.toString().contains("synthetic-"));
+
+        // The legacy key is still reported verbatim: the report shows what the operator wrote,
+        // it does not resolve aurora-over-legacy precedence for them.
+        assertTrue(out.getAsJsonObject("global.toml").getAsJsonObject("perf")
+            .getAsJsonObject("ai").get("async-pathfinding").getAsBoolean());
+
+        assertArrayEquals(before, Files.readAllBytes(config));
+        try (var entries = Files.list(directory)) {
+            assertEquals(List.of("sourbycraft_config"),
+                entries.map(entry -> entry.getFileName().toString()).toList());
+        }
+    }
+
+    @Test
     void missingGroupCreatesNothing() throws Exception {
         assertNull(new SourbyServerConfigProvider.SourbyCraftSplitParser(directory).load("sourbycraft/", filter()));
         try (var entries = Files.list(directory)) {
