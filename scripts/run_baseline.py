@@ -68,11 +68,33 @@ def competing_servers(jar, own_pid):
     return found
 
 
+# Untracked paths that can change the produced jar. An untracked file outside these
+# cannot, so it must not fail a measurement: reading raw `git status --porcelain`
+# counts every stray note and scratch file as a dirty tree.
+BUILD_INPUT_PREFIXES = ("sourbycraft-server/", "sourbyapi/", "sourbyclip/", "Metal/",
+                        "build-data/", "gradle/", "paper-server/", "canvas-server/")
+BUILD_INPUT_SUFFIXES = (".gradle.kts", ".gradle", ".properties", ".patch", ".java", ".at")
+
+
+def affects_build(path):
+    return path.startswith(BUILD_INPUT_PREFIXES) or path.endswith(BUILD_INPUT_SUFFIXES)
+
+
 def git_state():
-    """The commit under measurement and whether the tree matches it."""
+    """The commit under measurement, and whether the tree still describes the jar.
+
+    Tracked modifications always count. Untracked files count only when they sit where
+    the build would read them; an untracked note beside the repository does not change
+    what was compiled, and failing a ten-minute measurement over one is wrong.
+    """
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"]))
-    return commit, dirty
+    tracked = subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"], text=True).strip()
+    untracked = [line[3:].strip() for line
+                 in subprocess.check_output(["git", "status", "--porcelain"], text=True).splitlines()
+                 if line.startswith("??")]
+    relevant = sorted(path for path in untracked if affects_build(path))
+    return commit, bool(tracked) or bool(relevant), sorted(untracked), relevant
 
 
 def sha256(path):
@@ -241,12 +263,14 @@ def prepare(directory, plan, port, heap_mib):
 def capture(jar, plan, output, args, tools):
     java, jcmd, jfr, java_version = tools
     output = output.resolve()
-    commit, dirty = git_state()
+    commit, dirty, untracked, untracked_build_inputs = git_state()
     if dirty and not args.allow_dirty:
+        detail = (f" Untracked build inputs: {', '.join(untracked_build_inputs)}."
+                  if untracked_build_inputs else "")
         raise RuntimeError(
-            "The worktree has uncommitted changes, so this run could not be tied to a commit "
-            "and would not be certified. Commit or stash first, or pass --allow-dirty to "
-            "measure anyway.")
+            "The worktree has uncommitted changes that affect the build, so this run could "
+            "not be tied to a commit and would not be certified." + detail
+            + " Commit or stash first, or pass --allow-dirty to measure anyway.")
     competitors = competing_servers(jar, -1)
     if competitors and not args.allow_shared_machine:
         raise RuntimeError(
@@ -271,6 +295,8 @@ def capture(jar, plan, output, args, tools):
         "provenance": {
             "commit": commit,
             "worktree_dirty": dirty,
+            "untracked_files": untracked,
+            "untracked_build_inputs": untracked_build_inputs,
             "jar": str(jar), "jar_sha256": sha256(jar),
             "java_version": java_version, "jvm_args": command[1:-3],
             "jfr_settings": args.jfr_settings,
@@ -349,7 +375,7 @@ def capture(jar, plan, output, args, tools):
             raise RuntimeError(f"Unclean exit: {server.process.returncode}")
         record["provenance"]["shutdown_seconds"] = time.monotonic() - shutdown
 
-        after_commit, after_dirty = git_state()
+        after_commit, after_dirty, _, _ = git_state()
         record["provenance"]["worktree_dirty"] = dirty or after_dirty
         record["provenance"]["commit_moved_during_run"] = after_commit != commit
         if after_commit != commit:

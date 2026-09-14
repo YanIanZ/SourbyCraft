@@ -536,6 +536,35 @@ class CompetingServerTest(unittest.TestCase):
         self.assertEqual(found, [])
 
 
+class BuildInputTest(unittest.TestCase):
+    """Which untracked paths can actually change the produced jar.
+
+    Reading raw `git status --porcelain` counts untracked files, so a single stray note
+    beside the repository made every run report a dirty worktree and fail certification.
+    """
+
+    def test_source_and_patch_paths_affect_the_build(self):
+        for path in ("sourbycraft-server/src/main/java/x/Y.java",
+                     "sourbycraft-server/minecraft-patches/features/0001-x.patch",
+                     "sourbyapi/src/main/java/x/Y.java",
+                     "sourbyclip/java25/src/main/java/x/Y.java",
+                     "Metal/src/main/java/x/Y.java",
+                     "build-data/canvas-dev-imports.txt",
+                     "gradle.properties", "settings.gradle.kts", "build.gradle.kts"):
+            with self.subTest(path=path):
+                self.assertTrue(run_baseline.affects_build(path))
+
+    def test_notes_and_tooling_beside_the_repository_do_not(self):
+        for path in ("opencode.json", "notes.md", "scripts/run_baseline.py",
+                     "docs/BASELINE.md", "README.md", ".DS_Store"):
+            with self.subTest(path=path):
+                self.assertFalse(run_baseline.affects_build(path))
+
+    def test_a_stray_java_file_anywhere_still_counts(self):
+        # Loose enough to catch a source file dropped outside the known roots.
+        self.assertTrue(run_baseline.affects_build("scratch/Thing.java"))
+
+
 class MidRunChurnTest(unittest.TestCase):
     @staticmethod
     def args(**overrides):
