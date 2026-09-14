@@ -160,11 +160,20 @@ corruption, not a crash.
 `ScratchBufferConfinementTest` now pins both rules and was mutation-checked against the
 original 0014 bug.
 
-### 3. Merge the two fragments
+### 3. Merge the two fragments — DONE
 
-0007 into 0006 (seven lines of the same async-pathfinding feature) and 0019 into 0018
-(one line of the same lifecycle wiring). Both are currently patches that cannot be
-understood or reverted alone.
+**Done.** 0007 folded into 0006 and 0019 into 0018; both files removed.
+
+0019 was the clearer case: it rewrote a line that 0018 itself adds, so 0018 could not
+be reverted without 0019 breaking, and 0019 alone said nothing. 0007 guarded the
+`PathfindingContext` path-type cache that 0006's off-region solve NPEs without, in a
+different file but as one feature. 0007's explanation was carried into 0006's message
+rather than deleted with the file.
+
+The feature patch set is now `0001-0006, 0008, 0010-0012, 0016-0018` — thirteen
+patches. The numbering gaps are deliberate: filenames are the apply order, so
+renumbering rewrites every file, and that churn is worth taking once at a patch-freeze
+boundary rather than piecemeal.
 
 ### 4. Add a regression test for 0017
 
@@ -172,11 +181,35 @@ understood or reverted alone.
 `75e8a64`), twice for the same missing `boundingBox.move` inline. A rebase will
 reintroduce that class of error unless a test pins the behaviour.
 
-### 5. Split the `GlobalConfiguration` patch
+### 5. Split the `GlobalConfiguration` patch — NOT POSSIBLE; pinned instead
 
-It does two unrelated things — renames a logger and removes a runtime build-status
-broadcast. Section 16 wants one problem per patch, and the second change is a
-behaviour change hiding inside a branding patch.
+**This recommendation was wrong, and the count was wrong too.** The patch does four
+things, not two: renames a logger, suppresses Canvas's build-channel broadcast, and
+changes two operator-facing defaults (`guardSeverity` THROW to LOG,
+`logEnderPearlRewriteActions` true to false).
+
+It cannot be split. `canvas-patches/files/` patches are keyed by target file path —
+one patch per file — and carry no commit message, only the diff. There is no second
+patch for `GlobalConfiguration.java` to move anything into. The original
+recommendation was made without checking the layout.
+
+The concern underneath it is real: a default that differs from upstream is only
+discoverable by reading a diff. That is addressed by pinning instead. `patch_policy.
+upstream_default_changes` extracts every upstream field default any patch redefines,
+and `UpstreamDefaultTest` asserts the set matches an approved list carrying the reason
+for each. A new default change fails the test until somebody writes down why:
+
+| Field | Upstream | SourbyCraft | Why |
+| --- | --- | --- | --- |
+| `guardSeverity` | `THROW` | `LOG` | THROW crashes the server when a plugin touches state off-region; production should log. Operators can restore THROW. |
+| `logEnderPearlRewriteActions` | `true` | `false` | Logs on every pearl save/load — console spam on an active server. |
+| `enableTpsBar` | `true` | `false` | Duplicates the SourbyCraft HUD; section 23 says keep one. |
+| `enableRamBar` | `true` | `false` | Same. |
+| `LOGGER` (x2) | `CanvasMC`, `CanvasWorlds` | `SourbyCraft` | Console prefix branding. |
+
+Matching required an access modifier rather than treating it as optional: Java locals
+cannot have one, and without that the scan reported local initialisers inside rewritten
+method bodies as default changes.
 
 ## Category assignment (section 15)
 

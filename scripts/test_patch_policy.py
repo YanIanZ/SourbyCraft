@@ -91,6 +91,62 @@ class SharedMutableFieldTest(unittest.TestCase):
         self.assertEqual(self.check(body), [])
 
 
+class UpstreamDefaultTest(unittest.TestCase):
+    """Every upstream default SourbyCraft ships differently, and why.
+
+    These patches are keyed by target file — one patch per file — so a default change
+    cannot be moved into a patch of its own. Pinning the set here is what makes it
+    reviewable, and makes a new one fail until somebody writes down the reason.
+    """
+
+    APPROVED = {
+        # Branding: console prefix, in both Canvas config classes.
+        "GlobalConfiguration.java.patch:LOGGER": ("LoggerFactory.getLogger(\"CanvasMC\")",
+                                                  "LoggerFactory.getLogger(\"SourbyCraft\")"),
+        "WorldConfig.java.patch:LOGGER": ("LoggerFactory.getLogger(\"CanvasWorlds\")",
+                                          "LoggerFactory.getLogger(\"SourbyCraft\")"),
+        # Canvas ships THROW, which crashes the server when a plugin touches state
+        # off-region. On a production server that should be logged, not fatal.
+        # Operators can restore THROW in config/canvas-server.yml.
+        "GlobalConfiguration.java.patch:guardSeverity": ("GuardSeverity.THROW", "GuardSeverity.LOG"),
+        # Debug logging on every ender pearl save/load: console spam on an active server.
+        "GlobalConfiguration.java.patch:logEnderPearlRewriteActions": ("true", "false"),
+        # Canvas' own TPS/RAM bars duplicate the SourbyCraft HUD (/tpsbar, /rambar).
+        # Section 23 says keep one implementation, not two.
+        "WorldConfig.java.patch:enableTpsBar": ("true", "false"),
+        "WorldConfig.java.patch:enableRamBar": ("true", "false"),
+    }
+
+    def test_the_shipped_default_changes_are_exactly_the_approved_ones(self):
+        found = patch_policy.upstream_default_changes(REPO)
+        # LOGGER is changed in two files to the same value; compare by field name.
+        self.assertEqual(sorted(found), sorted(self.APPROVED),
+                         "a patch changes an upstream default that is not written down; add it "
+                         "to APPROVED with the reason, or drop the change")
+        for field, transition in found.items():
+            with self.subTest(field=field):
+                self.assertEqual(transition, self.APPROVED[field])
+
+    def test_detects_a_default_change_in_a_fixture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_patch(root, "0001-fixture.patch", patch_for(
+                "net/minecraft/server/level/ServerLevel.java",
+                "-    public int viewDistance = 10;",
+                "+    public int viewDistance = 4;"))
+            found = patch_policy.upstream_default_changes(root)
+            self.assertEqual(found, {"0001-fixture.patch:viewDistance": ("10", "4")})
+
+    def test_an_unchanged_value_is_not_a_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_patch(root, "0001-fixture.patch", patch_for(
+                "net/minecraft/server/level/ServerLevel.java",
+                "-    public int viewDistance = 10; // old comment",
+                "+    public int viewDistance = 10; // new comment"))
+            self.assertEqual(patch_policy.upstream_default_changes(root), {})
+
+
 class RepositoryTest(unittest.TestCase):
     def test_the_committed_patch_set_holds_no_shared_mutable_buffer(self):
         violations = patch_policy.shared_mutable_fields(REPO)

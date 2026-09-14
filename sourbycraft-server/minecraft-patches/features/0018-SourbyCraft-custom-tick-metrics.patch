@@ -290,7 +290,7 @@ index d10da4e3954e3bfeacd075cd6d6ba27876ba7475..eb931d7f083ae61418df46d5a84bc6db
              this.server.spark.disable(); // Paper - spark
              this.server.disablePlugins();
              this.server.waitForAsyncTasksShutdown(); // Paper - Wait for Async Tasks during shutdown
-+            dev.iyanz.sourbycraft.perf.MetricsRuntime.close(org.bukkit.Bukkit.getServicesManager());
++            dev.iyanz.sourbycraft.core.SourbyCraftBootstrap.close();
          }
          // CraftBukkit end
          this.isSaving = true; // Canvas - region threading

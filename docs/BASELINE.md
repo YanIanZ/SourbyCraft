@@ -62,6 +62,26 @@ desktop running builds alongside a measurement is not a controlled performance l
 
 ## Workloads
 
+All workloads run on generated terrain (`minecraft:normal`), never superflat. Superflat
+has a convenient known ground height, but it is representative of nothing: it changes
+chunk generation cost, block variety and therefore random-tick load, lighting,
+heightmaps and collision shapes. Entities are placed per column with
+`execute positioned <x> 0 <z> positioned over world_surface run summon ~ ~ ~`, so they
+land on the surface rather than inside or above it.
+
+Generated terrain has to be generated, and that cost must not land inside the
+measurement. Two things keep it out: each plan declares a settle period after setup,
+scaled to forceloaded chunk count for the player workloads, and `--world` copies a
+pre-generated world in. Use `--world` for anything you intend to compare — it keeps the
+terrain identical across runs, which the section 85 table reports as `World`, and it
+removes generation from the window entirely.
+
+```sh
+python3 scripts/run_baseline.py build/libs/SourbyCraft-slim.jar \
+    --workload players-50 --output build/baselines/players-50 \
+    --world build/worlds/baseline-world --cache-from build/baselines/idle
+```
+
 | Workload | Exercises | Needs clients |
 | --- | --- | --- |
 | `idle` | Fixed cost of runtime, telemetry and region scheduler | no |
