@@ -251,6 +251,11 @@ def prepare(directory, plan, port, heap_mib, max_players=0):
         # The default cap is 20; a workload asking for more clients than that silently
         # loses the rest to "The server is full!" and measures a fraction of its load.
         f"max-players={max(20, max_players)}\n"
+        # Headless clients hold altitude while moving, which a server with allow-flight
+        # off treats as hovering and kicks with "Flying is not enabled on this server".
+        # A load client is not a player to police; enabling flight is what lets the
+        # workload include flying movement at all.
+        "allow-flight=true\n"
         f"level-type={plan.level_type.replace(':', chr(92) + ':')}\nlevel-seed=440044\n"
         "spawn-protection=0\nenable-query=false\nenable-rcon=false\nsync-chunk-writes=false\n")
     config = directory / "sourbycraft_config" / "sourbycraft_global_config.toml"
@@ -289,7 +294,13 @@ def capture(jar, plan, output, args, tools):
         # out of the measurement window. Section 85 wants the world named in provenance.
         shutil.copytree(args.world.resolve(strict=True), output / "world")
     command = [str(java), f"-Xms{args.heap_mib}M", f"-Xmx{args.heap_mib}M", f"-XX:+Use{args.gc}",
-               "-Xlog:gc*:file=gc.log:time,uptime,level,tags", "-jar", str(jar), "--nogui"]
+               "-Xlog:gc*:file=gc.log:time,uptime,level,tags"]
+    # Extra -D properties, so a tuning question can be answered by measuring both sides
+    # rather than by changing a default and hoping. They are recorded in provenance, and
+    # compare_baseline treats jvm_args as pinned, so an A/B with different properties is
+    # reported as provenance drift rather than silently compared.
+    command += [f"-D{prop}" for prop in args.property]
+    command += ["-jar", str(jar), "--nogui"]
     record = {
         "schema": "sourbycraft.baseline/1",
         "workload": {"name": plan.name, "summary": plan.summary, "level_type": plan.level_type,
@@ -500,6 +511,9 @@ def main():
     parser.add_argument("--cache-from", type=Path,
                         help="Copy this run directory's bootstrap cache (or a cache/ directory) "
                              "into the new run, so it does not re-download on first boot.")
+    parser.add_argument("--property", action="append", default=[], metavar="KEY=VALUE",
+                        help="Extra -D system property for the server JVM; repeatable. "
+                             "E.g. --property Paper.WorkerThreadCount=4")
     parser.add_argument("--allow-dirty", action="store_true",
                         help="Start with uncommitted changes. The run will not be certified.")
     parser.add_argument("--allow-shared-machine", action="store_true",

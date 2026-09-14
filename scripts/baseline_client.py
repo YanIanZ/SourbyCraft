@@ -56,6 +56,12 @@ PLAY_KEEP_ALIVE_SERVERBOUND = 0x1C
 # a workload resemble a server with people on it.
 SERVERBOUND_MOVE_POS = 0x1E          # SERVERBOUND_MOVE_PLAYER_POS
 SERVERBOUND_MOVE_POS_ROT = 0x1F      # SERVERBOUND_MOVE_PLAYER_POS_ROT
+SERVERBOUND_ACCEPT_TELEPORT = 0x00   # SERVERBOUND_ACCEPT_TELEPORTATION
+
+# The server's authoritative position. Without reading this a client invents coordinates,
+# the server rejects every one of them and snaps the player back, and the only thing that
+# survives is the rotation — which looks exactly like a bot that only turns its head.
+CLIENTBOUND_PLAYER_POSITION = 0x48
 
 
 class _Reader:
@@ -136,7 +142,26 @@ class HeadlessClient(threading.Thread):
         self._x, self._y, self._z = 0.0, 80.0, 0.0
         self._angle = self._random.uniform(0.0, math.tau)
         self._flying = self._random.random() < 0.5
+        self._synced = False
+        self.syncs = 0
         self.reached_play = threading.Event()
+
+    def _sync(self, connection, payload, threshold):
+        """Adopt the server's position and confirm the teleport.
+
+        Payload is a VarInt teleport id, then PositionMoveRotation: position as three
+        doubles, delta movement as three more, then yaw and pitch. Confirming is not
+        optional — an unconfirmed teleport leaves the server re-sending it and ignoring
+        everything the client claims about where it is.
+        """
+        view = _Reader(payload)
+        teleport_id = read_varint(view)
+        body = view.read(24)
+        if len(body) == 24:
+            self._x, self._y, self._z = struct.unpack(">ddd", body)
+        connection.sendall(_frame(SERVERBOUND_ACCEPT_TELEPORT, write_varint(teleport_id), threshold))
+        self._synced = True
+        self.syncs += 1
 
     def _step(self, connection, threshold):
         """Walk or fly a short distance along a wandering heading.
@@ -147,17 +172,21 @@ class HeadlessClient(threading.Thread):
         the server corrects a position it disagrees with rather than dropping the player.
         """
         self._angle += self._random.uniform(-0.6, 0.6)
-        speed = 3.2 if self._flying else 0.9      # Blocks per step; flying covers ground faster.
+        # Vanilla walking is about 4.3 blocks per second; at four steps a second that is
+        # roughly one block per step. Sprinting is a little over that.
+        speed = 3.0 if self._flying else 0.95
         self._x += math.cos(self._angle) * speed
         self._z += math.sin(self._angle) * speed
         if self._flying:
-            self._y = max(70.0, min(140.0, self._y + self._random.uniform(-1.5, 1.5)))
+            self._y = max(70.0, min(160.0, self._y + self._random.uniform(-1.0, 1.0)))
         yaw = math.degrees(self._angle) % 360.0 - 180.0
         # PosRot: three doubles, two floats, then a packed flags byte whose low bit is
         # onGround (ServerboundMovePlayerPacket#packFlags).
         payload = (struct.pack(">ddd", self._x, self._y, self._z)
                    + struct.pack(">ff", yaw, 0.0)
-                   + bytes([0x01 if not self._flying else 0x00]))
+                   # onGround: a flier is never on the ground, a walker always claims to be
+                   # and lets the server correct the height it disagrees with.
+                   + bytes([0x00 if self._flying else 0x01]))
         connection.sendall(_frame(SERVERBOUND_MOVE_POS_ROT, payload, threshold))
         self.moves += 1
         self._next_move = time.monotonic() + 0.25   # Four updates a second, like a real client.
@@ -210,7 +239,10 @@ class HeadlessClient(threading.Thread):
                         continue
                     # Play: answer only the keep-alive, by its own id. Everything else is
                     # read and discarded, which is all a load-generating client needs to do.
-                    if self._move and time.monotonic() >= self._next_move:
+                    if packet_id == CLIENTBOUND_PLAYER_POSITION:
+                        self._sync(connection, payload, threshold)
+                        continue
+                    if self._move and self._synced and time.monotonic() >= self._next_move:
                         self._step(connection, threshold)
                     if packet_id == PLAY_KEEP_ALIVE_CLIENTBOUND:
                         # The reply carries exactly the eight-byte id and nothing else; echoing
@@ -248,5 +280,6 @@ class ClientSwarm:
                 "keep_alives": sum(c.keep_alives for c in self._clients),
                 "moves": sum(c.moves for c in self._clients),
                 "flying": sum(1 for c in self._clients if c._flying),
+                "syncs": sum(c.syncs for c in self._clients),
                 "first_error": failed[0].failure if failed else None,
                 "stages": sorted({c.stage for c in self._clients})}

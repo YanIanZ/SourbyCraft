@@ -46,10 +46,24 @@ public final class StressCommands implements BasicCommand {
         }
     }
 
-    /** {@code /massspawn <type> <x> <y> <z> <count>} — coordinates accept {@code ~}. */
+    /**
+     * {@code /massspawn <type> <x> <y> <z> <count> [loop]} — coordinates accept {@code ~}.
+     *
+     * <p>Spawns the requested count once and stops. Passing a loop interval in ticks repeats
+     * it until {@code /massspawn stop}, for sustained pressure rather than a single burst.
+     */
     private void massSpawn(final CommandSender sender, final String[] args) {
-        if (args.length != 5) {
-            sender.sendMessage("Usage: /massspawn <type> <x> <y> <z> <count>   (~ allowed, e.g. arrow ~ ~ ~ 100)");
+        if (args.length == 1 && args[0].equalsIgnoreCase("stop")) {
+            final int cancelled = cancelLoops();
+            sender.sendMessage(cancelled == 0 ? "No repeating spawn running."
+                : "Stopped " + cancelled + " repeating spawn(s).");
+            return;
+        }
+        if (args.length < 5 || args.length > 6) {
+            sender.sendMessage("Usage: /massspawn <type> <x> <y> <z> <count> [loopTicks]");
+            sender.sendMessage("  once:   /massspawn arrow ~ ~ ~ 100");
+            sender.sendMessage("  repeat: /massspawn arrow ~ ~ ~ 100 40      (every 40 ticks)");
+            sender.sendMessage("  stop:   /massspawn stop");
             return;
         }
         final EntityType type;
@@ -68,11 +82,13 @@ public final class StressCommands implements BasicCommand {
             : Bukkit.getWorlds().getFirst().getSpawnLocation();
         final double x, y, z;
         final int count;
+        final int loopTicks;
         try {
             x = relative(args[1], origin.getX());
             y = relative(args[2], origin.getY());
             z = relative(args[3], origin.getZ());
             count = Integer.parseInt(args[4]);
+            loopTicks = args.length == 6 ? Integer.parseInt(args[5]) : 0;
         } catch (final NumberFormatException bad) {
             sender.sendMessage("Coordinates must be numbers or ~offset, and count must be an integer.");
             return;
@@ -90,18 +106,41 @@ public final class StressCommands implements BasicCommand {
         // getRegionScheduler runs the task on whichever region owns the target chunk, which
         // is the only thread allowed to create entities there.
         final int[] remaining = {count};
-        Bukkit.getRegionScheduler().runAtFixedRate(this.plugin, world,
-            target.getBlockX() >> 4, target.getBlockZ() >> 4, task -> {
+        final var task = Bukkit.getRegionScheduler().runAtFixedRate(this.plugin, world,
+            target.getBlockX() >> 4, target.getBlockZ() >> 4, handle -> {
                 final int batch = Math.min(BATCH, remaining[0]);
                 for (int i = 0; i < batch; i++) {
                     world.spawnEntity(target, type);
                 }
                 remaining[0] -= batch;
                 if (remaining[0] <= 0) {
-                    task.cancel();
-                    sender.sendMessage("Spawned " + count + " " + type.name() + ".");
+                    if (loopTicks <= 0) {
+                        handle.cancel();
+                        LOOPS.remove(handle);
+                        sender.sendMessage("Spawned " + count + " " + type.name() + ".");
+                    } else {
+                        remaining[0] = count;      // Repeat: refill and keep going.
+                    }
                 }
-            }, 1L, 1L);
+            }, 1L, loopTicks > 0 ? Math.max(1L, loopTicks) : 1L);
+        if (loopTicks > 0) {
+            LOOPS.add(task);
+            sender.sendMessage("Repeating every " + loopTicks + " ticks. Stop with /massspawn stop.");
+        }
+    }
+
+    /** Repeating spawns, so they can be stopped without restarting the server. */
+    private static final java.util.Set<io.papermc.paper.threadedregions.scheduler.ScheduledTask> LOOPS =
+        java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private static int cancelLoops() {
+        int cancelled = 0;
+        for (final var task : java.util.Set.copyOf(LOOPS)) {
+            task.cancel();
+            LOOPS.remove(task);
+            cancelled++;
+        }
+        return cancelled;
     }
 
     /** {@code /flyspeed <0.0-1.0> [player]} — raises travel speed for extreme-range testing. */
@@ -165,6 +204,9 @@ public final class StressCommands implements BasicCommand {
             }
             if (args.length == 5) {
                 return List.of("100", "1000", "10000");
+            }
+            if (args.length == 6) {
+                return List.of("0", "20", "40", "100");
             }
         }
         return List.of();
