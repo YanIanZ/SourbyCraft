@@ -558,29 +558,49 @@ class MidRunChurnTest(unittest.TestCase):
 
 
 class SeedCacheTest(unittest.TestCase):
-    def test_copies_a_cache_directory_into_the_new_run(self):
+    @staticmethod
+    def donor(root, cache=True, libraries=True):
+        base = root / "donor"
+        if cache:
+            (base / "cache").mkdir(parents=True)
+            (base / "cache" / "mojang_26.2.jar").write_bytes(b"server")
+        if libraries:
+            (base / "libraries" / "com" / "x").mkdir(parents=True)
+            (base / "libraries" / "com" / "x" / "x.jar").write_bytes(b"lib")
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
+    def test_copies_both_bootstrap_trees_into_the_new_run(self):
+        # The Mojang jar lands in cache/, the externalized libraries in libraries/.
+        # Seeding only the first still leaves a boot fetching a few hundred jars.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            donor = root / "donor" / "cache"
-            donor.mkdir(parents=True)
-            (donor / "mojang_26.2.jar").write_bytes(b"payload")
+            source = self.donor(root)
             target = root / "run"
             target.mkdir()
-            seeded = run_baseline.seed_cache(target, root / "donor")
-            self.assertEqual(seeded, ["mojang_26.2.jar"])
-            self.assertEqual((target / "cache" / "mojang_26.2.jar").read_bytes(), b"payload")
+            self.assertEqual(run_baseline.seed_cache(target, source), ["cache", "libraries"])
+            self.assertEqual((target / "cache" / "mojang_26.2.jar").read_bytes(), b"server")
+            self.assertEqual((target / "libraries" / "com" / "x" / "x.jar").read_bytes(), b"lib")
 
-    def test_accepts_the_cache_directory_itself(self):
+    def test_accepts_a_pointer_at_either_bootstrap_directory(self):
+        for name in ("cache", "libraries"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = self.donor(root)
+                target = root / "run"
+                target.mkdir()
+                self.assertEqual(run_baseline.seed_cache(target, source / name),
+                                 ["cache", "libraries"])
+
+    def test_copies_what_exists_when_only_one_tree_is_present(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            donor = root / "donor" / "cache"
-            donor.mkdir(parents=True)
-            (donor / "a.jar").write_bytes(b"x")
+            source = self.donor(root, libraries=False)
             target = root / "run"
             target.mkdir()
-            self.assertEqual(run_baseline.seed_cache(target, donor), ["a.jar"])
+            self.assertEqual(run_baseline.seed_cache(target, source), ["cache"])
 
-    def test_rejects_a_source_with_no_cache(self):
+    def test_rejects_a_source_with_no_bootstrap_tree(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "empty").mkdir()
