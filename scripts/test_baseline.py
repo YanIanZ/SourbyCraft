@@ -238,8 +238,31 @@ class WorkloadTest(unittest.TestCase):
 
     def test_entity_counts_match_the_declared_parameters(self):
         plan = workloads.build("players-10")
-        summons = [command for command in plan.setup if command.startswith("summon")]
+        summons = [command for command in plan.setup if " run summon " in command]
         self.assertEqual(len(summons), plan.parameters["entities_total"])
+
+    def test_no_workload_uses_a_superflat_world(self):
+        # Superflat has a known ground height but is representative of nothing: it changes
+        # generation cost, block variety and therefore random-tick load, lighting and collision.
+        for name in workloads.NAMES:
+            with self.subTest(name=name):
+                self.assertEqual(workloads.build(name).level_type, "minecraft:normal")
+
+    def test_entities_are_placed_on_the_generated_surface(self):
+        for name in ("players-10", "entity-stress"):
+            with self.subTest(name=name):
+                summons = [c for c in workloads.build(name).setup if " run summon " in c]
+                self.assertTrue(summons)
+                for command in summons:
+                    self.assertIn("positioned over world_surface", command)
+                    self.assertTrue(command.startswith("execute positioned "))
+
+    def test_chunk_heavy_workloads_settle_before_the_window_opens(self):
+        # Terrain generation triggered by forceload continues after the command returns.
+        self.assertGreater(workloads.build("players-100").settle_seconds,
+                           workloads.build("idle").settle_seconds)
+        self.assertGreaterEqual(workloads.build("players-100").settle_seconds,
+                                workloads.build("players-50").settle_seconds)
 
     def test_player_workloads_declare_their_dependence_on_connected_clients(self):
         for name in ("players-10", "players-50", "players-100", "entity-stress"):
@@ -581,7 +604,7 @@ class HeapGuardTest(unittest.TestCase):
             properties = (target / "server.properties").read_text()
             self.assertIn("server-ip=127.0.0.1", properties)
             self.assertIn("online-mode=false", properties)
-            self.assertIn(r"level-type=minecraft\:flat", properties)
+            self.assertIn(r"level-type=minecraft\:normal", properties)
             self.assertIn("auto-provision=false", config.read_text())
             self.assertEqual((target / "eula.txt").read_text(), "eula=true\n")
 

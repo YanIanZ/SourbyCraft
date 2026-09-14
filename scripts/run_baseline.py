@@ -30,7 +30,6 @@ STARTUP_TIMEOUT = 600
 SHUTDOWN_TIMEOUT = 120
 SETUP_BATCH = 50
 SETUP_BATCH_PAUSE = 0.2
-SETTLE_AFTER_SETUP = 15
 RSS_INTERVAL = 1.0
 
 # Console output that means a workload command did not take effect.
@@ -247,6 +246,10 @@ def capture(jar, plan, output, args, tools):
               "not be certified).")
     config = prepare(output, plan, args.port, args.heap_mib)
     seeded = seed_cache(output, args.cache_from) if args.cache_from else []
+    if args.world:
+        # A pre-generated world keeps terrain identical across runs and keeps generation
+        # out of the measurement window. Section 85 wants the world named in provenance.
+        shutil.copytree(args.world.resolve(strict=True), output / "world")
     command = [str(java), f"-Xms{args.heap_mib}M", f"-Xmx{args.heap_mib}M", f"-XX:+Use{args.gc}",
                "-Xlog:gc*:file=gc.log:time,uptime,level,tags", "-jar", str(jar), "--nogui"]
     record = {
@@ -267,7 +270,8 @@ def capture(jar, plan, output, args, tools):
             "connected_players_asserted": args.connected_players,
             "competing_servers_at_start": competitors,
             "seeded_cache_files": seeded,
-            "plugins": [], "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")},
+            "plugins": [], "world_source": str(args.world) if args.world else "generated fresh",
+            "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")},
         "status": "running"}
     record_path = output / "baseline.json"
     server = sampler = load = None
@@ -278,7 +282,9 @@ def capture(jar, plan, output, args, tools):
               f"applying {len(plan.setup)} setup commands", flush=True)
         before_setup = len(server.text)
         server.apply(list(plan.setup))
-        server.hold(SETTLE_AFTER_SETUP)
+        # Terrain generation triggered by setup continues after the last command returns.
+        print(f"[{plan.name}] settling {plan.settle_seconds}s", flush=True)
+        server.hold(plan.settle_seconds)
         setup_log = server.text[before_setup:]
         errors = [marker for marker in COMMAND_FAILURES if marker in setup_log]
         record["workload"]["setup_command_errors"] = errors
@@ -415,6 +421,10 @@ def main():
     parser.add_argument("--connected-players", type=int, default=0,
                         help="Assert how many real clients the operator attached before the run")
     parser.add_argument("--allow-command-errors", action="store_true")
+    parser.add_argument("--world", type=Path,
+                        help="Copy a pre-generated world in, so terrain generation does not "
+                             "happen inside the measurement window and every run measures the "
+                             "same terrain.")
     parser.add_argument("--cache-from", type=Path,
                         help="Copy this run directory's bootstrap cache (or a cache/ directory) "
                              "into the new run, so it does not re-download on first boot.")
