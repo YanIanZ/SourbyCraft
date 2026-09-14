@@ -333,7 +333,7 @@ def capture(jar, plan, output, args, tools):
 
         sampler = ResidentSampler(server.process.pid)
         sampler.start()
-        subprocess.run([str(jcmd), str(server.process.pid), "JFR.start", "name=SourbyBaseline",
+        subprocess.run([str(jcmd), str(server.process.pid), "JFR.start", "name=SourbyCraft",
                         f"settings={args.jfr_settings}", f"duration={args.duration}s",
                         f"filename={output / 'profile.jfr'}"], check=True, capture_output=True)
         if plan.network_clients:

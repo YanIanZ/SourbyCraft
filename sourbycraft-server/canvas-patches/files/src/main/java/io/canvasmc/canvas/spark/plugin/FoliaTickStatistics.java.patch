@@ -35,7 +35,7 @@
      @Override
      public int gameTargetTps() {
          // rounding is probably easier and more accurate tbh
-@@ -22,136 +_,105 @@
+@@ -22,136 +_,114 @@
  
      @Override
      public double tps5Sec() {
@@ -121,8 +121,10 @@
  
 -        // return the average TPS from the collected counts
 -        return tpsCounts.doubleStream().sum() / tpsCounts.size();
++        // SourbyCraft - worst region, matching MSPT above and the headline figure /tps, /perf
++        // and the bars all show. A mean across regions reads healthy while one region is not.
 +        final PerformanceSnapshot snapshot = this.metrics.snapshot();
-+        return snapshot.window(window).aggregateTps();
++        return snapshot.window(window).worstTps();
      }
  
 -    private static double getTpsFor(final TickRegionScheduler.RegionScheduleHandle scheduleHandle, final TimeSpan span) {
@@ -179,7 +181,15 @@
 -        public double mean() {
 -            return 0;
 +        private static AverageInfo from(final WindowMetrics window) {
-+            return new AverageInfo(window.aggregateAverageMspt(), window.minimumMspt(), window.maximumMspt(),
++            // SourbyCraft - report the worst region's average, not the mean across regions.
++            // /tps, /mspt and the TPS/RAM bars all read worstAverageMspt, and a Spark report
++            // reading aggregateAverageMspt disagreed with them on the same server at the same
++            // moment — 2.13 ms against 5 ms with fifty regions, because the mean hides a single
++            // loaded region. PRD section 81 requires every surface to answer from one source.
++            // The worst region is also the honest answer to "is anyone lagging": on a
++            // region-threaded server there is no single tick duration, and players in the
++            // slowest region feel that region, not the average.
++            return new AverageInfo(window.worstAverageMspt(), window.minimumMspt(), window.maximumMspt(),
 +                window.medianMspt(), window.estimatedP95Mspt());
          }
  

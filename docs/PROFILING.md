@@ -46,10 +46,20 @@ is sufficient. JDK tools must be next to the selected `java` executable.
 does not simulate players or prove full player/inventory persistence. Use different
 output directories for baseline and candidate. Never run comparisons concurrently.
 
+## One JFR recording name
+
+Every tool that starts a recording names it **`SourbyCraft`**: the IDE run configuration,
+`profile_server.py` and `run_baseline.py`. They previously used three different names, so
+`jfr summary` output and the IDE profiler disagreed about what a file was depending on
+which tool wrote it. There is one JFR event type too,
+`dev.iyanz.sourbycraft.PerformanceSnapshot`, and one IDE run configuration,
+**SourbyCraft JFR**. If a second JFR run configuration appears in the IDE, it is a local
+one — delete it rather than keeping two.
+
 ## Manual diagnostics
 
 ```sh
-jcmd PID JFR.start name=SourbyProfile settings=profile duration=120s filename=/absolute/path/profile.jfr
+jcmd PID JFR.start name=SourbyCraft settings=profile duration=120s filename=/absolute/path/profile.jfr
 jcmd PID Thread.print
 jcmd PID GC.heap_info
 jfr summary /absolute/path/profile.jfr

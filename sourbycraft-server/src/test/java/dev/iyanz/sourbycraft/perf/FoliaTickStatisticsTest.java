@@ -19,6 +19,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,7 +32,7 @@ class FoliaTickStatisticsTest {
     }
 
     @Test
-    void normalStatisticsMapEveryWindowToOneCachedAggregateRead() {
+    void normalStatisticsMapEveryWindowToOneCachedWorstRegionRead() {
         final AtomicInteger reads = new AtomicInteger();
         provider().overrideSnapshotsForTesting(() -> {
             reads.incrementAndGet();
@@ -39,15 +40,15 @@ class FoliaTickStatisticsTest {
         });
         final FoliaTickStatistics statistics = new FoliaTickStatistics();
 
-        assertEquals(5.0, statistics.tps5Sec());
+        assertEquals(4.0, statistics.tps5Sec());
         assertEquals(1, reads.get());
-        assertEquals(10.0, statistics.tps10Sec());
+        assertEquals(9.0, statistics.tps10Sec());
         assertEquals(2, reads.get());
-        assertEquals(60.0, statistics.tps1Min());
+        assertEquals(59.0, statistics.tps1Min());
         assertEquals(3, reads.get());
-        assertEquals(300.0, statistics.tps5Min());
+        assertEquals(299.0, statistics.tps5Min());
         assertEquals(4, reads.get());
-        assertEquals(900.0, statistics.tps15Min());
+        assertEquals(899.0, statistics.tps15Min());
         assertEquals(5, reads.get());
     }
 
@@ -61,12 +62,29 @@ class FoliaTickStatisticsTest {
         final FoliaTickStatistics statistics = new FoliaTickStatistics();
 
         assertTrue(statistics.isDurationSupported());
-        assertDuration(statistics.duration10Sec(), 11.25, 12.0, 13.0, 14.0, 15.0);
+        // Mean is the worst region's average, not the aggregate: the fixture builds
+        // aggregateAverageMspt as worstAverageMspt + 0.25, so these are 0.25 lower.
+        assertDuration(statistics.duration10Sec(), 11.0, 12.0, 13.0, 14.0, 15.0);
         assertEquals(1, reads.get());
-        assertDuration(statistics.duration1Min(), 61.25, 62.0, 63.0, 64.0, 65.0);
+        assertDuration(statistics.duration1Min(), 61.0, 62.0, 63.0, 64.0, 65.0);
         assertEquals(2, reads.get());
-        assertDuration(statistics.duration5Min(), 301.25, 302.0, 303.0, 304.0, 305.0);
+        assertDuration(statistics.duration5Min(), 301.0, 302.0, 303.0, 304.0, 305.0);
         assertEquals(3, reads.get());
+    }
+
+    @Test
+    void sparkAgreesWithTheCommandsAndTheBars() {
+        // PRD section 81: every surface answers from one source with one statistic. Spark
+        // previously reported the mean across regions while /tps, /mspt, /perf and the bars
+        // reported the worst region, so the same server read 2.13 ms in Spark and 5 ms on the
+        // bar at the same moment.
+        provider().overrideSnapshotsForTesting(FoliaTickStatisticsTest::snapshot);
+        final FoliaTickStatistics statistics = new FoliaTickStatistics();
+        final var window = snapshot().window(dev.iyanz.sourbycraft.api.metrics.MetricWindow.TEN_SECONDS);
+
+        assertEquals(window.worstAverageMspt(), statistics.duration10Sec().mean());
+        assertEquals(window.worstTps(), statistics.tps10Sec());
+        assertNotEquals(window.aggregateAverageMspt(), statistics.duration10Sec().mean());
     }
 
     @Test
