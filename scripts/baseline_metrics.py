@@ -213,6 +213,28 @@ def rss_metrics(samples_kib):
             "bytes": distribution([value * 1024 for value in samples_kib])}
 
 
+def drift(samples, label):
+    """Compare the first quarter of a series against the last.
+
+    A soak asks a different question from a benchmark: not "how fast" but "does it stay
+    the same". A leak, a growing queue or a thread that is never released shows up as a
+    series that climbs and does not come back, which a distribution over the whole window
+    hides completely — the mean of a climbing series looks unremarkable.
+    """
+    if len(samples) < 8:
+        return dict(UNAVAILABLE, reason=f"too few {label} samples for a trend ({len(samples)})")
+    quarter = max(1, len(samples) // 4)
+    early = samples[:quarter]
+    late = samples[-quarter:]
+    first = sum(early) / len(early)
+    last = sum(late) / len(late)
+    return {"available": True, "samples": len(samples),
+            "first_quarter_mean": first, "last_quarter_mean": last,
+            "change": last - first,
+            "change_fraction": (last - first) / first if first else None,
+            "peak": max(samples)}
+
+
 def collect(jfr_tool, recording, window_seconds, rss_samples_kib):
     """Assemble the full baseline metric set for one workload run."""
     return {
@@ -228,4 +250,28 @@ def collect(jfr_tool, recording, window_seconds, rss_samples_kib):
         "allocation_from_gc": allocation_metrics(
             read_events(jfr_tool, recording, "jdk.GCHeapSummary"), window_seconds),
         "rss": rss_metrics(rss_samples_kib),
+        # Trends, for soak runs. Retained heap and resident memory that climb across the
+        # window and do not return are what a soak is looking for.
+        "drift": {
+            "rss_bytes": drift([value * 1024 for value in rss_samples_kib], "resident memory"),
+            "heap_after_gc_bytes": drift(_heap_after_gc(
+                read_events(jfr_tool, recording, "jdk.GCHeapSummary")), "heap-after-GC"),
+            "mspt": drift(_snapshot_series(
+                read_events(jfr_tool, recording,
+                            "dev.iyanz.sourbycraft.PerformanceSnapshot")), "tick"),
+        },
     }
+
+
+def _heap_after_gc(summaries):
+    """Heap occupancy after each collection, in collection order."""
+    after = [(event["gcId"], event["heapUsed"]) for event in summaries
+             if event.get("when") == "After GC"]
+    return [used for _, used in sorted(after)]
+
+
+def _snapshot_series(snapshots):
+    """Worst-region average MSPT per published sample, in publication order."""
+    usable = [event for event in snapshots if event["state"] in USABLE_STATES]
+    usable.sort(key=lambda event: event["sequence"])
+    return [event["worstAverageMspt"] for event in usable]

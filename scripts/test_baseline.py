@@ -574,6 +574,41 @@ class CompetingServerTest(unittest.TestCase):
         self.assertEqual(found, [])
 
 
+class DriftTest(unittest.TestCase):
+    """A soak asks whether things stay the same, which a distribution cannot answer."""
+
+    def test_a_flat_series_shows_no_drift(self):
+        result = metrics.drift([100.0] * 40, "flat")
+        self.assertTrue(result["available"])
+        self.assertEqual(result["change"], 0.0)
+        self.assertEqual(result["change_fraction"], 0.0)
+
+    def test_a_climbing_series_is_reported_as_growth(self):
+        result = metrics.drift(list(range(100, 200)), "climbing")
+        self.assertGreater(result["change_fraction"], 0.5)
+        self.assertEqual(result["peak"], 199)
+
+    def test_a_spike_that_returns_is_not_growth(self):
+        # The mean over the whole window would be raised by the spike; the trend is flat,
+        # which is the distinction a soak needs.
+        series = [100.0] * 20 + [500.0] * 5 + [100.0] * 20
+        self.assertAlmostEqual(metrics.drift(series, "spike")["change_fraction"], 0.0)
+        self.assertEqual(metrics.drift(series, "spike")["peak"], 500.0)
+
+    def test_a_falling_series_reports_negative_change(self):
+        self.assertLess(metrics.drift(list(range(200, 100, -1)), "falling")["change_fraction"], 0)
+
+    def test_too_few_samples_is_unavailable_rather_than_noise(self):
+        result = metrics.drift([1.0, 2.0, 3.0], "short")
+        self.assertFalse(result["available"])
+        self.assertIn("too few", result["reason"])
+
+    def test_a_zero_baseline_does_not_divide_by_zero(self):
+        result = metrics.drift([0.0] * 20 + [5.0] * 20, "from zero")
+        self.assertIsNone(result["change_fraction"])
+        self.assertEqual(result["change"], 5.0)
+
+
 class BuildInputTest(unittest.TestCase):
     """Which untracked paths can actually change the produced jar.
 
