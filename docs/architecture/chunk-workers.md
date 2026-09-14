@@ -99,3 +99,46 @@ variable under test, so the tooling reporting it as drift is the tooling working
 * One machine, eight cores, one heap size, G1 only.
 * The 78.5% figure comes from a contended profile. The share is reliable; the absolute
   CPU is not.
+
+
+## Contention, measured on the same recordings
+
+AURORA-INDEPENDENT-ENGINE Phase 0 asks for contention analysis beside the CPU and
+allocation rankings, and section 33 makes tail latency the metric that matters. Both
+certified recordings were re-read for monitor waits.
+
+The tail is **lock contention, not GC and not safepoints**. Safepoints are negligible —
+141 of them, mean 0.03 ms, max 0.19 ms — while individual monitor waits reach 20 ms,
+larger than the measured p99 of 11.6 ms.
+
+Every wait is region thread against region thread:
+
+| Blocked ms | Holder → waiter |
+| ---: | --- |
+| 20.3 | Folia Region Scheduler Thread #1 → #0 |
+| 20.0 | Folia Region Scheduler Thread #1 → #2 |
+| 11.7 | Folia Region Scheduler Thread #0 → #1 |
+
+The stack is the same every time:
+
+```text
+ca.spottedleaf.concurrentutil.scheduler.EDFSchedulerThreadPool$TickThreadRunner.takeTask
+ca.spottedleaf.concurrentutil.scheduler.EDFSchedulerThreadPool$TickThreadRunner.run
+```
+
+This is the region scheduler's own dispatch monitor, shared by every region thread. It
+is not SourbyCraft code — which also clears the one suspicion the object-reuse audit
+raised in its section 9, that `RegionTickMetrics` being `synchronized` could block a
+region tick. It does not appear here.
+
+**What is not established.** A thread blocked entering `takeTask` may have had no work
+to do, in which case the wait costs nothing. Monitor-enter alone cannot distinguish
+"waited while work was pending" from "waited while idle", so this is not yet evidence
+that dispatch contention costs tick time. What it does establish is that the only
+measured contention in a loaded, certified run is on the scheduler's dispatch path, and
+that it reaches durations larger than the tick-time tail.
+
+That makes it the first concrete datum for the Aurora Scheduler Program in section 10 of
+AURORA-INDEPENDENT-ENGINE, whose stage 5 contemplates replacing the scheduler. Answering
+it needs either an instrumented dispatch path or a comparison against a different
+backend — not a guess.

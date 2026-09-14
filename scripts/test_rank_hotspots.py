@@ -152,7 +152,7 @@ class OverstatementTest(unittest.TestCase):
         report = ranker.render(Path("p.jfr"), ranker.cpu_hotspots([], 5),
                                ranker.allocation_hotspots([allocation("A", 1000)], 5, 900), None)
         self.assertIn("Cross-checked against the counters", report)
-        self.assertNotIn("out of proportion", report)
+        self.assertNotIn("dominate this table", report)   # the allocation warning
 
 
 class TickBudgetTest(unittest.TestCase):
@@ -192,6 +192,59 @@ class TickBudgetTest(unittest.TestCase):
                                ranker.allocation_hotspots([], 5), None,
                                ranker.tick_budget_note(self.tick(30.0), 20.0))
         self.assertNotIn("no bottleneck here to find", report)
+
+
+class ContentionTest(unittest.TestCase):
+    """Monitor waits only. A parked worker is idle, not contended."""
+
+    @staticmethod
+    def monitor(seconds, waiter, holder, cls="java/lang/Object"):
+        return {"duration": f"PT{seconds}S", "eventThread": {"javaName": waiter},
+                "previousOwner": {"javaName": holder}, "monitorClass": {"name": cls}}
+
+    def test_totals_and_worst_block(self):
+        result = ranker.contention_hotspots(
+            [self.monitor(0.020, "R2", "R1"), self.monitor(0.005, "R0", "R1")], [], [], 5)
+        self.assertEqual(result["monitor_events"], 2)
+        self.assertAlmostEqual(result["blocked_total_ms"], 25.0)
+        self.assertAlmostEqual(result["worst_block"]["seconds"], 0.020)
+        self.assertEqual(result["worst_block"]["blocked"], "R2")
+        self.assertEqual(result["worst_block"]["holder"], "R1")
+
+    def test_groups_by_holder_and_waiter_pair(self):
+        result = ranker.contention_hotspots(
+            [self.monitor(0.010, "R2", "R1"), self.monitor(0.010, "R2", "R1"),
+             self.monitor(0.001, "R0", "R3")], [], [], 5)
+        self.assertEqual(result["by_pair"][0]["name"], "R1 → R2")
+        self.assertAlmostEqual(result["by_pair"][0]["ms"], 20.0)
+
+    def test_handles_a_monitor_class_given_as_a_plain_string(self):
+        event = self.monitor(0.001, "R0", "R1")
+        event["monitorClass"] = "java/lang/Object"
+        result = ranker.contention_hotspots([event], [], [], 5)
+        self.assertEqual(result["by_monitor"][0]["name"], "java.lang.Object")
+
+    def test_safepoints_are_summarised_separately(self):
+        result = ranker.contention_hotspots(
+            [], [{"duration": "PT0.0002S"}, {"duration": "PT0.0001S"}], [], 5)
+        self.assertTrue(result["safepoints"]["available"])
+        self.assertAlmostEqual(result["safepoints"]["max"], 0.2, places=3)
+
+    def test_no_contention_still_renders(self):
+        result = ranker.contention_hotspots([], [], [], 5)
+        self.assertEqual(result["monitor_events"], 0)
+        self.assertIsNone(result["worst_block"])
+        report = ranker.render(Path("p.jfr"), ranker.cpu_hotspots([], 5),
+                               ranker.allocation_hotspots([], 5), None, None, result)
+        self.assertIn("0 monitor-enter events", report)
+
+    def test_the_report_names_the_blocking_pair(self):
+        result = ranker.contention_hotspots([self.monitor(0.020, "R2", "R1")], [], [], 5)
+        report = ranker.render(Path("p.jfr"), ranker.cpu_hotspots([], 5),
+                               ranker.allocation_hotspots([], 5), None, None, result)
+        self.assertIn("Worst single block", report)
+        self.assertIn("R1", report)
+        self.assertIn("idleness, not contention", report)
 
 
 class RenderTest(unittest.TestCase):

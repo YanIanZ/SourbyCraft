@@ -126,6 +126,54 @@ def allocation_hotspots(samples, limit, measured_bytes=None):
     return result
 
 
+def contention_hotspots(monitors, safepoints, vm_operations, limit):
+    """Where threads waited on each other, and where the JVM stopped the world.
+
+    Phase 0 of AURORA-INDEPENDENT-ENGINE asks for contention analysis alongside the CPU
+    and allocation rankings, and section 33 makes tail latency the metric that matters:
+    a lock held across a region tick shows up as a p99 spike, not as CPU.
+
+    ``jdk.JavaMonitorEnter`` is real contention — a thread that had to wait for a monitor
+    another thread held, with ``previousOwner`` naming the holder. ``jdk.ThreadPark`` is
+    deliberately not counted: a worker parked waiting for work is idle, not blocked, and
+    mixing the two would make an idle pool look like a contended one.
+    """
+    blocked_total = 0.0
+    by_thread, by_monitor, by_pair = defaultdict(float), defaultdict(float), defaultdict(float)
+    worst = None
+    for values in monitors:
+        seconds = baseline_metrics.duration_seconds(values["duration"])
+        blocked_total += seconds
+        thread = _thread_name(values, "eventThread")
+        owner = _thread_name(values, "previousOwner")
+        # monitorClass is a class descriptor object, not a string.
+        raw = values.get("monitorClass")
+        monitor = _dotted(raw.get("name") if isinstance(raw, dict) else raw)
+        by_thread[thread] += seconds
+        by_monitor[monitor] += seconds
+        by_pair[f"{owner} → {thread}"] += seconds
+        if worst is None or seconds > worst["seconds"]:
+            worst = {"seconds": seconds, "blocked": thread, "holder": owner, "monitor": monitor}
+
+    def rank(counter):
+        return [{"name": name, "ms": value * 1000.0}
+                for name, value in sorted(counter.items(), key=lambda kv: -kv[1])[:limit]]
+
+    safepoint_ms = [baseline_metrics.duration_seconds(v["duration"]) * 1000.0
+                    for v in safepoints if "duration" in v]
+    vm_ms = [baseline_metrics.duration_seconds(v["duration"]) * 1000.0
+             for v in vm_operations if "duration" in v]
+    return {"available": True,
+            "monitor_events": len(monitors),
+            "blocked_total_ms": blocked_total * 1000.0,
+            "worst_block": worst,
+            "by_blocked_thread": rank(by_thread),
+            "by_monitor": rank(by_monitor),
+            "by_pair": rank(by_pair),
+            "safepoints": baseline_metrics.distribution(safepoint_ms),
+            "vm_operations": baseline_metrics.distribution(vm_ms)}
+
+
 def tick_budget_note(tick, target_tps):
     """How much of the tick budget the profiled run actually used.
 
@@ -141,7 +189,7 @@ def tick_budget_note(tick, target_tps):
     return {"mspt_mean": tick["mspt"]["mean"], "budget_ms": budget_ms, "fraction_used": used}
 
 
-def render(recording, cpu, allocation, workload, budget=None):
+def render(recording, cpu, allocation, workload, budget=None, contention=None):
     lines = [f"# Hot spots — {recording.name}", ""]
     if budget is not None and budget["fraction_used"] < 0.20:
         lines += [f"> **This run used {budget['fraction_used']:.1%} of its tick budget** "
@@ -203,6 +251,25 @@ def render(recording, cpu, allocation, workload, budget=None):
                   for row in allocation["by_thread"]]
         lines.append("")
 
+    if contention is not None and contention["available"]:
+        lines += ["## Contention", "",
+                  f"{contention['monitor_events']} monitor-enter events, "
+                  f"{contention['blocked_total_ms']:.1f} ms blocked in total. Threads parked "
+                  "waiting for work are not counted — that is idleness, not contention.", ""]
+        worst = contention["worst_block"]
+        if worst:
+            lines += [f"Worst single block: **{worst['seconds'] * 1000.0:.1f} ms** — "
+                      f"`{worst['blocked']}` waiting on `{worst['monitor']}` held by "
+                      f"`{worst['holder']}`.", ""]
+        if contention["by_pair"]:
+            lines += ["| Blocked ms | Holder → waiter |", "| ---: | --- |"]
+            lines += [f"| {row['ms']:.1f} | `{row['name']}` |" for row in contention["by_pair"]]
+            lines.append("")
+        if contention["safepoints"]["available"]:
+            sp = contention["safepoints"]
+            lines += [f"Safepoints: {sp['samples']}, mean {sp['mean']:.2f} ms, "
+                      f"p95 {sp['p95']:.2f} ms, max {sp['max']:.2f} ms.", ""]
+
     lines += ["## How to read this", "",
               "* Execution sampling only sees Java frames on threads the JVM sampled. Native "
               "work, GC and JIT compilation are not attributed here.",
@@ -210,7 +277,9 @@ def render(recording, cpu, allocation, workload, budget=None):
               "* Allocation weights are extrapolated from sampled allocations.",
               "* A ranking is only as representative as its workload. A run with no connected "
               "clients leaves mob AI inactive, so nothing here speaks to AI cost.",
-              "* A high rank is a candidate to investigate, not a defect.", ""]
+              "* A high rank is a candidate to investigate, not a defect.",
+              "* Contention counts monitor waits only. A lock held briefly but during a region "
+              "tick costs tail latency out of proportion to its total time.", ""]
     return "\n".join(lines)
 
 
@@ -247,7 +316,11 @@ def main():
         captured = json.loads(record.read_text())
         budget = tick_budget_note(captured.get("metrics", {}).get("tick"),
                                   captured.get("metrics", {}).get("tick", {}).get("target_tps"))
-    report = render(recording, cpu, allocation, workload, budget)
+    contention = contention_hotspots(
+        read(jfr, recording, "jdk.JavaMonitorEnter", 1),
+        read(jfr, recording, "jdk.SafepointBegin", 1),
+        read(jfr, recording, "jdk.ExecuteVMOperation", 1), args.limit)
+    report = render(recording, cpu, allocation, workload, budget, contention)
     print(report)
     if args.output:
         args.output.write_text(report)
