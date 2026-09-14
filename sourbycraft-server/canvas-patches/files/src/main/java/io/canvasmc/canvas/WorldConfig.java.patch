@@ -5,7 +5,7 @@
      // config class should be the logger publicly used
  
 -    private static final Logger LOGGER = LoggerFactory.getLogger("CanvasWorlds");
-+    private static final Logger LOGGER = LoggerFactory.getLogger("SourbyCraft"); // SourbyCraft - rebrand console prefix [CanvasWorlds] -> [SourbyCraft]
++    private static final Logger LOGGER = LoggerFactory.getLogger("Aurora"); // SourbyCraft - engine config speaks as the engine: [CanvasWorlds] -> [Aurora]
  
      private static final Path BASE_FILE = Path.of("config/canvas-worlds.yml").toAbsolutePath().normalize();
  

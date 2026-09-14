@@ -100,11 +100,12 @@ class UpstreamDefaultTest(unittest.TestCase):
     """
 
     APPROVED = {
-        # Branding: console prefix, in both Canvas config classes.
+        # Console prefix. These are engine configuration, so they speak as the engine:
+        # Aurora is inside the Minecraft system, SourbyCraft is the layer outside it.
         "GlobalConfiguration.java.patch:LOGGER": ("LoggerFactory.getLogger(\"CanvasMC\")",
-                                                  "LoggerFactory.getLogger(\"SourbyCraft\")"),
+                                                  "LoggerFactory.getLogger(\"Aurora\")"),
         "WorldConfig.java.patch:LOGGER": ("LoggerFactory.getLogger(\"CanvasWorlds\")",
-                                          "LoggerFactory.getLogger(\"SourbyCraft\")"),
+                                          "LoggerFactory.getLogger(\"Aurora\")"),
         # Canvas ships THROW, which crashes the server when a plugin touches state
         # off-region. On a production server that should be logged, not fatal.
         # Operators can restore THROW in config/canvas-server.yml.

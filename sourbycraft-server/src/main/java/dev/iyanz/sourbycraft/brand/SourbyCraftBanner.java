@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.brand;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
+import java.util.Locale;
 import net.kyori.adventure.text.format.TextColor;
 
 /**
@@ -32,27 +33,74 @@ public final class SourbyCraftBanner {
     private static final String FRAME = fg(SourbyCraftColors.PRIMARY);
     private static final String TITLE = fg(SourbyCraftColors.HEADER);
     private static final String BODY  = fg(SourbyCraftColors.INFO);
+    private static final String DIM   = fg(SourbyCraftColors.DIM);
     private static final String OK    = fg(SourbyCraftColors.SUCCESS);
 
     /**
      * Renders the branded ANSI-truecolor startup box for {@code info} as a single multi-line
      * string (leading newline included), ready to print straight to a console stream.
      */
+    /** Width of the box interior, excluding the frame characters. */
+    private static final int WIDTH = 58;
+
+    /**
+     * Renders the branded startup box for {@code info}.
+     *
+     * <p>The frame is swept through the Aurora gradient character by character, which is the
+     * one place AURORA-UX section 1 allows a gradient: a header. The body lines are flat, and
+     * nothing here animates or sleeps — the box is printed once, already complete.
+     */
     public static String render(BuildInfo info) {
-        final String java = System.getProperty("java.specification.version");
+        final String javaVersion = System.getProperty("java.specification.version");
         final int cores = Runtime.getRuntime().availableProcessors();
-        StringBuilder sb = new StringBuilder();
-        sb.append('\n');
-        final String shownVersion = info.displayVersion();
-        sb.append(FRAME).append("   ┌─ ").append(TITLE).append("SOURBYCRAFT ").append(FRAME)
-          .append("─".repeat(Math.max(0, 44 - shownVersion.length())))
-          .append(' ').append(OK).append(shownVersion).append(' ').append(FRAME).append("─┐").append(RESET).append('\n');
-        sb.append(FRAME).append("   │  ").append(BODY).append(pad(info.tagline(), 58)).append(FRAME).append("│").append(RESET).append('\n');
         final String engine = info.engineName();
-        sb.append(FRAME).append("   │  ").append(BODY).append(pad(engine + " engine benchmark · utilities only", 58)).append(FRAME).append("│").append(RESET).append('\n');
-        sb.append(FRAME).append("   │  ").append(BODY).append(pad(engine + " " + info.mcVersion() + "  ·  Java " + java + "  ·  " + cores + " cores", 58)).append(FRAME).append("│").append(RESET).append('\n');
-        sb.append(FRAME).append("   └").append("─".repeat(62)).append("┘").append(RESET).append('\n');
+        final String shownVersion = info.displayVersion();
+
+        final StringBuilder sb = new StringBuilder();
+        sb.append('\n');
+        sb.append(sweep("   ╭" + "─".repeat(WIDTH + 2) + "╮")).append(RESET).append('\n');
+        sb.append(row(centre("SOURBYCRAFT · " + engine.toUpperCase(Locale.ROOT)), TITLE));
+        sb.append(row(centre("Java " + javaVersion + " · Minecraft " + info.mcVersion()
+            + " · " + shownVersion), BODY));
+        sb.append(row(centre(info.tagline()), BODY));
+        sb.append(sweep("   ╰" + "─".repeat(WIDTH + 2) + "╯")).append(RESET).append('\n');
+        // Environment line sits below the box, unframed: it is reference detail rather than
+        // identity, and the spec keeps the box itself to the identity rows.
+        sb.append(DIM).append("   ").append(engine).append(" engine · ")
+          .append(cores).append(" cores · ")
+          .append(Runtime.getRuntime().maxMemory() / (1024L * 1024L)).append(" MiB heap")
+          .append(RESET).append('\n');
         return sb.toString();
+    }
+
+    /** One framed line, with the frame drawn in the gradient's end colours. */
+    private static String row(final String text, final String colour) {
+        return FRAME + "   │ " + colour + pad(text, WIDTH) + FRAME + " │" + RESET + "\n";
+    }
+
+    private static String centre(final String text) {
+        if (text.length() >= WIDTH) {
+            return text;
+        }
+        final int left = (WIDTH - text.length()) / 2;
+        return " ".repeat(left) + text;
+    }
+
+    /**
+     * Sweeps a string through the Aurora gradient, one colour step per character.
+     *
+     * <p>Used only for the two frame rules. A terminal without truecolor renders the escapes
+     * as nothing and the rule still draws.
+     */
+    private static String sweep(final String text) {
+        final StringBuilder out = new StringBuilder(text.length() * 12);
+        final int span = Math.max(1, text.length() - 1);
+        for (int i = 0; i < text.length(); i++) {
+            final TextColor colour = SourbyCraftColors.lerp(
+                SourbyCraftColors.AURORA_DEEP, SourbyCraftColors.AURORA, (double)i / span);
+            out.append(fg(colour)).append(text.charAt(i));
+        }
+        return out.toString();
     }
 
     private static String pad(String s, int width) {
