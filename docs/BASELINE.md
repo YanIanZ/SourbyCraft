@@ -115,7 +115,8 @@ Every metric names its source, and an unsupported metric is reported as
 | TPS, MSPT | `dev.iyanz.sourbycraft.PerformanceSnapshot` | One sample per second, build 44 and later |
 | CPU | `jdk.CPULoad` | Process and machine fractions |
 | GC pauses | `jdk.GCPhasePause` | Stop-the-world only, not MXBean collection time |
-| Allocation rate | `jdk.GCHeapSummary` pairs | Heap used before a collection minus after the previous one |
+| Allocation rate | `jdk.ThreadAllocationStatistics` | Cumulative per-thread counters; GC-independent, with per-thread attribution |
+| Allocation (cross-check) | `jdk.GCHeapSummary` pairs | Heap used before a collection minus after the previous one |
 | Heap after GC | `jdk.GCHeapSummary` | Retained size, not peak occupancy |
 | RSS | `ps -o rss=` | Sampled from the OS once a second |
 | Network throughput | the load generator | Client-observed round-trips and bytes |
@@ -139,14 +140,33 @@ run a minute without a collection — in which case GC and allocation are correc
 reported unavailable rather than as zero. That is another reason the default
 measurement window is ten minutes.
 
+The profiler is part of what you are measuring. In the 600-second idle baseline the
+single heaviest allocating thread was `spark-async-sampler-worker`, at 101 MiB of a
+178 MiB total — 57% of all allocation on an otherwise idle server. `top_threads` makes
+that visible; read a baseline with it in mind rather than attributing it to the server.
+
 RSS is the noisiest metric here. Two runs of the same jar minutes apart have differed
 by over 80% on a desktop with other work in flight. Gate on it only on a quiet machine,
 and only with repeated runs.
 
-The allocation-rate estimator was cross-checked against `jdk.ObjectAllocationSample`
-weights on a synthetic allocation load and agreed within about 12%. It uses bounded
-events on purpose: printing the sampled allocation event also serializes every stack
-trace in the recording.
+Allocation is measured two ways, because the obvious way does not always work.
+
+`allocation` comes from `jdk.ThreadAllocationStatistics`: each thread's cumulative
+allocated bytes, carrying no stack trace, so it is cheap to read and keeps working on a
+server that never collects. It also attributes allocation per thread, which the heap
+estimate cannot. It undercounts — a thread that starts and exits between two samples is
+never observed — and it measures only the span the samples actually cover.
+
+`allocation_from_gc` is the heap-occupancy estimate: bytes allocated between two
+collections are the heap used before one minus the heap used after the previous. It was
+cross-checked against `jdk.ObjectAllocationSample` weights on a synthetic load and agreed
+within about 12%. It needs at least two collections, and **an idle server at a large heap
+does not collect at all** — a 600-second idle run at 6 GiB produced zero `GCPhasePause`
+and zero `GCHeapSummary` events, so this estimate, and every GC metric, was correctly
+reported unavailable. Do not read that as "no allocation"; read `allocation` instead.
+
+Both avoid `jdk.ObjectAllocationSample` as a primary source on purpose: printing it also
+serializes every stack trace in the recording.
 
 ## Certification
 

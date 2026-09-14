@@ -99,6 +99,62 @@ class AllocationTest(unittest.TestCase):
             metrics.allocation_metrics(self.summaries([(100, 10), (100, 10)]), 0)
 
 
+class InstantTest(unittest.TestCase):
+    def test_truncates_nanoseconds_datetime_cannot_parse(self):
+        self.assertAlmostEqual(metrics.instant_seconds("2026-09-14T08:29:56.859497667+07:00"),
+                               metrics.instant_seconds("2026-09-14T01:29:56.859497Z"), places=6)
+
+    def test_rejects_a_timestamp_without_a_zone(self):
+        with self.assertRaises(ValueError):
+            metrics.instant_seconds("2026-09-14T08:29:56.859497667")
+
+
+class ThreadAllocationTest(unittest.TestCase):
+    @staticmethod
+    def event(thread_id, name, second, allocated):
+        return {"startTime": f"2026-09-14T00:00:{second:02d}.000000000+00:00",
+                "thread": {"javaThreadId": thread_id, "javaName": name},
+                "allocated": allocated}
+
+    def test_sums_each_threads_growth_over_the_observed_span(self):
+        result = metrics.thread_allocation_metrics([
+            self.event(1, "a", 0, 100), self.event(1, "a", 10, 1100),
+            self.event(2, "b", 0, 0), self.event(2, "b", 10, 500)])
+        self.assertEqual(result["allocated_bytes"], 1500)
+        self.assertEqual(result["observed_seconds"], 10.0)
+        self.assertEqual(result["bytes_per_second"], 150.0)
+        self.assertEqual(result["threads_observed"], 2)
+
+    def test_ranks_the_heaviest_allocators_first(self):
+        result = metrics.thread_allocation_metrics([
+            self.event(1, "light", 0, 0), self.event(1, "light", 10, 10),
+            self.event(2, "heavy", 0, 0), self.event(2, "heavy", 10, 900)])
+        self.assertEqual([entry["thread"] for entry in result["top_threads"]], ["heavy", "light"])
+
+    def test_ignores_event_ordering(self):
+        forward = metrics.thread_allocation_metrics([self.event(1, "a", 0, 10), self.event(1, "a", 10, 90)])
+        backward = metrics.thread_allocation_metrics([self.event(1, "a", 10, 90), self.event(1, "a", 0, 10)])
+        self.assertEqual(forward["allocated_bytes"], backward["allocated_bytes"])
+
+    def test_a_counter_that_went_backwards_is_clamped(self):
+        result = metrics.thread_allocation_metrics([self.event(1, "a", 0, 500), self.event(1, "a", 10, 100)])
+        self.assertEqual(result["allocated_bytes"], 0)
+
+    def test_unavailable_without_events_or_without_a_span(self):
+        self.assertFalse(metrics.thread_allocation_metrics([])["available"])
+        single = metrics.thread_allocation_metrics([self.event(1, "a", 5, 10), self.event(2, "b", 5, 20)])
+        self.assertFalse(single["available"])
+        self.assertIn("one timestamp", single["reason"])
+
+    def test_survives_a_thread_with_only_an_os_name(self):
+        result = metrics.thread_allocation_metrics([
+            {"startTime": "2026-09-14T00:00:00.000000000+00:00",
+             "thread": {"osThreadId": 7, "javaName": None, "osName": "VM Thread"}, "allocated": 0},
+            {"startTime": "2026-09-14T00:00:10.000000000+00:00",
+             "thread": {"osThreadId": 7, "javaName": None, "osName": "VM Thread"}, "allocated": 80}])
+        self.assertEqual(result["top_threads"][0]["thread"], "VM Thread")
+
+
 class SnapshotTest(unittest.TestCase):
     @staticmethod
     def sample(state="AVAILABLE", mspt=10.0):
@@ -244,8 +300,9 @@ def record(name="players-50", commit="a" * 40, **overrides):
                     "cpu": {"process_fraction": {"mean": 0.5}},
                     "gc": {"total_pause_ms": 100.0, "collections": 20,
                            "pause_ms": {"p95": 5.0}},
-                    "allocation": {"bytes_per_second": 1000.0,
-                                   "heap_used_after_gc": {"mean": 500.0}},
+                    "allocation": {"bytes_per_second": 1000.0},
+                    "allocation_from_gc": {"bytes_per_second": 900.0,
+                                           "heap_used_after_gc": {"mean": 500.0}},
                     "rss": {"bytes": {"mean": 2000.0}}}}
     base.update(overrides)
     return base
