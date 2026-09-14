@@ -1,15 +1,15 @@
 package dev.iyanz.sourbycraft.testplugin;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
+import io.papermc.paper.command.brigadier.BasicCommand;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
 import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
@@ -22,44 +22,46 @@ import org.bukkit.plugin.Plugin;
  * thread, and dropping ten thousand entities into one tick would stall that region badly
  * enough to make the very measurement the load is for meaningless.
  */
-public final class StressCommands implements CommandExecutor, TabCompleter {
+public final class StressCommands implements BasicCommand {
 
     /** Entities created per tick. Enough to build load quickly, small enough not to stall. */
     private static final int BATCH = 200;
     private static final int MAX_COUNT = 200_000;
 
     private final Plugin plugin;
+    private final String name;
 
-    public StressCommands(final Plugin plugin) {
+    public StressCommands(final Plugin plugin, final String name) {
         this.plugin = plugin;
+        this.name = name;
     }
 
     @Override
-    public boolean onCommand(final CommandSender sender, final Command command,
-                             final String label, final String[] args) {
-        return switch (command.getName().toLowerCase(Locale.ROOT)) {
+    public void execute(final CommandSourceStack source, final String[] args) {
+        final CommandSender sender = source.getSender();
+        switch (this.name) {
             case "massspawn" -> this.massSpawn(sender, args);
             case "flyspeed" -> this.flySpeed(sender, args);
-            default -> false;
-        };
+            default -> sender.sendMessage("Unknown stress command: " + this.name);
+        }
     }
 
     /** {@code /massspawn <type> <x> <y> <z> <count>} — coordinates accept {@code ~}. */
-    private boolean massSpawn(final CommandSender sender, final String[] args) {
+    private void massSpawn(final CommandSender sender, final String[] args) {
         if (args.length != 5) {
             sender.sendMessage("Usage: /massspawn <type> <x> <y> <z> <count>   (~ allowed, e.g. arrow ~ ~ ~ 100)");
-            return true;
+            return;
         }
         final EntityType type;
         try {
             type = EntityType.valueOf(args[0].toUpperCase(Locale.ROOT).replace("MINECRAFT:", ""));
         } catch (final IllegalArgumentException unknown) {
             sender.sendMessage("Unknown entity type: " + args[0]);
-            return true;
+            return;
         }
         if (!type.isSpawnable()) {
             sender.sendMessage(type.name() + " cannot be spawned directly.");
-            return true;
+            return;
         }
 
         final Location origin = sender instanceof Player player ? player.getLocation()
@@ -73,11 +75,11 @@ public final class StressCommands implements CommandExecutor, TabCompleter {
             count = Integer.parseInt(args[4]);
         } catch (final NumberFormatException bad) {
             sender.sendMessage("Coordinates must be numbers or ~offset, and count must be an integer.");
-            return true;
+            return;
         }
         if (count < 1 || count > MAX_COUNT) {
             sender.sendMessage("Count must be between 1 and " + MAX_COUNT + ".");
-            return true;
+            return;
         }
 
         final World world = origin.getWorld();
@@ -100,31 +102,30 @@ public final class StressCommands implements CommandExecutor, TabCompleter {
                     sender.sendMessage("Spawned " + count + " " + type.name() + ".");
                 }
             }, 1L, 1L);
-        return true;
     }
 
     /** {@code /flyspeed <0.0-1.0> [player]} — raises travel speed for extreme-range testing. */
-    private boolean flySpeed(final CommandSender sender, final String[] args) {
+    private void flySpeed(final CommandSender sender, final String[] args) {
         if (args.length < 1 || args.length > 2) {
             sender.sendMessage("Usage: /flyspeed <0.0-1.0> [player]");
-            return true;
+            return;
         }
         final float speed;
         try {
             speed = Float.parseFloat(args[0]);
         } catch (final NumberFormatException bad) {
             sender.sendMessage("Speed must be a number between 0.0 and 1.0.");
-            return true;
+            return;
         }
         if (!(speed >= 0.0F) || speed > 1.0F) {         // Rejects NaN as well as out of range.
             sender.sendMessage("Speed must be between 0.0 and 1.0 (vanilla default is 0.1).");
-            return true;
+            return;
         }
         final Player target = args.length == 2 ? Bukkit.getPlayerExact(args[1])
             : sender instanceof Player self ? self : null;
         if (target == null) {
             sender.sendMessage(args.length == 2 ? "No such player online." : "Console must name a player.");
-            return true;
+            return;
         }
         // A player's own scheduler owns that player's state wherever their region moves.
         target.getScheduler().run(this.plugin, task -> {
@@ -135,7 +136,6 @@ public final class StressCommands implements CommandExecutor, TabCompleter {
                 sender.sendMessage("Fly speed for " + target.getName() + " set to " + speed + ".");
             }
         }, null);
-        return true;
     }
 
     private static double relative(final String token, final double origin) {
@@ -146,12 +146,11 @@ public final class StressCommands implements CommandExecutor, TabCompleter {
     }
 
     @Override
-    public List<String> onTabComplete(final CommandSender sender, final Command command,
-                                      final String alias, final String[] args) {
-        if (command.getName().equalsIgnoreCase("flyspeed") && args.length == 1) {
+    public Collection<String> suggest(final CommandSourceStack source, final String[] args) {
+        if (this.name.equals("flyspeed") && args.length <= 1) {
             return List.of("0.1", "0.5", "1.0");
         }
-        if (command.getName().equalsIgnoreCase("massspawn")) {
+        if (this.name.equals("massspawn")) {
             if (args.length == 1) {
                 final List<String> types = new ArrayList<>();
                 for (final EntityType type : EntityType.values()) {
