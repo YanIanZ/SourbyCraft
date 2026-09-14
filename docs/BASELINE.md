@@ -305,3 +305,21 @@ The discriminator is the same 6 GiB ceiling at a load the machine can sustain: t
 players for two hours, whose five-minute steady state is ~3.0 GiB. A live set still
 near 3 GiB after two hours means residency tracks the players and there is no leak; a
 live set that climbs to the ceiling anyway means there is one.
+
+### What the soak says about capacity
+
+Terrain generation dominated the soak: 61.6% of CPU samples and 86.9% of allocation
+sat on the two `Paper Common Worker` threads, because fifty clients flying randomly for
+two hours never stop entering ungenerated terrain. The top sites are
+`DensityFunctions$Ap2.fillArray`, `LinearPalette.<init>` and
+`PalettedContainer.reencodeContents` — chunk generation, not gameplay.
+
+Raising the worker count is the obvious lever and it does not apply here. The certified
+A/B at ten players shows six workers cost +22.3% mean and +24.6% p95 MSPT to buy −38.6%
+p99 and −36.6% max: on eight cores the extra workers are taken from the region threads,
+trading typical tick for tail. During the soak the machine was already at 89% CPU with
+the client swarm on the same box, so there was nothing left to give.
+
+The soak therefore measured this machine's ceiling, not SourbyCraft's. Capacity numbers
+for fifty players need either more cores and memory than 8/16 GB, or a reduction in the
+cost of generating a chunk.
