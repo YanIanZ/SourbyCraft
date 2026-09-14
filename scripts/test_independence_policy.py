@@ -106,3 +106,58 @@ class ReachTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SchedulerCouplingTest(unittest.TestCase):
+    """The Folia internal region scheduler reached from SourbyCraft's own side.
+
+    This is the surface an Aurora execution contract has to cover. It is pinned so the
+    contract is designed against a known list rather than a moving one, and so a new
+    reach into the scheduler is a deliberate act with a reason beside it.
+    """
+
+    APPROVED = {
+        # Telemetry. The collector reads the global tick handle's metrics and the
+        # configured tick rate; it schedules nothing and mutates nothing.
+        "io.papermc.paper.threadedregions.RegionizedServer",
+        "io.papermc.paper.threadedregions.TickRegionScheduler",
+        "RegionizedServer",
+        "TickRegionScheduler",
+        # Async pathfinding hands the completion back to the owning entity's region.
+        "io.papermc.paper.threadedregions.EntityScheduler",
+    }
+
+    def test_sourby_code_reaches_the_scheduler_only_where_recorded(self):
+        found = {site["symbol"] for site in policy.scheduler_sites(REPO)}
+        self.assertEqual(found, self.APPROVED,
+                         "SourbyCraft code reaches an internal region-scheduler symbol that "
+                         "is not in the ledger; add it with a reason, or route it through an "
+                         "Aurora execution contract")
+
+    def test_integration_patches_reach_the_scheduler_only_where_recorded(self):
+        found = {site["symbol"] for site in policy.scheduler_patch_sites(REPO)}
+        self.assertEqual(
+            found,
+            {"io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData"},
+            "a minecraft-patch reaches into the region scheduler outside the recorded set")
+
+    def test_the_public_folia_api_is_not_counted_as_coupling(self):
+        # threadedregions.scheduler is the published Bukkit-facing API. Depending on a
+        # contract is the goal, not the problem.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            owned = root / OWNED
+            owned.mkdir(parents=True)
+            (owned / "Fixture.java").write_text(
+                "import io.papermc.paper.threadedregions.scheduler.ScheduledTask;\n")
+            self.assertEqual(policy.scheduler_sites(root), [])
+
+    def test_a_patch_editing_the_scheduler_is_not_a_call_into_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            patches = root / policy.INTEGRATION_PATCH_ROOT / "features"
+            patches.mkdir(parents=True)
+            (patches / "0001-fixture.patch").write_text(
+                "+++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java\n"
+                "++ b/io/papermc/paper/threadedregions/TickRegions.java\n")
+            self.assertEqual(policy.scheduler_patch_sites(root), [])
