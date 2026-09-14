@@ -27,6 +27,11 @@ paths and direct moveTo stay synchronous; only the repeated recompute goes
 async. Degrades to sync on any failure. Needs a live mob-behaviour soak
 before default-on.
 
+Folded in the PathfindingContext guard that shipped separately as 0007: the
+regionized PathTypeCache lives on the current region's world data and is null on
+the async worker, so without it every off-region solve NPEs. The two are one
+feature and neither stands alone.
+
 diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 index 0b5fab274d9471472ffe81dead60e4d0906b0f31..88fb734f31d8e92d5e4417af75f455c4ccbad533 100644
 --- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
@@ -109,3 +114,22 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..88fb734f31d8e92d5e4417af75f455c4
      public final @Nullable Path createPath(final double x, final double y, final double z, final int reachRange) {
          return this.createPath(BlockPos.containing(x, y, z), reachRange);
      }
+diff --git a/net/minecraft/world/level/pathfinder/PathfindingContext.java b/net/minecraft/world/level/pathfinder/PathfindingContext.java
+index 64e1a34de133beccb90486f247e7e74d6535941f..e01bb2b30552a6bb8f35d780e235cec6cb969fa6 100644
+--- a/net/minecraft/world/level/pathfinder/PathfindingContext.java
++++ b/net/minecraft/world/level/pathfinder/PathfindingContext.java
+@@ -15,7 +15,13 @@ public class PathfindingContext {
+ 
+     public PathfindingContext(final CollisionGetter level, final Mob mob) {
+         this.level = level;
+-        if (mob.level() instanceof ServerLevel serverLevel) {
++        // SourbyCraft - async pathfinding: the regionized PathTypeCache lives on the CURRENT region's
++        // world data (ServerLevel.getPathTypeCache -> getCurrentWorldData().pathTypesByPosCache), which
++        // is null on the async-pathfinding worker thread (not a region tick thread). Only use the shared
++        // cache when actually running on a region thread; off-region, fall back to no cache — the static
++        // path-type computer in getPathTypeFromState is correct, just uncached for that one solve.
++        if (mob.level() instanceof ServerLevel serverLevel
++            && io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData() != null) {
+             this.cache = serverLevel.getPathTypeCache();
+         } else {
+             this.cache = null;

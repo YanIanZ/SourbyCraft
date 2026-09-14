@@ -79,3 +79,38 @@ def shared_mutable_fields(root):
             if array or MUTABLE_CONTAINER.search(line):
                 violations.append({"patch": patch.name, "file": target, "declaration": line.strip()})
     return violations
+
+
+# A downstream patch that changes an upstream default changes what an operator gets
+# without them asking. That is allowed — PRD section 5 forbids changing settings behind
+# an operator's back at runtime, not shipping a different default — but it has to be
+# deliberate and visible. These patches are keyed by target file, one per file, so a
+# default change cannot be split into its own patch; pinning the set here is what makes
+# it reviewable instead.
+# The access modifier is required, not optional: a Java local variable cannot have one,
+# so demanding it separates a field default from a local initialiser inside a method body
+# that a patch happens to rewrite.
+FIELD_DEFAULT = re.compile(
+    r"^([+-])\s*(?:public|protected|private)\s+(?:static\s+)?(?:final\s+)?"
+    r"[\w.<>\[\]]+\s+(\w+)\s*=\s*(.+?);\s*(?://.*)?$")
+
+
+def upstream_default_changes(root):
+    """Every upstream field default a patch redefines.
+
+    Keyed by "<patch file>:<field>" rather than by field alone: two patches may redefine
+    a same-named field in different classes, and collapsing them would hide one of them.
+    """
+    changes = {}
+    for patch in patch_files(root):
+        removed = {}
+        for line in patch.read_text(errors="replace").splitlines():
+            match = FIELD_DEFAULT.match(line)
+            if not match:
+                continue
+            sign, name, value = match.groups()
+            if sign == "-":
+                removed[name] = value.strip()
+            elif name in removed and removed[name] != value.strip():
+                changes[f"{patch.name}:{name}"] = (removed[name], value.strip())
+    return changes
