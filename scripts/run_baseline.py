@@ -28,7 +28,11 @@ import baseline_network
 import baseline_workloads
 
 STARTUP_TIMEOUT = 600
-SHUTDOWN_TIMEOUT = 120
+# Region shutdown saves one region at a time on a single RegionShutdownThread. A
+# two-hour fifty-player soak ended holding forty-six regions at roughly ten seconds
+# each, so a flat two-minute budget killed the server mid-save. Budget for the serial
+# walk; the duration actually taken is recorded either way.
+SHUTDOWN_TIMEOUT = 900
 SETUP_BATCH = 50
 SETUP_BATCH_PAUSE = 0.2
 RSS_INTERVAL = 1.0
@@ -412,9 +416,23 @@ def capture(jar, plan, output, args, tools):
         server.send("save-all", "stop")
         shutdown = time.monotonic()
         server.process.stdin.close()
-        if server.process.wait(timeout=SHUTDOWN_TIMEOUT) != 0:
-            raise RuntimeError(f"Unclean exit: {server.process.returncode}")
+        # A shutdown fault must not destroy the measurement. The timed recording was
+        # flushed to profile.jfr above, so every metric below is still derivable from a
+        # server that never exits cleanly -- and a soak that degrades badly enough to
+        # stall its own shutdown is exactly the run whose evidence is worth keeping.
+        # Record what happened and let certify() refuse it; do not raise.
+        try:
+            code = server.process.wait(timeout=SHUTDOWN_TIMEOUT)
+            note = None if code == 0 else f"unclean exit: {code}"
+        except subprocess.TimeoutExpired:
+            note = (f"did not exit within {SHUTDOWN_TIMEOUT}s; region saves were "
+                    "likely still in progress")
+            server.process.kill()
+            server.process.wait()
         record["provenance"]["shutdown_seconds"] = time.monotonic() - shutdown
+        record["provenance"]["shutdown_clean"] = note is None
+        if note is not None:
+            record["provenance"]["shutdown_note"] = note
 
         after_commit, after_dirty, _, _ = git_state()
         record["provenance"]["worktree_dirty"] = dirty or after_dirty
@@ -479,6 +497,9 @@ def certify(plan, record, args):
     if record["provenance"].get("commit_moved_during_run"):
         reasons.append("HEAD moved while the measurement was running, so the jar and the "
                        "repository no longer describe the same thing")
+    if not record["provenance"].get("shutdown_clean", True):
+        reasons.append(f"shutdown was not clean ({record['provenance']['shutdown_note']}), "
+                       "so the world this run leaves behind may be torn")
     if record["provenance"].get("competing_servers_at_start"):
         reasons.append("another server was already running when this run started")
     if args.duration < 300:
