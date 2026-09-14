@@ -96,7 +96,7 @@ def main():
             print(f"Ready: {output}; warming {args.warmup}s", flush=True)
             send("forceload add 0 0")
             wait_alive(args.warmup)
-            subprocess.run([str(jcmd), str(process.pid), "JFR.start", "name=SourbyProfile", "settings=profile",
+            subprocess.run([str(jcmd), str(process.pid), "JFR.start", "name=SourbyCraft", "settings=profile",
                             f"duration={args.duration}s", f"filename={output / 'profile.jfr'}"], check=True)
             send("version\ntps\nmspt\nperf\nram")
             wait_alive(args.duration + 2)
