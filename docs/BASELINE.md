@@ -179,6 +179,18 @@ hold, and records the reason in `baseline.json`:
 * the worktree was dirty, so the jar cannot be tied to a commit
 * the server rejected a setup command
 * the measurement window was shorter than 300 seconds
+* another server was already running when the run started
+* the machine averaged more than 10% CPU on work other than this server
+
+The last two exist because a measurement that shares the machine is not a
+measurement, and nothing else in this list can see that. `run_baseline.py` refuses to
+start at all while another process is running a server jar — pass
+`--allow-shared-machine` to measure anyway, and the run will not be certified.
+Afterwards, `foreign_fraction` (the machine total minus this JVM's own share, from
+`jdk.CPULoad`) shows what the box was doing that the server was not; a sustained
+non-zero value means the numbers describe a contended machine. Both checks were added
+after two baselines were found running against each other with every other rule
+passing.
 
 ## Ranking hot spots
 

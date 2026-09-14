@@ -292,12 +292,14 @@ def record(name="players-50", commit="a" * 40, **overrides):
         "provenance": {"commit": commit, "worktree_dirty": False, "jar_sha256": "b" * 64, "java_version": "openjdk 25",
                        "platform": "macOS", "machine": "arm64", "cpu_count": 10, "heap_mib": 6144,
                        "jvm_args": ["-Xmx6144M"], "jfr_settings": "profile", "warmup_seconds": 120,
-                       "duration_seconds": 600, "connected_players_asserted": 0, "plugins": []},
+                       "duration_seconds": 600, "connected_players_asserted": 0, "plugins": [],
+                       "competing_servers_at_start": []},
         "certified": True, "certification": "meets baseline requirements",
         "metrics": {"tick": {"available": True, "mspt": {"mean": 10.0, "p50": 9.0, "p95": 20.0,
                                                          "p99": 30.0, "max": 40.0},
                              "tps": {"mean": 20.0}},
-                    "cpu": {"process_fraction": {"mean": 0.5}},
+                    "cpu": {"available": True, "process_fraction": {"mean": 0.5},
+                            "foreign_fraction": {"available": True, "mean": 0.01, "max": 0.05}},
                     "gc": {"total_pause_ms": 100.0, "collections": 20,
                            "pause_ms": {"p95": 5.0}},
                     "allocation": {"bytes_per_second": 1000.0},
@@ -430,6 +432,85 @@ class CertifyTest(unittest.TestCase):
         certified, reason = run_baseline.certify(workloads.build("idle"), dirty, self.args())
         self.assertFalse(certified)
         self.assertIn("dirty", reason)
+
+
+class ForeignCpuTest(unittest.TestCase):
+    def test_reports_what_the_machine_did_that_this_server_did_not(self):
+        result = metrics.cpu_metrics([{"jvmUser": 0.20, "jvmSystem": 0.05, "machineTotal": 0.80}])
+        self.assertAlmostEqual(result["foreign_fraction"]["mean"], 0.55)
+        self.assertAlmostEqual(result["process_fraction"]["mean"], 0.25)
+
+    def test_a_quiet_machine_reports_near_zero_foreign_cpu(self):
+        result = metrics.cpu_metrics([{"jvmUser": 0.30, "jvmSystem": 0.02, "machineTotal": 0.33}])
+        self.assertLess(result["foreign_fraction"]["mean"], 0.02)
+
+    def test_never_reports_negative_foreign_cpu(self):
+        # The two figures are sampled independently and can disagree slightly.
+        result = metrics.cpu_metrics([{"jvmUser": 0.50, "jvmSystem": 0.10, "machineTotal": 0.55}])
+        self.assertEqual(result["foreign_fraction"]["min"], 0.0)
+
+
+class ContentionCertificationTest(unittest.TestCase):
+    @staticmethod
+    def args(**overrides):
+        values = {"connected_players": 0, "duration": 600}
+        values.update(overrides)
+        return argparse.Namespace(**values)
+
+    def test_a_contended_window_is_not_certified(self):
+        busy = record()
+        busy["metrics"]["cpu"]["foreign_fraction"] = {"available": True, "mean": 0.42, "max": 0.90}
+        certified, reason = run_baseline.certify(workloads.build("idle"), busy, self.args())
+        self.assertFalse(certified)
+        self.assertIn("sharing the box", reason)
+        self.assertIn("42", reason)
+
+    def test_a_quiet_window_certifies(self):
+        certified, reason = run_baseline.certify(workloads.build("idle"), record(), self.args())
+        self.assertTrue(certified)
+        self.assertEqual(reason, "meets baseline requirements")
+
+    def test_a_competing_server_at_start_is_not_certified(self):
+        shared = record()
+        shared["provenance"]["competing_servers_at_start"] = ["pid 2760: java -jar Sourby.jar"]
+        certified, reason = run_baseline.certify(workloads.build("idle"), shared, self.args())
+        self.assertFalse(certified)
+        self.assertIn("already running", reason)
+
+    def test_unavailable_cpu_metrics_do_not_crash_certification(self):
+        blind = record()
+        blind["metrics"]["cpu"] = {"available": False, "reason": "no events"}
+        certified, reason = run_baseline.certify(workloads.build("idle"), blind, self.args())
+        self.assertTrue(certified)
+
+
+class CompetingServerTest(unittest.TestCase):
+    def test_finds_another_process_running_the_same_jar(self):
+        from pathlib import Path as P
+        import subprocess as sp
+        listing = ("  111 /usr/bin/java -Xmx2G -jar /x/SourbyCraft-slim.jar --nogui\n"
+                   "  222 /bin/zsh -c something-else\n")
+        original = sp.run
+        sp.run = lambda *a, **k: type("R", (), {"stdout": listing})()
+        try:
+            found = run_baseline.competing_servers(P("/x/SourbyCraft-slim.jar"), -1)
+        finally:
+            sp.run = original
+        self.assertEqual(len(found), 1)
+        self.assertIn("pid 111", found[0])
+
+    def test_ignores_its_own_pid_and_non_jar_matches(self):
+        from pathlib import Path as P
+        import os as _os
+        import subprocess as sp
+        listing = f"  {_os.getpid()} java -jar /x/SourbyCraft-slim.jar\n  333 grep SourbyCraft-slim.jar\n"
+        original = sp.run
+        sp.run = lambda *a, **k: type("R", (), {"stdout": listing})()
+        try:
+            found = run_baseline.competing_servers(P("/x/SourbyCraft-slim.jar"), -1)
+        finally:
+            sp.run = original
+        self.assertEqual(found, [])
 
 
 class HeapGuardTest(unittest.TestCase):

@@ -147,13 +147,22 @@ def thread_allocation_metrics(statistics, top=8):
 
 
 def cpu_metrics(loads):
-    """Process and machine CPU load as fractions of total machine capacity."""
+    """Process and machine CPU load as fractions of total machine capacity.
+
+    ``foreign_fraction`` is what the machine was doing that this server was not: the
+    machine total minus this JVM's own share. On a dedicated box it sits near zero. A
+    sustained non-zero value means the measurement was sharing the machine with
+    something else, which no other certification rule can see.
+    """
     if not loads:
         return dict(UNAVAILABLE, reason="no jdk.CPULoad events in recording")
     process = [event["jvmUser"] + event["jvmSystem"] for event in loads]
+    machine = [event["machineTotal"] for event in loads]
+    foreign = [max(0.0, whole - mine) for whole, mine in zip(machine, process)]
     return {"available": True, "source": "jdk.CPULoad",
             "process_fraction": distribution(process),
-            "machine_fraction": distribution([event["machineTotal"] for event in loads])}
+            "machine_fraction": distribution(machine),
+            "foreign_fraction": distribution(foreign)}
 
 
 # MetricState values whose sample carries its own freshly collected values.
