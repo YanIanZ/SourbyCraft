@@ -175,11 +175,31 @@ patches. The numbering gaps are deliberate: filenames are the apply order, so
 renumbering rewrites every file, and that churn is worth taking once at a patch-freeze
 boundary rather than piecemeal.
 
-### 4. Add a regression test for 0017
+### 4. Add a regression test for 0017 — DONE
 
-`isInWall` needed three follow-up commits after landing (`676be16`, `c08e691`,
-`75e8a64`), twice for the same missing `boundingBox.move` inline. A rebase will
-reintroduce that class of error unless a test pins the behaviour.
+**Done**, in two halves, because one test cannot cover both failure modes.
+
+0017 replaces `AABB.ofSize(eyePosition, w, 1.0E-6, w)` and
+`boundingBox.move(-blockX, -blockY, -blockZ)` with scalar arithmetic to drop two
+allocations per entity per tick. What shipped broken was the translation: once a
+dangling reference to the deleted variable, once bounds left in world space. An
+untranslated box makes `isInWall` test the wrong region of space, so suffocation is
+decided against blocks the entity is not in — silent, not a crash.
+
+`IsInWallBoundsTest` pins the **contract**: for representative entities and block
+coordinates, including negative ones, the inlined scalars equal what `AABB.ofSize` and
+`AABB#move` produce. The assertions are exact rather than tolerance-based on purpose —
+halving by `* 0.5` and by `/ 2.0` are the same exact power-of-two scaling, and `a - b`
+is exactly `a + (-b)`, so any difference is a real change in the formula. If upstream
+ever changes how `ofSize` or `move` computes, this fails and says the inlined copy must
+follow.
+
+`patch_policy.translated_bounds` pins the **patch**: it extracts the inline
+`toCollide` construction and counts the translation per axis, which must be two per
+axis — one for each corner. The contract test cannot see the patch drifting, and this
+one cannot see upstream drifting; together they cover both directions. Its own tests
+check that it detects a box left in world space, a partially translated box, one
+corner translated, and a construction split across lines.
 
 ### 5. Split the `GlobalConfiguration` patch — NOT POSSIBLE; pinned instead
 

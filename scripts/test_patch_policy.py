@@ -147,6 +147,56 @@ class UpstreamDefaultTest(unittest.TestCase):
             self.assertEqual(patch_policy.upstream_default_changes(root), {})
 
 
+class TranslatedBoundsTest(unittest.TestCase):
+    """Patch 0017's inline block-local AABB must translate all six components.
+
+    Upstream writes `boundingBox.move(-blockX, -blockY, -blockZ)`. 0017 inlines it to
+    drop an allocation. The translation went missing twice while that was being settled,
+    and an untranslated box makes isInWall test the wrong region of space — suffocation
+    decided against blocks the entity is not in. Silent, not a crash.
+    """
+
+    def check(self, expression):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_patch(root, "0017-fixture.patch", patch_for(
+                "net/minecraft/world/entity/Entity.java",
+                f"+    final AABB toCollide = new AABB({expression});"))
+            return patch_policy.translated_bounds(root)
+
+    def test_the_shipped_patch_translates_every_axis(self):
+        found = patch_policy.translated_bounds(REPO)
+        self.assertEqual(len(found), 1, "expected exactly one inline toCollide construction")
+        self.assertEqual(found[0]["translated_axes"], {"x": 2, "y": 2, "z": 2},
+                         "each axis must be translated for both the min and the max corner; "
+                         "an untranslated corner makes isInWall test the wrong blocks")
+
+    def test_detects_a_box_left_in_world_space(self):
+        # The regression that shipped: bounds never moved into block-local space.
+        found = self.check("minX, minY, minZ, maxX, maxY, maxZ")
+        self.assertEqual(found[0]["translated_axes"], {"x": 0, "y": 0, "z": 0})
+
+    def test_detects_a_partially_translated_box(self):
+        found = self.check("minX - blockX, minY, minZ - blockZ, "
+                           "maxX - blockX, maxY, maxZ - blockZ")
+        self.assertEqual(found[0]["translated_axes"], {"x": 2, "y": 0, "z": 2})
+
+    def test_detects_only_one_corner_translated(self):
+        found = self.check("minX - blockX, minY - blockY, minZ - blockZ, maxX, maxY, maxZ")
+        self.assertEqual(found[0]["translated_axes"], {"x": 1, "y": 1, "z": 1})
+
+    def test_reads_a_construction_split_across_lines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_patch(root, "0017-fixture.patch", patch_for(
+                "net/minecraft/world/entity/Entity.java",
+                "+    final AABB toCollide = new AABB(",
+                "+        minX - blockX, minY - blockY, minZ - blockZ,",
+                "+        maxX - blockX, maxY - blockY, maxZ - blockZ);"))
+            found = patch_policy.translated_bounds(root)
+            self.assertEqual(found[0]["translated_axes"], {"x": 2, "y": 2, "z": 2})
+
+
 class RepositoryTest(unittest.TestCase):
     def test_the_committed_patch_set_holds_no_shared_mutable_buffer(self):
         violations = patch_policy.shared_mutable_fields(REPO)
