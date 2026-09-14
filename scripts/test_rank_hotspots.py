@@ -155,6 +155,45 @@ class OverstatementTest(unittest.TestCase):
         self.assertNotIn("out of proportion", report)
 
 
+class TickBudgetTest(unittest.TestCase):
+    """A CPU ranking describes where time went, not whether any of it was a problem."""
+
+    @staticmethod
+    def tick(mspt):
+        return {"available": True, "mspt": {"mean": mspt}}
+
+    def test_computes_the_fraction_of_budget_used(self):
+        note = ranker.tick_budget_note(self.tick(25.0), 20.0)
+        self.assertAlmostEqual(note["fraction_used"], 0.5)
+        self.assertAlmostEqual(note["budget_ms"], 50.0)
+
+    def test_a_higher_target_tps_shrinks_the_budget(self):
+        note = ranker.tick_budget_note(self.tick(25.0), 40.0)
+        self.assertAlmostEqual(note["budget_ms"], 25.0)
+        self.assertAlmostEqual(note["fraction_used"], 1.0)
+
+    def test_defaults_to_twenty_tps_when_the_target_is_missing(self):
+        self.assertAlmostEqual(ranker.tick_budget_note(self.tick(5.0), None)["budget_ms"], 50.0)
+
+    def test_absent_when_tick_metrics_are_unavailable(self):
+        self.assertIsNone(ranker.tick_budget_note({"available": False}, 20.0))
+        self.assertIsNone(ranker.tick_budget_note(None, 20.0))
+
+    def test_an_idle_run_is_called_out_before_the_rankings(self):
+        report = ranker.render(Path("p.jfr"), ranker.cpu_hotspots([], 5),
+                               ranker.allocation_hotspots([], 5), None,
+                               ranker.tick_budget_note(self.tick(0.53), 20.0))
+        self.assertIn("1.1% of its tick budget", report)
+        self.assertIn("no bottleneck here to find", report)
+        self.assertLess(report.index("tick budget"), report.index("## CPU"))
+
+    def test_a_loaded_run_is_not_second_guessed(self):
+        report = ranker.render(Path("p.jfr"), ranker.cpu_hotspots([], 5),
+                               ranker.allocation_hotspots([], 5), None,
+                               ranker.tick_budget_note(self.tick(30.0), 20.0))
+        self.assertNotIn("no bottleneck here to find", report)
+
+
 class RenderTest(unittest.TestCase):
     def test_states_every_caveat_that_limits_the_ranking(self):
         report = ranker.render(Path("profile.jfr"),

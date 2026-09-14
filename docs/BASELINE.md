@@ -231,6 +231,13 @@ It picks up the workload's fidelity statements from the `baseline.json` beside t
 recording and reprints them at the top, so a ranking is never read apart from the
 conditions that produced it.
 
+The report leads with how much of the tick budget the run used. Below 20% it says so
+loudly, because a CPU ranking describes where time went and not whether any of it was a
+problem. The first loaded profile used 1.1% of its budget — 0.53 ms of 50 — so its top
+entry at 31.9% was the largest slice of nearly nothing: 0.111 of one core on an
+eight-core machine. Nothing there can justify an optimization, and any improvement to it
+would land below run-to-run noise.
+
 The allocation table is cross-checked against the counters and says so. JFR's
 allocation sampler favours large objects, so a site allocating big arrays dominates it
 out of proportion to the bytes actually allocated. On the first loaded profile the

@@ -2320,6 +2320,8 @@ V11: Collision, pickup and effect-particle query lists remain per-call; entity f
 V12: Async path completion releases pending state when scheduler admission fails or an admitted task retires; result application stays on the owning entity scheduler (DEVELOPMENT §4.2).
 V13: Launcher bootstrap failure exits nonzero and preserves diagnostic cause; successful reflective invocation preserves arguments and normal exit status (DEVELOPMENT-TASKS §L).
 V14: release/* branches identify as REL, feat/* and experimental/* as EXP, other branches and detached PR builds as DEV; CI artifact paths follow that channel; development checks do not reserve published release numbers (§83–87).
+V15: Aurora config is typed and immutable; present modern async-pathfinding key wins over legacy, invalid modern key/namespace defaults off without legacy fallback; legacy-only reads warn; load/reload never rewrite existing operator files (AURORA-DEVELOPMENT §3).
+V16: Aurora LIVE async toggle controls new path admission; admitted work may drain through the existing owner scheduler; reload reports only applied Aurora changes, with no invented restart-required settings (AURORA-DEVELOPMENT §3.4).
 
 # 153. Regression Log (§B)
 
@@ -2343,6 +2345,7 @@ V14: release/* branches identify as REL, feat/* and experimental/* as EXP, other
 | B16 | 2026-09-14 | Cold bootstrap rejected a hash-mismatched Mojang download but exited 0 before Done | V13; launcher catch exits 1; process tests cover success, exception, Error and missing class. Claude transfer loop repair packaged in SourbyClip 3.0.22; local multi-chunk/hash/cache probe passes; remote cold-download qualification remains OPEN |
 | B17 | 2026-09-14 | 26.2 absent from CI; default branch suffix falsely REL; unconditional release-number reservation rejected ordinary builds | V6,V14; enable 26.2 build/boot/Docker checks, default DEV in three build surfaces, channel-specific artifacts, reserve fresh numbers only for publication |
 | B18 | 2026-09-14 | Packaged launcher returned 0 when ServerMain failed after reflective launcher invocation had returned | V13; ServerMain catch preserves cause and exits 1; packaged thread-boundary success/failure probes |
+| B19 | 2026-09-14 | New-file seed test read disk before NightConfig asynchronous save completed | Test fixture uses sync writer to verify seeding deterministically; no new runtime invariant; V15 separately covers existing-file preservation |
 
 # 154. Delivery Scope
 
