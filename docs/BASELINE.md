@@ -12,6 +12,7 @@ it does not measure.
 | `scripts/baseline_metrics.py` | Turns a JFR recording and OS samples into the metric set |
 | `scripts/run_baseline.py` | Boots a server, applies a workload, writes `baseline.json` |
 | `scripts/compare_baseline.py` | Section 85 table and the section 10 regression gate |
+| `scripts/rank_hotspots.py` | Ranks CPU and allocation hot spots from a recording |
 
 `scripts/profile_server.py` remains the single-run boot/idle smoke test. This harness
 is the comparison instrument.
@@ -178,6 +179,27 @@ hold, and records the reason in `baseline.json`:
 * the worktree was dirty, so the jar cannot be tied to a commit
 * the server rejected a setup command
 * the measurement window was shorter than 300 seconds
+
+## Ranking hot spots
+
+```sh
+python3 scripts/rank_hotspots.py build/baselines/players-100/profile.jfr \
+    --output build/baselines/players-100/hotspots.md
+```
+
+Produces the ranked evidence an optimization may be argued from: CPU by self frame,
+by inclusive frame and by thread; allocation by type, by allocation site and by thread.
+It picks up the workload's fidelity statements from the `baseline.json` beside the
+recording and reprints them at the top, so a ranking is never read apart from the
+conditions that produced it.
+
+Four things it is not. Execution sampling sees only Java frames on threads the JVM
+sampled, so native work, GC and JIT compilation are unattributed. Sample counts are
+proportional to time, not measured time. Allocation weights are extrapolated from
+sampled allocations. And a high rank is a candidate to investigate, not a defect.
+
+It also reports what share of self samples is the profiler and Sourby telemetry rather
+than the server — on a lightly loaded recording that share is not small.
 
 ## Recording a result
 
