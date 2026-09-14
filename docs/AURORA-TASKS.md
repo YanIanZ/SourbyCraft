@@ -2,6 +2,12 @@
 
 This checklist supplements `docs/DEVELOPMENT-TASKS.md`. It does not replace existing unfinished tasks; it groups the next work around Aurora configuration ownership, deep Minecraft optimization, stability, and independence.
 
+Current focus (2026-09-15): Phase 2 of [Aurora Independent Engine](architecture/AURORA-INDEPENDENT-ENGINE.md),
+starting with [execution contract extraction](architecture/execution-contract.md).
+Preserve completed config/baseline work; isolate current backend dependencies before introducing
+new execution machinery. The first candidate is owner-bound async result delivery, with explicit
+owner identity, rejection, retirement, and stale-result validation. Custom Spark viewer work is deferred.
+
 Status:
 
 - `[x]` complete enough to build on

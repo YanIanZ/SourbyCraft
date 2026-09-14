@@ -863,12 +863,15 @@ deliver roughly half the regions they declare.
 - isolate direct Canvas/Folia scheduler access,
 - define minimal Aurora contracts.
 
-The first and third bullets are done, and measured rather than recalled:
+The first bullet is done and measured rather than recalled:
 `docs/architecture/execution-contract.md`. SourbyCraft-owned code reaches the internal
 region scheduler at five sites across eighty files, and the integration patches at one.
-Three of the four capabilities needed are read-only telemetry or the published Folia
-API; exactly one — *am I on a region thread* — is behavioural. The remaining bullet is
-a mechanical change against those sites, not an architectural project.
+
+That count settles the size of the mechanical edit and nothing else. The contract the
+same document specifies — owner identity across dimension transfer, rejection, retirement,
+stale-result validation — is where the work is, and a generic `execute(Runnable)` facade
+would satisfy none of it while looking like independence. The third bullet is therefore
+specified but not closed, and the second is not started.
 
 ## Phase 3 — Deep entity and AI optimization
 
