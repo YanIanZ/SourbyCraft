@@ -114,3 +114,32 @@ def upstream_default_changes(root):
             elif name in removed and removed[name] != value.strip():
                 changes[f"{patch.name}:{name}"] = (removed[name], value.strip())
     return changes
+
+
+# Patch 0017 replaces `boundingBox.move(-blockX, -blockY, -blockZ)` with an inline AABB
+# built from scalars. Twice the translation went missing — once as a dangling reference to
+# the deleted variable, once as bounds left in world space — and it took three follow-up
+# commits to settle. The Java test IsInWallBoundsTest pins the arithmetic *contract*; it
+# cannot see the patch itself drifting, which is what this covers.
+TO_COLLIDE = re.compile(r"toCollide\s*=\s*new\s+AABB\s*\((.*?)\)\s*;", re.DOTALL)
+
+
+def translated_bounds(root):
+    """The inline block-local AABB expressions any patch builds for `toCollide`.
+
+    Returns a list of {patch, expression, translated_axes}. Patch lines keep their leading
+    '+' and diff context, so the expression is normalised before inspection.
+    """
+    results = []
+    for patch in patch_files(root):
+        text = patch.read_text(errors="replace")
+        added = "\n".join(line[1:] for line in text.splitlines() if line.startswith("+"))
+        for match in TO_COLLIDE.finditer(added):
+            expression = " ".join(match.group(1).split())
+            results.append({
+                "patch": patch.name,
+                "expression": expression,
+                "translated_axes": {axis: expression.count(f"- block{axis.upper()}")
+                                    for axis in ("x", "y", "z")},
+            })
+    return results
