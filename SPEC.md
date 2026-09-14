@@ -2318,6 +2318,8 @@ V9: Reused entity buffers remain owner-confined; shared ServerLevel holds no dow
 V10: Spark metadata retains upstream base secret exclusions; Sourby TOML/YAML credential keys are removed recursively through objects/arrays; report collection leaves operator files unchanged (DEVELOPMENT §11).
 V11: Collision, pickup and effect-particle query lists remain per-call; entity fields do not retain their previous query results across inactive/gated ticks (DEVELOPMENT §4.3, §15).
 V12: Async path completion releases pending state when scheduler admission fails or an admitted task retires; result application stays on the owning entity scheduler (DEVELOPMENT §4.2).
+V13: Launcher bootstrap failure exits nonzero and preserves diagnostic cause; successful reflective invocation preserves arguments and normal exit status (DEVELOPMENT-TASKS §L).
+V14: release/* branches identify as REL, feat/* and experimental/* as EXP, other branches and detached PR builds as DEV; CI artifact paths follow that channel; development checks do not reserve published release numbers (§83–87).
 
 # 153. Regression Log (§B)
 
@@ -2338,7 +2340,9 @@ V12: Async path completion releases pending state when scheduler admission fails
 | B13 | 2026-09-13 | Focused --tests filter left two forcibly included existing JUnit suites empty | Run full server suite for integration; invocation issue, no runtime invariant change |
 | B14 | 2026-09-14 | Reused collision/pickup/effect lists retained previous results until the next eligible call and left reentrancy unproven | V11; remove unbenchmarked collection reuse from 0009/0014/0016 (retain Level overload compatibility); restore upstream per-call collections; retention architecture regression tests |
 | B15 | 2026-09-14 | scheduleOrExecute rejection and its null retired callback left async path pending latched | V12; explicit retirement callback and admission-failure cleanup; tests with real EntityScheduler retirement plus owner callback/failure tests |
-| B16 | 2026-09-14 | Cold bootstrap rejected a hash-mismatched Mojang download but exited 0 before Done | OPEN: SourbyClip failure/exit-code audit; profiling harness correctly rejects early exit; cached immutable JAR hash verified before runtime validation |
+| B16 | 2026-09-14 | Cold bootstrap rejected a hash-mismatched Mojang download but exited 0 before Done | V13; launcher catch exits 1; process tests cover success, exception, Error and missing class. Claude transfer loop repair packaged in SourbyClip 3.0.22; local multi-chunk/hash/cache probe passes; remote cold-download qualification remains OPEN |
+| B17 | 2026-09-14 | 26.2 absent from CI; default branch suffix falsely REL; unconditional release-number reservation rejected ordinary builds | V6,V14; enable 26.2 build/boot/Docker checks, default DEV in three build surfaces, channel-specific artifacts, reserve fresh numbers only for publication |
+| B18 | 2026-09-14 | Packaged launcher returned 0 when ServerMain failed after reflective launcher invocation had returned | V13; ServerMain catch preserves cause and exits 1; packaged thread-boundary success/failure probes |
 
 # 154. Delivery Scope
 

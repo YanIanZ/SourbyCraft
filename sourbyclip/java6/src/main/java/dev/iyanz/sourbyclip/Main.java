@@ -26,6 +26,8 @@ public final class Main {
             mainMethod.invoke(null, (Object) args);
         } catch (final Exception e) {
             e.printStackTrace();
+            // Bootstrap never reached the server: supervisors must see a failure.
+            System.exit(1);
         }
     }
 

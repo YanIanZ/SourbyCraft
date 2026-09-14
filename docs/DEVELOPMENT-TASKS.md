@@ -223,7 +223,7 @@ Only measured hot spots should produce new performance patches.
 # L. SourbyClip / bootstrap
 
 - [ ] **P0** downloader timeout audit
-- [-] **P0** retry/failure behavior audit — reproduced rejected Mojang hash with exit 0 before boot; SPEC B16 remains open
+- [-] **P0** retry/failure behavior audit — SPEC B16 launcher exit status and transfer loop shipped in repo bootstrap 3.0.22; process and local multi-chunk/cache probes pass; remote cold-download qualification remains pending (see `BOOTSTRAP.md`)
 - [ ] **P0** SHA/cache validation audit
 - [ ] **P1** concurrency/boundedness audit
 - [ ] **P1** thread/executor ownership audit
