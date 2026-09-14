@@ -88,11 +88,17 @@ def cpu_hotspots(samples, limit):
             "threads": rank(by_thread), "states": rank(by_state)}
 
 
-def allocation_hotspots(samples, limit):
+def allocation_hotspots(samples, limit, measured_bytes=None):
     """Rank allocated bytes by type and by allocation site.
 
     ``weight`` is JFR's extrapolation from a sampled allocation to the bytes that sample
-    represents, so these are proportions, not exact totals.
+    represents, so these are proportions, not exact totals — and the sampler favours large
+    objects, so a site allocating big arrays is over-represented relative to one allocating
+    many small objects.
+
+    Pass ``measured_bytes`` from a counter-based source (``jdk.ThreadAllocationStatistics``)
+    to get an overstatement factor. On a real recording these disagreed sixfold, and the
+    site at the top of the ranking turned out not to be a meaningful allocator at all.
     """
     if not samples:
         return dict(baseline_metrics.UNAVAILABLE,
@@ -111,9 +117,13 @@ def allocation_hotspots(samples, limit):
         return [{"name": name, "bytes": value, "share": value / total if total else 0.0}
                 for name, value in sorted(counter.items(), key=lambda kv: -kv[1])[:limit]]
 
-    return {"available": True, "source": "jdk.ObjectAllocationSample",
-            "sampled_events": len(samples), "estimated_bytes": total,
-            "by_class": rank(by_class), "by_site": rank(by_site), "by_thread": rank(by_thread)}
+    result = {"available": True, "source": "jdk.ObjectAllocationSample",
+              "sampled_events": len(samples), "estimated_bytes": total,
+              "by_class": rank(by_class), "by_site": rank(by_site), "by_thread": rank(by_thread)}
+    if measured_bytes:
+        result["measured_bytes"] = measured_bytes
+        result["overstatement_factor"] = total / measured_bytes if measured_bytes else None
+    return result
 
 
 def render(recording, cpu, allocation, workload):
@@ -147,7 +157,19 @@ def render(recording, cpu, allocation, workload):
     else:
         lines += [f"{allocation['sampled_events']} allocation samples, "
                   f"{allocation['estimated_bytes'] / 1048576:.0f} MiB estimated. "
-                  "Weights are extrapolations, not exact totals.", "",
+                  "Weights are extrapolations, not exact totals.", ""]
+        factor = allocation.get("overstatement_factor")
+        if factor is not None and factor >= 2.0:
+            lines += [f"> **These figures are {factor:.1f}x the allocation the counters actually "
+                      f"measured** ({allocation['measured_bytes'] / 1048576:.0f} MiB from "
+                      "`jdk.ThreadAllocationStatistics`). JFR's allocation sampler favours large "
+                      "objects, so sites allocating big arrays dominate this table out of "
+                      "proportion. Treat the ordering as a hint and confirm any target against "
+                      "the counter total and the CPU ranking before acting on it.", ""]
+        elif factor is not None:
+            lines += [f"> Cross-checked against the counters: {factor:.1f}x "
+                      f"({allocation['measured_bytes'] / 1048576:.0f} MiB measured).", ""]
+        lines += [
                   "### By type", "", "| Share | MiB | Type |", "| ---: | ---: | --- |"]
         lines += [f"| {row['share']:.1%} | {row['bytes'] / 1048576:.1f} | `{row['name']}` |"
                   for row in allocation["by_class"]]
@@ -184,13 +206,19 @@ def main():
     _, _, jfr, _ = __import__("run_baseline").jdk_tools()
 
     cpu = cpu_hotspots(read(jfr, recording, "jdk.ExecutionSample", args.stack_depth), args.limit)
-    allocation = allocation_hotspots(
-        read(jfr, recording, "jdk.ObjectAllocationSample", args.stack_depth), args.limit)
-
     workload = None
+    measured_bytes = None
     record = recording.parent / "baseline.json"
     if record.is_file():
-        workload = json.loads(record.read_text()).get("workload")
+        captured = json.loads(record.read_text())
+        workload = captured.get("workload")
+        counters = captured.get("metrics", {}).get("allocation", {})
+        if counters.get("available"):
+            measured_bytes = counters.get("allocated_bytes")
+
+    allocation = allocation_hotspots(
+        read(jfr, recording, "jdk.ObjectAllocationSample", args.stack_depth), args.limit,
+        measured_bytes)
 
     report = render(recording, cpu, allocation, workload)
     print(report)

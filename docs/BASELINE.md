@@ -231,6 +231,15 @@ It picks up the workload's fidelity statements from the `baseline.json` beside t
 recording and reprints them at the top, so a ranking is never read apart from the
 conditions that produced it.
 
+The allocation table is cross-checked against the counters and says so. JFR's
+allocation sampler favours large objects, so a site allocating big arrays dominates it
+out of proportion to the bytes actually allocated. On the first loaded profile the
+sampled total came to 6.5x what `jdk.ThreadAllocationStatistics` measured, and the site
+at the top of the table — 83% of it — turned out not to be a meaningful allocator at
+all: it never appeared in the CPU ranking, and the run collected four times in ten
+minutes. Confirm any allocation target against the counter total and the CPU ranking
+before acting on it.
+
 Four things it is not. Execution sampling sees only Java frames on threads the JVM
 sampled, so native work, GC and JIT compilation are unattributed. Sample counts are
 proportional to time, not measured time. Allocation weights are extrapolated from
