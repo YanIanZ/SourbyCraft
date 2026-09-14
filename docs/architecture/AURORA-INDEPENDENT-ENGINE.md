@@ -859,6 +859,13 @@ close until a soak certifies.
 - isolate direct Canvas/Folia scheduler access,
 - define minimal Aurora contracts.
 
+The first and third bullets are done, and measured rather than recalled:
+`docs/architecture/execution-contract.md`. SourbyCraft-owned code reaches the internal
+region scheduler at five sites across eighty files, and the integration patches at one.
+Three of the four capabilities needed are read-only telemetry or the published Folia
+API; exactly one — *am I on a region thread* — is behavioural. The remaining bullet is
+a mechanical change against those sites, not an architectural project.
+
 ## Phase 3 — Deep entity and AI optimization
 
 - direct NMS profiling,
