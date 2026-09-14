@@ -20,6 +20,18 @@ import math
 # and collision shapes. "positioned over world_surface" resolves the height per column.
 SURFACE = "positioned over world_surface"
 
+# Region sections are 1 << grid-exponent chunks square, and paper-global.yml ships
+# grid-exponent 4, so 16. The regionizer merges regions whose sections are within one
+# section of each other, so two sites stay in separate regions only when their sections
+# differ by at least two. Sites were previously spaced 7 chunks apart, well inside one
+# section: all 50 merged into a single region, 90% of CPU landed on one region thread
+# while three sat idle, and the workload measured single-threaded chunk ticking rather
+# than anything regional. Three sections of separation leaves a full empty section
+# between neighbours.
+REGION_SECTION_CHUNKS = 16
+REGION_SECTIONS_BETWEEN_SITES = 3
+SITE_SPACING_CHUNKS = REGION_SECTION_CHUNKS * REGION_SECTIONS_BETWEEN_SITES
+
 ITEM_NBT = '{Item:{id:"minecraft:cobblestone",count:16}}'
 
 # One player-equivalent site: a survival-server entity mix in one forceloaded cluster.
@@ -93,7 +105,7 @@ def idle():
         setup=DETERMINISM + ("forceload add 0 0",))
 
 
-def players(count, radius=2, gap=2):
+def players(count, radius=2, spacing=SITE_SPACING_CHUNKS):
     """N spatially distributed ticking clusters, each with a survival entity mix.
 
     This is a spatial-distribution model, not a player simulation. It reproduces the
@@ -101,7 +113,9 @@ def players(count, radius=2, gap=2):
     reproduces neither their network traffic, their entity-tracking cost, nor their
     chunk-streaming cost as they move.
     """
-    spacing = 2 * radius + 1 + gap
+    if spacing < 2 * REGION_SECTION_CHUNKS:
+        raise ValueError(f"site spacing {spacing} would merge neighbouring regions; "
+                         f"need at least {2 * REGION_SECTION_CHUNKS} chunks")
     sites = list(_grid(count, spacing))
     setup = list(DETERMINISM)
     for centre_x, centre_z in sites:
@@ -117,12 +131,17 @@ def players(count, radius=2, gap=2):
                 f"{count * per_site} entities.",
         fidelity=("Runs on generated terrain; seed a pre-generated world with --world so "
                   "terrain generation does not land inside the measurement window.",
+                  f"Sites are {spacing} chunks apart so each stays its own region; check "
+                  "active_regions in the result, because one region means the run measured "
+                  "a single region thread rather than region parallelism.",
                   "Models chunk residency and entity population for dispersed players.",
                   "Does not model player network traffic, entity tracking or chunk streaming.",
                   "Mob AI is inactive without connected players; see requires_connected_players."),
         setup=tuple(setup), requires_connected_players=True,
         settle_seconds=max(60, chunks // 10),
         parameters={"sites": count, "chunk_radius": radius, "site_spacing_chunks": spacing,
+                    "region_section_chunks": REGION_SECTION_CHUNKS,
+                    "expected_min_regions": count,
                     "forceloaded_chunks": chunks, "entities_per_site": per_site,
                     "entities_total": count * per_site})
 

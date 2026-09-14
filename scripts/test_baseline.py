@@ -220,6 +220,26 @@ class WorkloadTest(unittest.TestCase):
                     with self.subTest(name=name, command=command, token=token):
                         self.assertNotIn(token, command.lower())
 
+    def test_player_sites_stay_in_separate_regions(self):
+        # The regionizer merges regions whose sections are within one section of each
+        # other. At the old 7-chunk spacing every site merged into one region and the
+        # workload measured a single region thread instead of region parallelism.
+        plan = workloads.build("players-50")
+        spacing = plan.parameters["site_spacing_chunks"]
+        section = plan.parameters["region_section_chunks"]
+        self.assertGreaterEqual(spacing, 2 * section,
+                                "neighbouring sites would land in adjacent region sections")
+        self.assertEqual(spacing % section, 0, "spacing should be a whole number of sections")
+
+    def test_spacing_that_would_merge_regions_is_rejected(self):
+        with self.assertRaises(ValueError):
+            workloads.players(4, spacing=8)
+
+    def test_the_expected_region_count_is_recorded_for_comparison(self):
+        # A run reporting fewer active regions than sites did not measure what it claims.
+        plan = workloads.build("players-10")
+        self.assertEqual(plan.parameters["expected_min_regions"], plan.parameters["sites"])
+
     def test_player_sites_do_not_overlap(self):
         plan = workloads.build("players-50")
         radius = plan.parameters["chunk_radius"]
