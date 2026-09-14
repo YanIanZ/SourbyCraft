@@ -3,6 +3,14 @@ from release_version import resolve
 
 
 class ReleaseVersionTest(unittest.TestCase):
+    def test_development_build_may_reuse_published_identity(self):
+        self.assertEqual(("v26.2-r45", 45), resolve(
+            "releaseVersion=26.2\nsourbyBuild=45", "v26.2-r45", development=True))
+
+    def test_development_build_still_requires_positive_integer(self):
+        with self.assertRaises(ValueError):
+            resolve("releaseVersion=26.2\nsourbyBuild=0", "", development=True)
+
     def test_composite_and_legacy_tags_reserve_their_integer(self):
         for tag in ("v26.2-r43", "v26.2-r43.1", "v26.2-r43-hotfix", "v26.2-43c"):
             with self.subTest(tag=tag):

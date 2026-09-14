@@ -163,7 +163,10 @@ public final class Sourbyclip {
                         .asFixedArity();
                 mainHandle.invoke(args);
             } catch (final Throwable t) {
-                throw Util.sneakyThrow(t);
+                // An uncaught exception in this child thread otherwise leaves the
+                // launcher process with status 0 once its main thread has returned.
+                t.printStackTrace();
+                System.exit(1);
             }
         }, "ServerMain");
 

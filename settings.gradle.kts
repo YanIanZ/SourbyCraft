@@ -68,11 +68,11 @@ gradle.lifecycle.beforeProject {
     val releaseMajor = releaseVersionFull.substringBefore('-')
     val codename = providers.gradleProperty("codename").getOrElse("dev").trim()
     val suffix = when {
-        branch.contains("experimental") || branch.contains("feat") -> "EXP"
+        branch.startsWith("experimental/") || branch.startsWith("feat/") -> "EXP"
         branch.startsWith("release/") -> "REL"
         branch.contains("-dev") || branch.contains("develop") -> "DEV"
         codename == "dev" -> "DEV"
-        else -> "REL"
+        else -> "DEV"
     }
     val versionString = when (suffix) {
         "EXP" -> "$releaseMajor-EXP"

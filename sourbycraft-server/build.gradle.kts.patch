@@ -153,11 +153,11 @@
 +        val releaseMajor = releaseVersionFull.substringBefore('-')
 +        val codename = rootProject.providers.gradleProperty("codename").getOrElse("dev")
 +        val suffix = when {
-+            gitBranch.contains("experimental") || gitBranch.contains("feat") -> "EXP"
++            gitBranch.startsWith("experimental/") || gitBranch.startsWith("feat/") -> "EXP"
 +            gitBranch.startsWith("release/") -> "REL"
 +            gitBranch.contains("-dev") || gitBranch.contains("develop") -> "DEV"
 +            codename == "dev" -> "DEV"
-+            else -> "REL"
++            else -> "DEV"
 +        }
 +        val channelVersion = when (suffix) {
 +            "EXP" -> "$releaseMajor-EXP"

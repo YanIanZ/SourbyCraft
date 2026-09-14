@@ -2,9 +2,9 @@ name: Build & Boot Test
 
 on:
   push:
-    branches: [ release/26.2-canvas, main ]
+    branches: [ '26.2', release/26.2-canvas, main ]
   pull_request:
-    branches: [ release/26.2-canvas, main ]
+    branches: [ '26.2', release/26.2-canvas, main ]
   workflow_dispatch:
 
 concurrency:
@@ -18,6 +18,7 @@ jobs:
     outputs:
       number: ${{ steps.relnum.outputs.number }}
       tag: ${{ steps.relnum.outputs.tag }}
+      channel: ${{ steps.relnum.outputs.channel }}
     if: "!contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'ci skip')"
     steps:
       - name: Checkout code
@@ -56,11 +57,35 @@ jobs:
       - name: Validate release identity and profiling scripts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
+      - name: Verify packaged bootstrap download and cache behavior
+        run: |
+          clip=$(sed -n 's/^clipVersion=//p' gradle.properties)
+          clip_jar="sourby-maven/dev/iyanz/sourbyclip/$clip/sourbyclip-$clip.jar"
+          java --class-path "$clip_jar" scripts/fixtures/ClipDownloadProbe.java "$RUNNER_TEMP/clip-download-probe"
+          java --class-path "$clip_jar" scripts/fixtures/ClipLaunchProbe.java success
+          status=0
+          java --class-path "$clip_jar" scripts/fixtures/ClipLaunchProbe.java failure > "$RUNNER_TEMP/clip-failure.log" 2>&1 || status=$?
+          test "$status" -eq 1
+          grep -F 'fixture ServerMain failure' "$RUNNER_TEMP/clip-failure.log"
+
       - name: Resolve release identity once
         id: relnum
-        run: python3 scripts/release_version.py >> "$GITHUB_OUTPUT"
+        run: |
+          channel=DEV
+          case "$GITHUB_REF" in
+            refs/heads/release/*) channel=REL ;;
+            refs/heads/feat/*|refs/heads/experimental/*) channel=EXP ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          # Only publication needs an unused release number. PRs and development
+          # builds must remain testable after the configured build was released.
+          if [ "$GITHUB_REF" = 'refs/heads/release/26.2-canvas' ] && [ "$GITHUB_EVENT_NAME" != 'pull_request' ]; then
+            python3 scripts/release_version.py >> "$GITHUB_OUTPUT"
+          else
+            python3 scripts/release_version.py --development >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Build slim release jar (SourbyLoader)
+      - name: Build slim server jar (SourbyLoader)
         run: |
           # Release number == build number from r6 onward: the auto-updater compares the tag's rN
           # against the running jar's own build Nf, so the two MUST be stamped from the same counter.
@@ -72,19 +97,19 @@ jobs:
           # was renamed to drop the paperclip assumption.
           ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.number }}
           mkdir -p release
-          python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-REL.jar "${{ steps.relnum.outputs.number }}"
-          cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-REL.jar
+          python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-${{ steps.relnum.outputs.channel }}.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}"
+          cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
 
       - name: Show build info
         run: |
-          jar=release/SourbyCraft-26.2-REL.jar
+          jar=release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
           echo "Built: $jar ($(du -h "$jar" | cut -f1))"
 
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
           name: SourbyCraft-26.2
-          path: release/SourbyCraft-*-REL.jar
+          path: release/SourbyCraft-26.2-*.jar
           if-no-files-found: error
           retention-days: 7
 
@@ -123,7 +148,7 @@ jobs:
         working-directory: run
         run: |
           set -euo pipefail
-          jar=$(find . -maxdepth 1 -type f -name 'SourbyCraft-*-REL.jar' -print -quit)
+          jar=$(find . -maxdepth 1 -type f -name 'SourbyCraft-26.2-*.jar' -print -quit)
           test -n "$jar"
           fixture=../fixture/test-plugin-1.0.0.jar
           test -f "$fixture"
@@ -294,7 +319,7 @@ jobs:
 
       - name: Build image (Dockerfile + entrypoint COPY paths)
         run: |
-          jar=release/SourbyCraft-26.2-REL.jar
+          jar=release/SourbyCraft-26.2-${{ needs.build.outputs.channel }}.jar
           echo "Building image with $jar"
           docker build --build-arg JAR="$jar" -t sourbycraft:ci .
 
@@ -333,7 +358,7 @@ jobs:
           last=$(git tag -l 'v26.2-r*' | sed -n 's#^v26\.2-r\([0-9]*\)$#\1#p' | sort -n | tail -1)
           next="$RELEASE_NUMBER"
           tag="$RELEASE_TAG"
-          jar=release/SourbyCraft-26.2-REL.jar
+          jar=release/SourbyCraft-26.2-${{ needs.build.outputs.channel }}.jar
           sha=$(sha256sum "$jar" | cut -d' ' -f1)
           echo "$sha  $(basename "$jar")" > "$jar.sha256"
           codename=$(sed -n 's/^codename=//p' gradle.properties)

@@ -188,11 +188,11 @@ val sourbycraftSuffixProvider: Provider<String> = sourbycraftBranchProvider.map 
     val releaseMajor = releaseVersionFull.substringBefore('-')
     val codename = providers.gradleProperty("codename").getOrElse("dev")
     val suffix = when {
-        branch.contains("experimental") || branch.contains("feat") -> "EXP"
+        branch.startsWith("experimental/") || branch.startsWith("feat/") -> "EXP"
         branch.startsWith("release/") -> "REL"
         branch.contains("-dev") || branch.contains("develop") -> "DEV"
         codename == "dev" -> "DEV"
-        else -> "REL"
+        else -> "DEV"
     }
     when (suffix) {
         "EXP" -> "$releaseMajor-EXP"

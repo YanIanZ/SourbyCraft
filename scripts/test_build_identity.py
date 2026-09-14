@@ -6,6 +6,17 @@ from verify_build_identity import verify
 
 
 class BuildIdentityTest(unittest.TestCase):
+    def test_channel_mismatch_blocks_mislabeled_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "server.jar"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("META-INF/sourbycraft-build.properties",
+                                 "buildNumber=45\nbuild=45c\nversion=26.2-DEV\n")
+                archive.writestr("META-INF/MANIFEST.MF", "Implementation-Version: build 45c\r\n")
+            self.assertEqual("26.2-DEV", verify(path, 45, "DEV")["version"])
+            with self.assertRaises(ValueError):
+                verify(path, 45, "REL")
+
     def test_mismatched_manifest_blocks_publication(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "server.jar"
