@@ -690,10 +690,19 @@ class HeapGuardTest(unittest.TestCase):
             config = run_baseline.prepare(target, workloads.build("idle"), 25585, 4096)
             properties = (target / "server.properties").read_text()
             self.assertIn("server-ip=127.0.0.1", properties)
+            self.assertIn("max-players=20", properties)
             self.assertIn("online-mode=false", properties)
             self.assertIn(r"level-type=minecraft\:normal", properties)
             self.assertIn("auto-provision=false", config.read_text())
             self.assertEqual((target / "eula.txt").read_text(), "eula=true\n")
+
+    def test_the_player_cap_covers_the_requested_clients(self):
+        # The default cap is 20: asking for 50 clients without raising it loses the rest
+        # to "The server is full!" and measures a fraction of the intended load.
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "run"
+            run_baseline.prepare(target, workloads.build("players-50"), 25585, 6144, 50)
+            self.assertIn("max-players=50", (target / "server.properties").read_text())
 
     def test_refuses_to_overwrite_an_existing_directory(self):
         with tempfile.TemporaryDirectory() as directory:
