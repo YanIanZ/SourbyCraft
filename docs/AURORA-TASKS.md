@@ -45,7 +45,7 @@ Status:
 Carry forward all unfinished baseline work from `docs/DEVELOPMENT-TASKS.md`.
 
 - [ ] certified idle baseline
-- [ ] 10-player connected/equivalent baseline
+- [x] 10-player connected baseline — certified both sides of the chunk-worker A/B; see [chunk-workers.md](architecture/chunk-workers.md)
 - [ ] 50-player baseline
 - [ ] 100-player baseline
 - [ ] entity-stress baseline
