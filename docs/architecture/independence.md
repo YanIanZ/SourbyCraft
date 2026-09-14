@@ -401,3 +401,11 @@ The desired end state is not “zero upstream code.”
 The desired end state is:
 
 > SourbyCraft controls its own behavior, lifecycle, diagnostics, releases, and feature architecture while using upstream components as implementation inputs rather than as its identity.
+
+## Independent-engine continuation
+
+The active direction is [AURORA-INDEPENDENT-ENGINE.md](AURORA-INDEPENDENT-ENGINE.md):
+Aurora owns execution contracts, while current Folia/Canvas scheduling can remain a backend.
+[Execution contract extraction](execution-contract.md) maps the first concrete boundaries,
+records owner-identity/stale-result gaps in async path completion, and defines acceptance tests
+before adding an Aurora dispatcher. This is contract extraction, not completed scheduler isolation.
