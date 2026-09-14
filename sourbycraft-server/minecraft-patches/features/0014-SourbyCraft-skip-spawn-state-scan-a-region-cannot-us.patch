@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: agent <agent@local>
+Date: Mon, 14 Sep 2026 20:26:08 +0700
+Subject: [PATCH] SourbyCraft - skip spawn-state scan a region cannot use
+
+createState walks every chunk in the region and every entity in each chunk. It ran
+before the check deciding whether spawning happens, so a region built full mob counts
+every tick even with spawn_mobs off or no players present. The result is consumed only
+by the spawning pass, which is skipped under the same condition, and by /paper mobcaps
+and the debug report via lastSpawnState, which is now left at its previous value rather
+than cleared.
+
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index d451d6bb3352e7c9b3b22ce3600e49687296aa1d..f9b72435195643b674931da0d2aa312a06d44bf7 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -521,9 +521,31 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+     private void tickChunks(final long timeDiff) {
+         final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = this.level.getCurrentWorldData(); // Folia - region threading
+         int chunkCount = this.distanceManager.getNaturalSpawnChunkCount();
++        // SourbyCraft start - do not build spawn state a region cannot use.
++        //
++        // createState walks every chunk in the region and every entity in each chunk to
++        // build mob counts, which a JFR profile of players-50 put at 16.4% of self CPU
++        // samples. It ran before the check that decides whether spawning happens at all,
++        // so a region built the full count every tick even when the spawn_mobs gamerule
++        // was off or the region had no players in it. A region with no players is the
++        // case that matters on a live server: forceloaded chunks, chunk loaders and spawn
++        // chunks all tick without anybody standing in them.
++        //
++        // The result is only read by the spawning pass itself, which is skipped in the
++        // same condition, and by /paper mobcaps and the debug report through
++        // lastSpawnState. lastSpawnState is deliberately left at its previous value
++        // rather than cleared, so those two keep reporting the last real counts instead
++        // of regressing to no data; both already tolerate null for a region that has
++        // never spawned.
++        final boolean sourbyCanSpawn =
++            this.level.getGameRules().get(GameRules.SPAWN_MOBS)
++                && !this.level.getLocalPlayers().isEmpty()
++                && (this.spawnEnemies || this.spawnFriendlies);
++        // SourbyCraft end
+         // Paper start - Optional per player mob spawns
+-        NaturalSpawner.SpawnState spawnCookie;
+-        if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) { // don't count mobs when animals and monsters are disabled
++        NaturalSpawner.SpawnState spawnCookie = regionizedWorldData.lastSpawnState; // SourbyCraft - keep the previous state when the scan is skipped
++        if (!sourbyCanSpawn) { // SourbyCraft - skip the scan entirely; nothing below can consume it
++        } else if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) { // don't count mobs when animals and monsters are disabled
+             // re-set mob counts
+             for (ServerPlayer player : this.level.getLocalPlayers()) { // Folia - region threading
+                 // Paper start - per player mob spawning backoff
+@@ -543,7 +565,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             spawnCookie = NaturalSpawner.createState(chunkCount, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false, regionizedWorldData); // Folia - region threading - note: function only cares about loaded entities, doesn't need all // Canvas - optimize natural spawning
+         }
+         // Paper end - Optional per player mob spawns
+-        regionizedWorldData.lastSpawnState = spawnCookie; // Folia - region threading
++        if (sourbyCanSpawn) regionizedWorldData.lastSpawnState = spawnCookie; // Folia - region threading // SourbyCraft - only publish a state we actually built
+         boolean doMobSpawning = this.level.getGameRules().get(GameRules.SPAWN_MOBS) && !this.level.getLocalPlayers().isEmpty(); // CraftBukkit // Folia - region threading
+         int tickSpeed = this.level.getGameRules().get(GameRules.RANDOM_TICK_SPEED);
+         List<MobCategory> spawningCategories;
