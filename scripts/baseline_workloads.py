@@ -14,7 +14,11 @@ certify their results unless the operator asserts that clients were attached.
 from dataclasses import dataclass, field
 import math
 
-GROUND_Y = -60  # Superflat: bedrock at -64, dirt, grass at -61, so entities stand at -60.
+# Entities are placed on the generated surface rather than at a fixed height. A superflat
+# world has a known ground level but is representative of nothing: real terrain changes
+# chunk generation cost, block variety and therefore random-tick load, lighting, heightmaps
+# and collision shapes. "positioned over world_surface" resolves the height per column.
+SURFACE = "positioned over world_surface"
 
 ITEM_NBT = '{Item:{id:"minecraft:cobblestone",count:16}}'
 
@@ -41,6 +45,7 @@ class Plan:
     setup: tuple = ()
     steady: tuple = ()                    # Re-issued once per steady_interval_seconds.
     steady_interval_seconds: int = 0
+    settle_seconds: int = 15              # Quiet time after setup, before warmup.
     moving_window: bool = False           # Steady phase advances to fresh terrain each step.
     network_clients: int = 0
     network_rate_per_second: int = 0
@@ -64,21 +69,27 @@ def _forceload(centre_x, centre_z, radius):
     return f"forceload add {low_x} {low_z} {high_x} {high_z}"
 
 
+def _at_surface(x, z, command):
+    """Run a command at the generated surface height of one column."""
+    return f"execute positioned {x} 0 {z} {SURFACE} run {command}"
+
+
 def _populate(centre_x, centre_z, mix, items):
-    """Summon one site's entity mix at the centre of a chunk."""
+    """Summon one site's entity mix on the surface at the centre of a chunk."""
     x, z = centre_x * 16 + 8, centre_z * 16 + 8
-    commands = [f"summon {entity} {x} {GROUND_Y} {z}"
+    commands = [_at_surface(x, z, f"summon {entity} ~ ~ ~")
                 for entity, count in mix for _ in range(count)]
-    commands += [f"summon minecraft:item {x} {GROUND_Y + 1} {z} {ITEM_NBT}" for _ in range(items)]
+    commands += [_at_surface(x, z, f"summon minecraft:item ~ ~1 ~ {ITEM_NBT}") for _ in range(items)]
     return commands
 
 
 def idle():
     return Plan(
-        name="idle", level_type="minecraft:flat", minimum_heap_mib=2048,
+        name="idle", level_type="minecraft:normal", minimum_heap_mib=2048,
         summary="Zero load: one forceloaded spawn chunk, no entities, no connections.",
         fidelity=("Establishes the fixed cost of the runtime, telemetry and region scheduler.",
-                  "Does not exercise entity, chunk generation or network paths."),
+                  "Does not exercise entity, chunk generation or network paths.",
+                  "Runs on generated terrain, not superflat, so the spawn chunk is representative."),
         setup=DETERMINISM + ("forceload add 0 0",))
 
 
@@ -100,14 +111,17 @@ def players(count, radius=2, gap=2):
     per_site = sum(count for _, count in SITE_MIX) + SITE_ITEMS
     chunks = count * (2 * radius + 1) ** 2
     return Plan(
-        name=f"players-{count}", level_type="minecraft:flat",
+        name=f"players-{count}", level_type="minecraft:normal",
         minimum_heap_mib=max(2048, 1024 + chunks // 2),
         summary=f"{count} dispersed ticking clusters: {chunks} forceloaded chunks, "
                 f"{count * per_site} entities.",
-        fidelity=("Models chunk residency and entity population for dispersed players.",
+        fidelity=("Runs on generated terrain; seed a pre-generated world with --world so "
+                  "terrain generation does not land inside the measurement window.",
+                  "Models chunk residency and entity population for dispersed players.",
                   "Does not model player network traffic, entity tracking or chunk streaming.",
                   "Mob AI is inactive without connected players; see requires_connected_players."),
         setup=tuple(setup), requires_connected_players=True,
+        settle_seconds=max(60, chunks // 10),
         parameters={"sites": count, "chunk_radius": radius, "site_spacing_chunks": spacing,
                     "forceloaded_chunks": chunks, "entities_per_site": per_site,
                     "entities_total": count * per_site})
@@ -120,18 +134,19 @@ def entity_stress(mobs=3000, items=3000, radius=4):
     for index in range(mobs):
         entity = ("minecraft:zombie", "minecraft:skeleton", "minecraft:cow")[index % 3]
         x, z = -span + (index * 7) % (2 * span), -span + (index * 11) % (2 * span)
-        setup.append(f"summon {entity} {x} {GROUND_Y} {z}")
+        setup.append(_at_surface(x, z, f"summon {entity} ~ ~ ~"))
     for index in range(items):
         x, z = -span + (index * 13) % (2 * span), -span + (index * 5) % (2 * span)
-        setup.append(f"summon minecraft:item {x} {GROUND_Y + 1} {z} {ITEM_NBT}")
+        setup.append(_at_surface(x, z, f"summon minecraft:item ~ ~1 ~ {ITEM_NBT}"))
     return Plan(
-        name="entity-stress", level_type="minecraft:flat",
+        name="entity-stress", level_type="minecraft:normal",
         minimum_heap_mib=4096,
         summary=f"{mobs} mobs and {items} item entities inside {(2 * radius + 1) ** 2} chunks.",
-        fidelity=("Exercises entity tick, collision, item merge and despawn checks.",
+        fidelity=("Runs on generated terrain; entities are placed on the surface per column.",
+                  "Exercises entity tick, collision, item merge and despawn checks.",
                   "Mob AI, pathfinding and goal selection stay inactive without connected "
                   "players, so this measures the inactive entity path unless clients attach."),
-        setup=tuple(setup), requires_connected_players=True,
+        setup=tuple(setup), requires_connected_players=True, settle_seconds=60,
         parameters={"mobs": mobs, "items": items, "chunk_radius": radius})
 
 
@@ -155,7 +170,7 @@ def chunk_stress(radius=4, step_chunks=64, interval_seconds=10):
 def network_stress(clients=64, rate_per_second=400):
     """Connection, handshake and status round-trips against the live Netty pipeline."""
     return Plan(
-        name="network-stress", level_type="minecraft:flat", minimum_heap_mib=2048,
+        name="network-stress", level_type="minecraft:normal", minimum_heap_mib=2048,
         summary=f"{clients} concurrent clients driving up to {rate_per_second} "
                 "handshake/status round-trips per second.",
         fidelity=("Exercises accept, decode, encode, flush and connection teardown.",
