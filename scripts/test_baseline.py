@@ -227,13 +227,14 @@ class WorkloadTest(unittest.TestCase):
         plan = workloads.build("players-50")
         spacing = plan.parameters["site_spacing_chunks"]
         section = plan.parameters["region_section_chunks"]
-        self.assertGreaterEqual(spacing, 2 * section,
-                                "neighbouring sites would land in adjacent region sections")
+        self.assertGreaterEqual(spacing, section * workloads.REGION_SECTIONS_MINIMUM_GAP,
+                                "sites would merge: the regionizer creates empty neighbour "
+                                "sections and merges across a further two")
         self.assertEqual(spacing % section, 0, "spacing should be a whole number of sections")
 
     def test_spacing_that_would_merge_regions_is_rejected(self):
         with self.assertRaises(ValueError):
-            workloads.players(4, spacing=8)
+            workloads.players(4, spacing=48)
 
     def test_the_expected_region_count_is_recorded_for_comparison(self):
         # A run reporting fewer active regions than sites did not measure what it claims.

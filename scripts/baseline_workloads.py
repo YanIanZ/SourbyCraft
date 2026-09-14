@@ -20,16 +20,26 @@ import math
 # and collision shapes. "positioned over world_surface" resolves the height per column.
 SURFACE = "positioned over world_surface"
 
-# Region sections are 1 << grid-exponent chunks square, and paper-global.yml ships
-# grid-exponent 4, so 16. The regionizer merges regions whose sections are within one
-# section of each other, so two sites stay in separate regions only when their sections
-# differ by at least two. Sites were previously spaced 7 chunks apart, well inside one
-# section: all 50 merged into a single region, 90% of CPU landed on one region thread
-# while three sat idle, and the workload measured single-threaded chunk ticking rather
-# than anything regional. Three sections of separation leaves a full empty section
-# between neighbours.
+# Keeping sites in separate regions, derived from ThreadedRegionizer rather than guessed.
+#
+# Region sections are 1 << grid-exponent chunks square and paper-global.yml ships
+# grid-exponent 4, so 16. On chunk load the regionizer creates empty neighbour sections
+# within emptySectionCreateRadius (1), then merges any region whose section lies within
+# createRadius + regionSectionMergeRadius (2) sections. A site's chunk square can also
+# straddle a section boundary, so it occupies up to 2 sections.
+#
+#   site sections                     2
+#   + empty neighbours either side  + 2   (createRadius on each side)
+#   + merge reach                   + 1   (regionSectionMergeRadius)
+#   + one clear section             + 1
+#   = 6 sections minimum
+#
+# A first attempt used 3 sections (48 chunks) on the assumption that only the merge
+# radius mattered. Every site still merged; the create radius and the straddle are what
+# it missed. 8 sections is the derived minimum plus margin.
 REGION_SECTION_CHUNKS = 16
-REGION_SECTIONS_BETWEEN_SITES = 3
+REGION_SECTIONS_MINIMUM_GAP = 6
+REGION_SECTIONS_BETWEEN_SITES = 8
 SITE_SPACING_CHUNKS = REGION_SECTION_CHUNKS * REGION_SECTIONS_BETWEEN_SITES
 
 ITEM_NBT = '{Item:{id:"minecraft:cobblestone",count:16}}'
@@ -113,9 +123,10 @@ def players(count, radius=2, spacing=SITE_SPACING_CHUNKS):
     reproduces neither their network traffic, their entity-tracking cost, nor their
     chunk-streaming cost as they move.
     """
-    if spacing < 2 * REGION_SECTION_CHUNKS:
+    minimum = REGION_SECTION_CHUNKS * REGION_SECTIONS_MINIMUM_GAP
+    if spacing < minimum:
         raise ValueError(f"site spacing {spacing} would merge neighbouring regions; "
-                         f"need at least {2 * REGION_SECTION_CHUNKS} chunks")
+                         f"need at least {minimum} chunks (see the derivation above)")
     sites = list(_grid(count, spacing))
     setup = list(DETERMINISM)
     for centre_x, centre_z in sites:
