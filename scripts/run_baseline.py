@@ -243,11 +243,14 @@ def seed_cache(directory, source):
     return copied
 
 
-def prepare(directory, plan, port, heap_mib):
+def prepare(directory, plan, port, heap_mib, max_players=0):
     directory.mkdir(parents=True, exist_ok=False)
     (directory / "eula.txt").write_text("eula=true\n")
     (directory / "server.properties").write_text(
         f"server-ip=127.0.0.1\nserver-port={port}\nonline-mode=false\n"
+        # The default cap is 20; a workload asking for more clients than that silently
+        # loses the rest to "The server is full!" and measures a fraction of its load.
+        f"max-players={max(20, max_players)}\n"
         f"level-type={plan.level_type.replace(':', chr(92) + ':')}\nlevel-seed=440044\n"
         "spawn-protection=0\nenable-query=false\nenable-rcon=false\nsync-chunk-writes=false\n")
     config = directory / "sourbycraft_config" / "sourbycraft_global_config.toml"
@@ -279,7 +282,7 @@ def capture(jar, plan, output, args, tools):
             + "\n  ".join(competitors)
             + "\nStop it, or pass --allow-shared-machine to measure anyway (the run will "
               "not be certified).")
-    config = prepare(output, plan, args.port, args.heap_mib)
+    config = prepare(output, plan, args.port, args.heap_mib, args.connected_players)
     seeded = seed_cache(output, args.cache_from) if args.cache_from else []
     if args.world:
         # A pre-generated world keeps terrain identical across runs and keeps generation
