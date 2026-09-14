@@ -12,7 +12,7 @@ import dev.iyanz.sourbycraft.perf.MetricsRuntime;
 import dev.iyanz.sourbycraft.util.ContainerMemory;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
+import dev.iyanz.sourbycraft.SourbyCraftColors;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -201,7 +201,7 @@ public final class HudBars {
         final String cpu = Double.isFinite(runtime.processCpuPercent())
             ? TpsCommand.value(runtime.processCpuPercent(), 0) + "%" : "unavailable";
         return new TpsDisplay(tick.name().append(Component.text("  RAM " + heap + "  CPU " + cpu,
-            NamedTextColor.GRAY)), tick.progress(), tick.color());
+            SourbyCraftColors.DIM)), tick.progress(), tick.color());
     }
 
     private static TpsDisplay renderTps(final PerformanceSnapshot snapshot) {
@@ -211,25 +211,25 @@ public final class HudBars {
         final double mspt = recent.worstAverageMspt();
         if (!TpsCommand.available(tps)
             || snapshot.freshness().state() == MetricState.UNAVAILABLE) {
-            return new TpsDisplay(Component.text("TPS " + snapshot.freshness().state().name(), NamedTextColor.GRAY),
+            return new TpsDisplay(Component.text("TPS " + snapshot.freshness().state().name(), SourbyCraftColors.DIM),
                 0.0F, BossBar.Color.YELLOW);
         }
         final double ratio = tps / target;
         final BossBar.Color color = ratio >= 0.9 ? BossBar.Color.GREEN
             : ratio >= 0.75 ? BossBar.Color.YELLOW : BossBar.Color.RED;
-        final TextColor valueColor = ratio >= 0.9 ? NamedTextColor.GREEN
-            : ratio >= 0.75 ? NamedTextColor.YELLOW : NamedTextColor.RED;
+        final TextColor valueColor = ratio >= 0.9 ? SourbyCraftColors.HEALTHY
+            : ratio >= 0.75 ? SourbyCraftColors.PRESSURE : SourbyCraftColors.CRITICAL;
         final double budget = 1_000.0 / target;
-        final TextColor msptColor = !TpsCommand.available(mspt) ? NamedTextColor.GRAY
-            : mspt < budget * 0.8 ? NamedTextColor.GREEN
-            : mspt < budget * 1.2 ? NamedTextColor.YELLOW : NamedTextColor.RED;
+        final TextColor msptColor = !TpsCommand.available(mspt) ? SourbyCraftColors.DIM
+            : mspt < budget * 0.8 ? SourbyCraftColors.HEALTHY
+            : mspt < budget * 1.2 ? SourbyCraftColors.PRESSURE : SourbyCraftColors.CRITICAL;
         final String stale = snapshot.freshness().state() == MetricState.STALE ? "  STALE" : "";
         final Component name = Component.text()
-            .append(Component.text("TPS ", NamedTextColor.GRAY))
+            .append(Component.text("TPS ", SourbyCraftColors.DIM))
             .append(Component.text(String.format(java.util.Locale.ROOT, "%.2f/%.2f", tps, target), valueColor))
-            .append(Component.text("   MSPT ", NamedTextColor.GRAY))
+            .append(Component.text("   MSPT ", SourbyCraftColors.DIM))
             .append(Component.text(TpsCommand.ms(mspt), msptColor))
-            .append(Component.text(stale, NamedTextColor.GRAY))
+            .append(Component.text(stale, SourbyCraftColors.DIM))
             .build();
         return new TpsDisplay(name, (float)ratio, color);
     }
@@ -245,17 +245,17 @@ public final class HudBars {
         final long max = runtime.heapMaxBytes();
         final long used = runtime.heapUsedBytes();
         if (max <= 0L || used < 0L) {
-            RAM_BAR.name(Component.text("RAM " + snapshot.freshness().state().name(), NamedTextColor.GRAY));
+            RAM_BAR.name(Component.text("RAM " + snapshot.freshness().state().name(), SourbyCraftColors.DIM));
             RAM_BAR.progress(0.0F);
             RAM_BAR.color(BossBar.Color.YELLOW);
             return;
         }
         final double pct = max > 0 ? (double) used / max : 0.0;
         final var name = Component.text()
-            .append(Component.text("RAM ", NamedTextColor.GRAY))
+            .append(Component.text("RAM ", SourbyCraftColors.DIM))
             .append(Component.text(ContainerMemory.fmt(used) + "/" + ContainerMemory.fmt(max),
-                pct < 0.60 ? NamedTextColor.GREEN : pct < 0.85 ? NamedTextColor.YELLOW : NamedTextColor.RED))
-            .append(Component.text(String.format(java.util.Locale.ROOT, " (%.0f%%)", pct * 100), NamedTextColor.GRAY));
+                pct < 0.60 ? SourbyCraftColors.HEALTHY : pct < 0.85 ? SourbyCraftColors.PRESSURE : SourbyCraftColors.CRITICAL))
+            .append(Component.text(String.format(java.util.Locale.ROOT, " (%.0f%%)", pct * 100), SourbyCraftColors.DIM));
         // Swap usage (host/container-level), shown like the RAM readout: used/total. Only when swap
         // exists. Robust against the common container bug where the platform bean's free-swap figure
         // is unreliable (negative, or larger than the total) while the total itself is fine — see
@@ -267,13 +267,13 @@ public final class HudBars {
                 final long swapUsed = ContainerMemory.swapUsedBytes(swapTotal);
                 final Component swapValue;
                 if (swapUsed < 0) {
-                    swapValue = Component.text(ContainerMemory.fmt(swapTotal) + " total (used n/a)", NamedTextColor.GRAY);
+                    swapValue = Component.text(ContainerMemory.fmt(swapTotal) + " total (used n/a)", SourbyCraftColors.DIM);
                 } else {
                     final double swapPct = (double) swapUsed / swapTotal;
                     swapValue = Component.text(ContainerMemory.fmt(swapUsed) + "/" + ContainerMemory.fmt(swapTotal),
-                        swapPct < 0.30 ? NamedTextColor.GREEN : swapPct < 0.70 ? NamedTextColor.YELLOW : NamedTextColor.RED);
+                        swapPct < 0.30 ? SourbyCraftColors.HEALTHY : swapPct < 0.70 ? SourbyCraftColors.PRESSURE : SourbyCraftColors.CRITICAL);
                 }
-                name.append(Component.text("  Swap ", NamedTextColor.GRAY)).append(swapValue);
+                name.append(Component.text("  Swap ", SourbyCraftColors.DIM)).append(swapValue);
             }
         } catch (Throwable ignored) { /* swap metrics unavailable on this JVM/OS */ }
         RAM_BAR.name(name.build());

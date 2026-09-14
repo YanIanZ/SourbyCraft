@@ -46,6 +46,9 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
     // source set is compiled in isolation and cannot depend on the server module, so the two
     // hex values are duplicated here on purpose — keep them in sync if the brand palette moves).
     private static final String PRIMARY = fg(0xFF, 0xB3, 0x47); // #FFB347 SourbyCraft brand
+    private static final String AURORA  = fg(0x22, 0xD3, 0xEE); // #22D3EE Aurora engine
+    /** The engine's name, used for everything inside the Minecraft system. */
+    private static final String ENGINE = "Aurora";
     private static final String DIM     = fg(0x80, 0x80, 0x80); // #808080 class name
 
     private static final String BRAND = "SourbyCraft";
@@ -59,18 +62,32 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
      * re-platform (feat/canvas-engine, PR #12) — they are inert string prefixes (never match
      * anything now) and cost nothing to leave for anyone diffing against the archived Folia line.
      */
-    private static final String[] INTERNAL_PREFIXES = {
+    /**
+     * Engine packages. These are the Minecraft server internals SourbyCraft patches — the
+     * region scheduler, chunk system, and the Canvas/Folia/Paper lineage it is built on.
+     * They log as Aurora, the engine's name.
+     */
+    private static final String[] AURORA_PREFIXES = {
+        "io.papermc.paper.",
+        "io.canvasmc.",
+        "ca.spottedleaf.",
+        "net.minecraft.",
         "me.earthme.luminol.",
         "org.leavesmc.",
         "org.dreeam.leaf.",
         "org.purpurmc.",
         "org.leaf.",
-        "dev.iyanz.sourbycraft.",
-        "io.papermc.paper.",
-        "io.canvasmc.",
         "com.destroystokyo.paper.",
         "abomination.",
         "com.kiocg.",
+    };
+
+    /**
+     * The SourbyCraft layer: everything outside the Minecraft system — commands, HUD,
+     * configuration, telemetry publication, the updater. These log as SourbyCraft.
+     */
+    private static final String[] SOURBY_PREFIXES = {
+        "dev.iyanz.sourbycraft.",
     };
 
     private static String fg(int r, int g, int b) {
@@ -94,36 +111,34 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
             return;
         }
 
-        if (logger.equals(BRAND)) {
-            // dev.iyanz.sourbycraft.util.SourbyLogger logs under the literal "SourbyCraft" logger
-            // name. simpleName() would yield "SourbyCraft" too, rendering the doubled
-            // [SourbyCraft/SourbyCraft] tag the boot log showed — so collapse it to a single clean
-            // [SourbyCraft] tag (no "/SourbyCraft" suffix).
+        if (logger.equals(BRAND) || logger.equals(ENGINE)) {
+            // Already a brand name; rendering "SourbyCraft/SourbyCraft" would read as a bug.
+            final boolean engine = logger.equals(ENGINE);
             toAppendTo.append('[')
-                      .append(PRIMARY).append(BRAND)
+                      .append(engine ? AURORA : PRIMARY).append(logger)
                       .append(RESET)
                       .append(']');
-        } else if (isInternal(logger)) {
-            // [SourbyCraft/SimpleName] with brand + dim coloring, then a hard reset so the
-            // surrounding %highlightError / %msg picks up its own color cleanly.
+        } else if (matches(logger, AURORA_PREFIXES)) {
+            // Minecraft internals: the engine speaks as Aurora.
+            toAppendTo.append('[')
+                      .append(AURORA).append(ENGINE)
+                      .append(DIM).append('/').append(simpleName(logger))
+                      .append(RESET)
+                      .append(']');
+        } else if (matches(logger, SOURBY_PREFIXES)) {
+            // Outside the Minecraft system: the utility layer speaks as SourbyCraft.
             toAppendTo.append('[')
                       .append(PRIMARY).append(BRAND)
                       .append(DIM).append('/').append(simpleName(logger))
                       .append(RESET)
                       .append(']');
         } else {
-            // Vanilla / Mojang / unknown third-party: keep the real logger name verbatim and
-            // uncolored, so nothing that isn't ours is renamed, recolored, or truncated. This
-            // exactly reproduces the stock [%logger] behavior for those loggers.
             toAppendTo.append('[').append(logger).append(']');
         }
     }
 
-    private static boolean isInternal(final String logger) {
-        if (logger.equals(BRAND)) {
-            return true; // dev.iyanz.sourbycraft.util.SourbyLogger uses the literal "SourbyCraft"
-        }
-        for (final String prefix : INTERNAL_PREFIXES) {
+    private static boolean matches(final String logger, final String[] prefixes) {
+        for (final String prefix : prefixes) {
             if (logger.startsWith(prefix)) {
                 return true;
             }

@@ -5,7 +5,7 @@
      protected static final int CHAR_LIM = 90;
  
 -    public static final Logger LOGGER = LoggerFactory.getLogger("CanvasMC");
-+    public static final Logger LOGGER = LoggerFactory.getLogger("SourbyCraft"); // SourbyCraft - rebrand console prefix [CanvasMC] -> [SourbyCraft]
++    public static final Logger LOGGER = LoggerFactory.getLogger("Aurora"); // SourbyCraft - engine config speaks as the engine: [CanvasMC] -> [Aurora]
      public static final LockedReference<TimeSpan> AUTOSAVE_SPAN = new LockedReference<>(null);
  
      public static final int INFO = 0;
