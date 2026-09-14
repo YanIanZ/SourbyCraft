@@ -44,7 +44,12 @@ STARTUP_FAILURES = ("Failed to start the minecraft server", "Perhaps a server is
 
 COMMAND_FAILURES = ("Unknown or incomplete command", "Incorrect argument for command",
                     "Expected whitespace to end one argument", "Invalid or unknown entity type",
-                    "Unable to summon", "Cannot place feature")
+                    "Unable to summon", "Cannot place feature",
+                    # Placing an entity before its forceloaded chunk finished generating.
+                    # This one is quiet: the command is well-formed and the server answers
+                    # in chat, so without the marker the run measures bare terrain while
+                    # its summary claims an entity population.
+                    "That position is not loaded")
 
 
 # A measurement sharing the machine is not a measurement. This is the share of the
@@ -205,10 +210,29 @@ class Server:
             self.hold(1)
 
     def apply(self, commands):
-        """Send workload setup in paced batches so setup itself does not spike a tick."""
-        for index in range(0, len(commands), SETUP_BATCH):
-            self.send(*commands[index:index + SETUP_BATCH])
-            self.hold(SETUP_BATCH_PAUSE)
+        """Send workload setup in paced batches so setup itself does not spike a tick.
+
+        A ``@settle <seconds>`` entry is a pause, not a command: the batch so far is
+        flushed and the server is left alone, so work the previous commands started --
+        terrain generation, above all -- has finished before the next group runs.
+        """
+        batch = []
+
+        def flush(pause):
+            if batch:
+                self.send(*batch)
+                batch.clear()
+            self.hold(pause)
+
+        for command in commands:
+            if command.startswith(baseline_workloads.SETTLE_TOKEN):
+                flush(float(command.split()[1]))
+                continue
+            batch.append(command)
+            if len(batch) == SETUP_BATCH:
+                flush(SETUP_BATCH_PAUSE)
+        if batch:
+            flush(SETUP_BATCH_PAUSE)
 
     def close(self):
         if self.process.poll() is None:
@@ -309,7 +333,9 @@ def capture(jar, plan, output, args, tools):
         "schema": "sourbycraft.baseline/1",
         "workload": {"name": plan.name, "summary": plan.summary, "level_type": plan.level_type,
                      "fidelity": list(plan.fidelity), "parameters": plan.parameters,
-                     "setup_command_count": len(plan.setup),
+                     "setup_command_count": sum(
+                         1 for entry in plan.setup
+                         if not entry.startswith(baseline_workloads.SETTLE_TOKEN)),
                      "requires_connected_players": plan.requires_connected_players},
         "provenance": {
             "commit": commit,

@@ -278,6 +278,53 @@ class WorkloadTest(unittest.TestCase):
                     self.assertIn("positioned over world_surface", command)
                     self.assertTrue(command.startswith("execute positioned "))
 
+    def test_every_summon_waits_for_its_forceloaded_terrain(self):
+        # forceload add returns once the chunks are marked; generation happens after.
+        # A summon issued in between is answered with "That position is not loaded" and
+        # the entity is never created -- which is exactly what every run before this
+        # check did, measuring bare terrain while reporting an entity population.
+        for name in ("players-10", "players-50", "players-100", "entity-stress"):
+            with self.subTest(name=name):
+                setup = workloads.build(name).setup
+                settle = [n for n, c in enumerate(setup)
+                          if c.startswith(workloads.SETTLE_TOKEN)]
+                self.assertTrue(settle, "no wait between forceload and summon")
+                first_summon = next(n for n, c in enumerate(setup) if " run summon " in c)
+                last_forceload = max(n for n, c in enumerate(setup)
+                                     if c.startswith("forceload add"))
+                self.assertLess(last_forceload, settle[0])
+                self.assertLess(settle[0], first_summon)
+
+    def test_the_wait_grows_with_the_amount_of_terrain(self):
+        small = int(workloads.await_chunks(250).split()[1])
+        large = int(workloads.await_chunks(1250).split()[1])
+        self.assertLess(small, large)
+        # Capped, so a large workload cannot stall the run indefinitely; the summons
+        # then fail loudly through COMMAND_FAILURES instead.
+        self.assertLessEqual(int(workloads.await_chunks(10 ** 6).split()[1]), 300)
+
+    def test_a_summon_into_an_unloaded_chunk_is_treated_as_a_failure(self):
+        self.assertIn("That position is not loaded", run_baseline.COMMAND_FAILURES)
+
+    def test_apply_pauses_on_the_token_and_never_sends_it(self):
+        server = run_baseline.Server.__new__(run_baseline.Server)
+        sent, held = [], []
+        server.send = lambda *commands: sent.extend(commands)
+        server.hold = held.append
+        server.apply(["forceload add 0 0", f"{workloads.SETTLE_TOKEN} 45", "summon pig"])
+        self.assertEqual(sent, ["forceload add 0 0", "summon pig"])
+        self.assertIn(45.0, held)
+
+    def test_apply_flushes_what_precedes_the_pause_before_waiting(self):
+        # The wait is pointless if the forceloads are still sitting in an unsent batch.
+        server = run_baseline.Server.__new__(run_baseline.Server)
+        order = []
+        server.send = lambda *commands: order.append(("send", list(commands)))
+        server.hold = lambda seconds: order.append(("hold", seconds))
+        server.apply(["forceload add 0 0", f"{workloads.SETTLE_TOKEN} 30", "summon pig"])
+        self.assertEqual(order[0], ("send", ["forceload add 0 0"]))
+        self.assertEqual(order[1], ("hold", 30.0))
+
     def test_chunk_heavy_workloads_settle_before_the_window_opens(self):
         # Terrain generation triggered by forceload continues after the command returns.
         self.assertGreater(workloads.build("players-100").settle_seconds,
