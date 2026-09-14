@@ -10,13 +10,13 @@ index 05139e18ccdca70ec1223e4f818254709bb5cb25..7e890efffdafe894b99545fbe8552db7
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -422,6 +422,12 @@ public abstract class Entity
-     private final List<AABB> collisionScratchAabbs = new ArrayList<>();
-     private final List<AABB> collisionScratchEntityAabbs = new ArrayList<>();
-     // SourbyCraft end
+     public static final int MAX_MOVEMENTS_HANDELED_PER_TICK = 100;
+     private final ArrayDeque<Entity.Movement> movementThisTick = new ArrayDeque<>(100);
+     private final List<Entity.Movement> finalMovementsThisTick = new ObjectArrayList<>();
 +    // SourbyCraft start - reuse a single BlockPos.MutableBlockPos across isInWall calls. isInWall
 +    // is called from LivingEntity.baseTick per-entity per-tick (gated by shouldCheckForSuffocation,
 +    // default true — see WorldConfig#enableSuffocationOptimization = false). The previous code
-+    // allocated a fresh MutableBlockPos per call. Same pattern as 0010/0013/0014/0015/0016/0017.
++    // allocated a fresh MutableBlockPos per call. Position contains only scalar coordinates; it retains no world/entity references.
 +    private final BlockPos.MutableBlockPos isInWallScratch = new BlockPos.MutableBlockPos();
 +    // SourbyCraft end
      private final LongSet visitedBlocks = new LongOpenHashSet();

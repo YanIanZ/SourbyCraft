@@ -49,7 +49,7 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..88fb734f31d8e92d5e4417af75f455c4
              this.path = null;
              this.path = this.createPath(this.targetPos, this.reachRange);
              this.timeLastRecompute = this.tick; // Folia - region threading
-@@ -107,6 +118,63 @@ public abstract class PathNavigation {
+@@ -107,6 +118,59 @@ public abstract class PathNavigation {
          }
      }
  
@@ -91,21 +91,17 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..88fb734f31d8e92d5e4417af75f455c4
 +        this.sourbyAsyncPathPending = true;
 +        dev.iyanz.sourbycraft.perf.AsyncPathProcessor
 +            .submit(() -> solver.findPath(snapshot, mob, targets, maxPathLength, reachRange, mult))
-+            .whenComplete((path, err) -> {
-+                try {
-+                    mob.getBukkitEntity().taskScheduler.scheduleOrExecute((net.minecraft.world.entity.Entity e) -> {
-+                        this.sourbyAsyncPathPending = false;
-+                        if (path != null && path.getTarget() != null) {
-+                            this.path = path;
-+                            this.targetPos = path.getTarget();
-+                            this.reachRange = reachRange;
-+                            this.resetStuckTimeout();
-+                        }
-+                    });
-+                } catch (final Throwable t) {
-+                    this.sourbyAsyncPathPending = false; // retired/removed entity — just drop the result
-+                }
-+            });
++            .whenComplete((path, err) -> dev.iyanz.sourbycraft.perf.AsyncPathCompletion.schedule(
++                mob.getBukkitEntity().taskScheduler,
++                () -> {
++                    if (path != null && path.getTarget() != null) {
++                        this.path = path;
++                        this.targetPos = path.getTarget();
++                        this.reachRange = reachRange;
++                        this.resetStuckTimeout();
++                    }
++                },
++                () -> this.sourbyAsyncPathPending = false));
 +        return true;
 +    }
 +    // SourbyCraft end - async pathfinding

@@ -2316,6 +2316,8 @@ V7: SourbyCraft-owned services do not set runtime JVM options or inject hardware
 V8: Baseline comparison refuses uncertified inputs; report cannot claim PASS under provenance drift; network gate reads captured top-level network values (§9–10, §85).
 V9: Reused entity buffers remain owner-confined; shared ServerLevel holds no downstream scratch buffers; synced entity data receives a detached copy (§108).
 V10: Spark metadata retains upstream base secret exclusions; Sourby TOML/YAML credential keys are removed recursively through objects/arrays; report collection leaves operator files unchanged (DEVELOPMENT §11).
+V11: Collision, pickup and effect-particle query lists remain per-call; entity fields do not retain their previous query results across inactive/gated ticks (DEVELOPMENT §4.3, §15).
+V12: Async path completion releases pending state when scheduler admission fails or an admitted task retires; result application stays on the owning entity scheduler (DEVELOPMENT §4.2).
 
 # 153. Regression Log (§B)
 
@@ -2334,6 +2336,9 @@ V10: Spark metadata retains upstream base secret exclusions; Sourby TOML/YAML cr
 | B11 | 2026-09-13 | ServerLevel scratch collections shared across region threads; particle scratch aliased synchronized data | V9; Claude removed patches 0013/0015 and detached particle publication; ScratchBufferConfinementTest |
 | B12 | 2026-09-13 | Copied Spark hidden-path list omitted current management secrets; path filter did not traverse arrays or identify nested Sourby credentials | V10; inherit BASE_HIDDEN_PATHS and recursively remove credential keys from report JSON; synthetic-secret parser/group tests |
 | B13 | 2026-09-13 | Focused --tests filter left two forcibly included existing JUnit suites empty | Run full server suite for integration; invocation issue, no runtime invariant change |
+| B14 | 2026-09-14 | Reused collision/pickup/effect lists retained previous results until the next eligible call and left reentrancy unproven | V11; remove unbenchmarked collection reuse from 0009/0014/0016 (retain Level overload compatibility); restore upstream per-call collections; retention architecture regression tests |
+| B15 | 2026-09-14 | scheduleOrExecute rejection and its null retired callback left async path pending latched | V12; explicit retirement callback and admission-failure cleanup; tests with real EntityScheduler retirement plus owner callback/failure tests |
+| B16 | 2026-09-14 | Cold bootstrap rejected a hash-mismatched Mojang download but exited 0 before Done | OPEN: SourbyClip failure/exit-code audit; profiling harness correctly rejects early exit; cached immutable JAR hash verified before runtime validation |
 
 # 154. Delivery Scope
 

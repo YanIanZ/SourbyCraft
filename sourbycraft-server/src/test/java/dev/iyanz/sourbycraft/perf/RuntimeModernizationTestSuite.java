@@ -7,6 +7,6 @@ import org.junit.platform.suite.api.Suite;
 
 @Suite
 @SelectClasses({RuntimeSamplerTest.class, IoLifecycleTest.class, ConfigSnapshotTest.class,
-    TelemetryEventTest.class, AsyncPathShutdownTest.class,
+    TelemetryEventTest.class, AsyncPathShutdownTest.class, AsyncPathCompletionTest.class,
     ScratchBufferConfinementTest.class})
 public class RuntimeModernizationTestSuite {}
