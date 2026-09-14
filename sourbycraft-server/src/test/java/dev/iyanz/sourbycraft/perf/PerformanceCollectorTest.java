@@ -297,6 +297,35 @@ class PerformanceCollectorTest {
     }
 
     @Test
+    void realisticQuantisedCoverageBecomesAvailable() {
+        // completeCoverageBecomesAvailable passes a window covering its full fifteen minutes,
+        // which real bucketing never produces: the long windows are summed from whole buckets
+        // and land a bucket short however long the server runs. That fixture is why a two-hour
+        // certified soak reported WARMING for all 6302 of its samples while the test was green.
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final long fifteenMinutes = TimeUnit.MINUTES.toNanos(15L);
+        final long covered = fifteenMinutes - RegionTickMetrics.coverageQuantisationNanos(fifteenMinutes);
+
+        collector(provider, source(view(1L, true,
+            window(1L, covered, MILLISECOND, 0.1)))).collect(fifteenMinutes, 900_000L, 0L);
+
+        assertEquals(MetricState.AVAILABLE, provider.snapshot().freshness().state());
+    }
+
+    @Test
+    void coverageShortOfTheAllowanceIsStillWarming() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final long fifteenMinutes = TimeUnit.MINUTES.toNanos(15L);
+        final long covered = fifteenMinutes
+            - RegionTickMetrics.coverageQuantisationNanos(fifteenMinutes) - MILLISECOND;
+
+        collector(provider, source(view(1L, true,
+            window(1L, covered, MILLISECOND, 0.1)))).collect(fifteenMinutes, 900_000L, 0L);
+
+        assertEquals(MetricState.WARMING, provider.snapshot().freshness().state());
+    }
+
+    @Test
     void activeGenerationWithoutSamplesDoesNotFabricateHealthyUtilisation() {
         final SourbyMetricsProvider provider = new SourbyMetricsProvider();
         final RegionTickMetrics.WindowSnapshot empty = new RegionTickMetrics.WindowSnapshot(

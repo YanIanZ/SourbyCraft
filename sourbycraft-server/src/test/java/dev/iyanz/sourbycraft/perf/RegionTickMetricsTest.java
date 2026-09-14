@@ -593,6 +593,41 @@ class RegionTickMetricsTest {
         }
     }
 
+    @Test
+    void longWindowCoverageLandsWithinOneBucketOfTheWindow() {
+        // A two-hour certified soak reported all 6302 samples WARMING. Coverage of the
+        // bucketed windows is quantised -- whole buckets only -- so it lands just short of
+        // the nominal window however long the server runs, and a readiness test demanding
+        // the full window can never pass. Pin the shortfall so the allowance stays honest.
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        final int ticks = 20 * 60 * 20;                       // twenty minutes at 20 TPS
+        appendTicks(metrics, ticks, 0L, TARGET_20_TPS, 10L * MILLISECOND);
+        final RegionTickMetrics.Snapshot snapshot = metrics.snapshot((long)ticks * TARGET_20_TPS);
+
+        assertCoverage(snapshot.oneMinute(), 60L);
+        assertCoverage(snapshot.fiveMinutes(), 300L);
+        assertCoverage(snapshot.fifteenMinutes(), 900L);
+    }
+
+    @Test
+    void shortWindowsAreExactBecauseTheyAreSummedFromRawTicks() {
+        assertEquals(0L, RegionTickMetrics.coverageQuantisationNanos(5L * SECOND));
+        assertEquals(0L, RegionTickMetrics.coverageQuantisationNanos(15L * SECOND));
+        assertTrue(RegionTickMetrics.coverageQuantisationNanos(60L * SECOND) > 0L);
+    }
+
+    private static void assertCoverage(final RegionTickMetrics.WindowSnapshot window,
+                                       final long windowSeconds) {
+        final long windowNanos = windowSeconds * SECOND;
+        final long slack = RegionTickMetrics.coverageQuantisationNanos(windowNanos);
+        final long covered = window.intervalNanos();
+        assertTrue(covered <= windowNanos,
+            "coverage " + covered + " exceeds the window " + windowNanos);
+        assertTrue(covered >= windowNanos - slack,
+            "coverage " + covered + " is short of " + windowNanos + " by more than the "
+                + slack + "ns the bucket layout can lose");
+    }
+
     private static void appendTicks(final RegionTickMetrics metrics, final int count, final long firstStart,
                                     final long interval, final long duration) {
         long previous = TimeUtil.DEADLINE_NOT_SET;

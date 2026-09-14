@@ -126,7 +126,7 @@ public final class PerformanceCollector implements AutoCloseable {
                 windows[i] = this.accumulators[i].finish(i, this.activeRegions);
                 globalWindows[i] = globalWindow(window(globalSnapshot, WINDOWS[i]),
                     globalSnapshot.activeTickStartNanos(), nowNanos, WINDOWS[i]);
-                warming |= windows[i].coverageMillis() < windowMillis(WINDOWS[i]);
+                warming |= windows[i].coverageMillis() < requiredCoverageMillis(WINDOWS[i]);
             }
             final long duration = elapsed(this.nanoClock.getAsLong(), scanStarted);
             final long latenessMillis = TimeUnit.NANOSECONDS.toMillis(Math.max(0L, latenessNanos));
@@ -255,6 +255,20 @@ public final class PerformanceCollector implements AutoCloseable {
 
     private static long windowMillis(final MetricWindow window) {
         return TimeUnit.NANOSECONDS.toMillis(windowNanos(window));
+    }
+
+    /**
+     * How much coverage a window needs before it counts as warmed up.
+     *
+     * <p>Not the whole window: the long windows are summed from whole buckets, so their coverage
+     * is quantised and lands just short however long the server runs. Demanding the full window
+     * left a two-hour run reporting WARMING for all of its 6302 samples, and anything gating on
+     * AVAILABLE saw nothing.</p>
+     */
+    private static long requiredCoverageMillis(final MetricWindow window) {
+        final long nanos = windowNanos(window);
+        return TimeUnit.NANOSECONDS.toMillis(
+            nanos - RegionTickMetrics.coverageQuantisationNanos(nanos));
     }
 
     private static long elapsed(final long end, final long start) {
