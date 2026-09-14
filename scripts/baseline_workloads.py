@@ -154,7 +154,8 @@ def players(count, radius=2, spacing=SITE_SPACING_CHUNKS):
                     "region_section_chunks": REGION_SECTION_CHUNKS,
                     "expected_min_regions": count,
                     "forceloaded_chunks": chunks, "entities_per_site": per_site,
-                    "entities_total": count * per_site})
+                    "entities_total": count * per_site,
+                    "site_coordinates": [[cx * 16 + 8, cz * 16 + 8] for cx, cz in sites]})
 
 
 def entity_stress(mobs=3000, items=3000, radius=4):

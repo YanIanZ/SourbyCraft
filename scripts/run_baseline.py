@@ -22,6 +22,7 @@ import subprocess
 import threading
 import time
 
+import baseline_client
 import baseline_metrics
 import baseline_network
 import baseline_workloads
@@ -310,7 +311,7 @@ def capture(jar, plan, output, args, tools):
             "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")},
         "status": "running"}
     record_path = output / "baseline.json"
-    server = sampler = load = None
+    server = sampler = load = swarm = None
     try:
         server = Server(command, output)
         record["provenance"]["startup_seconds"] = server.await_ready(STARTUP_TIMEOUT)
@@ -327,6 +328,30 @@ def capture(jar, plan, output, args, tools):
         if errors and not args.allow_command_errors:
             raise RuntimeError(f"Workload setup rejected by the server: {errors}. "
                                "The command syntax does not match this Minecraft version.")
+
+        if args.connected_players > 0:
+            # Real clients, because entity activation range is computed around players: without
+            # them mob AI, goal selection and pathfinding never run and the profile is block and
+            # chunk work only.
+            print(f"[{plan.name}] connecting {args.connected_players} clients", flush=True)
+            swarm = baseline_client.ClientSwarm("127.0.0.1", args.port, args.connected_players)
+            record["clients"] = swarm.start(timeout=120.0)
+            print(f"[{plan.name}] clients: {record['clients']}", flush=True)
+            if record["clients"]["in_play"] < args.connected_players:
+                raise RuntimeError(f"only {record['clients']['in_play']} of "
+                                   f"{args.connected_players} clients reached play: "
+                                   f"{record['clients']['first_error']}")
+            # Spread them over the workload's sites, so each site has a player in it rather
+            # than every player standing in the spawn region.
+            sites = plan.parameters.get("site_coordinates") or []
+            if sites:
+                moves = []
+                for index in range(args.connected_players):
+                    x, z = sites[index % len(sites)]
+                    moves.append(f"execute positioned {x} 0 {z} positioned over world_surface "
+                                 f"run tp Baseline{index:03d} ~ ~1 ~")
+                server.apply(moves)
+                server.hold(10)
 
         print(f"[{plan.name}] warming {args.warmup}s", flush=True)
         server.hold(args.warmup)
@@ -356,6 +381,8 @@ def capture(jar, plan, output, args, tools):
                 server.hold(min(5, args.duration - (time.monotonic() - measured)))
         record["workload"]["steady_steps"] = steps
 
+        if swarm is not None:
+            record["clients"] = swarm.report()
         if load is not None:
             load.stop()
             report = load.report()
@@ -396,7 +423,8 @@ def capture(jar, plan, output, args, tools):
         record["certified"], record["certification"] = False, "run failed"
         raise
     finally:
-        for cleanup in (lambda: sampler and sampler.stop(),
+        for cleanup in (lambda: swarm and swarm.stop(),
+                        lambda: sampler and sampler.stop(),
                         lambda: load and load.stopped_at is None and load.stop(),
                         lambda: server and server.close()):
             try:
@@ -413,10 +441,15 @@ def certify(plan, record, args):
     and is simply refused as a regression reference.
     """
     reasons = []
-    if plan.requires_connected_players and args.connected_players < 1:
-        reasons.append("workload depends on entity activation range, which is computed "
-                       "around connected players; no clients were asserted with "
-                       "--connected-players, so mob AI stayed inactive")
+    if plan.requires_connected_players:
+        clients = record.get("clients") or {}
+        in_play = clients.get("in_play", 0)
+        if in_play < 1:
+            reasons.append("workload depends on entity activation range, which is computed "
+                           "around connected players; none connected, so mob AI stayed "
+                           "inactive")
+        elif in_play < clients.get("requested", 0):
+            reasons.append(f"only {in_play} of {clients['requested']} clients stayed in play")
     if not record["metrics"]["tick"]["available"]:
         reasons.append(f"tick telemetry unavailable: {record['metrics']['tick']['reason']}")
     if record["provenance"]["worktree_dirty"]:

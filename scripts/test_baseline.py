@@ -451,11 +451,28 @@ class CertifyTest(unittest.TestCase):
         self.assertFalse(certified)
         self.assertIn("activation range", reason)
 
-    def test_the_same_workload_certifies_once_clients_are_asserted(self):
-        certified, reason = run_baseline.certify(workloads.build("players-50"), record(),
+    def test_the_same_workload_certifies_once_clients_actually_connected(self):
+        # An operator's word is no longer enough: the run must show clients in play.
+        connected = record()
+        connected["clients"] = {"requested": 50, "in_play": 50, "failed": 0}
+        certified, reason = run_baseline.certify(workloads.build("players-50"), connected,
                                                  self.args(connected_players=50))
         self.assertTrue(certified)
         self.assertEqual(reason, "meets baseline requirements")
+
+    def test_clients_that_dropped_out_do_not_certify(self):
+        partial = record()
+        partial["clients"] = {"requested": 50, "in_play": 37, "failed": 13}
+        certified, reason = run_baseline.certify(workloads.build("players-50"), partial,
+                                                 self.args(connected_players=50))
+        self.assertFalse(certified)
+        self.assertIn("37 of 50", reason)
+
+    def test_asserting_clients_without_connecting_them_does_not_certify(self):
+        certified, reason = run_baseline.certify(workloads.build("players-50"), record(),
+                                                 self.args(connected_players=50))
+        self.assertFalse(certified)
+        self.assertIn("mob AI stayed inactive", reason)
 
     def test_a_short_window_is_uncertified(self):
         certified, reason = run_baseline.certify(workloads.build("idle"), record(),
