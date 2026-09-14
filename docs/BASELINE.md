@@ -180,9 +180,15 @@ hold, and records the reason in `baseline.json`:
 * the server rejected a setup command
 * the measurement window was shorter than 300 seconds
 * another server was already running when the run started
+* HEAD moved while the measurement was running
 * the machine averaged more than 10% CPU on work other than this server
 
-The last two exist because a measurement that shares the machine is not a
+`run_baseline.py` also refuses to *start* on a dirty worktree, because such a run could
+never be certified and a measurement window is ten minutes long. `--allow-dirty` starts
+anyway. The tree and HEAD are re-read when the window closes as well: a commit landing
+mid-measurement means the jar and the repository no longer describe the same thing.
+
+The machine checks exist because a measurement that shares the machine is not a
 measurement, and nothing else in this list can see that. `run_baseline.py` refuses to
 start at all while another process is running a server jar — pass
 `--allow-shared-machine` to measure anyway, and the run will not be certified.
