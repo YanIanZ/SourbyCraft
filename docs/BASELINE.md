@@ -323,3 +323,38 @@ the client swarm on the same box, so there was nothing left to give.
 The soak therefore measured this machine's ceiling, not SourbyCraft's. Capacity numbers
 for fifty players need either more cores and memory than 8/16 GB, or a reduction in the
 cost of generating a chunk.
+
+### Second soak — 10 players, two hours, 6 GiB (CERTIFIED)
+
+The first certified multi-hour soak, and the answer to the question the first one left
+open. Ten clients, 300 entities that this time actually existed, 10/10 clients still in
+play after two hours, clean shutdown in 8.1 s.
+
+| | first quarter | last quarter | change |
+|---|---|---|---|
+| resident memory | 4.93 GB | 4.64 GB | **−5.9%** |
+| heap after GC | 3.88 GB | 3.83 GB | **−1.3%** |
+| tick | 5.312 ms | 5.278 ms | **−0.6%** |
+
+Nothing grows. Across 518 collections the heap-after-GC mean is flat, resident memory
+falls, and tick is unchanged over two hours. TPS held 19.85 mean and 19.98 p50; GC took
+46.6 s of the 7200 s window (0.65%, against 34% in the fifty-player run).
+
+**There is no memory leak.** The first soak exhausted its heap because fifty players and
+fifty regions need more than 6 GiB, not because anything retains. Five Full-GC live-set
+points during the run suggested a +310 MB/hour climb; the full 518-sample series shows
+that was noise in an unevenly spaced sample, which is why the drift comparison uses the
+whole window rather than GC events.
+
+Two things this run exposed, neither affecting the above:
+
+* **Telemetry never leaves `WARMING`.** All 6302 usable samples report state `WARMING`
+  and `long_windows_covered` is false after two hours. The five- and fifteen-minute
+  windows should be covered within fifteen minutes, so the state machine is wrong
+  somewhere. Any surface that gates on `AVAILABLE` is affected.
+* **The workload delivers fewer regions than it declares.** `players-10` designs ten
+  sites 128 chunks apart, one region each, and `expected_min_regions` is 10 — but
+  `active_regions` ran 3 to 10, mean 5.73. Both certified A/B runs show the same (5.88
+  and 5.60), so it is systematic, not incidental. The plan's own fidelity note says to
+  check this; certification does not yet, and should not start gating on it before the
+  cause is understood.
