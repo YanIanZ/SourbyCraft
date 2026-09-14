@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.testplugin;
 
 import dev.iyanz.sourbycraft.api.metrics.SourbyMetrics;
+import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import org.bukkit.Bukkit;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -16,16 +17,16 @@ public class TestPlugin extends JavaPlugin implements Listener {
     public void onEnable() {
         this.requireMetrics("SOURBY_METRICS_ONENABLE_OK");
         Bukkit.getPluginManager().registerEvents(this, this);
-        final StressCommands stress = new StressCommands(this);
-        for (final String name : new String[]{"massspawn", "flyspeed"}) {
-            final var command = this.getCommand(name);
-            if (command == null) {
-                throw new IllegalStateException("command " + name + " missing from paper-plugin.yml");
-            }
-            command.setExecutor(stress);
-            command.setTabCompleter(stress);
-        }
-        this.getLogger().info("SOURBY_STRESS_COMMANDS_OK");
+        // A Paper plugin must register commands through the lifecycle COMMANDS event.
+        // JavaPlugin#getCommand throws UnsupportedOperationException during startup here.
+        this.getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
+            final var registrar = event.registrar();
+            registrar.register("massspawn", "Spawn many entities at a position, batched across ticks.",
+                new StressCommands(this, "massspawn"));
+            registrar.register("flyspeed", "Set a player's fly speed for extreme-range testing.",
+                new StressCommands(this, "flyspeed"));
+            this.getLogger().info("SOURBY_STRESS_COMMANDS_OK");
+        });
     }
 
     private void requireMetrics(final String marker) {

@@ -10,7 +10,10 @@ observed against a running 26.2 server with scripts/protocol_probe.py, and the
 ClientInformation layout is taken from net.minecraft.server.level.ClientInformation#write
 in the materialized sources. A different Minecraft version will need the probe re-run.
 """
+import math
+import random
 import socket
+import struct
 import threading
 import time
 import zlib
@@ -45,6 +48,14 @@ SERVERBOUND_FINISH_CONFIG = 0x03
 # being decoded as keep_alive. Both carry exactly one long.
 PLAY_KEEP_ALIVE_CLIENTBOUND = 0x2C
 PLAY_KEEP_ALIVE_SERVERBOUND = 0x1C
+
+# Serverbound movement, from the same registration order as the keep-alive above (the
+# serverbound builder has no bundle packet, so an id is its plain addPacket index).
+# A stationary player loads its chunks once and then generates no further work: no chunk
+# streaming, no entity tracking churn, no movement handling. Moving players are what make
+# a workload resemble a server with people on it.
+SERVERBOUND_MOVE_POS = 0x1E          # SERVERBOUND_MOVE_PLAYER_POS
+SERVERBOUND_MOVE_POS_ROT = 0x1F      # SERVERBOUND_MOVE_PLAYER_POS_ROT
 
 
 class _Reader:
@@ -109,15 +120,47 @@ class HeadlessClient(threading.Thread):
     deadline and the server times the client out.
     """
 
-    def __init__(self, host, port, name, view_distance=2):
+    def __init__(self, host, port, name, view_distance=2, move=True, origin=None):
         super().__init__(name=f"client-{name}", daemon=True)
         self._host, self._port, self._name = host, port, name
         self._view_distance = view_distance
+        self._move = move
+        self._origin = origin
+        self._random = random.Random(name)          # Deterministic per client, varied across them.
+        self.moves = 0
         self._halt = threading.Event()
         self.stage = "new"
         self.failure = None
         self.keep_alives = 0
+        self._next_move = float("inf")
+        self._x, self._y, self._z = 0.0, 80.0, 0.0
+        self._angle = self._random.uniform(0.0, math.tau)
+        self._flying = self._random.random() < 0.5
         self.reached_play = threading.Event()
+
+    def _step(self, connection, threshold):
+        """Walk or fly a short distance along a wandering heading.
+
+        Half the clients fly and half walk, and each turns by a small random amount every
+        step, so the swarm spreads out and keeps loading new chunks instead of orbiting one
+        point. The walk height is only approximate: this client does not track terrain, and
+        the server corrects a position it disagrees with rather than dropping the player.
+        """
+        self._angle += self._random.uniform(-0.6, 0.6)
+        speed = 3.2 if self._flying else 0.9      # Blocks per step; flying covers ground faster.
+        self._x += math.cos(self._angle) * speed
+        self._z += math.sin(self._angle) * speed
+        if self._flying:
+            self._y = max(70.0, min(140.0, self._y + self._random.uniform(-1.5, 1.5)))
+        yaw = math.degrees(self._angle) % 360.0 - 180.0
+        # PosRot: three doubles, two floats, then a packed flags byte whose low bit is
+        # onGround (ServerboundMovePlayerPacket#packFlags).
+        payload = (struct.pack(">ddd", self._x, self._y, self._z)
+                   + struct.pack(">ff", yaw, 0.0)
+                   + bytes([0x01 if not self._flying else 0x00]))
+        connection.sendall(_frame(SERVERBOUND_MOVE_POS_ROT, payload, threshold))
+        self.moves += 1
+        self._next_move = time.monotonic() + 0.25   # Four updates a second, like a real client.
 
     def stop(self):
         self._halt.set()
@@ -162,10 +205,13 @@ class HeadlessClient(threading.Thread):
                         elif packet_id == CONFIG_FINISH:
                             connection.sendall(_frame(SERVERBOUND_FINISH_CONFIG, b"", threshold))
                             self.stage = "play"
+                            self._next_move = time.monotonic() + 2.0
                             self.reached_play.set()
                         continue
                     # Play: answer only the keep-alive, by its own id. Everything else is
                     # read and discarded, which is all a load-generating client needs to do.
+                    if self._move and time.monotonic() >= self._next_move:
+                        self._step(connection, threshold)
                     if packet_id == PLAY_KEEP_ALIVE_CLIENTBOUND:
                         # The reply carries exactly the eight-byte id and nothing else; echoing
                         # the whole clientbound payload is rejected as "larger than I expected".
@@ -176,8 +222,8 @@ class HeadlessClient(threading.Thread):
 class ClientSwarm:
     """A group of headless clients, reported on as a whole."""
 
-    def __init__(self, host, port, count, prefix="Baseline", view_distance=2):
-        self._clients = [HeadlessClient(host, port, f"{prefix}{index:03d}", view_distance)
+    def __init__(self, host, port, count, prefix="Baseline", view_distance=2, move=True):
+        self._clients = [HeadlessClient(host, port, f"{prefix}{index:03d}", view_distance, move)
                          for index in range(count)]
 
     def start(self, timeout=60.0):
@@ -200,5 +246,7 @@ class ClientSwarm:
         failed = [c for c in self._clients if c.failure]
         return {"requested": len(self._clients), "in_play": len(playing), "failed": len(failed),
                 "keep_alives": sum(c.keep_alives for c in self._clients),
+                "moves": sum(c.moves for c in self._clients),
+                "flying": sum(1 for c in self._clients if c._flying),
                 "first_error": failed[0].failure if failed else None,
                 "stages": sorted({c.stage for c in self._clients})}
