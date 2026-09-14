@@ -16,6 +16,16 @@ public class TestPlugin extends JavaPlugin implements Listener {
     public void onEnable() {
         this.requireMetrics("SOURBY_METRICS_ONENABLE_OK");
         Bukkit.getPluginManager().registerEvents(this, this);
+        final StressCommands stress = new StressCommands(this);
+        for (final String name : new String[]{"massspawn", "flyspeed"}) {
+            final var command = this.getCommand(name);
+            if (command == null) {
+                throw new IllegalStateException("command " + name + " missing from paper-plugin.yml");
+            }
+            command.setExecutor(stress);
+            command.setTabCompleter(stress);
+        }
+        this.getLogger().info("SOURBY_STRESS_COMMANDS_OK");
     }
 
     private void requireMetrics(final String marker) {

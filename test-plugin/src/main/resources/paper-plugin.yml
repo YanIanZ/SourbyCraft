@@ -11,3 +11,10 @@ loader: dev.iyanz.sourbycraft.testplugin.TestLoader
 defaultPerm: FALSE
 permissions:
 dependencies:
+commands:
+  massspawn:
+    description: Spawn many entities at a position, batched across ticks.
+    usage: /massspawn <type> <x> <y> <z> <count>
+  flyspeed:
+    description: Set a player's fly speed for extreme-range testing.
+    usage: /flyspeed <0.0-1.0> [player]

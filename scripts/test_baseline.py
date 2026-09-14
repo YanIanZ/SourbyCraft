@@ -331,7 +331,7 @@ class NetworkCodecTest(unittest.TestCase):
 def record(name="players-50", commit="a" * 40, **overrides):
     base = {
         "schema": "sourbycraft.baseline/1",
-        "workload": {"name": name, "summary": "s", "level_type": "minecraft:flat",
+        "workload": {"name": name, "summary": "s", "level_type": "minecraft:normal",
                      "fidelity": [], "parameters": {}},
         "provenance": {"commit": commit, "worktree_dirty": False, "jar_sha256": "b" * 64, "java_version": "openjdk 25",
                        "platform": "macOS", "machine": "arm64", "cpu_count": 10, "heap_mib": 6144,
