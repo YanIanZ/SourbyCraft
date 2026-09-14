@@ -513,6 +513,27 @@ class CompetingServerTest(unittest.TestCase):
         self.assertEqual(found, [])
 
 
+class MidRunChurnTest(unittest.TestCase):
+    @staticmethod
+    def args(**overrides):
+        values = {"connected_players": 0, "duration": 600}
+        values.update(overrides)
+        return argparse.Namespace(**values)
+
+    def test_a_commit_landing_mid_run_is_not_certified(self):
+        moved = record()
+        moved["provenance"]["commit_moved_during_run"] = True
+        certified, reason = run_baseline.certify(workloads.build("idle"), moved, self.args())
+        self.assertFalse(certified)
+        self.assertIn("HEAD moved", reason)
+
+    def test_an_unchanged_repository_certifies(self):
+        steady = record()
+        steady["provenance"]["commit_moved_during_run"] = False
+        certified, _ = run_baseline.certify(workloads.build("idle"), steady, self.args())
+        self.assertTrue(certified)
+
+
 class SeedCacheTest(unittest.TestCase):
     def test_copies_a_cache_directory_into_the_new_run(self):
         with tempfile.TemporaryDirectory() as directory:
