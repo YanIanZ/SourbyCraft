@@ -1,3 +1,9 @@
+> Phase 46 follow-up (2026-09-14): patches 0009/0014 and the Mob portion of 0016 below are now
+> removed after the [reuse audit](reuse-audit.md); upstream per-call collections
+> are restored. Patch 0017 remains with updated context, and 0006 delegates
+> completion cleanup to AsyncPathCompletion. The inventory below records the
+> earlier build-45 review; consult the follow-up for current dispositions.
+
 # Patch inventory and ownership audit (PRD Phase 1)
 
 Every SourbyCraft patch on `release/26.2-canvas`, classified per PRD section 22 with

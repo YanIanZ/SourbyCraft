@@ -26,10 +26,10 @@ Priority:
 - [x] **P0** explicit runtime service shutdown work
 - [x] **P0** remove unsafe shared `ServerLevel` scratch collections
 - [x] **P0** fix effect-particle scratch publication semantics
-- [ ] **P0** audit remaining reusable mutable state / scratch buffers
-- [ ] **P0** audit all `ThreadLocal` usage relevant to Sourby performance patches
-- [ ] **P0** audit remaining object pools
-- [ ] **P0** validate entity-owned scratch reentrancy assumptions
+- [x] **P0** audit remaining reusable mutable state / scratch buffers — scoped Sourby audit; [findings and remaining unknowns](architecture/reuse-audit.md)
+- [x] **P0** audit all `ThreadLocal` usage relevant to Sourby performance patches — no Sourby-owned mutable storage found; upstream internals outside scope
+- [x] **P0** audit remaining object pools — no Sourby-owned object recycler found; solver-state ownership reviewed
+- [-] **P0** validate entity-owned scratch reentrancy assumptions — retained collection reuse removed; scalar-position reentrancy proof remains open
 - [ ] **P0** full restart persistence test after performance changes
 - [ ] **P0** multi-hour concurrency soak
 
@@ -223,7 +223,7 @@ Only measured hot spots should produce new performance patches.
 # L. SourbyClip / bootstrap
 
 - [ ] **P0** downloader timeout audit
-- [ ] **P0** retry/failure behavior audit
+- [-] **P0** retry/failure behavior audit — reproduced rejected Mojang hash with exit 0 before boot; SPEC B16 remains open
 - [ ] **P0** SHA/cache validation audit
 - [ ] **P1** concurrency/boundedness audit
 - [ ] **P1** thread/executor ownership audit
@@ -276,3 +276,18 @@ patch regeneration, 9867 Java tests (24 skipped, no failures/errors), slim JAR b
 and saved-world boot/JFR with unchanged utility configuration and clean shutdown.
 See [Spark reporting](SPARK.md) for scope. This does not close Spark web-viewer
 verification, representative workloads, restart inventory persistence, or soak gates.
+
+Claude completed the scoped reuse/ThreadLocal/pool audit through CLI session
+`988a8822-80be-44bc-9c26-9bbc2aa1467b`. Integration review corrected unsupported
+CME/extrema claims, removed unbenchmarked retained entity collections, and added
+explicit async completion retirement cleanup. The audit is not a concurrency soak
+or a complete async pathfinding snapshot/staleness review. See
+[reuse audit and follow-up](architecture/reuse-audit.md).
+
+Final integration Java verification: 9874 tests (24 skipped, no failures/errors),
+including retained-list removal guards, preserved Level query-overload descriptor,
+and four async completion cleanup tests. Python verification at baseline commit
+7ebd1eb: 65 tests passed. Subsequent in-progress baseline edits are separate work.
+Cold bootstrap on a new cache failed the Mojang download hash check and exited 0;
+that is tracked under SourbyClip (SPEC B16), not recorded as a successful boot.
+Runtime validation uses a cached Mojang JAR verified against META-INF/download-context.
