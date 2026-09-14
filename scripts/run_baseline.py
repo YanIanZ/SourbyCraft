@@ -43,6 +43,32 @@ COMMAND_FAILURES = ("Unknown or incomplete command", "Incorrect argument for com
                     "Unable to summon", "Cannot place feature")
 
 
+# A measurement sharing the machine is not a measurement. This is the share of the
+# machine that was busy with something other than the server under test.
+FOREIGN_CPU_LIMIT = 0.10
+
+
+def competing_servers(jar, own_pid):
+    """Other live processes running a server jar, so a run does not silently share the box.
+
+    Catches the common case directly — a second baseline, a profile_server.py run, a
+    leftover server from an aborted run — before a long measurement is wasted on it.
+    """
+    try:
+        listing = subprocess.run(["ps", "-eo", "pid=,command="],
+                                 capture_output=True, text=True, check=True).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []                                     # Not fatal; the CPU check still applies.
+    found = []
+    for line in listing.splitlines():
+        pid, _, command = line.strip().partition(" ")
+        if not pid.isdigit() or int(pid) in (own_pid, os.getpid()):
+            continue
+        if jar.name in command and "-jar" in command:
+            found.append(f"pid {pid}: {command.strip()[:110]}")
+    return found
+
+
 def sha256(path):
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -183,6 +209,13 @@ def prepare(directory, plan, port, heap_mib):
 def capture(jar, plan, output, args, tools):
     java, jcmd, jfr, java_version = tools
     output = output.resolve()
+    competitors = competing_servers(jar, -1)
+    if competitors and not args.allow_shared_machine:
+        raise RuntimeError(
+            "Another server is already running; a baseline needs the machine to itself:\n  "
+            + "\n  ".join(competitors)
+            + "\nStop it, or pass --allow-shared-machine to measure anyway (the run will "
+              "not be certified).")
     config = prepare(output, plan, args.port, args.heap_mib)
     command = [str(java), f"-Xms{args.heap_mib}M", f"-Xmx{args.heap_mib}M", f"-XX:+Use{args.gc}",
                "-Xlog:gc*:file=gc.log:time,uptime,level,tags", "-jar", str(jar), "--nogui"]
@@ -202,6 +235,7 @@ def capture(jar, plan, output, args, tools):
             "cpu_count": os.cpu_count(), "heap_mib": args.heap_mib,
             "warmup_seconds": args.warmup, "duration_seconds": args.duration,
             "connected_players_asserted": args.connected_players,
+            "competing_servers_at_start": competitors,
             "plugins": [], "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")},
         "status": "running"}
     record_path = output / "baseline.json"
@@ -311,6 +345,14 @@ def certify(plan, record, args):
         reasons.append("worktree is dirty, so the jar cannot be tied to a commit")
     if record["workload"].get("setup_command_errors"):
         reasons.append(f"setup commands rejected: {record['workload']['setup_command_errors']}")
+    foreign = record["metrics"]["cpu"].get("foreign_fraction") if record["metrics"]["cpu"]["available"] else None
+    if foreign and foreign.get("available") and foreign["mean"] > FOREIGN_CPU_LIMIT:
+        reasons.append(
+            f"the machine averaged {foreign['mean']:.1%} CPU on work other than this server "
+            f"(peak {foreign['max']:.1%}, limit {FOREIGN_CPU_LIMIT:.0%}); the measurement "
+            "was sharing the box")
+    if record["provenance"].get("competing_servers_at_start"):
+        reasons.append("another server was already running when this run started")
     if args.duration < 300:
         reasons.append(f"measurement window {args.duration}s is below the 300s minimum for a "
                        "stable percentile estimate")
@@ -334,6 +376,9 @@ def main():
     parser.add_argument("--connected-players", type=int, default=0,
                         help="Assert how many real clients the operator attached before the run")
     parser.add_argument("--allow-command-errors", action="store_true")
+    parser.add_argument("--allow-shared-machine", action="store_true",
+                        help="Start even though another server is running. The run will not "
+                             "be certified; use it for a quick check, never for a reference.")
     args = parser.parse_args()
     if args.duration < 1 or args.warmup < 0:
         parser.error("duration must be positive and warmup cannot be negative")
