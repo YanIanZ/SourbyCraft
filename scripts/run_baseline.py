@@ -69,6 +69,13 @@ def competing_servers(jar, own_pid):
     return found
 
 
+def git_state():
+    """The commit under measurement and whether the tree matches it."""
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"]))
+    return commit, dirty
+
+
 def sha256(path):
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -225,6 +232,12 @@ def prepare(directory, plan, port, heap_mib):
 def capture(jar, plan, output, args, tools):
     java, jcmd, jfr, java_version = tools
     output = output.resolve()
+    commit, dirty = git_state()
+    if dirty and not args.allow_dirty:
+        raise RuntimeError(
+            "The worktree has uncommitted changes, so this run could not be tied to a commit "
+            "and would not be certified. Commit or stash first, or pass --allow-dirty to "
+            "measure anyway.")
     competitors = competing_servers(jar, -1)
     if competitors and not args.allow_shared_machine:
         raise RuntimeError(
@@ -243,8 +256,8 @@ def capture(jar, plan, output, args, tools):
                      "setup_command_count": len(plan.setup),
                      "requires_connected_players": plan.requires_connected_players},
         "provenance": {
-            "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-            "worktree_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"])),
+            "commit": commit,
+            "worktree_dirty": dirty,
             "jar": str(jar), "jar_sha256": sha256(jar),
             "java_version": java_version, "jvm_args": command[1:-3],
             "jfr_settings": args.jfr_settings,
@@ -320,6 +333,11 @@ def capture(jar, plan, output, args, tools):
             raise RuntimeError(f"Unclean exit: {server.process.returncode}")
         record["provenance"]["shutdown_seconds"] = time.monotonic() - shutdown
 
+        after_commit, after_dirty = git_state()
+        record["provenance"]["worktree_dirty"] = dirty or after_dirty
+        record["provenance"]["commit_moved_during_run"] = after_commit != commit
+        if after_commit != commit:
+            record["provenance"]["commit_at_end"] = after_commit
         record["metrics"] = baseline_metrics.collect(jfr, output / "profile.jfr",
                                                      args.duration, sampler.samples_kib)
         with (output / "jfr-summary.txt").open("w") as summary:
@@ -369,6 +387,9 @@ def certify(plan, record, args):
             f"the machine averaged {foreign['mean']:.1%} CPU on work other than this server "
             f"(peak {foreign['max']:.1%}, limit {FOREIGN_CPU_LIMIT:.0%}); the measurement "
             "was sharing the box")
+    if record["provenance"].get("commit_moved_during_run"):
+        reasons.append("HEAD moved while the measurement was running, so the jar and the "
+                       "repository no longer describe the same thing")
     if record["provenance"].get("competing_servers_at_start"):
         reasons.append("another server was already running when this run started")
     if args.duration < 300:
@@ -397,6 +418,8 @@ def main():
     parser.add_argument("--cache-from", type=Path,
                         help="Copy this run directory's bootstrap cache (or a cache/ directory) "
                              "into the new run, so it does not re-download on first boot.")
+    parser.add_argument("--allow-dirty", action="store_true",
+                        help="Start with uncommitted changes. The run will not be certified.")
     parser.add_argument("--allow-shared-machine", action="store_true",
                         help="Start even though another server is running. The run will not "
                              "be certified; use it for a quick check, never for a reference.")
