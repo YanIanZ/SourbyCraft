@@ -92,6 +92,40 @@ This is the long-term target, not a requirement to rewrite every subsystem immed
 
 Update this table whenever a hard dependency is added, removed, or replaced.
 
+## 2.1 Measured Canvas coupling
+
+The table above is qualitative. This is the counted version, produced by
+`scripts/independence_policy.py` and pinned by `test_independence_policy.py`.
+
+| Surface | Count | What it is |
+| --- | ---: | --- |
+| `io.canvasmc` reached from SourbyCraft-owned code | **2** | `GlobalConfiguration.reload()` and `WorldConfig.reload()`, both in `SourbyCraftConfig` |
+| `io.canvasmc` calls added by `minecraft-patches` | **0** | The integration patches add no live call into Canvas |
+| `io.canvasmc` files modified by `canvas-patches` | 5 | Excluded from the measure: these exist only to modify Canvas and would be deleted with it |
+
+**SourbyCraft's own code barely touches Canvas.** The entire live coupling is two static
+config-reload calls. That is a materially better position than the ledger above suggests
+on its own, and it means replacing Canvas would not require rewriting SourbyCraft code.
+
+What SourbyCraft *is* coupled to is the region-threading contract, which Canvas inherits
+from the Folia lineage rather than originating:
+
+| Namespace | Sites | Used for |
+| --- | ---: | --- |
+| `io.papermc.paper.threadedregions` | 4 | `RegionizedServer` and `TickRegionScheduler` in `PerformanceCollector`, `ScheduledTask` in `HudBars`, `EntityScheduler` in `AsyncPathCompletion` |
+| `ca.spottedleaf.common.time` | 2 | `TickData` and `TickTime` in `RegionTickMetrics` and its holder |
+
+So the real independence question is not "how do we stop depending on Canvas" — that
+dependency is already two calls wide — but "what region-threading contract do we depend
+on, and is it stable across engines". That is section 7's minimal scheduler contract, and
+it is where the effort belongs.
+
+Both counts are pinned. New Canvas coupling fails `test_independence_policy.py` until it
+is added to the approved set with a reason, and a patch adding a live Canvas call fails
+outright. Comments naming a Canvas type are excluded from both — a Javadoc line
+explaining which engine class a bridge talks to is not coupling, and the one apparent
+patch-side call turned out to be a comment recording a call that had been removed.
+
 ---
 
 # 3. Runtime Independence Rules
