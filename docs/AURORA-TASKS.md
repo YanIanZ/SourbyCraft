@@ -17,25 +17,25 @@ Status:
 - [x] document Sourby-first runtime ownership model
 - [x] document direct Minecraft/NMS optimization policy
 - [x] document no-auto-tuning rule under Aurora
-- [ ] define `AuroraConfig` typed root model
-- [ ] define config lifecycle and reload status model
+- [x] define `AuroraConfig` typed root model
+- [x] define config lifecycle and reload status model
 - [ ] expose Aurora architecture/build metadata in `/version` where appropriate
 
 ## B. Aurora configuration ownership
 
 - [ ] add `[aurora.performance]` logical namespace
 - [ ] add `[aurora.scheduler]` logical namespace
-- [ ] add `[aurora.entity]` logical namespace
+- [x] add `[aurora.entity]` logical namespace
 - [ ] add `[aurora.chunk]` logical namespace
 - [ ] add `[aurora.network]` logical namespace
 - [ ] add `[aurora.memory]` logical namespace
 - [ ] add `[aurora.diagnostics]` logical namespace
-- [ ] migrate `perf.ai.async-pathfinding` to `aurora.entity.async-pathfinding` with legacy read fallback
-- [ ] never auto-save migrated keys
-- [ ] mark each config key LIVE / RESTART_REQUIRED / IMMUTABLE_FOR_RUN
-- [ ] report restart-required changes accurately on reload
-- [ ] add typed immutable config records/classes
-- [ ] remove hot-path dotted-string config lookup where present
+- [x] migrate `perf.ai.async-pathfinding` to `aurora.entity.async-pathfinding` with legacy read fallback
+- [x] never auto-save migrated keys
+- [-] mark each config key LIVE / RESTART_REQUIRED / IMMUTABLE_FOR_RUN — implemented async key is LIVE; future keys require their own policy
+- [-] report restart-required changes accurately on reload — Aurora-only live/invalid summary implemented; no Aurora restart-required keys exist yet
+- [x] add typed immutable config records/classes
+- [-] remove hot-path dotted-string config lookup where present — async path setting now resolves once into typed snapshot
 - [-] ensure Spark shows SourbyCraft config
 - [ ] verify Aurora config rendering in Spark web report
 - [x] preserve secret filtering requirements
@@ -201,3 +201,9 @@ No task in this group is considered complete without before/after evidence.
 9. independence isolation
 10. soak + release qualification
 ```
+
+## Aurora-1 implementation notes
+
+See [AURORA-CONFIG.md](AURORA-CONFIG.md) for precedence, validation, lifecycle, admitted-work
+draining, and Spark report limitations. Empty namespaces and unimplemented feature switches
+remain intentionally absent. Existing baseline, async safety, and release gates remain open.
