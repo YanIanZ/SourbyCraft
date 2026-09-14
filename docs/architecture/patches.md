@@ -170,10 +170,13 @@ be reverted without 0019 breaking, and 0019 alone said nothing. 0007 guarded the
 different file but as one feature. 0007's explanation was carried into 0006's message
 rather than deleted with the file.
 
-The feature patch set is now `0001-0006, 0008, 0010-0012, 0016-0018` — thirteen
-patches. The numbering gaps are deliberate: filenames are the apply order, so
-renumbering rewrites every file, and that churn is worth taking once at a patch-freeze
-boundary rather than piecemeal.
+The feature patch set is now thirteen patches, renumbered `0001-0013` with no gaps.
+
+The gaps this originally left were not sustainable. `rebuildMinecraftFeaturePatches`
+renumbers the whole set every time it runs — it regenerates the filenames from the
+commit order in `sourbycraft-server/src/minecraft/java`, which is a real git repository
+with one commit per patch. Deciding to keep gaps "until a patch-freeze boundary" only
+held until the next regeneration, which is a routine operation rather than a rare one.
 
 ### 4. Add a regression test for 0017 — DONE
 

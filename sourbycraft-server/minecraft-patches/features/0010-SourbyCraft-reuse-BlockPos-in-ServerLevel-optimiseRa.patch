@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SourbyCraft <agent@local>
+Date: Sun, 30 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SourbyCraft - reuse BlockPos in
+ ServerLevel#optimiseRandomTick
+
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index a54d6f329fe221f5264a9e4f57eba1313f5fe5d6..6b9c42f283bb9f0144c70c6321edbbb754d30240 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -1061,6 +1061,28 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+ 
+         final net.minecraft.util.RandomSource random = worldData.getCanvasWorldData().simpleUnsafeLocalRandom;
+ 
++        // SourbyCraft start - one scratch BlockPos per call, reused across every section and
++        // every random tick in this chunk, in place of an immutable BlockPos per tick.
++        //
++        // It was previously declared inside the per-section loop, so a chunk allocated one per
++        // randomly-ticking section per tick rather than one per call. A JFR profile of
++        // players-50 (50 regions, 1250 forceloaded chunks) put optimiseRandomTick second only to
++        // PalettedContainer.reencodeContents among allocation sites, and it is the largest single
++        // CPU consumer in that profile at 31.9% of self samples.
++        //
++        // Method-local, so it is confined to the calling region thread by construction. This is
++        // deliberately NOT a field: ServerLevel is shared by every region thread ticking that
++        // level, and two earlier patches that put scratch there were removed for exactly that
++        // reason (see docs/architecture/threading.md).
++        //
++        // Safety of the reuse itself is unchanged and was audited when it was introduced: every
++        // consumer either reads the coordinates directly or chains pos.offset/above/relative,
++        // which return .immutable() on a MutableBlockPos, so none retains the mutable. The two
++        // capture points that would matter, CraftBlock and ScheduledTick, both call .immutable()
++        // themselves (verified in docs/architecture/reuse-audit.md).
++        final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
++        // SourbyCraft end
++
+         for (int sectionIndex = 0, sectionsLen = sections.length; sectionIndex < sectionsLen; sectionIndex++) {
+             final LevelChunkSection section = sections[sectionIndex];
+             if (!section.isRandomlyTickingBlocks()) {
+@@ -1091,11 +1113,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                 final int location = (int)tickList.getRaw(index) & 0xFFFF;
+                 final BlockState state = states.get(location);
+ 
+-                final BlockPos pos = new BlockPos(
++                // SourbyCraft start - set the mutable BlockPos in place instead of allocating.
++                pos.set(
+                     (location & 15) | offsetX,
+                     ((location >>> 8) & 15) | offsetY,
+                     ((location >>> 4) & 15) | offsetZ
+                 );
++                // SourbyCraft end
+ 
+                 state.randomTick(this, pos, random);
+                 if (doubleTickFluids) {
