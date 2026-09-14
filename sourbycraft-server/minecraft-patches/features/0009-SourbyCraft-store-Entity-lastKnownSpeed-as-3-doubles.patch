@@ -6,7 +6,7 @@ Subject: [PATCH] SourbyCraft - store Entity#lastKnownSpeed as 3 doubles
 
 
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 5ff72c2a6a50039641ef90fd0c6f2f1c2a771231..05139e18ccdca70ec1223e4f818254709bb5cb25 100644
+index 5cd3b13da55d39845a12398ffb75a1dd1d055322..a3bbae76a4b3be08c444c9c1aba24cd7ede596ca 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -398,8 +398,17 @@ public abstract class Entity
@@ -28,7 +28,7 @@ index 5ff72c2a6a50039641ef90fd0c6f2f1c2a771231..05139e18ccdca70ec1223e4f81825470
      public net.kyori.adventure.util.TriState visualFire = net.kyori.adventure.util.TriState.NOT_SET; // Paper - improve visual fire API
      private @Nullable BlockState inBlockState = null;
      public static final int MAX_MOVEMENTS_HANDELED_PER_TICK = 100;
-@@ -1019,12 +1028,19 @@ public abstract class Entity
+@@ -1011,12 +1020,19 @@ public abstract class Entity
      }
  
      protected void computeSpeed() {
@@ -51,7 +51,7 @@ index 5ff72c2a6a50039641ef90fd0c6f2f1c2a771231..05139e18ccdca70ec1223e4f81825470
      }
  
      public void setSharedFlagOnFire(final boolean value) {
-@@ -1500,7 +1516,11 @@ public abstract class Entity
+@@ -1492,7 +1508,11 @@ public abstract class Entity
      }
  
      public boolean hasMovedHorizontallyRecently() {
@@ -64,7 +64,7 @@ index 5ff72c2a6a50039641ef90fd0c6f2f1c2a771231..05139e18ccdca70ec1223e4f81825470
      }
  
      public void applyEffectsFromBlocks(final Vec3 from, final Vec3 to) {
-@@ -6748,7 +6768,14 @@ public abstract class Entity
+@@ -6733,7 +6753,14 @@ public abstract class Entity
      }
  
      public Vec3 getKnownSpeed() {
