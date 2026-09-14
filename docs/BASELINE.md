@@ -263,3 +263,45 @@ any provenance drift, and the gate verdict.
 
 Also answer the section 84 questions in prose: what was slow, how it was measured, why
 it was slow, what changed, what improved, and what the risks are.
+
+## Soaks
+
+A soak asks one question a five-minute window cannot: does anything grow and not come
+back. `run_baseline.py` answers it with `metrics.drift`, which compares the first
+quarter of the window against the last for resident memory, heap after GC, and tick
+duration.
+
+Budget for the shutdown. Regions are saved one at a time on a single
+`RegionShutdownThread`, so a run holding forty-six regions needs roughly seven minutes
+to stop. A shutdown that stalls no longer throws away the run: `profile.jfr` is flushed
+before the stop command, so the metrics are still collected and `certify()` refuses the
+run as a comparison reference instead.
+
+### First soak — 50 players, two hours, 6 GiB (NOT CERTIFIED)
+
+Three failures with one cause.
+
+| | first quarter | last quarter |
+|---|---|---|
+| tick | 4.0 ms | 2519 ms (peak 14.1 s) |
+| heap after GC | 6.12 GiB | 6.42 GiB |
+
+The live set after each Full GC is the clearer trace: 3.48 GiB at 3.7 min, ~6.0 GiB by
+16 min, then flat between 5.65 and 6.13 GiB for the remaining 110 minutes — pinned
+against a 6.0 GiB ceiling. The server spent **40.7 of the 120 minutes in GC pause**
+across 2,205 Full GCs, and the last compactions recovered 142 MB of 6144 MB in 3.4 s.
+That is heap exhaustion, and everything else follows from it: 33 of 50 clients timed
+out (all 50 were still connected at the 44-minute check), 862 of 1312 telemetry
+snapshots went `STALE` because regions were not ticking often enough to publish, and
+shutdown could not finish its serial region walk.
+
+It does **not** yet show a leak. Five-minute 50-player runs already sit at 5.33 GiB p50
+with 50 regions, so 6 GiB left ~13% headroom before the soak started, on a 16 GB
+8-core machine that also hosted the client swarm at 89% machine CPU. Once a heap is
+full, a leak and an undersized heap are indistinguishable, because growth is clamped by
+the ceiling.
+
+The discriminator is the same 6 GiB ceiling at a load the machine can sustain: ten
+players for two hours, whose five-minute steady state is ~3.0 GiB. A live set still
+near 3 GiB after two hours means residency tracks the players and there is no leak; a
+live set that climbs to the ceiling anyway means there is one.
