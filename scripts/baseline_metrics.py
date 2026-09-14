@@ -5,6 +5,7 @@ Every metric carries its own source so a reader can tell a measured value from a
 derived estimate, and an unsupported metric is reported as unavailable rather than
 defaulted to zero. See docs/BASELINE.md.
 """
+from datetime import datetime
 import json
 import re
 import subprocess
@@ -96,6 +97,55 @@ def allocation_metrics(heap_summaries, window_seconds):
             "heap_used_after_gc": distribution([after[key] for key in identifiers])}
 
 
+def instant_seconds(text):
+    """Parse a JFR event timestamp into epoch seconds.
+
+    JFR prints nanosecond precision, which datetime cannot parse, so the fractional
+    part is truncated to microseconds.
+    """
+    match = re.match(r"^(.*\.\d{1,6})\d*([+-]\d{2}:\d{2}|Z)$", text)
+    if match is None:
+        raise ValueError(f"Not a JFR instant: {text!r}")
+    stamp, zone = match.groups()
+    return datetime.fromisoformat(stamp + ("+00:00" if zone == "Z" else zone)).timestamp()
+
+
+def thread_allocation_metrics(statistics, top=8):
+    """Allocation rate from cumulative per-thread counters, independent of GC.
+
+    ``jdk.ThreadAllocationStatistics`` carries each thread's total allocated bytes and
+    no stack trace, so it is cheap to read and — unlike a heap-occupancy estimate — it
+    still reports a rate on a server that never collects. It undercounts: a thread that
+    starts and exits between two samples is never observed, and only the span actually
+    covered by samples is measured.
+    """
+    if not statistics:
+        return dict(UNAVAILABLE, reason="no jdk.ThreadAllocationStatistics events in recording")
+    series = {}
+    for event in statistics:
+        thread = event["thread"]
+        key = thread.get("javaThreadId") or thread.get("osThreadId")
+        name = thread.get("javaName") or thread.get("osName") or "unknown"
+        moment = instant_seconds(event["startTime"])
+        first, last = series.get(key, (None, None))
+        point = (moment, event["allocated"], name)
+        series[key] = (point if first is None or moment < first[0] else first,
+                       point if last is None or moment > last[0] else last)
+    observed = [(last[2], max(0, last[1] - first[1])) for first, last in series.values()]
+    span = (max(last[0] for _, last in series.values())
+            - min(first[0] for first, _ in series.values()))
+    if span <= 0:
+        return dict(UNAVAILABLE, reason="all thread allocation samples share one timestamp")
+    allocated = sum(bytes_ for _, bytes_ in observed)
+    ranked = sorted(observed, key=lambda entry: -entry[1])[:top]
+    return {"available": True, "source": "jdk.ThreadAllocationStatistics",
+            "threads_observed": len(series), "observed_seconds": span,
+            "allocated_bytes": allocated, "bytes_per_second": allocated / span,
+            "undercounts_short_lived_threads": True,
+            "top_threads": [{"thread": name, "allocated_bytes": bytes_,
+                             "bytes_per_second": bytes_ / span} for name, bytes_ in ranked]}
+
+
 def cpu_metrics(loads):
     """Process and machine CPU load as fractions of total machine capacity."""
     if not loads:
@@ -161,6 +211,12 @@ def collect(jfr_tool, recording, window_seconds, rss_samples_kib):
         "cpu": cpu_metrics(read_events(jfr_tool, recording, "jdk.CPULoad")),
         "gc": gc_metrics(read_events(jfr_tool, recording, "jdk.GCPhasePause"),
                          read_events(jfr_tool, recording, "jdk.GarbageCollection")),
-        "allocation": allocation_metrics(read_events(jfr_tool, recording, "jdk.GCHeapSummary"), window_seconds),
+        "allocation": thread_allocation_metrics(
+            read_events(jfr_tool, recording, "jdk.ThreadAllocationStatistics")),
+        # Heap-occupancy estimate, kept as an independent cross-check. It is unavailable
+        # whenever the run did not collect at least twice — which an idle server at a large
+        # heap does not, even over ten minutes.
+        "allocation_from_gc": allocation_metrics(
+            read_events(jfr_tool, recording, "jdk.GCHeapSummary"), window_seconds),
         "rss": rss_metrics(rss_samples_kib),
     }

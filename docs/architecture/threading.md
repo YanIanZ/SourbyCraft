@@ -34,6 +34,17 @@ the stored value, so publishing a scratch makes every later comparison a self-co
 
 ## Findings
 
+> **Superseded in part (2026-09-14).** This review covered *confinement* (which thread may
+> touch the buffer) and *escape* (whether a callee stores it). It did not cover *lifetime* —
+> whether a buffer retains its last contents after the call. A later audit,
+> [reuse-audit.md](reuse-audit.md), found exactly that defect in three of the buffers marked
+> "Safe" or "Fixed" below: each clears on *entry* to its next use, so it pins the previous
+> query's objects indefinitely whenever that next use does not come. Patches 0009 and 0014
+> and the `Mob` half of 0016 were consequently **removed**, restoring upstream's per-call
+> collections, since no benchmark ever justified the reuse. The verdicts below are correct
+> for the question this review asked and incomplete for the question the later audit asked.
+
+
 | Patch | Buffer lives on | Escapes? | Verdict |
 | --- | --- | --- | --- |
 | 0009 collision scratch lists | `Entity` instance | No — `collide` returns a `Vec3` | **Safe** |
@@ -49,11 +60,20 @@ Both put the buffer on `ServerLevel`. Both patch comments justified it with *"ca
 per region per tick"*, which is the reason it is wrong rather than the reason it is right:
 once per region, on as many threads as there are regions, against one shared field.
 
-`ReferenceOpenHashSet` and `ArrayList` are not thread-safe. One thread clearing while
-another iterates gives a `ConcurrentModificationException` or a silently short iteration;
-concurrent `add` during a rehash can lose entries outright. For 0015 that means block
-events — redstone, pistons, note blocks — being dropped, or one region's events handed to
-`pushBlockEvents` for another region.
+`ReferenceOpenHashSet` and `ArrayList` are not thread-safe, and the accesses were
+unsynchronised, so the Java memory model promises nothing about the result. An earlier
+revision of this document asserted a specific outcome — a `ConcurrentModificationException`,
+or entries lost during a rehash. **That claim was not supported and is withdrawn.**
+Fail-fast detection is documented as best-effort and cannot be relied on, `ArrayList`
+iteration may be indexed rather than iterator-based, and no particular failure was
+reproduced here.
+
+What can be said without measuring: two region threads could interleave `clear`, `add`
+and iteration on one shared collection with no happens-before between them, so for 0015 a
+block event could be missed, double-processed, or pushed to the wrong region's queue, and
+for 0013 a world border could be skipped. Which of those occurs, and how often, was not
+determined. The patches were removed because the access pattern is unsound and unjustified,
+not because a specific failure was demonstrated.
 
 They were removed rather than moved into `RegionizedWorldData`. Each saved exactly one
 allocation per region per tick, roughly 20 per second per region, which is not
