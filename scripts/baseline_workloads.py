@@ -19,6 +19,8 @@ import math
 # chunk generation cost, block variety and therefore random-tick load, lighting, heightmaps
 # and collision shapes. "positioned over world_surface" resolves the height per column.
 SURFACE = "positioned over world_surface"
+# Recognised by run_baseline.Server.apply as "pause here", never sent to the server.
+SETTLE_TOKEN = "@settle"
 
 # Keeping sites in separate regions, derived from ThreadedRegionizer rather than guessed.
 #
@@ -91,6 +93,20 @@ def _forceload(centre_x, centre_z, radius):
     return f"forceload add {low_x} {low_z} {high_x} {high_z}"
 
 
+def await_chunks(chunks):
+    """Wait for forceloaded terrain to exist before anything is placed on it.
+
+    ``forceload add`` returns as soon as the chunks are marked; generating them happens
+    afterwards on the chunk workers. A ``summon`` issued in between is rejected with
+    "That position is not loaded" and the entity is silently never created, so the
+    workload measures bare terrain while claiming an entity population. Scale the wait
+    with the amount of terrain, and cap it so a large workload cannot stall forever --
+    if the wait is still short, the summons fail loudly rather than silently, because
+    the marker is in run_baseline.COMMAND_FAILURES.
+    """
+    return f"{SETTLE_TOKEN} {max(30, min(300, chunks // 4))}"
+
+
 def _at_surface(x, z, command):
     """Run a command at the generated surface height of one column."""
     return f"execute positioned {x} 0 {z} {SURFACE} run {command}"
@@ -131,10 +147,11 @@ def players(count, radius=2, spacing=SITE_SPACING_CHUNKS):
     setup = list(DETERMINISM)
     for centre_x, centre_z in sites:
         setup.append(_forceload(centre_x, centre_z, radius))
-    for centre_x, centre_z in sites:
-        setup.extend(_populate(centre_x, centre_z, SITE_MIX, SITE_ITEMS))
     per_site = sum(count for _, count in SITE_MIX) + SITE_ITEMS
     chunks = count * (2 * radius + 1) ** 2
+    setup.append(await_chunks(chunks))
+    for centre_x, centre_z in sites:
+        setup.extend(_populate(centre_x, centre_z, SITE_MIX, SITE_ITEMS))
     return Plan(
         name=f"players-{count}", level_type="minecraft:normal",
         minimum_heap_mib=max(2048, 1024 + chunks // 2),
@@ -160,7 +177,8 @@ def players(count, radius=2, spacing=SITE_SPACING_CHUNKS):
 
 def entity_stress(mobs=3000, items=3000, radius=4):
     """A dense entity population in one region: tick, collision, merge and despawn load."""
-    setup = list(DETERMINISM) + [_forceload(0, 0, radius)]
+    setup = list(DETERMINISM) + [_forceload(0, 0, radius),
+                                 await_chunks((2 * radius + 1) ** 2)]
     span = radius * 16
     for index in range(mobs):
         entity = ("minecraft:zombie", "minecraft:skeleton", "minecraft:cow")[index % 3]
