@@ -188,6 +188,22 @@ class Server:
         self._log.close()
 
 
+def seed_cache(directory, source):
+    """Copy a previously downloaded bootstrap cache into a fresh run directory.
+
+    A baseline should not depend on a 60 MB download succeeding. Seeding makes the run
+    offline, deterministic and faster, and removes a failure mode that has already
+    truncated two runs on this machine.
+    """
+    source = source.resolve(strict=True)
+    if source.name != "cache":
+        source = source / "cache"
+    if not source.is_dir():
+        raise RuntimeError(f"No cache directory at {source}")
+    shutil.copytree(source, directory / "cache")
+    return sorted(item.name for item in (directory / "cache").iterdir())
+
+
 def prepare(directory, plan, port, heap_mib):
     directory.mkdir(parents=True, exist_ok=False)
     (directory / "eula.txt").write_text("eula=true\n")
@@ -217,6 +233,7 @@ def capture(jar, plan, output, args, tools):
             + "\nStop it, or pass --allow-shared-machine to measure anyway (the run will "
               "not be certified).")
     config = prepare(output, plan, args.port, args.heap_mib)
+    seeded = seed_cache(output, args.cache_from) if args.cache_from else []
     command = [str(java), f"-Xms{args.heap_mib}M", f"-Xmx{args.heap_mib}M", f"-XX:+Use{args.gc}",
                "-Xlog:gc*:file=gc.log:time,uptime,level,tags", "-jar", str(jar), "--nogui"]
     record = {
@@ -236,6 +253,7 @@ def capture(jar, plan, output, args, tools):
             "warmup_seconds": args.warmup, "duration_seconds": args.duration,
             "connected_players_asserted": args.connected_players,
             "competing_servers_at_start": competitors,
+            "seeded_cache_files": seeded,
             "plugins": [], "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")},
         "status": "running"}
     record_path = output / "baseline.json"
@@ -376,6 +394,9 @@ def main():
     parser.add_argument("--connected-players", type=int, default=0,
                         help="Assert how many real clients the operator attached before the run")
     parser.add_argument("--allow-command-errors", action="store_true")
+    parser.add_argument("--cache-from", type=Path,
+                        help="Copy this run directory's bootstrap cache (or a cache/ directory) "
+                             "into the new run, so it does not re-download on first boot.")
     parser.add_argument("--allow-shared-machine", action="store_true",
                         help="Start even though another server is running. The run will not "
                              "be certified; use it for a quick check, never for a reference.")

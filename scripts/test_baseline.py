@@ -513,6 +513,38 @@ class CompetingServerTest(unittest.TestCase):
         self.assertEqual(found, [])
 
 
+class SeedCacheTest(unittest.TestCase):
+    def test_copies_a_cache_directory_into_the_new_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            donor = root / "donor" / "cache"
+            donor.mkdir(parents=True)
+            (donor / "mojang_26.2.jar").write_bytes(b"payload")
+            target = root / "run"
+            target.mkdir()
+            seeded = run_baseline.seed_cache(target, root / "donor")
+            self.assertEqual(seeded, ["mojang_26.2.jar"])
+            self.assertEqual((target / "cache" / "mojang_26.2.jar").read_bytes(), b"payload")
+
+    def test_accepts_the_cache_directory_itself(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            donor = root / "donor" / "cache"
+            donor.mkdir(parents=True)
+            (donor / "a.jar").write_bytes(b"x")
+            target = root / "run"
+            target.mkdir()
+            self.assertEqual(run_baseline.seed_cache(target, donor), ["a.jar"])
+
+    def test_rejects_a_source_with_no_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "empty").mkdir()
+            (root / "run").mkdir()
+            with self.assertRaises(RuntimeError):
+                run_baseline.seed_cache(root / "run", root / "empty")
+
+
 class HeapGuardTest(unittest.TestCase):
     def test_refuses_to_run_a_workload_under_its_minimum_heap(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -14,6 +14,8 @@ import static java.nio.file.StandardOpenOption.*;
 
 public record DownloadContext(byte[] hash, URL url, String fileName) {
 
+    private static final long TRANSFER_CHUNK_BYTES = 8L << 20;
+
     public Path getOutputFile(final Path outputDir) {
         final Path cacheDir = outputDir.resolve("cache");
         return cacheDir.resolve(this.fileName);
@@ -53,7 +55,15 @@ public record DownloadContext(byte[] hash, URL url, String fileName) {
                 final ReadableByteChannel source = Channels.newChannel(this.url.openStream());
                 final FileChannel fileChannel = FileChannel.open(outputFile, CREATE, WRITE, TRUNCATE_EXISTING)
         ) {
-            fileChannel.transferFrom(source, 0, Long.MAX_VALUE);
+            // transferFrom moves *at most* count bytes and returns how many it actually moved;
+            // it is not required to drain the source in one call, and a single unchecked call
+            // silently writes a truncated file. Loop until the source reports end of stream.
+            // Channels.newChannel gives a blocking channel, so a zero-byte transfer means EOF.
+            long position = 0L;
+            long transferred;
+            while ((transferred = fileChannel.transferFrom(source, position, TRANSFER_CHUNK_BYTES)) > 0L) {
+                position += transferred;
+            }
         } catch (final IOException e) {
             Sourbyclip.logger.error(e, "Failed to download {}", this.fileName);
             e.printStackTrace();
