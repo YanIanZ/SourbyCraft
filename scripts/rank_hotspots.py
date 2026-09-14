@@ -126,8 +126,30 @@ def allocation_hotspots(samples, limit, measured_bytes=None):
     return result
 
 
-def render(recording, cpu, allocation, workload):
+def tick_budget_note(tick, target_tps):
+    """How much of the tick budget the profiled run actually used.
+
+    A CPU ranking describes where time went, not whether any of it was a problem. A run
+    using a few percent of its tick budget has no bottleneck to find: the top entry is
+    simply the largest slice of nearly nothing, and any improvement to it would sit below
+    run-to-run noise.
+    """
+    if not tick or not tick.get("available"):
+        return None
+    budget_ms = 1000.0 / (target_tps or 20.0)
+    used = tick["mspt"]["mean"] / budget_ms
+    return {"mspt_mean": tick["mspt"]["mean"], "budget_ms": budget_ms, "fraction_used": used}
+
+
+def render(recording, cpu, allocation, workload, budget=None):
     lines = [f"# Hot spots — {recording.name}", ""]
+    if budget is not None and budget["fraction_used"] < 0.20:
+        lines += [f"> **This run used {budget['fraction_used']:.1%} of its tick budget** "
+                  f"({budget['mspt_mean']:.2f} ms of {budget['budget_ms']:.0f} ms). There is no "
+                  "bottleneck here to find. The entries below show where the little time that "
+                  "was spent went, not what is slow; the top one is the largest slice of nearly "
+                  "nothing, and improving it would land below run-to-run noise. Load the server "
+                  "before using this to justify an optimization.", ""]
     if workload:
         lines += [f"Workload: **{workload.get('name')}** — {workload.get('summary')}", ""]
         for note in workload.get("fidelity") or []:
@@ -220,7 +242,12 @@ def main():
         read(jfr, recording, "jdk.ObjectAllocationSample", args.stack_depth), args.limit,
         measured_bytes)
 
-    report = render(recording, cpu, allocation, workload)
+    budget = None
+    if record.is_file():
+        captured = json.loads(record.read_text())
+        budget = tick_budget_note(captured.get("metrics", {}).get("tick"),
+                                  captured.get("metrics", {}).get("tick", {}).get("target_tps"))
+    report = render(recording, cpu, allocation, workload, budget)
     print(report)
     if args.output:
         args.output.write_text(report)

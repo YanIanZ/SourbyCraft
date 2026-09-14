@@ -3,6 +3,8 @@ package dev.iyanz.sourbycraft;
 import com.electronwill.nightconfig.core.file.CommentedFileConfig;
 import com.electronwill.nightconfig.core.file.FileNotFoundAction;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
+import dev.iyanz.sourbycraft.config.AuroraConfig;
+import dev.iyanz.sourbycraft.config.ConfigSnapshot;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,8 +36,30 @@ public final class SourbyCraftConfig {
 
     private static volatile CommentedFileConfig FILE;
     private static boolean newFile;
-    private static volatile dev.iyanz.sourbycraft.config.ConfigSnapshot snapshot =
-        new dev.iyanz.sourbycraft.config.ConfigSnapshot(java.util.Map.of());
+    private record LoadedConfig(ConfigSnapshot utility, AuroraConfig aurora) {}
+    private static volatile LoadedConfig loaded = new LoadedConfig(
+        new ConfigSnapshot(java.util.Map.of()), AuroraConfig.DEFAULT);
+
+    /** Effective immutable Aurora settings, published only at explicit load boundaries. */
+    public static AuroraConfig aurora() { return loaded.aurora(); }
+
+    private static AuroraConfig.Parsed loadSnapshot(final CommentedFileConfig file) {
+        final ConfigSnapshot utility = ConfigSnapshot.copyOf(file);
+        final AuroraConfig.Parsed parsed = AuroraConfig.parse(utility);
+        // Apply before publication: a failed runtime activation must not report success.
+        dev.iyanz.sourbycraft.perf.AsyncPathProcessor.setEnabled(parsed.config().entity().asyncPathfinding());
+        loaded = new LoadedConfig(utility, parsed.config());
+        for (final String key : parsed.deprecatedKeys()) {
+            SourbyLogger.warn("Deprecated config key '" + key + "'; use '"
+                + AuroraConfig.ASYNC_PATH_KEY + "'. Operator file was not modified.");
+        }
+        for (final String key : parsed.invalidKeys()) {
+            SourbyLogger.warn("Aurora config key '" + key
+                + "' is invalid; expected boolean setting under TOML tables. Runtime fallback: false. "
+                + "Operator file was not modified.");
+        }
+        return parsed;
+    }
 
     private SourbyCraftConfig() {}
 
@@ -55,7 +79,7 @@ public final class SourbyCraftConfig {
         } catch (Throwable t) {
             SourbyLogger.error("seedDefaults failed; utility layer will use hardcoded defaults", t);
         }
-        snapshot = dev.iyanz.sourbycraft.config.ConfigSnapshot.copyOf(f);
+        loadSnapshot(f);
         applyLiveConfig(false);
     }
 
@@ -71,15 +95,18 @@ public final class SourbyCraftConfig {
         } catch (Throwable t) {
             return "reload FAILED: could not re-read the config file: " + t.getMessage();
         }
+        final AuroraConfig previous = aurora();
+        final AuroraConfig.Parsed parsed;
         try {
-            snapshot = dev.iyanz.sourbycraft.config.ConfigSnapshot.copyOf(f);
+            parsed = loadSnapshot(f);
             applyLiveConfig(true);
         } catch (Throwable t) {
             SourbyLogger.error("config reload apply failed", t);
             return "reload FAILED during apply: " + t.getMessage();
         }
         SourbyLogger.info("config reloaded from disk (/sourbycraft reload)");
-        return "reloaded — messages, /maxp persistence, auto-updater settings applied "
+        return "reloaded — " + aurora().reloadSummary(previous)
+            + "; invalid Aurora keys: " + parsed.invalidKeys() + ". Messages, /maxp persistence, auto-updater settings applied "
             + "live, plus the Canvas server/world configs (canvas-server.yml / canvas-worlds.yml). "
             + "Options cached at construction (and a scheduled auto-update interval) only take effect "
             + "on the next restart.";
@@ -96,15 +123,6 @@ public final class SourbyCraftConfig {
         if (cfgBool("perf.smart-swap.enabled", false) || cfgBool("swap.auto-create.enabled", false)) {
             SourbyLogger.warn("SmartSwap and automatic swap creation are retired in build 44. "
                 + "JVM memory and OS swap remain operator-owned; legacy config keys were not modified.");
-        }
-
-        // Async pathfinding (MT uplift phase 1a) — offload the periodic path recompute off the region
-        // thread. Default OFF; reloadable. Starts the worker pool the first time it is enabled.
-        try {
-            dev.iyanz.sourbycraft.perf.AsyncPathProcessor.setEnabled(
-                cfgBool("perf.ai.async-pathfinding", false));
-        } catch (Throwable t) {
-            SourbyLogger.error("AsyncPathProcessor.setEnabled failed; leaving pathfinding synchronous", t);
         }
 
         // Canvas server + world configs (canvas-server.yml / canvas-worlds.yml) — fold the canonical
@@ -203,7 +221,7 @@ public final class SourbyCraftConfig {
     }
 
     private static Object lookup(String dottedPath) {
-        return snapshot.values().get(dottedPath);
+        return loaded.utility().values().get(dottedPath);
     }
 
     // ------------------------------------------------------------------------------- typed writes
@@ -221,7 +239,7 @@ public final class SourbyCraftConfig {
                 f.setComment(dottedPath, commentIfNew);
             }
             f.save();
-            snapshot = dev.iyanz.sourbycraft.config.ConfigSnapshot.copyOf(f);
+            loaded = new LoadedConfig(ConfigSnapshot.copyOf(f), loaded.aurora());
             return true;
         } catch (Throwable t) {
             SourbyLogger.warn("could not persist " + dottedPath + ": " + t.getMessage());
@@ -237,6 +255,13 @@ public final class SourbyCraftConfig {
      */
     private static void seedDefaults(CommentedFileConfig f) {
         boolean[] changed = {false};
+
+        // Only first-created files receive Aurora defaults. In-memory seeding on an
+        // existing file would mask the read-only legacy fallback even without saving.
+        if (newFile) {
+            seed(f, changed, AuroraConfig.ASYNC_PATH_KEY, false,
+                "Aurora async pathfinding (LIVE). Experimental and default-off; requires region/snapshot qualification.");
+        }
 
         seed(f, changed, "branding.gc-advisor.enabled", true,
             "Enable the startup GC/JVM-flags advisory log.");

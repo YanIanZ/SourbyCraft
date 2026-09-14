@@ -35,10 +35,10 @@ public final class AsyncPathProcessor {
 
     /** Live toggle (reloadable). Starts the pool the first time it is turned on. */
     public static void setEnabled(final boolean on) {
-        enabled = on;
         if (on) {
             ensureStarted();
         }
+        enabled = on;
     }
 
     public static boolean isEnabled() {
