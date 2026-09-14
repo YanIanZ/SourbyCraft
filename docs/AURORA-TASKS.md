@@ -131,12 +131,15 @@ No task in this group is considered complete without before/after evidence.
 
 - [x] route Spark tick stats through Sourby metrics
 - [x] report SourbyCraft profiler identity
+- [x] report Spark platform version as `Build44 (MC:26.2)` instead of the upstream `26.2-DEV-<git>` string
 - [x] provide Sourby config group
 - [ ] verify Spark web-viewer config rendering
 - [ ] add cheap Sourby runtime metadata
 - [ ] improve region thread classification
 - [ ] expose useful slow-region context
 - [ ] document Spark update procedure
+- [!] replace the upstream viewer text `engine async` with `Aurora Engine`: the current spark upload protocol serializes profiler engine as the fixed `JAVA`/`ASYNC` enum, and spark.lucko.me renders that enum itself; an exact custom label therefore requires a Sourby/Aurora viewer fork or compatible custom viewer layer rather than a server-only metadata patch
+- [ ] design Aurora viewer presentation so the primary label is `Aurora Engine` while the underlying implementation (`async-profiler` or Java sampler) remains visible in technical details
 - [ ] decide adapter vs deep SourbySpark fork only after requirements are proven
 
 ## H. Independence
