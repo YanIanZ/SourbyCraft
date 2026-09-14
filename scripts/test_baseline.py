@@ -487,6 +487,20 @@ class CertifyTest(unittest.TestCase):
         self.assertFalse(certified)
         self.assertIn("event disabled", reason)
 
+    def test_a_torn_shutdown_is_uncertified(self):
+        # A soak that degrades until it cannot finish saving is exactly the run whose
+        # evidence must survive -- but it must not be usable as a comparison reference.
+        torn = record()
+        torn["provenance"]["shutdown_clean"] = False
+        torn["provenance"]["shutdown_note"] = "did not exit within 900s"
+        certified, reason = run_baseline.certify(workloads.build("idle"), torn, self.args())
+        self.assertFalse(certified)
+        self.assertIn("shutdown was not clean", reason)
+
+    def test_a_clean_shutdown_is_assumed_when_unrecorded(self):
+        certified, reason = run_baseline.certify(workloads.build("idle"), record(), self.args())
+        self.assertNotIn("shutdown", reason)
+
     def test_a_dirty_worktree_is_uncertified(self):
         dirty = record()
         dirty["provenance"]["worktree_dirty"] = True
