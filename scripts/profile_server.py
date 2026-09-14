@@ -43,7 +43,9 @@ def main():
     (output / "eula.txt").write_text("eula=true\n")
     (output / "server.properties").write_text(
         f"server-ip=127.0.0.1\nserver-port={args.port}\nonline-mode=false\n"
-        "level-type=minecraft\\:flat\nlevel-seed=440044\nspawn-protection=0\n"
+        # Generated terrain, never superflat: superflat changes chunk generation cost, block
+        # variety and so random-tick load, lighting, heightmaps and collision shapes.
+        "level-type=minecraft\\:normal\nlevel-seed=440044\nspawn-protection=0\n"
         "enable-query=false\nenable-rcon=false\n")
     config = output / "sourbycraft_config" / "sourbycraft_global_config.toml"
     config.parent.mkdir()

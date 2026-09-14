@@ -156,7 +156,7 @@ jobs:
           cp "$fixture" plugins/test-plugin-1.0.0.jar
           echo "eula=true" > eula.txt
           # keep the console-log short and offline so CI runs deterministically
-          printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
+          printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:normal\nspawn-protection=0\n' > server.properties
           echo "Booting $jar ..."
           mkfifo stdin.pipe
           java -Xmx2G -XX:+UseG1GC -XX:StartFlightRecording=settings=profile,filename=boot.jfr,dumponexit=true -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
