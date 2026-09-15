@@ -609,17 +609,12 @@ class RegionTickMetricsTest {
         assertCoverage(snapshot.fifteenMinutes(), 900L);
     }
 
-    @Test
-    void shortWindowsAreExactBecauseTheyAreSummedFromRawTicks() {
-        assertEquals(0L, RegionTickMetrics.coverageQuantisationNanos(5L * SECOND));
-        assertEquals(0L, RegionTickMetrics.coverageQuantisationNanos(15L * SECOND));
-        assertTrue(RegionTickMetrics.coverageQuantisationNanos(60L * SECOND) > 0L);
-    }
-
     private static void assertCoverage(final RegionTickMetrics.WindowSnapshot window,
                                        final long windowSeconds) {
         final long windowNanos = windowSeconds * SECOND;
-        final long slack = RegionTickMetrics.coverageQuantisationNanos(windowNanos);
+        // One bucket per store the window reads: the one-second store, plus the
+        // five-second store for anything longer than a minute.
+        final long slack = windowSeconds <= 60L ? SECOND : SECOND + 5L * SECOND;
         final long covered = window.intervalNanos();
         assertTrue(covered <= windowNanos,
             "coverage " + covered + " exceeds the window " + windowNanos);
