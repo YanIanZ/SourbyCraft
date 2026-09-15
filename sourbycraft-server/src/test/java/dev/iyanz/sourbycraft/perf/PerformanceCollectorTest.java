@@ -290,37 +290,52 @@ class PerformanceCollectorTest {
         final SourbyMetricsProvider provider = new SourbyMetricsProvider();
         final long fifteenMinutes = TimeUnit.MINUTES.toNanos(15L);
 
-        collector(provider, source(view(1L, true,
-            window(1L, fifteenMinutes, MILLISECOND, 0.1)))).collect(fifteenMinutes, 900_000L, 0L);
+        final PerformanceCollector collector = collector(provider, source(view(1L, true,
+            window(1L, fifteenMinutes, MILLISECOND, 0.1))));
+
+        collector.collect(0L, 0L, 0L);
+        collector.collect(fifteenMinutes, 900_000L, 0L);
 
         assertEquals(MetricState.AVAILABLE, provider.snapshot().freshness().state());
     }
 
     @Test
-    void realisticQuantisedCoverageBecomesAvailable() {
-        // completeCoverageBecomesAvailable passes a window covering its full fifteen minutes,
-        // which real bucketing never produces: the long windows are summed from whole buckets
-        // and land a bucket short however long the server runs. That fixture is why a two-hour
-        // certified soak reported WARMING for all 6302 of its samples while the test was green.
+    void regionChurnDoesNotHoldTelemetryInWarming() {
+        // The bug a certified two-hour soak exposed: regions split, merge and die as players
+        // move, so no generation spans fifteen minutes and readiness derived from per-generation
+        // coverage never cleared. All 6302 samples of that run reported WARMING.
         final SourbyMetricsProvider provider = new SourbyMetricsProvider();
-        final long fifteenMinutes = TimeUnit.MINUTES.toNanos(15L);
-        final long covered = fifteenMinutes - RegionTickMetrics.coverageQuantisationNanos(fifteenMinutes);
+        final long twoMinutes = TimeUnit.MINUTES.toNanos(2L);
+        final PerformanceCollector collector = collector(provider, source(
+            view(1L, true, window(2400L, twoMinutes, MILLISECOND, 0.1)),
+            view(2L, true, window(2400L, twoMinutes, MILLISECOND, 0.1))));
 
-        collector(provider, source(view(1L, true,
-            window(1L, covered, MILLISECOND, 0.1)))).collect(fifteenMinutes, 900_000L, 0L);
+        collector.collect(0L, 0L, 0L);
+        collector.collect(TimeUnit.HOURS.toNanos(2L), 7_200_000L, 0L);
 
         assertEquals(MetricState.AVAILABLE, provider.snapshot().freshness().state());
     }
 
     @Test
-    void coverageShortOfTheAllowanceIsStillWarming() {
+    void aWindowTheCollectorHasNotWatchedLongEnoughIsWarming() {
         final SourbyMetricsProvider provider = new SourbyMetricsProvider();
         final long fifteenMinutes = TimeUnit.MINUTES.toNanos(15L);
-        final long covered = fifteenMinutes
-            - RegionTickMetrics.coverageQuantisationNanos(fifteenMinutes) - MILLISECOND;
+        final PerformanceCollector collector = collector(provider, source(
+            view(1L, true, window(1L, fifteenMinutes, MILLISECOND, 0.1))));
 
-        collector(provider, source(view(1L, true,
-            window(1L, covered, MILLISECOND, 0.1)))).collect(fifteenMinutes, 900_000L, 0L);
+        collector.collect(0L, 0L, 0L);
+        collector.collect(fifteenMinutes - MILLISECOND, 899_999L, 0L);
+
+        assertEquals(MetricState.WARMING, provider.snapshot().freshness().state());
+    }
+
+    @Test
+    void aWindowWithoutSamplesStaysWarmingHoweverLongTheCollectorRuns() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final PerformanceCollector collector = collector(provider, source());
+
+        collector.collect(0L, 0L, 0L);
+        collector.collect(TimeUnit.HOURS.toNanos(2L), 7_200_000L, 0L);
 
         assertEquals(MetricState.WARMING, provider.snapshot().freshness().state());
     }
