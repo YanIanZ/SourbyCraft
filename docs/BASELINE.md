@@ -348,13 +348,32 @@ whole window rather than GC events.
 
 Two things this run exposed, neither affecting the above:
 
-* **Telemetry never leaves `WARMING`.** All 6302 usable samples report state `WARMING`
-  and `long_windows_covered` is false after two hours. The five- and fifteen-minute
-  windows should be covered within fifteen minutes, so the state machine is wrong
-  somewhere. Any surface that gates on `AVAILABLE` is affected.
+* **Telemetry never leaves `WARMING`** — fixed. All 6302 usable samples reported state
+  `WARMING` after two hours, and anything gating on `AVAILABLE` saw nothing. Readiness
+  was derived from the longest-lived region generation's coverage, but regions split,
+  merge and die as players move, so no generation ever spanned fifteen minutes and the
+  window was never "covered" however long the server ran. It now asks what
+  `MetricState.WARMING` documents: whether the collector has been watching long enough.
+  A twenty-minute run afterwards reports 361 `AVAILABLE` samples, with the freshness
+  diagnostic climbing `FIFTEEN_MINUTES: observed 581s of 900s` to `891s of 900s` before
+  it flips. Two earlier attempts fixed real defects that were not this one; the
+  diagnostic string exists because an empty one is what let that happen.
 * **The workload delivers fewer regions than it declares.** `players-10` designs ten
   sites 128 chunks apart, one region each, and `expected_min_regions` is 10 — but
   `active_regions` ran 3 to 10, mean 5.73. Both certified A/B runs show the same (5.88
   and 5.60), so it is systematic, not incidental. The plan's own fidelity note says to
   check this; certification does not yet, and should not start gating on it before the
   cause is understood.
+
+### The client swarm's movement is partly rejected
+
+A twenty-minute ten-client run logged 4354 `moved wrongly` warnings against 31674 moves:
+the server rejected **13.7%** of client movement and teleported those players back, and
+the swarm reports 4790 position resyncs. Two of the ten clients account for 2757 of the
+rejections, and five of the ten are fliers.
+
+So `baseline_client.py` is still proposing positions the server will not accept, most
+likely moving faster than the movement checks allow. The workloads remain usable —
+clients stay connected and chunks load around them — but a run's player motion is not
+what the driver intends, and the server is doing correction work that a real client
+would not cause. Fix before any workload claims to model player movement cost.
