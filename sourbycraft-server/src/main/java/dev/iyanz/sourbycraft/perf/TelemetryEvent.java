@@ -19,6 +19,7 @@ final class TelemetryEvent extends Event {
     private static final EventType TYPE = EventType.getEventType(TelemetryEvent.class);
     public String build;
     public String state;
+    @Label("Why warming") public String diagnostic;
     public long sequence;
     public int activeRegions;
     public double targetTps;
@@ -35,6 +36,7 @@ final class TelemetryEvent extends Event {
         final var recent = snapshot.window(MetricWindow.FIVE_SECONDS);
         event.build = BuildInfo.load().build();
         event.state = snapshot.freshness().state().name();
+        event.diagnostic = snapshot.freshness().diagnostic();
         event.sequence = snapshot.sequence();
         event.activeRegions = snapshot.activeRegionCount();
         event.targetTps = snapshot.targetTps();

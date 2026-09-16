@@ -129,6 +129,7 @@ public final class PerformanceCollector implements AutoCloseable {
             }
             final long observedNanos = elapsed(nowNanos, this.observationStartNanos);
             boolean warming = false;
+            String warmingReason = "";
             for (int i = 0; i < windows.length; ++i) {
                 windows[i] = this.accumulators[i].finish(i, this.activeRegions);
                 globalWindows[i] = globalWindow(window(globalSnapshot, WINDOWS[i]),
@@ -141,7 +142,18 @@ public final class PerformanceCollector implements AutoCloseable {
                 // the server ran. The aggregate does hold that history -- samples are summed
                 // across generations, including retired ones -- only the per-generation coverage
                 // number could not express it. A window with no samples at all is still warming.
-                warming |= observedNanos < windowNanos(WINDOWS[i]) || windows[i].sampleCount() == 0L;
+                final boolean tooYoung = observedNanos < windowNanos(WINDOWS[i]);
+                final boolean noSamples = windows[i].sampleCount() == 0L;
+                if ((tooYoung || noSamples) && warmingReason.isEmpty()) {
+                    // Say which window is not ready and why. An empty diagnostic left an
+                    // operator -- and two rounds of my own debugging -- with no way to tell
+                    // "not running long enough" from "no data arriving".
+                    warmingReason = WINDOWS[i] + (tooYoung
+                        ? ": observed " + TimeUnit.NANOSECONDS.toSeconds(observedNanos) + "s of "
+                          + TimeUnit.NANOSECONDS.toSeconds(windowNanos(WINDOWS[i])) + "s"
+                        : ": no samples");
+                }
+                warming |= tooYoung || noSamples;
             }
             final long duration = elapsed(this.nanoClock.getAsLong(), scanStarted);
             final long latenessMillis = TimeUnit.NANOSECONDS.toMillis(Math.max(0L, latenessNanos));
@@ -159,7 +171,7 @@ public final class PerformanceCollector implements AutoCloseable {
             final ImmutablePerformanceSnapshot next = new ImmutablePerformanceSnapshot(
                 ++this.sequence, nowEpochMillis, sampledTargetTps, this.activeRegions,
                 this.retainedGenerations,
-                new ImmutableFreshness(state, 0L, latenessMillis, duration, ""),
+                new ImmutableFreshness(state, 0L, latenessMillis, duration, warmingReason),
                 windows[0], windows[1], windows[2], windows[3], windows[4], runtime, global);
             this.publishUnlessClosed(next);
         } catch (final Throwable failure) {

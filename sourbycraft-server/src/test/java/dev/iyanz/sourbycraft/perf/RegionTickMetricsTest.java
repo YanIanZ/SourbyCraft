@@ -623,6 +623,21 @@ class RegionTickMetricsTest {
                 + slack + "ns the bucket layout can lose");
     }
 
+    @Test
+    void DIAGNOSTIC_youngRegionLongWindow() {
+        for (final int minutes : new int[] {2, 5, 10, 16}) {
+            final RegionTickMetrics metrics = new RegionTickMetrics();
+            final int ticks = minutes * 60 * 20;
+            appendTicks(metrics, ticks, 0L, TARGET_20_TPS, 10L * MILLISECOND);
+            final RegionTickMetrics.Snapshot snap = metrics.snapshot((long)ticks * TARGET_20_TPS);
+            System.out.println("DIAG age=" + minutes + "min"
+                + " 1m.count=" + snap.oneMinute().sampleCount()
+                + " 5m.count=" + snap.fiveMinutes().sampleCount()
+                + " 15m.count=" + snap.fifteenMinutes().sampleCount()
+                + " 15m.interval=" + snap.fifteenMinutes().intervalNanos() / SECOND + "s");
+        }
+    }
+
     private static void appendTicks(final RegionTickMetrics metrics, final int count, final long firstStart,
                                     final long interval, final long duration) {
         long previous = TimeUtil.DEADLINE_NOT_SET;
