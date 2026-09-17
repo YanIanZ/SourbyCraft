@@ -65,7 +65,44 @@ public final class GcAdvisor {
         List<String> jvmArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
         long xms = parseMemArg(jvmArgs, "-Xms");
         long xmx = parseMemArg(jvmArgs, "-Xmx");
-        return evaluate(gcNames, jvmArgs, xms, xmx);
+        final Result flags = evaluate(gcNames, jvmArgs, xms, xmx);
+        final List<String> all = new ArrayList<>(flags.warnings());
+        all.addAll(headroom(Runtime.getRuntime().maxMemory(),
+            dev.iyanz.sourbycraft.util.ContainerMemory.limitBytes()));
+        return new Result(all.isEmpty(), List.copyOf(all));
+    }
+
+    /** Heap that leaves the container no room for everything else the JVM needs. */
+    static final double HEAP_SHARE_LIMIT = 0.85;
+
+    /**
+     * Warns when the heap is sized so close to the container limit that the process must overrun it.
+     *
+     * <p>A heap maximum is not the process's memory: metaspace, the code cache, thread stacks, GC
+     * structures and Netty's direct buffers all live outside it, and on a Minecraft server those
+     * run to a gigabyte or more. A panel allocation of 10 GiB with a 10 GiB heap therefore does not
+     * fit, and the kernel resolves it with swap — where a JVM heap is catastrophic for tick times,
+     * and where an allocation with OOM-kill disabled will thrash rather than fail. This is the
+     * failure that makes an operator say the server "randomly" lags.</p>
+     *
+     * @param heapMaxBytes       the JVM's maximum heap
+     * @param containerLimitBytes the container's memory limit, or a non-positive value if unknown
+     * @return one warning, or nothing when the sizing leaves room or cannot be judged
+     */
+    static List<String> headroom(final long heapMaxBytes, final long containerLimitBytes) {
+        if (heapMaxBytes <= 0 || containerLimitBytes <= 0) {
+            return List.of();                 // Outside a container, or the limit is unreadable.
+        }
+        final double share = (double) heapMaxBytes / containerLimitBytes;
+        if (share <= HEAP_SHARE_LIMIT) {
+            return List.of();
+        }
+        return List.of("Heap maximum is " + Math.round(share * 100) + "% of the container's "
+            + dev.iyanz.sourbycraft.util.ContainerMemory.fmt(containerLimitBytes)
+            + " — metaspace, code cache, thread stacks and direct buffers live outside the heap, so "
+            + "the process will overrun its limit and swap. Size the heap to about "
+            + Math.round(HEAP_SHARE_LIMIT * 100) + "% (e.g. -XX:MaxRAMPercentage="
+            + Math.round(HEAP_SHARE_LIMIT * 100) + ".0).");
     }
 
     /**
