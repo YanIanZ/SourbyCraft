@@ -21,8 +21,13 @@ import java.util.logging.Logger;
  * snapshot off-thread. Nothing in the submitted work may touch the live world — see {@code
  * SnapshotPathRegion} for why.
  *
- * <p>Degrades safely: if the pool is disabled, not yet started, or saturated (the bounded queue rejects),
- * the work runs inline on the calling thread — a slow path, never a dropped path.
+ * <p>Degrades safely while running: if the pool is not yet started or saturated (the bounded queue
+ * rejects), the work runs inline on the calling thread — a slow path, never a dropped path.
+ *
+ * <p>Shutdown is the one case that does not degrade to inline. Once stopped, admission is refused
+ * outright: the region threads are trying to stop, and a CPU-bound solve on one of them delays
+ * exactly that. Callers still receive a completed future, so nothing is left believing a solve is
+ * in flight.
  */
 public final class AsyncPathProcessor {
 
@@ -32,6 +37,21 @@ public final class AsyncPathProcessor {
 
     private static volatile boolean enabled = false;
     private static volatile ThreadPoolExecutor pool;
+    /** Terminal until the pool is started again: admission is refused, not degraded to inline. */
+    private static volatile boolean stopped = false;
+    /** Solves admitted to the pool whose futures have not completed yet. */
+    private static final AtomicInteger OUTSTANDING = new AtomicInteger();
+
+    /**
+     * How many admitted solves have not completed.
+     *
+     * <p>The pool's own queue is bounded, but each completed solve then enqueues a delivery on
+     * an entity's scheduler, and that queue is not ours to bound. This is the count that makes
+     * the difference observable.</p>
+     */
+    public static int outstanding() {
+        return OUTSTANDING.get();
+    }
 
     /** Live toggle (reloadable). Starts the pool the first time it is turned on. */
     public static void setEnabled(final boolean on) {
@@ -47,6 +67,7 @@ public final class AsyncPathProcessor {
 
     /** Idempotent. Sizes the pool to a quarter of the cores (min 1) — pathfinding is a background cost. */
     public static synchronized void ensureStarted() {
+        stopped = false;                 // Starting again lifts the refusal a shutdown installed.
         if (pool != null && !pool.isShutdown()) {
             return;
         }
@@ -80,6 +101,14 @@ public final class AsyncPathProcessor {
      * completed on return.
      */
     public static <T> CompletableFuture<T> submit(final Supplier<T> solve) {
+        if (stopped) {
+            // Refuse, rather than degrading to an inline solve as a not-yet-started pool does.
+            // The two look alike but are not: after shutdown the region threads are trying to
+            // stop, and running a CPU-bound A* on one of them delays exactly that. The caller
+            // still receives a completed future, so its pending bookkeeping is released and no
+            // request is left outstanding.
+            return CompletableFuture.completedFuture(null);
+        }
         final ThreadPoolExecutor p = pool;
         if (p == null || p.isShutdown()) {
             // Not started — run inline so callers still get a result.
@@ -101,7 +130,9 @@ public final class AsyncPathProcessor {
                 }
             }
         };
+        OUTSTANDING.incrementAndGet();
         future.whenComplete((result, failure) -> {
+            OUTSTANDING.decrementAndGet();
             if (future.isCancelled()) task.cancel(true);
         });
         try { p.execute(task); }
@@ -109,13 +140,26 @@ public final class AsyncPathProcessor {
         return future;
     }
 
+    /**
+     * Stops admission and disposes of everything outstanding.
+     *
+     * <p>Distinct from {@link #setEnabled}, which only stops callers offering new work: this is
+     * terminal, refusing submissions until the pool is started again. Every admitted solve is
+     * cancelled, which completes its future with {@code null}, which runs the caller's release —
+     * so no caller is left believing a solve is still in flight.</p>
+     */
     public static synchronized void shutdown() {
         enabled = false;
+        stopped = true;
         final ThreadPoolExecutor p = pool;
         pool = null;
         if (p != null) {
+            final int admitted = OUTSTANDING.get();
             for (final Runnable pending : p.shutdownNow()) {
                 if (pending instanceof FutureTask<?> task) task.cancel(false);
+            }
+            if (admitted > 0) {
+                LOGGER.info("AsyncPath: disposing " + admitted + " outstanding solve(s)");
             }
         }
     }
