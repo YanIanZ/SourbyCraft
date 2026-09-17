@@ -24,8 +24,25 @@ public enum ExecutionLane {
     /** Gameplay owned by a region: entities, blocks, and plugin handlers fired from them. */
     REGION_TICK("Region tick", "Folia Region Scheduler Thread", "Region Scheduler Thread"),
 
-    /** Chunk generation, lighting and the chunk system's own work. */
-    CHUNK_WORKER("Chunk workers", "Paper Common Worker", "Worker-Main"),
+    /**
+     * The chunk system's worker pool: generation, lighting and chunk loading.
+     *
+     * <p>Moonrise's {@code WORKER_POOL}, sized by {@code Paper.WorkerThreadCount}. This is the
+     * lane that answers "how much does world load cost".</p>
+     */
+    CHUNK_WORKER("Chunk workers", "Paper Common Worker"),
+
+    /**
+     * The engine's general background pool, {@code Util.backgroundExecutor()}.
+     *
+     * <p>Deliberately not folded into {@link #CHUNK_WORKER}. It is a different pool — a
+     * deprioritised ForkJoinPool sized from the core count, not from
+     * {@code Paper.WorkerThreadCount} — and it carries whatever the engine hands it rather than
+     * chunk work specifically. Counting the two together made a chunk-worker A/B read four and
+     * twelve threads where the setting said two and six, which is how a lane measurement starts
+     * misleading the tuning it exists to inform.</p>
+     */
+    BACKGROUND("Engine background", "Worker-Main"),
 
     /** Reading and writing world data. */
     WORLD_IO("World I/O", "Dimension-Data-IO-Worker", "Paper I/O Worker", "SourbyCraft-IO"),
