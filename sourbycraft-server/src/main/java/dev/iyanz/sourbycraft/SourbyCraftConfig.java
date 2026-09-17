@@ -259,9 +259,18 @@ public final class SourbyCraftConfig {
 
         // Only first-created files receive Aurora defaults. In-memory seeding on an
         // existing file would mask the read-only legacy fallback even without saving.
+        //
+        // Seeded together and first, so the [aurora.*] tables are written as one run rather than
+        // interleaved between unrelated sections. TOML table headers are absolute, so a stray
+        // order still parses -- but a file where [aurora.entity] appears indented under
+        // [messages] reads as though it were nested, and an operator edits what they read.
         if (newFile) {
             seed(f, changed, AuroraConfig.ASYNC_PATH_KEY, false,
                 "Aurora async pathfinding (LIVE). Experimental and default-off; requires region/snapshot qualification.");
+            seed(f, changed, AuroraConfig.LANE_SAMPLING_KEY, true,
+                "Aurora execution-lane CPU attribution (LIVE), behind /perf lanes. Walks every thread once a "
+                + "second: negligible beside a loaded server, and on an idle one the telemetry lane costs more "
+                + "than the region lane. false stops the sampling; the lanes view then reports it as disabled.");
         }
 
         seed(f, changed, "branding.gc-advisor.enabled", true,
