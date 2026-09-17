@@ -399,9 +399,9 @@ The lane split says why, and it is not core starvation:
 
 | Lane | 2 workers | 6 workers |
 | --- | --- | --- |
-| `CHUNK_WORKER` | 4 threads, 1.06 cores | 12 threads, 1.32 cores |
-| `REGION_TICK` | 4 threads, 0.21 cores | 4 threads, 0.29 cores |
-| Total | 1.31 of 8 cores | 1.64 of 8 cores |
+| `CHUNK_WORKER` | 2 threads, 1.06 cores | 6 threads, 1.27 cores |
+| `REGION_TICK` | 4 threads, 0.21 cores | 4 threads, 0.27 cores |
+| Total | 1.36 of 8 cores | 1.64 of 8 cores |
 
 The region lane consumes 38% *more* CPU while ticking 45% slower, with six cores idle
 throughout. The region threads are not short of CPU; they are doing more work. Extra chunk
@@ -411,12 +411,21 @@ regions — rather than relieving it, and allocation rate rises 5.0% with it.
 **Leave the worker count alone.** More threads is not the lever on this hardware, and the
 constraint is not the core count.
 
-Two caveats. Neither side certified cleanly: the 2-worker run measured 10.4% foreign CPU
+The lane table above is the corrected one. It first read 4 and 12 threads, because the
+classifier folded `Worker-Main` — `Util.backgroundExecutor()`, a deprioritised ForkJoinPool
+sized from the core count — in with `Paper Common Worker`, Moonrise's `WORKER_POOL` sized by
+`Paper.WorkerThreadCount`. Separated, the counts match the setting exactly, which is what a
+lane measurement has to do before anything is tuned from it.
+
+The numbers survive an independent check. `LaneCpuSampler` derives them from `ThreadMXBean`
+deltas; JFR's own `jdk.ThreadCPULoad` is a different mechanism entirely, and re-deriving the
+split from it gives 1.06 and 0.21 cores at two workers against the sampler's 1.06 and 0.21,
+and a 1.64-core total at six against the sampler's 1.64.
+
+One caveat stands. Neither side certified: the 2-worker run measured 10.4% foreign CPU
 against a 10% limit, because the Python client swarm shares the box and the harness counts
 its own apparatus as competing load. Both sides ran under identical conditions, so the
-comparison holds even though neither is usable as a reference baseline. And `CHUNK_WORKER`
-folds `Worker-Main` in with `Paper Common Worker`, which is why the thread counts read 4
-and 12 rather than 2 and 6; splitting those lanes would sharpen this table.
+comparison holds even though neither is usable as a reference baseline.
 
 The earlier certified `ab-workers-2` and `ab-workers-6` baselines are superseded. They are
 certified against a workload that silently contained no entities.
