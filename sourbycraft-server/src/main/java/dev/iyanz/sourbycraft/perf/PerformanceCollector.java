@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.perf;
 
 import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
+import dev.iyanz.sourbycraft.execution.LaneCpuSampler;
 import dev.iyanz.sourbycraft.execution.region.FoliaRegionBackend;
 import dev.iyanz.sourbycraft.execution.region.RegionBackend;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
@@ -60,6 +61,9 @@ public final class PerformanceCollector implements AutoCloseable {
     private long lastCollectionErrorNanos;
     private long observationStartNanos;
     private boolean observing;
+    // Lane load is sampled on this thread, so the collector's own cost lands in TELEMETRY where
+    // it can be seen rather than being quietly attributed to whatever it was measuring.
+    private final LaneCpuSampler lanes = LaneCpuSampler.platform();
 
     public PerformanceCollector(final SourbyMetricsProvider provider, final RegionMetricsRegistry registry,
                                 final Supplier<ImmutableRuntimeMetrics> runtimeSource) {
@@ -180,6 +184,7 @@ public final class PerformanceCollector implements AutoCloseable {
                 new ImmutableFreshness(state, 0L, latenessMillis, duration, warmingReason),
                 windows[0], windows[1], windows[2], windows[3], windows[4], runtime, global);
             this.publishUnlessClosed(next);
+            LaneLoadEvent.record(this.lanes.sample());
         } catch (final Throwable failure) {
             final long duration = elapsed(this.nanoClock.getAsLong(), scanStarted);
             final long latenessMillis = TimeUnit.NANOSECONDS.toMillis(Math.max(0L, latenessNanos));
