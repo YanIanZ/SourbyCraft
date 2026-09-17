@@ -68,6 +68,8 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
      * They log as Aurora, the engine's name.
      */
     private static final String[] AURORA_PREFIXES = {
+        // Aurora's own engine code, which lives inside the Minecraft tree and speaks as the engine.
+        "dev.iyanz.aurora.",
         "io.papermc.paper.",
         "io.canvasmc.",
         "ca.spottedleaf.",
