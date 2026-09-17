@@ -33,7 +33,7 @@ the async worker, so without it every off-region solve NPEs. The two are one
 feature and neither stands alone.
 
 diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 0b5fab274d9471472ffe81dead60e4d0906b0f31..6933d5aa5f6f724df11417d8602c097fb2db7a28 100644
+index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2f77b6e73ab39c5d83fc9f143ab3961a400e115e 100644
 --- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 +++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 @@ -100,6 +100,17 @@ public abstract class PathNavigation {
@@ -54,7 +54,7 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..6933d5aa5f6f724df11417d8602c097f
              this.path = null;
              this.path = this.createPath(this.targetPos, this.reachRange);
              this.timeLastRecompute = this.tick; // Folia - region threading
-@@ -107,6 +118,66 @@ public abstract class PathNavigation {
+@@ -107,6 +118,80 @@ public abstract class PathNavigation {
          }
      }
  
@@ -93,6 +93,13 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..6933d5aa5f6f724df11417d8602c097f
 +            this.createPathFinder(net.minecraft.util.Mth.floor(maxPathLength * 16.0F));
 +        final float mult = this.maxVisitedNodesMultiplier;
 +        final net.minecraft.world.entity.Mob mob = this.mob;
++        // The path the mob is following right now, as this solve's validity token. Every event
++        // that invalidates the result replaces this object: the synchronous recompute below
++        // (which still runs while a solve is in flight, because the pending flag only skips the
++        // offload), moveTo assigning or clearing a path, and stop(). targetPos and reachRange
++        // only change inside createPath, whose caller assigns this.path in the same statement,
++        // so a retarget shows up here too. No epoch field is needed to see any of it.
++        final net.minecraft.world.level.pathfinder.Path requested = this.path;
 +        this.sourbyAsyncPathPending = true;
 +        dev.iyanz.sourbycraft.perf.AsyncPathProcessor
 +            .submit(() -> solver.findPath(snapshot, mob, targets, maxPathLength, reachRange, mult))
@@ -104,6 +111,13 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..6933d5aa5f6f724df11417d8602c097f
 +                    // not be applied: this navigation belongs to the entity that was replaced,
 +                    // and its level, position and target are no longer the live ones.
 +                    if (owner != mob) {
++                        return;
++                    }
++                    // Something replaced the path while this solve was running, so the result
++                    // describes a route the navigation is no longer taking. Applying it would
++                    // overwrite a newer synchronous recompute, undo a retarget, or resurrect a
++                    // navigation that was stopped.
++                    if (this.path != requested) {
 +                        return;
 +                    }
 +                    if (path != null && path.getTarget() != null) {
