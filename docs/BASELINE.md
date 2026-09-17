@@ -429,3 +429,38 @@ comparison holds even though neither is usable as a reference baseline.
 
 The earlier certified `ab-workers-2` and `ab-workers-6` baselines are superseded. They are
 certified against a workload that silently contained no entities.
+
+### Every baseline so far measured world generation
+
+`run_baseline.py` has always had `--world`, and the `players-N` fidelity note has always said to
+use it: *"seed a pre-generated world with --world so terrain generation does not land inside the
+measurement window."* No run ever did. Every baseline, every A/B and the certified soak generated
+their world from scratch while being measured.
+
+The same workload, same settings, seeded against a pre-generated world instead:
+
+| | fresh world | seeded | change |
+| --- | ---: | ---: | --- |
+| MSPT mean | 3.858 ms | 2.268 ms | −41% |
+| MSPT p95 | 5.810 ms | 3.100 ms | −47% |
+| MSPT p99 | 10.018 ms | 4.117 ms | −59% |
+| `CHUNK_WORKER` | 1.06 cores (85%) | 0.39 cores (58%) | −63% |
+| `REGION_TICK` | 0.21 cores (13%) | 0.26 cores (38%) | +24% |
+| total CPU | 1.36 of 8 | 0.68 of 8 | −50% |
+| active regions | 5.73–7.83 | 9.65 | ≈ the declared 10 |
+
+Half the CPU and most of the tail latency were terrain generation — an artifact of how the
+harness builds its world, not a property of the server.
+
+This also explains the second fault the soak logged. `players-10` declares ten regions and was
+delivering five to eight; seeded, it delivers 9.65. Chunk generation was delaying region
+formation, so the workload under-delivered the region parallelism it exists to exercise. That was
+never a region-system defect.
+
+Chunk work is still the largest lane at 58%, but the residual is loading chunks from disk plus
+generation where clients roam past the seed's coverage, which is not the same cost as building
+terrain from noise.
+
+The seed is a previous run's world with `dimensions/minecraft/overworld/entities/*.mca` removed.
+Entities have to go: the workload summons its own three hundred on every run, and a seed that
+keeps the last run's would stack them.
