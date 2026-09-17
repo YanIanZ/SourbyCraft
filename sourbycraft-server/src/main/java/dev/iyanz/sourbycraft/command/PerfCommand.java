@@ -5,6 +5,7 @@ import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
 import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
 import dev.iyanz.sourbycraft.api.metrics.SourbyMetrics;
+import dev.iyanz.sourbycraft.execution.LanePortions;
 import dev.iyanz.sourbycraft.perf.MetricsRuntime;
 import dev.iyanz.sourbycraft.util.ContainerMemory;
 import java.util.ArrayList;
@@ -16,7 +17,8 @@ import org.bukkit.command.CommandSender;
 
 /** Read-only diagnostics: one immutable generation per invocation, no world/OS queries. */
 public final class PerfCommand extends Command {
-    private static final List<String> VIEWS = List.of("tick", "cpu", "memory", "gc", "region", "health");
+    static final List<String> VIEWS =
+        List.of("tick", "cpu", "memory", "gc", "lanes", "region", "health");
 
     public PerfCommand(final String name) {
         super(name);
@@ -82,6 +84,9 @@ public final class PerfCommand extends Command {
             add(lines, "Pause distribution / allocation samples", "use JFR or /spark profiler start");
             add(lines, "GC scope", "MXBean collection time is not stop-the-world pause time");
         }
+        if (view.equals("lanes")) {
+            renderLanes(lines, MetricsRuntime.lanePortions());
+        }
         if (view.equals("overview") || view.equals("region")) {
             final boolean known = snapshot.freshness().state() != MetricState.UNAVAILABLE;
             add(lines, "Active regions / retained generations", known
@@ -96,6 +101,35 @@ public final class PerfCommand extends Command {
         }
         lines.add(TpsCommand.freshness(snapshot.freshness()));
         return List.copyOf(lines);
+    }
+
+    /**
+     * Where the machine's time went, by execution lane.
+     *
+     * <p>Two facts are reported rather than one number, because they answer different questions.
+     * A lane holding most of what was used is the thing to fix; a machine that is actually spent
+     * is the only state where moving threads between lanes is the right kind of move. A server
+     * can be the first without being the second, and that is exactly when adding threads to the
+     * busy lane looks obvious and measures worse.</p>
+     */
+    private static void renderLanes(final List<Component> lines, final LanePortions.Report report) {
+        if (!report.available()) {
+            add(lines, "Lane load", "unavailable — " + report.reason());
+            return;
+        }
+        for (final LanePortions.Portion portion : report.portions()) {
+            if (portion.cores() < 0.005) {
+                continue;                 // Below the noise the sampler can distinguish.
+            }
+            add(lines, "  " + portion.lane().display(),
+                TpsCommand.value(portion.cores(), 2) + " cores ("
+                    + percent(portion.shareOfUsed() * 100.0) + " of used)");
+        }
+        add(lines, "Used / idle / cores", TpsCommand.value(report.usedCores(), 2) + " / "
+            + TpsCommand.value(report.idleCores(), 2) + " / " + report.machineCores());
+        add(lines, "Shape", (report.isConcentrated()
+                ? "concentrated in " + report.dominant().display() : "spread across lanes")
+            + (report.isSaturated() ? ", machine saturated" : ", machine has headroom"));
     }
 
     public static String health(final PerformanceSnapshot snapshot) {

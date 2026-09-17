@@ -81,6 +81,14 @@ public final class LanePortions {
             List.copyOf(portions), portions.isEmpty() ? null : portions.get(0).lane());
     }
 
+    /**
+     * A report for when there is nothing to divide yet — the collector has not run, or is not
+     * running at all. Says why rather than reporting an idle machine.
+     */
+    public static Report notMeasured(final String reason) {
+        return unavailable(reason, 0);
+    }
+
     private static Report unavailable(final String reason, final int machineCores) {
         return new Report(false, reason, machineCores, Double.NaN, Double.NaN, List.of(), null);
     }

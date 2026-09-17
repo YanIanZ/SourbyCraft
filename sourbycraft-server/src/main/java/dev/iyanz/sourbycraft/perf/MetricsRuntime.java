@@ -3,6 +3,7 @@ package dev.iyanz.sourbycraft.perf;
 import dev.iyanz.sourbycraft.api.metrics.SourbyMetrics;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import java.util.Objects;
+import dev.iyanz.sourbycraft.execution.LanePortions;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.ServicesManager;
@@ -20,6 +21,18 @@ public final class MetricsRuntime {
 
     public static SourbyMetrics provider() {
         return PROVIDER;
+    }
+
+    /**
+     * How the machine is currently divided between execution lanes.
+     *
+     * <p>Kept off {@link dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot} on purpose: this is
+     * operator diagnostics, not something plugins should build on yet.</p>
+     */
+    public static synchronized LanePortions.Report lanePortions() {
+        final PerformanceCollector current = collector;
+        return current != null ? current.lanePortions()
+            : LanePortions.notMeasured("metrics are not running");
     }
 
     public static RegionMetricsRegistry registry() {
