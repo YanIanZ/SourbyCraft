@@ -127,14 +127,20 @@ public final class SourbyCraftBootstrap {
             dev.iyanz.sourbycraft.perf.GcTracker.start();
         });
 
-        SourbyLogger.info(dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
+        progress.add(dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
             TOTAL_STAGES, failureCount, (System.nanoTime() - begun) / 1_000_000L));
+        // One event, so nothing can appear between the lines. Logged through a logger the console
+        // renders as the engine rather than as SourbyCraft: this is the engine coming up.
+        java.util.logging.Logger.getLogger("Aurora Engine")
+            .info(String.join(System.lineSeparator(), progress));
+        progress.clear();
     }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
     private static final int TOTAL_STAGES = 11;
     private static int stageCount;
     private static int failureCount;
+    private static final java.util.List<String> progress = new java.util.ArrayList<>();
 
     /**
      * Runs one boot stage and reports it.
@@ -152,7 +158,11 @@ public final class SourbyCraftBootstrap {
             SourbyLogger.error(name + " failed during Aurora boot", failure);
         }
         stageCount++;
-        SourbyLogger.info(dev.iyanz.sourbycraft.brand.AuroraBoot.render(
+        // Held, not printed. Stages log their own output as they run -- the virtual executor and
+        // the command registry both announce themselves -- so emitting a bar line per stage
+        // interleaved the bar with those lines and neither read well. The whole bar goes out as
+        // one event below, before the server finishes starting.
+        progress.add(dev.iyanz.sourbycraft.brand.AuroraBoot.render(
             stageCount, TOTAL_STAGES, name, failureCount > 0));
     }
 }
