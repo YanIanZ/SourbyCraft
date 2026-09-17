@@ -3,6 +3,7 @@ package dev.iyanz.sourbycraft.perf;
 import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
 import dev.iyanz.sourbycraft.execution.LaneCpuSampler;
+import dev.iyanz.sourbycraft.execution.LanePortions;
 import dev.iyanz.sourbycraft.execution.region.FoliaRegionBackend;
 import dev.iyanz.sourbycraft.execution.region.RegionBackend;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
@@ -64,6 +65,10 @@ public final class PerformanceCollector implements AutoCloseable {
     // Lane load is sampled on this thread, so the collector's own cost lands in TELEMETRY where
     // it can be seen rather than being quietly attributed to whatever it was measuring.
     private final LaneCpuSampler lanes = LaneCpuSampler.platform();
+    // The latest division of the machine, for operators asking where the time went. Volatile
+    // because it is written on the collector thread and read from whichever thread asks.
+    private volatile LanePortions.Report lanePortions =
+        LanePortions.notMeasured("no reading yet");
 
     public PerformanceCollector(final SourbyMetricsProvider provider, final RegionMetricsRegistry registry,
                                 final Supplier<ImmutableRuntimeMetrics> runtimeSource) {
@@ -113,6 +118,11 @@ public final class PerformanceCollector implements AutoCloseable {
 
     void start() {
         this.worker.start();
+    }
+
+    /** The latest division of the machine between lanes. */
+    public LanePortions.Report lanePortions() {
+        return this.lanePortions;
     }
 
     Thread worker() {
@@ -184,7 +194,9 @@ public final class PerformanceCollector implements AutoCloseable {
                 new ImmutableFreshness(state, 0L, latenessMillis, duration, warmingReason),
                 windows[0], windows[1], windows[2], windows[3], windows[4], runtime, global);
             this.publishUnlessClosed(next);
-            LaneLoadEvent.record(this.lanes.sample());
+            final LaneCpuSampler.LaneLoads reading = this.lanes.sample();
+            this.lanePortions = LanePortions.of(reading, runtime.availableProcessors());
+            LaneLoadEvent.record(reading);
         } catch (final Throwable failure) {
             final long duration = elapsed(this.nanoClock.getAsLong(), scanStarted);
             final long latenessMillis = TimeUnit.NANOSECONDS.toMillis(Math.max(0L, latenessNanos));
