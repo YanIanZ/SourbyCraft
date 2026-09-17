@@ -48,10 +48,10 @@ index 24e82cff2bc2908852bcd4f1367b54690a65e2da..dfd54287295e9c1e51a78dc4e51de4d0
      }
 diff --git a/net/minecraft/world/level/SnapshotPathRegion.java b/net/minecraft/world/level/SnapshotPathRegion.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..bad3b9e77a16d86495c02f31fa30873c4f98326c
+index 0000000000000000000000000000000000000000..55fdcb196f79cd07406d05ad1c6b9b81b626eb3d
 --- /dev/null
 +++ b/net/minecraft/world/level/SnapshotPathRegion.java
-@@ -0,0 +1,179 @@
+@@ -0,0 +1,212 @@
 +package net.minecraft.world.level;
 +
 +import net.minecraft.core.BlockPos;
@@ -61,6 +61,7 @@ index 0000000000000000000000000000000000000000..bad3b9e77a16d86495c02f31fa30873c
 +import net.minecraft.world.level.block.state.BlockState;
 +import net.minecraft.world.level.chunk.ChunkAccess;
 +import net.minecraft.world.level.chunk.LevelChunkSection;
++import net.minecraft.world.level.border.WorldBorder;
 +import net.minecraft.world.level.chunk.PalettedContainerRO;
 +import net.minecraft.world.level.material.FluidState;
 +import net.minecraft.world.level.material.Fluids;
@@ -81,8 +82,21 @@ index 0000000000000000000000000000000000000000..bad3b9e77a16d86495c02f31fa30873c
 + * <p>Fluids are derived from block state ({@code getBlockState(pos).getFluidState()}), so no separate
 + * fluid snapshot is needed. Block entities are intentionally not captured (mutable, unsafe off-thread);
 + * {@link #getBlockEntity} returns {@code null}, which only affects the handful of blocks whose collision
-+ * shape depends on a block entity — a negligible pathfinding inaccuracy. Once constructed the instance is
-+ * fully immutable and safe to read from any thread.
++ * shape depends on a block entity — a negligible pathfinding inaccuracy.
++ *
++ * <p>The world border is captured too, as a detached copy. {@code CollisionGetter.noCollision} reaches
++ * it through {@code borderCollision}, and the inherited implementation would have dereferenced the live
++ * level from the worker thread. A copy also freezes a lerping border for the duration of one solve,
++ * which is what a snapshot should do.
++ *
++ * <p><b>What this class does not snapshot.</b> The solve still reads the live mob: the evaluators read
++ * its position and bounding box, and {@code noCollision(mob, box)} builds an {@code
++ * EntityCollisionContext} from {@code isDescending()}, {@code getY()} and {@code getMainHandItem()}.
++ * Those are the same staleness a path always races — a path is recomputed constantly and acts on a
++ * position that has already moved — and they are reads, not writes. Evaluators that <i>write</i> to the
++ * mob are refused the offload entirely; see {@code PathNavigation.sourbyAsyncSolveSafe}. The parent also
++ * retains its live {@link ChunkAccess} references in {@code chunks}; every read path is overridden here,
++ * so they are never dereferenced off-thread, but they do pin those chunks for the solve.
 + */
 +public final class SnapshotPathRegion extends PathNavigationRegion {
 +
@@ -93,6 +107,7 @@ index 0000000000000000000000000000000000000000..bad3b9e77a16d86495c02f31fa30873c
 +    private final int gridSizeX;
 +    private final int gridSizeZ;
 +    private final CollisionView collisionView = new CollisionView();
++    private final WorldBorder borderSnapshot;
 +
 +    @SuppressWarnings("unchecked")
 +    public SnapshotPathRegion(final Level level, final BlockPos start, final BlockPos end) {
@@ -101,6 +116,7 @@ index 0000000000000000000000000000000000000000..bad3b9e77a16d86495c02f31fa30873c
 +        this.sectionsPerColumn = level.getSectionsCount();
 +        this.gridSizeX = this.chunks.length;
 +        this.gridSizeZ = this.gridSizeX == 0 ? 0 : this.chunks[0].length;
++        this.borderSnapshot = detach(level.getWorldBorder());
 +        this.sectionStates =
 +            (PalettedContainerRO<BlockState>[][][]) new PalettedContainerRO[this.gridSizeX][this.gridSizeZ][];
 +
@@ -123,6 +139,23 @@ index 0000000000000000000000000000000000000000..bad3b9e77a16d86495c02f31fa30873c
 +                this.sectionStates[gx][gz] = column;
 +            }
 +        }
++    }
++
++    /**
++     * A detached copy of the border's geometry, taken on the region thread.
++     *
++     * <p>The copy has no level attached, so its setters fire no events and notify no listeners.</p>
++     */
++    private static WorldBorder detach(final WorldBorder live) {
++        final WorldBorder copy = new WorldBorder();
++        copy.setCenter(live.getCenterX(), live.getCenterZ());
++        copy.setSize(live.getSize());
++        return copy;
++    }
++
++    @Override
++    public WorldBorder getWorldBorder() {
++        return this.borderSnapshot;
 +    }
 +
 +    private @Nullable PalettedContainerRO<BlockState> sectionAt(final int blockX, final int blockY, final int blockZ) {
