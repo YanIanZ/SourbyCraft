@@ -15,7 +15,8 @@ public class ExecutionLaneTest {
     @Test
     void everyThreadTheCertifiedSoakRanIsAttributed() {
         assertLane(ExecutionLane.REGION_TICK, "Folia Region Scheduler Thread #3");
-        assertLane(ExecutionLane.CHUNK_WORKER, "Paper Common Worker #1", "Worker-Main-2");
+        assertLane(ExecutionLane.CHUNK_WORKER, "Paper Common Worker #1");
+        assertLane(ExecutionLane.BACKGROUND, "Worker-Main-2");
         assertLane(ExecutionLane.WORLD_IO, "Dimension-Data-IO-Worker-1", "SourbyCraft-IO-4");
         assertLane(ExecutionLane.NETWORK, "Netty Kqueue IO #0");
         assertLane(ExecutionLane.PLUGIN_ASYNC,
@@ -24,6 +25,15 @@ public class ExecutionLaneTest {
         assertLane(ExecutionLane.TELEMETRY,
             "SourbyCraft-PerformanceCollector", "spark-async-sampler-worker-2-thread-1");
         assertLane(ExecutionLane.GARBAGE_COLLECTION, "GC Thread#5", "G1 Conc#0");
+    }
+
+    @Test
+    void theChunkPoolAndTheEngineBackgroundPoolAreDifferentLanes() {
+        // Paper Common Worker is Moonrise's WORKER_POOL, sized by Paper.WorkerThreadCount.
+        // Worker-Main is Util.backgroundExecutor(), a deprioritised ForkJoinPool sized from the
+        // core count that carries whatever the engine hands it. Counting them together made a
+        // chunk-worker A/B read four and twelve threads where the setting said two and six.
+        assertNotEquals(ExecutionLane.of("Paper Common Worker #0"), ExecutionLane.of("Worker-Main-1"));
     }
 
     @Test
