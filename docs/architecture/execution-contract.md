@@ -23,6 +23,33 @@ Paths above are relative to `sourbycraft-server/src/main/java/dev/iyanz/sourbycr
 The Minecraft integration source is `sourbycraft-server/minecraft-patches/features/0006-SourbyCraft-async-pathfinding-offload-periodic-path-.patch`.
 Generated upstream code is read-only evidence, never the patch source of truth.
 
+## The Aurora region system
+
+`execution/region` states what a region is in SourbyCraft's own terms. Most of it was already
+Aurora-owned and mis-filed: `RegionMetricsRegistry` tracks region identity, merges, retirement and
+enumeration without naming a single backend type, under `perf`, framed as telemetry.
+
+* `AuroraRegion` — one region, identified by world, region **and generation**. The generation is
+  not decoration: regions split and merge as players move, so a region id can outlive the region
+  that bore it, and two readings are comparable only when the generation matches.
+* `RegionTopology` — the regions that exist, including recently retired ones. Retired generations
+  are kept deliberately: a region that merged away thirty seconds ago holds the only record of what
+  those chunks were doing, and dropping it on retirement is how a fifteen-minute window ends up
+  empty.
+* `RegionBackend` / `FoliaRegionBackend` — the two read-only questions the engine still answers:
+  the global tick handle's metrics, and the configured tick rate.
+
+Every region runs on `ExecutionLane.REGION_TICK`, with no way to place one elsewhere. That is the
+whole point: a region *is* the unit of gameplay ownership, so a region on another lane would be
+gameplay mutated by a thread that does not own it. It is also why "world load on one core, plugins
+on another" is not something a region system can offer — a region thread runs the entire tick for
+what it owns, plugin handlers included.
+
+With this in place the backend is named in exactly two files, `RegionOwnerHandoff` and
+`FoliaRegionBackend`, and `perf` no longer names it at all. The independence tests pin the file
+set, not just the symbols, so replacing the backend stays an edit to a known list rather than a
+search.
+
 ## What counts as coupling
 
 The public Bukkit-facing Folia API — `io.papermc.paper.threadedregions.scheduler` — is not
@@ -39,8 +66,8 @@ Five sites in SourbyCraft-owned code, across eighty files:
 
 | Where | Symbol | Why |
 | --- | --- | --- |
-| `perf/PerformanceCollector.java` | `RegionizedServer.getGlobalTickData()` | read the global tick handle's metrics |
-| `perf/PerformanceCollector.java` | `TickRegionScheduler::getTickRate` | the configured tick rate, for TPS |
+| `execution/region/FoliaRegionBackend.java` | `RegionizedServer.getGlobalTickData()` | read the global tick handle's metrics |
+| `execution/region/FoliaRegionBackend.java` | `TickRegionScheduler::getTickRate` | the configured tick rate, for TPS |
 | `execution/RegionOwnerHandoff.java` | `EntityScheduler` | the single adapter behind `OwnerHandoff`; hands work to an entity's owning region |
 
 One site in the fourteen engine-integration patches:

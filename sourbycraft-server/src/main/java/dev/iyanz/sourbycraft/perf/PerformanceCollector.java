@@ -2,9 +2,9 @@ package dev.iyanz.sourbycraft.perf;
 
 import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
+import dev.iyanz.sourbycraft.execution.region.FoliaRegionBackend;
+import dev.iyanz.sourbycraft.execution.region.RegionBackend;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
-import io.papermc.paper.threadedregions.RegionizedServer;
-import io.papermc.paper.threadedregions.TickRegionScheduler;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
@@ -63,9 +63,15 @@ public final class PerformanceCollector implements AutoCloseable {
 
     public PerformanceCollector(final SourbyMetricsProvider provider, final RegionMetricsRegistry registry,
                                 final Supplier<ImmutableRuntimeMetrics> runtimeSource) {
+        this(provider, registry, runtimeSource, new FoliaRegionBackend());
+    }
+
+    public PerformanceCollector(final SourbyMetricsProvider provider, final RegionMetricsRegistry registry,
+                                final Supplier<ImmutableRuntimeMetrics> runtimeSource,
+                                final RegionBackend backend) {
         this(provider, registry::forEachUnexpiredForCollection,
-            now -> RegionizedServer.getGlobalTickData().sourbyTickMetrics.current().refreshSnapshot(now), runtimeSource,
-            System::nanoTime, System::currentTimeMillis, TickRegionScheduler::getTickRate,
+            backend::globalTickMetrics, runtimeSource,
+            System::nanoTime, System::currentTimeMillis, backend::tickRateHz,
             (message, failure) -> SourbyLogger.error(message, failure));
     }
 
