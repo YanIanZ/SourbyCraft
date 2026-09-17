@@ -33,7 +33,7 @@ the async worker, so without it every off-region solve NPEs. The two are one
 feature and neither stands alone.
 
 diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 0b5fab274d9471472ffe81dead60e4d0906b0f31..025189a887b10999aafe865a8df902a4a689cf44 100644
+index 0b5fab274d9471472ffe81dead60e4d0906b0f31..6933d5aa5f6f724df11417d8602c097fb2db7a28 100644
 --- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 +++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 @@ -100,6 +100,17 @@ public abstract class PathNavigation {
@@ -54,7 +54,7 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..025189a887b10999aafe865a8df902a4
              this.path = null;
              this.path = this.createPath(this.targetPos, this.reachRange);
              this.timeLastRecompute = this.tick; // Folia - region threading
-@@ -107,6 +118,59 @@ public abstract class PathNavigation {
+@@ -107,6 +118,66 @@ public abstract class PathNavigation {
          }
      }
  
@@ -96,9 +96,16 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..025189a887b10999aafe865a8df902a4
 +        this.sourbyAsyncPathPending = true;
 +        dev.iyanz.sourbycraft.perf.AsyncPathProcessor
 +            .submit(() -> solver.findPath(snapshot, mob, targets, maxPathLength, reachRange, mult))
-+            .whenComplete((path, err) -> dev.iyanz.sourbycraft.perf.AsyncPathCompletion.schedule(
-+                mob.getBukkitEntity().taskScheduler,
-+                () -> {
++            .whenComplete((path, err) -> dev.iyanz.sourbycraft.perf.AsyncPathCompletion.deliver(
++                dev.iyanz.sourbycraft.execution.RegionOwnerHandoff.forEntity(mob),
++                owner -> {
++                    // The region hands back the entity as it is now. A dimension transfer
++                    // replaces the underlying entity, so a solve computed for the old one must
++                    // not be applied: this navigation belongs to the entity that was replaced,
++                    // and its level, position and target are no longer the live ones.
++                    if (owner != mob) {
++                        return;
++                    }
 +                    if (path != null && path.getTarget() != null) {
 +                        this.path = path;
 +                        this.targetPos = path.getTarget();

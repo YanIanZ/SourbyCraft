@@ -123,7 +123,8 @@ class SchedulerCouplingTest(unittest.TestCase):
         "io.papermc.paper.threadedregions.TickRegionScheduler",
         "RegionizedServer",
         "TickRegionScheduler",
-        # Async pathfinding hands the completion back to the owning entity's region.
+        # The one adapter behind the Aurora owner-handoff contract. Everything that hands
+        # work to an entity's owner goes through OwnerHandoff, so this is the only name.
         "io.papermc.paper.threadedregions.EntityScheduler",
     }
 
