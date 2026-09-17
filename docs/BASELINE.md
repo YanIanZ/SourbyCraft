@@ -491,8 +491,14 @@ foreign CPU against a 10% limit, and a three-point difference in background load
 runs is the same order as a 5-9% delta. The honest claim is "no benefit, some cost", not the
 specific percentages.
 
-Foreign CPU is now the binding constraint on this kind of work. It has blocked or degraded
-every run in this series, and the largest single contributor is the harness's own Python client
-swarm sharing the box with the server it measures. Nothing further should be tuned from small
-deltas until that is resolved — either by excluding the swarm from the foreign measurement, or
-by driving clients from another machine.
+Foreign CPU is the binding constraint on this kind of work, and it is not the harness's fault.
+Measured while the runs were being written up, the machine was carrying RobloxPlayer at 98.6%
+of a core, contactsd at 56.2%, two Discord processes at 43.6% together and WindowServer at
+18.7% — about two of eight cores, which is the 24.9% to 28.1% those runs reported almost
+exactly. The client swarm was blamed for this first, without being measured; it is not the
+largest contributor.
+
+So the guard is working as designed and there is nothing to re-engineer. What it needs is a
+quiet desktop: close the browser, the game and the chat client, then measure. A run that
+reports foreign CPU near zero is worth more than three that do not, and no amount of accounting
+cleverness recovers a measurement taken beside a game engine.
