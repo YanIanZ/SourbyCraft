@@ -15,5 +15,6 @@ import org.junit.platform.suite.api.Suite;
     dev.iyanz.sourbycraft.execution.ExecutionLaneTest.class,
     dev.iyanz.sourbycraft.execution.region.AuroraRegionTest.class,
     dev.iyanz.sourbycraft.execution.LaneCpuSamplerTest.class,
-    dev.iyanz.sourbycraft.execution.LanePortionsTest.class})
+    dev.iyanz.sourbycraft.execution.LanePortionsTest.class,
+    dev.iyanz.sourbycraft.command.SourbyReplyTest.class})
 public class RuntimeModernizationTestSuite {}

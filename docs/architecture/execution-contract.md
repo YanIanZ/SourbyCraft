@@ -250,10 +250,19 @@ The feature remains default-off. This review removes the live-level read and sta
 mob reads precisely; it does not by itself qualify enabling it, which still wants a workload
 measurement.
 
-`SourbyReply` groups all non-player senders into a direct reply path, including a comment about
-command-block senders. That comment alone is insufficient evidence for arbitrary gameplay-side
-mutations. A future contract must distinguish a thread-safe message sink from an owned gameplay
-command context.
+`SourbyReply` grouped all non-player senders into a direct reply path on the strength of a
+comment. The comment was wrong. `BaseCommandBlock.sendSystemMessage` writes `lastOutput` on the
+block entity and calls `onUpdated`, behind both `AsyncCatcher.catchOp` and Folia's
+`threadCheck()` — so replying to a command block from an off-thread worker threw, and the
+catch-all logged it and moved on. A command block running `/ping` or `/speedtest` silently got
+no output.
+
+The distinction the document asked for now exists as `SourbyReply.hopFor`: an entity sender goes
+to its own scheduler, a `BlockCommandSender` to the region owning its block, and console and RCON
+run directly because they write to a logger or a connection buffer and own no world state. It is
+a separate function from `run` because the safety decision should be testable without reaching a
+static scheduler, and it is pinned by tests — including that a non-player *entity* sender, which
+`/execute as` produces, needs an entity hop rather than the old direct path.
 
 ## Implementation sequence
 
