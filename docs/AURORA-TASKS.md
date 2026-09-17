@@ -25,6 +25,8 @@ Status:
 - [x] document no-auto-tuning rule under Aurora
 - [x] define `AuroraConfig` typed root model
 - [x] define config lifecycle and reload status model
+- [x] Aurora engine package inside the Minecraft tree — `dev.iyanz.aurora.*`, see
+  [aurora-engine-package.md](architecture/aurora-engine-package.md)
 - [ ] expose Aurora architecture/build metadata in `/version` where appropriate
 
 ## B. Aurora configuration ownership

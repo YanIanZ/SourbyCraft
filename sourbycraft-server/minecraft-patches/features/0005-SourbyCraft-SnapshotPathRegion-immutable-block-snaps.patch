@@ -25,37 +25,19 @@ Evaluator's terminal PathType read goes through getBlockStateIfLoaded).
 Not yet wired into PathNavigation — the AI-tick wiring is the next gated
 step (needs a live mob-behaviour soak before default-on).
 
-diff --git a/net/minecraft/world/level/PathNavigationRegion.java b/net/minecraft/world/level/PathNavigationRegion.java
-index 24e82cff2bc2908852bcd4f1367b54690a65e2da..dfd54287295e9c1e51a78dc4e51de4d0a7f788fb 100644
---- a/net/minecraft/world/level/PathNavigationRegion.java
-+++ b/net/minecraft/world/level/PathNavigationRegion.java
-@@ -89,14 +89,14 @@ public class PathNavigationRegion implements CollisionGetter {
- 
-     @Nullable
-     @Override
--    public final FluidState getFluidIfLoaded(BlockPos pos) {
-+    public FluidState getFluidIfLoaded(BlockPos pos) { // SourbyCraft - de-final so SnapshotPathRegion can serve reads from its immutable copy
-         ChunkAccess chunk = getChunkIfLoaded(pos.getX() >> 4, pos.getZ() >> 4);
-         return chunk == null ? null : chunk.getFluidState(pos);
-     }
- 
-     @Nullable
-     @Override
--    public final BlockState getBlockStateIfLoaded(BlockPos pos) {
-+    public BlockState getBlockStateIfLoaded(BlockPos pos) { // SourbyCraft - de-final so SnapshotPathRegion can serve reads from its immutable copy
-         ChunkAccess chunk = getChunkIfLoaded(pos.getX() >> 4, pos.getZ() >> 4);
-         return chunk == null ? null : chunk.getBlockState(pos);
-     }
-diff --git a/net/minecraft/world/level/SnapshotPathRegion.java b/net/minecraft/world/level/SnapshotPathRegion.java
+diff --git a/dev/iyanz/aurora/level/SnapshotPathRegion.java b/dev/iyanz/aurora/level/SnapshotPathRegion.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..55fdcb196f79cd07406d05ad1c6b9b81b626eb3d
+index 0000000000000000000000000000000000000000..512b655ab551c575062c4f76753fa61c9b469346
 --- /dev/null
-+++ b/net/minecraft/world/level/SnapshotPathRegion.java
-@@ -0,0 +1,212 @@
-+package net.minecraft.world.level;
++++ b/dev/iyanz/aurora/level/SnapshotPathRegion.java
+@@ -0,0 +1,220 @@
++package dev.iyanz.aurora.level;
 +
 +import net.minecraft.core.BlockPos;
 +import net.minecraft.core.SectionPos;
++import net.minecraft.world.level.BlockGetter;
++import net.minecraft.world.level.Level;
++import net.minecraft.world.level.PathNavigationRegion;
 +import net.minecraft.world.level.block.Blocks;
 +import net.minecraft.world.level.block.entity.BlockEntity;
 +import net.minecraft.world.level.block.state.BlockState;
@@ -68,9 +50,14 @@ index 0000000000000000000000000000000000000000..55fdcb196f79cd07406d05ad1c6b9b81
 +import org.jspecify.annotations.Nullable;
 +
 +/**
-+ * SourbyCraft - async pathfinding: a {@link PathNavigationRegion} that captures an <b>immutable</b>
-+ * copy of the block data in its volume, so the A* solve can run off the region tick thread without
-+ * racing the live world.
++ * Aurora engine — a {@link PathNavigationRegion} that captures an <b>immutable</b> copy of the
++ * block data in its volume, so the A* solve can run off the region tick thread without racing the
++ * live world.
++ *
++ * <p>Lives under {@code dev.iyanz.aurora} rather than {@code net.minecraft.world.level}. It is
++ * engine code and belongs in the engine tree, but it is not Mojang's: keeping it in a vanilla
++ * package hides which lines of the engine SourbyCraft wrote, and makes every upstream diff read as
++ * though this class came from above.
 + *
 + * <p>Vanilla {@code PathNavigationRegion} snapshots only chunk <i>references</i> and dereferences the
 + * live, mutable section palettes on every read — reading those off the owning region thread is exactly
@@ -264,3 +251,24 @@ index 0000000000000000000000000000000000000000..55fdcb196f79cd07406d05ad1c6b9b81
 +        }
 +    }
 +}
+diff --git a/net/minecraft/world/level/PathNavigationRegion.java b/net/minecraft/world/level/PathNavigationRegion.java
+index 24e82cff2bc2908852bcd4f1367b54690a65e2da..dfd54287295e9c1e51a78dc4e51de4d0a7f788fb 100644
+--- a/net/minecraft/world/level/PathNavigationRegion.java
++++ b/net/minecraft/world/level/PathNavigationRegion.java
+@@ -89,14 +89,14 @@ public class PathNavigationRegion implements CollisionGetter {
+ 
+     @Nullable
+     @Override
+-    public final FluidState getFluidIfLoaded(BlockPos pos) {
++    public FluidState getFluidIfLoaded(BlockPos pos) { // SourbyCraft - de-final so SnapshotPathRegion can serve reads from its immutable copy
+         ChunkAccess chunk = getChunkIfLoaded(pos.getX() >> 4, pos.getZ() >> 4);
+         return chunk == null ? null : chunk.getFluidState(pos);
+     }
+ 
+     @Nullable
+     @Override
+-    public final BlockState getBlockStateIfLoaded(BlockPos pos) {
++    public BlockState getBlockStateIfLoaded(BlockPos pos) { // SourbyCraft - de-final so SnapshotPathRegion can serve reads from its immutable copy
+         ChunkAccess chunk = getChunkIfLoaded(pos.getX() >> 4, pos.getZ() >> 4);
+         return chunk == null ? null : chunk.getBlockState(pos);
+     }

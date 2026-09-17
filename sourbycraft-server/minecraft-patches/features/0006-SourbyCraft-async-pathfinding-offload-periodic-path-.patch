@@ -78,7 +78,7 @@ index 45942481a972f2308eae80f6f0f8b886e47016ec..e50157aa7469c654b06dd7d697993b29
      protected PathFinder createPathFinder(final int maxVisitedNodes) {
          this.nodeEvaluator = new AmphibiousNodeEvaluator(false);
 diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 0b5fab274d9471472ffe81dead60e4d0906b0f31..00d7f502bcab5b0aba8a0bdc3f4e7a9e196bea64 100644
+index 0b5fab274d9471472ffe81dead60e4d0906b0f31..40aec05434ecf0e5b61d95651410fbaf5727c5ae 100644
 --- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 +++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 @@ -100,6 +100,17 @@ public abstract class PathNavigation {
@@ -108,7 +108,7 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..00d7f502bcab5b0aba8a0bdc3f4e7a9e
 +
 +    /**
 +     * Recompute the path off the region thread. The setup — target validation, {@code
-+     * EntityPathfindEvent}, the immutable {@link net.minecraft.world.level.SnapshotPathRegion} and a
++     * EntityPathfindEvent}, the immutable {@link dev.iyanz.aurora.level.SnapshotPathRegion} and a
 +     * fresh thread-isolated {@code PathFinder}/{@code NodeEvaluator} — all happens HERE on the region
 +     * thread. Only the A* solve runs on the worker pool, against the immutable snapshot (block reads
 +     * are safe; the mob is only read, never structurally mutated, during a solve). The mob keeps its
@@ -149,7 +149,7 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..00d7f502bcab5b0aba8a0bdc3f4e7a9e
 +        final float maxPathLength = this.getMaxPathLength();
 +        final net.minecraft.core.BlockPos fromPos = this.mob.blockPosition();
 +        final int radius = (int) (maxPathLength + 8.0F);
-+        final net.minecraft.world.level.SnapshotPathRegion snapshot = new net.minecraft.world.level.SnapshotPathRegion(
++        final dev.iyanz.aurora.level.SnapshotPathRegion snapshot = new dev.iyanz.aurora.level.SnapshotPathRegion(
 +            this.level, fromPos.offset(-radius, -radius, -radius), fromPos.offset(radius, radius, radius));
 +        // A fresh solver per solve — PathFinder/NodeEvaluator hold mutable A* buffers and MUST NOT be
 +        // shared with the region thread's this.pathFinder.
