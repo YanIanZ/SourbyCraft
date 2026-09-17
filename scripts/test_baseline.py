@@ -56,6 +56,33 @@ class DistributionTest(unittest.TestCase):
             self.assertIn(field, result)
 
 
+class UnreadableSampleTest(unittest.TestCase):
+    """A metric the server could not compute must not destroy the run that recorded it."""
+
+    def test_null_samples_are_dropped_and_counted_rather_than_summed(self):
+        # jfr print --json has no spelling for NaN, so an uncomputable metric arrives as null --
+        # and a server is likeliest to fail computing one while overloaded, which is the run
+        # most worth keeping. Summing these raised TypeError and lost the whole measurement.
+        result = metrics.distribution([1.0, None, 3.0, None])
+        self.assertTrue(result["available"])
+        self.assertEqual(result["samples"], 2)
+        self.assertEqual(result["unreadable_samples"], 2)
+        self.assertEqual(result["mean"], 2.0)
+
+    def test_nan_is_dropped_too(self):
+        result = metrics.distribution([1.0, float("nan"), 3.0])
+        self.assertEqual(result["samples"], 2)
+        self.assertEqual(result["unreadable_samples"], 1)
+
+    def test_a_clean_distribution_does_not_mention_unreadable_samples(self):
+        self.assertNotIn("unreadable_samples", metrics.distribution([1.0, 2.0]))
+
+    def test_all_samples_unreadable_is_unavailable_and_says_how_many(self):
+        result = metrics.distribution([None, None, None])
+        self.assertFalse(result["available"])
+        self.assertIn("3 recorded", result["reason"])
+
+
 class GcMetricsTest(unittest.TestCase):
     def test_reports_pause_distribution_and_collectors(self):
         pauses = [{"duration": "PT0.004S"}, {"duration": "PT0.020S"}]

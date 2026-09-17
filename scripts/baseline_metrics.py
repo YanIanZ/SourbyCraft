@@ -6,6 +6,7 @@ derived estimate, and an unsupported metric is reported as unavailable rather th
 defaulted to zero. See docs/BASELINE.md.
 """
 from datetime import datetime
+import math
 import json
 import re
 import subprocess
@@ -40,13 +41,25 @@ def percentile(values, fraction):
 
 
 def distribution(values):
-    """Summarize a sample list into the distribution PRD section 9 requires."""
-    if not values:
-        return dict(UNAVAILABLE, reason="no samples recorded")
-    return {"available": True, "samples": len(values),
-            "mean": sum(values) / len(values), "min": min(values),
-            "p50": percentile(values, 0.50), "p95": percentile(values, 0.95),
-            "p99": percentile(values, 0.99), "max": max(values)}
+    """Summarize a sample list into the distribution PRD section 9 requires.
+
+    Unreadable samples are dropped and counted rather than summed. A metric the server could
+    not compute arrives as null through ``jfr print --json`` — NaN has no JSON spelling — and a
+    server is most likely to fail computing one while it is overloaded, which is exactly the run
+    worth keeping. Summing those raised a TypeError and destroyed the whole measurement.
+    """
+    usable = [value for value in values
+              if value is not None and not (isinstance(value, float) and math.isnan(value))]
+    if not usable:
+        return dict(UNAVAILABLE, reason=f"no readable samples in {len(values)} recorded")
+    summary = {"available": True, "samples": len(usable),
+               "mean": sum(usable) / len(usable), "min": min(usable),
+               "p50": percentile(usable, 0.50), "p95": percentile(usable, 0.95),
+               "p99": percentile(usable, 0.99), "max": max(usable)}
+    if len(usable) != len(values):
+        # Stated, not silent: a distribution over half its samples is a different claim.
+        summary["unreadable_samples"] = len(values) - len(usable)
+    return summary
 
 
 def read_events(jfr_tool, recording, event):

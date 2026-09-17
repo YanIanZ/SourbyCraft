@@ -68,92 +68,81 @@ public final class SourbyCraftBootstrap {
         started = true;
 
         final Plugin owner = MinecraftInternalPlugin.INSTANCE;
+        final long begun = System.nanoTime();
+        stageCount = 0;
+        failureCount = 0;
 
-        // Register before command and plugin loading; shutdown keeps it readable through plugin disable.
-        try {
+        stage("metrics runtime", () -> {
             dev.iyanz.sourbycraft.perf.MetricsRuntime.start(org.bukkit.Bukkit.getServicesManager(), owner);
-        } catch (Throwable t) {
-            SourbyLogger.error("MetricsRuntime.start failed", t);
-        }
+        });
 
-        // 1. Load + seed the unified TOML (messages, /maxp, auto-updater settings).
-        try {
+        stage("configuration", () -> {
             SourbyCraftConfig.init();
-        } catch (Throwable t) {
-            SourbyLogger.error("SourbyCraftConfig.init failed; utility layer will use hardcoded defaults", t);
-        }
+        });
 
-        // 1b. Write the shipped default ViaVersion/ViaBackwards config.yml (1.20 floor) into
-        //     plugins/<name>/, only when absent — must run before CraftServer#enablePlugins,
-        //     where Via reads its config in onEnable.
-        try {
+        stage("plugin provisioning", () -> {
             PluginProvisioner.provisionConfigs(SourbyCraftConfig.cfgBool("viaversion.auto-provision", true));
-        } catch (Throwable t) {
-            SourbyLogger.error("PluginProvisioner.provisionConfigs failed", t);
-        }
+        });
 
-        // 2. Branded startup banner + GC/JVM advisory (console output; warn-only).
-        try {
+        stage("banner", () -> {
             StartupBanner.printOnce();
-        } catch (Throwable t) {
-            SourbyLogger.error("StartupBanner.printOnce failed", t);
-        }
+        });
 
-        // 3. Capture plugin-load failures for /sys — must be installed before CraftServer#loadPlugins.
-        try {
+        stage("plugin diagnostics", () -> {
             PluginLoadDiagnostics.install();
-        } catch (Throwable t) {
-            SourbyLogger.error("PluginLoadDiagnostics.install failed", t);
-        }
+        });
 
-        // 4. Claim the bare command names (/tps, /ping, /ver, ...) + register the HUD quit-listener.
-        try {
+        stage("commands", () -> {
             SourbyCraftCommands.registerAll();
-        } catch (Throwable t) {
-            SourbyLogger.error("SourbyCraftCommands.registerAll failed", t);
-        }
+        });
 
-        // 5. Varied join/leave broadcast messages.
-        try {
+        stage("join listener", () -> {
             SourbyJoinLeaveListener.register(owner);
-        } catch (Throwable t) {
-            SourbyLogger.error("SourbyJoinLeaveListener.register failed", t);
-        }
+        });
 
-        // 6. /maxp persisted value + opt-in full-server bypass.
-        try {
+        stage("player slots", () -> {
             MaxPlayersConfig.applyAtBoot();
-        } catch (Throwable t) {
-            SourbyLogger.error("MaxPlayersConfig.applyAtBoot failed", t);
-        }
-        try {
             MaxPlayersBypass.register(owner);
-        } catch (Throwable t) {
-            SourbyLogger.error("MaxPlayersBypass.register failed", t);
-        }
+        });
 
-        // 7. Virtual-thread executor for off-thread command work (/speedtest, /update, /ping geoip).
-        try {
+        stage("virtual executor", () -> {
             VirtualExecutor.init();
-        } catch (Throwable t) {
-            SourbyLogger.error("VirtualExecutor.init failed", t);
-        }
+        });
 
-        // 8. Auto-updater (+ ViaVersion/ViaBackwards keep-current on the same cadence).
-        try {
+        stage("auto updater", () -> {
             AutoUpdateSettings.startUpdater();
-        } catch (Throwable t) {
-            SourbyLogger.error("AutoUpdateSettings.startUpdater failed", t);
-        }
+        });
 
-        // 9b. GcTracker — always-on, lightweight GC-health sampler feeding /sys and the perf readout.
-        //     GC pauses are invisible in TPS/MSPT, so this rolling-window tracker is the only source
-        //     for collections/min + GC-time%. One daemon thread; never throws.
-        try {
+        stage("gc tracker", () -> {
             dev.iyanz.sourbycraft.perf.GcTracker.start();
-        } catch (Throwable t) {
-            SourbyLogger.error("GcTracker.start failed", t);
-        }
+        });
 
+        SourbyLogger.info(dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
+            TOTAL_STAGES, failureCount, (System.nanoTime() - begun) / 1_000_000L));
+    }
+
+    /** Stages the engine brings up, in order; the denominator of the boot bar. */
+    private static final int TOTAL_STAGES = 11;
+    private static int stageCount;
+    private static int failureCount;
+
+    /**
+     * Runs one boot stage and reports it.
+     *
+     * <p>A stage that throws is counted, logged and stepped past: none of these are load-bearing
+     * enough to abort a server start, and a half-started engine that says which part is missing is
+     * more useful than one that refuses to boot. The bar turns critical from the first failure, so
+     * the progress line cannot read healthy while something is broken.</p>
+     */
+    private static void stage(final String name, final Runnable body) {
+        try {
+            body.run();
+        } catch (final Throwable failure) {
+            failureCount++;
+            SourbyLogger.error(name + " failed during Aurora boot", failure);
+        }
+        stageCount++;
+        SourbyLogger.info(dev.iyanz.sourbycraft.brand.AuroraBoot.render(
+            stageCount, TOTAL_STAGES, name, failureCount > 0));
     }
 }
