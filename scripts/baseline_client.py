@@ -142,8 +142,11 @@ class HeadlessClient(threading.Thread):
         self._x, self._y, self._z = 0.0, 80.0, 0.0
         self._angle = self._random.uniform(0.0, math.tau)
         self._flying = self._random.random() < 0.5
+        self._cruise = self._random.uniform(self.FLOOR, self.CEILING)
         self._synced = False
+        self._corrected = False
         self.syncs = 0
+        self.corrections = 0
         self.reached_play = threading.Event()
 
     def _sync(self, connection, payload, threshold):
@@ -160,6 +163,12 @@ class HeadlessClient(threading.Thread):
         if len(body) == 24:
             self._x, self._y, self._z = struct.unpack(">ddd", body)
         connection.sendall(_frame(SERVERBOUND_ACCEPT_TELEPORT, write_varint(teleport_id), threshold))
+        if self._synced:
+            # Not the login teleport: the server disagreed with where we claimed to be and put
+            # us back. Walking the same heading into the same hillside is what turned two of ten
+            # clients into 2757 of one run's 4354 "moved wrongly" warnings.
+            self._corrected = True
+            self.corrections += 1
         self._synced = True
         self.syncs += 1
 
@@ -168,17 +177,37 @@ class HeadlessClient(threading.Thread):
 
         Half the clients fly and half walk, and each turns by a small random amount every
         step, so the swarm spreads out and keeps loading new chunks instead of orbiting one
-        point. The walk height is only approximate: this client does not track terrain, and
-        the server corrects a position it disagrees with rather than dropping the player.
+        point.
+
+        "Moved wrongly" is not a speed limit. The server runs collision physics on the move
+        and compares where we claimed to be against where physics put us; a claim it cannot
+        reach by more than movedWronglyThreshold is refused and teleported back. This client
+        has no heightmap, so it avoids the refusal three ways: it steps slowly enough to stay
+        inside vanilla speeds, it turns away when the server corrects it rather than pushing
+        into the same obstacle, and a flier climbs when corrected until it is over the terrain
+        instead of inside it.
         """
+        if self._corrected:
+            self._corrected = False
+            self._angle = self._random.uniform(0.0, math.tau)
+            if self._flying:
+                # We were inside something, so terrain here is higher than we assumed. Raise
+                # the cruise altitude; the climb itself is rate-limited below.
+                self._cruise = min(self.CEILING, self._cruise + self.CLIMB_ON_CORRECTION)
         self._angle += self._random.uniform(-0.6, 0.6)
-        # Vanilla walking is about 4.3 blocks per second; at four steps a second that is
-        # roughly one block per step. Sprinting is a little over that.
-        speed = 3.0 if self._flying else 0.95
+        # Vanilla walking is about 4.3 blocks per second and creative flight about 10.9; at
+        # four steps a second these stay under both, because a longer step is likelier to
+        # cross into a hillside and produces a bigger discrepancy when it does.
+        speed = 2.0 if self._flying else 0.85
         self._x += math.cos(self._angle) * speed
         self._z += math.sin(self._angle) * speed
         if self._flying:
-            self._y = max(70.0, min(160.0, self._y + self._random.uniform(-1.0, 1.0)))
+            # Climb toward cruise rather than snapping to it. Clients spawn near the surface,
+            # and a jump of a hundred blocks in one step is refused exactly like walking into a
+            # hill. Altitude itself costs the workload nothing: chunks load by horizontal
+            # position, so cruising above the terrain loses no chunk traffic.
+            wanted = self._cruise + self._random.uniform(-1.0, 1.0) - self._y
+            self._y += max(-self.CLIMB_RATE, min(self.CLIMB_RATE, wanted))
         yaw = math.degrees(self._angle) % 360.0 - 180.0
         # PosRot: three doubles, two floats, then a packed flags byte whose low bit is
         # onGround (ServerboundMovePlayerPacket#packFlags).
@@ -190,6 +219,11 @@ class HeadlessClient(threading.Thread):
         connection.sendall(_frame(SERVERBOUND_MOVE_POS_ROT, payload, threshold))
         self.moves += 1
         self._next_move = time.monotonic() + 0.25   # Four updates a second, like a real client.
+
+    FLOOR = 180.0                 # Above normal terrain; mountains reach past 200.
+    CEILING = 250.0               # Below the build limit, with room to climb.
+    CLIMB_ON_CORRECTION = 12.0    # One correction should clear a hillside, not creep over it.
+    CLIMB_RATE = 2.0              # Per step, so eight blocks a second: inside creative flight.
 
     def stop(self):
         self._halt.set()
@@ -280,6 +314,7 @@ class ClientSwarm:
                 "keep_alives": sum(c.keep_alives for c in self._clients),
                 "moves": sum(c.moves for c in self._clients),
                 "flying": sum(1 for c in self._clients if c._flying),
+                "corrections": sum(c.corrections for c in self._clients),
                 "syncs": sum(c.syncs for c in self._clients),
                 "first_error": failed[0].failure if failed else None,
                 "stages": sorted({c.stage for c in self._clients})}
