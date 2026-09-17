@@ -464,3 +464,35 @@ terrain from noise.
 The seed is a previous run's world with `dimensions/minecraft/overworld/entities/*.mca` removed.
 Entities have to go: the workload summons its own three hundred on every run, and a seed that
 keeps the last run's would stack them.
+
+### The chunk-worker A/B, seeded
+
+Re-run on the seeded world, six workers against two:
+
+| Metric | fresh world | seeded |
+| --- | ---: | ---: |
+| MSPT avg | +45.2% | +8.4% |
+| MSPT p50 | +56.2% | +9.6% |
+| MSPT p95 | +55.5% | +6.4% |
+| MSPT p99 | +43.3% | +5.3% |
+| MSPT max | +39.4% | −36.3% |
+
+Lane split, same mechanism and much milder: `CHUNK_WORKER` 0.34 to 0.47 cores, `REGION_TICK`
+0.30 to 0.34.
+
+The direction survives — six workers buy nothing — but the fresh-world run overstated the
+penalty about fivefold. Most of that +45% was the extra threads contending with terrain
+generation, not a cost of the threads themselves. The recommendation is unchanged and its
+justification is weaker: leave the worker count alone because nothing is gained, not because
+raising it is catastrophic.
+
+**The seeded deltas are inside the measurement noise.** Both runs measured 24.9% and 28.1%
+foreign CPU against a 10% limit, and a three-point difference in background load between two
+runs is the same order as a 5-9% delta. The honest claim is "no benefit, some cost", not the
+specific percentages.
+
+Foreign CPU is now the binding constraint on this kind of work. It has blocked or degraded
+every run in this series, and the largest single contributor is the harness's own Python client
+swarm sharing the box with the server it measures. Nothing further should be tuned from small
+deltas until that is resolved — either by excluding the swarm from the foreign measurement, or
+by driving clients from another machine.
