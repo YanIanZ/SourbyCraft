@@ -87,3 +87,40 @@ to the download concurrency the bootstrap actually wants would close it.
 * `AsyncPathProcessor`'s caller-runs rejection policy means a saturated queue executes
   the task on the submitting thread. Whether that thread can be a region thread, and
   what that would cost, belongs to the open async-pathfinding audit.
+
+## Measured lane load
+
+`LaneCpuSampler` attributes per-thread CPU to an `ExecutionLane` and emits it as
+`dev.iyanz.sourbycraft.LaneLoad`. From a certified `players-10` run on an 8-core machine,
+300 entities and 10 connected clients:
+
+| Lane | Threads | Mean cores | Share |
+| --- | ---: | ---: | ---: |
+| `CHUNK_WORKER` | 4 | 1.43 | 85% |
+| `REGION_TICK` | 4 | 0.22 | 13% |
+| `NETWORK` | 4 | 0.02 | 1% |
+| `WORLD_IO` | 5 | 0.01 | — |
+| `TELEMETRY` | 6 | 0.00 | — |
+| `PLUGIN_ASYNC` | 4 | 0.00 | — |
+| `OTHER` | 23 | 0.00 | — |
+| **Total** | **50** | **1.68** | **of 8 cores** |
+
+Three things this settles.
+
+Gameplay is not the cost. `REGION_TICK` — entities, blocks and the plugin handlers fired
+from them — used 0.22 cores across four threads, roughly a twentieth of a core each.
+Moving work off the region lane cannot help a lane that is already idle.
+
+Chunk generation is nearly all of it, at 85%. That agrees with the soak's CPU ranking,
+which put 61.6% of execution samples on the chunk workers, but by direct measurement of
+consumed CPU rather than by attributing samples.
+
+The machine is 79% idle. 1.68 of 8 cores at ten players means the earlier fifty-player
+saturation was a property of that load, not of how the lanes are arranged.
+
+Two caveats before anything is sized from this. Twenty-three of fifty threads land in
+`OTHER`: they consume no measurable CPU so they do not distort the totals, but the
+mapping only properly covers the lanes that are busy. And `CHUNK_WORKER` counts four
+threads here because the classifier folds `Worker-Main` in with `Paper Common Worker` —
+defensible, since Mojang's background executor does chunk work, but they are arguably two
+lanes and should be split before the number is used for tuning.
