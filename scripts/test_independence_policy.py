@@ -117,8 +117,8 @@ class SchedulerCouplingTest(unittest.TestCase):
     """
 
     APPROVED = {
-        # Telemetry. The collector reads the global tick handle's metrics and the
-        # configured tick rate; it schedules nothing and mutates nothing.
+        # The Aurora region system's backend adapter: the global tick handle's metrics and the
+        # configured tick rate. Read-only; it schedules nothing and mutates nothing.
         "io.papermc.paper.threadedregions.RegionizedServer",
         "io.papermc.paper.threadedregions.TickRegionScheduler",
         "RegionizedServer",
@@ -127,6 +127,16 @@ class SchedulerCouplingTest(unittest.TestCase):
         # work to an entity's owner goes through OwnerHandoff, so this is the only name.
         "io.papermc.paper.threadedregions.EntityScheduler",
     }
+
+    def test_the_backend_is_named_only_inside_the_adapters(self):
+        # The point of the contracts is that replacing the backend is an edit to a known set of
+        # files, not a search. Two adapters: one answers "how is the engine ticking", the other
+        # "hand this to whoever owns that entity".
+        files = {site["file"] for site in policy.scheduler_sites(REPO)}
+        self.assertEqual(files, {
+            "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/execution/RegionOwnerHandoff.java",
+            "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/execution/region/FoliaRegionBackend.java",
+        }, "the region backend is named outside the adapters; route it through a contract")
 
     def test_sourby_code_reaches_the_scheduler_only_where_recorded(self):
         found = {site["symbol"] for site in policy.scheduler_sites(REPO)}

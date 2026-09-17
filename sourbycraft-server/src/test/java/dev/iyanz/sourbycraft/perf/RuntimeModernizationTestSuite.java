@@ -12,5 +12,6 @@ import org.junit.platform.suite.api.Suite;
     dev.iyanz.sourbycraft.config.AuroraConfigTest.class,
     TelemetryEventTest.class, AsyncPathShutdownTest.class, AsyncPathCompletionTest.class,
     ScratchBufferConfinementTest.class, IsInWallBoundsTest.class, EngineNameTest.class,
-    dev.iyanz.sourbycraft.execution.ExecutionLaneTest.class})
+    dev.iyanz.sourbycraft.execution.ExecutionLaneTest.class,
+    dev.iyanz.sourbycraft.execution.region.AuroraRegionTest.class})
 public class RuntimeModernizationTestSuite {}
