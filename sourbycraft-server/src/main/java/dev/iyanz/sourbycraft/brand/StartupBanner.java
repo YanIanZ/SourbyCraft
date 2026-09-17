@@ -65,12 +65,21 @@ public final class StartupBanner {
             System.out.flush();
             // 1. branded banner
             UTF8_OUT.print(SourbyCraftBanner.render(BuildInfo.load()));
-            // 2. GC + JVM-arg advisor (warn-only; empty string when acceptable)
-            String gcWarn = GcAdvisor.renderWarningBanner(GcAdvisor.run());
-            if (!gcWarn.isEmpty()) {
-                UTF8_OUT.print(gcWarn);
-            }
             UTF8_OUT.flush();
+            // 2. GC + JVM-arg advisor. Logged rather than written to the raw stream the banner
+            //    uses: that stream reaches the console and never reaches logs/latest.log, and the
+            //    operator who needs this most is the one reading logs after a lag incident to
+            //    find out why the server was swapping.
+            final GcAdvisor.Result advice = GcAdvisor.run();
+            if (!advice.acceptable()) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("JVM flag advisor:");
+                for (final String warning : advice.warnings()) {
+                    dev.iyanz.sourbycraft.util.SourbyLogger.warn("  - " + warning);
+                }
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn(
+                    "  Recommended (Java 25): -Xms2G -Xmx<75-85% of allocation> -XX:+UseZGC "
+                    + "-XX:ZUncommitDelay=60 --add-modules=jdk.incubator.vector");
+            }
         } catch (Throwable t) {
             // Branding must never take the server down.
             dev.iyanz.sourbycraft.util.SourbyLogger.warn(
