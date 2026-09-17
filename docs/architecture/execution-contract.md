@@ -194,8 +194,34 @@ like a shared-RNG race. Folia already replaced `Entity.SHARED_RANDOM` with
 draws from the worker's stream rather than the region's — a determinism difference, not
 corruption.
 
-The block snapshot itself (`SnapshotPathRegion`) is still unreviewed. The feature remains
-default-off, and this does not qualify enabling it.
+`SnapshotPathRegion` is now reviewed too. Its central claim holds: `PalettedContainer.copy()`
+deep-copies both the palette and the bit storage (`Palette.copy()` clones its value array,
+`SimpleBitStorage.copy()` clones the `long[]`, and `ZeroBitStorage` is stateless), so block and
+fluid reads during the solve are served entirely from detached data. `getEntityCollisions`
+returns an empty list and `getBlockEntity` returns null, so neither reaches live state.
+
+The claim that the instance was *"fully immutable and safe to read from any thread"* was
+overstated, and three reads escaped it:
+
+* **World border** — `CollisionGetter.noCollision` reaches `borderCollision`, which calls
+  `getWorldBorder()`. That was not overridden, so it dereferenced the live level from the worker.
+  Now captured as a detached copy at construction, which also freezes a lerping border for the
+  duration of one solve.
+* **The live mob** — `noCollision(mob, box)` builds an `EntityCollisionContext` from
+  `isDescending()`, `getY()` and `getMainHandItem()`, and the evaluators read position and
+  bounding box directly. Left as-is and documented: these are reads of the same state a path
+  always races, and a path is recomputed constantly against a position that has already moved.
+  Evaluators that *write* to the mob are refused the offload entirely.
+* **`mob.level()`** — used directly for `getMinY()` in `WalkNodeEvaluator` and `getSeaLevel()` in
+  `AmphibiousNodeEvaluator`, bypassing the snapshot. Both are per-dimension constants fixed at
+  world load, so they are safe; noted because they are easy to mistake for live reads.
+
+The parent also retains its live `ChunkAccess` references. Every read path is overridden, so they
+are never dereferenced off-thread, but they pin those chunks for the solve's duration.
+
+The feature remains default-off. This review removes the live-level read and states the residual
+mob reads precisely; it does not by itself qualify enabling it, which still wants a workload
+measurement.
 
 `SourbyReply` groups all non-player senders into a direct reply path, including a comment about
 command-block senders. That comment alone is insufficient evidence for arbitrary gameplay-side
