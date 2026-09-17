@@ -45,6 +45,7 @@ public final class SourbyCraftCommands {
         OURS.clear();
         OURS.put("ping", new PingCommand("ping"));
         OURS.put("sys", new SysCommand("sys"));
+        OURS.put("spec", new SpecCommand("spec"));
         OURS.put("plugins", new PluginsCommand("plugins"));
         OURS.put("speedtest", new SpeedtestCommand("speedtest"));
         OURS.put("ver", new VerCommand("ver"));
