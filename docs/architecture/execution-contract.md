@@ -70,11 +70,36 @@ The first slice is implemented. `OwnerHandoff` and `Admission` state the contrac
 delivers through it and compares the delivered owner against the entity the solve was
 computed for, discarding the result when a dimension transfer has replaced it.
 
-Requirements 1 to 6 below are met by the contract and its adapter. Requirement 7 is
-partly met: owner identity is validated, request epoch and target/navigation state are
-not. Requirements 8 and 9 -- shutdown disposal and explicit cancellation -- are not
-addressed. The next slice is the one this document asks for first: trace each
-invalidation event before choosing an epoch's lifetime and storage.
+Requirements 1 to 6 are met by the contract and its adapter. Requirement 7 is now met for
+async pathfinding: owner identity and result applicability are both validated, from the
+trace below. Requirements 8 and 9 -- shutdown disposal and explicit cancellation -- are
+not addressed.
+
+### Traced invalidation events for the async path solve
+
+Every write to `PathNavigation.path`, which is `protected` but written by no subclass:
+
+| Event | Site | Effect on an in-flight solve |
+| --- | --- | --- |
+| Synchronous recompute | `recomputePath`, the fallback below the offload | The result overwrites a **newer** path |
+| Retarget or clear | `moveTo(Path, double)` | The result undoes the retarget |
+| Navigation stopped | `stop()` | The result resurrects a stopped navigation |
+
+The first is not hypothetical. `recomputePath` is throttled to twenty ticks, and
+`sourbyAsyncPathPending` only suppresses the *offload* — the synchronous recompute below
+it still runs. A solve outliving the throttle therefore lands on top of a fresher path.
+
+`targetPos` and `reachRange` are written only inside `createPath`, and every caller
+assigns `this.path` in the same statement, so a change of target is visible as a change
+of path. That makes the path object itself a sufficient validity token: the solve
+captures the path it was computed against and discards its result if the navigation is
+no longer following that object.
+
+This is why no epoch field was added. An epoch would need incrementing at every one of
+those sites, widening the diff against upstream, to derive a token the state already
+provides. The trade is that two identical-but-distinct `Path` objects cannot be told
+apart — but `moveTo` only reassigns when `!newPath.sameAs(this.path)`, so a path that
+compares the same is one the mob is still following, and refreshing it is correct.
 
 ## First contract: owner-result handoff
 
