@@ -63,7 +63,7 @@ public final class AuroraBoot {
             }
         }
 
-        return fg(SourbyCraftColors.AURORA) + "  AURORA " + bar + RESET
+        return fg(SourbyCraftColors.AURORA) + "  " + bar + RESET
             + fg(SourbyCraftColors.HEADER) + String.format(Locale.ROOT, " %3d%%", percent)
             + fg(SourbyCraftColors.DIM) + "  " + stage.toLowerCase(Locale.ROOT) + RESET;
     }
@@ -80,7 +80,7 @@ public final class AuroraBoot {
         final String verdict = failures == 0
             ? total + " stages online"
             : failures + " of " + total + " stages degraded";
-        return fg(colour) + "  AURORA ENGINE " + verdict
+        return fg(colour) + "  " + verdict
             + fg(SourbyCraftColors.DIM) + "  " + millis + "ms" + RESET;
     }
 

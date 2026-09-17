@@ -48,7 +48,7 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
     private static final String PRIMARY = fg(0xFF, 0xB3, 0x47); // #FFB347 SourbyCraft brand
     private static final String AURORA  = fg(0x22, 0xD3, 0xEE); // #22D3EE Aurora engine
     /** The engine's name, used for everything inside the Minecraft system. */
-    private static final String ENGINE = "Aurora";
+    private static final String ENGINE = "Aurora Engine";
     private static final String DIM     = fg(0x80, 0x80, 0x80); // #808080 class name
 
     private static final String BRAND = "SourbyCraft";
