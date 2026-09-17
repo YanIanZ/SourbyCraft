@@ -502,3 +502,38 @@ So the guard is working as designed and there is nothing to re-engineer. What it
 quiet desktop: close the browser, the game and the chat client, then measure. A run that
 reports foreign CPU near zero is worth more than three that do not, and no amount of accounting
 cleverness recovers a measurement taken beside a game engine.
+
+### Dense mob AI is not the cost
+
+A reported instability with "too many AI, like 1000 zombies" was profiled two ways.
+
+The live session that prompted it shows what actually went wrong. Tick reached **1208 ms** at its
+worst, and `activeRegions` was **1**: everything spawned at the player's feet lands in one region,
+which is one thread, while the other seven cores idle. Region threading parallelises across
+*space*, so a dense single-point spawn defeats it by construction. The dominant cost was not AI
+either — 806 of 832 samples in the hottest stack were
+`AbstractArrow.canHitEntity → Entity.canBeHitByProjectile → Holder.is → ReferenceOpenHashSet.contains`,
+projectiles scanning nearby entities each tick. `Mob.aiStep` had 9 samples; `PathFinder.findPath`
+had 8.
+
+A controlled run then measured what dense AI does cost: `entity-stress`, 3000 mobs in 81 chunks,
+four connected players so activation range is real, seeded world.
+
+| Share of execution samples | |
+| --- | ---: |
+| terrain generation | 40.5% |
+| entity tick and lookup | 7.4% |
+| random tick and chunk tick | 6.5% |
+| **mob AI and pathfinding** | **1.1%** |
+
+Tick held at 10.4 ms mean and 18.4 ms maximum with eight active regions. Three thousand mobs cost
+about a hundredth of the CPU.
+
+So the advice is spatial, not numerical: spread spawns across regions. The same entity count that
+stalls one region is unremarkable across eight.
+
+One harness limitation this exposed. Terrain generation still dominates at 40.5% *despite* the
+seeded world, because the client swarm flies continuously and generates terrain beyond whatever
+the seed covers. A workload meant to profile entities should keep its clients near the entities —
+which is also what a real AI test looks like. Until that changes, any entity profile taken here
+is reading through a layer of generation noise.
