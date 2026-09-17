@@ -48,6 +48,7 @@ public final class SourbyCraftConfig {
         final AuroraConfig.Parsed parsed = AuroraConfig.parse(utility);
         // Apply before publication: a failed runtime activation must not report success.
         dev.iyanz.sourbycraft.perf.AsyncPathProcessor.setEnabled(parsed.config().entity().asyncPathfinding());
+        dev.iyanz.sourbycraft.execution.LaneCpuSampler.setEnabled(parsed.config().diagnostics().laneSampling());
         loaded = new LoadedConfig(utility, parsed.config());
         for (final String key : parsed.deprecatedKeys()) {
             SourbyLogger.warn("Deprecated config key '" + key + "'; use '"

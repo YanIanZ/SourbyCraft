@@ -19,6 +19,23 @@ import java.util.function.LongSupplier;
  */
 public final class LaneCpuSampler {
 
+    private static volatile boolean enabled = true;
+
+    /**
+     * Turns lane attribution on or off, live.
+     *
+     * <p>Sampling walks every thread once a second. That is cheap beside a loaded server and not
+     * beside an idle one — on an idle server the telemetry lane costs more than the region lane —
+     * so a host running many quiet worlds has a reason to switch it off.</p>
+     */
+    public static void setEnabled(final boolean on) {
+        enabled = on;
+    }
+
+    public static boolean isEnabled() {
+        return enabled;
+    }
+
     private final ThreadCpuSource source;
     private final LongSupplier nanoClock;
     private Map<Long, Long> previousCpu = Map.of();
@@ -62,6 +79,13 @@ public final class LaneCpuSampler {
      * A thread first seen in this sample is counted but contributes no CPU, for the same reason.</p>
      */
     public LaneLoads sample() {
+        if (!enabled) {
+            // Drop the baseline too: resuming later must not attribute the whole gap to whichever
+            // threads happened to run during it.
+            this.previousCpu = Map.of();
+            this.sampled = false;
+            return LaneLoads.unavailable("lane sampling is disabled");
+        }
         final List<ThreadCpuSource.ThreadCpu> threads = this.source.sample();
         final long now = this.nanoClock.getAsLong();
         if (threads.isEmpty()) {
