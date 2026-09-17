@@ -11,7 +11,7 @@ metrics, plugin compatibility, and completed tests remain in place.
 
 | Domain / consumer | Current execution dependency | Required behavior | Migration boundary |
 | --- | --- | --- | --- |
-| Async path completion | `perf/AsyncPathCompletion.java` directly accepts internal `EntityScheduler`; called from Minecraft patch 0006 | Defer mutation to the current entity owner; handle rejection and retirement; release pending state | First candidate: owner-result handoff |
+| Async path completion | `perf/AsyncPathCompletion.java` depends on `OwnerHandoff`; `execution/RegionOwnerHandoff` is the only backend adapter | Defer mutation to the current entity owner; handle rejection and retirement; release pending state | **Done** — owner identity delivered and checked; epoch and target validation outstanding |
 | Path computation | `perf/AsyncPathProcessor.java`, bounded platform-thread pool | Snapshot-only CPU work; defined saturation, cancellation, shutdown | Separate CPU admission contract; do not conflate with owner dispatch |
 | Player replies | `command/SourbyReply.java`, player scheduler | Deliver on current player owner; handle disconnect | Public compatibility API remains until a shared handoff contract proves useful |
 | HUD | `hud/HudBars.java`, global periodic task plus player schedulers | One shared snapshot cadence; player-owned show/hide/preferences; cancellation on close | Separate aggregation cadence from player mutation |
@@ -41,7 +41,7 @@ Five sites in SourbyCraft-owned code, across eighty files:
 | --- | --- | --- |
 | `perf/PerformanceCollector.java` | `RegionizedServer.getGlobalTickData()` | read the global tick handle's metrics |
 | `perf/PerformanceCollector.java` | `TickRegionScheduler::getTickRate` | the configured tick rate, for TPS |
-| `perf/AsyncPathCompletion.java` | `EntityScheduler` | hand a finished path back to the owning entity's region |
+| `execution/RegionOwnerHandoff.java` | `EntityScheduler` | the single adapter behind `OwnerHandoff`; hands work to an entity's owning region |
 
 One site in the fourteen engine-integration patches:
 
@@ -62,6 +62,19 @@ already". It is not. A small number of call sites says the *mechanical* edit is 
 nothing about the semantics behind them, and the requirements below — owner identity across
 dimension transfer, retirement, stale-result validation — are where the work actually is. Counting
 imports measures the surface, not the contract.
+
+## Progress against this document
+
+The first slice is implemented. `OwnerHandoff` and `Admission` state the contract,
+`RegionOwnerHandoff` is the only place `EntityScheduler` is named, and patch 0006 now
+delivers through it and compares the delivered owner against the entity the solve was
+computed for, discarding the result when a dimension transfer has replaced it.
+
+Requirements 1 to 6 below are met by the contract and its adapter. Requirement 7 is
+partly met: owner identity is validated, request epoch and target/navigation state are
+not. Requirements 8 and 9 -- shutdown disposal and explicit cancellation -- are not
+addressed. The next slice is the one this document asks for first: trace each
+invalidation event before choosing an epoch's lifetime and storage.
 
 ## First contract: owner-result handoff
 

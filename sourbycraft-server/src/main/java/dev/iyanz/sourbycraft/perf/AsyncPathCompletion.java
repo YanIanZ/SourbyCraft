@@ -2,8 +2,6 @@ package dev.iyanz.sourbycraft.perf;
 
 import dev.iyanz.sourbycraft.execution.Admission;
 import dev.iyanz.sourbycraft.execution.OwnerHandoff;
-import dev.iyanz.sourbycraft.execution.RegionOwnerHandoff;
-import io.papermc.paper.threadedregions.EntityScheduler;
 import java.util.function.Consumer;
 
 /** Completes an async solve on the entity owner, with cleanup on every retirement path. */
@@ -31,20 +29,5 @@ public final class AsyncPathCompletion {
         if (admission == Admission.REJECTED) {
             release.run();
         }
-    }
-
-    /**
-     * Transitional entrypoint for callers that still hold a backend scheduler.
-     *
-     * <p>Discards the delivered owner, so a result computed for one entity is applied to
-     * whatever the caller captured. Callers are being moved to {@link #deliver}; this exists
-     * so the migration is one call site at a time rather than all at once.</p>
-     *
-     * @deprecated use {@link #deliver} with {@link RegionOwnerHandoff#forEntity}
-     */
-    @Deprecated
-    public static void schedule(final EntityScheduler scheduler, final Runnable apply,
-                                final Runnable release) {
-        deliver(new RegionOwnerHandoff(scheduler), ignoredOwner -> apply.run(), release);
     }
 }
