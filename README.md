@@ -90,8 +90,27 @@ The `26.2` branch already includes or is actively refining:
 - patch/threading architecture audits
 - removal of unsafe cross-region scratch-buffer optimizations
 - direct Minecraft/NMS performance patches where ownership is proven safe
+- Aurora execution contracts, with the region backend confined to two adapter files
+- the Aurora region system: region identity, topology and lifecycle, backend-free
+- execution lanes with per-lane CPU attribution, surfaced by `/perf lanes`
+- an Aurora engine package inside the Minecraft tree, `dev.iyanz.aurora`
+- a certified multi-hour soak
 
-Representative gameplay benchmarks, multi-hour soak tests, deeper entity/chunk/network profiling, and additional Aurora ownership work are still active development tasks.
+Deeper entity/chunk/network profiling and further Aurora ownership work remain active
+development tasks.
+
+### Aurora engine, and where it lives
+
+Aurora is the engine; SourbyCraft is what surrounds it. The console says so — a line from
+`net.minecraft`, `io.papermc.paper`, `io.canvasmc` or `dev.iyanz.aurora` prints as **Aurora
+Engine**, a line from `dev.iyanz.sourbycraft` prints as **SourbyCraft** — and the source tree
+says so too: engine code SourbyCraft wrote lives in `dev.iyanz.aurora.*` inside the Minecraft
+tree, rather than hiding in a vanilla package. See
+[aurora-engine-package.md](docs/architecture/aurora-engine-package.md).
+
+Startup reports the engine coming up stage by stage, as a bar whose percentage is stages
+finished over stages declared — never elapsed time. A stage that fails is named, and the closing
+line reads *degraded*, not *online*.
 
 See **[DEVELOPMENT.md](DEVELOPMENT.md)** and **[Development Task Matrix](docs/DEVELOPMENT-TASKS.md)**.
 
@@ -248,6 +267,7 @@ Current/active command family:
 | `/ver` · `/version` | SourbyCraft build/runtime information |
 | `/plugins` | SourbyCraft-styled plugin list |
 | `/maxp [n]` | max-player management |
+| `/perf lanes` | where the machine's time went, by execution lane |
 | `/update` | SourbyCraft updater status/check |
 
 Planned `/perf` depth includes:
@@ -348,6 +368,12 @@ Requires **JDK 25** and Git.
 
 The active build currently materializes pinned upstream source inputs and applies SourbyCraft changes. Aurora's long-term build goal is reproducible SourbyCraft ownership with upstream inputs treated as replaceable implementation sources rather than runtime requirements.
 
+Scheduler replacement is **not** on the near path, and the measurements are the reason. On this
+hardware the region lane — the part Folia's architecture governs — accounts for roughly a third of
+consumed CPU at ten players, and the machine sits mostly idle; chunk work dominates, and chunk work
+is the same noise mathematics in any architecture. Aurora therefore owns its contracts first, so a
+backend *can* be replaced, and defers replacing one until a workload measurement argues for it.
+
 ---
 
 ## Development documents
@@ -359,8 +385,24 @@ The active architecture/development set is:
 - **[PLAN.md](PLAN.md)** — performance/observability roadmap
 - **[DEVELOPMENT.md](DEVELOPMENT.md)** — unified continuation contract
 - **[Aurora Architecture](docs/architecture/AURORA.md)** — deep engine/configuration architecture
+- **[Aurora Independent Engine](docs/architecture/AURORA-INDEPENDENT-ENGINE.md)** — the phased roadmap beyond Folia constraints
+- **[Execution Contract](docs/architecture/execution-contract.md)** — what SourbyCraft needs from whatever schedules it
+- **[Aurora Engine Package](docs/architecture/aurora-engine-package.md)** — which tree engine code belongs in, and why
 - **[Independence Architecture](docs/architecture/independence.md)** — upstream decoupling strategy
+- **[Performance Baseline](docs/BASELINE.md)** — how a run is measured, certified, and what the measurements found
 - **[Development Task Matrix](docs/DEVELOPMENT-TASKS.md)** — actionable implementation state
+
+### Measuring this server
+
+Baselines are captured by `scripts/run_baseline.py`, which refuses to certify a run it cannot
+trust — a dirty worktree, a moved HEAD, a shared machine, rejected setup commands, clients that
+dropped out. Two rules are worth knowing before reading any number from it:
+
+- **Seed a pre-generated world with `--world`.** Without it, the run builds terrain inside its own
+  measurement window; on this project that accounted for half the measured CPU and most of the
+  tail latency, and made a workload deliver six regions where it declared ten.
+- **Measure on a quiet machine.** The foreign-CPU guard exists because a desktop running a game
+  alongside the server silently doubles the numbers, and no accounting recovers that afterwards.
 - **[Threading Review](docs/architecture/threading.md)** — region-safety findings
 - **[Profiling](docs/PROFILING.md)** — JFR/profiling workflow
 
