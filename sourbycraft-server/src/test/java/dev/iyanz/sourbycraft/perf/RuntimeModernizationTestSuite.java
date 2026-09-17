@@ -14,5 +14,6 @@ import org.junit.platform.suite.api.Suite;
     ScratchBufferConfinementTest.class, IsInWallBoundsTest.class, EngineNameTest.class,
     dev.iyanz.sourbycraft.execution.ExecutionLaneTest.class,
     dev.iyanz.sourbycraft.execution.region.AuroraRegionTest.class,
-    dev.iyanz.sourbycraft.execution.LaneCpuSamplerTest.class})
+    dev.iyanz.sourbycraft.execution.LaneCpuSamplerTest.class,
+    dev.iyanz.sourbycraft.execution.LanePortionsTest.class})
 public class RuntimeModernizationTestSuite {}
