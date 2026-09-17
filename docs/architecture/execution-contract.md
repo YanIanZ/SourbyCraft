@@ -72,8 +72,7 @@ computed for, discarding the result when a dimension transfer has replaced it.
 
 Requirements 1 to 6 are met by the contract and its adapter. Requirement 7 is now met for
 async pathfinding: owner identity and result applicability are both validated, from the
-trace below. Requirements 8 and 9 -- shutdown disposal and explicit cancellation -- are
-not addressed.
+trace below. Requirements 8 and 9 are met for this slice, below.
 
 ### Traced invalidation events for the async path solve
 
@@ -100,6 +99,36 @@ those sites, widening the diff against upstream, to derive a token the state alr
 provides. The trade is that two identical-but-distinct `Path` objects cannot be told
 apart — but `moveTo` only reassigns when `!newPath.sameAs(this.path)`, so a path that
 compares the same is one the mob is still following, and refreshing it is correct.
+
+### Shutdown and cancellation (requirements 8 and 9)
+
+Shutdown is terminal and refuses admission rather than degrading to an inline solve. The
+two look alike and are not: a not-yet-started pool running the solve on the caller is a
+deliberate slow path, but doing it *during shutdown* puts CPU-bound A* on a region thread
+that is trying to stop. A refused submission still returns a completed future, so the
+caller's release runs and nothing is left believing a solve is in flight. Every admitted
+solve is cancelled on the way down, and `AsyncPathProcessor.outstanding()` reports how
+many are unaccounted for.
+
+That counter also makes this document's own caveat measurable: the pool's queue is
+bounded at 1024, but each completed solve then enqueues a delivery on an entity's
+scheduler, and *that* queue is not ours to bound. The count is the difference. No cap has
+been imposed on it, because what the right cap is depends on a measurement nobody has
+taken yet.
+
+The four cancellation operations are separate, with separately tested outcomes:
+
+| Operation | Mechanism | Tested by |
+| --- | --- | --- |
+| Stop admission | `shutdown()` — terminal until restarted | `admissionIsRefusedAfterShutdownRatherThanRunningInline` |
+| Cancel a computation | `future.cancel(true)` | `cancellingAComputationIsNotShuttingThePoolDown` |
+| Retire an owner | handoff retirement callback | `v12RetirementAfterAdmissionReleasesWithoutApplying` |
+| Invalidate a result | path-identity check in patch 0006 | the trace above, not a unit test |
+
+The last row is the honest one. That check lives in patched Minecraft code and needs a
+bootstrapped server to exercise, so it rests on the traced invalidation set rather than
+on a test. `setEnabled(false)` stops callers *offering* work and is distinct from
+`shutdown()`, which refuses work already being offered.
 
 ## First contract: owner-result handoff
 
