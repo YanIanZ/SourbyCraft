@@ -35,10 +35,10 @@ Status:
 - [ ] add `[aurora.chunk]` logical namespace
 - [ ] add `[aurora.network]` logical namespace
 - [ ] add `[aurora.memory]` logical namespace
-- [ ] add `[aurora.diagnostics]` logical namespace
+- [x] add `[aurora.diagnostics]` logical namespace — `lane-sampling`, LIVE
 - [x] migrate `perf.ai.async-pathfinding` to `aurora.entity.async-pathfinding` with legacy read fallback
 - [x] never auto-save migrated keys
-- [-] mark each config key LIVE / RESTART_REQUIRED / IMMUTABLE_FOR_RUN — implemented async key is LIVE; future keys require their own policy
+- [-] mark each config key LIVE / RESTART_REQUIRED / IMMUTABLE_FOR_RUN — both implemented keys are LIVE; future keys require their own policy
 - [-] report restart-required changes accurately on reload — Aurora-only live/invalid summary implemented; no Aurora restart-required keys exist yet
 - [x] add typed immutable config records/classes
 - [-] remove hot-path dotted-string config lookup where present — async path setting now resolves once into typed snapshot

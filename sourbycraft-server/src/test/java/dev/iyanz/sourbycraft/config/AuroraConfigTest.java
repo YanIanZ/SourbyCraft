@@ -70,7 +70,8 @@ public class AuroraConfigTest {
     }
 
     @Test void liveReloadSummaryDoesNotInventRestartRequiredChanges() {
-        var enabled = new AuroraConfig(new AuroraConfig.Entity(true));
+        // Diagnostics held at the default, so this asserts the async key alone counts as one.
+        var enabled = new AuroraConfig(new AuroraConfig.Entity(true), AuroraConfig.DEFAULT.diagnostics());
         assertEquals(AuroraConfig.Lifecycle.LIVE, AuroraConfig.ASYNC_PATH.lifecycle());
         assertTrue(enabled.reloadSummary(AuroraConfig.DEFAULT).contains("1 live change(s)"));
         assertTrue(enabled.reloadSummary(enabled).contains("0 live change(s)"));
@@ -163,5 +164,58 @@ public class AuroraConfigTest {
             AsyncPathProcessor.setEnabled(previousEnabled);
             field.set(null, previous);
         }
+    }
+
+    // --- aurora.diagnostics ------------------------------------------------------------------
+
+    @Test
+    void laneSamplingDefaultsOnSoADefaultServerCanSayWhereTimeWent() {
+        assertTrue(AuroraConfig.DEFAULT.diagnostics().laneSampling());
+        assertTrue(parse(Map.of()).config().diagnostics().laneSampling());
+    }
+
+    @Test
+    void laneSamplingCanBeTurnedOff() {
+        final AuroraConfig.Parsed parsed = parse(Map.of(AuroraConfig.LANE_SAMPLING_KEY, false));
+        assertFalse(parsed.config().diagnostics().laneSampling());
+        assertEquals(List.of(), parsed.invalidKeys());
+    }
+
+    @Test
+    void anUnreadableLaneSamplingValueKeepsTheDefaultAndIsReported() {
+        // Falling back to off would silently disable the thing that explains where CPU went,
+        // which is a worse outcome than ignoring a typo.
+        final AuroraConfig.Parsed parsed = parse(Map.of(AuroraConfig.LANE_SAMPLING_KEY, "yes"));
+        assertTrue(parsed.config().diagnostics().laneSampling());
+        assertEquals(List.of(AuroraConfig.LANE_SAMPLING_KEY), parsed.invalidKeys());
+    }
+
+    @Test
+    void aMalformedDiagnosticsContainerDoesNotExposeSettingsUnderneathIt() {
+        final Map<String, Object> values = new HashMap<>();
+        values.put("aurora.diagnostics", "nonsense");
+        values.put(AuroraConfig.LANE_SAMPLING_KEY, false);
+        final AuroraConfig.Parsed parsed = parse(values);
+        assertSame(AuroraConfig.DEFAULT, parsed.config());
+        assertEquals(List.of("aurora.diagnostics"), parsed.invalidKeys());
+    }
+
+    @Test
+    void bothSettingsAreReadFromOneSnapshot() {
+        final Map<String, Object> values = new HashMap<>();
+        values.put(AuroraConfig.ASYNC_PATH_KEY, true);
+        values.put(AuroraConfig.LANE_SAMPLING_KEY, false);
+        final AuroraConfig config = parse(values).config();
+        assertTrue(config.entity().asyncPathfinding());
+        assertFalse(config.diagnostics().laneSampling());
+    }
+
+    @Test
+    void theReloadSummaryCountsEverySettingThatChanged() {
+        final AuroraConfig after = new AuroraConfig(
+            new AuroraConfig.Entity(true), new AuroraConfig.Diagnostics(false));
+        assertTrue(after.reloadSummary(AuroraConfig.DEFAULT).startsWith("Aurora: 2 live change(s)"));
+        assertTrue(AuroraConfig.DEFAULT.reloadSummary(AuroraConfig.DEFAULT)
+            .startsWith("Aurora: 0 live change(s)"));
     }
 }
