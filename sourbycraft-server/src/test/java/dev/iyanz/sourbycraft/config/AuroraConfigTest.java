@@ -211,6 +211,20 @@ public class AuroraConfigTest {
     }
 
     @Test
+    void aTypoInOneSettingDoesNotRevertAnother() {
+        // The operator turned async pathfinding on deliberately. A mistyped diagnostics value is
+        // their typo to fix; silently switching off the other setting is not a fix.
+        final Map<String, Object> values = new HashMap<>();
+        values.put(AuroraConfig.ASYNC_PATH_KEY, true);
+        values.put(AuroraConfig.LANE_SAMPLING_KEY, "yes");
+        final AuroraConfig.Parsed parsed = parse(values);
+
+        assertTrue(parsed.config().entity().asyncPathfinding(), "the valid setting must survive");
+        assertTrue(parsed.config().diagnostics().laneSampling(), "the invalid one falls back");
+        assertEquals(List.of(AuroraConfig.LANE_SAMPLING_KEY), parsed.invalidKeys());
+    }
+
+    @Test
     void theReloadSummaryCountsEverySettingThatChanged() {
         final AuroraConfig after = new AuroraConfig(
             new AuroraConfig.Entity(true), new AuroraConfig.Diagnostics(false));

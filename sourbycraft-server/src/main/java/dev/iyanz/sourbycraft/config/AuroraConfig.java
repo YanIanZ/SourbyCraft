@@ -72,10 +72,11 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics) {
             }
         }
 
-        final AuroraConfig config = invalid.isEmpty()
-            ? new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling))
-            : DEFAULT;
-        return new Parsed(config, List.copyOf(invalid), deprecated);
+        // Each key falls back on its own. A typo in one setting must not silently revert another
+        // the operator set deliberately -- only a malformed namespace container, handled above,
+        // discards everything, because then nothing underneath it can be trusted.
+        return new Parsed(new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling)),
+            List.copyOf(invalid), deprecated);
     }
 
     /** Counts only implemented Aurora settings, never upstream or cached utility settings. */

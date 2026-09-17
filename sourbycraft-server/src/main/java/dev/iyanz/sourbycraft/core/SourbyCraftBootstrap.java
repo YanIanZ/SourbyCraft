@@ -72,14 +72,18 @@ public final class SourbyCraftBootstrap {
         stageCount = 0;
         failureCount = 0;
 
+        // Before command and plugin loading; shutdown keeps it readable through plugin disable.
         stage("metrics runtime", () -> {
             dev.iyanz.sourbycraft.perf.MetricsRuntime.start(org.bukkit.Bukkit.getServicesManager(), owner);
         });
 
+        // The unified TOML: messages, /maxp, auto-updater settings.
         stage("configuration", () -> {
             SourbyCraftConfig.init();
         });
 
+        // ORDERING: must precede CraftServer#enablePlugins, where Via reads its config in
+        // onEnable. Writes the shipped default ViaVersion/ViaBackwards config only when absent.
         stage("plugin provisioning", () -> {
             PluginProvisioner.provisionConfigs(SourbyCraftConfig.cfgBool("viaversion.auto-provision", true));
         });
@@ -88,10 +92,12 @@ public final class SourbyCraftBootstrap {
             StartupBanner.printOnce();
         });
 
+        // ORDERING: must precede CraftServer#loadPlugins, or load failures go uncaptured for /sys.
         stage("plugin diagnostics", () -> {
             PluginLoadDiagnostics.install();
         });
 
+        // Claims the bare command names (/tps, /ping, /ver, ...) and the HUD quit-listener.
         stage("commands", () -> {
             SourbyCraftCommands.registerAll();
         });
@@ -100,11 +106,13 @@ public final class SourbyCraftBootstrap {
             SourbyJoinLeaveListener.register(owner);
         });
 
+        // Persisted /maxp value, then the opt-in full-server bypass.
         stage("player slots", () -> {
             MaxPlayersConfig.applyAtBoot();
             MaxPlayersBypass.register(owner);
         });
 
+        // Off-thread command work: /speedtest, /update, /ping geoip.
         stage("virtual executor", () -> {
             VirtualExecutor.init();
         });
@@ -113,6 +121,8 @@ public final class SourbyCraftBootstrap {
             AutoUpdateSettings.startUpdater();
         });
 
+        // GC pauses are invisible in TPS/MSPT, so this rolling-window sampler is the only source
+        // for collections/min and GC-time%. One daemon thread; never throws.
         stage("gc tracker", () -> {
             dev.iyanz.sourbycraft.perf.GcTracker.start();
         });
