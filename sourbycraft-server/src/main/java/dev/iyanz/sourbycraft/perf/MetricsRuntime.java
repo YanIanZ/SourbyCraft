@@ -12,7 +12,10 @@ import org.bukkit.plugin.ServicesManager;
 public final class MetricsRuntime {
 
     private static final SourbyMetricsProvider PROVIDER = new SourbyMetricsProvider();
-    private static PerformanceCollector collector;
+    // Volatile so a reader does not need the lifecycle lock. close() joins the collector
+    // thread while holding that lock, and a command asking where CPU went should not wait
+    // behind a shutdown to be told "metrics are not running".
+    private static volatile PerformanceCollector collector;
     private static boolean running;
     private static ServicesManager registeredWith;
     private static boolean cleanupNeeded;
@@ -29,7 +32,7 @@ public final class MetricsRuntime {
      * <p>Kept off {@link dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot} on purpose: this is
      * operator diagnostics, not something plugins should build on yet.</p>
      */
-    public static synchronized LanePortions.Report lanePortions() {
+    public static LanePortions.Report lanePortions() {
         final PerformanceCollector current = collector;
         return current != null ? current.lanePortions()
             : LanePortions.notMeasured("metrics are not running");
