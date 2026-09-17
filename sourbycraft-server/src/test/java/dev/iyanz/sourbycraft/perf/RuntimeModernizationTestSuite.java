@@ -13,5 +13,6 @@ import org.junit.platform.suite.api.Suite;
     TelemetryEventTest.class, AsyncPathShutdownTest.class, AsyncPathCompletionTest.class,
     ScratchBufferConfinementTest.class, IsInWallBoundsTest.class, EngineNameTest.class,
     dev.iyanz.sourbycraft.execution.ExecutionLaneTest.class,
-    dev.iyanz.sourbycraft.execution.region.AuroraRegionTest.class})
+    dev.iyanz.sourbycraft.execution.region.AuroraRegionTest.class,
+    dev.iyanz.sourbycraft.execution.LaneCpuSamplerTest.class})
 public class RuntimeModernizationTestSuite {}
