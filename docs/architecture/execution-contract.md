@@ -168,9 +168,34 @@ validate a request epoch or compare the current delivered entity against the ori
 The pending boolean prevents overlapping submissions through that path; it does not prove that
 an old result is still valid after a target, navigation, or lifecycle change.
 
-The worker also passes a live `Mob` into the path solver. Calling that input read-only does not
-prove snapshot safety. The block snapshot and the complete mob/evaluator input set require
-separate review. The feature remains default-off; this extraction does not qualify enabling it.
+The worker also passes a live `Mob` into the path solver. That review is done, and the input
+set was not read-only.
+
+`PathFinder.findPath` hands the mob to `NodeEvaluator.prepare`, which stores it for the whole
+solve. The evaluators then read position, bounding box, `onGround`, `isInWater`, step height
+and fall distance off-thread — tolerable staleness, the same kind a path always races. Two
+paths **write** to the mob instead:
+
+* `AmphibiousNodeEvaluator.prepare` sets WATER, WALKABLE and WATER_BORDER malus and `done()`
+  restores two of them. `Mob.pathfindingMalus` is a plain `EnumMap`. Worse than a racing write:
+  it is save-and-restore, so a region-thread solve starting between the worker's `prepare` and
+  `done` saves the already-overwritten 6.0F as the original and restores *that* — corrupting the
+  mob's WALKABLE cost for its lifetime. Reaches **Axolotl** and **Drowned**.
+* `Mob.onPathfindingStart` / `onPathfindingDone` are called from inside the solve. Both are empty
+  on `Mob`, and **Sniffer** overrides both to write WATER malus.
+
+Both are now refused rather than raced: `PathNavigation.sourbyAsyncSolveSafe` (false for
+`AmphibiousPathNavigation`) and `Mob.sourbyPathfindingMutatesMob` (true for `Sniffer`) gate the
+offload, which falls back to the synchronous recompute.
+
+One hypothesis this review disproved: `FlyNodeEvaluator` calls `mob.getRandom()`, which looked
+like a shared-RNG race. Folia already replaced `Entity.SHARED_RANDOM` with
+`ThreadLocalRandomSource.INSTANCE`, so it is per-thread. The only consequence is that a solve
+draws from the worker's stream rather than the region's — a determinism difference, not
+corruption.
+
+The block snapshot itself (`SnapshotPathRegion`) is still unreviewed. The feature remains
+default-off, and this does not qualify enabling it.
 
 `SourbyReply` groups all non-player senders into a direct reply path, including a comment about
 command-block senders. That comment alone is insufficient evidence for arbitrary gameplay-side

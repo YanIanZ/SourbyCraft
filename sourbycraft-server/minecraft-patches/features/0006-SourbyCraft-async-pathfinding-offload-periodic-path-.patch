@@ -32,8 +32,53 @@ regionized PathTypeCache lives on the current region's world data and is null on
 the async worker, so without it every off-region solve NPEs. The two are one
 feature and neither stands alone.
 
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+index b52e11404b1d256d3ddf9c30b965efdd5688224c..7be67689665c5f548243518817bf1d8b3d69d0c0 100644
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -205,6 +205,19 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+     public void onPathfindingDone() {
+     }
+ 
++    // SourbyCraft start - async pathfinding
++    /**
++     * Whether this mob's pathfinding callbacks write to it. The evaluators call
++     * {@link #onPathfindingStart} and {@link #onPathfindingDone} from inside the solve, so for a
++     * solve running off the owning region thread an overriding mob would be mutating itself from
++     * a thread that does not own it. {@code pathfindingMalus} is a plain EnumMap, so that is an
++     * unsynchronised write, not merely a stale one.
++     */
++    public boolean sourbyPathfindingMutatesMob() {
++        return false;
++    }
++    // SourbyCraft end - async pathfinding
++
+     protected BodyRotationControl createBodyControl() {
+         return new BodyRotationControl(this);
+     }
+diff --git a/net/minecraft/world/entity/ai/navigation/AmphibiousPathNavigation.java b/net/minecraft/world/entity/ai/navigation/AmphibiousPathNavigation.java
+index 45942481a972f2308eae80f6f0f8b886e47016ec..e50157aa7469c654b06dd7d697993b294c2fb973 100644
+--- a/net/minecraft/world/entity/ai/navigation/AmphibiousPathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/AmphibiousPathNavigation.java
+@@ -12,6 +12,16 @@ public class AmphibiousPathNavigation extends PathNavigation {
+         super(mob, level);
+     }
+ 
++    // SourbyCraft start - async pathfinding
++    // AmphibiousNodeEvaluator.prepare writes WATER, WALKABLE and WATER_BORDER malus on the mob
++    // and done() restores two of them, so a solve off the owning region thread both races the
++    // region's own reads and can restore a value it never saved.
++    @Override
++    protected boolean sourbyAsyncSolveSafe() {
++        return false;
++    }
++    // SourbyCraft end - async pathfinding
++
+     @Override
+     protected PathFinder createPathFinder(final int maxVisitedNodes) {
+         this.nodeEvaluator = new AmphibiousNodeEvaluator(false);
 diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2f77b6e73ab39c5d83fc9f143ab3961a400e115e 100644
+index 0b5fab274d9471472ffe81dead60e4d0906b0f31..00d7f502bcab5b0aba8a0bdc3f4e7a9e196bea64 100644
 --- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 +++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 @@ -100,6 +100,17 @@ public abstract class PathNavigation {
@@ -54,7 +99,7 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2f77b6e73ab39c5d83fc9f143ab3961a
              this.path = null;
              this.path = this.createPath(this.targetPos, this.reachRange);
              this.timeLastRecompute = this.tick; // Folia - region threading
-@@ -107,6 +118,80 @@ public abstract class PathNavigation {
+@@ -107,6 +118,99 @@ public abstract class PathNavigation {
          }
      }
  
@@ -71,7 +116,26 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2f77b6e73ab39c5d83fc9f143ab3961a
 +     * its {@code EntityScheduler}. Returns {@code false} (caller falls back to the vanilla sync path)
 +     * if the mob can't path right now or the event cancelled every target.
 +     */
++    /**
++     * Whether this navigation's node evaluator only reads the mob during a solve.
++     *
++     * <p>An evaluator that writes to the mob cannot run off the owning region thread, so a
++     * navigation using one refuses the offload and keeps the synchronous path.</p>
++     */
++    protected boolean sourbyAsyncSolveSafe() {
++        return true;
++    }
++
 +    private boolean sourbyKickAsyncRecompute(final net.minecraft.core.BlockPos targetPos, final int reachRange) {
++        // The solve runs on a worker, so anything it touches on the mob is touched from a thread
++        // that does not own the entity. Reads of position and bounding box are tolerable -- they
++        // are the same kind of staleness a path always races against. Writes are not:
++        // Mob.pathfindingMalus is a plain EnumMap, and AmphibiousNodeEvaluator's save-and-restore
++        // around a solve can lose the original cost permanently if the owning region starts its
++        // own solve in between. Refuse those, and fall back to the synchronous recompute.
++        if (!this.sourbyAsyncSolveSafe() || this.mob.sourbyPathfindingMutatesMob()) {
++            return false;
++        }
 +        if (this.mob.getY() < this.level.getMinY() || !this.canUpdatePath()) {
 +            return false;
 +        }
@@ -135,6 +199,24 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2f77b6e73ab39c5d83fc9f143ab3961a
      public final @Nullable Path createPath(final double x, final double y, final double z, final int reachRange) {
          return this.createPath(BlockPos.containing(x, y, z), reachRange);
      }
+diff --git a/net/minecraft/world/entity/animal/sniffer/Sniffer.java b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
+index 427dd88bd63679314462d5ef2e9df4803e93b47b..9b55b7a72a2e8cca273d5304d656e414bfa0722f 100644
+--- a/net/minecraft/world/entity/animal/sniffer/Sniffer.java
++++ b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
+@@ -113,6 +113,13 @@ public class Sniffer extends Animal {
+         this.setPathfindingMalus(PathType.WATER, -1.0F);
+     }
+ 
++    // SourbyCraft start - async pathfinding: both callbacks above write pathfindingMalus
++    @Override
++    public boolean sourbyPathfindingMutatesMob() {
++        return true;
++    }
++    // SourbyCraft end - async pathfinding
++
+     @Override
+     public int getBabyStartAge() {
+         return -48000;
 diff --git a/net/minecraft/world/level/pathfinder/PathfindingContext.java b/net/minecraft/world/level/pathfinder/PathfindingContext.java
 index 64e1a34de133beccb90486f247e7e74d6535941f..e01bb2b30552a6bb8f35d780e235cec6cb969fa6 100644
 --- a/net/minecraft/world/level/pathfinder/PathfindingContext.java
