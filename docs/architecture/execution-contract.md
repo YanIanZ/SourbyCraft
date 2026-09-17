@@ -276,8 +276,43 @@ static scheduler, and it is pinned by tests — including that a non-player *ent
    allocations, and latency against the existing implementation.
 5. Reuse the contract for player notifications/HUD only if their lifetime semantics actually
    match. Metrics reads, periodic aggregation, and external I/O remain separate boundaries.
+   **Examined and declined — see below.**
 6. Consider alternative execution backends only after the contract suite, region-transfer tests,
    persistence/compatibility checks, and relevant workload measurements pass.
+
+## The HUD does not want this contract
+
+Step 5 asks whether the owner handoff should be reused for the HUD. It should not, and the
+reasons are the contract's own requirements failing to apply rather than a preference.
+
+`HudBars` runs one global task every twenty ticks that reads a metrics snapshot and updates three
+shared boss bars, and separately mutates per-player visibility on each player's own scheduler.
+Against the nine requirements:
+
+* There is no **pending bookkeeping** to release. Async pathfinding needed the contract because
+  `sourbyAsyncPathPending` gates the next submission and a lost callback strands the mob forever.
+  Nothing in the HUD is gated on a callback arriving.
+* There is no **stale result** to invalidate. The HUD recomputes from the newest snapshot every
+  tick; a delivery that arrives late simply carries what was true when it left, and one second
+  later it is replaced anyway. The path-identity check exists because a path applies to a route
+  the mob may have abandoned. A boss bar has no equivalent.
+* **Retirement is benign.** `player.getScheduler().run(..., null)` passes no retirement callback
+  and ignores the returned task, so a player who leaves before the task runs is silently skipped.
+  For gameplay that would be a defect; for showing a bar to someone who has gone, it is the
+  correct outcome. This is understood, not overlooked.
+* **Current identity** does not bite. The contract delivers the live owner because a dimension
+  transfer replaces the underlying entity. Players are not replaced that way, and a player who
+  reconnects is a new session that re-reads its own preferences.
+
+One concurrency question was worth checking and came back clean. The global task mutates shared
+`BossBar` objects while player-region threads add and remove viewers on the same objects. Adventure
+keeps its listener list in a `CopyOnWriteArrayList`, so the structural part is safe; `name`,
+`progress` and `color` are plain fields and can be read one update stale, which is invisible on a
+bar that refreshes every second.
+
+So the separation the dependency map asks for — aggregation cadence apart from player mutation —
+already exists, and adopting the handoff would add admission and retirement semantics to a place
+that needs neither. Doing it for symmetry is how a contract turns into ceremony.
 
 ## Acceptance matrix for the first implementation
 
