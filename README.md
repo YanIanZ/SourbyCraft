@@ -268,6 +268,7 @@ Current/active command family:
 | `/plugins` | SourbyCraft-styled plugin list |
 | `/maxp [n]` | max-player management |
 | `/perf lanes` | where the machine's time went, by execution lane |
+| `/spec` | full machine specification: processor, clock, cores, memory and heap allocation |
 | `/update` | SourbyCraft updater status/check |
 
 Planned `/perf` depth includes:
