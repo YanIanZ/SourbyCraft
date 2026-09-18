@@ -160,6 +160,44 @@ class AsyncPathShutdownTest {
         }
     }
 
+    @Test
+    void aSaturatedSolveIsCountedAsHavingRunOnTheCaller() throws Exception {
+        // The counter that decides whether this feature is helping. An inline solve is the pool
+        // doing its work on a region thread -- the place it exists to avoid -- after already
+        // paying to build the snapshot, so a rising count means the pool is undersized.
+        AsyncPathProcessor.setEnabled(true);
+        final var release = new CountDownLatch(1);
+        final long before = AsyncPathProcessor.stats().inline();
+        final int workers = Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
+        try {
+            for (int i = 0; i < workers; i++) {
+                AsyncPathProcessor.submit(() -> {
+                    try { release.await(); }
+                    catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                    return null;
+                });
+            }
+            for (int i = 0; i < QUEUE_CAPACITY; i++) {
+                AsyncPathProcessor.submit(() -> null);
+            }
+            AsyncPathProcessor.submit(() -> "overflow").get(5, TimeUnit.SECONDS);
+
+            assertTrue(AsyncPathProcessor.stats().inline() > before,
+                "a solve the pool could not take must be counted");
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void solveTimeIsUnavailableUntilSomethingHasSolved() {
+        // NaN rather than zero: "0.00ms mean" reads as an impossibly fast pool, not an idle one.
+        AsyncPathProcessor.shutdown();
+        final var stats = AsyncPathProcessor.stats();
+        assertTrue(stats.outstanding() >= 0);
+        assertTrue(Double.isNaN(stats.meanMillis()) || stats.meanMillis() >= 0.0);
+    }
+
     /** Mirrors the pool's bounded queue; a smaller value would not reach the rejection handler. */
     private static final int QUEUE_CAPACITY = 1024;
 

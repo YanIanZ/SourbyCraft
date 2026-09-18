@@ -41,6 +41,45 @@ public final class AsyncPathProcessor {
     private static volatile boolean stopped = false;
     /** Solves admitted to the pool whose futures have not completed yet. */
     private static final AtomicInteger OUTSTANDING = new AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicLong ADMITTED =
+        new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong INLINE =
+        new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong REFUSED =
+        new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong SOLVE_NANOS =
+        new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong SOLVED =
+        new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong SLOWEST_NANOS =
+        new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * What the pool has actually been doing.
+     *
+     * <p>{@code inline} is the number that decides whether this feature is helping. When the
+     * bounded queue fills, the solve runs on the submitting thread — a region thread — so an
+     * inline solve is the feature doing its work in the one place it exists to avoid, after
+     * already paying to build the immutable snapshot. A rising inline count means the pool is
+     * undersized for the workload and async pathfinding is costing more than it saves.</p>
+     *
+     * @param admitted      solves handed to the pool
+     * @param inline        solves the pool refused and the caller ran itself
+     * @param refused       submissions declined outright, which happens only after shutdown
+     * @param outstanding   admitted solves that have not completed
+     * @param meanMillis    mean solve duration, or NaN before anything has solved
+     * @param slowestMillis the slowest single solve seen
+     */
+    public record PathStats(long admitted, long inline, long refused, int outstanding,
+                            double meanMillis, double slowestMillis) {}
+
+    /** A snapshot of the pool's counters. Never blocks and never throws. */
+    public static PathStats stats() {
+        final long solved = SOLVED.get();
+        return new PathStats(ADMITTED.get(), INLINE.get(), REFUSED.get(), OUTSTANDING.get(),
+            solved == 0L ? Double.NaN : SOLVE_NANOS.get() / (double) solved / 1.0E6,
+            SLOWEST_NANOS.get() / 1.0E6);
+    }
 
     /**
      * How many admitted solves have not completed.
@@ -86,6 +125,9 @@ public final class AsyncPathProcessor {
             },
             (task, executor) -> {
                 if (executor.isShutdown()) throw new RejectedExecutionException("Path executor stopped");
+                // Counted, because this is the pool doing its work on a region thread: the one
+                // place the feature exists to keep free. See PathStats#inline.
+                INLINE.incrementAndGet();
                 task.run();
             });
         p.allowCoreThreadTimeOut(true);
@@ -110,6 +152,7 @@ public final class AsyncPathProcessor {
             // stop, and running a CPU-bound A* on one of them delays exactly that. The caller
             // still receives a completed future, so its pending bookkeeping is released and no
             // request is left outstanding.
+            REFUSED.incrementAndGet();
             return CompletableFuture.completedFuture(null);
         }
         final ThreadPoolExecutor p = pool;
@@ -123,7 +166,19 @@ public final class AsyncPathProcessor {
             }
         }
         final CompletableFuture<T> future = new CompletableFuture<>();
-        final FutureTask<T> task = new FutureTask<>(solve::get) {
+        final FutureTask<T> task = new FutureTask<>(() -> {
+            final long began = System.nanoTime();
+            try {
+                return solve.get();
+            } finally {
+                // Solve duration, not queue wait: how long the A* itself took is what says
+                // whether the pool is sized for the work, and it is comparable to a tick budget.
+                final long took = System.nanoTime() - began;
+                SOLVE_NANOS.addAndGet(took);
+                SOLVED.incrementAndGet();
+                SLOWEST_NANOS.accumulateAndGet(took, Math::max);
+            }
+        }) {
             @Override protected void done() {
                 if (isCancelled()) { future.complete(null); return; }
                 try { future.complete(get()); }
@@ -134,6 +189,7 @@ public final class AsyncPathProcessor {
             }
         };
         OUTSTANDING.incrementAndGet();
+        ADMITTED.incrementAndGet();
         future.whenComplete((result, failure) -> {
             OUTSTANDING.decrementAndGet();
             if (future.isCancelled()) task.cancel(true);

@@ -269,6 +269,7 @@ Current/active command family:
 | `/maxp [n]` | max-player management |
 | `/perf lanes` | where the machine's time went, by execution lane |
 | `/spec` | full machine specification: processor, clock, cores, memory and heap allocation |
+| `/perf async` | async-path pool: solve times, and how often saturation put a solve back on a region thread |
 | `/update` | SourbyCraft updater status/check |
 
 Planned `/perf` depth includes:

@@ -465,7 +465,7 @@ Make Aurora telemetry the authoritative runtime truth.
 
 - [ ] scheduler queue depth
 - [ ] task wait latency
-- [ ] async-path queue/solve latency
+- [x] async-path queue/solve latency — `/perf async`; see below
 - [ ] chunk lifecycle counters
 - [ ] entity tick counters
 - [ ] packet counters
@@ -494,6 +494,22 @@ PerformanceSnapshot
 ### Gate
 
 No competing Sourby TPS/MSPT truth source exists.
+
+### Async-path telemetry
+
+`/perf async` reports solves admitted and outstanding, mean and slowest solve time, submissions
+refused after shutdown, and — the line that decides whether the feature is worth having — how many
+solves ran on the caller because the pool was saturated.
+
+That count is the point. When the bounded queue fills, the rejection handler runs the solve on the
+submitting thread, which is a region thread: the feature doing its work in the one place it exists
+to avoid, after already paying to build the immutable snapshot. A rising inline count means the
+pool is undersized for the workload and async pathfinding costs more than it saves, and until now
+nothing said so. It is measured rather than inferred, so an operator deciding whether to keep the
+feature on has the number the decision turns on.
+
+Mean solve time is NaN until something has solved, not zero: "0.00ms mean" reads as an
+impossibly fast pool rather than an idle one.
 
 ---
 
