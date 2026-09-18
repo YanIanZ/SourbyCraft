@@ -336,7 +336,8 @@ def capture(jar, plan, output, args, tools):
                      "setup_command_count": sum(
                          1 for entry in plan.setup
                          if not entry.startswith(baseline_workloads.SETTLE_TOKEN)),
-                     "requires_connected_players": plan.requires_connected_players},
+                     "requires_connected_players": plan.requires_connected_players,
+                     "client_roam_blocks": plan.client_roam_blocks},
         "provenance": {
             "commit": commit,
             "worktree_dirty": dirty,
@@ -378,7 +379,8 @@ def capture(jar, plan, output, args, tools):
             # them mob AI, goal selection and pathfinding never run and the profile is block and
             # chunk work only.
             print(f"[{plan.name}] connecting {args.connected_players} clients", flush=True)
-            swarm = baseline_client.ClientSwarm("127.0.0.1", args.port, args.connected_players)
+            swarm = baseline_client.ClientSwarm("127.0.0.1", args.port, args.connected_players,
+                                               roam=plan.client_roam_blocks)
             record["clients"] = swarm.start(timeout=120.0)
             print(f"[{plan.name}] clients: {record['clients']}", flush=True)
             if record["clients"]["in_play"] < args.connected_players:

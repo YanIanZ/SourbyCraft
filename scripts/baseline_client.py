@@ -126,12 +126,18 @@ class HeadlessClient(threading.Thread):
     deadline and the server times the client out.
     """
 
-    def __init__(self, host, port, name, view_distance=2, move=True, origin=None):
+    def __init__(self, host, port, name, view_distance=2, move=True, origin=None, roam=None):
         super().__init__(name=f"client-{name}", daemon=True)
         self._host, self._port, self._name = host, port, name
         self._view_distance = view_distance
         self._move = move
         self._origin = origin
+        # How far a client may wander from where it spawned, or None to explore without limit.
+        # A workload measuring entities wants its players beside the entities: clients that fly
+        # outward generate terrain continuously, and terrain generation then dominates the
+        # profile of whatever the workload was actually built to measure.
+        self._roam = roam
+        self._home = None
         self._random = random.Random(name)          # Deterministic per client, varied across them.
         self.moves = 0
         self._halt = threading.Event()
@@ -187,9 +193,18 @@ class HeadlessClient(threading.Thread):
         into the same obstacle, and a flier climbs when corrected until it is over the terrain
         instead of inside it.
         """
+        if self._home is None:
+            self._home = (self._x, self._z)     # First step after the login teleport settles.
         if self._corrected:
             self._corrected = False
             self._angle = self._random.uniform(0.0, math.tau)
+        elif self._roam is not None:
+            # Turn back toward home once past the leash, rather than bouncing off an invisible
+            # wall: a client pinned against a boundary stops loading new chunks entirely, which
+            # is its own distortion.
+            drift = math.hypot(self._x - self._home[0], self._z - self._home[1])
+            if drift > self._roam:
+                self._angle = math.atan2(self._home[1] - self._z, self._home[0] - self._x)
             if self._flying:
                 # We were inside something, so terrain here is higher than we assumed. Raise
                 # the cruise altitude; the climb itself is rate-limited below.
@@ -288,8 +303,9 @@ class HeadlessClient(threading.Thread):
 class ClientSwarm:
     """A group of headless clients, reported on as a whole."""
 
-    def __init__(self, host, port, count, prefix="Baseline", view_distance=2, move=True):
-        self._clients = [HeadlessClient(host, port, f"{prefix}{index:03d}", view_distance, move)
+    def __init__(self, host, port, count, prefix="Baseline", view_distance=2, move=True, roam=None):
+        self._clients = [HeadlessClient(host, port, f"{prefix}{index:03d}", view_distance, move,
+                                        None, roam)
                          for index in range(count)]
 
     def start(self, timeout=60.0):
