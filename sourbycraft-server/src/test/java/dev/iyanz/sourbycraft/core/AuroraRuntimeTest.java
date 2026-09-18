@@ -71,6 +71,16 @@ public class AuroraRuntimeTest {
     }
 
     @Test
+    void aServerThatDiedBeforeBootstrapCanStillShutDown() {
+        // A port already bound, or a config that will not parse, kills the JVM before bootstrap
+        // runs at all. Shutdown still happens, and it must not report itself as a bug: an error
+        // line here lands in the middle of the startup failure the operator is trying to read.
+        assertTrue(AuroraRuntime.transition(State.STOPPING), "never-started is legal to stop");
+        assertFalse(AuroraRuntime.acceptingWork());
+        assertTrue(AuroraRuntime.transition(State.STOPPED));
+    }
+
+    @Test
     void stoppedIsTerminal() {
         AuroraRuntime.transition(State.BOOTSTRAPPING);
         AuroraRuntime.transition(State.STOPPING);
