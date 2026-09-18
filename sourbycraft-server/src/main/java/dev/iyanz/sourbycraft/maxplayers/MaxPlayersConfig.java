@@ -7,8 +7,7 @@ import org.bukkit.Bukkit;
 /**
  * Persistence + boot re-apply for the operator-set max-player slot count ({@code /maxp <n>}, F1-6).
  *
- * <p>Relocated out of the {@code perf} package on the Canvas re-platform (feat/canvas-engine,
- * PR #12) — {@code /maxp} is a kept utility command, not part of the deferred self-tuning
+ * <p>Relocated out of the {@code perf} package when the engine became Aurora's — {@code /maxp} is a kept utility command, not part of the deferred self-tuning
  * perf-engine, so it gets its own small package instead of sitting inside the (now perf-engine-only)
  * {@code perf.*} tree. Reads/writes the same {@code sourbycraft.max-players} key in the unified
  * TOML via {@link SourbyCraftConfig}.

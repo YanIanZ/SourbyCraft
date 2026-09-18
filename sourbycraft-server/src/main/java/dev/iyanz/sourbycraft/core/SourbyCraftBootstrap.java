@@ -15,7 +15,7 @@ import dev.iyanz.sourbycraft.util.VirtualExecutor;
 import org.bukkit.plugin.Plugin;
 
 /**
- * SourbyCraft's single boot hook on the Canvas re-platform (feat/canvas-engine, PR #12).
+ * SourbyCraft's single boot hook, and where the Aurora engine is brought up stage by stage.
  *
  * <p>The archived Folia build hooked its post-config boot sequence via
  * {@code me.earthme.luminol.commands.CommandRegister#register()} (itself invoked from Luminol's
@@ -27,7 +27,7 @@ import org.bukkit.plugin.Plugin;
  * {@code CraftServer#loadPlugins()} (so {@link PluginLoadDiagnostics} is installed in time to
  * observe a plugin load failure, and the config file exists before any plugin might read it).
  *
- * <p>Deliberately minimal: only the utility layer lives here now. The self-tuning perf-engine,
+ * <p>Deliberately minimal: this brings up Aurora and SourbyCraft's own services. The self-tuning perf-engine,
  * anti-xray raytrace reveal and proxy-forwarding/hardening-advisor security layer that the archived
  * {@code PerfEngineBootstrap} also wired are DEFERRED on this benchmark build — see the PR #12 task
  * brief. Every step is wrapped so a single failure can never abort boot.

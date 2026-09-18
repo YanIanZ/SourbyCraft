@@ -17,7 +17,7 @@ import java.nio.charset.StandardCharsets;
  * </ol>
  *
  * <p>The third archived piece — a {@code HardeningAdvisor} paper-global.yml exploit-setting scan —
- * lived under the {@code security} package, which is DEFERRED on this Canvas re-platform benchmark
+ * lived under the {@code security} package, which is DEFERRED on this build benchmark
  * build (feat/canvas-engine, PR #12) along with proxy-forwarding.
  *
  * <p>On this base this is invoked once from {@link dev.iyanz.sourbycraft.core.SourbyCraftBootstrap},

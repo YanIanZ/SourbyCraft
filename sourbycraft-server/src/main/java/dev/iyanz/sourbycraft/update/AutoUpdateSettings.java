@@ -10,7 +10,7 @@ import java.util.List;
  * Plain config surface for the SourbyCraft auto-updater (F1-8), replacing the archived Folia
  * build's {@code me.earthme.luminol.config.modules.misc.AutoUpdateConfig} — a Luminol
  * {@code @ConfigClassInfo}/{@code @ConfigInfo}-annotated module resolved by reflection. On this
- * Canvas re-platform benchmark build there is no Luminol config manager, so these are plain
+ * current build there is no Luminol config manager, so these are plain
  * static fields, seeded into + read back from the same unified TOML
  * {@link SourbyCraftConfig} manages (under {@code misc.auto_update.*}, matching the archived
  * key layout so an existing install's file keeps working).

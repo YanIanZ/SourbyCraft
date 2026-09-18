@@ -29,8 +29,7 @@ import org.bukkit.plugin.Plugin;
  * gated behind the config key {@code sourcebycraft.maxplayers.bypass-enabled} (default
  * {@code false}): when unset/false NO listener is registered.
  *
- * <p>Relocated out of the {@code perf} package on the Canvas re-platform (feat/canvas-engine,
- * PR #12) — this is a kept utility feature, not part of the deferred self-tuning perf-engine.
+ * <p>Relocated out of the {@code perf} package when the engine became Aurora's — this is a kept utility feature, not part of the deferred self-tuning perf-engine.
  */
 public final class MaxPlayersBypass implements Listener {
 

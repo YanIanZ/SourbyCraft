@@ -4,7 +4,7 @@ package dev.iyanz.sourbycraft.perf;
  * Coarse display-only load tier for the benchmark-build utility commands.
  *
  * <p>The full self-tuning perf-engine (KnobEnforcer, SelfTuneController, SimulationThrottle,
- * ViewThrottle, PerfSensor's per-region sampling, ...) is DEFERRED on this Canvas re-platform
+ * ViewThrottle, PerfSensor's per-region sampling, ...) is DEFERRED on this build
  * benchmark build (feat/canvas-engine, PR #12) — there is no sensor class behind this enum, no
  * sampling loop, nothing scheduled. {@code /tps}, {@code /mspt} and {@code /tpsbar} read one cached
  * performance snapshot and derive a {@link Tier} inline (see each call site) purely to pick a colour.

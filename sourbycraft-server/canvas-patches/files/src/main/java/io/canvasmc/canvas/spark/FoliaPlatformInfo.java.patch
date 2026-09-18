@@ -15,7 +15,11 @@
      @Override
      public String getVersion() {
 -        return this.server.getVersion();
-+        return "Build44 (MC:" + this.server.getMinecraftVersion() + ")";
++        // SourbyCraft - one canonical build identity. This read "Build44" while the server
++        // shipped build 46: a literal here is a second source of truth that drifts silently,
++        // and Spark reports are the one place an operator goes to be told what they are running.
++        return dev.iyanz.sourbycraft.brand.BuildInfo.load().displayVersion()
++            + " (MC:" + this.server.getMinecraftVersion() + ")";
      }
  
      @Override

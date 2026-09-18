@@ -4,8 +4,8 @@
  * SourbyCraft — kept as the internal/synthetic Plugin handle used to own our own
  * scheduled tasks + event listeners (Bukkit/Paper scheduler APIs require a Plugin owner).
  * The rest of the vendored Leaves tree (command framework, lithium hopper utils, plugin
- * provider) was dropped on the Canvas re-platform (feat/canvas-engine) — Canvas provides
- * its own engine and none of SourbyCraft's utility layer needs Leaves' command tree.
+ * provider) was dropped when the engine became Aurora's: the engine supplies its own
+ * command tree and nothing outside it needs Leaves'.
  * Relocated from org.leavesmc.leaves.plugin to dev.iyanz.sourbycraft.bootstrap so no
  * "leftover single-file package" remains after that removal.
  */
