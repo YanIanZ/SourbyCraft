@@ -320,6 +320,29 @@ Subsystems must not admit new work after the runtime enters `STOPPING`.
 - every long-lived Sourby service has explicit startup/shutdown ownership,
 - no subsystem relies on accidental static initialization for correctness.
 
+### T1 status
+
+`core/AuroraRuntime` holds the seven states and the legal transitions between them.
+`SourbyCraftBootstrap` drives it: BOOTSTRAPPING and STARTING as the stage runner begins, RUNNING
+or FAILED when it finishes, STOPPING before the first service goes down, STOPPED after the last.
+
+The problem it solves is concrete. Five services each answered "are we shutting down" their own
+way — a `stopped` flag in `AsyncPathProcessor`, `isShutdown()` in `VirtualExecutor`, `running` in
+`MetricsRuntime`, `taskStarted` in `HudBars`, `closed` in `PerformanceCollector`. Five answers to
+one question is five chances for one to be wrong during the seconds when shutdown is in flight and
+work is still arriving, which is the only time it matters. `acceptingWork()` is that question, in
+one place; a service's own state still answers its own lifecycle.
+
+An illegal transition is reported and then made. Refusing it would leave the runtime claiming to
+run while its services go down, which is worse than the inconsistency it guards — shutdown has to
+be able to finish. FAILED is entered only when no stage came up at all: a server missing one
+service that says which is more useful than one that refuses to start.
+
+Still open against this gate: `HudBars`, `GcTracker` and `MetricsRuntime` have explicit
+startup/shutdown but do not yet consult `acceptingWork()`, so the fourth bullet is partly met —
+their correctness does not depend on static initialisation, but their admission does not consult
+the runtime either.
+
 ---
 
 # 8. T2 — Aurora Configuration Ownership

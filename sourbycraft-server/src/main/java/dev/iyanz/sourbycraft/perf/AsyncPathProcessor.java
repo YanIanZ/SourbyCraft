@@ -101,7 +101,10 @@ public final class AsyncPathProcessor {
      * completed on return.
      */
     public static <T> CompletableFuture<T> submit(final Supplier<T> solve) {
-        if (stopped) {
+        // The pool's own flag covers its lifecycle; the runtime's covers the server's. A solve
+        // arriving while the server is going down must not start, even if this pool has not been
+        // told to stop yet -- shutdown runs in an order, and this is not first.
+        if (stopped || dev.iyanz.sourbycraft.core.AuroraRuntime.stopping()) {
             // Refuse, rather than degrading to an inline solve as a not-yet-started pool does.
             // The two look alike but are not: after shutdown the region threads are trying to
             // stop, and running a CPU-bound A* on one of them delays exactly that. The caller
