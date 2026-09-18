@@ -531,6 +531,36 @@ Do not introduce abstractions with no real consumer.
 - queue saturation behavior is tested,
 - no direct Folia scheduler class is required by Sourby-owned CPU/I/O work.
 
+### T3 status
+
+Every bullet is met. Async pathfinding runs the pipeline this section describes — owner context,
+immutable snapshot, Aurora CPU task, validation, owner-context commit — through `OwnerHandoff`,
+with `RegionOwnerHandoff` the only file naming the backend. Stale results are rejected on the
+path-identity token derived from a traced set of invalidation events; cancellation is four
+separate operations with separate tests; shutdown refuses admission and disposes what is
+outstanding.
+
+Saturation is now tested, and the test records something an operator should know before enabling
+the feature. When the bounded queue fills, the rejection handler runs the solve on the submitting
+thread — which is a region thread. So a saturated pool moves A* onto the thread the feature exists
+to keep free, and because the immutable snapshot has already been built by that point, a saturated
+async solve costs *more* than the synchronous path it replaced. "A slow path, never a dropped
+path" is accurate, and the slow path is slower than not having the feature on.
+
+That is a property of the current policy, not a defect in it: dropping the solve would leave the
+mob on a stale path, and rejecting it would fall back to the same region-thread work anyway. It is
+recorded here because the failure is invisible until tick times move, and because it is the
+argument for sizing the pool against the workload rather than leaving it at cores/4.
+
+### Deliberately not built
+
+`AuroraTaskClass` and the seven work categories. Five of the seven have real consumers today —
+owner handoff, the CPU pool, the I/O executors, the diagnostics samplers, the maintenance threads
+— and an enum naming them would restate what those types already say. The section's own rule
+applies: *do not introduce abstractions with no real consumer*. The categories become worth
+declaring when a policy has to be enforced against them, for example when a second CPU-compute
+pipeline needs the same admission rules as pathfinding. One pipeline does not need a taxonomy.
+
 ---
 
 # 10. T4 — Aurora Scheduler Boundary

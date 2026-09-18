@@ -4,6 +4,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -119,6 +120,48 @@ class AsyncPathShutdownTest {
         assertEquals("next", AsyncPathProcessor.submit(() -> "next").get(5, TimeUnit.SECONDS));
         release.countDown();
     }
+
+    // --- saturation ---------------------------------------------------------------------------
+
+    @Test
+    void aSaturatedPoolRunsTheSolveOnTheCallerRatherThanDroppingIt() throws Exception {
+        // The documented degradation: a slow path, never a dropped path. Worth pinning because
+        // the caller is a region thread, so saturation moves A* onto the thread the feature
+        // exists to keep free -- and the snapshot was already built by then, so a saturated
+        // async solve costs more than the synchronous path it replaced. Config-gated and
+        // default-off, but an operator enabling it should not discover this from tick times.
+        AsyncPathProcessor.setEnabled(true);
+        final var release = new CountDownLatch(1);
+        final int workers = Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
+        try {
+            for (int i = 0; i < workers; i++) {
+                AsyncPathProcessor.submit(() -> {
+                    try { release.await(); }
+                    catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                    return null;
+                });
+            }
+            // Fill the bounded queue so the next submission has nowhere to go.
+            for (int i = 0; i < QUEUE_CAPACITY; i++) {
+                AsyncPathProcessor.submit(() -> null);
+            }
+
+            final var ranOn = new AtomicReference<Thread>();
+            final var overflow = AsyncPathProcessor.submit(() -> {
+                ranOn.set(Thread.currentThread());
+                return "solved";
+            });
+
+            assertEquals("solved", overflow.get(5, TimeUnit.SECONDS), "never dropped");
+            assertSame(Thread.currentThread(), ranOn.get(),
+                "a saturated pool runs the solve on the submitting thread");
+        } finally {
+            release.countDown();
+        }
+    }
+
+    /** Mirrors the pool's bounded queue; a smaller value would not reach the rejection handler. */
+    private static final int QUEUE_CAPACITY = 1024;
 
     private static int awaitOutstandingSettled() throws InterruptedException {
         for (int attempt = 0; attempt < 100 && AsyncPathProcessor.outstanding() != 0; attempt++) {
