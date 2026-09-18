@@ -33,9 +33,18 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class SourbyCraftConfig {
 
     private static final Path CONFIG_PATH = Path.of("sourbycraft_config", "sourbycraft_global_config.toml");
+    /**
+     * Aurora's own file. The engine and the utility layer are different things -- that is the whole
+     * point of the Aurora/SourbyCraft split -- and an operator tuning the engine should not have to
+     * read past join messages to find it. The unified file is still read underneath, so a
+     * deployment that predates this keeps working.
+     */
+    private static final Path AURORA_PATH = Path.of("sourbycraft_config", "aurora.toml");
 
     private static volatile CommentedFileConfig FILE;
+    private static volatile CommentedFileConfig AURORA_FILE;
     private static boolean newFile;
+    private static boolean newAuroraFile;
     private record LoadedConfig(ConfigSnapshot utility, AuroraConfig aurora) {}
     private static volatile LoadedConfig loaded = new LoadedConfig(
         new ConfigSnapshot(java.util.Map.of()), AuroraConfig.DEFAULT);
@@ -43,9 +52,23 @@ public final class SourbyCraftConfig {
     /** Effective immutable Aurora settings, published only at explicit load boundaries. */
     public static AuroraConfig aurora() { return loaded.aurora(); }
 
-    private static AuroraConfig.Parsed loadSnapshot(final CommentedFileConfig file) {
+    /**
+     * Publishes both layers.
+     *
+     * <p>Both files are parameters rather than globals. Reaching for the Aurora path from in here
+     * made this method depend on a file its caller had not named, which is how a test handed a
+     * temporary file quietly picked up the real one.</p>
+     *
+     * @param file       the unified utility file
+     * @param auroraFile Aurora's own file, or {@code null} when there is none to read
+     */
+    private static AuroraConfig.Parsed loadSnapshot(final CommentedFileConfig file,
+                                                    final CommentedFileConfig auroraFile) {
         final ConfigSnapshot utility = ConfigSnapshot.copyOf(file);
-        final AuroraConfig.Parsed parsed = AuroraConfig.parse(utility);
+        // Legacy first, Aurora's own file over it: a server that has never seen aurora.toml keeps
+        // the value it already had, and one that has takes the new file's.
+        final AuroraConfig.Parsed parsed = AuroraConfig.parse(auroraFile == null ? utility
+            : ConfigSnapshot.layered(utility, ConfigSnapshot.copyOf(auroraFile)));
         // Apply before publication: a failed runtime activation must not report success.
         dev.iyanz.sourbycraft.perf.AsyncPathProcessor.setEnabled(parsed.config().entity().asyncPathfinding());
         dev.iyanz.sourbycraft.execution.LaneCpuSampler.setEnabled(parsed.config().diagnostics().laneSampling());
@@ -77,10 +100,11 @@ public final class SourbyCraftConfig {
         if (f == null) return;
         try {
             seedDefaults(f);
+            seedAurora();          // Aurora's own file, seeded beside it rather than inside it.
         } catch (Throwable t) {
             SourbyLogger.error("seedDefaults failed; utility layer will use hardcoded defaults", t);
         }
-        loadSnapshot(f);
+        loadSnapshot(f, auroraFile());
         applyLiveConfig(false);
     }
 
@@ -99,7 +123,7 @@ public final class SourbyCraftConfig {
         final AuroraConfig previous = aurora();
         final AuroraConfig.Parsed parsed;
         try {
-            parsed = loadSnapshot(f);
+            parsed = loadSnapshot(f, auroraFile());
             applyLiveConfig(true);
         } catch (Throwable t) {
             SourbyLogger.error("config reload apply failed", t);
@@ -144,6 +168,51 @@ public final class SourbyCraftConfig {
         } catch (Throwable t) {
             SourbyLogger.error("Canvas WorldConfig.reload() failed; keeping the previous values", t);
         }
+    }
+
+    /** Aurora's file, or {@code null} when it cannot be opened -- then only the unified file is read. */
+    /**
+     * Writes Aurora's defaults into its own file, once, when that file is new.
+     *
+     * <p>Only a newly created file is seeded. Writing into an existing one would mask the fallback
+     * to the unified file, turning an operator's old setting into a default without them touching
+     * anything.</p>
+     */
+    private static void seedAurora() {
+        final CommentedFileConfig f = auroraFile();
+        if (f == null || !newAuroraFile) {
+            return;
+        }
+        final boolean[] changed = {false};
+        seed(f, changed, AuroraConfig.ASYNC_PATH_KEY, false,
+            "Aurora async pathfinding (LIVE). Experimental and default-off; requires region/snapshot qualification.");
+        seed(f, changed, AuroraConfig.LANE_SAMPLING_KEY, true,
+            "Aurora execution-lane CPU attribution (LIVE), behind /perf lanes. Walks every thread once a "
+            + "second: negligible beside a loaded server, and on an idle one the telemetry lane costs more "
+            + "than the region lane. false stops the sampling; the lanes view then reports it as disabled.");
+        if (changed[0]) {
+            f.save();
+            SourbyLogger.info("seeded Aurora engine defaults into sourbycraft_config/aurora.toml");
+        }
+    }
+
+    private static synchronized CommentedFileConfig auroraFile() {
+        if (AURORA_FILE != null) return AURORA_FILE;
+        try {
+            if (AURORA_PATH.getParent() != null) {
+                Files.createDirectories(AURORA_PATH.getParent());
+            }
+            newAuroraFile = !Files.exists(AURORA_PATH);
+            final CommentedFileConfig f = CommentedFileConfig.builder(AURORA_PATH)
+                .onFileNotFound(FileNotFoundAction.CREATE_EMPTY)
+                .build();
+            f.load();
+            AURORA_FILE = f;
+        } catch (Throwable t) {
+            SourbyLogger.error("could not open sourbycraft_config/aurora.toml; Aurora settings "
+                + "will be read from the unified file and its defaults", t);
+        }
+        return AURORA_FILE;
     }
 
     private static synchronized CommentedFileConfig file() {
@@ -256,22 +325,6 @@ public final class SourbyCraftConfig {
      */
     private static void seedDefaults(CommentedFileConfig f) {
         boolean[] changed = {false};
-
-        // Only first-created files receive Aurora defaults. In-memory seeding on an
-        // existing file would mask the read-only legacy fallback even without saving.
-        //
-        // Seeded together and first, so the [aurora.*] tables are written as one run rather than
-        // interleaved between unrelated sections. TOML table headers are absolute, so a stray
-        // order still parses -- but a file where [aurora.entity] appears indented under
-        // [messages] reads as though it were nested, and an operator edits what they read.
-        if (newFile) {
-            seed(f, changed, AuroraConfig.ASYNC_PATH_KEY, false,
-                "Aurora async pathfinding (LIVE). Experimental and default-off; requires region/snapshot qualification.");
-            seed(f, changed, AuroraConfig.LANE_SAMPLING_KEY, true,
-                "Aurora execution-lane CPU attribution (LIVE), behind /perf lanes. Walks every thread once a "
-                + "second: negligible beside a loaded server, and on an idle one the telemetry lane costs more "
-                + "than the region lane. false stops the sampling; the lanes view then reports it as disabled.");
-        }
 
         seed(f, changed, "branding.gc-advisor.enabled", true,
             "Enable the startup GC/JVM-flags advisory log.");
