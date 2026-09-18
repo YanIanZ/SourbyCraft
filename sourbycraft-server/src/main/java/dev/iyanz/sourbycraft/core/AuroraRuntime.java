@@ -47,7 +47,10 @@ public final class AuroraRuntime {
     // A lifecycle that can go anywhere is not a lifecycle. Written out so an illegal move is a
     // reported bug rather than a state nobody expected arriving somewhere that cannot handle it.
     private static final Map<State, Set<State>> ALLOWED = Map.of(
-        State.NEW, EnumSet.of(State.BOOTSTRAPPING, State.FAILED),
+        // STOPPING from NEW: a JVM that dies before bootstrap runs — a port already bound, a
+        // config that will not parse, a Ctrl-C during early init — still shuts down, and a
+        // "not a legal transition" error logged there is noise at the worst possible moment.
+        State.NEW, EnumSet.of(State.BOOTSTRAPPING, State.STOPPING, State.FAILED),
         State.BOOTSTRAPPING, EnumSet.of(State.STARTING, State.STOPPING, State.FAILED),
         State.STARTING, EnumSet.of(State.RUNNING, State.STOPPING, State.FAILED),
         State.RUNNING, EnumSet.of(State.STOPPING, State.FAILED),
