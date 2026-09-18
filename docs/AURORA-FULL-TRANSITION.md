@@ -611,6 +611,33 @@ The public/runtime contract must remain stable while the implementation changes.
 - scheduler metrics are exposed through Aurora telemetry,
 - shutdown drains or rejects work predictably.
 
+### T4 status
+
+Met, by work already done rather than by anything new.
+
+Concrete backend classes appear in three files and no others — `RegionOwnerHandoff`,
+`FoliaRegionBackend`, `CanvasConfigBridge` — and the independence tests pin that file set.
+Scheduler metrics reach the operator through `/sys`: busiest and average region utilisation, and
+CPU starvation as "owed but not scheduled", which is the metric that says the scheduler wanted to
+tick and could not. `/perf lanes` adds where the machine's time actually went. Shutdown is tested
+per executor: the path pool refuses and disposes, the I/O executor rejects without blocking its
+caller and cannot be lazily resurrected, and blocking I/O is interruptible.
+
+### No AuroraScheduler wrapper
+
+This section sketches `AuroraScheduler` over a `FoliaCanvasSchedulerBridge`. Six of the eight
+capabilities it lists are already owned: owner-context through `OwnerHandoff`, CPU handoff through
+`AsyncPathProcessor`, I/O completion through `VirtualExecutor`, shutdown-awareness through
+`AuroraRuntime`. The remaining two — player-context and world-context tasks — are reached through
+`org.bukkit.*` schedulers, which is the *published* Bukkit API rather than a concrete Folia class.
+
+`docs/architecture/execution-contract.md` draws that line deliberately: depending on a published
+contract is the goal, not the problem. Wrapping the Bukkit scheduler in an Aurora interface would
+add a layer over a stable API without removing a dependency, and the gate's own wording asks for
+no *concrete* scheduler classes, which is already true. The wrapper becomes worth building when an
+Aurora-native scheduler actually exists to swap in behind it — at which point the interface can be
+shaped by two implementations instead of guessed from one.
+
 ---
 
 # 11. T5 — Aurora Engine Domains
