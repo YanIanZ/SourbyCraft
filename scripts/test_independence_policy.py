@@ -23,6 +23,16 @@ class CanvasSourceCouplingTest(unittest.TestCase):
         "io.canvasmc.canvas.WorldConfig.reload",
     }
 
+    ADAPTER = ("sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/config/upstream/"
+               "CanvasConfigBridge.java")
+
+    def test_canvas_is_named_only_inside_its_bridge(self):
+        # Same rule as the region backend: replacing the implementation should be an edit to a
+        # known file, not a search. The reload path above it names no engine at all.
+        files = {site["file"] for site in policy.canvas_source_sites(REPO)}
+        self.assertEqual(files, {self.ADAPTER},
+                         "Canvas is named outside its bridge; route it through UpstreamConfigBridge")
+
     def test_sourby_code_reaches_canvas_only_where_recorded(self):
         found = {site["symbol"] for site in policy.canvas_source_sites(REPO)}
         self.assertEqual(found, self.APPROVED,

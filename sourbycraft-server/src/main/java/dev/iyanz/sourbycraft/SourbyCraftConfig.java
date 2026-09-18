@@ -150,25 +150,19 @@ public final class SourbyCraftConfig {
                 + "JVM memory and OS swap remain operator-owned; legacy config keys were not modified.");
         }
 
-        // Canvas server + world configs (canvas-server.yml / canvas-worlds.yml) — fold the canonical
-        // Canvas reload (the same GlobalConfiguration.reload() + WorldConfig.reload() the removed
-        // /canvas reload ran) into /sourbycraft reload so operators have ONE reload command. Each is
-        // isolated: a failure re-reading the Canvas yml never aborts the rest of the SourbyCraft
-        // reload. Note: options cached at construction (e.g. a per-world value read once into a field)
-        // update the config object but only take effect on the next restart — matching Canvas's own
-        // "some options cannot change at runtime" contract.
+        // The engine's own configuration, folded into /sourbycraft reload so an operator has one
+        // command. Which engine that is stays behind the bridge: nothing here names it, so
+        // replacing the implementation is a new bridge rather than an edit to this path.
         if (!reloadEngine) return;
-        try {
-            io.canvasmc.canvas.GlobalConfiguration.reload();
-        } catch (Throwable t) {
-            SourbyLogger.error("Canvas GlobalConfiguration.reload() failed; keeping the previous values", t);
-        }
-        try {
-            io.canvasmc.canvas.WorldConfig.reload();
-        } catch (Throwable t) {
-            SourbyLogger.error("Canvas WorldConfig.reload() failed; keeping the previous values", t);
+        for (final String failure : ENGINE_CONFIG.reload()) {
+            SourbyLogger.error(ENGINE_CONFIG.name() + " " + failure
+                + "; keeping the previous values", null);
         }
     }
+
+    /** The engine configuration SourbyCraft's reload also re-reads. */
+    private static final dev.iyanz.sourbycraft.config.upstream.UpstreamConfigBridge ENGINE_CONFIG =
+        new dev.iyanz.sourbycraft.config.upstream.CanvasConfigBridge();
 
     /** Aurora's file, or {@code null} when it cannot be opened -- then only the unified file is read. */
     /**
