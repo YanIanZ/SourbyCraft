@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Every operator-facing SourbyCraft setting still lives in ONE file: {@code
  * sourcebycraft_config/sourbycraft_global_config.toml} (own {@code nightconfig} {@link
  * CommentedFileConfig}, resolved directly here — no Luminol {@code ConfigManager} dependency on
- * this base, unlike the archived Folia build). The utility layer (varied messages, the auto-
+ * this base, unlike the archived Folia build). SourbyCraft's own settings (varied messages, the auto-
  * updater, {@code /maxp}) reads its keys through the typed {@link #cfgBool}/{@link #cfgInt}/
  * {@link #cfgGet}/{@link #cfgStringList} accessors below.
  *
@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * combat-profile, thread-pool bridges), the anti-xray raytrace reveal layer, and the proxy-
  * forwarding / hardening-advisor security layer. All three are DEFERRED on this benchmark build
  * (see the PR #12 task brief) — their config trees, {@code seed()} calls and live-apply bridges
- * are gone with them. What remains is exactly what the kept utility layer reads: varied messages,
+ * are gone with them. What remains is exactly what SourbyCraft itself reads: varied messages,
  * {@code /maxp} persistence + bypass, the auto-updater, and the GC-advisor toggle. Since
  * build 44, immutable utility snapshots and read-only performance diagnostics. Legacy automatic
  * memory tuning is retired; existing keys remain in operator files.
@@ -34,7 +34,7 @@ public final class SourbyCraftConfig {
 
     private static final Path CONFIG_PATH = Path.of("sourbycraft_config", "sourbycraft_global_config.toml");
     /**
-     * Aurora's own file. The engine and the utility layer are different things -- that is the whole
+     * Aurora's own file. The engine and SourbyCraft are different things -- that is the whole
      * point of the Aurora/SourbyCraft split -- and an operator tuning the engine should not have to
      * read past join messages to find it. The unified file is still read underneath, so a
      * deployment that predates this keeps working.
@@ -102,7 +102,7 @@ public final class SourbyCraftConfig {
             seedDefaults(f);
             seedAurora();          // Aurora's own file, seeded beside it rather than inside it.
         } catch (Throwable t) {
-            SourbyLogger.error("seedDefaults failed; utility layer will use hardcoded defaults", t);
+            SourbyLogger.error("seedDefaults failed; SourbyCraft will use hardcoded defaults", t);
         }
         loadSnapshot(f, auroraFile());
         applyLiveConfig(false);
@@ -320,7 +320,8 @@ public final class SourbyCraftConfig {
     // ------------------------------------------------------------------------------------ seeding
 
     /**
-     * Seed every operator-facing key this benchmark build's utility layer reads, when absent
+     * Seed every operator-facing SourbyCraft key, when absent. Aurora's own keys are seeded
+     * separately into its own file by {@code seedAurora()}, and never here
      * (never clobbers an operator edit). Saves once at the end if anything changed.
      */
     private static void seedDefaults(CommentedFileConfig f) {

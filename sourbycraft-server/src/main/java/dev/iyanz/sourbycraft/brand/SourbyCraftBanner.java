@@ -8,7 +8,7 @@ import net.kyori.adventure.text.format.TextColor;
  * Branded startup banner printed to the console at server start.
  *
  * <p>Ported from the Paper tag {@code paper-26.2-pre-folia} (where it was a plain
- * monochrome box). On this Canvas re-platform it is emitted from
+ * monochrome box). It is emitted from
  * {@link dev.iyanz.sourbycraft.core.SourbyCraftBootstrap}, itself called from a small
  * hand-authored {@code minecraft-patch} to {@code DedicatedServer#initServer}.
  *

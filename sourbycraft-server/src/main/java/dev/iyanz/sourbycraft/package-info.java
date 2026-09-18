@@ -1,6 +1,7 @@
 /**
- * SourbyCraft's utility layer — the server-side branding, config and quality-of-life features kept
- * on the Canvas re-platform (feat/canvas-engine, PR #12) after the self-tuning perf-engine,
+ * SourbyCraft — everything outside the Aurora engine: branding, configuration, operator commands
+ * and quality-of-life features. Aurora is the engine (see {@code dev.iyanz.aurora} in the
+ * Minecraft tree); this package is what surrounds it. The self-tuning perf-engine,
  * anti-xray raytrace reveal and proxy-forwarding/hardening-advisor layers were deferred.
  *
  * <p>This root package holds the two pieces every other sub-package depends on:
