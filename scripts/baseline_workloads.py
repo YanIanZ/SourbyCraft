@@ -74,6 +74,10 @@ class Plan:
     network_clients: int = 0
     network_rate_per_second: int = 0
     requires_connected_players: bool = False
+    # How far connected clients may wander, or None to explore freely. A workload that measures
+    # entities keeps its players beside them: clients flying outward generate terrain for the
+    # whole run, and that generation then dominates the profile of what was being measured.
+    client_roam_blocks: int | None = None
     parameters: dict = field(default_factory=dict)
 
 
@@ -196,7 +200,10 @@ def entity_stress(mobs=3000, items=3000, radius=4):
                   "Mob AI, pathfinding and goal selection stay inactive without connected "
                   "players, so this measures the inactive entity path unless clients attach."),
         setup=tuple(setup), requires_connected_players=True, settle_seconds=60,
-        parameters={"mobs": mobs, "items": items, "chunk_radius": radius})
+        # The entities sit inside radius*16 blocks of the origin; the players stay with them.
+        client_roam_blocks=radius * 16,
+        parameters={"mobs": mobs, "items": items, "chunk_radius": radius,
+                    "client_roam_blocks": radius * 16})
 
 
 def chunk_stress(radius=4, step_chunks=64, interval_seconds=10):

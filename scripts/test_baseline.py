@@ -352,6 +352,23 @@ class WorkloadTest(unittest.TestCase):
         self.assertEqual(order[0], ("send", ["forceload add 0 0"]))
         self.assertEqual(order[1], ("hold", 30.0))
 
+    def test_entity_workloads_keep_their_players_beside_the_entities(self):
+        # A profile of entity-stress came back 40.5% terrain generation because the clients flew
+        # outward for the whole run, generating terrain past whatever the seeded world covered.
+        # The workload measures entities; its players have to stay where the entities are.
+        entity = workloads.build("entity-stress")
+        self.assertIsNotNone(entity.client_roam_blocks)
+        self.assertLessEqual(entity.client_roam_blocks,
+                             entity.parameters["chunk_radius"] * 16,
+                             "the leash must not exceed the volume the entities occupy")
+
+    def test_exploration_workloads_are_not_leashed(self):
+        # players-N exists to model dispersed chunk residency; leashing it would measure
+        # something else entirely.
+        for name in ("players-10", "players-50", "chunk-stress"):
+            with self.subTest(name=name):
+                self.assertIsNone(workloads.build(name).client_roam_blocks)
+
     def test_chunk_heavy_workloads_settle_before_the_window_opens(self):
         # Terrain generation triggered by forceload continues after the command returns.
         self.assertGreater(workloads.build("players-100").settle_seconds,
