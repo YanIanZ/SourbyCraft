@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: agent <agent@local>
+Date: Fri, 18 Sep 2026 17:13:08 +0700
+Subject: [PATCH] SourbyCraft - refuse a cross-region block test instead of
+ dying on it
+
+
+diff --git a/net/minecraft/server/commands/ExecuteCommand.java b/net/minecraft/server/commands/ExecuteCommand.java
+index f7201f9bb38a08dd506b43325a341b117f64df75..ba946422334405d6aee51c2c76d31a5b37b4a4bb 100644
+--- a/net/minecraft/server/commands/ExecuteCommand.java
++++ b/net/minecraft/server/commands/ExecuteCommand.java
+@@ -478,8 +478,24 @@ public class ExecuteCommand {
+                                     execute,
+                                     Commands.argument("block", BlockPredicateArgument.blockPredicate(context)),
+                                     expected,
+-                                    c -> BlockPredicateArgument.getBlockPredicate(c, "block")
+-                                        .test(new BlockInWorld(c.getSource().getLevel(), BlockPosArgument.getLoadedBlockPos(c, "pos"), true))
++                                    // SourbyCraft start - region threading
++                                    c -> {
++                                        final var level = c.getSource().getLevel();
++                                        final var pos = BlockPosArgument.getLoadedBlockPos(c, "pos");
++                                        // Level.getBlockState reads region-local world data, which is unbound on a
++                                        // thread that does not own this position, so this died on a
++                                        // NullPointerException out of getCurrentWorldData(). A conditional has to
++                                        // answer now, for the rest of the chain, so the position cannot be handed to
++                                        // the owning region the way setblock and fill hand theirs over. Refusing it
++                                        // says so; reading anyway would be an unsynchronised cross-region read.
++                                        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, pos)) {
++                                            throw io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution
++                                                .CANNOT_DO_X_CROSS_REGION.create("test a block");
++                                        }
++                                        return BlockPredicateArgument.getBlockPredicate(c, "block")
++                                            .test(new BlockInWorld(level, pos, true));
++                                    }
++                                    // SourbyCraft end - region threading
+                                 )
+                             )
+                     )
