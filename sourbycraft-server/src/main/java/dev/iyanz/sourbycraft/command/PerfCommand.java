@@ -18,7 +18,7 @@ import org.bukkit.command.CommandSender;
 /** Read-only diagnostics: one immutable generation per invocation, no world/OS queries. */
 public final class PerfCommand extends Command {
     static final List<String> VIEWS =
-        List.of("tick", "cpu", "memory", "gc", "lanes", "region", "health");
+        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "region", "health");
 
     public PerfCommand(final String name) {
         super(name);
@@ -87,6 +87,9 @@ public final class PerfCommand extends Command {
         if (view.equals("lanes")) {
             renderLanes(lines, MetricsRuntime.lanePortions());
         }
+        if (view.equals("async")) {
+            renderAsyncPath(lines);
+        }
         if (view.equals("overview") || view.equals("region")) {
             final boolean known = snapshot.freshness().state() != MetricState.UNAVAILABLE;
             add(lines, "Active regions / retained generations", known
@@ -130,6 +133,29 @@ public final class PerfCommand extends Command {
         add(lines, "Shape", (report.isConcentrated()
                 ? "concentrated in " + report.dominant().display() : "spread across lanes")
             + (report.isSaturated() ? ", machine saturated" : ", machine has headroom"));
+    }
+
+    /**
+     * What the async-path pool has been doing, when it is on.
+     *
+     * <p>The line that matters is the inline count. When the bounded queue fills, the solve runs
+     * on the submitting thread — a region thread — so an inline solve is this feature doing its
+     * work in the one place it exists to avoid, having already paid to build the snapshot. A
+     * rising count means the pool is undersized and the feature is costing more than it saves.</p>
+     */
+    private static void renderAsyncPath(final List<Component> lines) {
+        if (!dev.iyanz.sourbycraft.perf.AsyncPathProcessor.isEnabled()) {
+            add(lines, "Async pathfinding", "disabled (aurora.entity.async-pathfinding)");
+            return;
+        }
+        final var stats = dev.iyanz.sourbycraft.perf.AsyncPathProcessor.stats();
+        add(lines, "Solves admitted / outstanding",
+            count(stats.admitted()) + " / " + count(stats.outstanding()));
+        add(lines, "Solve time mean / slowest", Double.isNaN(stats.meanMillis()) ? "no solves yet"
+            : TpsCommand.ms(stats.meanMillis()) + " / " + TpsCommand.ms(stats.slowestMillis()));
+        add(lines, "Ran on the caller (pool saturated)", count(stats.inline())
+            + (stats.inline() > 0 ? "  — these ran on a region thread" : ""));
+        add(lines, "Refused after shutdown", count(stats.refused()));
     }
 
     public static String health(final PerformanceSnapshot snapshot) {
