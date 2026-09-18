@@ -8,6 +8,7 @@ import dev.iyanz.sourbycraft.config.ConfigSnapshot;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -67,8 +68,12 @@ public final class SourbyCraftConfig {
         final ConfigSnapshot utility = ConfigSnapshot.copyOf(file);
         // Legacy first, Aurora's own file over it: a server that has never seen aurora.toml keeps
         // the value it already had, and one that has takes the new file's.
-        final AuroraConfig.Parsed parsed = AuroraConfig.parse(auroraFile == null ? utility
-            : ConfigSnapshot.layered(utility, ConfigSnapshot.copyOf(auroraFile)));
+        final ConfigSnapshot aurora = auroraFile == null ? null : ConfigSnapshot.copyOf(auroraFile);
+        if (aurora != null) {
+            warnShadowedAuroraKeys(utility, aurora);
+        }
+        final AuroraConfig.Parsed parsed = AuroraConfig.parse(aurora == null ? utility
+            : ConfigSnapshot.layered(utility, aurora));
         // Apply before publication: a failed runtime activation must not report success.
         dev.iyanz.sourbycraft.perf.AsyncPathProcessor.setEnabled(parsed.config().entity().asyncPathfinding());
         dev.iyanz.sourbycraft.execution.LaneCpuSampler.setEnabled(parsed.config().diagnostics().laneSampling());
@@ -83,6 +88,52 @@ public final class SourbyCraftConfig {
                 + "Operator file was not modified.");
         }
         return parsed;
+    }
+
+    /**
+     * Reports an Aurora key that two files both set, where only one of them decides anything.
+     *
+     * <p>Giving Aurora its own file did not remove the keys already sitting in the unified one.
+     * A deployment that has been through the split holds the same key twice, aurora.toml wins,
+     * and an operator who edits the copy they happened to open watches nothing happen -- with no
+     * error to explain why, because neither value is wrong on its own.</p>
+     *
+     * <p>Both files belong to the operator, so this says which one is being ignored rather than
+     * deleting a line they wrote.</p>
+     */
+    private static void warnShadowedAuroraKeys(final ConfigSnapshot utility,
+                                               final ConfigSnapshot aurora) {
+        for (final String key : shadowedAuroraKeys(utility, aurora)) {
+            SourbyLogger.warn("Config key '" + key + "' is set in both "
+                + CONFIG_PATH + " (" + utility.values().get(key) + ") and " + AURORA_PATH
+                + " (" + aurora.values().get(key) + "); " + AURORA_PATH.getFileName()
+                + " wins. Remove the key from " + CONFIG_PATH.getFileName()
+                + " so the value you edit is the value that runs. Neither file was modified.");
+        }
+    }
+
+    /**
+     * The Aurora keys both files set to different values, in file order.
+     *
+     * @param utility the unified file's snapshot
+     * @param aurora  the Aurora file's snapshot, which wins
+     * @return keys whose value in {@code utility} decides nothing
+     */
+    static List<String> shadowedAuroraKeys(final ConfigSnapshot utility,
+                                           final ConfigSnapshot aurora) {
+        final List<String> shadowed = new java.util.ArrayList<>();
+        for (final var entry : aurora.values().entrySet()) {
+            final String key = entry.getKey();
+            if (!key.startsWith("aurora.")) {
+                continue;
+            }
+            final Object other = utility.values().get(key);
+            // Equal values are not a trap: both files agree, so editing either one is harmless.
+            if (other != null && !other.equals(entry.getValue())) {
+                shadowed.add(key);
+            }
+        }
+        return List.copyOf(shadowed);
     }
 
     private SourbyCraftConfig() {}
