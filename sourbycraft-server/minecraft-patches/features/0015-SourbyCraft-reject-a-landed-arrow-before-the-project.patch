@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: agent <agent@local>
+Date: Fri, 18 Sep 2026 10:38:48 +0700
+Subject: [PATCH] SourbyCraft - reject a landed arrow before the projectile tag
+ lookup
+
+AbstractArrow.isPickable evaluated super.isPickable() first, which is a
+tag-set membership lookup for REDIRECTABLE_PROJECTILE, and only then the
+boolean field read isInGround(). Both operands are pure reads, so the
+order is free, and an arrow that has landed -- what an arrow spends most
+of its life being -- can reject without touching the tag set at all.
+
+Measured rather than guessed: a live overload on a real server put 806 of
+832 samples in the hottest stack under canHitEntity ->
+canBeHitByProjectile -> Holder.is -> ReferenceOpenHashSet.contains, and
+this call is how that stack is reached. Projectile collision asks every
+nearby candidate whether it is pickable, so the cost scales with local
+projectile density -- the exact case that stalled the region.
+
+diff --git a/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java b/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
+index 449d211ed59b27f1878c472e974ca8573b546d84..28656a78364ae948d48bdfa897eb2123bf73f549 100644
+--- a/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
++++ b/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
+@@ -813,7 +813,13 @@ public abstract class AbstractArrow extends Projectile {
+ 
+     @Override
+     public boolean isPickable() {
+-        return super.isPickable() && !this.isInGround();
++        // SourbyCraft - cheap test first. super.isPickable() is a tag-set membership lookup
++        // (REDIRECTABLE_PROJECTILE); isInGround() reads a boolean field. Both are pure, so the
++        // order is free to choose, and a landed arrow -- which is what an arrow spends most of
++        // its life being -- now rejects without touching the tag set. Measured: a live overload
++        // put 806 of 832 samples in the hottest stack under canHitEntity -> canBeHitByProjectile
++        // -> Holder.is -> ReferenceOpenHashSet.contains, reached through exactly this call.
++        return !this.isInGround() && super.isPickable();
+     }
+ 
+     @Override
