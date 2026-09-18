@@ -417,6 +417,26 @@ The runtime should not directly depend on Canvas config classes outside the comp
 - no automatic config migration/writeback,
 - Spark config reporting reads Aurora-owned metadata safely.
 
+### T2 status
+
+Aurora settings live in `sourbycraft_config/aurora.toml`, separate from SourbyCraft's own file.
+The unified file is still read underneath and the Aurora file layered over it, so a deployment
+that predates the split keeps the values it had; only a newly created Aurora file is seeded,
+because writing into an existing one would mask that fallback and turn an operator's setting into
+a default without them touching anything.
+
+`config/upstream/UpstreamConfigBridge` isolates the engine's own reload. `CanvasConfigBridge` is
+now the only file in SourbyCraft that names Canvas — the independence tests pin that file, not
+just the symbols — and the reload path above it names no engine at all. A part the engine cannot
+re-read is reported and the previous values stay in force, rather than aborting the SourbyCraft
+reload around it.
+
+Two settings exist because two behaviours exist: `aurora.entity.async-pathfinding` and
+`aurora.diagnostics.lane-sampling`, both LIVE, both with type, default, validation, consumer and
+legacy fallback. The other eight namespaces this section lists are deliberately absent. The rule
+above — *do not generate empty sections purely for branding* — is the same rule the config file
+itself follows, and a namespace with no behaviour behind it is a promise the server cannot keep.
+
 ---
 
 # 9. T3 — Aurora Execution Model
