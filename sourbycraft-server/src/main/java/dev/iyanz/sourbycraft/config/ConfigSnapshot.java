@@ -9,6 +9,26 @@ import java.util.Map;
 public record ConfigSnapshot(Map<String, Object> values) {
     public ConfigSnapshot { values = Map.copyOf(values); }
 
+    /**
+     * One snapshot from several files, later files winning.
+     *
+     * <p>How Aurora keeps its own configuration file while still reading an older deployment's
+     * unified one: the legacy file is supplied first and the Aurora file overlays it, so a server
+     * that has never seen the new file keeps working and one that has takes the new value.</p>
+     *
+     * @param layers lowest precedence first
+     * @return the merged snapshot
+     */
+    public static ConfigSnapshot layered(final ConfigSnapshot... layers) {
+        final Map<String, Object> merged = new LinkedHashMap<>();
+        for (final ConfigSnapshot layer : layers) {
+            if (layer != null) {
+                merged.putAll(layer.values());
+            }
+        }
+        return new ConfigSnapshot(merged);
+    }
+
     public static ConfigSnapshot copyOf(final UnmodifiableConfig config) {
         final Map<String, Object> values = new LinkedHashMap<>();
         flatten(config, "", values);

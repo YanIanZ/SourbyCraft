@@ -98,12 +98,16 @@ public class AuroraConfigTest {
             }
             flag.setBoolean(null, true);
             Path created = dir.resolve("new.toml");
-            // FileConfig defaults to asynchronous saves; this fixture verifies seeding,
-            // so use synchronous persistence rather than racing the writer thread.
+            // Aurora keys no longer land in the unified file: the engine has its own, seeded
+            // separately by seedAurora(). What seedDefaults must still do is leave this file
+            // free of them, so a unified file never becomes a second source of engine truth.
             try (var file = CommentedFileConfig.builder(created).sync().build()) {
                 seed.invoke(null, file);
-                assertEquals(false, file.get(AuroraConfig.ASYNC_PATH_KEY));
-                assertTrue(Files.readString(created).contains("async-pathfinding"));
+                assertFalse(file.contains(AuroraConfig.ASYNC_PATH_KEY),
+                    "the unified file must not carry Aurora keys any more");
+                assertFalse(file.contains(AuroraConfig.LANE_SAMPLING_KEY));
+                assertTrue(file.contains("branding.gc-advisor.enabled"),
+                    "utility keys still seed here");
             }
         } finally {
             flag.setBoolean(null, previous);
@@ -144,18 +148,19 @@ public class AuroraConfigTest {
         field.setAccessible(true);
         Object previous = field.get(null);
         boolean previousEnabled = AsyncPathProcessor.isEnabled();
-        var load = SourbyCraftConfig.class.getDeclaredMethod("loadSnapshot", CommentedFileConfig.class);
+        var load = SourbyCraftConfig.class.getDeclaredMethod(
+            "loadSnapshot", CommentedFileConfig.class, CommentedFileConfig.class);
         load.setAccessible(true);
         try (var file = CommentedFileConfig.of(path)) {
             file.load();
-            load.invoke(null, file);
+            load.invoke(null, file, null);
             assertTrue(SourbyCraftConfig.aurora().entity().asyncPathfinding());
             assertTrue(AsyncPathProcessor.isEnabled());
             assertEquals(legacy, Files.readString(path));
             String modern = legacy + "\n[aurora.entity]\nasync-pathfinding = false\n";
             Files.writeString(path, modern);
             file.load();
-            load.invoke(null, file);
+            load.invoke(null, file, null);
             assertFalse(SourbyCraftConfig.aurora().entity().asyncPathfinding());
             assertFalse(AsyncPathProcessor.isEnabled());
             assertEquals(modern, Files.readString(path));
@@ -222,6 +227,49 @@ public class AuroraConfigTest {
         assertTrue(parsed.config().entity().asyncPathfinding(), "the valid setting must survive");
         assertTrue(parsed.config().diagnostics().laneSampling(), "the invalid one falls back");
         assertEquals(List.of(AuroraConfig.LANE_SAMPLING_KEY), parsed.invalidKeys());
+    }
+
+    // --- Aurora's own file, layered over the unified one ----------------------------------
+
+    @Test
+    void auroraOwnFileWinsOverTheUnifiedOne() {
+        // A deployment that already had the key in the unified file, then gained aurora.toml.
+        final Map<String, Object> legacy = new HashMap<>();
+        legacy.put(AuroraConfig.ASYNC_PATH_KEY, false);
+        final Map<String, Object> aurora = new HashMap<>();
+        aurora.put(AuroraConfig.ASYNC_PATH_KEY, true);
+
+        final AuroraConfig config = AuroraConfig.parse(ConfigSnapshot.layered(
+            new ConfigSnapshot(legacy), new ConfigSnapshot(aurora))).config();
+
+        assertTrue(config.entity().asyncPathfinding(), "the Aurora file is authoritative");
+    }
+
+    @Test
+    void aDeploymentWithoutTheAuroraFileKeepsItsExistingSetting() {
+        // The whole point of layering: never silently revert a server that predates the split.
+        final Map<String, Object> legacy = new HashMap<>();
+        legacy.put(AuroraConfig.ASYNC_PATH_KEY, true);
+
+        final AuroraConfig config = AuroraConfig.parse(ConfigSnapshot.layered(
+            new ConfigSnapshot(legacy), new ConfigSnapshot(Map.of()))).config();
+
+        assertTrue(config.entity().asyncPathfinding());
+    }
+
+    @Test
+    void layeringLeavesUntouchedKeysAlone() {
+        final Map<String, Object> legacy = new HashMap<>();
+        legacy.put(AuroraConfig.ASYNC_PATH_KEY, true);
+        legacy.put(AuroraConfig.LANE_SAMPLING_KEY, false);
+        final Map<String, Object> aurora = new HashMap<>();
+        aurora.put(AuroraConfig.ASYNC_PATH_KEY, false);
+
+        final AuroraConfig config = AuroraConfig.parse(ConfigSnapshot.layered(
+            new ConfigSnapshot(legacy), new ConfigSnapshot(aurora))).config();
+
+        assertFalse(config.entity().asyncPathfinding(), "overridden");
+        assertFalse(config.diagnostics().laneSampling(), "not overridden, so the legacy value stands");
     }
 
     @Test
