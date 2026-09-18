@@ -22,5 +22,6 @@ import org.junit.platform.suite.api.Suite;
     dev.iyanz.sourbycraft.command.SpecCommandTest.class,
     dev.iyanz.sourbycraft.brand.GcAdvisorHeadroomTest.class,
     dev.iyanz.sourbycraft.core.AuroraRuntimeTest.class,
-    dev.iyanz.sourbycraft.config.upstream.UpstreamConfigBridgeTest.class})
+    dev.iyanz.sourbycraft.config.upstream.UpstreamConfigBridgeTest.class,
+    dev.iyanz.sourbycraft.SourbyCraftConfigShadowTest.class})
 public class RuntimeModernizationTestSuite {}
