@@ -42,6 +42,9 @@ public final class SourbyCraftBootstrap {
 
     /** Server stop hook after plugin disable; each optional service has isolated cleanup. */
     public static void close() {
+        // Before the first service goes down, so anything consulting acceptingWork() stops
+        // admitting during the window when shutdown is in flight and work is still arriving.
+        AuroraRuntime.transition(AuroraRuntime.State.STOPPING);
         try { dev.iyanz.sourbycraft.hud.HudBars.close(); }
         catch (Throwable failure) { SourbyLogger.error("HUD shutdown failed", failure); }
         try { AutoUpdateSettings.stopUpdater(); }
@@ -54,6 +57,7 @@ public final class SourbyCraftBootstrap {
         catch (Throwable failure) { SourbyLogger.error("Path worker shutdown failed", failure); }
         try { VirtualExecutor.shutdown(); }
         catch (Throwable failure) { SourbyLogger.error("I/O shutdown failed", failure); }
+        AuroraRuntime.transition(AuroraRuntime.State.STOPPED);
     }
 
     /**
@@ -67,6 +71,8 @@ public final class SourbyCraftBootstrap {
         if (started) return;
         started = true;
 
+        AuroraRuntime.transition(AuroraRuntime.State.BOOTSTRAPPING);
+        AuroraRuntime.transition(AuroraRuntime.State.STARTING);
         final Plugin owner = MinecraftInternalPlugin.INSTANCE;
         final long begun = System.nanoTime();
         stageCount = 0;
@@ -134,6 +140,10 @@ public final class SourbyCraftBootstrap {
         java.util.logging.Logger.getLogger("Aurora Engine")
             .info(String.join(System.lineSeparator(), progress));
         progress.clear();
+        // FAILED only when nothing came up. A stage or two failing leaves a server that runs and
+        // says which part is missing, which is more useful than refusing to start.
+        AuroraRuntime.transition(failureCount >= TOTAL_STAGES
+            ? AuroraRuntime.State.FAILED : AuroraRuntime.State.RUNNING);
     }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
