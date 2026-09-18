@@ -537,3 +537,32 @@ seeded world, because the client swarm flies continuously and generates terrain 
 the seed covers. A workload meant to profile entities should keep its clients near the entities —
 which is also what a real AI test looks like. Until that changes, any entity profile taken here
 is reading through a layer of generation noise.
+
+### Measured on the deployment server
+
+A Pterodactyl node, Xeon E3-1245 v5, 4 physical cores and 8 logical, 10 GiB container.
+
+Two things that had only been verified locally are confirmed on real hardware. Telemetry reaches
+`Freshness: AVAILABLE`, where a two-hour certified soak had reported `WARMING` for all 6302 of its
+samples. And `/perf lanes` reports a live division of the machine.
+
+The spatial claim is confirmed directly. Entities and forceloads placed at one site produced
+`Active regions: 1` — one thread, seven cores idle. The same server, given eight sites roughly
+2000 blocks apart, produced `Active regions: 7`:
+
+| | one site | eight dispersed sites |
+| --- | ---: | ---: |
+| active regions | 1 | 7 |
+| `REGION_TICK` | 0.04 cores | 0.09 cores |
+| worst average MSPT | 1.52 ms | 1.37 ms |
+| TPS | 20.00 | 20.00 |
+
+Region threading parallelises across space, and this is what that means in practice: the same
+work spread out engages seven threads, and concentrated engages one. It is the whole of the advice
+for "too many entities" — spread the spawn, not the count.
+
+Neither load came close to stressing the machine: 0.11 of 8 cores at the peak. A console-driven
+test cannot generate real load, because entity activation range is computed around players and
+this server runs `online-mode=true`, which the harness's offline-login clients cannot join. Load
+testing it needs either real players or an offline-mode staging server — and weakening the login
+mode of a public server to make a test easier is not a trade worth making.
