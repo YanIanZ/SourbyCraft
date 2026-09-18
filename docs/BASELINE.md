@@ -566,3 +566,39 @@ test cannot generate real load, because entity activation range is computed arou
 this server runs `online-mode=true`, which the harness's offline-login clients cannot join. Load
 testing it needs either real players or an offline-mode staging server — and weakening the login
 mode of a public server to make a test easier is not a trade worth making.
+
+### Entity baseline, with the clients where the entities are
+
+`entity-stress` — 3000 mobs and 3000 item entities in 81 chunks, four connected players, seeded
+world, clients leashed to the volume the entities occupy.
+
+The leash is what makes this measurement mean anything. The same workload with roaming clients
+reported 40.5% terrain generation; leashed, generation is 2.7% and the entity work it was built to
+measure is visible:
+
+| Share of execution samples | roaming | leashed |
+| --- | ---: | ---: |
+| terrain generation | 40.5% | 2.7% |
+| entity tick and lookup | 7.4% | 22.9% |
+| random tick and chunk tick | 6.5% | 14.6% |
+| collision | — | 10.3% |
+| mob AI and pathfinding | 1.1% | 3.4% |
+
+Tick held at 11.6 ms mean, 14.3 ms maximum, across eight regions. Client position corrections fell
+from 468 to 4, because a leashed client stops fighting terrain it flew into.
+
+The largest single self-time entry is `ServerLevel.optimiseRandomTick` at 10.0% — a method
+SourbyCraft has already patched once, to reuse one `MutableBlockPos` per call instead of
+allocating per tick. What remains is the loop itself: cached RNG bits, a block-counting tick list,
+a palette read and a position write per selected block. No further change is proposed, because no
+specific waste was identified and "it is the biggest number" is not a reason to edit a hot loop.
+
+Worth noting for its own sake: random ticking is the top cost *in an entity workload*. Its cost
+follows loaded chunks and `randomTickSpeed`, not entity count, so a server with entity problems
+may be spending more on the blocks around them than on the entities.
+
+Nothing else in the ranking offers a safe measured win. `AABB.intersects` (2.7%),
+`ConcurrentChainedLong2ReferenceHashTable.getNode` (2.0%) and `TrackedEntity.updatePlayer` (1.5%)
+are upstream collision, chunk-map and entity-tracking paths with no identified redundancy;
+`Entity.fixPassengerDesync` (1.4%) already early-returns for entities without passengers, so what
+is measured there is the call itself.
