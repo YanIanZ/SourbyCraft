@@ -16,7 +16,7 @@ import java.util.logging.Logger;
  *
  * <p>Pathfinding A* is CPU-bound, so this is a small <b>bounded platform-thread</b> pool (never virtual
  * threads — those are for I/O and would just oversubscribe the cores). The caller builds the immutable
- * {@link net.minecraft.world.level.SnapshotPathRegion} and its per-solve {@code PathFinder}/{@code
+ * {@link dev.iyanz.aurora.level.SnapshotPathRegion} and its per-solve {@code PathFinder}/{@code
  * NodeEvaluator} on the region thread, then hands a closure here that runs the solve against that
  * snapshot off-thread. Nothing in the submitted work may touch the live world — see {@code
  * SnapshotPathRegion} for why.
