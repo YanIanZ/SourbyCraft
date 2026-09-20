@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: agent <agent@local>
+Date: Mon, 21 Sep 2026 02:05:36 +0700
+Subject: [PATCH] SourbyCraft - translate block collision boxes without
+ allocating on a miss
+
+getCollisionsForBlocksOrWorldBorder is fourth on the CPU list under real
+AI load, and AABB.move is its largest callee and the second largest
+allocation site in the whole profile.
+
+The single-AABB path called move() to translate the block's collision box
+into world coordinates and only then tested it against the query box.
+move() returns a new AABB, so every candidate block allocated one -- and
+most candidates fail the test, so most of those were discarded
+immediately. checkOnly callers discarded theirs even on a hit.
+
+The translation is six additions. Both intersection tests already have an
+overload taking the bounds as doubles, so the test now runs against those
+and an AABB is constructed only on the path that keeps it.
+
+Semantics are unchanged: same operands, same epsilon, same order, and the
+retained box is built from the same six values move() would have
+produced.
+
+diff --git a/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java b/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java
+index bc91b87da9c8034fc142007bfb0be4927bd958d6..17d1a7f5ae9ea7713a93b2dc72b93210b6ab6107 100644
+--- a/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java
++++ b/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java
+@@ -2022,21 +2022,34 @@ public final class CollisionUtil {
+                                         blockCollision = blockData.getCollisionShape(world, mutablePos, collisionShape);
+                                     }
+ 
+-                                    AABB singleAABB = ((CollisionVoxelShape)blockCollision).moonrise$getSingleAABBRepresentation();
++                                    final AABB singleAABB = ((CollisionVoxelShape)blockCollision).moonrise$getSingleAABBRepresentation();
+                                     if (singleAABB != null) {
+-                                        singleAABB = singleAABB.move((double)blockX, (double)blockY, (double)blockZ);
++                                        // SourbyCraft start - translate as coordinates, allocate only on a hit
++                                        // move() returns a new AABB, and this allocated one per candidate
++                                        // block before testing it. Most candidates fail the test, so most of
++                                        // those allocations were discarded immediately -- AABB.move is the
++                                        // second largest allocation site in an entity profile with players
++                                        // connected. The offset bounds are six doubles; both intersection
++                                        // tests already have an overload that takes them.
++                                        final double movedMinX = singleAABB.minX + (double)blockX;
++                                        final double movedMinY = singleAABB.minY + (double)blockY;
++                                        final double movedMinZ = singleAABB.minZ + (double)blockZ;
++                                        final double movedMaxX = singleAABB.maxX + (double)blockX;
++                                        final double movedMaxY = singleAABB.maxY + (double)blockY;
++                                        final double movedMaxZ = singleAABB.maxZ + (double)blockZ;
+ 
+                                         // Not using the epsilon violates the collision rules but this is what Vanilla does.
+                                         // Check BlockCollisions.class
+                                         if (blockCollision == Shapes.block()) {
+-                                            if (!aabb.intersects(singleAABB)) {
++                                            if (!aabb.intersects(movedMinX, movedMinY, movedMinZ, movedMaxX, movedMaxY, movedMaxZ)) {
+                                                 continue;
+                                             }
+                                         } else {
+-                                            if (!voxelShapeIntersect(aabb, singleAABB)) {
++                                            if (!voxelShapeIntersect(aabb, movedMinX, movedMinY, movedMinZ, movedMaxX, movedMaxY, movedMaxZ)) {
+                                                 continue;
+                                             }
+                                         }
++                                        // SourbyCraft end - translate as coordinates, allocate only on a hit
+ 
+                                         if (predicate != null) {
+                                             if (!predicate.test(blockData, mutablePos)) {
+@@ -2048,7 +2061,9 @@ public final class CollisionUtil {
+                                             return true;
+                                         } else {
+                                             ret = true;
+-                                            intoAABB.add(singleAABB);
++                                            // SourbyCraft - the only path that keeps the box, so the only
++                                            // path that needs one. checkOnly returns above without allocating.
++                                            intoAABB.add(new AABB(movedMinX, movedMinY, movedMinZ, movedMaxX, movedMaxY, movedMaxZ));
+                                             continue;
+                                         }
+                                     }
