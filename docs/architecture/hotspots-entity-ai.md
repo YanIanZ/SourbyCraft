@@ -106,3 +106,44 @@ up. The cluster as a whole fell about one percentage point.
 The correct claim is narrow: the profile shows less time in the frame the patch changed, in the
 direction the patch intended. Whether that reaches MSPT needs the certified `entity-stress`
 reference T10 is waiting on — produced by this exact command on a quiet machine.
+
+---
+
+## Examined and not patched: `optimiseRandomTick`
+
+Second on the CPU list at 245 samples, so the obvious next target. It was examined and
+deliberately left alone; this is recorded so the next reader does not spend the same hour
+rediscovering it.
+
+Of the 245 samples, only about 48 have any callee frame beneath them:
+
+| Callee | Samples |
+|---|---|
+| `BlockStateBase.randomTick` | 19 |
+| `FasterRandomSource.nextLong` | 14 |
+| `ShortList.getRaw` | 12 |
+| `ShortList.size`, `LevelChunkSection.getStates` | 3 |
+
+The remaining ~197 are **self-time**: loop arithmetic, the palette lookup that JIT inlined, and
+`pos.set`. There is no dominant callee to attack.
+
+Reading the method against that, the usual candidates are already taken:
+
+- the scratch `BlockPos` is allocated once per call and reused — **patch 0010**,
+- the RNG is drawn once per section and split into 12-bit slices, not per trial,
+- `isRandomlyTickingBlocks()` guards `getStates()`, and `tickingBlocks == 0` guards the RNG
+  draw, so an empty section costs one virtual call,
+- offsets are hoisted above the inner loop,
+- the ticking-block list with index rejection is Moonrise's own optimisation and preserves
+  vanilla's per-position probability. Changing the rejection would change which blocks tick.
+
+The palette lookup cannot be removed: the tick list stores positions, not states, so the
+`BlockState` has to be fetched to call `randomTick` on it.
+
+**Conclusion: this method is at its floor for its current semantics.** Its cost scales with
+`random_tick_speed` and the number of loaded, randomly-ticking sections — which is why raising
+`random_tick_speed` to 480 was measurable at all. Reducing it is an operator decision about
+load, not an optimisation available in this code.
+
+Recorded as a negative result rather than left as an open target, because "second on the CPU
+list" reads like opportunity until someone checks.
