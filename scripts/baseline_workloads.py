@@ -223,6 +223,49 @@ def chunk_stress(radius=4, step_chunks=64, interval_seconds=10):
                     "chunks_per_window": (2 * radius + 1) ** 2})
 
 
+def save_stress(radius=6, churn_columns=192, interval_seconds=15):
+    """Dirty many chunks, then force them to disk, repeatedly.
+
+    §16 lists save stress separately from chunk traversal, and the difference is real:
+    chunk-stress measures generating and loading new terrain, while this measures writing
+    *already loaded* chunks that keep changing. The save path is the one place §11.6's rule
+    bites -- no performance gain may come from silently weakening durability -- so it needs a
+    workload that makes the server write, not one that happens to call save-all.
+
+    No connected players are required: block edits and region writes have no activation gate.
+    """
+    chunks = (2 * radius + 1) ** 2
+    span = radius * 16
+    setup = [*DETERMINISM,
+             f"forceload add -{span} -{span} {span} {span}",
+             await_chunks(chunks)]
+    # Churn spread across the whole forceloaded square rather than one column, so the dirty
+    # set is many region-file sectors instead of the same one rewritten.
+    churn = []
+    for index in range(churn_columns):
+        x = -span + (index * 17) % (2 * span)
+        z = -span + (index * 23) % (2 * span)
+        # Alternating blocks so every pass genuinely changes state; writing the same block
+        # back would leave the chunk clean and the save path idle.
+        block = ("minecraft:stone", "minecraft:sandstone")[index % 2]
+        churn.append(_at_surface(x, z, f"fill ~ ~1 ~ ~3 ~4 ~3 {block}"))
+    return Plan(
+        name="save-stress", level_type="minecraft:normal", minimum_heap_mib=4096,
+        summary=f"Rewrites {churn_columns} columns across {chunks} forceloaded chunks, "
+                f"flushing every {interval_seconds}s.",
+        fidelity=("Exercises the save queue, chunk serialization and region-file writes.",
+                  "Measures writing loaded chunks that keep changing, not generating new "
+                  "terrain -- chunk-stress covers generation.",
+                  "Storage backlog is not instrumented yet, so queue depth on the save path "
+                  "is not visible in the snapshot; read throughput from the JFR recording.",
+                  "No connected players are needed: block edits and region writes have no "
+                  "activation gate."),
+        setup=tuple(setup), steady=(*churn, "save-all flush"),
+        steady_interval_seconds=interval_seconds, settle_seconds=30,
+        parameters={"chunk_radius": radius, "chunks": chunks,
+                    "churn_columns": churn_columns, "blocks_per_pass": churn_columns * 4 * 4 * 4})
+
+
 def network_stress(clients=64, rate_per_second=400):
     """Connection, handshake and status round-trips against the live Netty pipeline."""
     return Plan(
@@ -240,7 +283,8 @@ def network_stress(clients=64, rate_per_second=400):
 BUILDERS = {"idle": idle,
             "players-10": lambda: players(10), "players-50": lambda: players(50),
             "players-100": lambda: players(100), "entity-stress": entity_stress,
-            "chunk-stress": chunk_stress, "network-stress": network_stress}
+            "chunk-stress": chunk_stress, "save-stress": save_stress,
+            "network-stress": network_stress}
 
 NAMES = tuple(BUILDERS)
 
