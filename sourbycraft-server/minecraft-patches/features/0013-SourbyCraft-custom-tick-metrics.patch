@@ -175,7 +175,7 @@ index 6c3769f8babea5e89aa063f5aef3168ecab4bed5..1b2ebb474f7747a1b585e6cc4562d1b4
          }
  
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 93893d5bc2a4cb4ff2e4c92cc4195adb7aad2b86..eaa6841a2b7cc4f210aec3212557378591c96b2a 100644
+index bf3ea5c66a178a914787bb9bc6697cf9c3ad4c2c..310aae47cf64e0226f673e8357c836b37140abe9 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
 @@ -4,6 +4,7 @@ import ca.spottedleaf.common.util.TimeUtil;
@@ -195,7 +195,7 @@ index 93893d5bc2a4cb4ff2e4c92cc4195adb7aad2b86..eaa6841a2b7cc4f210aec32125573785
  
      public static int getRegionChunkShift() {
          return regionShift;
-@@ -105,6 +108,29 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -117,6 +120,29 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          return new TickRegionData(region);
      }
  
@@ -225,7 +225,7 @@ index 93893d5bc2a4cb4ff2e4c92cc4195adb7aad2b86..eaa6841a2b7cc4f210aec32125573785
      @Override
      public TickRegionSectionData createNewSectionData(final int sectionX, final int sectionZ, final int sectionShift) {
          return null;
-@@ -119,6 +145,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -131,6 +157,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
  
      @Override
      public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
@@ -233,7 +233,7 @@ index 93893d5bc2a4cb4ff2e4c92cc4195adb7aad2b86..eaa6841a2b7cc4f210aec32125573785
          // nothing for now
          io.canvasmc.canvas.threadedregions.SchedulerUtil.getHandle().onRegionDestroy(region); // Canvas - region profiler
          // Canvas start - region threading
-@@ -139,6 +166,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -151,6 +178,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
      @Override
      public void onRegionActive(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
          final TickRegionData data = region.getData();
@@ -241,7 +241,7 @@ index 93893d5bc2a4cb4ff2e4c92cc4195adb7aad2b86..eaa6841a2b7cc4f210aec32125573785
  
          data.tickHandle.checkInitialSchedule();
          scheduler.scheduleRegion(data.tickHandle);
-@@ -149,6 +177,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -161,6 +189,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          final TickRegionData data = region.getData();
  
          scheduler.descheduleRegion(data.tickHandle);
@@ -249,7 +249,7 @@ index 93893d5bc2a4cb4ff2e4c92cc4195adb7aad2b86..eaa6841a2b7cc4f210aec32125573785
          // we call inactive here, since unpinning needs to occur before copying, or else this will cause issues
          io.canvasmc.canvas.threadedregions.SchedulerUtil.getHandle().onRegionInactive(region); // Canvas - region profiler
          // old handle cannot be scheduled anymore, copy to a new handle
-@@ -158,13 +187,14 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -170,13 +199,14 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
      @Override
      public void preMerge(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
                           final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
@@ -266,7 +266,7 @@ index 93893d5bc2a4cb4ff2e4c92cc4195adb7aad2b86..eaa6841a2b7cc4f210aec32125573785
      }
  
      public static final class TickRegionSectionData implements ThreadedRegionizer.ThreadedRegionSectionData {}
-@@ -514,6 +544,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -526,6 +556,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          public void mergeInto(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
              // note: merge target is always a region being released from ticking
              final TickRegionData data = into.getData();
@@ -274,7 +274,7 @@ index 93893d5bc2a4cb4ff2e4c92cc4195adb7aad2b86..eaa6841a2b7cc4f210aec32125573785
              final long currentTickTo = data.getCurrentTick();
              final long currentTickFrom = this.getCurrentTick();
  
-@@ -560,6 +591,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -572,6 +603,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
  
          @NonNull
          private ConcreteRegionTickHandle copy() {
