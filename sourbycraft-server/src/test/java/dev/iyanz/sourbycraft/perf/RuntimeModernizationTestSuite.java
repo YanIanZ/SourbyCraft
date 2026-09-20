@@ -11,6 +11,7 @@ import org.junit.platform.suite.api.Suite;
 @SelectClasses({RuntimeSamplerTest.class, IoLifecycleTest.class, ConfigSnapshotTest.class,
     dev.iyanz.sourbycraft.config.AuroraConfigTest.class,
     TelemetryEventTest.class, AsyncPathShutdownTest.class, AsyncPathCompletionTest.class,
+    AsyncPathQueueTelemetryTest.class,
     ScratchBufferConfinementTest.class, IsInWallBoundsTest.class, EngineNameTest.class,
     dev.iyanz.sourbycraft.execution.ExecutionLaneTest.class,
     dev.iyanz.sourbycraft.execution.region.AuroraRegionTest.class,

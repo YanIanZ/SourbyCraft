@@ -153,6 +153,14 @@ public final class PerfCommand extends Command {
             count(stats.admitted()) + " / " + count(stats.outstanding()));
         add(lines, "Solve time mean / slowest", Double.isNaN(stats.meanMillis()) ? "no solves yet"
             : TpsCommand.ms(stats.meanMillis()) + " / " + TpsCommand.ms(stats.slowestMillis()));
+        // Queue wait separates "the A* is expensive" from "the pool is too small for the arrival
+        // rate". A short solve behind a long wait still reaches the entity late.
+        add(lines, "Queue wait mean / slowest", Double.isNaN(stats.meanWaitMillis())
+            ? "no solves yet"
+            : TpsCommand.ms(stats.meanWaitMillis()) + " / " + TpsCommand.ms(stats.slowestWaitMillis()));
+        add(lines, "Queue depth / active workers / pool", stats.poolSize() < 0 ? "pool not running"
+            : count(stats.queueDepth()) + " / " + count(stats.activeWorkers())
+                + " / " + count(stats.poolSize()));
         add(lines, "Ran on the caller (pool saturated)", count(stats.inline())
             + (stats.inline() > 0 ? "  — these ran on a region thread" : ""));
         add(lines, "Refused after shutdown", count(stats.refused()));
