@@ -171,10 +171,25 @@ public final class SourbyCraftConfig {
         } catch (Throwable t) {
             return "reload FAILED: could not re-read the config file: " + t.getMessage();
         }
+        // Aurora's own file has to be re-read too. auroraFile() returns a cached handle and only
+        // load()s it on creation, so without this the one file the split exists to give Aurora
+        // is the one file /sourbycraft reload ignores: an operator edits aurora.toml, reloads,
+        // is told it reloaded, and keeps the value from boot.
+        final CommentedFileConfig auroraFile = auroraFile();
+        if (auroraFile != null) {
+            try {
+                auroraFile.load();
+            } catch (final Throwable t) {
+                // Keep going with the last good Aurora values rather than failing the whole
+                // reload: the unified file's settings below are still worth applying.
+                SourbyLogger.error("could not re-read " + AURORA_PATH
+                    + "; Aurora settings keep the values loaded at startup", t);
+            }
+        }
         final AuroraConfig previous = aurora();
         final AuroraConfig.Parsed parsed;
         try {
-            parsed = loadSnapshot(f, auroraFile());
+            parsed = loadSnapshot(f, auroraFile);
             applyLiveConfig(true);
         } catch (Throwable t) {
             SourbyLogger.error("config reload apply failed", t);
