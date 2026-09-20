@@ -278,6 +278,12 @@ subprojects {
         // config-cache layer cannot serialise. Opting THIS task out is cheap and does
         // not affect the rest of the build.
         notCompatibleWithConfigurationCache("Reads git branch via providers.exec at task execution time.")
+        // SOURCE_DATE_EPOCH is read with System.getenv inside doLast, which Gradle cannot see,
+        // so without declaring it here the task stays UP-TO-DATE when it changes. That shipped a
+        // jar reporting a 2023 build date to the deployment server: a reproducibility test had
+        // set the variable, and the next ordinary build repackaged the stale properties file.
+        inputs.property("sourceDateEpoch", providers.environmentVariable("SOURCE_DATE_EPOCH")
+            .orElse("")).optional(true)
 
         doLast {
             val f = outFile.get().asFile
