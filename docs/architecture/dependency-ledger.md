@@ -103,7 +103,7 @@ vanilla class; none of them is an Aurora contract.
 
 | Item | Class | Reason |
 |---|---|---|
-| `sourbypatcher/` | `LEGACY` / `REMOVABLE` | Our own paperweight fork, superseded by the Canvas weaver toolchain ("Path B", `build.gradle.kts`). **Not included in any build**: `settings.gradle.kts` does not include it and nothing outside its own directory references it except comments. It survives as a directory only. |
+| `sourbypatcher/` | `LEGACY` / `REMOVABLE` | Our own paperweight fork, superseded by the Canvas weaver toolchain ("Path B", `build.gradle.kts`). No Gradle build includes it — `settings.gradle.kts` does not, and the only reference outside its own directory is the comment recording that the weaver toolchain replaced `dev.iyanz.sourbypatcher`. **CI still builds it**: `.github/workflows/build.yml` runs `publishToMavenLocal` under a step labelled "build plugin for the Folia patcher", a leftover from the Folia era. Nothing resolves the published artifact, so that step is dead work on every run. |
 
 T9's gate asks that removable legacy layers be deleted. Deleting `sourbypatcher/` is a
 judgement call for the maintainer, not a mechanical one — it is the fallback if the weaver
