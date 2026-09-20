@@ -111,8 +111,8 @@ No task in this group is considered complete without before/after evidence.
 
 ## E. Scheduler / concurrency
 
-- [ ] inventory all Sourby-owned executors
-- [ ] audit implicit common-pool usage
+- [x] inventory all Sourby-owned executors — [executor-inventory.md](architecture/executor-inventory.md)
+- [x] audit implicit common-pool usage — [executor-inventory.md](architecture/executor-inventory.md)
 - [-] async pathfinding shutdown/cancellation work
 - [ ] complete async path snapshot correctness review
 - [ ] path result staleness test
