@@ -20,6 +20,7 @@ passes.
 | no known persistence bug | **no bug found** | `verify_persistence.py`, 16 checks; 4/4 on the deployment server (§4) |
 | no unbounded queue | **met** | `UnboundedQueueAuditTest`, 3 tests |
 | heap/threads/tasks stabilize after load | **blocked** | needs the 2h soak |
+| cached runtime boots offline (T8) | **corrected** | a *populated* runtime boots offline; a *fresh* one does not boot at all — [slim-jar bootstrap failure](slim-jar-bootstrap-failure.md) |
 | shutdown completes predictably | **partial** | unit tests, plus two clean console shutdowns and a live restart on the deployment server; not yet exercised *under load* |
 
 ---
