@@ -66,12 +66,15 @@ Probing the four repositories SourbyClip is built with, for
 responses is a miss. Three say so. The fourth returns 200, and a downloader that treats 200 as
 success writes that HTML into `libraries/` under a `.jar` name.
 
-Two consequences follow, and the second is what makes it look like a build problem:
+The hash check then fails — `Downloaded library SHA-256 mismatch` — and because no repository
+after it is consulted, the boot dies.
 
-1. the hash check then fails — `Downloaded library SHA-256 mismatch`,
-2. **the bad file stays on disk**, so the next boot finds it, fails its hash, and reports
-   `Bundled library SHA-256 mismatch` — which reads like the jar is corrupt when the jar is
-   fine.
+**Correction to an earlier version of this document.** It claimed the bad file stays on disk and
+poisons later boots. That is wrong. `Downloader.deleteIfInvalid()` is misleadingly named: it
+creates the output directory if absent and then calls `Files.deleteIfExists(outputFile)`
+unconditionally, with no validity check. Every attempt starts from a clean slate, so the failure
+is deterministic rather than cumulative — each boot re-fetches and re-fails. The claim was made
+from the error text rather than from the bytecode, before the bytecode was read.
 
 The artifacts themselves were verified good. All 58 stripped libraries return 200 from at least
 one repository, and `zstd-jni` hashes identically from Maven Central, aliyun and papermc, all
@@ -83,14 +86,19 @@ In SourbyClip, which is a separate private repository pinned by
 `build-data/private-toolchain.lock.json` and therefore not fixable from this tree. Any one of
 these closes it:
 
-- **verify before persisting** — hash the response body and only then write it into
-  `libraries/`, so a bad answer cannot poison later boots. This is the important one: without
-  it, a single bad response breaks an installation permanently,
+- **verify before persisting** — write to a temporary file, hash it, and move it into place
+  only when it matches. Both paths currently write straight to the final path and validate
+  afterwards, so a crash or a concurrent reader between those two steps sees a corrupt jar,
 - **reject non-archive responses** — a 200 whose body is HTML, or which is orders of magnitude
   smaller than expected, is a miss regardless of status code,
 - **keep trying** — a hash mismatch from one repository should fall through to the next rather
   than ending the attempt,
 - drop `repo.menthamc.org`, or move it last.
+
+A reconstructed patch for those first two points is in
+[`sourbyclip-download-fix.patch`](sourbyclip-download-fix.patch). It is written against bytecode
+rather than sources, since SourbyClip is private, so it is applied by hand rather than with
+`git am`.
 
 ## Workaround until then
 

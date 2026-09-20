@@ -1,0 +1,137 @@
+From: SourbyCraft <noreply@sourbycraft>
+Subject: [PATCH] downloader: do not trust HTTP 200, and verify before persisting
+
+A slim jar cannot bootstrap in a clean directory. It fails with
+
+    RuntimeException: All maven repo download attempts has been failed for library <id>!
+      Suppressed: java.io.IOException: Downloaded library SHA-256 mismatch: <id>
+
+for whichever library it reaches first.
+
+Cause, established by probing the four repositories in Sourbyclip's list with
+dev/iyanz/sourbycraft/sourbyapi/26.2-DEV/sourbyapi-26.2-DEV.jar, an artifact that is published
+nowhere so every answer is necessarily a miss:
+
+    maven.aliyun.com/repository/central        404   689 B
+    repo.papermc.io/repository/maven-public    404   170 B
+    repo.menthamc.org/repository/maven-public  200   995 B   <-- HTML, status 200
+    repo.spongepowered.org/maven               404  1602 B
+
+menthamc answers 200 with an HTML body for artifacts it does not have. A downloader that treats
+200 as success writes that HTML into libraries/ under a .jar name and then fails its hash.
+
+The libraries are not at fault. All 58 stripped entries resolve from at least one repository,
+and zstd-jni hashes identically from Maven Central, aliyun and papermc, all three matching
+libraries.list.
+
+---
+
+NOTE ON FORM. SourbyClip's sources are not in the SourbyCraft tree -- they live in the private
+YanIanZ/SourbyClip repository, pinned by build-data/private-toolchain.lock.json. This patch was
+reconstructed from the bytecode shipped inside SourbyCraft-slim.jar
+(dev/iyanz/sourbyclip/downloader/Downloader.class, javap -c -p), so the structure and method
+names are accurate but the surrounding source text is not verbatim. Apply by hand.
+
+---
+
+ src/main/java/dev/iyanz/sourbyclip/downloader/Downloader.java            | 38 ++++++++---
+ src/main/java/dev/iyanz/sourbyclip/downloader/MavenDependencyResolver.java | 21 +++++-
+ 2 files changed
+
+diff --git a/src/main/java/dev/iyanz/sourbyclip/downloader/Downloader.java b/src/main/java/dev/iyanz/sourbyclip/downloader/Downloader.java
+--- a/src/main/java/dev/iyanz/sourbyclip/downloader/Downloader.java
++++ b/src/main/java/dev/iyanz/sourbyclip/downloader/Downloader.java
+@@
+-    private void deleteIfInvalid() throws IOException {
++    /**
++     * Renamed from deleteIfInvalid, which it never was: it deletes unconditionally. The old name
++     * implied a validity check that does not exist, and that reading is what made a deterministic
++     * failure look like a poisoned cache.
++     */
++    private void prepareOutput() throws IOException {
+         if (!Files.isDirectory(this.outputDir)) {
+             Files.createDirectories(this.outputDir);
+         }
+         Files.deleteIfExists(this.outputFile);
+     }
++
++    /**
++     * Writes to a sibling temporary file, verifies it, and only then moves it into place.
++     *
++     * <p>Both call sites previously wrote straight to outputFile and validated afterwards, so
++     * between those two steps the final path held unverified bytes. A crash or a concurrent
++     * reader there sees a corrupt jar.</p>
++     */
++    private void writeVerified(final InputStream in, final String source) throws IOException {
++        final Path temporary = this.outputFile.resolveSibling(this.outputFile.getFileName() + ".part");
++        try {
++            Files.deleteIfExists(temporary);
++            try (final OutputStream out = Files.newOutputStream(temporary)) {
++                in.transferTo(out);
++            }
++            if (!Util.isFileValid(temporary, this.entry.hash())) {
++                throw new IOException(source + " library SHA-256 mismatch: " + this.entry.id());
++            }
++            Files.move(temporary, this.outputFile, StandardCopyOption.REPLACE_EXISTING);
++        } finally {
++            Files.deleteIfExists(temporary);
++        }
++    }
+@@ bundled path
+-        this.deleteIfInvalid();
+-        this.write(stream);
+-        if (!Util.isFileValid(this.outputFile, this.entry.hash())) {
+-            throw new IOException("Bundled library SHA-256 mismatch: " + this.entry.id());
+-        }
++        this.prepareOutput();
++        this.writeVerified(stream, "Bundled");
+@@ download path
+-        this.deleteIfInvalid();
+-        final MavenDependencyResolver resolver = new MavenDependencyResolver(repositories, this.outputDir);
+-        final MavenDependencyResolver.DownloadResult result = resolver.downloadTo(coordinate, this.outputFile);
+-        if (!Util.isFileValid(this.outputFile, this.entry.hash())) {
+-            throw new IOException("Downloaded library SHA-256 mismatch: " + this.entry.id());
+-        }
++        this.prepareOutput();
++        final MavenDependencyResolver resolver = new MavenDependencyResolver(repositories, this.outputDir);
++        // Hand the expected hash down so the resolver can reject a repository's answer and try
++        // the next one, rather than accepting the first 200 and failing the whole attempt.
++        final MavenDependencyResolver.DownloadResult result =
++            resolver.downloadTo(coordinate, this.outputFile, this.entry.hash());
++        if (!result.success()) {
++            throw new IOException("Downloaded library SHA-256 mismatch: " + this.entry.id()
++                + " (tried " + result.attempted() + " repositories)");
++        }
+
+diff --git a/src/main/java/dev/iyanz/sourbyclip/downloader/MavenDependencyResolver.java b/src/main/java/dev/iyanz/sourbyclip/downloader/MavenDependencyResolver.java
+--- a/src/main/java/dev/iyanz/sourbyclip/downloader/MavenDependencyResolver.java
++++ b/src/main/java/dev/iyanz/sourbyclip/downloader/MavenDependencyResolver.java
+@@
+-    public DownloadResult downloadTo(final String coordinate, final Path target) {
++    public DownloadResult downloadTo(final String coordinate, final Path target,
++                                     final byte[] expectedHash) {
+         for (final MavenRepository repository : this.repositories) {
+-            // ... fetch; a 200 was taken as success
++            final Path candidate = this.fetch(repository, coordinate);
++            if (candidate == null) {
++                continue;
++            }
++            // A repository that answers 200 for an artifact it does not have -- menthamc serves
++            // an HTML page this way -- is a miss, not a hit. The status code is not the answer;
++            // the bytes are. Keep going rather than ending the attempt on the first 200.
++            if (expectedHash != null && !Util.isFileValid(candidate, expectedHash)) {
++                LOGGER.debug("{} returned content for {} that does not match its hash; trying the next repository",
++                    repository.name(), coordinate);
++                Files.deleteIfExists(candidate);
++                continue;
++            }
++            Files.move(candidate, target, StandardCopyOption.REPLACE_EXISTING);
++            return DownloadResult.success(repository);
+         }
++        return DownloadResult.exhausted(this.repositories.size());
+     }
+
+--
+Optional, and separable from the above: move repo.menthamc.org to the end of the repository
+list, or drop it. That reduces how often the fallthrough is exercised but does not fix anything
+by itself -- any mirror can answer 200 for a miss, and the resolver has to survive it.
