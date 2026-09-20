@@ -162,11 +162,18 @@ public final class AsyncPathProcessor {
     }
 
     /**
-     * Run {@code solve} off the region thread and complete the returned future with its result. The
-     * {@code solve} supplier MUST already be closed over an immutable snapshot (no live-world reads).
-     * On any failure the future completes with {@code null} (the caller falls back to keeping/omitting a
-     * path — never a crash). If the pool is unavailable the solve runs inline and the future is already
-     * completed on return.
+     * Computes a path result using the bounded worker pool, with caller-thread fallback before pool
+     * startup or when its queue is full. The supplier must capture an immutable snapshot and must
+     * not read or mutate live world state, even when it happens to run on a region thread.
+     *
+     * <p>A stopped pool or failed/stopping runtime refuses new work with a completed null result.
+     * Solver failures also produce null. Explicit cancellation of the returned future remains
+     * cancellation, and propagates to the submitted task. Result application must use an owner
+     * handoff and validate freshness; future completion alone conveys no region ownership.</p>
+     *
+     * @param solve computation over an already captured snapshot
+     * @param <T> result type
+     * @return result future, possibly already completed by refusal or inline execution
      */
     public static <T> CompletableFuture<T> submit(final Supplier<T> solve) {
         // The pool's own flag covers its lifecycle; the runtime's covers the server's. A solve

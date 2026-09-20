@@ -3,24 +3,24 @@ package dev.iyanz.sourbycraft.core;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import java.util.EnumSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
- * The Aurora runtime's lifecycle, and the one place that answers "may we still take work".
- *
- * <p>Before this, five services each answered that question their own way — a {@code stopped}
- * flag here, an {@code isShutdown()} there, a {@code running} boolean elsewhere. Five answers to
- * one question is five chances for one of them to be wrong during the few seconds when a shutdown
- * is in flight and work is still arriving, which is exactly when it matters.</p>
+ * Process-wide lifecycle state published by {@link SourbyCraftBootstrap}.
  *
  * <p>This does not replace a service's own state. A pool still knows whether it has started, and
  * a collector still knows whether it has been closed. It adds the fact none of them own: whether
  * the server as a whole is still running. {@link #acceptingWork()} is false from the moment
- * shutdown begins, so a service need only ask rather than infer.</p>
+ * shutdown begins or startup fails. Services must explicitly consult this state alongside their
+ * own admission controls; changing it does not stop workers or drain their queues.</p>
  *
  * <p>Not a service locator. It holds no services and resolves nothing; {@link SourbyCraftBootstrap}
  * still owns startup order and shutdown order explicitly, because an order that is written down is
  * one that can be reviewed.</p>
+ *
+ * <p>Transitions are serialized on the class monitor. Readers observe a volatile snapshot;
+ * checking admission does not atomically reserve work against a concurrent shutdown.</p>
  */
 public final class AuroraRuntime {
 
@@ -34,11 +34,11 @@ public final class AuroraRuntime {
         BOOTSTRAPPING,
         /** Services are coming up, in order. */
         STARTING,
-        /** Fully up. The only state in which new work is freely admitted. */
+        /** Startup stages have completed; optional services may have failed. Work is admitted. */
         RUNNING,
         /** Shutdown has begun. No new work is admitted; outstanding work drains. */
         STOPPING,
-        /** Everything is down. */
+        /** The bootstrap shutdown sequence has completed its cleanup attempts. */
         STOPPED,
         /** Startup failed in a way that left the runtime unusable. */
         FAILED
@@ -60,6 +60,7 @@ public final class AuroraRuntime {
 
     private static volatile State state = State.NEW;
 
+    /** @return the current non-null lifecycle state */
     public static State state() {
         return state;
     }
@@ -69,6 +70,8 @@ public final class AuroraRuntime {
      *
      * <p>True while starting as well as running: services come up in order, and one that is up
      * has to serve the ones still coming up behind it.</p>
+     *
+     * @return true in BOOTSTRAPPING, STARTING or RUNNING; false otherwise
      */
     public static boolean acceptingWork() {
         final State current = state;
@@ -76,10 +79,14 @@ public final class AuroraRuntime {
             || current == State.BOOTSTRAPPING;
     }
 
-    /** Whether shutdown has begun, by any route including failure. */
+    /**
+     * Whether shutdown-sensitive work must be refused, including after startup failure.
+     *
+     * @return true in FAILED, STOPPING or STOPPED; false before startup or while starting/running
+     */
     public static boolean stopping() {
         final State current = state;
-        return current == State.STOPPING || current == State.STOPPED;
+        return current == State.FAILED || current == State.STOPPING || current == State.STOPPED;
     }
 
     /**
@@ -89,10 +96,15 @@ public final class AuroraRuntime {
      * are going down, which is worse than the inconsistency it was guarding. The move is made and
      * the fault is logged, so shutdown still completes and the ordering bug is visible.</p>
      *
-     * @param next the state to enter
-     * @return true when the transition was a legal one
+     * <p>The transition table is diagnostic: even an illegal non-null transition changes state.
+     * Callers remain responsible for startup/shutdown ordering and preventing restarts.</p>
+     *
+     * @param next the non-null state to enter
+     * @return true for an allowed transition or the current state; false for a logged illegal move
+     * @throws NullPointerException if {@code next} is null; the current state is preserved
      */
     public static synchronized boolean transition(final State next) {
+        Objects.requireNonNull(next, "next");
         final State current = state;
         if (current == next) {
             return true;                      // Idempotent: close() may be reached twice.
