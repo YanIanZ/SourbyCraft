@@ -71,7 +71,8 @@ public class AuroraConfigTest {
 
     @Test void liveReloadSummaryDoesNotInventRestartRequiredChanges() {
         // Diagnostics held at the default, so this asserts the async key alone counts as one.
-        var enabled = new AuroraConfig(new AuroraConfig.Entity(true), AuroraConfig.DEFAULT.diagnostics());
+        var enabled = new AuroraConfig(new AuroraConfig.Entity(true), AuroraConfig.DEFAULT.diagnostics(),
+            AuroraConfig.DEFAULT.cpu());
         assertEquals(AuroraConfig.Lifecycle.LIVE, AuroraConfig.ASYNC_PATH.lifecycle());
         assertTrue(enabled.reloadSummary(AuroraConfig.DEFAULT).contains("1 live change(s)"));
         assertTrue(enabled.reloadSummary(enabled).contains("0 live change(s)"));
@@ -275,7 +276,8 @@ public class AuroraConfigTest {
     @Test
     void theReloadSummaryCountsEverySettingThatChanged() {
         final AuroraConfig after = new AuroraConfig(
-            new AuroraConfig.Entity(true), new AuroraConfig.Diagnostics(false));
+            new AuroraConfig.Entity(true), new AuroraConfig.Diagnostics(false),
+            AuroraConfig.DEFAULT.cpu());
         assertTrue(after.reloadSummary(AuroraConfig.DEFAULT).startsWith("Aurora: 2 live change(s)"));
         assertTrue(AuroraConfig.DEFAULT.reloadSummary(AuroraConfig.DEFAULT)
             .startsWith("Aurora: 0 live change(s)"));

@@ -253,6 +253,12 @@ public final class SourbyCraftConfig {
         final boolean[] changed = {false};
         seed(f, changed, AuroraConfig.ASYNC_PATH_KEY, false,
             "Aurora async pathfinding (LIVE). Experimental and default-off; requires region/snapshot qualification.");
+        seed(f, changed, AuroraConfig.CPU_CORES_KEY, 0,
+            "Processors Aurora may use in total, cores and hardware threads alike (RESTART). "
+            + "0 = every available processor. Counted as the JVM counts them, so a container CPU "
+            + "quota is respected rather than the physical socket. A budget, not a reservation: a "
+            + "region ticks on one thread, so threads past the number of separate active regions "
+            + "idle. An explicit threaded-regions.threads in paper-global.yml still wins.");
         seed(f, changed, AuroraConfig.LANE_SAMPLING_KEY, true,
             "Aurora execution-lane CPU attribution (LIVE), behind /perf lanes. Walks every thread once a "
             + "second: negligible beside a loaded server, and on an idle one the telemetry lane costs more "

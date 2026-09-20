@@ -26,5 +26,6 @@ import org.junit.platform.suite.api.Suite;
     dev.iyanz.sourbycraft.config.upstream.UpstreamConfigBridgeTest.class,
     dev.iyanz.sourbycraft.SourbyCraftConfigShadowTest.class,
     dev.iyanz.sourbycraft.architecture.UpstreamDependencyLedgerTest.class,
-    dev.iyanz.sourbycraft.architecture.UnboundedQueueAuditTest.class})
+    dev.iyanz.sourbycraft.architecture.UnboundedQueueAuditTest.class,
+    dev.iyanz.sourbycraft.config.AuroraCpuConfigTest.class})
 public class RuntimeModernizationTestSuite {}
