@@ -229,7 +229,21 @@ class WorkloadTest(unittest.TestCase):
     def test_every_prd_section_9_workload_is_defined(self):
         self.assertEqual(set(workloads.NAMES),
                          {"idle", "players-10", "players-50", "players-100",
-                          "entity-stress", "chunk-stress", "network-stress"})
+                          "entity-stress", "chunk-stress", "save-stress",
+                          "network-stress"})
+
+    def test_save_stress_needs_no_clients_and_rewrites_what_it_loaded(self):
+        # §16 lists save stress separately from chunk traversal: one writes chunks that keep
+        # changing, the other generates new ones. A save workload that needed players would be
+        # uncertifiable for no reason -- block edits and region writes have no activation gate.
+        plan = workloads.build("save-stress")
+        self.assertFalse(plan.requires_connected_players)
+        self.assertIn("save-all flush", plan.steady)
+        self.assertGreater(plan.steady_interval_seconds, 0, "a save workload must re-dirty")
+        # Alternating blocks, so each pass genuinely changes state; rewriting the same block
+        # would leave the chunk clean and the save path idle.
+        blocks = {c.rsplit(" ", 1)[-1] for c in plan.steady if c.startswith("execute")}
+        self.assertEqual(len(blocks), 2, f"expected two alternating blocks, got {blocks}")
 
     def test_every_plan_states_its_fidelity_limits(self):
         for name in workloads.NAMES:

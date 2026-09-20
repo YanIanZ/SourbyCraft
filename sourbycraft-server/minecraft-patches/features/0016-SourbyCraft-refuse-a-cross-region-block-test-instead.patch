@@ -5,8 +5,45 @@ Subject: [PATCH] SourbyCraft - refuse a cross-region block test instead of
  dying on it
 
 
+diff --git a/dev/iyanz/aurora/command/AuroraCommandErrors.java b/dev/iyanz/aurora/command/AuroraCommandErrors.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..fc499da90069923e21c0d8543f33d71a197dadac
+--- /dev/null
++++ b/dev/iyanz/aurora/command/AuroraCommandErrors.java
+@@ -0,0 +1,31 @@
++package dev.iyanz.aurora.command;
++
++import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
++import net.minecraft.network.chat.Component;
++
++/**
++ * Command failures the Aurora engine reports, owned by Aurora rather than borrowed upstream.
++ *
++ * <p>Region threading gives commands a failure mode vanilla has no vocabulary for: the work is
++ * legal, the arguments are valid, and the thread running it simply does not own the data. Canvas
++ * defines an equivalent, but a Minecraft patch reaching into {@code io.canvasmc} would put a
++ * direct engine call in a vanilla class, which is the coupling the independence policy exists to
++ * prevent -- engine access belongs behind something SourbyCraft owns.</p>
++ *
++ * <p>The wording deliberately matches what an operator already sees from Canvas-era builds, so
++ * the message is not a second vocabulary for the same condition.</p>
++ */
++public final class AuroraCommandErrors {
++
++    private AuroraCommandErrors() {}
++
++    /**
++     * The executing thread does not own the region the command targets.
++     *
++     * <p>Applies where the answer is needed immediately and so cannot be handed to the owning
++     * region: a conditional has to return before the rest of the chain runs, unlike
++     * {@code setblock} or {@code fill}, which pass the position over and finish later.</p>
++     */
++    public static final DynamicCommandExceptionType CANNOT_DO_X_CROSS_REGION =
++        new DynamicCommandExceptionType(action -> Component.literal("Cannot " + action + " cross-region"));
++}
 diff --git a/net/minecraft/server/commands/ExecuteCommand.java b/net/minecraft/server/commands/ExecuteCommand.java
-index f7201f9bb38a08dd506b43325a341b117f64df75..ba946422334405d6aee51c2c76d31a5b37b4a4bb 100644
+index f7201f9bb38a08dd506b43325a341b117f64df75..29485b1bea9cb6e6410f1700b3eacaf4f4a95630 100644
 --- a/net/minecraft/server/commands/ExecuteCommand.java
 +++ b/net/minecraft/server/commands/ExecuteCommand.java
 @@ -478,8 +478,24 @@ public class ExecuteCommand {
@@ -26,7 +63,7 @@ index f7201f9bb38a08dd506b43325a341b117f64df75..ba946422334405d6aee51c2c76d31a5b
 +                                        // the owning region the way setblock and fill hand theirs over. Refusing it
 +                                        // says so; reading anyway would be an unsynchronised cross-region read.
 +                                        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, pos)) {
-+                                            throw io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution
++                                            throw dev.iyanz.aurora.command.AuroraCommandErrors
 +                                                .CANNOT_DO_X_CROSS_REGION.create("test a block");
 +                                        }
 +                                        return BlockPredicateArgument.getBlockPredicate(c, "block")
