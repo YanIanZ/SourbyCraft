@@ -15,24 +15,18 @@ import dev.iyanz.sourbycraft.util.VirtualExecutor;
 import org.bukkit.plugin.Plugin;
 
 /**
- * SourbyCraft's single boot hook, and where the Aurora engine is brought up stage by stage.
+ * Owns the ordered startup and cleanup of SourbyCraft services and publishes Aurora lifecycle state.
  *
- * <p>The archived Folia build hooked its post-config boot sequence via
- * {@code me.earthme.luminol.commands.CommandRegister#register()} (itself invoked from Luminol's
- * {@code ConfigManager#loadConfigFiles}, called from {@code DedicatedServer#initServer}). Canvas
- * carries no Luminol, so this class is called directly from a small hand-authored
- * {@code minecraft-patch} to {@code DedicatedServer#initServer} instead — right after Paper's own
- * {@code PaperCommands.registerCommands(this)} call (so our commands claim the bare names AFTER
- * Paper registers its built-ins, with no two-phase reclaim needed) and before
- * {@code CraftServer#loadPlugins()} (so {@link PluginLoadDiagnostics} is installed in time to
- * observe a plugin load failure, and the config file exists before any plugin might read it).
+ * <p>The downstream {@code DedicatedServer#initServer} patch invokes {@link #init()} after
+ * Paper command registration and before plugin loading. This lets SourbyCraft register its
+ * commands and install {@link PluginLoadDiagnostics} before plugins are loaded.</p>
  *
- * <p>Deliberately minimal: this brings up Aurora and SourbyCraft's own services. The self-tuning perf-engine,
- * anti-xray raytrace reveal and proxy-forwarding/hardening-advisor security layer that the archived
- * {@code PerfEngineBootstrap} also wired are DEFERRED on this benchmark build — see the PR #12 task
- * brief. Every step is wrapped so a single failure can never abort boot.
+ * <p>Individual stage failures are logged and isolated. Completion publishes RUNNING when any
+ * stage succeeded, or FAILED when all stages failed; RUNNING therefore permits degraded service
+ * availability. Diagnostics do not tune JVM options or operator configuration.</p>
  *
- * <p>Build 44 retires automatic JVM/OS memory tuning. Diagnostics remain read-only.
+ * <p>The server owns the call order: startup precedes shutdown. Synchronization prevents duplicate
+ * initialization; it does not serialize {@link #close()} against initialization.</p>
  */
 public final class SourbyCraftBootstrap {
 
@@ -40,7 +34,11 @@ public final class SourbyCraftBootstrap {
 
     private SourbyCraftBootstrap() {}
 
-    /** Server stop hook after plugin disable; each optional service has isolated cleanup. */
+    /**
+     * Runs service cleanup after plugin disable, publishing STOPPING before cleanup and STOPPED
+     * after all attempts. Each failure is logged without preventing the remaining cleanup steps;
+     * STOPPED reports completion of this sequence, not proof that every service stopped successfully.
+     */
     public static void close() {
         // Before the first service goes down, so anything consulting acceptingWork() stops
         // admitting during the window when shutdown is in flight and work is still arriving.
@@ -61,11 +59,10 @@ public final class SourbyCraftBootstrap {
     }
 
     /**
-     * Runs every utility-layer boot step in order (config, ViaVersion config seeding, startup
-     * banner, plugin-load diagnostics, command registration, join/leave messages, max-players,
-     * the virtual-thread executor, the auto-updater, GC telemetry). Idempotent — a second
-     * call is a no-op. Each step is individually wrapped so one failure never aborts the rest or the
-     * server boot.
+     * Starts metrics, configuration, plugin config provisioning, branding, diagnostics, commands,
+     * listeners, player-slot settings, I/O workers, the updater and GC sampling, in that order.
+     * A second invocation is a no-op, including after a partially failed startup. Individual stage
+     * failures are logged and counted without skipping subsequent stages.
      */
     public static synchronized void init() {
         if (started) return;
@@ -127,8 +124,8 @@ public final class SourbyCraftBootstrap {
             AutoUpdateSettings.startUpdater();
         });
 
-        // GC pauses are invisible in TPS/MSPT, so this rolling-window sampler is the only source
-        // for collections/min and GC-time%. One daemon thread; never throws.
+        // MXBean collection counts and elapsed collection time, including concurrent GC work.
+        // These are not stop-the-world pause measurements.
         stage("gc tracker", () -> {
             dev.iyanz.sourbycraft.perf.GcTracker.start();
         });

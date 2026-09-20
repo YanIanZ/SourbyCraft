@@ -90,14 +90,15 @@ public final class AuroraRuntime {
     }
 
     /**
-     * Moves to {@code next}, or reports the move as a bug and makes it anyway.
+     * Moves to {@code next}, logging transitions outside the expected lifecycle order.
      *
-     * <p>Refusing an illegal transition would leave the runtime claiming to run while its services
-     * are going down, which is worse than the inconsistency it was guarding. The move is made and
-     * the fault is logged, so shutdown still completes and the ordering bug is visible.</p>
+     * <p>Illegal transitions normally proceed so an ordering error cannot prevent shutdown.
+     * Once FAILED, STOPPING or STOPPED has been published, attempts to return to NEW or a startup/
+     * running state are refused without mutation. A late startup callback must not reopen admission
+     * while services are being dismantled.</p>
      *
-     * <p>The transition table is diagnostic: even an illegal non-null transition changes state.
-     * Callers remain responsible for startup/shutdown ordering and preventing restarts.</p>
+     * <p>This guard does not cancel a startup callback or stop its service side effects. Callers
+     * remain responsible for serializing startup and shutdown.</p>
      *
      * @param next the non-null state to enter
      * @return true for an allowed transition or the current state; false for a logged illegal move
@@ -108,6 +109,13 @@ public final class AuroraRuntime {
         final State current = state;
         if (current == next) {
             return true;                      // Idempotent: close() may be reached twice.
+        }
+        if ((current == State.FAILED || current == State.STOPPING || current == State.STOPPED)
+            && (next == State.NEW || next == State.BOOTSTRAPPING
+                || next == State.STARTING || next == State.RUNNING)) {
+            SourbyLogger.error("Aurora runtime refused transition from " + current + " to " + next
+                + "; work admission must remain closed", null);
+            return false;
         }
         final boolean legal = ALLOWED.getOrDefault(current, Set.of()).contains(next);
         if (!legal) {

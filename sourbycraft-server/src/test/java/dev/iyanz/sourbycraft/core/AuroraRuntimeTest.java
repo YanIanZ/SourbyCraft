@@ -113,5 +113,23 @@ public class AuroraRuntimeTest {
         AuroraRuntime.transition(State.STOPPED);
         assertFalse(AuroraRuntime.acceptingWork());
         assertFalse(AuroraRuntime.transition(State.RUNNING), "nothing legally follows STOPPED");
+        assertEquals(State.STOPPED, AuroraRuntime.state());
+        assertFalse(AuroraRuntime.acceptingWork());
+    }
+
+    @Test
+    void shutdownAndFailureCannotReopenAdmission() {
+        for (final State closed : new State[] {State.FAILED, State.STOPPING, State.STOPPED}) {
+            for (final State reopen : new State[] {
+                State.NEW, State.BOOTSTRAPPING, State.STARTING, State.RUNNING
+            }) {
+                AuroraRuntime.resetForTest();
+                AuroraRuntime.transition(closed);
+                assertFalse(AuroraRuntime.transition(reopen));
+                assertEquals(closed, AuroraRuntime.state());
+                assertTrue(AuroraRuntime.stopping());
+                assertFalse(AuroraRuntime.acceptingWork());
+            }
+        }
     }
 }
