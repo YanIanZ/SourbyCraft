@@ -14,7 +14,7 @@ passes.
 
 | Gate requirement | State | Evidence |
 |---|---|---|
-| representative benchmark exists | **partial** | 7 of 11 workloads (§2) |
+| representative benchmark exists | **partial** | 8 of 11 workloads (§2) |
 | no unexplained >3% regression in affected workloads | **blocked** | needs two certified runs to compare; none exist |
 | no known region ownership bug | **one open** | §5 |
 | no known persistence bug | **no bug found** | `verify_persistence.py`, 16 checks; 4/4 on the deployment server (§4) |
@@ -24,7 +24,7 @@ passes.
 
 ---
 
-## 2. Workloads — 7 of 11
+## 2. Workloads — 8 of 11
 
 Defined in `scripts/baseline_workloads.py`:
 
@@ -34,10 +34,10 @@ Defined in `scripts/baseline_workloads.py`:
 | 10 / 50 / 100 players | ✔ `players-10/50/100` | `requires_connected_players` |
 | entity stress | ✔ `entity-stress` | `requires_connected_players` |
 | network stress | ✔ `network-stress` | never certified |
-| chunk traversal | ✔ `chunk-stress` | closest existing match; certifiable without clients |
-| **AI stress** | ✘ | distinct from entity stress: goal/brain/pathfinding cost, not tick count |
-| **generation stress** | ✘ | `chunk-stress` covers load/unload, not sustained worldgen |
-| **save stress** | ✘ | no workload drives the save path |
+| chunk traversal | ✔ `chunk-stress` | certifiable without clients |
+| generation stress | ✔ `chunk-stress` | its moving window generates fresh terrain continuously; the plan's own fidelity note says generation dominates. Listed as missing here until 2026-09-20, which was wrong |
+| save stress | ✔ `save-stress` | rewrites loaded chunks that keep changing, then flushes; needs no clients, so certifiable in the same window as `idle` |
+| **AI stress** | ✘ | distinct from entity stress: goal/brain/pathfinding cost, not tick count. Needs connected clients to mean anything |
 | **plugin-heavy representative** | ✘ | no representative plugin set defined |
 
 ---
@@ -138,8 +138,8 @@ references to obtain.
 1. ~~Persistence validation tooling~~ — **done**, §4.
 2. **`idle` + `chunk-stress` certified references** — one quiet window, no clients. Still the
    binding constraint: without a reference there is nothing to compare a regression against.
-3. **The four missing workloads**, AI stress first, since it covers the domain with the most
-   Aurora-owned policy.
+3. **The remaining workloads**: AI stress, which needs clients, and a plugin-heavy
+   representative set, which needs a decision about which plugins represent the product.
 4. **Client-attached runs** for `players-*` and `entity-stress`.
 5. **The regression gate**, once two certified runs of the same workload exist.
 
