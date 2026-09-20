@@ -2322,6 +2322,7 @@ V13: Launcher bootstrap failure exits nonzero and preserves diagnostic cause; su
 V14: release/* branches identify as REL, feat/* and experimental/* as EXP, other branches and detached PR builds as DEV; CI artifact paths follow that channel; development checks do not reserve published release numbers (§83–87).
 V15: Aurora config is typed and immutable; present modern async-pathfinding key wins over legacy, invalid modern key/namespace defaults off without legacy fallback; legacy-only reads warn; load/reload never rewrite existing operator files (AURORA-DEVELOPMENT §3).
 V16: Aurora LIVE async toggle controls new path admission; admitted work may drain through the existing owner scheduler; reload reports only applied Aurora changes, with no invented restart-required settings (AURORA-DEVELOPMENT §3.4).
+V17: Aurora FAILED rejects new async path solves before pool shutdown; null lifecycle transitions throw without changing the published state; FAILED/STOPPING/STOPPED cannot transition back to NEW or work-admitting states (§7, §35, §71).
 
 # 153. Regression Log (§B)
 
@@ -2346,6 +2347,9 @@ V16: Aurora LIVE async toggle controls new path admission; admitted work may dra
 | B17 | 2026-09-14 | 26.2 absent from CI; default branch suffix falsely REL; unconditional release-number reservation rejected ordinary builds | V6,V14; enable 26.2 build/boot/Docker checks, default DEV in three build surfaces, channel-specific artifacts, reserve fresh numbers only for publication |
 | B18 | 2026-09-14 | Packaged launcher returned 0 when ServerMain failed after reflective launcher invocation had returned | V13; ServerMain catch preserves cause and exits 1; packaged thread-boundary success/failure probes |
 | B19 | 2026-09-14 | New-file seed test read disk before NightConfig asynchronous save completed | Test fixture uses sync writer to verify seeding deterministically; no new runtime invariant; V15 separately covers existing-file preservation |
+| B20 | 2026-09-20 | Runtime stopping predicate omitted FAILED, admitting path solves after startup failure; null transition replaced lifecycle state with null | V17; include FAILED in stopping predicate, validate transition target before mutation; AuroraRuntimeTest reproduces both failures |
+| B21 | 2026-09-20 | Illegal transition logging still applied startup states after failure/shutdown, reopening work admission | V17; refuse reopening transitions without state mutation; preserve forward cleanup; lifecycle regression tests |
+| B22 | 2026-09-20 | Overlapping Gradle test runs shared binary-result files, causing NoSuchFileException during report generation | Verification orchestration issue; serialize own runs and isolate result/report/work directories in shared workspace; no new runtime invariant |
 
 # 154. Delivery Scope
 

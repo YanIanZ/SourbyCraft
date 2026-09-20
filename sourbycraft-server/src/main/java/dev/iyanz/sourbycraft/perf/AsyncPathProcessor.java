@@ -24,10 +24,9 @@ import java.util.logging.Logger;
  * <p>Degrades safely while running: if the pool is not yet started or saturated (the bounded queue
  * rejects), the work runs inline on the calling thread — a slow path, never a dropped path.
  *
- * <p>Shutdown is the one case that does not degrade to inline. Once stopped, admission is refused
- * outright: the region threads are trying to stop, and a CPU-bound solve on one of them delays
- * exactly that. Callers still receive a completed future, so nothing is left believing a solve is
- * in flight.
+ * <p>A stopped pool or failed/stopping runtime refuses admission without an inline solve.
+ * Refused submissions receive an already completed null future so callers can release pending
+ * bookkeeping. Work admitted before shutdown follows {@link #shutdown()}'s disposal rules.</p>
  */
 public final class AsyncPathProcessor {
 
@@ -68,9 +67,11 @@ public final class AsyncPathProcessor {
      * already paying to build the immutable snapshot. A rising inline count means the pool is
      * undersized for the workload and async pathfinding is costing more than it saves.</p>
      *
-     * @param admitted      solves handed to the pool
-     * @param inline        solves the pool refused and the caller ran itself
-     * @param refused       submissions declined outright, which happens only after shutdown
+     * @param admitted      executor submission attempts, including saturation fallback and attempts
+     *                      rejected by a concurrent shutdown; excludes pre-start inline solves
+     * @param inline        admitted attempts run by the caller when the queue is full
+     * @param refused       submissions declined because the pool stopped, the runtime failed/stopped,
+     *                      or executor admission raced with shutdown; may overlap with admitted
      * @param outstanding   admitted solves that have not completed
      * @param meanMillis    mean solve duration, or NaN before anything has solved
      * @param slowestMillis the slowest single solve seen
@@ -243,9 +244,10 @@ public final class AsyncPathProcessor {
      * Stops admission and disposes of everything outstanding.
      *
      * <p>Distinct from {@link #setEnabled}, which only stops callers offering new work: this is
-     * terminal, refusing submissions until the pool is started again. Every admitted solve is
-     * cancelled, which completes its future with {@code null}, which runs the caller's release —
-     * so no caller is left believing a solve is still in flight.</p>
+     * terminal for this pool, refusing submissions until it is started again. Queued tasks are
+     * cancelled and their result futures complete with {@code null} unless already cancelled by
+     * the caller. Running tasks are interrupted, but this method does not await their termination:
+     * a solver that ignores interruption may continue and complete its future later.</p>
      */
     public static synchronized void shutdown() {
         enabled = false;
