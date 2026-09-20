@@ -62,8 +62,8 @@ Carry forward all unfinished baseline work from `docs/DEVELOPMENT-TASKS.md`.
 - [ ] 2h+ concurrency soak
 - [ ] post-load heap recovery
 - [ ] restart persistence qualification
-- [ ] rank JFR CPU hot spots
-- [ ] rank JFR allocation hot spots
+- [x] rank JFR CPU hot spots — [hotspots-entity-ai.md](architecture/hotspots-entity-ai.md) (ranking only; run not certified)
+- [x] rank JFR allocation hot spots — [hotspots-entity-ai.md](architecture/hotspots-entity-ai.md) (ranking only; run not certified)
 - [ ] inspect JFR contention and I/O hot spots
 
 ## D. Deep Minecraft/NMS optimization
