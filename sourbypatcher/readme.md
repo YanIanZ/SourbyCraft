@@ -1,57 +1,93 @@
-## paperweight
+## sourbypatcher
 
-`paperweight` consists of three Gradle plugins:
-- `paperweight-core`: Used to build Paper
-- `paperweight-patcher`: Used to create forks of Paper or other `paperweight-patcher`-based forks
-- `paperweight-userdev`: Used to develop internals plugins using Mojang mappings
+SourbyCraft's fork of [`paperweight`](https://github.com/PaperMC/paperweight), the Gradle
+plugin PaperMC uses to build Paper and its downstream forks.
 
-### How to use this for testing:
+It is **not** on the path that builds SourbyCraft today. Keep reading before using it.
 
-- Install `paperweight` to Maven Local:
+### Status in this repository
+
+SourbyCraft builds through Canvas's own toolchain, `io.canvasmc.weaver.patcher`, declared in
+the root `build.gradle.kts`. That was a deliberate choice ("Path B"): Canvas is a three-stage
+fork whose weaver sequences access transformers and base patches in an order this fork does not
+reproduce, and making sourbypatcher consume Canvas hit git-am conflicts in `TickThread.java`
+and `CraftServer.java`.
+
+So sourbypatcher is:
+
+- **not included in any Gradle build** — the root `settings.gradle.kts` does not include it,
+  and nothing resolves the `dev.iyanz.sourbypatcher` artifact,
+- **not built by CI** — the workflow step that published it to Maven Local was removed once it
+  was established that nothing consumed the artifact,
+- **kept, and kept working** — it is the fallback if the weaver toolchain stops being viable,
+  and it assembles cleanly against the same Gradle 9.4.1 and Java 25 the main build uses.
+
+It is classified `LEGACY` / `REMOVABLE` in
+[`docs/architecture/dependency-ledger.md`](../docs/architecture/dependency-ledger.md). Retiring
+it is a maintainer decision, not a mechanical one.
+
+### Modules
+
+| Module | Notes |
+|---|---|
+| `sourbypatcher-core` | Builds a Paper-like server fork |
+| `sourbypatcher-userdev` | Develops internals plugins against Mojang mappings |
+| `paperweight-lib` | Shared library. **Keeps the upstream name** |
+
+The mixed naming is intentional. Every Kotlin package here is still `io.papermc.paperweight`,
+because this is a fork rather than a rewrite and keeping the package coordinates makes upstream
+changes reviewable. Renaming `paperweight-lib` would change a directory without changing a
+single package, so the name records the lineage instead of hiding it.
+
+### Building
+
+Assemble without running the test suite:
+
 ```bash
-./gradlew publishToMavenLocal
+cd sourbypatcher && ./gradlew assemble -x test
 ```
-- Add `mavenLocal()` for plugin resolution in your test project
-  (see the [Gradle docs](https://docs.gradle.org/current/userguide/plugins.html#sec:custom_plugin_repositories) for more details)
-- Adjust the `paperweight` version in your test project
-  - Local versions of `paperweight` will use have the `-SNAPSHOT` suffix in the version from `gradle.properties` replaced by `-LOCAL-SNAPSHOT`
 
-> Most output `paperweight` creates goes into `<project-root>/.gradle/caches/paperweight`
+Publish to Maven Local, which is how a consuming build would resolve it:
+
+```bash
+cd sourbypatcher && ./gradlew publishToMavenLocal
+```
+
+Then add `mavenLocal()` to plugin resolution in the consuming project and point its plugin
+version at the `version` in `gradle.properties`. A locally published build replaces a
+`-SNAPSHOT` suffix with `-LOCAL-SNAPSHOT`.
+
+Most of what it produces lands in `<project-root>/.gradle/caches/paperweight`.
+
+### Toolchain
+
+Gradle **9.4.1** and Java **25**, matching the main build. Both are pinned in
+`gradle/wrapper/gradle-wrapper.properties` and `buildSrc/src/main/kotlin/config-kotlin.gradle.kts`;
+if the root project moves, move them together or this stops being a usable fallback.
+
+Dependency versions live in `gradle/libs.versions.toml`.
 
 ### Debugging
 
-Create a remote JVM debug run configuration in IntelliJ which connects to port 5005, then run Gradle in debug mode:
+Create a remote JVM debug configuration in IntelliJ on port 5005, then:
 
 ```bash
 ./gradlew --no-daemon -Dorg.gradle.debug=true <task>
 ```
 
-Gradle will not start until the debugger is connected so you don't need to worry about missing a breakpoint.
+Gradle waits for the debugger, so no breakpoint is missed.
 
-### Style Guide
+### Style
 
-This projects follows the opinionated [`ktlint`](https://ktlint.github.io/) linter and formatter. It uses the
-[`ktlint-gradle`](https://github.com/jlleitschuh/ktlint-gradle) plugin to automatically check and format the code in
-this repo.
+`ktlint`, via the `ktlint-gradle` plugin. Run `format` to reformat, and fix anything ktlint
+cannot fix itself before committing:
 
-Run the `format` task to automatically reformat the project using `ktlint` - which should handle most cases - to
-maintain a consistent code style. Adjust any errors `ktlint` can't fix itself before committing.
-
-```
-./gradlew format
-```
-
-### IDE Setup
-
-It's recommended to run the `ktlintApplyToIdea` and `addKtlintFormatGitPreCommitHook` tasks to configure your IDE
-with `ktlint` style settings and to automatically format this project's code before committing:
-
-```
+```bash
 ./gradlew ktlintApplyToIdea addKtlintFormatGitPreCommitHook
 ```
 
-> This project uses many new Gradle features to make sure we're ready for Gradle 7.0 and beyond, and we don't find
-> ourselves stuck in a bad position where it's too hard for us to update. That being said, Gradle always marks new APIs
-> as unstable for a bit until the next major version, so you should probably disable the "Unstable API Usages" inspection
-> in IntelliJ as well. The easiest way to do this is just find any place where an "unstable API" is used (tons in
-> `Paperweight.kt`) and disable the inspection from there.
+### Upstream and licence
+
+Forked from PaperMC's `paperweight`, LGPL v2.1 — see [`license/`](license). Upstream copyright
+and licence obligations are unchanged by the fork, and the retained `io.papermc.paperweight`
+package coordinates are part of that lineage rather than an oversight.
