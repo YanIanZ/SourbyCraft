@@ -17,10 +17,10 @@ passes.
 | representative benchmark exists | **partial** | 7 of 11 workloads (§2) |
 | no unexplained >3% regression in affected workloads | **blocked** | needs two certified runs to compare; none exist |
 | no known region ownership bug | **one open** | §5 |
-| no known persistence bug | **unknown** | nothing validates persistence (§4) |
+| no known persistence bug | **no bug found** | `verify_persistence.py`, 16 checks; 4/4 on the deployment server (§4) |
 | no unbounded queue | **met** | `UnboundedQueueAuditTest`, 3 tests |
 | heap/threads/tasks stabilize after load | **blocked** | needs the 2h soak |
-| shutdown completes predictably | **partial** | `AsyncPathShutdownTest`, `AuroraRuntimeTest`; not exercised under load |
+| shutdown completes predictably | **partial** | unit tests, plus two clean console shutdowns and a live restart on the deployment server; not yet exercised *under load* |
 
 ---
 
@@ -68,19 +68,27 @@ The four absent ones are the T7 telemetry items that need hooks into upstream pa
 
 ---
 
-## 4. Persistence — no coverage
+## 4. Persistence — covered and passing
 
-§16 requires validation of clean shutdown, restart, chunk save integrity, player data, entity
-data, region files and world metadata.
+`scripts/verify_persistence.py` writes known state, stops the server, inspects the files on
+disk while nothing holds them, boots a second server over the same directory and reads the
+state back. Structural checks and round-trip checks are both kept, because a region file can be
+structurally valid and hold the wrong chunk.
 
-**Nothing in `scripts/` validates any of it.** `verify-patch-parity.sh` and
-`verify_build_identity.py` check the build, not the data.
+| Run | Result |
+|---|---|
+| Local fixture, build 46c | **16 / 16 checks** |
+| Deployment server, live restart | **4 / 4** — 64/64 blocks, 24/24 entities, game time advanced, gamerule survived |
 
-This is the largest single gap in T10, and the riskiest to leave: §11.6 states that no
-performance gain may come from silently weakening durability, and there is currently no way to
-notice if one did. A save-path optimization cannot be accepted before this exists.
+Two limits are stated rather than hidden:
 
----
+- **Player data is structural only.** No client connects, so there is no player file to
+  round-trip; the check reports its own limitation in its result line.
+- **Region files in unused dimensions** reference up to one sector past EOF while the
+  overworld's are exact, and the server reads all of them. The trailing sector is unpadded, not
+  missing, so overruns under 4 KiB are reported benign and a whole missing sector still fails.
+
+§11.6 forbids buying performance with durability. This is the check that would notice.
 
 ## 5. Known region-ownership bug
 
@@ -127,10 +135,22 @@ references to obtain.
 
 ## 7. Order of remaining work
 
-1. **Persistence validation tooling** — the only gap needing no quiet machine and no clients,
-   and the one guarding a failure mode that is invisible until it costs data.
-2. **`idle` + `chunk-stress` certified references** — one quiet window, no clients.
+1. ~~Persistence validation tooling~~ — **done**, §4.
+2. **`idle` + `chunk-stress` certified references** — one quiet window, no clients. Still the
+   binding constraint: without a reference there is nothing to compare a regression against.
 3. **The four missing workloads**, AI stress first, since it covers the domain with the most
    Aurora-owned policy.
 4. **Client-attached runs** for `players-*` and `entity-stress`.
-5. **2h soak**, then the regression gate.
+5. **The regression gate**, once two certified runs of the same workload exist.
+
+### What the deployment server can and cannot settle
+
+The panel is dedicated and idle, which is exactly what this desktop is not, so the soak runs
+there. What it reaches without clients: sustained load, chunk load/unload cycling, heap
+recovery after the load is removed, restart, and shutdown. What it cannot reach: repeated
+joins/quits and any entity-AI load, because mob AI does not run without a player in activation
+range — driving mobs there would measure the inactive path and call it a soak.
+
+It also cannot produce a *certified baseline*: `run_baseline.py` needs a shell on the host to
+record JFR and operating-system samples, and the panel offers a console and a file API. So the
+panel settles stability; certification still needs the local harness on a quiet machine.
