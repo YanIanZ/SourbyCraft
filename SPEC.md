@@ -2359,6 +2359,9 @@ V18: Official build resolves SourbyClip/SourbyPatcher only from Maven Local; pri
 
 | B25 | 2026-09-20 | Public toolchain test assumed more than four modules after private-source extraction | Assert required public module identities instead of historical count; no runtime invariant |
 
+| B26 | 2026-09-21 | Library hash checked after repository selection, so HTML with HTTP 200 blocked valid fallback mirrors and replaced final paths before verification | V18; SourbyClip 3.0.24 checks each repository response before publishing a unique staged file; three failing regression cases now pass |
+| B27 | 2026-09-21 | Private-tool publication used a relative gradlew path after changing working directory, failing the documented CI command | Resolve checkout and Maven Local paths before invoking wrappers; relative-checkout process regression test |
+
 # 154. Delivery Scope
 
 Build 44 delivers a tested modernization increment: patch repair, runtime telemetry extensions,

@@ -8,7 +8,7 @@ pluginManagement {
         "Private SourbyPatcher missing. Publish the pinned private checkout to Maven Local; see docs/development/PRIVATE-TOOLCHAIN.md"
     }
     val hash = java.security.MessageDigest.getInstance("SHA-256")
-        .digest(patcherJar.readBytes()).joinToString("") { "%02x".format(it) }
+        .digest(providers.fileContents(layout.settingsDirectory.file(patcherJar.absolutePath)).asBytes.get()).joinToString("") { "%02x".format(it) }
     check(hash == providers.gradleProperty("patcherSha256").get()) {
         "Private SourbyPatcher SHA-256 mismatch; republish the approved private revision"
     }
@@ -25,7 +25,7 @@ pluginManagement {
     }
 
     plugins {
-        id("dev.iyanz.sourbypatcher.canvas") version "2.0.20"
+        id("dev.iyanz.sourbypatcher.canvas") version patcherVersion
         id("io.canvasmc.weaver.core") version "2.4.5"
         id("io.canvasmc.weaver.dependency-bridge") version "2.4.5"
     }
