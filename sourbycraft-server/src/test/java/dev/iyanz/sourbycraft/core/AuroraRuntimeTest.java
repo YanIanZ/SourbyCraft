@@ -67,7 +67,33 @@ public class AuroraRuntimeTest {
         AuroraRuntime.transition(State.BOOTSTRAPPING);
         assertTrue(AuroraRuntime.transition(State.FAILED));
         assertFalse(AuroraRuntime.acceptingWork(), "a failed runtime admits nothing");
+        assertTrue(AuroraRuntime.stopping(), "failure must close shutdown-sensitive admission");
         assertTrue(AuroraRuntime.transition(State.STOPPING), "and can still be torn down");
+    }
+
+    @Test
+    void nullTransitionCannotCorruptTheCurrentState() {
+        AuroraRuntime.transition(State.BOOTSTRAPPING);
+        assertThrows(NullPointerException.class, () -> AuroraRuntime.transition(null));
+        assertEquals(State.BOOTSTRAPPING, AuroraRuntime.state());
+        assertTrue(AuroraRuntime.transition(State.STOPPING));
+    }
+
+    @Test
+    void failedRuntimeRefusesPathWorkBeforeThePoolIsStopped() throws Exception {
+        final var ran = new java.util.concurrent.atomic.AtomicBoolean();
+        dev.iyanz.sourbycraft.perf.AsyncPathProcessor.setEnabled(true);
+        try {
+            AuroraRuntime.transition(State.FAILED);
+            final var result = dev.iyanz.sourbycraft.perf.AsyncPathProcessor.submit(() -> {
+                ran.set(true);
+                return "unexpected solve";
+            });
+            assertNull(result.get(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertFalse(ran.get(), "failure must refuse work even while the pool is alive");
+        } finally {
+            dev.iyanz.sourbycraft.perf.AsyncPathProcessor.shutdown();
+        }
     }
 
     @Test
