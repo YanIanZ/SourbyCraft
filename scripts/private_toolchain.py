@@ -39,6 +39,8 @@ def verify(repository):
 
 
 def publish(checkouts, repository):
+    checkouts = Path(checkouts).resolve()
+    repository = Path(repository).resolve()
     lock = json.loads((ROOT / 'build-data/private-toolchain.lock.json').read_text())
     for name, relative in [('SourbyPatcher', 'canvas-toolchain'), ('SourbyClip', '.')]:
         checkout = Path(checkouts) / name

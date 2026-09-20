@@ -1,0 +1,7 @@
+# Runtime image context: keep private tools, credentials and build caches out.
+**
+!Dockerfile
+!docker/
+!docker/entrypoint.sh
+!release/
+!release/*.jar

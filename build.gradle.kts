@@ -7,7 +7,7 @@ import org.gradle.api.tasks.testing.logging.TestLogEvent
 
 plugins {
     java // TODO java launcher tasks
-    id("dev.iyanz.sourbypatcher.canvas") version "2.0.20"
+    id("dev.iyanz.sourbypatcher.canvas")
 }
 
 repositories {

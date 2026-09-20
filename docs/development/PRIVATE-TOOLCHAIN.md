@@ -3,7 +3,7 @@
 Official server downloads are GitHub Releases. Maintainer builds require private checkouts:
 
 - `YanIanZ/SourbyPatcher`: active `canvas-toolchain` adapter 2.0.20 and archived Folia patcher.
-- `YanIanZ/SourbyClip`: launcher 3.0.23, protocol 1.
+- `YanIanZ/SourbyClip`: launcher 3.0.24, protocol 1.
 
 The public repository no longer vendors these sources or SourbyClip Maven binaries.
 Previously published Git history and releases still contain earlier versions. Private access
@@ -58,3 +58,15 @@ Private build inputs, Gradle caches and intermediate server/test-plugin JARs are
 to public workflow artifacts. Build, tests, boot/JFR and Docker checks share one runner. Only
 the existing release branch publishes a server JAR after those checks pass. Diagnostic logs/JFR
 remain available as workflow artifacts. Removing old artifacts/history is outside this migration.
+
+## Bootstrap qualification
+
+`python3.12 scripts/verify_bootstrap.py build/libs/SourbyCraft-slim.jar --output build/bootstrap-new`
+
+The output directory must not exist. The check boots once without copied caches, stops cleanly,
+then boots the same runtime with launcher offline mode. It writes a JSON report, separate logs
+and JFR recordings for both phases. Server/plugin network access is outside the offline flag's scope.
+
+The archived `nms-compat.yml` harness remains unported and is not a release gate. Its old
+public caches and offline build invocation must be redesigned before adding private checkouts;
+do not give that workflow private credentials in its current form.
