@@ -48,11 +48,53 @@ deployment runs. **Reading the code verified the wrong half.** The item should r
 - any baseline run in a new directory without `--cache-from`,
 - and, transitively, verification of patches 0017 and 0018, which is how it was found.
 
-## Not yet established
+## Root cause
 
-Why the published artifact differs from the bundled one. Candidates, none confirmed: the build
-repackaging dependencies so bundled bytes stop matching Maven's; `libraries.list` recording a
-hash from a different resolution than the one published under that coordinate; or the pinned
-SourbyClip revision changing how it verifies. The fat paperclip jar available locally when this
-was found was `26.2-REL` while the slim jar was `26.2-DEV`, so the comparison above was made
-across builds and should be repeated within one before a cause is asserted.
+`repo.menthamc.org` answers **HTTP 200 with an HTML body** for artifacts it does not have.
+
+Probing the four repositories SourbyClip is built with, for
+`dev/iyanz/sourbycraft/sourbyapi/26.2-DEV/sourbyapi-26.2-DEV.jar`:
+
+| Repository | Status | Body |
+|---|---|---|
+| `maven.aliyun.com/repository/central` | 404 | 689 B |
+| `repo.papermc.io/repository/maven-public` | 404 | 170 B |
+| **`repo.menthamc.org/repository/maven-public`** | **200** | **995 B** |
+| `repo.spongepowered.org/maven` | 404 | 1602 B |
+
+`sourbyapi` is SourbyCraft's own artifact and is published nowhere, so *every* one of those
+responses is a miss. Three say so. The fourth returns 200, and a downloader that treats 200 as
+success writes that HTML into `libraries/` under a `.jar` name.
+
+Two consequences follow, and the second is what makes it look like a build problem:
+
+1. the hash check then fails — `Downloaded library SHA-256 mismatch`,
+2. **the bad file stays on disk**, so the next boot finds it, fails its hash, and reports
+   `Bundled library SHA-256 mismatch` — which reads like the jar is corrupt when the jar is
+   fine.
+
+The artifacts themselves were verified good. All 58 stripped libraries return 200 from at least
+one repository, and `zstd-jni` hashes identically from Maven Central, aliyun and papermc, all
+three matching `libraries.list`.
+
+## Where the fix belongs
+
+In SourbyClip, which is a separate private repository pinned by
+`build-data/private-toolchain.lock.json` and therefore not fixable from this tree. Any one of
+these closes it:
+
+- **verify before persisting** — hash the response body and only then write it into
+  `libraries/`, so a bad answer cannot poison later boots. This is the important one: without
+  it, a single bad response breaks an installation permanently,
+- **reject non-archive responses** — a 200 whose body is HTML, or which is orders of magnitude
+  smaller than expected, is a miss regardless of status code,
+- **keep trying** — a hash mismatch from one repository should fall through to the next rather
+  than ending the attempt,
+- drop `repo.menthamc.org`, or move it last.
+
+## Workaround until then
+
+Ship with `libraries/` pre-populated, or boot once somewhere the downloads succeed and copy the
+directory. A populated runtime is unaffected: `DownloadContext` returns early when the file
+exists and its hash validates, which is why the deployment server and every `--cache-from` run
+kept working while fresh installs did not.
