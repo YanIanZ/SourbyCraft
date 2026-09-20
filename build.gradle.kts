@@ -282,7 +282,15 @@ subprojects {
         doLast {
             val f = outFile.get().asFile
             f.parentFile.mkdirs()
-            val timestamp = Instant.now().toString()
+            // SOURCE_DATE_EPOCH, the cross-ecosystem "build as if it were this instant"
+            // convention. Without it two builds of one commit differ only in this field, so
+            // nobody can verify that a published jar came from the commit it claims (T8 gate:
+            // "clean checkout build is reproducible"). Unset -- every ordinary dev build --
+            // this reads the clock exactly as before. Read from the environment directly
+            // rather than through a provider: this task already opts out of the configuration
+            // cache, and System.getenv here sees the daemon's environment at execution time.
+            val timestamp = (System.getenv("SOURCE_DATE_EPOCH")?.trim()?.toLongOrNull()
+                ?.let { Instant.ofEpochSecond(it) } ?: Instant.now()).toString()
             val resolved = internalVersionProvider.get()
             f.writeText(
                 """
