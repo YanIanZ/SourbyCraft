@@ -53,6 +53,11 @@ public final class AsyncPathProcessor {
         new java.util.concurrent.atomic.AtomicLong();
     private static final java.util.concurrent.atomic.AtomicLong SLOWEST_NANOS =
         new java.util.concurrent.atomic.AtomicLong();
+    /** Time a solve spent queued before a worker picked it up. T7 task wait latency. */
+    private static final java.util.concurrent.atomic.AtomicLong WAIT_NANOS =
+        new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong SLOWEST_WAIT_NANOS =
+        new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * What the pool has actually been doing.
@@ -69,16 +74,37 @@ public final class AsyncPathProcessor {
      * @param outstanding   admitted solves that have not completed
      * @param meanMillis    mean solve duration, or NaN before anything has solved
      * @param slowestMillis the slowest single solve seen
+     * @param queueDepth    solves accepted but not yet picked up by a worker, or -1 when the
+     *                      pool is not running
+     * @param activeWorkers workers currently running a solve, or -1 when the pool is not running
+     * @param poolSize      worker threads the pool currently holds, or -1 when it is not running
+     * @param meanWaitMillis    mean time a solve waited in the queue, or NaN before any ran
+     * @param slowestWaitMillis the longest a single solve waited before starting
      */
     public record PathStats(long admitted, long inline, long refused, int outstanding,
-                            double meanMillis, double slowestMillis) {}
+                            double meanMillis, double slowestMillis,
+                            int queueDepth, int activeWorkers, int poolSize,
+                            double meanWaitMillis, double slowestWaitMillis) {}
 
-    /** A snapshot of the pool's counters. Never blocks and never throws. */
+    /**
+     * A snapshot of the pool's counters. Never blocks and never throws.
+     *
+     * <p>Queue depth, active workers and pool size are read from the executor at call time
+     * rather than tracked, so they cost nothing while the server is running and simply report
+     * {@code -1} when there is no pool to ask.</p>
+     */
     public static PathStats stats() {
         final long solved = SOLVED.get();
+        final ThreadPoolExecutor p = pool;
+        final boolean running = p != null && !p.isShutdown();
         return new PathStats(ADMITTED.get(), INLINE.get(), REFUSED.get(), OUTSTANDING.get(),
             solved == 0L ? Double.NaN : SOLVE_NANOS.get() / (double) solved / 1.0E6,
-            SLOWEST_NANOS.get() / 1.0E6);
+            SLOWEST_NANOS.get() / 1.0E6,
+            running ? p.getQueue().size() : -1,
+            running ? p.getActiveCount() : -1,
+            running ? p.getPoolSize() : -1,
+            solved == 0L ? Double.NaN : WAIT_NANOS.get() / (double) solved / 1.0E6,
+            SLOWEST_WAIT_NANOS.get() / 1.0E6);
     }
 
     /**
@@ -166,8 +192,15 @@ public final class AsyncPathProcessor {
             }
         }
         final CompletableFuture<T> future = new CompletableFuture<>();
+        final long submittedAt = System.nanoTime();
         final FutureTask<T> task = new FutureTask<>(() -> {
             final long began = System.nanoTime();
+            // Queue wait, recorded separately from solve duration because they fail differently:
+            // a long solve means the A* is expensive, a long wait means the pool is too small for
+            // the arrival rate. Both can be inside budget while the pair is not.
+            final long waited = began - submittedAt;
+            WAIT_NANOS.addAndGet(waited);
+            SLOWEST_WAIT_NANOS.accumulateAndGet(waited, Math::max);
             try {
                 return solve.get();
             } finally {
