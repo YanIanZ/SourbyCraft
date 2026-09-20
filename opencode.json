@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "amazon-bedrock/claude-opus-4-6-v1",
+
+  "provider": {
+    "amazon-bedrock": {
+      "options": {
+        "region": "us-east-1"
+      },
+      "models": {
+        "claude-opus-4-6-v1": {
+          "name": "Claude Opus 4.6 V1 — Global 3M",
+          "id": "global.anthropic.claude-opus-4-6-v1",
+          "limit": {
+            "context": 3000000,
+            "output": 65536
+          }
+        }
+      }
+    }
+  }
+}
