@@ -147,3 +147,28 @@ load, not an optimisation available in this code.
 
 Recorded as a negative result rather than left as an open target, because "second on the CPU
 list" reads like opportunity until someone checks.
+
+---
+
+## Follow-up: patch 0018, the tracker's effective range
+
+Same workload, same ten clients, comparable noise (26.9% foreign CPU before, 24.6% after).
+
+| | `updatePlayer` | `getEffectiveRange` | `updatePlayer` share |
+|---|---|---|---|
+| before (0017 only) | 186 / 5364 | **14** | 3.46% |
+| after (0017 + 0018) | 159 / 5850 | **0** | **2.71%** |
+
+The categorical result is the second column: `getEffectiveRange` no longer appears in any
+sampled stack. It is called once per broadcast now instead of once per player, and with ten
+clients that is a tenfold reduction in call count — enough that the sampler stops catching it.
+That is directly attributable to the patch rather than inferred.
+
+`updatePlayer`'s own share fell from 3.46% to 2.71%. Treat that as supporting rather than
+decisive: 186 carries a Poisson spread near ±14, so a drop of 27 is roughly two standard
+deviations. Consistent with the change, not proof of it on its own.
+
+The saving scales with player count. Ten clients remove nine redundant computations per entity
+per tick; fifty would remove forty-nine. This profile understates what a populated server sees.
+
+Still not a throughput claim — neither run is certified.
