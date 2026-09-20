@@ -9,7 +9,7 @@ declares so the exceptions are listed rather than discovered.
 import re
 from pathlib import Path
 
-SKIP_PARTS = ("build", ".gradle", "upstreams", "node_modules", ".worktrees")
+SKIP_PARTS = ("build", ".gradle", "upstreams", "node_modules", ".worktrees", ".private-toolchain")
 
 TOOLCHAIN = re.compile(r"languageVersion(?:\.set\(|\s*=\s*)\s*JavaLanguageVersion\.of\((\d+)\)")
 RELEASE = re.compile(r"options\.release(?:\.set\(|\s*=\s*)\s*(\d+)")

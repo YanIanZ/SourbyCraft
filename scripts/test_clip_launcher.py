@@ -16,11 +16,18 @@ class ClipLauncherTest(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.temp.cleanup)
         cls.root = Path(cls.temp.name)
-        source = Path(__file__).resolve().parents[1] / "sourbyclip/java6/src/main/java/dev/iyanz/sourbyclip/Main.java"
-        # JDK 25 no longer targets Java 6; the production Gradle build verifies that
-        # compatibility separately. These tests exercise the real launcher in a JVM.
-        subprocess.run([javac, "--release", "8", "-d", str(cls.root), str(source)],
-                       check=True, capture_output=True, text=True, timeout=60)
+        # Test the exact privately published launcher class, not a public source copy.
+        import zipfile
+        from private_toolchain import properties, verify
+        repository = Path.home() / '.m2/repository'
+        verify(repository)
+        version = properties()['clipVersion']
+        artifact = repository / 'dev/iyanz/sourbyclip' / version / f'sourbyclip-{version}.jar'
+        with zipfile.ZipFile(artifact) as jar:
+            for name in ('dev/iyanz/sourbyclip/Main.class', 'META-INF/sourbyclip.properties'):
+                target = cls.root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(jar.read(name))
         cls.fixtures = {}
         for name, body in {
             "success": 'System.out.println("forwarded:" + args[0]);',

@@ -1,15 +1,23 @@
 pluginManagement {
-    // PR #12 "Path B": weaver-consumes-Canvas. io.canvasmc.weaver.patcher (root, upstream
-    // checkout + recursive resolution) and io.canvasmc.weaver.core (used unversioned inside the
-    // materialized sourbycraft-server/sourbyapi build scripts, exactly like Canvas's own
-    // canvas-server/canvas-api do — the version is resolved once here and shared across the
-    // multi-project build) are CanvasMC's own paperweight-core fork; it applies Canvas's base
-    // patches + ATs by construction, replacing dev.iyanz.sourbypatcher (our own paperweight fork,
-    // which hit a hard git-am ordering wall trying to reconstruct that sequencing generically).
-
+    // Private SourbyPatcher delegates to Weaver's Canvas-compatible pipeline (PR #12).
+    val patcherVersion = providers.gradleProperty("patcherVersion").get()
+    val localRepo = providers.systemProperty("maven.repo.local")
+        .getOrElse(System.getProperty("user.home") + "/.m2/repository")
+    val patcherJar = file("$localRepo/dev/iyanz/sourbypatcher/canvas-toolchain/$patcherVersion/canvas-toolchain-$patcherVersion.jar")
+    check(patcherJar.isFile) {
+        "Private SourbyPatcher missing. Publish the pinned private checkout to Maven Local; see docs/development/PRIVATE-TOOLCHAIN.md"
+    }
+    val hash = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(patcherJar.readBytes()).joinToString("") { "%02x".format(it) }
+    check(hash == providers.gradleProperty("patcherSha256").get()) {
+        "Private SourbyPatcher SHA-256 mismatch; republish the approved private revision"
+    }
     repositories {
         gradlePluginPortal()
-        mavenLocal()
+        exclusiveContent {
+            forRepository { mavenLocal() }
+            filter { includeGroupByRegex("dev\\.iyanz\\.sourbypatcher.*") }
+        }
         maven("https://repo.papermc.io/repository/maven-public/")
         maven("https://maven.canvasmc.io/public/")
         maven("https://maven.canvasmc.io/releases")
@@ -17,7 +25,7 @@ pluginManagement {
     }
 
     plugins {
-        id("io.canvasmc.weaver.patcher") version "2.4.5"
+        id("dev.iyanz.sourbypatcher.canvas") version "2.0.20"
         id("io.canvasmc.weaver.core") version "2.4.5"
         id("io.canvasmc.weaver.dependency-bridge") version "2.4.5"
     }

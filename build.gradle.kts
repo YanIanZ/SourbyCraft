@@ -7,22 +7,20 @@ import org.gradle.api.tasks.testing.logging.TestLogEvent
 
 plugins {
     java // TODO java launcher tasks
-    id("io.canvasmc.weaver.patcher") version "2.4.5"
+    id("dev.iyanz.sourbypatcher.canvas") version "2.0.20"
+}
+
+repositories {
+    exclusiveContent {
+        forRepository { mavenLocal() }
+        filter { includeModule("dev.iyanz", "sourbyclip") }
+    }
 }
 
 paperweight {
     filterPatches = false
-    // SourbyCraft-on-Canvas (feat/canvas-engine, PR #12) — "Path B": build on Canvas's OWN weaver
-    // toolchain instead of forcing our paperweight fork (sourbypatcher) to consume Canvas.
-    // sourbypatcher got 90% there but hit a hard wall: Canvas's weaver sequences ATs + base
-    // patches differently than paperweight does, and reconciling that generically caused git-am
-    // conflicts (TickThread.java/CraftServer.java). `upstreams.canvas { ... }` is a BUILT-IN
-    // convenience on weaver's own PaperweightPatcherExtension (alongside `paper` and `folia`),
-    // added by CanvasMC specifically so downstream forks of Canvas can consume it — it defaults
-    // `applyUpstreamNested = true`, meaning the checked-out Canvas repo (which itself applies
-    // `io.canvasmc.weaver.patcher` with `upstreams.paper { ... }`) is resolved recursively by
-    // weaver's native nested-build mechanism: the exact same code path Canvas already uses
-    // successfully to consume Paper, one level further down.
+    // SourbyPatcher's Canvas adapter applies Weaver unchanged for nested Paper -> Canvas
+    // patch sequencing. The legacy Folia patcher is retained only in the private repository.
     upstreams.canvas {
         ref = providers.gradleProperty("canvasRef")
 
@@ -212,6 +210,10 @@ subprojects {
     }
 
     repositories {
+        exclusiveContent {
+            forRepository { mavenLocal() }
+            filter { includeModule("dev.iyanz", "sourbyclip") }
+        }
         mavenCentral()
         maven(paperMavenPublicUrl)
         maven(canvasMavenPublicUrl)

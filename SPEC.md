@@ -2324,6 +2324,8 @@ V15: Aurora config is typed and immutable; present modern async-pathfinding key 
 V16: Aurora LIVE async toggle controls new path admission; admitted work may drain through the existing owner scheduler; reload reports only applied Aurora changes, with no invented restart-required settings (AURORA-DEVELOPMENT §3.4).
 V17: Aurora FAILED rejects new async path solves before pool shutdown; null lifecycle transitions throw without changing the published state; FAILED/STOPPING/STOPPED cannot transition back to NEW or work-admitting states (§7, §35, §71).
 
+V18: Official build resolves SourbyClip/SourbyPatcher only from Maven Local; private revision and JAR hashes pinned; unexpected launcher/protocol rejected; offline bootstrap makes no launcher network requests and accepts only verified cache/library bytes (§4, §35, §83–87).
+
 # 153. Regression Log (§B)
 
 | id | date | cause | fix |
@@ -2350,6 +2352,12 @@ V17: Aurora FAILED rejects new async path solves before pool shutdown; null life
 | B20 | 2026-09-20 | Runtime stopping predicate omitted FAILED, admitting path solves after startup failure; null transition replaced lifecycle state with null | V17; include FAILED in stopping predicate, validate transition target before mutation; AuroraRuntimeTest reproduces both failures |
 | B21 | 2026-09-20 | Illegal transition logging still applied startup states after failure/shutdown, reopening work admission | V17; refuse reopening transitions without state mutation; preserve forward cleanup; lifecycle regression tests |
 | B22 | 2026-09-20 | Overlapping Gradle test runs shared binary-result files, causing NoSuchFileException during report generation | Verification orchestration issue; serialize own runs and isolate result/report/work directories in shared workspace; no new runtime invariant |
+
+| B23 | 2026-09-20 | Launcher Downloader accepted freshly extracted/downloaded library bytes without checking the manifest hash; single transfer could truncate extraction | V18; private SourbyClip 3.0.23 validates hash before use, copies complete streams, and tests corrupt bundled library rejection |
+
+| B24 | 2026-09-20 | Combined applyAllPatches and packaging invocation hit Weaver nested-build implicit-output dependencies | Keep source materialization and compilation/packaging in separate Gradle invocations, matching CI; no new runtime invariant |
+
+| B25 | 2026-09-20 | Public toolchain test assumed more than four modules after private-source extraction | Assert required public module identities instead of historical count; no runtime invariant |
 
 # 154. Delivery Scope
 

@@ -16,17 +16,9 @@ class DeclaredTargetTest(unittest.TestCase):
     """
 
     EXCEPTIONS = {
-        # Shipped, and deliberately ancient. This is the launcher entry point an old JVM
-        # loads first: it must be Java 6 bytecode so that a pre-25 JVM prints a readable
-        # "wrong Java version" message instead of failing with UnsupportedClassVersionError
-        # before any of our code runs. Toolchain 11 is the oldest JDK that still targets 6.
-        "sourbyclip/java6/build.gradle.kts": [6, 11],
         # Not shipped. The NMS-compat harness is driven only by a workflow_dispatch
         # workflow that predates the 26.2 rebase and is marked stale in its own header.
         "test-harness/sanity-harness-plugin/build.gradle.kts": [21],
-        # Not shipped and not built on this branch. sourbypatcher is the legacy Folia
-        # toolchain; this is a test fixture inside it, not a production target.
-        "sourbypatcher/sourbypatcher-core/src/test/resources/functional_test/build.gradle": [21],
     }
 
     def test_every_module_is_on_the_baseline_or_a_recorded_exception(self):
@@ -46,13 +38,14 @@ class DeclaredTargetTest(unittest.TestCase):
 
     def test_the_shipped_modules_are_on_the_baseline(self):
         targets = policy.declared_targets(REPO)
-        for path in ("build.gradle.kts", "sourbycraft-server/build.gradle.kts",
-                     "sourbyclip/java25/build.gradle.kts"):
+        for path in ("build.gradle.kts", "sourbycraft-server/build.gradle.kts"):
             with self.subTest(path=path):
                 self.assertEqual(targets.get(path), [BASELINE])
 
     def test_the_policy_actually_found_the_build_scripts(self):
-        self.assertGreater(len(policy.declared_targets(REPO)), 4)
+        self.assertTrue({"build.gradle.kts", "sourbycraft-server/build.gradle.kts",
+                         "test-harness/sanity-harness-plugin/build.gradle.kts"}
+                        .issubset(policy.declared_targets(REPO)))
 
 
 class ExtractionTest(unittest.TestCase):

@@ -81,7 +81,7 @@ def competing_servers(jar, own_pid):
 # Untracked paths that can change the produced jar. An untracked file outside these
 # cannot, so it must not fail a measurement: reading raw `git status --porcelain`
 # counts every stray note and scratch file as a dirty tree.
-BUILD_INPUT_PREFIXES = ("sourbycraft-server/", "sourbyapi/", "sourbyclip/", "Metal/",
+BUILD_INPUT_PREFIXES = ("sourbycraft-server/", "sourbyapi/", "sourbyclip/", "build-data/private-toolchain.lock.json", "Metal/",
                         "build-data/", "gradle/", "paper-server/", "canvas-server/")
 BUILD_INPUT_SUFFIXES = (".gradle.kts", ".gradle", ".properties", ".patch", ".java", ".at")
 

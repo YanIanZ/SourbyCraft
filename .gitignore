@@ -499,3 +499,6 @@ sourbyapi/paper-patches/.skipped/
 # Python bytecode from scripts/
 __pycache__/
 *.py[cod]
+
+# Private maintainer build-tool checkouts; never archive or cache in public CI.
+.private-toolchain/
