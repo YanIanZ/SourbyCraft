@@ -68,7 +68,16 @@ public class VerCommand extends Command {
         s.sendMessage(headerLine.build());
 
         s.sendMessage(line("Minecraft", bi.minecraftVersionId() + "  (" + bi.minecraftVersionName() + ")"));
+        // Transition §14 names the build identity an operator should be able to read back:
+        // SourbyCraft, Minecraft, Aurora Engine, build, Java, commit, channel. The first two and
+        // the commit were already here; an engine, a runtime and a channel that only exist in
+        // the boot log cannot be checked by whoever is looking at a server months later.
+        s.sendMessage(line("Engine", brand.engineName() + " Engine"));
         s.sendMessage(line("Bukkit API", Bukkit.getBukkitVersion()));
+        s.sendMessage(line("Java", Runtime.version().toString()));
+        final String channel = dev.iyanz.sourbycraft.update.AutoUpdateSettings.channel;
+        s.sendMessage(line("Update channel",
+            channel == null || channel.isBlank() ? "auto-detected from this build" : channel));
 
         long u = ManagementFactory.getRuntimeMXBean().getUptime();
         long d = u / 86400000, h = (u % 86400000) / 3600000, m = (u % 3600000) / 60000;

@@ -132,7 +132,7 @@
 -        val buildTime = providers.environmentVariable("BUILD_STARTED_AT").map(Instant::parse).orElse(Instant.EPOCH).get()
 +        // SourbyCraft - build time in GMT+7 (Asia/Jakarta), matching the previous SourbyCraft
 +        // convention (paper-26.2-pre-folia). /ver + startup render this in the day-name format.
-+        val buildTime = ZonedDateTime.now(ZoneId.of("Asia/Jakarta")).toInstant()
++        val buildTime = providers.environmentVariable("SOURCE_DATE_EPOCH").map { Instant.ofEpochSecond(it.trim().toLong()) }.orElse(providers.environmentVariable("BUILD_STARTED_AT").map(Instant::parse)).orElse(ZonedDateTime.now(ZoneId.of("Asia/Jakarta")).toInstant()).get() // SourbyCraft - reproducible builds (T8); upstream had BUILD_STARTED_AT before this patch
          val gitHash = git.exec(providers, "rev-parse", "--short=7", "HEAD").get().trim()
 -        val implementationVersion = "$mcVersion-${build ?: "DEV"}-$gitHash"
          val date = git.exec(providers, "show", "-s", "--format=%ci", gitHash).get().trim()
