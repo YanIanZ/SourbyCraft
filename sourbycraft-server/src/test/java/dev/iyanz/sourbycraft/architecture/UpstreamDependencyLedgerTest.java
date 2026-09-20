@@ -1,5 +1,6 @@
 package dev.iyanz.sourbycraft.architecture;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -8,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
@@ -150,5 +152,77 @@ public class UpstreamDependencyLedgerTest {
         assertTrue(INTERNAL.matcher(
             "io.papermc.paper.threadedregions.RegionizedServer").find(),
             "but the internals beside it are");
+    }
+
+    // --- T6: dependency direction ---------------------------------------------------------
+
+    /**
+     * Files whose upstream coupling is a patch seam rather than an adapter.
+     *
+     * <p>Transition §12 allows this explicitly: "except in direct NMS/upstream patches where
+     * indirection would be harmful and the dependency is intentionally documented". Patch 0013
+     * makes upstream's {@code TickData} import these classes, so the dependency actually runs
+     * upstream → Aurora; they name {@code TickTime} and {@code TickReportData} because those are
+     * the contract the patched call site passes and expects back. Hiding that behind an
+     * interface would mean duplicating upstream's tick-time value types to gain nothing.</p>
+     */
+    private static final Map<String, String> PATCH_SEAM = Map.of(
+        "dev/iyanz/sourbycraft/perf/RegionTickMetrics.java",
+        "patch 0013: upstream TickData calls in; TickTime/TickReportData are the contract",
+        "dev/iyanz/sourbycraft/perf/RegionTickMetricsHolder.java",
+        "patch 0013: generation ownership for the same patched call site");
+
+    private static final Pattern IMPLEMENTS =
+        Pattern.compile("\\bclass\\s+\\w+\\s+implements\\s+([\\w.]+)");
+
+    @Test
+    void everyUpstreamDependencyIsBehindAnAuroraInterfaceOrADocumentedPatchSeam()
+            throws IOException {
+        // T6's direction rule: compat implementation -> upstream, never Aurora core -> upstream.
+        // A file that reaches into internals is either an adapter behind an Aurora interface, or
+        // one of the patch seams above. Anything else is the accidental coupling T6 removes.
+        final Path root = sourceRoot();
+        final List<String> offenders = new ArrayList<>();
+        for (final Leak leak : leaks(root)) {
+            if (PATCH_SEAM.containsKey(leak.file())) {
+                continue;
+            }
+            final Matcher implemented =
+                IMPLEMENTS.matcher(Files.readString(root.resolve(leak.file())));
+            if (!implemented.find()) {
+                offenders.add(leak.file() + " (implements nothing, and is not a listed patch seam)");
+            }
+        }
+        if (!offenders.isEmpty()) {
+            fail("Upstream internals must be reached through an Aurora interface so the core can "
+                + "be reasoned about without reading upstream service classes (transition §12). "
+                + "These do neither:\n  " + String.join("\n  ", offenders));
+        }
+    }
+
+    @Test
+    void canvasIsReachableFromExactlyOnePlace() throws IOException {
+        // "core runtime can be reasoned about without reading Canvas service classes" is the T6
+        // gate's last line. It holds only while Canvas has one doorway.
+        final List<String> touching = leaks(sourceRoot()).stream()
+            .filter(leak -> leak.symbols().stream().anyMatch(s -> s.startsWith("io.canvasmc.")))
+            .map(Leak::file)
+            .toList();
+
+        assertEquals(List.of("dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java"),
+            touching, "Canvas should be reachable only through the upstream config bridge");
+    }
+
+    @Test
+    void aPatchSeamThatStoppedTouchingUpstreamIsNotStillExcused() throws IOException {
+        // The same both-ways discipline as the ledger itself: an excuse outliving its reason
+        // quietly widens what the direction test permits.
+        final Set<String> leaking = new TreeSet<>();
+        for (final Leak leak : leaks(sourceRoot())) {
+            leaking.add(leak.file());
+        }
+        final Set<String> stale = new TreeSet<>(PATCH_SEAM.keySet());
+        stale.removeAll(leaking);
+        assertTrue(stale.isEmpty(), "these no longer touch upstream; drop the exception: " + stale);
     }
 }
