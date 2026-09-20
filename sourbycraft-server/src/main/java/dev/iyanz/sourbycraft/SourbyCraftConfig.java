@@ -12,24 +12,31 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * SourbyCraft config registry — SLIM Canvas-benchmark build (feat/canvas-engine, PR #12).
+ * SourbyCraft's configuration registry, and the boundary between its settings and Aurora's.
  *
- * <p>Every operator-facing SourbyCraft setting still lives in ONE file: {@code
- * sourcebycraft_config/sourbycraft_global_config.toml} (own {@code nightconfig} {@link
- * CommentedFileConfig}, resolved directly here — no Luminol {@code ConfigManager} dependency on
- * this base, unlike the archived Folia build). SourbyCraft's own settings (varied messages, the auto-
- * updater, {@code /maxp}) reads its keys through the typed {@link #cfgBool}/{@link #cfgInt}/
- * {@link #cfgGet}/{@link #cfgStringList} accessors below.
+ * <p>Operator-facing settings live in two files, not one. SourbyCraft's own -- varied messages,
+ * the auto-updater, {@code /maxp} persistence and bypass, the GC-advisor toggle -- are in
+ * {@code sourbycraft_config/sourbycraft_global_config.toml}, read through the typed
+ * {@link #cfgBool}/{@link #cfgInt}/{@link #cfgGet}/{@link #cfgStringList} accessors below.
+ * Aurora's are in {@code sourbycraft_config/aurora.toml}: the engine and the server are
+ * different things, and an operator tuning the engine should not have to read past join
+ * messages to find it.</p>
  *
- * <p><b>What got cut going from Folia to Canvas.</b> The archived version of this class was
- * ~1000 lines because it also seeded/bridged the self-tuning perf-engine (knobs, sensor,
- * combat-profile, thread-pool bridges), the anti-xray raytrace reveal layer, and the proxy-
- * forwarding / hardening-advisor security layer. All three are DEFERRED on this benchmark build
- * (see the PR #12 task brief) — their config trees, {@code seed()} calls and live-apply bridges
- * are gone with them. What remains is exactly what SourbyCraft itself reads: varied messages,
- * {@code /maxp} persistence + bypass, the auto-updater, and the GC-advisor toggle. Since
- * build 44, immutable utility snapshots and read-only performance diagnostics. Legacy automatic
- * memory tuning is retired; existing keys remain in operator files.
+ * <p>The Aurora file is layered <em>over</em> the unified one, so a deployment that predates the
+ * split keeps the value it already had. Where both files set the same Aurora key, aurora.toml
+ * wins and {@link #shadowedAuroraKeys} reports the copy that decides nothing -- neither file is
+ * ever rewritten, because both belong to the operator (PRD 5).</p>
+ *
+ * <p>Both files use their own {@code nightconfig} {@link CommentedFileConfig}, resolved here
+ * directly, with no upstream config-manager dependency.</p>
+ *
+ * <p><b>History.</b> An earlier version of this class was roughly a thousand lines, because it
+ * also seeded and bridged a self-tuning performance engine, an anti-xray reveal layer, and a
+ * proxy-forwarding and hardening-advisor security layer. Those were dropped rather than ported:
+ * their config trees, {@code seed()} calls and live-apply bridges went with them. Since build
+ * 44 this publishes immutable snapshots at explicit load boundaries and read-only performance
+ * diagnostics. Automatic memory tuning is retired; its keys may still sit in operator files and
+ * are ignored.</p>
  */
 public final class SourbyCraftConfig {
 
@@ -288,7 +295,7 @@ public final class SourbyCraftConfig {
             f.load();
             FILE = f;
         } catch (Throwable t) {
-            SourbyLogger.error("could not open sourcebycraft_config/sourbycraft_global_config.toml; "
+            SourbyLogger.error("could not open sourbycraft_config/sourbycraft_global_config.toml; "
                 + "every read will fall back to its default", t);
         }
         return FILE;

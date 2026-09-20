@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/architecture-Aurora-8a2be2?style=flat-square">
   <img src="https://img.shields.io/badge/runtime-SourbyCraft-00bcd4?style=flat-square">
-  <img src="https://img.shields.io/badge/build-45c%2B-brightgreen?style=flat-square">
+  <img src="https://img.shields.io/badge/build-46c%2B-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/mixins-Cherry-e83e8c?style=flat-square">
   <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
 </p>
@@ -94,7 +94,17 @@ The `26.2` branch already includes or is actively refining:
 - the Aurora region system: region identity, topology and lifecycle, backend-free
 - execution lanes with per-lane CPU attribution, surfaced by `/perf lanes`
 - an Aurora engine package inside the Minecraft tree, `dev.iyanz.aurora`
-- a certified multi-hour soak
+- ownership documents for all four engine domains, with metrics and boundaries
+- a Canvas/Folia dependency ledger, enforced by tests rather than prose
+- reproducible builds via `SOURCE_DATE_EPOCH`
+- persistence validation: `scripts/verify_persistence.py`, 16 checks
+
+**Not yet qualified.** T10 requires a certified reference run and a 2h+ soak, and neither
+exists: certification needs the measuring machine under 10% foreign CPU, which a development
+desktop in use does not provide. Runs still produce full evidence; they are refused only as
+*comparison references*. What is measured, what is missing and what each remaining item is
+blocked on is tracked in
+**[Qualification Readiness](docs/architecture/qualification-readiness.md)**.
 
 Deeper entity/chunk/network profiling and further Aurora ownership work remain active
 development tasks.
@@ -391,6 +401,13 @@ The active architecture/development set is:
 - **[Execution Contract](docs/architecture/execution-contract.md)** — what SourbyCraft needs from whatever schedules it
 - **[Aurora Engine Package](docs/architecture/aurora-engine-package.md)** — which tree engine code belongs in, and why
 - **[Independence Architecture](docs/architecture/independence.md)** — upstream decoupling strategy
+- **[Dependency Ledger](docs/architecture/dependency-ledger.md)** — every direct Canvas/Folia dependency, classified, enforced by test
+- **[Compatibility Boundary](docs/architecture/compat-boundary.md)** — which way the upstream arrows point, and what keeps them pointing that way
+- **[Entity & AI Engine](docs/architecture/engine-entity-ai.md)** — ownership, metrics, and why this domain is hard to measure honestly
+- **[Chunk & World Engine](docs/architecture/engine-chunk-world.md)** — ownership and the one domain qualifiable without clients
+- **[Network Engine](docs/architecture/engine-network.md)** — instrumented, unowned, and said so
+- **[Storage Engine](docs/architecture/engine-storage.md)** — ownership, and the durability rule that outranks throughput
+- **[Qualification Readiness](docs/architecture/qualification-readiness.md)** — T10 against what actually exists
 - **[Performance Baseline](docs/BASELINE.md)** — how a run is measured, certified, and what the measurements found
 - **[Development Task Matrix](docs/DEVELOPMENT-TASKS.md)** — actionable implementation state
 
