@@ -83,6 +83,30 @@ class SourbyServerConfigProviderTest {
     }
 
     @Test
+    void auroraOwnFileIsReportedAndItsSecretsStillRedacted() throws Exception {
+        // The config split moved Aurora's settings into their own file, and this group kept
+        // reporting only the unified one -- so a Spark report showed the messages and the updater
+        // while the settings that decide how the engine runs were absent from the one place an
+        // operator looks to find out how a slow server was configured.
+        Files.createDirectories(directory.resolve("sourbycraft_config"));
+        Files.writeString(directory.resolve("sourbycraft_config/sourbycraft_global_config.toml"),
+            "[messages]\njoin=['hi']\n");
+        final Path aurora = directory.resolve("sourbycraft_config/aurora.toml");
+        final String original = "[aurora.cpu]\ncores=8\n"
+            + "[aurora.entity]\nasync-pathfinding=false\n"
+            + "[aurora.diagnostics]\nlane-sampling=true\nwebhook-url='synthetic-aurora-secret'\n";
+        Files.writeString(aurora, original);
+
+        final JsonObject out = new SourbyServerConfigProvider.SourbyCraftSplitParser(directory)
+            .load("sourbycraft/", filter()).getAsJsonObject();
+
+        assertTrue(out.has("aurora.toml"), "Aurora's own file must appear in the report");
+        assertTrue(out.toString().contains("cores"), "the CPU budget is what a slow report needs");
+        assertFalse(out.toString().contains("synthetic-"), "secrets stay redacted in the new file too");
+        assertEquals(original, Files.readString(aurora), "the profiler never rewrites operator config");
+    }
+
+    @Test
     void composedGroupReportsAuroraNamespacesWithoutRewritingOperatorFile() throws Exception {
         final Path config = directory.resolve("sourbycraft_config/sourbycraft_global_config.toml");
         Files.createDirectories(config.getParent());

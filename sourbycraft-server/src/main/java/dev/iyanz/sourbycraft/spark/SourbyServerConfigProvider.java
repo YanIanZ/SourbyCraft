@@ -202,6 +202,13 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
 
             add(root, "global.toml", this.directory.resolve("sourbycraft_config/sourbycraft_global_config.toml"),
                 TomlConfigParser.INSTANCE, filter);
+            // Aurora's own file. Splitting the engine's settings out of the unified file made
+            // them invisible here: a Spark report showed SourbyCraft's messages and updater while
+            // the settings that decide how the engine runs -- the CPU budget, async pathfinding,
+            // lane sampling -- were absent from the one place an operator looks to find out what
+            // a server was configured like when it was slow.
+            add(root, "aurora.toml", this.directory.resolve("sourbycraft_config/aurora.toml"),
+                TomlConfigParser.INSTANCE, filter);
             add(root, "security.yml", this.directory.resolve("sourbycraft-security.yml"),
                 YamlConfigParser.INSTANCE, filter);
 
