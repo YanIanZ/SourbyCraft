@@ -80,3 +80,29 @@ What this ranking does **not** establish is that such a change would be an impro
 and PRD §115 need a benchmark, and this run cannot be one: a certified `entity-stress` reference
 with clients attached is still required before any of these is optimised, and the same
 configuration that produced this ranking can produce that reference on a quiet machine.
+
+---
+
+## Follow-up: patch 0017, hoisting the query bounds
+
+Same workload, same 10 clients, same 180 s window, comparable noise (26.9% foreign CPU before,
+26.3% after).
+
+| | `getEntities` | `AABB.intersects` | cluster | share |
+|---|---|---|---|---|
+| before | 137 | 246 | 383 / 5364 | **7.14%** |
+| after | **71** | 261 | 332 / 5440 | **6.10%** |
+
+`getEntities`' own frame nearly halved. On these sample counts that is outside sampling noise —
+137 carries a Poisson spread of about ±12 — so the change is real rather than chance, and it is
+the frame the six field reads were removed from.
+
+`AABB.intersects` rose slightly (246 → 261). That is the expected shape rather than a
+contradiction: the comparison is now reached directly with primitives, so proportionally more
+of the cluster's time is attributed to the comparison itself and less to the caller setting it
+up. The cluster as a whole fell about one percentage point.
+
+**What this is not.** Neither run is certified, so this says nothing about server throughput.
+The correct claim is narrow: the profile shows less time in the frame the patch changed, in the
+direction the patch intended. Whether that reaches MSPT needs the certified `entity-stress`
+reference T10 is waiting on — produced by this exact command on a quiet machine.
