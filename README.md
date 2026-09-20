@@ -368,11 +368,12 @@ The first boot may require network access to acquire externalized dependencies. 
 
 ---
 
-## Build from source
+## Maintainer build (private toolchain required)
 
 Requires **JDK 25** and Git.
 
 ```bash
+python3 scripts/private_toolchain.py --publish .private-toolchain
 ./gradlew applyAllPatches
 ./gradlew :sourbycraft-server:compileJava
 ./gradlew slimServerJar
@@ -442,3 +443,9 @@ SourbyCraft uses and derives work from upstream Minecraft server projects includ
 Cherry incorporates work inspired by/derived from projects including **[LeavesMC](https://github.com/LeavesMC)** and **[CraftCanvasMC/Horizon](https://github.com/CraftCanvasMC/Horizon)** where applicable. Profiling integration uses **[spark](https://spark.lucko.me)**.
 
 SourbyCraft project licensing is described in [`LICENSE`](LICENSE). Third-party components remain subject to their respective licenses.
+
+## Maintainer build access
+
+Official binaries are distributed through [Releases](https://github.com/YanIanZ/SourbyCraft/releases).
+The current build requires private SourbyPatcher/SourbyClip checkouts published to Maven Local.
+See [private toolchain setup](docs/development/PRIVATE-TOOLCHAIN.md) for pinned revisions, verification and CI policy.

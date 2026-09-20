@@ -99,15 +99,14 @@ vanilla class; none of them is an Aurora contract.
 
 ---
 
-## 4. Legacy
+## 4. Private build tooling
 
 | Item | Class | Reason |
 |---|---|---|
-| `sourbypatcher/` | `LEGACY` / `REMOVABLE` | Our own paperweight fork, superseded by the Canvas weaver toolchain ("Path B", `build.gradle.kts`). No Gradle build includes it — `settings.gradle.kts` does not, and the only reference outside its own directory is the comment recording that the weaver toolchain replaced `dev.iyanz.sourbypatcher`. **CI still builds it**: `.github/workflows/build.yml` runs `publishToMavenLocal` under a step labelled "build plugin for the Folia patcher", a leftover from the Folia era. Nothing resolves the published artifact, so that step is dead work on every run. |
+| `SourbyPatcher canvas-toolchain` (private) | `REQUIRED_UPSTREAM_CONTRACT` | Official build adapter delegates nested patching to Weaver 2.4.5 and verifies pinned SourbyClip. Legacy Folia sources moved to private YanIanZ/SourbyPatcher; not reactivated. See [private toolchain](../development/PRIVATE-TOOLCHAIN.md). |
 
-T9's gate asks that removable legacy layers be deleted. Deleting `sourbypatcher/` is a
-judgement call for the maintainer, not a mechanical one — it is the fallback if the weaver
-toolchain ever stops being viable. It is classified, not removed.
+The maintainer moved the legacy sources out of the public tree. The new Canvas adapter is
+an active build dependency; the archived Folia implementation remains unused in the private repo.
 
 ---
 
