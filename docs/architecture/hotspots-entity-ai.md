@@ -152,6 +152,12 @@ list" reads like opportunity until someone checks.
 
 ## Follow-up: patch 0018, the tracker's effective range
 
+**2026-09-21 correctness review:** this candidate has been withdrawn. The synchronous
+tracking-event callback can change range inputs between recipients, so caching one
+range across a broadcast does not preserve plugin semantics. The measurements below
+remain historical, not an accepted optimization. See
+[Task D validation](aurora-task-d-validation.md).
+
 Same workload, same ten clients, comparable noise (26.9% foreign CPU before, 24.6% after).
 
 | | `updatePlayer` | `getEffectiveRange` | `updatePlayer` share |

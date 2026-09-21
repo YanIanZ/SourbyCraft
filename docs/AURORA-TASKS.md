@@ -70,6 +70,11 @@ Carry forward all unfinished baseline work from `docs/DEVELOPMENT-TASKS.md`.
 
 No task in this group is considered complete without before/after evidence.
 
+Started 2026-09-21: [Entity/AI validation](architecture/aurora-task-d-validation.md).
+Existing collision/query/tracker profiles are exploratory, not certified baselines.
+The tracker range-hoisting candidate crosses plugin callbacks and has been withdrawn;
+collision candidate 0019 passes arithmetic checks and ownership review; live integration remains open.
+
 ### Entity / AI
 
 - [ ] profile `Entity.tick`
@@ -78,10 +83,10 @@ No task in this group is considered complete without before/after evidence.
 - [ ] profile GoalSelector
 - [ ] profile Brain/Sensor
 - [ ] profile path navigation
-- [ ] profile collision
-- [ ] profile entity section queries
+- [-] profile collision — exploratory before/after samples; certified comparison pending
+- [-] profile entity section queries — exploratory before/after samples; certified comparison pending
 - [ ] profile item entity merge/pickup
-- [ ] profile entity tracker updates
+- [-] profile entity tracker updates — exploratory samples retained; unsafe range-hoisting candidate withdrawn
 - [ ] implement first measured Aurora entity/NMS optimization
 - [x] region-safety review for every entity/NMS change — 0017/0018/0019 reviewed in [region-safety-review-0017-0019.md](architecture/region-safety-review-0017-0019.md); standing obligation for future entity/NMS patches
 

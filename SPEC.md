@@ -2326,6 +2326,8 @@ V17: Aurora FAILED rejects new async path solves before pool shutdown; null life
 
 V18: Official build resolves SourbyClip/SourbyPatcher only from Maven Local; private revision and JAR hashes pinned; unexpected launcher/protocol rejected; offline bootstrap makes no launcher network requests and accepts only verified cache/library bytes (§4, §35, §83–87).
 
+V19: Entity tracking broadcasts recalculate effective range per recipient after prior synchronous plugin callbacks; empty broadcasts perform no range traversal (PRD §9, §49; AURORA-TASKS §D).
+
 # 153. Regression Log (§B)
 
 | id | date | cause | fix |
@@ -2365,6 +2367,10 @@ V18: Official build resolves SourbyClip/SourbyPatcher only from Maven Local; pri
 | B28 | 2026-09-21 | Bootstrap treated the fourth libraries.list coordinate component as packaging instead of native classifier, generating invalid download URLs | V18; SourbyClip 3.0.25 parses Gradle JAR coordinates explicitly; classified-JAR HTTP regression test |
 
 | B29 | 2026-09-21 | Shared MessageDigest state rejected valid embedded libraries when parallel download workers verified concurrently | V18; SourbyClip 3.0.26 owns digest per operation, streams file hashing, and passes eight-worker regression test |
+
+| B30 | 2026-09-21 | Tracker patch 0018 cached passenger-dependent effective range across synchronous PlayerTrackEntityEvent callbacks, giving later recipients stale range and adding reads for empty broadcasts | V19; withdraw 0018; real list/region broadcast-loop regressions model callback range changes |
+
+| B31 | 2026-09-21 | Task D tests initially missed suite-only discovery; isolated tracker mocks then initialized Entity before registries | Add EntityOptimizationTestSuite and upstream Normal test environment; verify named cases actually execute; no new runtime invariant |
 
 # 154. Delivery Scope
 
