@@ -172,3 +172,30 @@ The saving scales with player count. Ten clients remove nine redundant computati
 per tick; fifty would remove forty-nine. This profile understates what a populated server sees.
 
 Still not a throughput claim — neither run is certified.
+
+---
+
+## Follow-up: patch 0019, deferring the collision-box allocation
+
+Same workload, same ten clients, comparable noise (24.6% foreign CPU before, 22.1% after), no
+competing server in either window.
+
+| | `AABB.move` CPU | `AABB.move` allocation |
+|---|---|---|
+| before (0017 + 0018) | 45 / 5850 | 1158 / 16986 — **6.82%** |
+| after (+ 0019) | **3** / 5026 | **382** / 16271 — **2.35%** |
+
+Both columns move together and both are large. CPU samples in `AABB.move` fall by 93%, and its
+share of allocation samples by two thirds. That is what deferring the allocation to the hit path
+should do, and the size of it reflects how often the miss path runs: most candidate blocks fail
+the intersection test.
+
+The residual 382 is expected rather than leftover. `AABB.move` has other callers —
+`Entity.collide`, `Level.noCollision`, `getEntityHardCollisions` — none of which this patch
+touches.
+
+`getCollisionsForBlocksOrWorldBorder` itself stayed at 142 samples while the run's total fell
+from 5850 to 5026, so its *share* rose from 2.43% to 2.83%. Same pattern as patch 0017: removing
+work from a callee moves proportion into the caller. The lower total is worth noticing — the
+same workload over the same 180 seconds produced 14% fewer execution samples — but at 22%
+foreign CPU that is not safe to read as throughput, and it is not claimed as such.
