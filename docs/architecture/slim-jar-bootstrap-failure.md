@@ -1,7 +1,36 @@
-# The slim jar does not boot on a clean machine
+# Slim bootstrap incident — fixed in SourbyClip 3.0.26
 
 Found 2026-09-20 while trying to verify patch 0018. Recorded because it affects releases, not
 just measurement, and because it contradicts a claim made earlier the same day.
+
+## Resolution — 2026-09-21
+
+The private implementation is fixed and pinned at SourbyClip `3.0.26`, revision
+`5b46c3b5a7033cf53ef2b833a60c83190c286b56`. The historical diagnosis below identified the
+HTTP-200 mirror problem, but fresh-process qualification exposed two additional causes:
+
+1. Library SHA-256 checks shared one mutable `MessageDigest` across download workers,
+   intermittently rejecting intact embedded JARs. Hash state is now owned per operation,
+   and file hashing streams through a bounded buffer.
+2. The fourth `libraries.list` coordinate component is a native classifier, not packaging.
+   Bootstrap downloads now parse `group:artifact:version[:classifier]` as JAR coordinates.
+3. A hash mismatch is now a repository miss, and each attempt is staged in a unique temporary
+   file. Only verified bytes replace a library destination; failed attempts preserve old files.
+
+Ten private bootstrap regression tests pass, including an eight-worker hashing test,
+classified-native download, HTTP-200 HTML fallback, offline cache checks and failed-write cleanup.
+
+Local end-to-end evidence (`scripts/verify_bootstrap.py`, no copied caches):
+
+| Phase | Time to Done | Exit |
+|---|---:|---:|
+| Empty-cache first boot | 25.1 s | 0 |
+| Cached restart with `-Dsourbyclip.offline=true` | 7.0 s | 0 |
+
+Tested server JAR: `58b701526caf273d49b22b3894d630a79569e47e37e4932da742c09dc31a59fd`
+(SHA-256), build 46 DEV with SourbyClip 3.0.26. Separate logs, JSON and JFR files were recorded
+under `build/bootstrap-3.0.26-20260921/`. This is bootstrap qualification, not performance or soak
+qualification. The reconstructed patch below is historical; the private source is authoritative.
 
 ## Symptom
 
@@ -100,7 +129,7 @@ A reconstructed patch for those first two points is in
 rather than sources, since SourbyClip is private, so it is applied by hand rather than with
 `git am`.
 
-## Workaround until then
+## Historical workaround before 3.0.26
 
 Ship with `libraries/` pre-populated, or boot once somewhere the downloads succeed and copy the
 directory. A populated runtime is unaffected: `DownloadContext` returns early when the file
