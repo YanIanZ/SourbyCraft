@@ -11,6 +11,8 @@ See [maintainer setup](development/PRIVATE-TOOLCHAIN.md).
 - `--sourbyclip-info` reports identity without starting Minecraft.
 - `-Dsourbyclip.offline=true` refuses bootstrap downloads and IP lookup. Verified cached
   or embedded libraries remain usable; this does not disable server/plugin networking.
+- Each concurrent hash check owns its digest and uses bounded memory. Native classifiers
+  are preserved when converting Gradle library coordinates to repository paths.
 - Library hash verification occurs inside the repository retry loop. HTML with HTTP 200
   is a failed attempt when its hash differs, so the next repository is tried.
 - Library extraction and downloads use unique sibling temporary files. Only complete,
