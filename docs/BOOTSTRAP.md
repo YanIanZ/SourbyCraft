@@ -1,6 +1,6 @@
-# SourbyClip bootstrap — 3.0.24
+# SourbyClip bootstrap — 3.0.26
 
-The official 26.2 build uses SourbyClip 3.0.24 from Maven Local. Its source lives in the
+The official 26.2 build uses SourbyClip 3.0.26 from Maven Local. Its source lives in the
 private `YanIanZ/SourbyClip` repository; the approved revision is recorded in
 `build-data/private-toolchain.lock.json`, and `gradle.properties` pins the JAR hash.
 See [maintainer setup](development/PRIVATE-TOOLCHAIN.md).
@@ -24,7 +24,7 @@ HTTP-200 HTML followed by a valid mirror, all mirrors failing, and destination p
 The public process probes cover the packaged launcher and large transfers:
 
 ```sh
-java --class-path "$HOME/.m2/repository/dev/iyanz/sourbyclip/3.0.24/sourbyclip-3.0.24.jar" \
+java --class-path "$HOME/.m2/repository/dev/iyanz/sourbyclip/3.0.26/sourbyclip-3.0.26.jar" \
   scripts/fixtures/ClipDownloadProbe.java build/clip-download-probe
 python3.12 scripts/verify_bootstrap.py build/libs/SourbyCraft-slim.jar \
   --output build/bootstrap-new
@@ -44,5 +44,5 @@ publishes a server JAR and checksum to Releases. The retired NMS harness is not 
 
 The 3.0.22 launcher exit-code/transfer fixes remain included. The 3.0.23 integrity check
 exposed the HTTP-200 mirror failure documented in
-[the incident report](architecture/slim-jar-bootstrap-failure.md); 3.0.24 moves that check
+[the incident report](architecture/slim-jar-bootstrap-failure.md); 3.0.26 moves that check
 inside retry and stages files before publication.
