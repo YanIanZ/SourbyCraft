@@ -83,7 +83,7 @@ No task in this group is considered complete without before/after evidence.
 - [ ] profile item entity merge/pickup
 - [ ] profile entity tracker updates
 - [ ] implement first measured Aurora entity/NMS optimization
-- [ ] region-safety review for every entity/NMS change
+- [x] region-safety review for every entity/NMS change — 0017/0018/0019 reviewed in [region-safety-review-0017-0019.md](architecture/region-safety-review-0017-0019.md); standing obligation for future entity/NMS patches
 
 ### Chunk / World
 
