@@ -40,12 +40,11 @@ Nothing new is read or published.
 freshly allocated in both the old and new code, and the new `AABB(...)` carries the same six
 values `move()` would have produced.
 
-This one matters more than it looks. Had `move()` returned `this` for a zero offset, the old
-code would have put a block's **cached** shape AABB into a caller-owned list, where a caller
-mutating or retaining it would corrupt the shape cache for every thread. It does not, so
-neither version has that defect — but the new version cannot acquire it.
+`AABB` is immutable, so retaining an instance does not by itself corrupt a shape cache.
+Both paths preserve the same retained bounds and caller-owned collection semantics.
 
-**Verdict: safe**, and marginally safer than what it replaces.
+**Verdict: equivalent local arithmetic**, with boundary tests in
+`BlockCollisionBoundsTest`. This does not replace gameplay integration or certified profiling.
 
 ---
 
@@ -62,54 +61,33 @@ which is unchanged and still guards every entry.
 the loop changes what the range depends on — `this.entity`'s passengers, via `getPassengers()`
 and `getIndirectPassengers()`.
 
-Checked, in the loop body:
+The original review overlooked synchronous callbacks reachable through pairing and removal:
 
-| Call | Touches passengers? |
+| Call | Plugin callback reachable |
 |---|---|
-| `seenBy.add` / `seenBy.remove` | no |
-| `serverEntity.addPairing` → `sendPairingData`, `startSeenByPlayer` | no |
-| `serverEntity.removePairing` | no |
-| `debugSynchronizers()` register/start/drop | no |
+| `updatePlayer` before pairing | `PlayerTrackEntityEvent` |
+| `removePairing` → `stopSeenByPlayer` | `PlayerUntrackEntityEvent` |
+| `addPairing` → `sendPairingData` → `detectEquipmentUpdates` | `PlayerArmorChangeEvent`, `EntityEquipmentChangedEvent` |
 
-**But the loop fires a plugin-visible event.** `ChunkMap.java:1401` constructs and calls
-`PlayerTrackEntityEvent` before pairing. A listener holds a `Bukkit` entity and may do anything
-a plugin can, including `addPassenger` or `eject`.
+Listeners may change passengers immediately through the Bukkit entity API. Reading the
+range once before the loop therefore gives later recipients a stale value. Region confinement
+does not make this same-thread callback behavior equivalent to upstream.
 
-So the honest statement is not "nothing mutates passengers". It is:
+**Corrected verdict (2026-09-21): withdrawn.** Patch 0018 is removed. The two real broadcast
+loops now recompute through the upstream per-player method. Regression tests reproduce the
+old stale-range behavior and unnecessary range read for an empty broadcast. Checking only
+`PlayerTrackEntityEvent` listeners would miss the other callback paths above.
 
-- **No engine code in the loop mutates them.** The hoist is equivalent for a server without a
-  plugin listening to that event.
-- **A plugin listener can.** If one changes the tracked entity's passengers during the event,
-  the remaining players in *that* broadcast are evaluated against the range computed before the
-  change, where previously each player would have recomputed it.
-
-**Bound on the consequence.** The staleness lasts one broadcast. Tracker updates run every
-tick, so the next tick computes the range afresh and any visibility difference corrects itself.
-The affected quantity is a visibility *distance*, so the worst case is an entity briefly shown
-or hidden one tick later than it would have been for players after the listener in iteration
-order.
-
-**Verdict: safe, with a documented behavioural narrowing.** This is not a thread-safety defect
-— the event runs on the same region thread as the loop, so there is no race — it is a
-same-thread reentrancy question, and the answer is a one-tick staleness in a case that requires
-a plugin to mutate passengers from a track event.
-
-If that is judged too much, the fix is cheap and does not undo the optimisation: recompute the
-range only when the event actually has listeners, which is already tested for on the same line.
-It is not done here because it trades a measured saving against a hypothetical listener, and
-the measurement is real while the listener is not yet known to exist.
-
----
+An invalidation-aware replacement may be investigated later, but needs independent semantic
+coverage and certified measurements. Exploratory sample reductions do not justify accepting
+changed plugin behavior.
 
 ## Summary
 
-| Patch | Thread access | Precondition | Verdict |
-|---|---|---|---|
-| 0017 | unchanged | `AABB` immutable — verified | safe |
-| 0018 | unchanged, still `AsyncCatcher`-guarded | no engine passenger mutation in loop — verified; plugin listener can — documented | safe, one-tick staleness in a plugin case |
-| 0019 | reduced | `move()` always allocates — verified | safe, marginally safer |
+| Patch | Ownership assessment | Status |
+|---|---|---|
+| 0017 | local immutable query bounds | retained; certified performance gate open |
+| 0018 | same-thread callback invalidation overlooked | withdrawn; upstream per-recipient reads restored |
+| 0019 | local scalar translation, caller-owned results | retained; arithmetic tests added, certified performance gate open |
 
-None of the three moves work between threads, publishes an object to another thread, or changes
-which thread owns any state. Two are pure local transformations over immutable data. The third
-narrows a per-player recomputation to per-broadcast, and its one behavioural edge is written
-down above rather than left for someone to find.
+See [Task D validation](aurora-task-d-validation.md) for scope, tests, and remaining gates.
