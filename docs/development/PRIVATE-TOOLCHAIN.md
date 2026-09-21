@@ -3,7 +3,7 @@
 Official server downloads are GitHub Releases. Maintainer builds require private checkouts:
 
 - `YanIanZ/SourbyPatcher`: active `canvas-toolchain` adapter 2.0.20 and archived Folia patcher.
-- `YanIanZ/SourbyClip`: launcher 3.0.24, protocol 1.
+- `YanIanZ/SourbyClip`: launcher 3.0.26, protocol 1.
 
 The public repository no longer vendors these sources or SourbyClip Maven binaries.
 Previously published Git history and releases still contain earlier versions. Private access

@@ -2362,6 +2362,10 @@ V18: Official build resolves SourbyClip/SourbyPatcher only from Maven Local; pri
 | B26 | 2026-09-21 | Library hash checked after repository selection, so HTML with HTTP 200 blocked valid fallback mirrors and replaced final paths before verification | V18; SourbyClip 3.0.24 checks each repository response before publishing a unique staged file; three failing regression cases now pass |
 | B27 | 2026-09-21 | Private-tool publication used a relative gradlew path after changing working directory, failing the documented CI command | Resolve checkout and Maven Local paths before invoking wrappers; relative-checkout process regression test |
 
+| B28 | 2026-09-21 | Bootstrap treated the fourth libraries.list coordinate component as packaging instead of native classifier, generating invalid download URLs | V18; SourbyClip 3.0.25 parses Gradle JAR coordinates explicitly; classified-JAR HTTP regression test |
+
+| B29 | 2026-09-21 | Shared MessageDigest state rejected valid embedded libraries when parallel download workers verified concurrently | V18; SourbyClip 3.0.26 owns digest per operation, streams file hashing, and passes eight-worker regression test |
+
 # 154. Delivery Scope
 
 Build 44 delivers a tested modernization increment: patch repair, runtime telemetry extensions,
