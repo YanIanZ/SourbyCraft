@@ -164,16 +164,11 @@
 +            "REL" -> "$releaseMajor-REL"
 +            else -> "$releaseVersionFull-DEV"
 +        }
-+        // SourbyCraft — the build id is the human-facing VERSION. ServerBuildInfoImpl.asString()
-+        // returns this manifest Implementation-Version verbatim, so the "[bootstrap] Loading" + "This
-+        // server is running SourbyCraft version" boot lines show just "build 43c" (c = Canvas base;
-+        // the channel version 26.2-EXP is deliberately NOT shown here — it stays on the
-+        // "Implementing API version" line as the protocol version). Kept in lockstep with
-+        // META-INF/sourbycraft-build.properties `build=43c` (writeBuildInfo) which the banner + /ver
-+        // read. Supports composite builds: `43.1` -> "build 43.1c", `44-hotfix` -> "build 44-hotfix".
++        // Build 47+: public build identity is independent from upstream lineage.
++        // Keep this in lockstep with root writeBuildInfo.
 +        val rawBuild = rootProject.providers.gradleProperty("sourbyBuild").getOrElse("1").trim()
-+        val sourbyBuild = if (rawBuild.matches(Regex("\\d+(\\.\\d+)*"))) rawBuild + "c" else rawBuild
-+        val implementationVersion = "build $sourbyBuild"
++        val sourbyBuild = rawBuild
++        val implementationVersion = "Build $sourbyBuild"
 +        // SourbyCraft — pre-formatted GMT+7 (Asia/Jakarta) day-name build timestamp, matching the
 +        // previous-version / GH-release convention and the /ver formatter (EEEE, d MMMM yyyy, HH:mm).
 +        // ServerBuildInfoImpl.asString(VERSION_FULL) appends this verbatim as "(<display> GMT+7)" on
