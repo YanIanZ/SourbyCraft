@@ -54,12 +54,12 @@ public final class SourbyCraftBanner {
         final String javaVersion = System.getProperty("java.specification.version");
         final int cores = Runtime.getRuntime().availableProcessors();
         final String engine = info.engineName();
-        final String shownVersion = info.displayVersion();
+        final String shownVersion = info.releaseIdentity();
 
         final StringBuilder sb = new StringBuilder();
         sb.append('\n');
         sb.append(sweep("   ╭" + "─".repeat(WIDTH + 2) + "╮")).append(RESET).append('\n');
-        sb.append(row(centre("SOURBYCRAFT · " + engine.toUpperCase(Locale.ROOT)), TITLE));
+        sb.append(row(centre("SOURBYCRAFT · " + engine.toUpperCase(Locale.ROOT) + " ENGINE"), TITLE));
         sb.append(row(centre("Java " + javaVersion + " · Minecraft " + info.mcVersion()
             + " · " + shownVersion), BODY));
         sb.append(row(centre(info.tagline()), BODY));
