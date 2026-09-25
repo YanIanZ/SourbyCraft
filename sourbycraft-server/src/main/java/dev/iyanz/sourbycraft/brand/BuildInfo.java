@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.brand;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Locale;
 import java.util.Properties;
 
 /**
@@ -34,11 +35,25 @@ public record BuildInfo(
      * Falls back to the product name when no codename is stamped.
      */
     public String engineName() {
-        if (this.codename == null || this.codename.isBlank() || "dev".equals(this.codename)) {
-            return "SourbyCraft";
-        }
-        return Character.toUpperCase(this.codename.charAt(0)) + this.codename.substring(1);
+        return "Aurora";
     }
+
+    /** Human-readable release codename, e.g. aurora-nexus -> Aurora Nexus. */
+    public String codenameDisplay() {
+        if (this.codename == null || this.codename.isBlank() || "dev".equalsIgnoreCase(this.codename)) {
+            return "Development";
+        }
+        final String[] parts = this.codename.split("[-_ ]+");
+        final StringBuilder out = new StringBuilder();
+        for (final String part : parts) {
+            if (part.isBlank()) continue;
+            if (!out.isEmpty()) out.append(' ');
+            out.append(part.substring(0, 1).toUpperCase(Locale.ROOT));
+            if (part.length() > 1) out.append(part.substring(1).toLowerCase(Locale.ROOT));
+        }
+        return out.isEmpty() ? this.codename : out.toString();
+    }
+
     /**
      * Human-facing build id, e.g. {@code "build 4c"} (c = Canvas base) — the channel version
      * ({@code 26.2-REL}) is deliberately NOT shown here (it stays on the
@@ -48,7 +63,7 @@ public record BuildInfo(
     public String displayVersion() {
         return (build == null || build.isEmpty())
             ? version
-            : "build " + build;
+            : "Build " + stripPlatformSuffix(build);
     }
 
     /**
@@ -69,7 +84,7 @@ public record BuildInfo(
         } catch (final Throwable ignored) {
             // never break a version-reporting path over the build id
         }
-        return "SourbyCraft build " + id;
+        return "SourbyCraft Build " + stripPlatformSuffix(id);
     }
 
     private static final String RESOURCE = "/META-INF/sourbycraft-build.properties";
@@ -130,6 +145,12 @@ public record BuildInfo(
      * E.g. {@code "43c"} -> {@code "43"}, {@code "43.1c"} -> {@code "43.1"},
      * {@code "44-hotfix"} -> {@code "44-hotfix"} (no known suffix).
      */
+    public String releaseIdentity() {
+        final String release = displayVersion();
+        final String name = codenameDisplay();
+        return "Development".equals(name) ? release : release + " — " + name;
+    }
+
     private static String stripPlatformSuffix(String build) {
         if (build.length() >= 2) {
             char last = build.charAt(build.length() - 1);
