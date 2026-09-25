@@ -1,68 +1,87 @@
-# Aurora configuration — first implementation
+# Aurora configuration — effective 26.2 contract
 
-Aurora uses the existing `sourbycraft_config/sourbycraft_global_config.toml`.
-No extra files or empty namespaces are created. This increment implements one setting:
+This document describes **what branch `26.2` actually consumes now**. It is not a future-layout proposal.
+
+## Implemented Aurora settings
 
 | Key | Type / default | Lifecycle | Consumer |
 | --- | --- | --- | --- |
-| `aurora.entity.async-pathfinding` | boolean / `false` | LIVE | AsyncPathProcessor admission flag |
+| `aurora.entity.async-pathfinding` | boolean / `false` | LIVE | `AsyncPathProcessor` admission |
+| `aurora.diagnostics.lane-sampling` | boolean / implementation default | LIVE | execution-lane CPU attribution |
+| `aurora.cpu.cores` | integer / `0` (AUTO) | RESTART_REQUIRED | early region-scheduler CPU budget |
+
+The typed runtime snapshot is owned by `AuroraConfig`. Tick code should consume typed values or already-published primitives rather than repeatedly parsing dotted configuration paths.
+
+## Configuration files and boot order
+
+Most SourbyCraft settings continue to live in:
+
+```text
+sourbycraft_config/sourbycraft_global_config.toml
+```
+
+The early region-thread decision is special. `AuroraCpu` currently reads:
+
+```text
+sourbycraft_config/aurora.toml
+```
+
+during Paper/Folia global configuration loading, **before** `SourbyCraftBootstrap.init()` and the normal typed config lifecycle. That separation is an implementation fact and must be documented until the boot order is redesigned.
+
+Current precedence for region tick threads is:
+
+1. explicit `threaded-regions.threads: N` in `paper-global.yml`;
+2. `aurora.cpu.cores = N` from `sourbycraft_config/aurora.toml`;
+3. AUTO: `Runtime.getRuntime().availableProcessors()`.
+
+`aurora.cpu.cores` is clamped to the JVM-visible processor count. JVM-visible processors are preferred to host/NUMA totals so container CPU quotas are respected.
+
+Example:
+
+```toml
+[aurora.cpu]
+cores = 8
+```
+
+Because the scheduler is sized before normal SourbyCraft bootstrap, changing this value at runtime does **not** resize region tick threads. A restart is required.
+
+## Live settings
+
+Example logical values:
 
 ```toml
 [aurora.entity]
 async-pathfinding = false
+
+[aurora.diagnostics]
+lane-sampling = true
 ```
 
-`AuroraConfig` and its nested entity record are immutable. `SourbyCraftConfig.aurora()`
-returns the effective typed snapshot; the async processor receives the primitive value at
-initialization/reload. Tick code does not parse configuration or read dotted paths.
+`/sourbycraft reload` may apply implemented LIVE Aurora settings. Reload output must explicitly separate live changes from restart-required values.
 
-## Compatibility and validation
+Disabling async pathfinding prevents new navigation checks from selecting async solves. Already admitted work may finish and return through the owning-entity handoff. Shutdown has stronger admission/cancellation behavior.
 
-The new key wins when present, including an explicit `false`. If absent, the legacy
-`perf.ai.async-pathfinding` key remains readable and emits a deprecation warning at load/reload.
-A malformed new key or namespace uses `false` and never falls through to a legacy `true`.
-Strings such as `"true"` and integers such as `1` are invalid boolean values.
+Async pathfinding remains **EXPERIMENTAL and default-off**. Functional tests or a successful boot do not make it qualified.
 
-Only a first-created config receives the Aurora default. Existing operator files are neither
-seeded with this new key nor automatically saved, including during reload and Spark collection.
-Use nested TOML tables as shown above. Migration is an operator edit, not an automatic rewrite.
+## Legacy compatibility
 
-## Reload
+Where the branch still supports legacy keys such as `perf.ai.async-pathfinding`, the Aurora key has precedence when present. Invalid Aurora values must not silently fall through to a legacy value that changes operator intent.
 
-`/sourbycraft reload` re-parses and applies the implemented Aurora setting. Its response reports
-changed live Aurora values and invalid key paths. There are currently no implemented Aurora
-restart-required or immutable-for-run settings, so the Aurora-only restart list is empty.
-The lifecycle model supports `LIVE`, `RESTART_REQUIRED`, and `IMMUTABLE_FOR_RUN`; future settings
-must implement their actual lifecycle before being exposed. Canvas and other cached utility
-settings retain their separate restart caveats.
+Deprecation support is compatibility, not permission to document the legacy key as the preferred interface.
 
-Disabling the live toggle prevents subsequent navigation checks from choosing async solves.
-Already admitted solves may finish and hand results back through the existing owning-entity
-scheduler; reload does not cancel them. Idle pool workers may time out and the pool remains
-available for a later explicit enable. Shutdown has its existing cancellation behavior.
-Async pathfinding remains experimental and default-off: this configuration migration does not
-complete the snapshot/staleness or mob-compatibility audit.
+## Development rules for configuration claims
 
-## Spark
+Documentation and release notes must distinguish:
 
-The existing `sourbycraft/` config group reports Aurora tables from the operator file and filters
-credential fields recursively. It reports file contents, not resolved effective values: when
-both legacy and new keys exist, both appear, with precedence defined above. Web-viewer rendering
-and separate effective-runtime metadata remain open tasks. Generic key-name filtering cannot
-recognize secrets placed under arbitrary innocuous names; operator hidden paths remain supported.
+- **implemented key** — parser + consumer exist;
+- **live key** — changing it can affect the running server without restart;
+- **restart-required key** — parser may reload it, but the active subsystem cannot;
+- **planned namespace** — architecture only, not a usable setting.
 
-## Verification scope
+Do not say a config file is the single source of truth if an early-boot consumer bypasses it. Do not say a reload "applied" a value whose consumer was already constructed and cannot change.
 
-AuroraConfigTest covers precedence, invalid types/namespaces, immutable values, legacy preservation,
-first-file seeding, runtime load/reload publication, and admitted-work draining after disable.
-Claude contributed a Spark group test for Aurora fields, nested redaction, and unchanged file bytes.
-Full build/test and isolated boot/reload results are recorded with each delivery; no performance
-improvement or stable-release qualification is inferred from these functional checks.
+## Verification
 
-Aurora-1 validation on 2026-09-14: patch application and full build passed; Java reports
-contained 9,894 tests (24 skipped, zero failures/errors), including 11 Aurora config tests
-and 7 Spark config tests. The script suite passed 180 tests at source commit e5507bf.
-An isolated cached-dependency server booted, processed normal and invalid-key reloads,
-preserved fixture bytes across each operation, and stopped with exit 0 after saving all
-worlds/player data. These results qualify this configuration increment, not the full Aurora
-performance/soak program.
+Configuration tests validate parsing, precedence, lifecycle publication and compatibility behavior. They are correctness evidence only. They do not establish a performance improvement, soak stability, or release qualification.
+
+When this document conflicts with code on branch `26.2`, verify the active consumer and boot order, then update this document in the same change.

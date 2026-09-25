@@ -17,15 +17,13 @@ CPU used  ≈  (number of DISCONNECTED active regions)  ×  (per-region tick cos
 
 ## 1. Region tick threads — measured, and the default is not the best value
 
-`threads: -1` in `paper-global.yml` resolves through **our own patch 0002** to
-`availableProcessors() / 2`, which is **4** on this host. (Upstream Canvas resolved it to **1**,
-which is why the patch exists at all.)
+`threads: -1` in `paper-global.yml` currently resolves through **our own patch 0002** to the Aurora CPU budget. With no explicit `aurora.cpu.cores`, AUTO resolves to **all JVM-visible processors** (`Runtime.getRuntime().availableProcessors()`). On this 8-processor host that is **8**. Historical measurements below include an earlier 4-thread default/configuration and are retained as evidence, not as a description of the current default.
 
 Identical block-tick load, same world, same server, one restart between arms:
 
 | region threads | CPU mean | CPU max | MSPT mean | **MSPT max** | active regions |
 |---|---|---|---|---|---|
-| 4 (`-1`, the default) | 87.5% | 191.2% | 25.07 ms | **48.7 ms** | 3 |
+| 4 (historical/default-at-measurement) | 87.5% | 191.2% | 25.07 ms | **48.7 ms** | 3 |
 | **8** (`= cores`) | 78.6% | 86.2% | **17.17 ms** | **18.3 ms** | 3 |
 
 Eight threads cut mean MSPT by **32%** and the tail by **62%**, while using *less* average CPU —
@@ -33,10 +31,7 @@ less time contending for four threads. The 48.7 ms maximum under the default is 
 number: the tick budget is 50 ms, so the default was running a tail that nearly missed it under
 a load the 8-thread arm absorbed at 18 ms.
 
-**The deployment server is now set to `threads: 8`.** The shipped *default* is unchanged: one
-host and one workload is thin evidence for a value every deployment inherits, and more region
-threads can in principle starve chunk workers and Netty on a busier box. Raising it is a
-per-host decision an operator can make today.
+**The deployment server was measured successfully at `threads: 8`, and branch `26.2` now also resolves AUTO to the JVM-visible processor count unless the operator supplies an explicit thread count or Aurora CPU budget.** The measurement proves that 8 beat 4 on this host/workload; it does **not** prove that `all processors` is universally optimal. Chunk workers, Netty, GC, plugin executors and other JVM work share the same CPUs. Treat the shipped AUTO rule as current runtime behavior, not a universal tuning recommendation.
 
 ---
 
@@ -84,3 +79,24 @@ matters:
 - **Before believing a parallelism measurement:** check what is actually loaded between the
   sites. `forceload query` and the active-region count disagree loudly when sites have merged,
   and the region count is the one telling the truth.
+
+
+---
+
+## 5. Interpretation rule
+
+This document contains historical A/B evidence. Historical labels such as "default" describe the configuration used **at the time of the run**, not necessarily the current branch default.
+
+Never convert:
+
+```text
+8 threads beat 4 threads on one measured workload
+```
+
+into:
+
+```text
+all processors is always the best region-thread count
+```
+
+without new certified evidence. Current runtime defaults belong to code/config documentation; benchmark documents record what was measured.

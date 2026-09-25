@@ -57,17 +57,20 @@ Read the architecture contract: **[Aurora Architecture](docs/architecture/AURORA
 
 ## Aurora goals
 
-Aurora focuses on five things:
+Aurora optimizes in this order: **correctness, reliability, stability, predictable latency, resource efficiency, scalability, observability, then peak throughput**. A faster result is not accepted as an engine improvement if it weakens ownership safety, persistence, shutdown behavior, compatibility, or overload behavior.
 
 | Area | Goal |
 |---|---|
-| **Stability** | Region-safe execution, clean shutdown, persistence correctness, bounded workers and queues |
-| **Efficiency** | Lower CPU, allocation, GC pressure, memory use and hot-path overhead |
-| **Deep engine work** | Optimize measured Minecraft/NMS hot paths instead of only wrapping them externally |
+| **Correctness** | Preserve Minecraft, plugin, ownership and persistence semantics before optimizing them |
+| **Reliability** | Fail and degrade predictably; close admission during shutdown/failure; avoid hidden state corruption |
+| **Stability** | Region-safe execution, clean shutdown, bounded workers/queues and stable long-running resource use |
+| **Latency** | Optimize p95/p99/tail behavior as well as averages; avoid overload cliffs |
+| **Efficiency** | Lower CPU, allocation, GC pressure, memory, I/O and hot-path overhead |
+| **Scalability** | Add parallelism only where independent work and measured capacity justify it |
 | **Independence** | SourbyCraft-owned runtime, configuration, diagnostics and build/release contract |
 | **Observability** | One first-party source for TPS, MSPT, memory, GC, region and performance diagnostics |
 
-Performance claims are expected to be benchmarked. Aurora does not silently reduce gameplay settings to produce better numbers.
+Performance claims require evidence with the exact workload, hardware, configuration and certification state. Aurora does not silently reduce gameplay settings to produce better numbers.
 
 ---
 
@@ -99,15 +102,39 @@ The `26.2` branch already includes or is actively refining:
 - reproducible builds via `SOURCE_DATE_EPOCH`
 - persistence validation: `scripts/verify_persistence.py`, 16 checks
 
-**Not yet qualified.** T10 requires a certified reference run and a 2h+ soak, and neither
-exists: certification needs the measuring machine under 10% foreign CPU, which a development
-desktop in use does not provide. Runs still produce full evidence; they are refused only as
-*comparison references*. What is measured, what is missing and what each remaining item is
-blocked on is tracked in
-**[Qualification Readiness](docs/architecture/qualification-readiness.md)**.
+**Not yet fully qualified.** A certified two-hour 10-player stability soak now exists and showed stable heap-after-GC, resident memory and tick duration over the window. That is stability evidence; it is **not** a certified performance reference pair and does not by itself clear the regression gate. Certified comparable reference runs, remaining representative workloads, missing domain telemetry, and the open region-ownership issue still block T10. The exact gate state is tracked in **[Qualification Readiness](docs/architecture/qualification-readiness.md)** and raw measurement history in **[Performance Baseline](docs/BASELINE.md)**.
 
 Deeper entity/chunk/network profiling and further Aurora ownership work remain active
 development tasks.
+
+
+### Status vocabulary
+
+These labels are normative across README, architecture docs, release notes and commit messages:
+
+| Label | Meaning |
+|---|---|
+| **IMPLEMENTED** | Code exists and functional verification has passed; no performance/stability claim is implied |
+| **EXPERIMENTAL** | Implemented but intentionally not treated as production-qualified; normally default-off when risk is material |
+| **MEASURED** | A workload produced an observation; the result may still be noisy or uncertified |
+| **CERTIFIED** | The measurement harness accepted the run under its provenance/noise rules |
+| **QUALIFIED** | All applicable correctness, regression, soak, persistence and compatibility gates are satisfied |
+| **PLANNED** | Design/roadmap only; it must never be described as current runtime behavior |
+
+A single workload, machine, percentile or profiler sample must never be generalized into a universal performance claim. When documentation and runtime disagree, inspect the current branch code/config resolution first and correct the document; do not preserve a stale statement for narrative consistency.
+
+### Current Aurora status
+
+| Area | Status |
+|---|---|
+| Runtime lifecycle / metrics / region adapters | **IMPLEMENTED** |
+| Persistence validation | **IMPLEMENTED**; current checks pass |
+| Async pathfinding | **EXPERIMENTAL**, default-off |
+| Two-hour stability soak | **CERTIFIED evidence exists** |
+| Certified performance regression reference pair | **INCOMPLETE** |
+| Network throughput / storage backlog telemetry | **PARTIAL / INCOMPLETE** |
+| Aurora Resource Governor / unified execution fabric | **PLANNED** |
+| Fully independent Aurora scheduler | **RESEARCH / PLANNED**, not current runtime |
 
 ### Aurora engine, and where it lives
 
@@ -164,10 +191,13 @@ SourbyCraft is moving toward first-party configuration ownership.
 
 Existing files remain supported:
 
-- `sourbycraft_config/sourbycraft_global_config.toml`
+- `sourbycraft_config/sourbycraft_global_config.toml` — SourbyCraft utility/global configuration
+- `sourbycraft_config/aurora.toml` — early-boot Aurora CPU budget consumed before normal SourbyCraft bootstrap
 - `sourbycraft-security.yml`
 - `config/canvas-server.yml`
 - `config/canvas-worlds.yml`
+
+Configuration documentation must describe the **effective consumer and lifecycle**, not only the intended future layout. In particular, settings read before bootstrap must not be documented as live-reloadable.
 
 New SourbyCraft-specific performance behavior should live under the **Aurora** configuration domain rather than adding new Canvas-owned keys.
 

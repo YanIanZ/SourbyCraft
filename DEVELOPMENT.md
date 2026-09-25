@@ -875,3 +875,103 @@ upstream becomes replaceable implementation detail
 ```
 
 A mature SourbyCraft release should remain stable even as upstream internals change, because the public runtime contract and most Sourby-specific behavior are controlled by SourbyCraft itself.
+
+
+---
+
+# Development truthfulness and non-misleading policy
+
+This policy is mandatory for Aurora development, documentation, commit messages, PR descriptions and release notes.
+
+## 1. Source-of-truth order
+
+When statements conflict:
+
+1. **current branch code and effective runtime resolution** define what the server currently does;
+2. **generated/runtime evidence** defines what a specific build actually did;
+3. **certified baseline artifacts** define measured performance for their exact workload/environment;
+4. architecture/roadmap prose defines intended direction only.
+
+A stale document must be corrected; do not change code merely to preserve old prose.
+
+## 2. Status words are not interchangeable
+
+Use only the strongest status actually proven:
+
+- **PLANNED** — no active implementation claim;
+- **IMPLEMENTED** — code exists and functional tests pass;
+- **EXPERIMENTAL** — implemented but not production-qualified;
+- **MEASURED** — observation from a named workload/run;
+- **CERTIFIED** — harness accepted the run under its certification rules;
+- **QUALIFIED** — all applicable correctness, regression, soak, persistence and compatibility gates pass.
+
+"Build passes", "tests pass", "boot verified", "profile improved", "soak passed" and "qualified" are different claims.
+
+## 3. Performance claim requirements
+
+Every performance claim must identify enough provenance to reproduce or correctly scope it:
+
+- commit/build;
+- workload;
+- hardware/container CPU and memory;
+- relevant thread/worker/config values;
+- seeded/fresh world state when relevant;
+- connected-player/entity fidelity when relevant;
+- measurement window;
+- certification/noise state;
+- metric and statistic (mean/p95/p99/max, allocation, RSS, CPU, etc.).
+
+Do not generalize one host or workload into "Aurora is X% faster". Prefer: "On workload W, build B reduced metric M from X to Y under conditions C."
+
+Uncertified runs may guide investigation but must be labeled uncertified and must not support release-wide throughput claims.
+
+## 4. Correctness outranks benchmark wins
+
+Do not keep an optimization merely because a profiler or benchmark improved if it changes observable semantics, ownership safety, persistence, plugin callback behavior, lifecycle guarantees or shutdown reliability.
+
+For NMS/entity/scheduler changes, record:
+
+- ownership/thread-safety assumptions;
+- reentrancy/plugin callback effects;
+- persistence implications;
+- overload/failure behavior;
+- before/after evidence;
+- rollback/default-off strategy for material risk.
+
+## 5. No benchmark-by-configuration trick
+
+Do not claim engine performance gains obtained by silently reducing gameplay work, including view/simulation distance, spawn/entity limits, AI, compression quality, save durability or equivalent behavior, unless the change itself is the explicitly evaluated product policy and is disclosed.
+
+## 6. No thread-count folklore
+
+"More threads", "all cores", "virtual threads", "async" and "native" are not optimizations by themselves.
+
+Any concurrency change must account for total CPU ownership across region ticks, chunk workers, Netty, GC/JIT, plugins and Aurora workers. Measure queue wait/age and tail latency, not only average CPU/TPS.
+
+## 7. Overload behavior is part of correctness
+
+Bound queues and define what happens at saturation. A fallback that moves CPU-heavy work back onto a latency-critical region thread must be treated as a potential performance cliff and measured explicitly.
+
+Prefer graceful degradation/admission control for deferrable work over unbounded backlog.
+
+## 8. Documentation synchronization
+
+A change that alters any of these must update the relevant docs in the same change:
+
+- default value or precedence;
+- config file/path;
+- live vs restart-required lifecycle;
+- feature default-on/off status;
+- benchmark/qualification state;
+- supported command/status surface;
+- upstream/compatibility ownership.
+
+Historical benchmark documents may retain old configurations, but must label them historical instead of presenting them as current defaults.
+
+## 9. Required review question
+
+Before merging a performance change, answer:
+
+> What exact claim will this change allow us to make, and what evidence prevents that claim from being stronger than the data?
+
+If that cannot be answered precisely, the change may still be experimental, but it must not be marketed as a qualified performance improvement.
