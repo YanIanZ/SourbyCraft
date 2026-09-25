@@ -21,12 +21,13 @@ import java.util.logging.Logger;
  * snapshot off-thread. Nothing in the submitted work may touch the live world — see {@code
  * SnapshotPathRegion} for why.
  *
- * <p>Degrades safely while running: if the pool is not yet started or saturated (the bounded queue
- * rejects), the work runs inline on the calling thread — a slow path, never a dropped path.
+ * <p>Overload is handled with backpressure, not CallerRuns. If the bounded queue is saturated,
+ * the solve is refused with a completed {@code null} future. The navigation keeps following its
+ * already-live path and may try a later periodic recompute. This deliberately avoids turning
+ * async saturation into a region-thread A* spike after the snapshot cost has already been paid.
  *
- * <p>A stopped pool or failed/stopping runtime refuses admission without an inline solve.
- * Refused submissions receive an already completed null future so callers can release pending
- * bookkeeping. Work admitted before shutdown follows {@link #shutdown()}'s disposal rules.</p>
+ * <p>A stopped pool or failed/stopping runtime uses the same refusal contract. Work admitted
+ * before shutdown follows {@link #shutdown()}'s disposal rules.</p>
  */
 public final class AsyncPathProcessor {
 
@@ -61,17 +62,16 @@ public final class AsyncPathProcessor {
     /**
      * What the pool has actually been doing.
      *
-     * <p>{@code inline} is the number that decides whether this feature is helping. When the
-     * bounded queue fills, the solve runs on the submitting thread — a region thread — so an
-     * inline solve is the feature doing its work in the one place it exists to avoid, after
-     * already paying to build the immutable snapshot. A rising inline count means the pool is
-     * undersized for the workload and async pathfinding is costing more than it saves.</p>
+     * <p>{@code inline} is retained for telemetry compatibility with older builds. Current
+     * overload policy never executes a rejected solve on the submitting thread, so this counter
+     * should remain zero. Saturation is represented by {@code refused} instead.</p>
      *
      * @param admitted      executor submission attempts, including saturation fallback and attempts
      *                      rejected by a concurrent shutdown; excludes pre-start inline solves
-     * @param inline        admitted attempts run by the caller when the queue is full
-     * @param refused       submissions declined because the pool stopped, the runtime failed/stopped,
-     *                      or executor admission raced with shutdown; may overlap with admitted
+     * @param inline        legacy caller-run count; should remain zero with current backpressure policy
+     * @param refused       submissions declined because the queue was saturated, the pool stopped,
+     *                      the runtime failed/stopped, or executor admission raced with shutdown;
+     *                      may overlap with admitted
      * @param outstanding   admitted solves that have not completed
      * @param meanMillis    mean solve duration, or NaN before anything has solved
      * @param slowestMillis the slowest single solve seen
@@ -139,8 +139,10 @@ public final class AsyncPathProcessor {
         }
         final int threads = Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
         final AtomicInteger idx = new AtomicInteger();
-        // Bounded queue: if solves back up faster than the pool drains, the rejection handler runs the
-        // solve inline on the caller rather than letting the queue grow without bound.
+        // Bounded queue + AbortPolicy: path recomputes are periodic and the mob already has a live
+        // path, so saturation should defer work rather than push CPU-bound A* back onto the region
+        // thread. CallerRuns created a positive feedback loop under load: snapshot cost + rejected
+        // submission + full synchronous solve on the latency-critical owner thread.
         final ThreadPoolExecutor p = new ThreadPoolExecutor(
             threads, threads, 30L, TimeUnit.SECONDS,
             new LinkedBlockingQueue<>(1024),
@@ -150,22 +152,17 @@ public final class AsyncPathProcessor {
                 t.setPriority(Thread.NORM_PRIORITY - 1); // yield to region tick threads under contention
                 return t;
             },
-            (task, executor) -> {
-                if (executor.isShutdown()) throw new RejectedExecutionException("Path executor stopped");
-                // Counted, because this is the pool doing its work on a region thread: the one
-                // place the feature exists to keep free. See PathStats#inline.
-                INLINE.incrementAndGet();
-                task.run();
-            });
+            new ThreadPoolExecutor.AbortPolicy());
         p.allowCoreThreadTimeOut(true);
         pool = p;
         LOGGER.info("AsyncPath: worker pool started (" + threads + " thread(s))");
     }
 
     /**
-     * Computes a path result using the bounded worker pool, with caller-thread fallback before pool
-     * startup or when its queue is full. The supplier must capture an immutable snapshot and must
-     * not read or mutate live world state, even when it happens to run on a region thread.
+     * Computes a path result using the bounded worker pool. Before pool startup the historical
+     * inline fallback is retained for lifecycle compatibility; once the pool is running, a full
+     * queue is refused rather than executed on the caller. The supplier must capture an immutable
+     * snapshot and must not read or mutate live world state.
      *
      * <p>A stopped pool or failed/stopping runtime refuses new work with a completed null result.
      * Solver failures also produce null. Explicit cancellation of the returned future remains
@@ -235,8 +232,15 @@ public final class AsyncPathProcessor {
             OUTSTANDING.decrementAndGet();
             if (future.isCancelled()) task.cancel(true);
         });
-        try { p.execute(task); }
-        catch (RejectedExecutionException rejected) { task.cancel(false); }
+        try {
+            p.execute(task);
+        } catch (RejectedExecutionException rejected) {
+            // Saturation and a concurrent shutdown have the same safe result for this periodic
+            // recompute: keep the mob's existing live path, release pending bookkeeping, and let
+            // a later recompute try again. Never run A* on the rejecting region thread.
+            REFUSED.incrementAndGet();
+            task.cancel(false);
+        }
         return future;
     }
 
