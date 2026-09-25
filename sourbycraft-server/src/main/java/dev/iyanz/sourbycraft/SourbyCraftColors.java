@@ -46,6 +46,12 @@ public final class SourbyCraftColors {
     public static final TextColor LABEL      = TextColor.fromHexString("#94A3B8");
     public static final TextColor VALUE      = TextColor.fromHexString("#F1F5F9");
 
+    /** Build 47 Aurora Nexus plugin compatibility palette. */
+    public static final TextColor PLUGIN_NATIVE   = TextColor.fromHexString("#4DA3FF");
+    public static final TextColor PLUGIN_BRIDGED  = TextColor.fromHexString("#57D68D");
+    public static final TextColor PLUGIN_FAILED   = TextColor.fromHexString("#FF5C70");
+    public static final TextColor PLUGIN_DISABLED = TextColor.fromHexString("#8B949E");
+
     /**
      * Colour for a measurement against its budget, so every surface agrees on what a number
      * means: healthy below 60%, pressure below 100%, critical at or above it.
