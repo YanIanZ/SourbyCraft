@@ -137,10 +137,11 @@ public final class SourbyCraftBootstrap {
         java.util.logging.Logger.getLogger("Aurora Engine")
             .info(String.join(System.lineSeparator(), progress));
         progress.clear();
-        // FAILED only when nothing came up. A stage or two failing leaves a server that runs and
-        // says which part is missing, which is more useful than refusing to start.
+        // Build 47 lifecycle truth: a partial boot is operational but DEGRADED, not healthy.
+        // FAILED is reserved for a bootstrap where no stage came up.
         AuroraRuntime.transition(failureCount >= TOTAL_STAGES
-            ? AuroraRuntime.State.FAILED : AuroraRuntime.State.RUNNING);
+            ? AuroraRuntime.State.FAILED
+            : failureCount > 0 ? AuroraRuntime.State.DEGRADED : AuroraRuntime.State.RUNNING);
     }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
