@@ -138,10 +138,10 @@ public final class PerfCommand extends Command {
     /**
      * What the async-path pool has been doing, when it is on.
      *
-     * <p>The line that matters is the inline count. When the bounded queue fills, the solve runs
-     * on the submitting thread — a region thread — so an inline solve is this feature doing its
-     * work in the one place it exists to avoid, having already paid to build the snapshot. A
-     * rising count means the pool is undersized and the feature is costing more than it saves.</p>
+     * <p>Saturation is visible as refused work. Periodic path recomputes are deliberately dropped
+     * when the queue is full so the mob keeps its current path rather than forcing CPU-bound A*
+     * back onto the region thread. The inline counter is retained only for compatibility with
+     * older telemetry and should stay zero.</p>
      */
     private static void renderAsyncPath(final List<Component> lines) {
         if (!dev.iyanz.sourbycraft.perf.AsyncPathProcessor.isEnabled()) {
@@ -161,9 +161,9 @@ public final class PerfCommand extends Command {
         add(lines, "Queue depth / active workers / pool", stats.poolSize() < 0 ? "pool not running"
             : count(stats.queueDepth()) + " / " + count(stats.activeWorkers())
                 + " / " + count(stats.poolSize()));
-        add(lines, "Ran on the caller (pool saturated)", count(stats.inline())
-            + (stats.inline() > 0 ? "  — these ran on a region thread" : ""));
-        add(lines, "Refused after shutdown", count(stats.refused()));
+        add(lines, "Legacy caller-run solves", count(stats.inline())
+            + (stats.inline() > 0 ? "  — unexpected on this build" : ""));
+        add(lines, "Refused (saturation / shutdown)", count(stats.refused()));
     }
 
     public static String health(final PerformanceSnapshot snapshot) {

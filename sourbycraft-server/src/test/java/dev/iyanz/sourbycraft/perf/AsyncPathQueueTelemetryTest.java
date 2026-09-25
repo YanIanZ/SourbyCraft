@@ -3,7 +3,6 @@ package dev.iyanz.sourbycraft.perf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -74,10 +73,8 @@ class AsyncPathQueueTelemetryTest {
         AsyncPathProcessor.setEnabled(true);
         final double waitBefore = AsyncPathProcessor.stats().slowestWaitMillis();
 
-        // Occupy the pool with solves that end on a timer rather than a latch. The pool's
-        // maximum size is not exposed, and when its bounded queue overflows the rejection
-        // handler runs the solve on the SUBMITTING thread -- so a latch here could be awaited by
-        // the very thread that must release it. A sleeping solve cannot deadlock either way.
+        // Occupy the pool with short solves. Saturation now rejects instead of running work on
+        // the submitting thread, so this test never depends on CallerRuns behavior.
         for (int i = 0; i < 12; i++) {
             AsyncPathProcessor.submit(() -> {
                 try {
@@ -93,14 +90,50 @@ class AsyncPathQueueTelemetryTest {
         final CompletableFuture<String> queued = AsyncPathProcessor.submit(() -> "queued");
         assertEquals("queued", queued.get(5, TimeUnit.SECONDS));
 
-        // If that last solve ran inline it never entered a queue, so there is no wait to assert.
-        // Whether it queues depends on pool and queue sizes derived from the host's core count,
-        // which this test does not control -- so it declines rather than asserting a coincidence.
-        assumeTrue(AsyncPathProcessor.stats().admitted() > admittedBefore,
-            "the final solve ran inline on this host; no queue wait to measure");
+        assertTrue(AsyncPathProcessor.stats().admitted() > admittedBefore,
+            "the final solve must be submitted to the running executor");
+        assertEquals(0L, AsyncPathProcessor.stats().inline(),
+            "a running pool must never execute saturation fallback on the caller");
+        assertTrue(AsyncPathProcessor.stats().slowestWaitMillis() >= waitBefore,
+            "queue wait telemetry must remain monotonic");
+    }
 
-        assertTrue(AsyncPathProcessor.stats().slowestWaitMillis() > waitBefore,
-            "a solve queued behind a busy pool must raise the slowest recorded wait");
+
+    @Test
+    void saturationRefusesInsteadOfRunningOnSubmittingThread() throws Exception {
+        AsyncPathProcessor.setEnabled(true);
+        final int workers = Math.max(1, AsyncPathProcessor.stats().poolSize());
+        final CountDownLatch hold = new CountDownLatch(1);
+        final CountDownLatch started = new CountDownLatch(workers);
+
+        // Fill every worker, then overflow the bounded queue. submit() itself must remain
+        // non-blocking: the old CallerRuns policy would execute one of these waiting suppliers
+        // on this JUnit/region-equivalent submitting thread and deadlock until hold was released.
+        for (int i = 0; i < workers; i++) {
+            AsyncPathProcessor.submit(() -> {
+                started.countDown();
+                try {
+                    hold.await(5, TimeUnit.SECONDS);
+                } catch (final InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                return "worker";
+            });
+        }
+        assertTrue(started.await(5, TimeUnit.SECONDS), "all path workers should be occupied");
+
+        final long refusedBefore = AsyncPathProcessor.stats().refused();
+        for (int i = 0; i < 1100; i++) {
+            AsyncPathProcessor.submit(() -> "queued-or-refused");
+        }
+
+        final var saturated = AsyncPathProcessor.stats();
+        assertTrue(saturated.refused() > refusedBefore,
+            "overflowing the bounded queue must be observable as refused work");
+        assertEquals(0L, saturated.inline(),
+            "saturation must never run CPU-bound pathfinding on the submitting thread");
+
+        hold.countDown();
     }
 
     @Test
