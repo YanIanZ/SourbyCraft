@@ -261,12 +261,10 @@ subprojects {
     val internalVersionProvider = sourbycraftSuffixProvider
     val writeBuildInfoTask = tasks.register("writeBuildInfo") {
         val mcVersion = providers.gradleProperty("mcVersion").getOrElse("unknown")
-        // SourbyCraft-on-Canvas build number: gradle.properties `sourbyBuild=43` -> effective id
-        // "43c" (c = Canvas base). Composite builds (e.g. `sourbyBuild=43.1` or `44-hotfix`)
-        // append the "c" suffix only to pure-numeric values; non-numeric builds use the raw string.
-        // The raw value is also stored as `buildNumber` for the auto-updater's comparison logic.
+        // Build 47+: public build identity belongs to SourbyCraft and intentionally does not
+        // encode the current upstream platform as a suffix.
         val rawBuild = providers.gradleProperty("sourbyBuild").getOrElse("1").trim()
-        val sourbyBuild = if (rawBuild.matches(Regex("\\d+(\\.\\d+)*"))) rawBuild + "c" else rawBuild
+        val sourbyBuild = rawBuild
         val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
 
         val engineCodename = providers.gradleProperty("codename").getOrElse("dev")
@@ -307,7 +305,7 @@ subprojects {
                 buildNumber=$rawBuild
                 mcVersion=$mcVersion
                 codename=$engineCodename
-                tagline=Lightning Fast Performance Feature Rich
+                tagline=Reliable Stable High Performance
                 buildTimestamp=$timestamp
                 """.trimIndent()
             )
