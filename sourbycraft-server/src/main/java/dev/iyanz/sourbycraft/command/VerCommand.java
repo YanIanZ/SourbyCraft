@@ -61,7 +61,7 @@ public class VerCommand extends Command {
         var headerLine = text()
             .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
             .append(text("SourbyCraft ", SourbyCraftColors.HEADER))
-            .append(text(brand.displayVersion(), SourbyCraftColors.VALUE));
+            .append(text(brand.releaseIdentity(), SourbyCraftColors.VALUE));
         if (!buildDate.isEmpty()) {
             headerLine.append(text("  " + buildDate, SourbyCraftColors.DIM));
         }
