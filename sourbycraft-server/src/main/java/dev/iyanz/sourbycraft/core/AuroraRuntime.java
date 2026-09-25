@@ -34,8 +34,10 @@ public final class AuroraRuntime {
         BOOTSTRAPPING,
         /** Services are coming up, in order. */
         STARTING,
-        /** Startup stages have completed; optional services may have failed. Work is admitted. */
+        /** Startup stages completed and all required runtime surfaces are healthy. */
         RUNNING,
+        /** Runtime remains operational, but one or more optional subsystems are degraded. */
+        DEGRADED,
         /** Shutdown has begun. No new work is admitted; outstanding work drains. */
         STOPPING,
         /** The bootstrap shutdown sequence has completed its cleanup attempts. */
@@ -52,8 +54,9 @@ public final class AuroraRuntime {
         // "not a legal transition" error logged there is noise at the worst possible moment.
         State.NEW, EnumSet.of(State.BOOTSTRAPPING, State.STOPPING, State.FAILED),
         State.BOOTSTRAPPING, EnumSet.of(State.STARTING, State.STOPPING, State.FAILED),
-        State.STARTING, EnumSet.of(State.RUNNING, State.STOPPING, State.FAILED),
-        State.RUNNING, EnumSet.of(State.STOPPING, State.FAILED),
+        State.STARTING, EnumSet.of(State.RUNNING, State.DEGRADED, State.STOPPING, State.FAILED),
+        State.RUNNING, EnumSet.of(State.DEGRADED, State.STOPPING, State.FAILED),
+        State.DEGRADED, EnumSet.of(State.RUNNING, State.STOPPING, State.FAILED),
         State.STOPPING, EnumSet.of(State.STOPPED, State.FAILED),
         State.STOPPED, EnumSet.noneOf(State.class),
         State.FAILED, EnumSet.of(State.STOPPING, State.STOPPED));
@@ -75,7 +78,7 @@ public final class AuroraRuntime {
      */
     public static boolean acceptingWork() {
         final State current = state;
-        return current == State.RUNNING || current == State.STARTING
+        return current == State.RUNNING || current == State.DEGRADED || current == State.STARTING
             || current == State.BOOTSTRAPPING;
     }
 
@@ -112,7 +115,7 @@ public final class AuroraRuntime {
         }
         if ((current == State.FAILED || current == State.STOPPING || current == State.STOPPED)
             && (next == State.NEW || next == State.BOOTSTRAPPING
-                || next == State.STARTING || next == State.RUNNING)) {
+                || next == State.STARTING || next == State.RUNNING || next == State.DEGRADED)) {
             SourbyLogger.error("Aurora runtime refused transition from " + current + " to " + next
                 + "; work admission must remain closed", null);
             return false;
