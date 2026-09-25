@@ -1,6 +1,6 @@
-# AGENTS.md — SourbyCraft 26.2 Canvas
+# AGENTS.md — SourbyCraft 26.2 Aurora
 
-Region-threading Minecraft 26.2 server fork. **Re-platformed onto [CanvasMC](https://github.com/CraftCanvasMC/Canvas)** via Canvas's own `io.canvasmc.weaver.patcher` toolchain (see `build.gradle.kts:9-11`, "Path B"). Custom `sourbypatcher` is **unused on this branch** — do not reintroduce it without checking PR #12 context in the root build script.
+Region-threaded Minecraft 26.2 server fork with the **Aurora** runtime/engine architecture. Canvas/Folia/Paper remain upstream implementation inputs where the current branch still depends on them; they are not the product/runtime identity. Do not describe planned Aurora ownership as already independent. The active build/toolchain must be verified from the current branch before repeating historical Path-B or private-toolchain statements.
 
 ## Toolchain
 
@@ -44,7 +44,7 @@ Critical gotcha in `sourbycraft-server/build.gradle.kts.patch`: `mergeMinecraftA
 
 ## Configuration surfaces
 
-Two independent configs (do not conflate):
+Configuration surfaces (do not conflate, and verify boot-order consumers before documenting reloadability):
 
 - **SourbyCraft utility layer** → `sourbycraft_config/sourbycraft_global_config.toml` (nightconfig). Messages, `/maxp` persistence, auto-updater, ViaVersion auto-provision.
 - **Canvas engine** → `config/canvas-server.yml` + `config/canvas-worlds.yml` (region scheduler, tick rate, autosave). Default `region-scheduler.guard-severity: LOG` (not Canvas's crash-prone `THROW`).
@@ -88,3 +88,21 @@ Wait for `Done (` in console. `/ver` reports the channel + `build Nc` (e.g. `bui
 - The `slimServerJar` task's `externalizeArtifactDirs` list is matched by path prefix against the paperclip layout — when Canvas/weaver bumps versions, jars may move and the task will **fail loudly** with `stripped 0 libraries`. That's the intended signal to update the list.
 - `applyAllPatches` is config-cache friendly but `writeBuildInfo` is opted out (`notCompatibleWithConfigurationCache`) because it reads git branch via `providers.exec` at execution time.
 - The Dockerfile's LABEL still says "Paper 26.2" in the description — known minor copy lag, not your bug to fix unless touching the Dockerfile.
+
+
+## Non-misleading development rules
+
+Agents working on this branch MUST follow `DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy`.
+
+In short:
+
+- Never call a feature **qualified** because it compiles, boots, passes unit tests or has one favorable profile.
+- Never turn an uncertified A/B observation into a release-wide percentage claim.
+- Never describe a historical benchmark setting as the current default without checking current branch code.
+- Never describe a planned subsystem (Resource Governor, unified execution fabric, independent scheduler, etc.) as implemented.
+- When code and docs disagree, inspect the current runtime path and fix the stale doc in the same change.
+- State whether a setting is LIVE, RESTART_REQUIRED or merely planned.
+- For performance work, include workload, hardware, config, certification/noise state and the exact statistic being compared.
+- Correctness, plugin semantics, region ownership, persistence and shutdown behavior outrank throughput.
+- A concurrency change must account for shared CPU capacity; adding executors/threads is not evidence of scalability.
+- Do not hide regressions by changing workload fidelity, player/entity activation, world-generation conditions or gameplay settings.

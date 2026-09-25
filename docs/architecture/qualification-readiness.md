@@ -15,11 +15,11 @@ passes.
 | Gate requirement | State | Evidence |
 |---|---|---|
 | representative benchmark exists | **partial** | 8 of 11 workloads (§2) |
-| no unexplained >3% regression in affected workloads | **blocked** | needs two certified runs to compare; none exist |
+| no unexplained >3% regression in affected workloads | **blocked** | needs a certified comparable before/after reference pair; a certified soak is not a regression pair |
 | no known region ownership bug | **one open** | §5 |
 | no known persistence bug | **no bug found** | `verify_persistence.py`, 16 checks; 4/4 on the deployment server (§4) |
 | no unbounded queue | **met** | `UnboundedQueueAuditTest`, 3 tests |
-| heap/threads/tasks stabilize after load | **blocked** | needs the 2h soak |
+| heap/threads/tasks stabilize after load | **partial** | certified 2h 10-player soak shows stable RSS, heap-after-GC and tick duration; thread/task stabilization still needs explicit gate evidence |
 | cached runtime boots offline (T8) | **corrected** | a *populated* runtime boots offline; a *fresh* one does not boot at all — [slim-jar bootstrap failure](slim-jar-bootstrap-failure.md) |
 | shutdown completes predictably | **partial** | unit tests, plus two clean console shutdowns and a live restart on the deployment server; not yet exercised *under load* |
 
@@ -123,8 +123,8 @@ development desktop in active use. The runs produce complete evidence and are re
 
 Consequences, in order of what they block:
 
-1. no certified reference → no regression comparison → the >3% gate cannot be evaluated,
-2. no 2h soak → heap/thread/task stabilisation cannot be shown,
+1. no certified **comparable reference pair** → no regression comparison → the >3% gate cannot be evaluated,
+2. the certified 2h 10-player soak already provides long-window memory/tick stability evidence, but it does not replace per-change soak requirements or explicit thread/task stabilization evidence,
 3. `players-*` and `entity-stress` additionally need real clients attached
    (`--connected-players N`), because entity activation is computed around players — see the
    [client gap](engine-entity-ai.md#4-the-measurement-constraint-this-domain-has).
@@ -155,3 +155,19 @@ range — driving mobs there would measure the inactive path and call it a soak.
 It also cannot produce a *certified baseline*: `run_baseline.py` needs a shell on the host to
 record JFR and operating-system samples, and the panel offers a console and a file API. So the
 panel settles stability; certification still needs the local harness on a quiet machine.
+
+
+---
+
+## 8. Evidence vocabulary — mandatory
+
+To prevent qualification drift, use these words precisely:
+
+- **implemented**: code exists and functional verification passed;
+- **measured**: a run produced data, regardless of certification;
+- **certified run**: the harness accepted that run's provenance/noise constraints;
+- **certified soak**: a certified long-duration run; it is stability evidence, not automatically a performance reference;
+- **certified comparison/reference pair**: comparable before/after runs suitable for a regression claim;
+- **qualified**: every applicable T10 gate is satisfied.
+
+A commit, README or release note must not replace one term with a stronger one. In particular, "certified soak" must not be shortened to "T10 qualified", and an uncertified profiler delta must not be reported as a throughput improvement.
