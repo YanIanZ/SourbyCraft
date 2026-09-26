@@ -27,24 +27,24 @@ Status:
 - [x] define config lifecycle and reload status model
 - [x] Aurora engine package inside the Minecraft tree — `dev.iyanz.aurora.*`, see
   [aurora-engine-package.md](architecture/aurora-engine-package.md)
-- [ ] expose Aurora architecture/build metadata in `/version` where appropriate
+- [x] expose Aurora architecture/build metadata in `/version` where appropriate — engine, Aurora runtime state, bridge mode, update channel
 
 ## B. Aurora configuration ownership
 
-- [ ] add `[aurora.performance]` logical namespace
-- [ ] add `[aurora.scheduler]` logical namespace
+- [ ] add `[aurora.performance]` logical namespace — intentionally absent: no implemented key belongs there (empty namespaces are not added)
+- [x] add `[aurora.scheduler]` logical namespace — Resource Governor lane budgets (RESTART_REQUIRED)
 - [x] add `[aurora.entity]` logical namespace
-- [ ] add `[aurora.chunk]` logical namespace
-- [ ] add `[aurora.network]` logical namespace
-- [ ] add `[aurora.memory]` logical namespace
+- [ ] add `[aurora.chunk]` logical namespace — intentionally absent: no implemented chunk key yet
+- [x] add `[aurora.network]` logical namespace — `aurora.network.counters` (LIVE)
+- [ ] add `[aurora.memory]` logical namespace — intentionally absent: no implemented memory key yet
 - [x] add `[aurora.diagnostics]` logical namespace — `lane-sampling`, LIVE
 - [x] migrate `perf.ai.async-pathfinding` to `aurora.entity.async-pathfinding` with legacy read fallback
 - [x] never auto-save migrated keys
-- [-] mark each config key LIVE / RESTART_REQUIRED / IMMUTABLE_FOR_RUN — both implemented keys are LIVE; future keys require their own policy
-- [-] report restart-required changes accurately on reload — Aurora-only live/invalid summary implemented; no Aurora restart-required keys exist yet
+- [x] mark each config key LIVE / RESTART_REQUIRED / IMMUTABLE_FOR_RUN — every key has a `Setting` constant; see [AURORA-CONFIG.md](AURORA-CONFIG.md)
+- [x] report restart-required changes accurately on reload — `aurora.cpu.cores`, `aurora.bridge.mode` and `aurora.scheduler` budgets are reported as restart-required, never counted as applied
 - [x] add typed immutable config records/classes
 - [-] remove hot-path dotted-string config lookup where present — async path setting now resolves once into typed snapshot
-- [-] ensure Spark shows SourbyCraft config
+- [x] ensure Spark shows SourbyCraft config — `sourbycraft/` group includes `aurora.toml` (provider test); viewer rendering still open below
 - [ ] verify Aurora config rendering in Spark web report
 - [x] preserve secret filtering requirements
 
@@ -105,8 +105,8 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 
 ### Network
 
-- [ ] instrument packets/sec
-- [ ] instrument bytes/sec
+- [x] instrument packets/sec — `perf/NetworkCounters`, `/perf network` (uncertified; handler cost unmeasured)
+- [x] instrument bytes/sec — same, wire bytes after compression/encryption
 - [ ] profile encode/decode
 - [ ] profile compression
 - [ ] profile chunk-send path
@@ -120,12 +120,12 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [x] audit implicit common-pool usage — [executor-inventory.md](architecture/executor-inventory.md)
 - [-] async pathfinding shutdown/cancellation work
 - [ ] complete async path snapshot correctness review
-- [ ] path result staleness test
-- [ ] queue saturation test
+- [x] path result staleness test — `AsyncPathValidityTest` (rules used by patch 0006)
+- [x] queue saturation test — `AsyncPathQueueTelemetryTest`, `AsyncPathShutdownTest` (saturation refuses, never caller-runs)
 - [ ] sync-vs-async path benchmark
 - [ ] mob behavior compatibility soak
-- [ ] collect worker queue depth/latency where useful
-- [ ] verify no external I/O blocks region execution
+- [x] collect worker queue depth/latency where useful — `/perf async` (queue depth, wait), `/perf governor` (governed lanes)
+- [x] verify no external I/O blocks region execution — static audit [region-io-audit.md](architecture/region-io-audit.md), pinned by `BlockingIoBoundaryTest` (SourbyCraft code only)
 
 ## F. Memory / GC
 
@@ -134,11 +134,11 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] allocation MB/s validation against JFR
 - [ ] RSS/cgroup validation
 - [ ] top allocated classes workflow
-- [ ] cache ownership/bounds inventory
+- [x] cache ownership/bounds inventory — [cache-inventory.md](architecture/cache-inventory.md); `AwfWorld.owned` is the one unbounded collection
 - [ ] player-disconnect retention test
 - [ ] chunk-unload retention test
 - [ ] world-unload retention test
-- [ ] completed future/task retention test
+- [x] completed future/task retention test — bridge one-shot tasks, async path accounting, AWF pending saves (tests named in cache-inventory.md)
 
 ## G. Spark / observability
 
@@ -150,22 +150,22 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] add cheap Sourby runtime metadata
 - [ ] improve region thread classification
 - [ ] expose useful slow-region context
-- [ ] document Spark update procedure
+- [x] document Spark update procedure — [SPARK.md](SPARK.md#updating-spark)
 - [!] replace the upstream viewer text `engine async` with `Aurora Engine`: the current spark upload protocol serializes profiler engine as the fixed `JAVA`/`ASYNC` enum, and spark.lucko.me renders that enum itself; an exact custom label therefore requires a Sourby/Aurora viewer fork or compatible custom viewer layer rather than a server-only metadata patch
 - [ ] design Aurora viewer presentation so the primary label is `Aurora Engine` while the underlying implementation (`async-profiler` or Java sampler) remains visible in technical details
 - [ ] decide adapter vs deep SourbySpark fork only after requirements are proven
 
 ## H. Independence
 
-- [ ] inventory direct Canvas accesses from `dev.iyanz.sourbycraft.*`
-- [ ] classify direct accesses as required contract / accidental coupling / removable
-- [ ] define minimal region access contract
-- [ ] define minimal scheduler access contract
-- [ ] define minimal engine config bridge contract
+- [x] inventory direct Canvas accesses from `dev.iyanz.sourbycraft.*` — one file, `CanvasConfigBridge` ([dependency-ledger.md](architecture/dependency-ledger.md), pinned by `UpstreamDependencyLedgerTest`)
+- [x] classify direct accesses as required contract / accidental coupling / removable — ledger classifications
+- [x] define minimal region access contract — `execution/region/RegionBackend` ([compat-boundary.md](architecture/compat-boundary.md))
+- [x] define minimal scheduler access contract — `execution/OwnerHandoff` ([execution-contract.md](architecture/execution-contract.md))
+- [x] define minimal engine config bridge contract — `config/upstream/UpstreamConfigBridge`
 - [ ] move large Sourby service bodies out of upstream classes
 - [ ] retain direct NMS algorithm patches when external indirection would be worse
-- [ ] active build-path dependency inventory
-- [ ] determine whether active CI still requires legacy `sourbypatcher`
+- [x] active build-path dependency inventory — ledger §3–4 and AGENTS.md CI description
+- [x] determine whether active CI still requires legacy `sourbypatcher` — no: CI requires the private SourbyPatcher `canvas-toolchain` adapter; the legacy Folia patcher is not used
 - [ ] clean-checkout reproducibility
 - [ ] cached/offline boot validation
 - [ ] track rebase conflict count
@@ -194,7 +194,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] heap/thread/queue stabilization confirmed
 - [ ] no known region ownership regression
 - [ ] no known persistence regression
-- [ ] dependency ledger updated
+- [x] dependency ledger updated — Build 47 Paper patches, bridge scheduler use, network hook
 - [ ] attribution/license review complete
 - [ ] README and release notes contain measured claims only
 
@@ -220,7 +220,8 @@ See the status table in [releases/26.2-build-47-aurora-nexus.md](releases/26.2-b
 - [ ] AWF database backends (MongoDB/MySQL/Redis), SlimeLoader adapter
 - [x] Resource Governor specification
 - [-] governed lanes with reject-not-caller-runs, `/perf governor`
-- [ ] operator-configurable governor budgets; existing executors under the governor
+- [x] operator-configurable governor budgets (`[aurora.scheduler]`)
+- [ ] existing executors under the governor — deferred; each already has its own bound ([executor-inventory.md](architecture/executor-inventory.md))
 - [-] network counters: bytes/packets per direction, connections, `/perf network`
 - [ ] vanilla save-queue / region-file storage metrics
 
