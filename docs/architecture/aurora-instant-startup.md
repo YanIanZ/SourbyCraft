@@ -21,25 +21,32 @@ Do not automatically parallelize plugin onLoad/onEnable, service registration, e
 
 ## Implementation status (26.2 branch)
 
-`dev.iyanz.sourbycraft.startup` implements the cache mechanics and one consumer:
+`dev.iyanz.sourbycraft.startup`:
 
-- `CacheEnvironment` — Minecraft version, SourbyCraft ABI, Aurora Bridge ABI, format version,
+- `CacheEnvironment`: Minecraft version, SourbyCraft ABI, Aurora Bridge ABI, format version (2),
   Java major. Any mismatch discards the file.
-- `SourceFingerprint` — SHA-256 plus size/mtime; size/mtime can only rule reuse out.
-- `StartupCache` — string payloads only (no live objects by construction); per-entry source hash,
-  output hash and line hash; corrupt/torn entries are dropped individually; writes go to a temp
-  file, are forced, then atomically moved.
-- `PluginStartupIndex` — hashes jars and parses `paper-plugin.yml`/`plugin.yml` on a bounded
-  `STARTUP` lane (`SourbyCraft-Startup-N`, at most 4 threads, queue sized to the jar count,
-  AbortPolicy). It evaluates `folia-supported`/`canvas-supported` exactly as the base does and never
-  loads plugin classes.
-- Boot stage `startup index` (before `CraftServer#loadPlugins`) logs the result and names jars the
-  base will refuse; `/sys` shows the last build. `-Daurora.startup.cache=false` disables the file
-  (RESTART_REQUIRED).
+- `SourceFingerprint`: SHA-256 plus size/mtime. Size and mtime can only rule reuse out.
+- `StartupCache`: string payloads only, so no live objects by construction. Each entry has a source
+  hash, an output hash and a line hash. Writes go to a temp file, are forced, and are moved
+  atomically.
+- `PluginStartupIndex`: runs on a bounded `STARTUP` lane and caches, per jar:
+  - the descriptor, including `depend`/`softdepend`/`loadbefore` and `paper-plugin.yml`
+    `dependencies.server`;
+  - a `CompatibilityScan`: class and package counts, plus references to the legacy Bukkit
+    scheduler, the Folia schedulers and server internals, read from class constant pools by
+    `BytecodeScanner` without loading classes.
+- `DependencyGraph`: missing hard dependencies, cycles (Tarjan), and a consistent order.
+  Diagnostic only; the plugin manager's order is unchanged.
+- `StartupTimeline`/`StartupProfile`: boot-stage and index phase timings, and JVM start to
+  `ServerLoadEvent(STARTUP)`. The profile is compared with the previous boot only when both have
+  the same start class.
+- Boot stage `startup index`: logs the index, names undeclared plugins with their scan verdict,
+  warns about internals the bridge cannot route, and warns about missing dependencies and cycles.
+  `/sys` shows the index, the startup profile and dependency problems.
+  `-Daurora.startup.cache=false` disables the file (RESTART_REQUIRED).
 
-Not implemented: class index, compatibility analysis beyond the support flags, transform outputs,
-dependency graph, AWF indexes, previous startup timing profile. No cold/warm startup measurement
-has been taken, so no startup-time improvement is claimed.
+Not implemented: caching transform outputs and AWF indexes. No cold/warm startup measurement has
+been taken, so no startup-time improvement is claimed.
 
 ## Telemetry
 Measure total startup and phase times plus hit/miss/rebuild counts. Cold and warm startup are separate benchmark classes.

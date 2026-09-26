@@ -132,8 +132,10 @@ A single workload, machine, percentile or profiler sample must never be generali
 | Async pathfinding | **EXPERIMENTAL**, default-off |
 | Two-hour stability soak | **CERTIFIED evidence exists** |
 | Certified performance regression reference pair | **INCOMPLETE** |
-| Network throughput / storage backlog telemetry | **PARTIAL / INCOMPLETE** |
-| Aurora Resource Governor / unified execution fabric | **PLANNED** |
+| Network throughput / storage backlog telemetry | **PARTIAL** — wire bytes/packets per direction (`/perf network`); no vanilla save-queue metrics |
+| Aurora Resource Governor / unified execution fabric | **PARTIAL** — fixed-budget governed lanes (`/perf governor`); existing executors not yet governed |
+| Aurora Compatibility Bridge | **IMPLEMENTED, UNQUALIFIED** — `aurora.bridge.mode = off` by default |
+| Aurora World Fabric | **LIBRARY, NOT WIRED** into world load/save |
 | Fully independent Aurora scheduler | **RESEARCH / PLANNED**, not current runtime |
 
 ### Aurora engine, and where it lives

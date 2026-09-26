@@ -14,6 +14,9 @@ a bad thing to act on unchecked. Here is every thread Aurora creates.
 | `perf/GcTracker` | 1 platform | one thread | GC notification listener |
 | `util/VirtualExecutor` → `BoundedIoExecutor` | virtual, `SourbyCraft-IO-` | **Semaphore, ≤64 admitted, no queue** | Administrative blocking I/O only — never world data |
 | `perf/AsyncPathProcessor` | `cores / 4` platform, `SourbyCraft-AsyncPath-` | **`LinkedBlockingQueue(1024)`**, inline on rejection | Off-region A*, **disabled by default** |
+| `startup/PluginStartupIndex` | ≤ 4 platform, `SourbyCraft-Startup-`, only during the boot stage | `ArrayBlockingQueue(jar count)`, AbortPolicy | Jar hashing, descriptor parsing, bytecode scan |
+| `execution/ResourceGovernor` `BRIDGE_IO` | max(2, cores/4) platform, `SourbyCraft-BridgeIO-`, idle threads released | `ArrayBlockingQueue(256)`, reject | Async tasks of bridged legacy plugins (bridge `off` by default) |
+| `execution/ResourceGovernor` `STORAGE` | 1 platform, `SourbyCraft-Storage-` | `ArrayBlockingQueue(64)`, reject | AWF commits; unused until AWF is wired |
 
 Two shutdown hooks exist (`bootstrap/SourbyBootstrap`, `update/UpdateApplier`); neither is a
 running thread.
@@ -26,8 +29,9 @@ running thread.
 `ForkJoinPool.commonPool()` — uncontrolled parallelism that competes with region ticking and
 answers to no configuration. Aurora uses none:
 
-- no `supplyAsync`, `runAsync`, `thenApplyAsync`, `thenComposeAsync` or `handleAsync` anywhere
-  in Aurora's source,
+- no `supplyAsync`, `runAsync`, `thenApplyAsync`, `thenComposeAsync` or `handleAsync` without an
+  explicit executor: the only `supplyAsync` calls (`awf/AwfWorld#save`,
+  `awf/GenerationStore#commitAsync`) take the caller's storage executor,
 - the only two `whenComplete` calls are the non-`Async` form, which runs on the thread that
   completes the future rather than handing work to the common pool,
 - the sole mention of `ForkJoinPool` in the source is a comment in `ExecutionLane` explaining

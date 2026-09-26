@@ -4,7 +4,11 @@ T5 deliverable for §11.5 of `docs/AURORA-FULL-TRANSITION.md`.
 
 ## Summary
 
-**Aurora owns no network policy today.** It measures the network lane and nothing else. This
+**Aurora owns no network policy today.** It measures: the network lane's CPU, and (since Build 47
+work) wire bytes, protocol packets and connections through `perf/NetworkCounters`, shown by
+`/perf network`. The counting handlers are installed through Paper's `ChannelInitializeListenerHolder`,
+which Paper marks as unofficial; the handlers are pass-through and their per-packet cost has not
+been measured. This
 document exists because the T5 gate asks for a boundary per domain, and a domain with an empty
 implementation is still a boundary worth writing down — it is what stops the next reader
 assuming the work was done.
@@ -14,8 +18,9 @@ assuming the work was done.
 | Service | Owns |
 |---|---|
 | `execution/ExecutionLane.NETWORK` | Attribution of packet encode, decode and socket work, by thread name: `Netty Epoll IO`, `Netty Kqueue IO`, `Netty NIO IO`, `Netty Server IO` |
+| `perf/NetworkCounters`, `perf/NetworkMetrics` | Wire bytes in/out (pipeline head, after compression/encryption), packets in/out (beside `packet_handler`), connections opened; per-second rates sampled by the metrics collector |
 
-That is the whole list. There is no Aurora packet path, no compression policy, no queue-health
+There is no Aurora packet path, no compression policy, no queue-health
 service, and **no direct NMS patch touches networking** — all 16 feature patches are entity, AI,
 chunk, world, runtime or command patches.
 
@@ -24,6 +29,7 @@ chunk, world, runtime or command patches.
 | Metric | Source | Surfaced by |
 |---|---|---|
 | Network lane CPU share | `LaneCpuSampler` / `ExecutionLane.NETWORK` | `/perf lanes` |
+| Bytes and packets per second, each direction; totals; connections | `NetworkCounters` | `/perf network` |
 
 Observed on the deployment server (idle, 0 players): `Network: 0.01 cores (5.6% of used)`. The
 lane resolves and reports, so the measurement surface is real — it has simply never been put
@@ -33,7 +39,7 @@ under load.
 
 Everything §11.5 lists:
 
-- packet instrumentation
+- per-packet-type instrumentation (counts are totals, not by packet type)
 - allocation/copy analysis
 - compression policy implementation
 - chunk packet path

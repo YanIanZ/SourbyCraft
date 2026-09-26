@@ -27,17 +27,38 @@ Per-plugin compatibility state, scheduler redirects, owner handoffs, rejected op
 
 ## Implementation status (26.2 branch)
 
-- Implemented: `dev.iyanz.sourbycraft.bridge.CompatibilityState` (palette above) and
-  `CompatibilityClassifier`, which encodes the qualification rule below. `/plugins` renders every
-  loaded plugin by state and lists captured load failures in red. `PluginLoadDiagnostics` now also
-  captures Paper's `Error occurred while enabling NAME vX` line, so a plugin that loaded but failed
-  to enable shows FAILED instead of DISABLED.
-- Not implemented: any adapter. The base (`canvas-server` patch `0002-Region-Threading`) refuses to
-  load plugins that declare neither `folia-supported` nor `canvas-supported`; nothing sets
-  `bridgeInitialized`, so BRIDGED cannot appear. Routing, SAFE-mode rejection, quarantine and the
-  per-plugin telemetry listed above do not exist yet.
-- An enabled plugin that does not declare support and has no bridge classifies as FAILED, never
-  green: there is no evidence it is safe under region threading.
+Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
+`sourbycraft-server/paper-patches/files`.
+
+- **Mode.** `aurora.bridge.mode` in `aurora.toml` (or the unified file): `off` (default) keeps the
+  base's refusal; `safe` admits. It is read straight from the TOML files on first use, because
+  plugin providers are built during Paper bootstrap, before `SourbyCraftBootstrap`; it is
+  RESTART_REQUIRED. A malformed value means `off`. `off` is the default rather than SAFE because
+  correctness outranks compatibility in the safety order: admitting unqualified code is the
+  operator's decision.
+- **Admission.** `PaperPluginProviderFactory`, `SpigotPluginProviderFactory` and
+  `CraftMagicNumbers#checkSupported` call `AuroraBridge.admitLegacy(name)` before throwing.
+- **Routing.** `CraftScheduler#handle` hands a bridged plugin's task to the bridge instead of
+  throwing. Sync tasks name no entity or location, so they go to the global region; async tasks are
+  timed by Folia's async scheduler and run on the Resource Governor's bounded `BRIDGE_IO` lane.
+  `cancelTask`/`cancelTasks` cancel bridged tasks; disable cancels them too, because Folia no
+  longer does for the Bukkit scheduler. `BridgeRouter` also defines the entity-owner and
+  region-owner routes. No caller supplies them yet, because a Bukkit task names neither.
+- **Violations.** A task body's `UnsupportedOperationException`/`IllegalStateException` from the
+  base's region checks counts as a fatal violation. Other exceptions are recorded as the last
+  failure, as the plain server would log them. After `aurora.bridge.quarantine-after` (LIVE,
+  default 3) violations, the plugin's bridged tasks are cancelled and new ones are rejected. The
+  plugin is not disabled: disabling would run plugin code on whichever thread noticed the
+  violation.
+- **Telemetry.** Per plugin: scheduler redirects, owner handoffs (0 until owner routes have
+  callers), rejected operations, fatal violations, quarantine, startup cache state and last
+  failure. `/plugins <name>` shows them.
+- **Not intercepted.** A bridged plugin calling world API directly from a bridged task on the
+  global region is not rewritten; the base's own thread checks decide what happens. Async tasks
+  run as `CraftAsyncTask` bodies without its worker bookkeeping, so `getActiveWorkers` does not
+  list them.
+- **Unverified.** No legacy plugin has been run through the bridge. The Paper patches have not
+  been applied by the private toolchain in this change.
 
 ## Qualification
 A plugin cannot be presented as BRIDGED until load, enable and bridge initialization succeed and no fatal compatibility violation is present.
