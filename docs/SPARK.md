@@ -5,8 +5,9 @@ SourbyCraft uses the upstream Spark engine through its existing Canvas integrati
 `SourbyServerConfigProvider`. This is an adapter, not a separate profiler fork.
 
 The `sourbycraft/` report group contains `global.toml` from
-`sourbycraft_config/sourbycraft_global_config.toml` and `security.yml` from
-`sourbycraft-security.yml`. Missing files are omitted. Collection reads files and
+`sourbycraft_config/sourbycraft_global_config.toml`, `aurora.toml` from
+`sourbycraft_config/aurora.toml` (every Aurora setting, including the Build 47 bridge, scheduler
+and network keys), and `security.yml` from `sourbycraft-security.yml`. Missing files are omitted. Collection reads files and
 builds report JSON; it does not seed defaults, migrate files, or save configuration.
 
 ## Secret filtering
@@ -40,3 +41,32 @@ an incompatible Gradle `--tests` filter excludes their children.
 The parser/provider contract is tested locally without uploading any server
 configuration. Verification of rendering in an actual Spark web report is still
 pending; local serialization tests do not establish viewer behavior.
+
+## Updating Spark
+
+Spark is not vendored. It arrives with the upstream server (`me.lucko:spark-paper`, a Paper
+dependency), so its version moves when `canvasRef` (and through it Paper) moves. SourbyCraft's
+coupling is three Canvas-side patch files plus one Sourby class:
+
+| File | What it does |
+| --- | --- |
+| `canvas-patches/files/.../spark/FoliaSparkPlugin.java.patch` | `createServerConfigProvider()` returns `SourbyServerConfigProvider` |
+| `canvas-patches/files/.../spark/FoliaPlatformInfo.java.patch` | Platform version reported as `BuildN (MC:26.2)` |
+| `canvas-patches/files/.../spark/plugin/FoliaTickStatistics.java.patch` | Tick statistics come from Sourby metrics |
+| `src/main/java/dev/iyanz/sourbycraft/spark/SourbyServerConfigProvider.java` | Config groups and secret filtering; extends Spark's `ServerConfigProvider` |
+
+Procedure, after bumping `canvasRef`:
+
+1. `./gradlew applyAllPatches`. If one of the three patches fails, re-apply its change on the new
+   upstream file. Keep the change minimal, and do not carry upstream edits into the patch.
+2. Check that `ServerConfigProvider`, `ConfigParser` and `BASE_HIDDEN_PATHS` still have the
+   shapes `SourbyServerConfigProvider` uses. Spark has changed them before. A compile error here
+   is the expected signal.
+3. Run the full `:sourbycraft-server:test` task (not a `--tests` filter; see above). At minimum,
+   `SparkConfigTestSuite` and `FoliaTickStatisticsTest` must pass.
+4. If the Spark jar coordinates moved, update the `me/lucko/spark-paper` prefix in
+   `slimServerJar`'s externalised directories (`build.gradle.kts`). A task that strips 0
+   libraries fails on purpose.
+5. Boot, run `/spark profiler start` and then `stop`, and open the report. Confirm the platform
+   version, the `sourbycraft/` config group (with secrets absent) and the tick statistics. Step 5
+   is the web-viewer verification that is still open; record the result here when done.

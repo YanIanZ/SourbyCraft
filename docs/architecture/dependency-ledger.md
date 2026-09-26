@@ -38,6 +38,8 @@ Measured over `sourbycraft-server/src/main/java` (Aurora/SourbyCraft's own sourc
 | `io.papermc.paper.threadedregions.scheduler.EntityScheduler` | `command/SourbyReply.java` | **Public** Folia-style scheduler API (note the `.scheduler.` segment), the documented way to run work on an entity's owning thread. |
 | `io.papermc.paper.threadedregions.scheduler.ScheduledTask` | `hud/HudBars.java` | Same public API; the handle type its own scheduling returns. |
 | `net.minecraft.server.Main` | bootstrap entry | The process entry point the launcher invokes. |
+| `io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler`, `AsyncScheduler` | `bridge/AuroraBridge.java` | Public scheduler API; the Aurora Bridge times bridged legacy tasks with them. |
+| `org.bukkit.event.server.ServerLoadEvent` | `startup/StartupTimeline.java` | Public event marking "server ready" for the startup profile. |
 
 ### 1.2 `TEMPORARY_IMPLEMENTATION`
 
@@ -56,6 +58,7 @@ these supply today's implementation of it. This is the set the ledger test pins.
 | File | Dependency | Reason |
 |---|---|---|
 | `config/upstream/CanvasConfigBridge.java` | `io.canvasmc.canvas.GlobalConfiguration`, `WorldConfig` | Reloads upstream config so an existing deployment's `canvas-server.yml` keeps working. No Aurora behaviour reads it; it sits behind `config/upstream/UpstreamConfigBridge`. This is the **only** `io.canvasmc` reference in Aurora's own source. |
+| `perf/NetworkMetrics.java` | `io.papermc.paper.network.ChannelInitializeListenerHolder`, Netty `ChannelPipeline` | The only hook for adding a handler to every connection's pipeline. Paper marks it unofficial. If it disappears, the `network counters` boot stage fails in isolation and `/perf network` reports nothing. It is not a threaded-regions internal, so the ledger test does not pin it; it is listed here by hand. |
 
 ---
 
@@ -80,6 +83,9 @@ vanilla class; none of them is an Aurora contract.
 | 0015 reject a landed arrow before the projectile tag lookup | Upstream bug fix |
 | 0016 refuse a cross-region block test | Region-safety fix (PRD §108) |
 
+Patch 0006 calls `perf/AsyncPathValidity` for its two staleness checks, so the rule is tested in
+Sourby's own test suite.
+
 ### 2.2 `sourbycraft-server/canvas-patches/files/` — 5 patches
 
 | Patch | Class | Reason |
@@ -87,6 +93,15 @@ vanilla class; none of them is an Aurora contract.
 | `spark/FoliaPlatformInfo.java` | `DIRECT_NMS_PATCH` | Platform identity and one canonical build version in Spark reports. |
 | `spark/FoliaSparkPlugin.java`, `spark/plugin/FoliaTickStatistics.java` | `DIRECT_NMS_PATCH` | Spark reads SourbyCraft's tick statistics rather than a parallel set. |
 | `GlobalConfiguration.java`, `WorldConfig.java` | `COMPATIBILITY_ONLY` | Upstream config shape, paired with `CanvasConfigBridge`. |
+
+### 2.3 `sourbycraft-server/paper-patches/files/` — 7 patches
+
+| Patch | Class | Reason |
+|---|---|---|
+| `PaperBootstrap.java`, `log4j2.xml` | `DIRECT_NMS_PATCH` | Branded boot line and console logger naming. |
+| `com/destroystokyo/paper/Metrics.java` | `DIRECT_NMS_PATCH` | Removes the bStats phone-home. |
+| `PaperPluginProviderFactory.java`, `SpigotPluginProviderFactory.java`, `CraftMagicNumbers.java` | `COMPATIBILITY_ONLY` | The three Folia "not marked as supporting" load gates ask `AuroraBridge.admitLegacy` before refusing. With `aurora.bridge.mode = off` (default), behaviour is unchanged. |
+| `CraftScheduler.java` | `COMPATIBILITY_ONLY` | Bridged plugins' Bukkit tasks go to the Aurora Bridge instead of the Folia `UnsupportedOperationException`; `cancelTask`/`cancelTasks` reach them. Non-bridged plugins are unchanged. |
 
 ---
 
