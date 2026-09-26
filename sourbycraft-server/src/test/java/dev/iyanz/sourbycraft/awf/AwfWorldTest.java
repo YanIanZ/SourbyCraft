@@ -175,6 +175,23 @@ class AwfWorldTest {
     }
 
     @Test
+    void pendingSavesAreBoundedAndTheOverflowIsRefused() throws Exception {
+        final List<Runnable> stalled = new ArrayList<>();
+        final AwfWorld world = new AwfWorld("s", WorldRole.VANILLA, null,
+            AwfWorldStore.open(this.dir.resolve("s"), WorldRole.VANILLA, 1));
+        world.write(new ChunkKey(0, 0), b("x"));
+        for (int i = 0; i < AwfWorld.MAX_PENDING_SAVES; i++) {
+            world.save(PersistenceMode.INCREMENTAL, stalled::add, 1);
+        }
+        final var refused = world.save(PersistenceMode.INCREMENTAL, stalled::add, 1).toCompletableFuture();
+        final var failure = assertThrows(java.util.concurrent.ExecutionException.class, refused::get);
+        assertTrue(failure.getCause() instanceof java.util.concurrent.RejectedExecutionException);
+        assertEquals(AwfWorld.MAX_PENDING_SAVES, world.metrics().saveQueueDepth());
+        stalled.forEach(Runnable::run);
+        assertEquals(0, world.metrics().saveQueueDepth(), "draining frees the slots");
+    }
+
+    @Test
     void latencyPercentilesAreNearestRank() {
         final LatencyRecorder r = new LatencyRecorder();
         for (int i = 1; i <= 100; i++) r.record(i * 1_000_000L);
