@@ -1,7 +1,8 @@
 # SourbyCraft 26.2 reference runtime image.
 #
 # Build the slim release jar first:
-#   ./gradlew applyAllPatches :sourbycraft-server:compileJava assembleReleaseArtifacts
+#   ./gradlew applyAllPatches slimServerJar
+#   cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-REL.jar
 #   docker build --build-arg JAR=release/SourbyCraft-26.2-REL.jar -t sourbycraft:26.2 .
 #
 # First boot needs internet once (SourbyLoader fetches externalized libs into the
@@ -10,7 +11,7 @@
 FROM eclipse-temurin:25-jre AS runtime
 
 LABEL org.opencontainers.image.title="SourbyCraft" \
-      org.opencontainers.image.description="High-performance Paper 26.2 survival fork (200+ players, Auto-CDS, anti-xray)" \
+      org.opencontainers.image.description="SourbyCraft 26.2 region-threaded Minecraft server (Aurora runtime, Java 25)" \
       org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
 
 ARG JAR=release/SourbyCraft-26.2-REL.jar
