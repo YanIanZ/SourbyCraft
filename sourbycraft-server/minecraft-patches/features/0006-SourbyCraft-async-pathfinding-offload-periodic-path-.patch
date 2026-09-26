@@ -174,14 +174,14 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..40aec05434ecf0e5b61d95651410fbaf
 +                    // replaces the underlying entity, so a solve computed for the old one must
 +                    // not be applied: this navigation belongs to the entity that was replaced,
 +                    // and its level, position and target are no longer the live ones.
-+                    if (owner != mob) {
++                    if (!dev.iyanz.sourbycraft.perf.AsyncPathValidity.sameSubject(owner, mob)) {
 +                        return;
 +                    }
 +                    // Something replaced the path while this solve was running, so the result
 +                    // describes a route the navigation is no longer taking. Applying it would
 +                    // overwrite a newer synchronous recompute, undo a retarget, or resurrect a
 +                    // navigation that was stopped.
-+                    if (this.path != requested) {
++                    if (!dev.iyanz.sourbycraft.perf.AsyncPathValidity.stillRequested(this.path, requested)) {
 +                        return;
 +                    }
 +                    if (path != null && path.getTarget() != null) {
