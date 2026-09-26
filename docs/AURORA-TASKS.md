@@ -198,6 +198,24 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] attribution/license review complete
 - [ ] README and release notes contain measured claims only
 
+## K. Build 47 Aurora Nexus pillars
+
+See the status table in [releases/26.2-build-47-aurora-nexus.md](releases/26.2-build-47-aurora-nexus.md).
+
+- [x] compatibility state model and `/plugins` palette (NATIVE/BRIDGED/FAILED/DISABLED)
+- [x] capture plugin enable failures for FAILED state
+- [ ] Aurora Bridge adapter for undeclared plugins (base currently refuses them)
+- [ ] bridge routing, SAFE-mode rejection, quarantine, per-plugin telemetry
+- [x] startup cache mechanics: fingerprints, environment key, per-entry integrity, atomic write
+- [x] plugin descriptor startup index on a bounded STARTUP lane, with boot diagnostics
+- [ ] cold vs warm startup benchmark
+- [ ] class index / transform / dependency graph caching
+- [x] AWF world roles and FILE atomic generation commit with crash-injection tests
+- [ ] AWF integration with world save/load
+- [ ] AWF database backends, incremental/checkpoint persistence, COW templates, metrics
+- [ ] Execution Fabric and Resource Governor
+- [ ] network/storage observability
+
 ---
 
 ## Recommended immediate order

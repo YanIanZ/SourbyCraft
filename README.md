@@ -305,7 +305,7 @@ Current/active command family:
 | `/sys` | server/JVM/host diagnostics |
 | `/ping [player]` | latency + offline GeoIP where enabled |
 | `/ver` · `/version` | SourbyCraft build/runtime information |
-| `/plugins` | SourbyCraft-styled plugin list |
+| `/plugins` | Plugin list coloured by Aurora compatibility state (native / bridged / failed / disabled) |
 | `/maxp [n]` | max-player management |
 | `/perf lanes` | where the machine's time went, by execution lane |
 | `/spec` | full machine specification: processor, clock, cores, memory and heap allocation |
