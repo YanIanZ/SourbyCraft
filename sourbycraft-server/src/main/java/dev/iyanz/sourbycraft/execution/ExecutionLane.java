@@ -57,6 +57,12 @@ public enum ExecutionLane {
     /** Sourby-owned computation on snapshots, which touches nothing a region owns. */
     ASYNC_COMPUTE("Async compute", "SourbyCraft-AsyncPath"),
 
+    /**
+     * Bounded startup analysis: jar hashing and descriptor parsing for the Aurora Instant Startup
+     * index. Short-lived; it exists only while the boot stage runs and never loads plugin code.
+     */
+    STARTUP("Startup", "SourbyCraft-Startup-"),
+
     /** Measuring the server, which must never be mistaken for the server working. */
     TELEMETRY("Telemetry", "SourbyCraft-PerformanceCollector", "spark-"),
 
