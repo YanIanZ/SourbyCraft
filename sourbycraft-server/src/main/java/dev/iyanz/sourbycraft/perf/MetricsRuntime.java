@@ -38,6 +38,12 @@ public final class MetricsRuntime {
             : LanePortions.notMeasured("metrics are not running");
     }
 
+    /** The slowest active region at the last collection, or {@code null} when none or not running. */
+    public static SlowRegion slowestRegion() {
+        final PerformanceCollector current = collector;
+        return current == null ? null : current.slowestRegion();
+    }
+
     public static RegionMetricsRegistry registry() {
         return RegionMetricsRegistry.INSTANCE;
     }

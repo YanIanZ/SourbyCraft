@@ -120,6 +120,14 @@ public final class PerformanceCollector implements AutoCloseable {
         this.worker.start();
     }
 
+    private SlowRegion slowestCandidate;
+    private volatile SlowRegion slowestRegion;
+
+    /** The slowest active region at the last successful collection, or {@code null}. */
+    public SlowRegion slowestRegion() {
+        return this.slowestRegion;
+    }
+
     /** The latest division of the machine between lanes. */
     public LanePortions.Report lanePortions() {
         return this.lanePortions;
@@ -194,6 +202,7 @@ public final class PerformanceCollector implements AutoCloseable {
                 new ImmutableFreshness(state, 0L, latenessMillis, duration, warmingReason),
                 windows[0], windows[1], windows[2], windows[3], windows[4], runtime, global);
             this.publishUnlessClosed(next);
+            this.slowestRegion = this.slowestCandidate;
             NetworkCounters.GLOBAL.sample(nowNanos);
             final LaneCpuSampler.LaneLoads reading = this.lanes.sample();
             this.lanePortions = LanePortions.of(reading, runtime.availableProcessors());
@@ -230,6 +239,7 @@ public final class PerformanceCollector implements AutoCloseable {
     }
 
     private void reset() {
+        this.slowestCandidate = null;
         this.activeRegions = 0;
         this.retainedGenerations = 0;
         Arrays.fill(this.pooledHistograms, 0L);
@@ -244,6 +254,12 @@ public final class PerformanceCollector implements AutoCloseable {
         final int activeIndex;
         ++this.retainedGenerations;
         if (view.active()) {
+            final RegionTickMetrics.WindowSnapshot five = snapshot.fiveSeconds();
+            if (five != null && five.sampleCount() > 0 && Double.isFinite(five.mspt())) {
+                this.slowestCandidate = SlowRegion.slower(this.slowestCandidate, new SlowRegion(view.worldId(),
+                    view.regionId(), view.generationId(), five.mspt(), five.maximumNanos() / 1_000_000.0,
+                    five.sampleCount()));
+            }
             activeIndex = this.activeRegions++;
             this.ensureMedianCapacity(this.activeRegions);
         } else {

@@ -149,7 +149,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] verify Spark web-viewer config rendering
 - [ ] add cheap Sourby runtime metadata
 - [ ] improve region thread classification
-- [ ] expose useful slow-region context
+- [x] expose useful slow-region context — `/perf region` names the slowest active region (world/region/generation ids, 5 s average and maximum MSPT); coordinates not tracked
 - [x] document Spark update procedure — [SPARK.md](SPARK.md#updating-spark)
 - [!] replace the upstream viewer text `engine async` with `Aurora Engine`: the current spark upload protocol serializes profiler engine as the fixed `JAVA`/`ASYNC` enum, and spark.lucko.me renders that enum itself; an exact custom label therefore requires a Sourby/Aurora viewer fork or compatible custom viewer layer rather than a server-only metadata patch
 - [ ] design Aurora viewer presentation so the primary label is `Aurora Engine` while the underlying implementation (`async-profiler` or Java sampler) remains visible in technical details
