@@ -2,6 +2,8 @@ package dev.iyanz.sourbycraft.brand;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -18,6 +20,10 @@ import java.util.regex.Pattern;
  * DedicatedServer#initServer before CraftServer#loadPlugins fires — that's
  * the only window where a load failure record is emitted.
  *
+ * <p>Enable failures ("Error occurred while enabling NAME vX") are captured too, so
+ * {@code /plugins} can show a plugin that loaded but failed to enable as FAILED rather than
+ * as merely disabled.
+ *
  * <p>/sys reads {@link #recent()} to surface the failed plugin names + the
  * first line of the stack trace, so operators can see "X failed, last
  * message: Y" without digging through the full log.
@@ -27,7 +33,14 @@ public final class PluginLoadDiagnostics {
     private static final int MAX_ENTRIES = 16;
     private static final Pattern LOAD_FAILURE = Pattern.compile(
             "Could not load plugin '([^']+)'(?:\\s+in folder '[^']+')?");
+    /**
+     * Paper's enable failure, from both the legacy and the Paper plugin managers. The captured
+     * group is the display name, {@code "Name vVersion"}.
+     */
+    private static final Pattern ENABLE_FAILURE = Pattern.compile(
+            "Error occurred while enabling (.+?) \\(Is it up to date\\?\\)");
     private static final List<Entry> ENTRIES = new CopyOnWriteArrayList<>();
+    private static final Set<String> ENABLE_FAILURES = ConcurrentHashMap.newKeySet();
     private static volatile boolean installed = false;
 
     /** One captured plugin-load failure: the jar name and a short human-readable reason. */
@@ -45,31 +58,60 @@ public final class PluginLoadDiagnostics {
         installed = true;
         Logger root = LogManager.getLogManager().getLogger("");
         root.addHandler(new Handler() {
-            /**
-             * Matches every emitted {@link LogRecord} against {@link #LOAD_FAILURE}; on a hit,
-             * records the plugin jar name plus the deepest-cause line of the attached throwable
-             * (or the raw message when there is none), evicting the oldest entry past
-             * {@link #MAX_ENTRIES}.
-             */
+            /** Hands every emitted {@link LogRecord} to {@link #capture}. */
             @Override
             public void publish(LogRecord record) {
-                if (record == null || record.getMessage() == null) return;
-                if (record.getLevel().intValue() < Level.WARNING.intValue()) return;
-                Matcher m = LOAD_FAILURE.matcher(record.getMessage());
-                if (!m.find()) return;
-                String jar = m.group(1);
-                String reason = firstThrowableLine(record.getThrown());
-                if (reason == null) reason = record.getMessage();
-                if (ENTRIES.size() >= MAX_ENTRIES) {
-                    ENTRIES.remove(0);
-                }
-                ENTRIES.add(new Entry(jar, reason));
+                if (record == null) return;
+                capture(record.getLevel(), record.getMessage(), record.getThrown());
             }
             /** No-op — this handler holds no buffered/flushable state. */
             @Override public void flush() {}
             /** No-op — this handler is never detached; nothing to release. */
             @Override public void close() {}
         });
+    }
+
+    /**
+     * Records one log line if it is a plugin load or enable failure. Package-visible so the
+     * matching can be tested without a live logger.
+     */
+    static void capture(final Level level, final String message, final Throwable thrown) {
+        if (level == null || message == null) return;
+        if (level.intValue() < Level.WARNING.intValue()) return;
+        final Matcher enable = ENABLE_FAILURE.matcher(message);
+        if (enable.find()) {
+            // Bounded: one entry per plugin display name, and plugins are finite per run.
+            ENABLE_FAILURES.add(enable.group(1));
+            return;
+        }
+        Matcher m = LOAD_FAILURE.matcher(message);
+        if (!m.find()) return;
+        String jar = m.group(1);
+        String reason = firstThrowableLine(thrown);
+        if (reason == null) reason = message;
+        if (ENTRIES.size() >= MAX_ENTRIES) {
+            ENTRIES.remove(0);
+        }
+        ENTRIES.add(new Entry(jar, reason));
+    }
+
+    /**
+     * Whether an enable failure was captured for the plugin with this name. Paper logs the
+     * display name, {@code "Name vVersion"}, so the name is matched as that prefix.
+     */
+    public static boolean enableFailed(final String pluginName) {
+        if (pluginName == null) return false;
+        final String prefix = pluginName + " v";
+        for (final String display : ENABLE_FAILURES) {
+            if (display.equals(pluginName) || display.startsWith(prefix)) return true;
+        }
+        return false;
+    }
+
+    /** Clears captured state; tests only. */
+    static void resetForTest() {
+        ENTRIES.clear();
+        ENABLE_FAILURES.clear();
     }
 
     /** Every captured plugin-load failure so far, oldest first, capped at {@link #MAX_ENTRIES}. */
