@@ -39,19 +39,34 @@ Loaded worlds, resident/dirty chunks, save queue depth, oldest pending save, ser
 
 ## Implementation status (26.2 branch)
 
-- `dev.iyanz.sourbycraft.awf.WorldRole` — the six roles with their mutability/persistence rules.
-- `dev.iyanz.sourbycraft.awf.GenerationStore` — the FILE backend's atomic commit primitive:
-  immutable byte snapshot → `generations/N.tmp` (each file forced) → read-back verification →
-  publish `generations/N` → replace `CURRENT` (the single commit point). Opening a store removes
-  temporary and uncommitted generations, so a crash before the commit point leaves the prior
-  generation authoritative. Reads verify size and SHA-256 of every blob and fail with
-  `CorruptGenerationException` rather than return damaged data. Blocking calls throw on a region
-  tick thread; `commitAsync` runs on a caller-supplied storage executor.
-- Tests inject a crash at each stage and reopen the store.
+`dev.iyanz.sourbycraft.awf` is a tested library. **The engine's chunk load/save path does not use
+it, so no world runs on AWF.** Wiring it in means patching chunk I/O in the engine, which has not
+been done.
 
-Not implemented: no world, chunk serializer or save path uses the store; MongoDB/MySQL/Redis;
-INCREMENTAL/CHECKPOINT; lazy materialisation; copy-on-write templates; the metrics above; any of
-the load/unload or multi-world qualification workloads.
+- `AwfFile` (`.awf`): header, immutable metadata, chunk index, and deflated chunks, each with a
+  SHA-256. Opening reads the index only; a chunk materialises when read. Corrupt or truncated
+  chunks are reported, never returned.
+- `GenerationStore`: the atomic commit primitive. Snapshot → `N.tmp` → read-back verify → publish →
+  replace `CURRENT`. Recovery on open; retention; `readRetained`; blocking calls throw on region
+  threads.
+- `AwfWorldStore` (FILE backend): a chunk index per generation, and chunk bytes in a
+  content-addressed `ObjectStore`.
+  - FULL rewrites every chunk.
+  - INCREMENTAL writes only new objects (identical chunks share one).
+  - CHECKPOINT also re-verifies every referenced object before committing.
+  - READ_ONLY refuses.
+  - Objects are verified before the generation swap. Objects no retained generation references
+    are collected after it.
+- `AwfWorld`: world-owned chunks copy-on-write over a base (`AwfFile`, a store, or
+  `LayeredSource`); the base is never written. Writes copy the caller's buffer. Saves run on a
+  caller-supplied executor (the governor's `STORAGE` lane is meant for this), with bounded
+  retries; a chunk rewritten during a save stays dirty. Metrics: resident/dirty chunks, save queue
+  depth, oldest pending save, serialization and backend p50/p95/p99, retries, failures, bytes read
+  and written, and materialised chunks. `AwfRegistry` counts loaded worlds.
+- `WorldRole`: the six roles and their write rules.
+
+Not implemented: MongoDB/MySQL/Redis backends; a SlimeLoader compatibility adapter; engine
+integration; any of the load/unload or multi-world qualification workloads.
 
 ## Qualification
 Load/unload loops, COW isolation, crash during each persistence stage, backend timeout/disconnect, shutdown with pending saves, corrupt cache/blob recovery, and 1/50/250/1000-world workloads.

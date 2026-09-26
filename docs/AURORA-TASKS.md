@@ -201,20 +201,28 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 ## K. Build 47 Aurora Nexus pillars
 
 See the status table in [releases/26.2-build-47-aurora-nexus.md](releases/26.2-build-47-aurora-nexus.md).
+`[-]` here means implemented and unit-tested but not compiled into a server or run.
 
 - [x] compatibility state model and `/plugins` palette (NATIVE/BRIDGED/FAILED/DISABLED)
 - [x] capture plugin enable failures for FAILED state
-- [ ] Aurora Bridge adapter for undeclared plugins (base currently refuses them)
-- [ ] bridge routing, SAFE-mode rejection, quarantine, per-plugin telemetry
+- [-] Aurora Bridge admission (`aurora.bridge.mode`, Paper load-gate patches)
+- [-] bridge scheduler routing (sync → global region, async → governed `BRIDGE_IO`), cancellation, disable cleanup
+- [-] SAFE-mode violation counting, quarantine, per-plugin telemetry (`/plugins <name>`)
+- [ ] entity-owner / region-owner routes with real callers
+- [ ] run representative legacy plugins through the bridge
 - [x] startup cache mechanics: fingerprints, environment key, per-entry integrity, atomic write
-- [x] plugin descriptor startup index on a bounded STARTUP lane, with boot diagnostics
+- [x] plugin descriptor index on a bounded STARTUP lane, with boot diagnostics
+- [x] class index and compatibility scan (constant pool), dependency graph, startup profile
 - [ ] cold vs warm startup benchmark
-- [ ] class index / transform / dependency graph caching
-- [x] AWF world roles and FILE atomic generation commit with crash-injection tests
-- [ ] AWF integration with world save/load
-- [ ] AWF database backends, incremental/checkpoint persistence, COW templates, metrics
-- [ ] Execution Fabric and Resource Governor
-- [ ] network/storage observability
+- [ ] transform output caching
+- [x] AWF: world roles, atomic generations, `.awf` lazy images, FULL/INCREMENTAL/CHECKPOINT/READ_ONLY, COW instances, metrics
+- [ ] AWF integration with the engine's chunk load/save
+- [ ] AWF database backends (MongoDB/MySQL/Redis), SlimeLoader adapter
+- [x] Resource Governor specification
+- [-] governed lanes with reject-not-caller-runs, `/perf governor`
+- [ ] operator-configurable governor budgets; existing executors under the governor
+- [-] network counters: bytes/packets per direction, connections, `/perf network`
+- [ ] vanilla save-queue / region-file storage metrics
 
 ---
 

@@ -4,7 +4,11 @@ T5 deliverable for §11.6 of `docs/AURORA-FULL-TRANSITION.md`.
 
 ## Summary
 
-**Aurora owns no world-persistence policy today.** It measures the world I/O lane, and it owns
+**Aurora owns no world-persistence policy for the running server today.** The AWF library
+(`dev.iyanz.sourbycraft.awf`, see [aurora-world-fabric.md](aurora-world-fabric.md)) implements
+atomic, verified persistence and its metrics, but the engine's chunk save path does not use it.
+The Resource Governor's `STORAGE` lane (`SourbyCraft-Storage-`, attributed to `WORLD_IO`) exists
+for AWF commits and is idle until AWF is wired in. It measures the world I/O lane, and it owns
 one executor that is explicitly *not* world persistence. The distinction matters enough to be
 the first thing this document says, because the thread-name prefix invites the opposite
 conclusion.
