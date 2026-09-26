@@ -56,8 +56,25 @@ class PluginDescriptorTest {
     }
 
     @Test
+    void legacyDependenciesAreRead() throws IOException {
+        final PluginDescriptor d = legacy("name: A\ndepend: [Vault]\nsoftdepend: [PlaceholderAPI, x]\nloadbefore: [Z]\n");
+        assertEquals(java.util.List.of("Vault"), d.depend());
+        assertEquals(java.util.List.of("PlaceholderAPI", "x"), d.softDepend());
+        assertEquals(java.util.List.of("Z"), d.loadBefore());
+    }
+
+    @Test
+    void paperDependenciesFollowPaperDefaults() throws IOException {
+        final PluginDescriptor d = paper("name: P\ndependencies:\n  server:\n"
+            + "    Hard: {load: BEFORE}\n    Soft: {load: BEFORE, required: false}\n    Later: {load: AFTER, required: false}\n");
+        assertEquals(java.util.List.of("Hard"), d.depend());
+        assertEquals(java.util.List.of("Soft"), d.softDepend());
+        assertEquals(java.util.List.of("Later"), d.loadBefore());
+    }
+
+    @Test
     void thePayloadRoundTrips() throws IOException {
-        final PluginDescriptor d = legacy("name: A\nversion: 1.2\nmain: a.A\nfolia-supported: true\n");
+        final PluginDescriptor d = legacy("name: A\nversion: 1.2\nmain: a.A\nfolia-supported: true\ndepend: [B]\n");
         assertEquals(d, PluginDescriptor.decode(d.encode()));
         assertNull(PluginDescriptor.decode("garbage"));
     }

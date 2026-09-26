@@ -107,6 +107,7 @@ public final class SourbyCraftBootstrap {
         // base will refuse before the refusals scroll past. Analysis only; loads nothing.
         stage("startup index", () -> {
             dev.iyanz.sourbycraft.startup.StartupIndexStage.run();
+            dev.iyanz.sourbycraft.startup.StartupTimeline.registerListener(owner);
         });
 
         // Claims the bare command names (/tps, /ping, /ver, ...) and the HUD quit-listener.
@@ -168,12 +169,14 @@ public final class SourbyCraftBootstrap {
      * the progress line cannot read healthy while something is broken.</p>
      */
     private static void stage(final String name, final Runnable body) {
+        final long stageBegun = System.nanoTime();
         try {
             body.run();
         } catch (final Throwable failure) {
             failureCount++;
             SourbyLogger.error(name + " failed during Aurora boot", failure);
         }
+        dev.iyanz.sourbycraft.startup.StartupTimeline.phase("boot:" + name, System.nanoTime() - stageBegun);
         stageCount++;
         // Held, not printed. Stages log their own output as they run -- the virtual executor and
         // the command registry both announce themselves -- so emitting a bar line per stage

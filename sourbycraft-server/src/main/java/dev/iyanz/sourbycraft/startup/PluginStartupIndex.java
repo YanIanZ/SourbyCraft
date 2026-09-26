@@ -44,9 +44,11 @@ public final class PluginStartupIndex {
      * @param cacheHit whether the descriptor came from the cache
      * @param failure why the jar could not be analysed, or {@code null}
      * @param fingerprint what the jar hashed to, or {@code null} when it could not be read
+     * @param scan class index and compatibility analysis; {@link CompatibilityScan#EMPTY} when the
+     *             jar is not a plugin or could not be read
      */
     public record Indexed(Path jar, PluginDescriptor descriptor, boolean cacheHit, String failure,
-                          SourceFingerprint fingerprint) {}
+                          SourceFingerprint fingerprint, CompatibilityScan scan) {}
 
     /** The index and what building it cost. */
     public record Result(List<Indexed> plugins, StartupTelemetry.Summary telemetry,
@@ -162,10 +164,10 @@ public final class PluginStartupIndex {
                 try {
                     out.add(futures.get(i).get());
                 } catch (final ExecutionException failure) {
-                    out.add(new Indexed(jars.get(i), null, false, String.valueOf(failure.getCause()), null));
+                    out.add(new Indexed(jars.get(i), null, false, String.valueOf(failure.getCause()), null, CompatibilityScan.EMPTY));
                 } catch (final InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
-                    out.add(new Indexed(jars.get(i), null, false, "interrupted", null));
+                    out.add(new Indexed(jars.get(i), null, false, "interrupted", null, CompatibilityScan.EMPTY));
                 }
             }
             return out;
@@ -181,7 +183,7 @@ public final class PluginStartupIndex {
             fingerprint = SourceFingerprint.of(jar);
         } catch (final IOException unreadable) {
             telemetry.miss();
-            return new Indexed(jar, null, false, "unreadable: " + unreadable.getMessage(), null);
+            return new Indexed(jar, null, false, "unreadable: " + unreadable.getMessage(), null, CompatibilityScan.EMPTY);
         }
         final StartupCache.Entry cached = loaded.entries().get(key);
         // Size/mtime can only rule reuse out early; reuse itself requires the SHA-256 to match.
@@ -189,22 +191,38 @@ public final class PluginStartupIndex {
             && cached.source().sha256().equals(fingerprint.sha256())) {
             if (NO_DESCRIPTOR.equals(cached.payload())) {
                 telemetry.hit();
-                return new Indexed(jar, null, true, null, fingerprint);
+                return new Indexed(jar, null, true, null, fingerprint, CompatibilityScan.EMPTY);
             }
-            final PluginDescriptor descriptor = PluginDescriptor.decode(cached.payload());
-            if (descriptor != null) {
+            final Indexed decoded = decodePayload(jar, fingerprint, cached.payload());
+            if (decoded != null) {
                 telemetry.hit();
-                return new Indexed(jar, descriptor, true, null, fingerprint);
+                return decoded;
             }
             telemetry.discarded(1);
         }
         telemetry.miss();
         try {
             final PluginDescriptor descriptor = PluginDescriptor.read(jar);
-            return new Indexed(jar, descriptor, false, null, fingerprint);
+            // Libraries dropped in plugins/ are not scanned: nothing loads them as plugins.
+            final CompatibilityScan scan = descriptor == null ? CompatibilityScan.EMPTY : CompatibilityScan.of(jar);
+            return new Indexed(jar, descriptor, false, null, fingerprint, scan);
         } catch (final IOException unreadable) {
-            return new Indexed(jar, null, false, "unreadable: " + unreadable.getMessage(), fingerprint);
+            return new Indexed(jar, null, false, "unreadable: " + unreadable.getMessage(), fingerprint,
+                CompatibilityScan.EMPTY);
         }
+    }
+
+    /** Descriptor lines, then one line of scan. */
+    static String encodePayload(final PluginDescriptor descriptor, final CompatibilityScan scan) {
+        return descriptor.encode() + "\n" + scan.encode();
+    }
+
+    private static Indexed decodePayload(final Path jar, final SourceFingerprint fingerprint, final String payload) {
+        final int last = payload.lastIndexOf('\n');
+        if (last < 0) return null;
+        final PluginDescriptor descriptor = PluginDescriptor.decode(payload.substring(0, last));
+        final CompatibilityScan scan = CompatibilityScan.decode(payload.substring(last + 1));
+        return descriptor == null || scan == null ? null : new Indexed(jar, descriptor, true, null, fingerprint, scan);
     }
 
     private static int cacheableCount(final List<Indexed> indexed) {
@@ -217,7 +235,7 @@ public final class PluginStartupIndex {
             // Unreadable jars are not cached: the next boot should look again.
             if (item.failure() != null || item.fingerprint() == null) continue;
             out.add(new StartupCache.Entry(key(pluginsDir, item.jar()), item.fingerprint(),
-                item.descriptor() == null ? NO_DESCRIPTOR : item.descriptor().encode()));
+                item.descriptor() == null ? NO_DESCRIPTOR : encodePayload(item.descriptor(), item.scan())));
         }
         return out;
     }

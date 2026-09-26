@@ -58,8 +58,37 @@ public final class StartupIndexStage {
                 + (dev.iyanz.sourbycraft.bridge.AuroraBridge.runtimeMode() == dev.iyanz.sourbycraft.config.AuroraConfig.BridgeMode.SAFE
                     ? "loaded through the Aurora Bridge (aurora.bridge.mode = safe): "
                     : "refused by the region-threading base (aurora.bridge.mode = off): ")
-                + undeclared.stream().map(p -> p.descriptor().name()).collect(Collectors.joining(", ")));
+                + undeclared.stream().map(p -> p.descriptor().name() + " [" + p.scan().verdict(false) + "]")
+                    .collect(Collectors.joining(", ")));
+            // No bridge can make server-internals access region-safe; say so separately.
+            final String internals = undeclared.stream().filter(p -> p.scan().serverInternals())
+                .map(p -> p.descriptor().name()).collect(Collectors.joining(", "));
+            if (!internals.isEmpty()) {
+                SourbyLogger.warn("Undeclared plugin(s) referencing net.minecraft/CraftBukkit internals, "
+                    + "which the Aurora Bridge cannot route: " + internals);
+            }
         }
+
+        final long graphBegun = System.nanoTime();
+        final DependencyGraph.Report graph = DependencyGraph.analyse(result.plugins().stream()
+            .map(PluginStartupIndex.Indexed::descriptor).filter(java.util.Objects::nonNull).toList());
+        lastGraph = graph;
+        StartupTimeline.phase("startup-index:dependency-graph", System.nanoTime() - graphBegun);
+        graph.missing().forEach((plugin, deps) -> SourbyLogger.warn("Plugin " + plugin
+            + " depends on missing plugin(s) " + String.join(", ", deps) + "; the plugin manager will not load it"));
+        for (final java.util.List<String> cycle : graph.cycles()) {
+            SourbyLogger.warn("Plugin dependency cycle: " + String.join(" -> ", cycle));
+        }
+
+        t.phaseNanos().forEach((phase, nanos) -> StartupTimeline.phase("startup-index:" + phase, nanos));
+        StartupTimeline.startClass(t.startClass());
+    }
+
+    private static volatile DependencyGraph.Report lastGraph;
+
+    /** The dependency graph from the most recent build, or {@code null}. */
+    public static DependencyGraph.Report lastGraph() {
+        return lastGraph;
     }
 
     /** The most recent build, or {@code null} before the stage has run. */

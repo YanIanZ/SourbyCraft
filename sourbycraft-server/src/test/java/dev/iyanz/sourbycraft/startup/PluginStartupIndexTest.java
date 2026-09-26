@@ -68,6 +68,8 @@ class PluginStartupIndexTest {
         assertEquals(cold.plugins().stream().map(PluginStartupIndex.Indexed::descriptor).toList(),
             warm.plugins().stream().map(PluginStartupIndex.Indexed::descriptor).toList());
         assertTrue(warnings.isEmpty(), warnings.toString());
+        assertEquals(cold.plugins().stream().map(PluginStartupIndex.Indexed::scan).toList(),
+            warm.plugins().stream().map(PluginStartupIndex.Indexed::scan).toList(), "the scan is cached too");
     }
 
     @Test
