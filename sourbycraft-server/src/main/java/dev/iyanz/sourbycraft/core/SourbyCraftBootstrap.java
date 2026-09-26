@@ -59,8 +59,9 @@ public final class SourbyCraftBootstrap {
     }
 
     /**
-     * Starts metrics, configuration, plugin config provisioning, branding, diagnostics, commands,
-     * listeners, player-slot settings, I/O workers, the updater and GC sampling, in that order.
+     * Starts metrics, configuration, plugin config provisioning, branding, diagnostics, the startup
+     * index, commands, listeners, player-slot settings, I/O workers, the updater and GC sampling,
+     * in that order.
      * A second invocation is a no-op, including after a partially failed startup. Individual stage
      * failures are logged and counted without skipping subsequent stages.
      */
@@ -98,6 +99,12 @@ public final class SourbyCraftBootstrap {
         // ORDERING: must precede CraftServer#loadPlugins, or load failures go uncaptured for /sys.
         stage("plugin diagnostics", () -> {
             PluginLoadDiagnostics.install();
+        });
+
+        // ORDERING: must precede CraftServer#loadPlugins so the operator learns which jars the
+        // base will refuse before the refusals scroll past. Analysis only; loads nothing.
+        stage("startup index", () -> {
+            dev.iyanz.sourbycraft.startup.StartupIndexStage.run();
         });
 
         // Claims the bare command names (/tps, /ping, /ver, ...) and the HUD quit-listener.
@@ -145,7 +152,7 @@ public final class SourbyCraftBootstrap {
     }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
-    private static final int TOTAL_STAGES = 11;
+    private static final int TOTAL_STAGES = 12;
     private static int stageCount;
     private static int failureCount;
     private static final java.util.List<String> progress = new java.util.ArrayList<>();

@@ -161,6 +161,19 @@ public class SysCommand extends Command {
                 .build());
         }
 
+        final var startup = dev.iyanz.sourbycraft.startup.StartupIndexStage.last();
+        if (startup != null) {
+            final var t = startup.telemetry();
+            s.sendMessage(text()
+                .append(text("  Startup index: ", SourbyCraftColors.HEADER))
+                .append(text(startup.plugins().size() + " jars, " + t.startClass()
+                    + " (hit " + t.hits() + " / miss " + t.misses() + " / discarded " + t.discarded() + ")",
+                    SourbyCraftColors.VALUE))
+                .append(text(String.format(java.util.Locale.ROOT, "  %.1f ms", t.totalMillis()),
+                    SourbyCraftColors.DIM))
+                .build());
+        }
+
         s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
         return true;
     }
