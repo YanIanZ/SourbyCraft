@@ -91,7 +91,8 @@ public final class SourbyCraftConfig {
         }
         for (final String key : parsed.invalidKeys()) {
             SourbyLogger.warn("Aurora config key '" + key
-                + "' is invalid; expected boolean setting under TOML tables. Runtime fallback: false. "
+                + "' is invalid for its type (see the comment beside it in aurora.toml). Runtime fallback: "
+                + "that key's default. "
                 + "Operator file was not modified.");
         }
         return parsed;
@@ -263,6 +264,14 @@ public final class SourbyCraftConfig {
             "Aurora execution-lane CPU attribution (LIVE), behind /perf lanes. Walks every thread once a "
             + "second: negligible beside a loaded server, and on an idle one the telemetry lane costs more "
             + "than the region lane. false stops the sampling; the lanes view then reports it as disabled.");
+        seed(f, changed, AuroraConfig.BRIDGE_MODE_KEY, "off",
+            "Aurora Compatibility Bridge (RESTART). off = plugins without folia-supported/canvas-supported "
+            + "are refused, as before. safe = they load, their Bukkit scheduler tasks are routed through "
+            + "the bridge (sync -> global region, async -> async scheduler) and failures are recorded. "
+            + "Legacy plugins remain unqualified code on a region-threaded server.");
+        seed(f, changed, AuroraConfig.BRIDGE_QUARANTINE_KEY, 3,
+            "Fatal bridge violations after which a bridged plugin is quarantined: its bridged tasks are "
+            + "cancelled and new ones rejected (LIVE). At least 1.");
         if (changed[0]) {
             f.save();
             SourbyLogger.info("seeded Aurora engine defaults into sourbycraft_config/aurora.toml");
