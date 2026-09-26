@@ -37,5 +37,21 @@ Initial backends: FILE, MongoDB, MySQL, Redis. Native async contracts return Com
 ## Required metrics
 Loaded worlds, resident/dirty chunks, save queue depth, oldest pending save, serialization/backend p50/p95/p99, retries/failures and bytes read/written.
 
+## Implementation status (26.2 branch)
+
+- `dev.iyanz.sourbycraft.awf.WorldRole` — the six roles with their mutability/persistence rules.
+- `dev.iyanz.sourbycraft.awf.GenerationStore` — the FILE backend's atomic commit primitive:
+  immutable byte snapshot → `generations/N.tmp` (each file forced) → read-back verification →
+  publish `generations/N` → replace `CURRENT` (the single commit point). Opening a store removes
+  temporary and uncommitted generations, so a crash before the commit point leaves the prior
+  generation authoritative. Reads verify size and SHA-256 of every blob and fail with
+  `CorruptGenerationException` rather than return damaged data. Blocking calls throw on a region
+  tick thread; `commitAsync` runs on a caller-supplied storage executor.
+- Tests inject a crash at each stage and reopen the store.
+
+Not implemented: no world, chunk serializer or save path uses the store; MongoDB/MySQL/Redis;
+INCREMENTAL/CHECKPOINT; lazy materialisation; copy-on-write templates; the metrics above; any of
+the load/unload or multi-world qualification workloads.
+
 ## Qualification
 Load/unload loops, COW isolation, crash during each persistence stage, backend timeout/disconnect, shutdown with pending saves, corrupt cache/blob recovery, and 1/50/250/1000-world workloads.
