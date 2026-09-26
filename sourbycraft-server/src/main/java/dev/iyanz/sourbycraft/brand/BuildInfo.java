@@ -30,9 +30,9 @@ public record BuildInfo(
 ) {
 
     /**
-     * The engine name shown to operators, derived from the release codename in
-     * {@code gradle.properties} so the banner cannot drift from the release it ships in.
-     * Falls back to the product name when no codename is stamped.
+     * The engine name shown to operators. Since Build 47 it is always Aurora: the release codename
+     * ({@code aurora-nexus}) names the release, not the engine, and is shown separately by
+     * {@link #codenameDisplay()}.
      */
     public String engineName() {
         return "Aurora";

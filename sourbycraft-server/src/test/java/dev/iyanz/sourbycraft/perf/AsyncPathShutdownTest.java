@@ -124,12 +124,11 @@ class AsyncPathShutdownTest {
     // --- saturation ---------------------------------------------------------------------------
 
     @Test
-    void aSaturatedPoolRunsTheSolveOnTheCallerRatherThanDroppingIt() throws Exception {
-        // The documented degradation: a slow path, never a dropped path. Worth pinning because
-        // the caller is a region thread, so saturation moves A* onto the thread the feature
-        // exists to keep free -- and the snapshot was already built by then, so a saturated
-        // async solve costs more than the synchronous path it replaced. Config-gated and
-        // default-off, but an operator enabling it should not discover this from tick times.
+    void aSaturatedPoolRefusesTheSolveRatherThanRunningItOnTheCaller() throws Exception {
+        // The documented degradation since backpressure replaced CallerRuns: the caller is a
+        // region thread, and running A* there after the snapshot was already built costs more
+        // than the synchronous path the feature replaced. A saturated solve is refused; the
+        // navigation keeps its current live path and a later recompute tries again.
         AsyncPathProcessor.setEnabled(true);
         final var release = new CountDownLatch(1);
         final int workers = Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
@@ -152,22 +151,21 @@ class AsyncPathShutdownTest {
                 return "solved";
             });
 
-            assertEquals("solved", overflow.get(5, TimeUnit.SECONDS), "never dropped");
-            assertSame(Thread.currentThread(), ranOn.get(),
-                "a saturated pool runs the solve on the submitting thread");
+            assertEquals(null, overflow.get(5, TimeUnit.SECONDS), "refused, completed without a result");
+            assertEquals(null, ranOn.get(), "a refused solve never runs, on the caller or anywhere else");
         } finally {
             release.countDown();
         }
     }
 
     @Test
-    void aSaturatedSolveIsCountedAsHavingRunOnTheCaller() throws Exception {
-        // The counter that decides whether this feature is helping. An inline solve is the pool
-        // doing its work on a region thread -- the place it exists to avoid -- after already
-        // paying to build the snapshot, so a rising count means the pool is undersized.
+    void aSaturatedSolveIsCountedAsRefusedNotAsRunOnTheCaller() throws Exception {
+        // inline is kept for telemetry compatibility and should stay flat; refused is the counter
+        // that says the pool is undersized for the arrival rate.
         AsyncPathProcessor.setEnabled(true);
         final var release = new CountDownLatch(1);
-        final long before = AsyncPathProcessor.stats().inline();
+        final long inlineBefore = AsyncPathProcessor.stats().inline();
+        final long refusedBefore = AsyncPathProcessor.stats().refused();
         final int workers = Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
         try {
             for (int i = 0; i < workers; i++) {
@@ -182,8 +180,10 @@ class AsyncPathShutdownTest {
             }
             AsyncPathProcessor.submit(() -> "overflow").get(5, TimeUnit.SECONDS);
 
-            assertTrue(AsyncPathProcessor.stats().inline() > before,
-                "a solve the pool could not take must be counted");
+            assertTrue(AsyncPathProcessor.stats().refused() > refusedBefore,
+                "a solve the pool could not take must be counted as refused");
+            assertEquals(inlineBefore, AsyncPathProcessor.stats().inline(),
+                "saturation must not run a solve on the caller");
         } finally {
             release.countDown();
         }
