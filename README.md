@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/architecture-Aurora-8a2be2?style=flat-square">
   <img src="https://img.shields.io/badge/runtime-SourbyCraft-00bcd4?style=flat-square">
-  <img src="https://img.shields.io/badge/build-46c%2B-brightgreen?style=flat-square">
+  <img src="https://img.shields.io/badge/build-47%20Aurora%20Nexus-brightgreen?style=flat-square">
   <img src="https://img.shields.io/badge/mixins-Cherry-e83e8c?style=flat-square">
   <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
 </p>

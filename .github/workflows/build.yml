@@ -118,8 +118,9 @@ jobs:
           # NOTE: the task is `slimServerJar` (registered in root build.gradle.kts:112) — not the
           # `slimPaperclipJar` name this workflow used pre-Canvas rebase. The Folia line at
           # release/26.2 had its own paperweight fork (`sourbypatcher/`) register a task under the
-          # old name; this Canvas line uses the stock weaver toolchain, and the slim-jar task
-          # was renamed to drop the paperclip assumption.
+          # old name; this Canvas line uses the private SourbyPatcher canvas-toolchain adapter
+          # (which delegates to weaver), and the slim-jar task was renamed to drop the paperclip
+          # assumption.
           ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.number }}
           mkdir -p release
           python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-${{ steps.relnum.outputs.channel }}.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}"
@@ -322,16 +323,30 @@ jobs:
           sha=$(sha256sum "$jar" | cut -d' ' -f1)
           echo "$sha  $(basename "$jar")" > "$jar.sha256"
           codename=$(sed -n 's/^codename=//p' gradle.properties)
+          # gradle.properties `release`: true publishes a normal release, pre publishes a
+          # prerelease (the auto-updater ignores prereleases unless allow-prerelease is set),
+          # false publishes nothing. An unqualified build must use pre.
+          mode=$(sed -n 's/^release=//p' gradle.properties | tr -d '[:space:]')
+          case "$mode" in
+            true) publish_flags="--latest" ;;
+            pre) publish_flags="--prerelease --latest=false" ;;
+            false) echo "release=false in gradle.properties; not publishing $tag"; exit 0 ;;
+            *) echo "release must be true, pre or false (got '$mode')" >&2; exit 1 ;;
+          esac
           title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next $codename [$(git log -1 --format=%s | cut -c1-80)]"
           {
-            echo "**Build ${next}c** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
+            echo "**SourbyCraft 26.2 Build ${next}** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
             echo
             echo "Auto-published from \`release/26.2-canvas\` after a green build + boot test."
             echo
-            if [ -f "docs/releases/$next.md" ]; then
-              cat "docs/releases/$next.md"
-              echo
-            fi
+            # Build 47+ notes are named docs/releases/26.2-build-N-<codename>.md.
+            for notes in "docs/releases/$next.md" docs/releases/26.2-build-"$next"-*.md; do
+              if [ -f "$notes" ]; then
+                cat "$notes"
+                echo
+                break
+              fi
+            done
             echo "## Commits"
             if [ -n "${last:-}" ]; then
               git log "v26.2-r$last"..HEAD --format='- %s' | head -40
@@ -339,4 +354,4 @@ jobs:
               git log -10 --format='- %s'
             fi
           } > notes.md
-          gh release create "$tag" --latest --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$jar" "$jar.sha256"
+          gh release create "$tag" $publish_flags --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$jar" "$jar.sha256"
