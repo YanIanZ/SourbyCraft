@@ -194,6 +194,7 @@ public final class PerformanceCollector implements AutoCloseable {
                 new ImmutableFreshness(state, 0L, latenessMillis, duration, warmingReason),
                 windows[0], windows[1], windows[2], windows[3], windows[4], runtime, global);
             this.publishUnlessClosed(next);
+            NetworkCounters.GLOBAL.sample(nowNanos);
             final LaneCpuSampler.LaneLoads reading = this.lanes.sample();
             this.lanePortions = LanePortions.of(reading, runtime.availableProcessors());
             LaneLoadEvent.record(reading);

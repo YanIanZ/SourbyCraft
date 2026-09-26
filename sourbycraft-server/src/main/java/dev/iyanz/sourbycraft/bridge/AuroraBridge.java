@@ -197,12 +197,22 @@ public final class AuroraBridge {
                                           final long periodTicks) {
             final Plugin plugin = (Plugin)owner;
             final var scheduler = Bukkit.getAsyncScheduler();
+            // Folia's async scheduler only times the work; the Resource Governor's bounded
+            // BRIDGE_IO lane runs it, so legacy async tasks cannot grow into unbounded threads.
+            final Runnable governed = () -> {
+                try {
+                    dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL
+                        .lane(dev.iyanz.sourbycraft.execution.ResourceGovernor.Lane.BRIDGE_IO).execute(body);
+                } catch (final java.util.concurrent.RejectedExecutionException full) {
+                    runtime().telemetry().rejected(plugin.getName());
+                }
+            };
             final var task = periodTicks > 0
-                ? scheduler.runAtFixedRate(plugin, t -> body.run(), Math.max(1L, delayTicks) * MILLIS_PER_TICK,
+                ? scheduler.runAtFixedRate(plugin, t -> governed.run(), Math.max(1L, delayTicks) * MILLIS_PER_TICK,
                     periodTicks * MILLIS_PER_TICK, TimeUnit.MILLISECONDS)
-                : delayTicks > 0 ? scheduler.runDelayed(plugin, t -> body.run(), delayTicks * MILLIS_PER_TICK,
+                : delayTicks > 0 ? scheduler.runDelayed(plugin, t -> governed.run(), delayTicks * MILLIS_PER_TICK,
                     TimeUnit.MILLISECONDS)
-                : scheduler.runNow(plugin, t -> body.run());
+                : scheduler.runNow(plugin, t -> governed.run());
             return task::cancel;
         }
     }

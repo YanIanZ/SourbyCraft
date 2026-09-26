@@ -18,12 +18,12 @@ import org.bukkit.command.CommandSender;
 /** Read-only diagnostics: one immutable generation per invocation, no world/OS queries. */
 public final class PerfCommand extends Command {
     static final List<String> VIEWS =
-        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "region", "health");
+        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "region", "health");
 
     public PerfCommand(final String name) {
         super(name);
         this.description = "SourbyCraft performance diagnostics";
-        this.usageMessage = "/" + name + (name.equals("ram") ? "" : " [tick|cpu|memory|gc|region|health]");
+        this.usageMessage = "/" + name + (name.equals("ram") ? "" : " [" + String.join("|", VIEWS) + "]");
         this.setPermission("sourbycraft.command." + name);
     }
 
@@ -89,6 +89,12 @@ public final class PerfCommand extends Command {
         }
         if (view.equals("async")) {
             renderAsyncPath(lines);
+        }
+        if (view.equals("network")) {
+            renderNetwork(lines);
+        }
+        if (view.equals("governor")) {
+            renderGovernor(lines);
         }
         if (view.equals("overview") || view.equals("region")) {
             final boolean known = snapshot.freshness().state() != MetricState.UNAVAILABLE;
@@ -164,6 +170,40 @@ public final class PerfCommand extends Command {
         add(lines, "Legacy caller-run solves", count(stats.inline())
             + (stats.inline() > 0 ? "  — unexpected on this build" : ""));
         add(lines, "Refused (saturation / shutdown)", count(stats.refused()));
+    }
+
+    /** Wire and packet rates from the network counters; totals since start beside them. */
+    private static void renderNetwork(final List<Component> lines) {
+        final var counters = dev.iyanz.sourbycraft.perf.NetworkCounters.GLOBAL;
+        final var rates = counters.rates();
+        final var totals = counters.totals(System.nanoTime());
+        if (!rates.available()) {
+            add(lines, "Network rates", "unavailable until two collector samples exist");
+        } else {
+            add(lines, "Bytes in / out per second", bytes((long)rates.bytesInPerSecond()) + " / "
+                + bytes((long)rates.bytesOutPerSecond()) + " (wire, after compression)");
+            add(lines, "Packets in / out per second", TpsCommand.value(rates.packetsInPerSecond(), 1) + " / "
+                + TpsCommand.value(rates.packetsOutPerSecond(), 1));
+        }
+        add(lines, "Total bytes in / out", bytes(totals.bytesIn()) + " / " + bytes(totals.bytesOut()));
+        add(lines, "Total packets in / out", count(totals.packetsIn()) + " / " + count(totals.packetsOut()));
+        add(lines, "Connections opened", count(totals.connections()));
+    }
+
+    /** Budgets and counters for each Resource Governor lane that has been used. */
+    private static void renderGovernor(final List<Component> lines) {
+        final var stats = dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.stats();
+        if (stats.isEmpty()) {
+            add(lines, "Resource Governor", "no governed lane has been used yet");
+            return;
+        }
+        for (final var lane : stats) {
+            add(lines, lane.name() + " budget", lane.threads() + " threads, queue " + lane.queueCapacity());
+            add(lines, lane.name() + " active / queued / peak queued",
+                lane.active() + " / " + lane.queued() + " / " + lane.peakQueued());
+            add(lines, lane.name() + " submitted / completed / failed / rejected", lane.submitted() + " / "
+                + lane.completed() + " / " + lane.failed() + " / " + lane.rejected());
+        }
     }
 
     public static String health(final PerformanceSnapshot snapshot) {
