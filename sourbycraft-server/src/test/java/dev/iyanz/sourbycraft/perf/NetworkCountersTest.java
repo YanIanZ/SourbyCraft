@@ -66,4 +66,15 @@ class NetworkCountersTest {
         assertSame(packet, channel.readInbound());
         channel.finishAndReleaseAll();
     }
+
+    @Test
+    void disabledCountersStopCounting() {
+        final NetworkCounters counters = new NetworkCounters();
+        counters.bytesIn(10);
+        counters.setEnabled(false);
+        counters.bytesIn(10);
+        counters.packetOut();
+        assertEquals(10, counters.totals(0L).bytesIn());
+        assertEquals(0, counters.totals(0L).packetsOut());
+    }
 }

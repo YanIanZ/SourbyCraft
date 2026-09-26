@@ -22,21 +22,16 @@ public final class ResourceGovernor {
          * Async work of plugins running through the Aurora Bridge. Bounded so legacy plugins cannot
          * turn unlimited concurrent async tasks into unlimited threads.
          */
-        BRIDGE_IO("Bridge I/O", "SourbyCraft-BridgeIO-",
-            Math.max(2, Runtime.getRuntime().availableProcessors() / 4), 256),
-        /** Aurora World Fabric commits. One thread: commits to one store are serialized anyway. */
-        STORAGE("Storage", "SourbyCraft-Storage-", 1, 64);
+        BRIDGE_IO("Bridge I/O", "SourbyCraft-BridgeIO-"),
+        /** Aurora World Fabric commits. One thread by default: commits to one store are serialized anyway. */
+        STORAGE("Storage", "SourbyCraft-Storage-");
 
         private final String display;
         private final String threadPrefix;
-        private final int threads;
-        private final int queue;
 
-        Lane(final String display, final String threadPrefix, final int threads, final int queue) {
+        Lane(final String display, final String threadPrefix) {
             this.display = display;
             this.threadPrefix = threadPrefix;
-            this.threads = threads;
-            this.queue = queue;
         }
 
         public String display() {
@@ -52,11 +47,26 @@ public final class ResourceGovernor {
     public static final ResourceGovernor GLOBAL = new ResourceGovernor();
 
     private final Map<Lane, GovernedLane> lanes = new ConcurrentHashMap<>();
+    private volatile dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler budgets =
+        dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler.DEFAULT;
 
-    /** The lane, created on first use with its budget. */
+    /**
+     * Sets the budgets lanes are created with. A lane that already exists keeps its budget until
+     * restart (RESTART_REQUIRED); the config reload summary says so.
+     */
+    public void configure(final dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler scheduler) {
+        this.budgets = java.util.Objects.requireNonNull(scheduler, "scheduler");
+    }
+
+    /** The lane, created on first use with its configured budget. */
     public GovernedLane lane(final Lane lane) {
-        return this.lanes.computeIfAbsent(lane,
-            l -> new GovernedLane(l.display, l.threadPrefix, l.threads, l.queue));
+        return this.lanes.computeIfAbsent(lane, l -> {
+            final var b = this.budgets;
+            return switch (l) {
+                case BRIDGE_IO -> new GovernedLane(l.display, l.threadPrefix, b.resolvedBridgeIoThreads(), b.bridgeIoQueue());
+                case STORAGE -> new GovernedLane(l.display, l.threadPrefix, b.resolvedStorageThreads(), b.storageQueue());
+            };
+        });
     }
 
     /** Stats for lanes that have been used, in declaration order. */

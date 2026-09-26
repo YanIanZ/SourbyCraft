@@ -60,6 +60,17 @@ class ResourceGovernorTest {
     }
 
     @Test
+    void configuredBudgetsApplyToLanesCreatedAfterwards() {
+        final ResourceGovernor governor = new ResourceGovernor();
+        governor.configure(new dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler(3, 7, 2, 5));
+        assertEquals(3, governor.lane(ResourceGovernor.Lane.BRIDGE_IO).stats().threads());
+        assertEquals(7, governor.lane(ResourceGovernor.Lane.BRIDGE_IO).stats().queueCapacity());
+        assertEquals(2, governor.lane(ResourceGovernor.Lane.STORAGE).stats().threads());
+        governor.configure(dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler.DEFAULT);
+        assertEquals(3, governor.lane(ResourceGovernor.Lane.BRIDGE_IO).stats().threads(), "never resized");
+    }
+
+    @Test
     void aBudgetNeedsAThreadAndAQueueSlot() {
         assertThrows(IllegalArgumentException.class, () -> new GovernedLane("x", "p-", 0, 1));
         assertThrows(IllegalArgumentException.class, () -> new GovernedLane("x", "p-", 1, 0));
