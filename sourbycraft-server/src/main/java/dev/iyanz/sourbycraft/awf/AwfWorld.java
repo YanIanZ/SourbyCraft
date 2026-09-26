@@ -28,6 +28,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * both via {@link LayeredSource}) until the first write, which makes the chunk world-owned. The base
  * is never written, so any number of instances can share one template and stay isolated.</p>
  *
+ * <p><b>Memory bound.</b> With a resident limit, chunks beyond it that are clean — committed to the
+ * store and not rewritten since — are dropped after a save, least recently used first. A dropped
+ * chunk is read back from the store. Dirty chunks are never dropped, so the limit can be exceeded
+ * by unsaved work; that is the price of never losing a write.</p>
+ *
  * <p><b>Scope.</b> This is the AWF runtime model with tests. The server's chunk system does not read
  * from or save to it yet; wiring it in means patching chunk load/save in the engine, which has not
  * been done.</p>
@@ -44,12 +49,27 @@ public final class AwfWorld {
     private final Map<ChunkKey, Long> dirty = new ConcurrentHashMap<>();
     private final AtomicLong versions = new AtomicLong();
     private final ConcurrentLinkedDeque<Long> pendingSaves = new ConcurrentLinkedDeque<>();
+    /** Last access, by a monotonic counter, for least-recently-used eviction. */
+    private final Map<ChunkKey, Long> lastAccess = new ConcurrentHashMap<>();
+    private final AtomicLong accessClock = new AtomicLong();
+    private final int residentLimit;
+    private final AtomicLong evicted = new AtomicLong();
 
     /**
      * @param base where unowned chunks are read from, or {@code null} for an empty world
      * @param store where commits go, or {@code null} for a world that is never persisted
      */
     public AwfWorld(final String name, final WorldRole role, final ChunkSource base, final AwfWorldStore store) {
+        this(name, role, base, store, 0);
+    }
+
+    /**
+     * @param residentLimit world-owned chunks kept in memory after a save; 0 means unlimited
+     */
+    public AwfWorld(final String name, final WorldRole role, final ChunkSource base, final AwfWorldStore store,
+                    final int residentLimit) {
+        if (residentLimit < 0) throw new IllegalArgumentException("residentLimit must be >= 0");
+        this.residentLimit = residentLimit;
         this.name = Objects.requireNonNull(name, "name");
         this.role = Objects.requireNonNull(role, "role");
         this.base = base;
@@ -71,7 +91,14 @@ public final class AwfWorld {
     public Optional<byte[]> read(final ChunkKey key) throws IOException {
         final byte[] mine = this.owned.get(key);
         if (mine != null) {
+            this.lastAccess.put(key, this.accessClock.incrementAndGet());
             return Optional.of(mine.clone());
+        }
+        // A chunk this world wrote, committed and then dropped from memory lives in the store.
+        if (this.store != null && this.store.keys().contains(key)) {
+            final Optional<byte[]> committed = this.store.read(key);
+            committed.ifPresent(bytes -> this.metrics.bytesRead.addAndGet(bytes.length));
+            return committed;
         }
         if (this.base == null) return Optional.empty();
         final Optional<byte[]> fromBase = this.base.read(key);
@@ -85,6 +112,7 @@ public final class AwfWorld {
     /** Every chunk this world can return. */
     public Set<ChunkKey> keys() {
         final Set<ChunkKey> keys = new TreeSet<>(this.owned.keySet());
+        if (this.store != null) keys.addAll(this.store.keys());
         if (this.base != null) keys.addAll(this.base.keys());
         return keys;
     }
@@ -96,10 +124,16 @@ public final class AwfWorld {
         }
         this.owned.put(key, serialized.clone());
         this.dirty.put(key, this.versions.incrementAndGet());
+        this.lastAccess.put(key, this.accessClock.incrementAndGet());
     }
 
     /** Whether a chunk has been written in this world rather than read through from the base. */
     public boolean owns(final ChunkKey key) {
+        return this.owned.containsKey(key) || (this.store != null && this.store.keys().contains(key));
+    }
+
+    /** Whether a chunk's bytes are currently held in memory. */
+    public boolean resident(final ChunkKey key) {
         return this.owned.containsKey(key);
     }
 
@@ -145,6 +179,7 @@ public final class AwfWorld {
                 this.metrics.backend.record(System.nanoTime() - begun);
                 this.metrics.bytesWritten.addAndGet(r.bytesWritten());
                 taken.forEach(this.dirty::remove);
+                evictCleanBeyondLimit();
                 return r;
             } catch (final IOException failure) {
                 if (attempt < maxAttempts) {
@@ -158,6 +193,33 @@ public final class AwfWorld {
                 throw failure;
             }
         }
+    }
+
+    /**
+     * Drops clean world-owned chunks, least recently used first, until at most
+     * {@code residentLimit} remain. Runs on the storage lane after a successful commit.
+     */
+    private void evictCleanBeyondLimit() {
+        if (this.residentLimit == 0 || this.owned.size() <= this.residentLimit) return;
+        final java.util.List<Map.Entry<ChunkKey, byte[]>> clean = new java.util.ArrayList<>();
+        for (final Map.Entry<ChunkKey, byte[]> e : this.owned.entrySet()) {
+            if (!this.dirty.containsKey(e.getKey())) clean.add(Map.entry(e.getKey(), e.getValue()));
+        }
+        clean.sort(java.util.Comparator.comparingLong(e -> this.lastAccess.getOrDefault(e.getKey(), 0L)));
+        for (final Map.Entry<ChunkKey, byte[]> e : clean) {
+            if (this.owned.size() <= this.residentLimit) break;
+            // Only the exact bytes observed as clean: a write since then replaced the array and
+            // re-dirtied the chunk, and must stay.
+            if (!this.dirty.containsKey(e.getKey()) && this.owned.remove(e.getKey(), e.getValue())) {
+                this.lastAccess.remove(e.getKey());
+                this.evicted.incrementAndGet();
+            }
+        }
+    }
+
+    /** Clean chunks dropped from memory by the resident limit. */
+    public long evicted() {
+        return this.evicted.get();
     }
 
     public AwfMetrics.Snapshot metrics() {

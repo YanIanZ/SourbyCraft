@@ -62,7 +62,9 @@ been done.
   caller-supplied executor (the governor's `STORAGE` lane is meant for this), with bounded
   retries; a chunk rewritten during a save stays dirty. Metrics: resident/dirty chunks, save queue
   depth, oldest pending save, serialization and backend p50/p95/p99, retries, failures, bytes read
-  and written, and materialised chunks. `AwfRegistry` counts loaded worlds.
+  and written, and materialised chunks. `AwfRegistry` counts loaded worlds. An optional resident
+  limit drops clean chunks LRU after each save; they are read back from the store, and dirty
+  chunks are never dropped.
 - `WorldRole`: the six roles and their write rules.
 
 Not implemented: MongoDB/MySQL/Redis backends; a SlimeLoader compatibility adapter; engine

@@ -22,7 +22,7 @@ heap-retention test under player churn is still open.
 | `startup/StartupTimeline` | `PHASES` | Process lifetime | Boot stages + index phases |
 | `startup/StartupIndexStage` | `last`, `lastGraph` | Replaced each boot | Jar count |
 | `awf/AwfRegistry` | `worlds` | `unregister` | Loaded AWF worlds (none today: AWF is not wired) |
-| `awf/AwfWorld` | `owned` (chunk → bytes) | Replaced on write; dropped with the world | Chunks written in this world. **No eviction.** Holding every written chunk is the model's cost and must be bounded before AWF is wired to real worlds |
+| `awf/AwfWorld` | `owned` (chunk → bytes), `lastAccess` | Replaced on write; clean chunks beyond `residentLimit` dropped LRU after each save and read back from the store | `residentLimit` + dirty chunks. With limit 0 (the default) it is unbounded |
 | `awf/AwfWorld` | `dirty` | Cleared by a successful save | ≤ `owned` |
 | `awf/AwfWorld` | `pendingSaves` | Removed on completion | ≤ `STORAGE` queue + threads |
 | `awf/LatencyRecorder` | ring | Overwritten | 1024 samples |
@@ -30,10 +30,10 @@ heap-retention test under player churn is still open.
 ## Findings
 
 - Every collection in this table is either bounded or tied to something bounded (online
-  players, plugins, config keys, lanes). The one exception is `AwfWorld.owned`. It is unbounded
-  by design: a world's written chunks stay resident until the world is dropped. That is a
-  blocker for wiring AWF into real worlds, and is recorded as such in
-  [aurora-world-fabric.md](aurora-world-fabric.md).
+  players, plugins, config keys, lanes). `AwfWorld.owned` is bounded when a `residentLimit` is
+  set: clean chunks are dropped LRU after a save. Dirty chunks are never dropped, so unsaved
+  work can exceed the limit until the next save. Whoever wires AWF into real worlds must pass a
+  limit.
 - Completed work does not accumulate:
   - A one-shot bridged task leaves `scheduled` when it runs (`BridgeRuntimeTest`
     `aOneShotTaskIsForgottenAfterItRuns`).
