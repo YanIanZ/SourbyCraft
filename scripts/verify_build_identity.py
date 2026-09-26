@@ -13,9 +13,10 @@ def verify(jar, number, channel=None):
         info = properties(archive.read("META-INF/sourbycraft-build.properties").decode())
         manifest = archive.read("META-INF/MANIFEST.MF").decode().replace("\r\n ", "")
     attributes = dict(line.split(": ", 1) for line in manifest.splitlines() if ": " in line)
-    if info["buildNumber"] != str(number) or info["build"] != f"{number}c":
+    # Build 47+: the public identity is "Build N" with no upstream-platform letter.
+    if info["buildNumber"] != str(number) or info["build"] != str(number):
         raise ValueError("Build properties do not match release number")
-    if attributes["Implementation-Version"] != f"build {number}c":
+    if attributes["Implementation-Version"] != f"Build {number}":
         raise ValueError("Manifest differs from build properties")
     if channel is not None and not info.get("version", "").endswith("-" + channel):
         raise ValueError("Build channel differs from expected artifact channel")
