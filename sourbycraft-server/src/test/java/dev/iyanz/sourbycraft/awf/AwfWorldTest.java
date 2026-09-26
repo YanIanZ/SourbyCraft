@@ -139,6 +139,42 @@ class AwfWorldTest {
     }
 
     @Test
+    void cleanChunksBeyondTheLimitAreDroppedLeastRecentlyUsedFirstAndReadBackFromTheStore() throws Exception {
+        final AwfWorld world = new AwfWorld("lru", WorldRole.VANILLA, null,
+            AwfWorldStore.open(this.dir.resolve("lru"), WorldRole.VANILLA, 1), 2);
+        for (int i = 0; i < 4; i++) world.write(new ChunkKey(i, 0), b("c" + i));
+        world.read(new ChunkKey(0, 0)); // touch 0: now most recently used
+        world.save(PersistenceMode.INCREMENTAL, Runnable::run, 1).toCompletableFuture().get();
+
+        assertEquals(2, world.evicted());
+        assertEquals(2, world.metrics().residentChunks());
+        assertTrue(world.resident(new ChunkKey(0, 0)), "recently read, kept");
+        assertTrue(world.resident(new ChunkKey(3, 0)), "most recently written, kept");
+        assertFalse(world.resident(new ChunkKey(1, 0)));
+        assertTrue(world.owns(new ChunkKey(1, 0)), "dropped from memory, still this world's chunk");
+        assertArrayEquals(b("c1"), world.read(new ChunkKey(1, 0)).orElseThrow(), "read back from the store");
+    }
+
+    @Test
+    void dirtyChunksAreNeverDropped() throws Exception {
+        final List<Runnable> queued = new ArrayList<>();
+        final AwfWorld world = new AwfWorld("d", WorldRole.VANILLA, null,
+            AwfWorldStore.open(this.dir.resolve("d"), WorldRole.VANILLA, 1), 1);
+        world.write(new ChunkKey(0, 0), b("a"));
+        world.write(new ChunkKey(1, 0), b("b"));
+        final var pending = world.save(PersistenceMode.INCREMENTAL, queued::add, 1).toCompletableFuture();
+        // Rewritten after the save was queued but before it ran: the save commits it, and
+        // eviction must still not drop anything a later write dirtied.
+        queued.remove(0).run();
+        pending.get();
+        world.write(new ChunkKey(2, 0), b("c"));
+        world.write(new ChunkKey(3, 0), b("d"));
+        assertEquals(3, world.metrics().residentChunks(), "1 clean kept by the limit + 2 dirty");
+        assertTrue(world.resident(new ChunkKey(2, 0)));
+        assertTrue(world.resident(new ChunkKey(3, 0)));
+    }
+
+    @Test
     void latencyPercentilesAreNearestRank() {
         final LatencyRecorder r = new LatencyRecorder();
         for (int i = 1; i <= 100; i++) r.record(i * 1_000_000L);
