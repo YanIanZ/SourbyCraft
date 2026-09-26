@@ -11,7 +11,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -48,7 +47,10 @@ public final class AwfWorld {
     /** Dirty chunks and the write version that dirtied them. */
     private final Map<ChunkKey, Long> dirty = new ConcurrentHashMap<>();
     private final AtomicLong versions = new AtomicLong();
-    private final ConcurrentLinkedDeque<Long> pendingSaves = new ConcurrentLinkedDeque<>();
+    /** Saves queued or running, by enqueue time; bounded so a stalled backend cannot pile them up. */
+    static final int MAX_PENDING_SAVES = 16;
+    private final java.util.concurrent.ArrayBlockingQueue<Long> pendingSaves =
+        new java.util.concurrent.ArrayBlockingQueue<>(MAX_PENDING_SAVES);
     /** Last access, by a monotonic counter, for least-recently-used eviction. */
     private final Map<ChunkKey, Long> lastAccess = new ConcurrentHashMap<>();
     private final AtomicLong accessClock = new AtomicLong();
@@ -151,8 +153,15 @@ public final class AwfWorld {
                 "a " + this.role + " world in " + mode + " mode does not save"));
         }
         if (maxAttempts < 1) throw new IllegalArgumentException("maxAttempts must be at least 1");
+        // Removal is by equals: two saves enqueued in the same nanosecond share a value, and each
+        // completion removes one of them, which keeps the count right.
         final Long enqueued = System.nanoTime();
-        this.pendingSaves.addLast(enqueued);
+        if (!this.pendingSaves.offer(enqueued)) {
+            this.metrics.failures.incrementAndGet();
+            return CompletableFuture.failedFuture(new java.util.concurrent.RejectedExecutionException(
+                MAX_PENDING_SAVES + " saves already pending for " + this.name
+                    + "; the backend is not keeping up, refusing rather than queueing more"));
+        }
         final CompletableFuture<AwfWorldStore.CommitResult> result;
         try {
             result = CompletableFuture.supplyAsync(() -> commit(mode, maxAttempts), storageLane);
@@ -223,7 +232,7 @@ public final class AwfWorld {
     }
 
     public AwfMetrics.Snapshot metrics() {
-        final Long oldest = this.pendingSaves.peekFirst();
+        final Long oldest = this.pendingSaves.peek();
         return new AwfMetrics.Snapshot(this.owned.size(), this.dirty.size(), this.pendingSaves.size(),
             oldest == null ? 0L : (System.nanoTime() - oldest) / 1_000_000L,
             this.metrics.serialization.percentiles(), this.metrics.backend.percentiles(),
