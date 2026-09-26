@@ -39,6 +39,12 @@ public final class StartupIndexStage {
                 }
             });
         last = result;
+        for (final PluginStartupIndex.Indexed indexed : result.plugins()) {
+            if (indexed.descriptor() != null) {
+                dev.iyanz.sourbycraft.bridge.AuroraBridge.startupCacheState(indexed.descriptor().name(),
+                    indexed.cacheHit() ? "hit" : "miss");
+            }
+        }
 
         final StartupTelemetry.Summary t = result.telemetry();
         SourbyLogger.info(String.format(Locale.ROOT,
@@ -48,7 +54,10 @@ public final class StartupIndexStage {
         final var undeclared = result.undeclared();
         if (!undeclared.isEmpty()) {
             SourbyLogger.warn(undeclared.size() + " plugin(s) do not declare folia-supported or "
-                + "canvas-supported and will be refused by the region-threading base: "
+                + "canvas-supported and will be "
+                + (dev.iyanz.sourbycraft.bridge.AuroraBridge.runtimeMode() == dev.iyanz.sourbycraft.config.AuroraConfig.BridgeMode.SAFE
+                    ? "loaded through the Aurora Bridge (aurora.bridge.mode = safe): "
+                    : "refused by the region-threading base (aurora.bridge.mode = off): ")
                 + undeclared.stream().map(p -> p.descriptor().name()).collect(Collectors.joining(", ")));
         }
     }

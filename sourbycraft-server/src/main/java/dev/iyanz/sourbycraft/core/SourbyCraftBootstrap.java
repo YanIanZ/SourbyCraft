@@ -99,6 +99,8 @@ public final class SourbyCraftBootstrap {
         // ORDERING: must precede CraftServer#loadPlugins, or load failures go uncaptured for /sys.
         stage("plugin diagnostics", () -> {
             PluginLoadDiagnostics.install();
+            // Folia no longer cancels Bukkit-scheduler tasks on disable; bridged ones must be.
+            dev.iyanz.sourbycraft.bridge.AuroraBridge.registerListener(owner);
         });
 
         // ORDERING: must precede CraftServer#loadPlugins so the operator learns which jars the

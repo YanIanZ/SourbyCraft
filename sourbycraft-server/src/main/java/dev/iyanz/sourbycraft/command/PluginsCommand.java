@@ -2,6 +2,8 @@ package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
 import dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics;
+import dev.iyanz.sourbycraft.bridge.AuroraBridge;
+import dev.iyanz.sourbycraft.bridge.BridgeTelemetry;
 import dev.iyanz.sourbycraft.bridge.CompatibilityClassifier;
 import dev.iyanz.sourbycraft.bridge.CompatibilityState;
 import dev.iyanz.sourbycraft.util.BarUtil;
@@ -31,7 +33,7 @@ public class PluginsCommand extends Command {
     public PluginsCommand(String n) {
         super(n);
         this.description = "Plugin list";
-        this.usageMessage = "/plugins";
+        this.usageMessage = "/plugins [plugin]";
         this.setPermission("sourbycraft.command.plugins");
     }
 
@@ -41,9 +43,8 @@ public class PluginsCommand extends Command {
             plugin.getPluginMeta().isFoliaSupported(),
             plugin.isEnabled(),
             PluginLoadDiagnostics.enableFailed(plugin.getName()),
-            // No bridge adapter exists yet; the base refuses undeclared plugins at load.
-            false,
-            false));
+            AuroraBridge.bridgeInitialized(plugin),
+            AuroraBridge.fatalViolation(plugin)));
     }
 
     static TextColor colorOf(final CompatibilityState state) {
@@ -55,10 +56,50 @@ public class PluginsCommand extends Command {
         };
     }
 
+    /** One plugin's compatibility state and, when bridged, its bridge telemetry. */
+    private boolean detail(final CommandSender s, final String name) {
+        final Plugin plugin = Bukkit.getPluginManager().getPlugin(name);
+        if (plugin == null) {
+            s.sendMessage(text("No loaded plugin named " + name, SourbyCraftColors.DANGER));
+            return true;
+        }
+        final CompatibilityState state = stateOf(plugin);
+        s.sendMessage(text(DIVIDER, SourbyCraftColors.PRIMARY));
+        s.sendMessage(text()
+            .append(text(plugin.getName() + " ", SourbyCraftColors.HEADER))
+            .append(text(state.display(), colorOf(state)))
+            .build());
+        final BridgeTelemetry.PluginStats stats = AuroraBridge.stats(plugin);
+        if (stats == null) {
+            s.sendMessage(text("  Not bridged: declares region-threading support or was not admitted.",
+                SourbyCraftColors.LABEL));
+        } else {
+            line(s, "Scheduler redirects", Long.toString(stats.schedulerRedirects()));
+            line(s, "Owner handoffs", Long.toString(stats.ownerHandoffs()));
+            line(s, "Rejected operations", Long.toString(stats.rejectedOperations()));
+            line(s, "Fatal violations", Long.toString(stats.fatalViolations()));
+            line(s, "Quarantined", stats.quarantined() ? "yes" : "no");
+            line(s, "Startup cache", stats.startupCacheState());
+            line(s, "Last failure", stats.lastFailure() == null ? "none" : stats.lastFailure());
+        }
+        s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
+        return true;
+    }
+
+    private static void line(final CommandSender s, final String label, final String value) {
+        s.sendMessage(text()
+            .append(text("  " + label + ": ", SourbyCraftColors.LABEL))
+            .append(text(value, SourbyCraftColors.VALUE))
+            .build());
+    }
+
     /** Renders the branded plugin roster as one comma-separated "Name vX" line per plugin. */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
+        if (args.length == 1) {
+            return detail(s, args[0]);
+        }
         Plugin[] pl = Bukkit.getPluginManager().getPlugins();
         long active = Arrays.stream(pl).filter(Plugin::isEnabled).count();
         var loadFailures = PluginLoadDiagnostics.recent();

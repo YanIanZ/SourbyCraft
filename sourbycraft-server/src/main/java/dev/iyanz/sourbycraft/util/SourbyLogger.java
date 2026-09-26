@@ -23,6 +23,8 @@ public final class SourbyLogger {
     public static void info(String msg)     { LOG.log(Level.INFO, msg); }
     /** Logs at WARNING. */
     public static void warn(String msg)     { LOG.log(Level.WARNING, msg); }
+    /** Logs at WARNING with a throwable. */
+    public static void warn(String msg, Throwable t) { LOG.log(Level.WARNING, msg, t); }
     /** Logs at SEVERE. */
     public static void error(String msg)    { LOG.log(Level.SEVERE, msg); }
     /** Logs at SEVERE with a stack trace. */
