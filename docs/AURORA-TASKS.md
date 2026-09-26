@@ -183,10 +183,10 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 
 ## J. Aurora release gate
 
-- [ ] patch regeneration clean
-- [ ] Java tests pass
-- [ ] boot pass
-- [ ] shutdown pass
+- [x] patch regeneration clean — CI run 437 (`a5fc62a7`, 2026-09-26): `applyAllPatches` including the Build 47 Paper patches
+- [x] Java tests pass — CI run 437 (`a5fc62a7`, 2026-09-26): `:sourbyapi:test :sourbycraft-server:test :test-plugin:test` (9480 tests, 7 skipped) and 219 Python tests
+- [x] boot pass — CI run 437 (`a5fc62a7`, 2026-09-26): boot to `Done (` with the test plugin, both metrics markers, `/tps` `/mspt` spark RAM PERF output markers (single CI boot, not a soak)
+- [x] shutdown pass — CI run 437 (`a5fc62a7`, 2026-09-26): `stop`, worlds and player data saved, RegionFile I/O drained, clean exit
 - [ ] restart persistence pass
 - [ ] representative benchmark report
 - [ ] JFR reviewed
