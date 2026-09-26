@@ -45,14 +45,14 @@ public enum ExecutionLane {
     BACKGROUND("Engine background", "Worker-Main"),
 
     /** Reading and writing world data. */
-    WORLD_IO("World I/O", "Dimension-Data-IO-Worker", "Paper I/O Worker", "SourbyCraft-IO"),
+    WORLD_IO("World I/O", "Dimension-Data-IO-Worker", "Paper I/O Worker", "SourbyCraft-IO", "SourbyCraft-Storage-"),
 
     /** Packet encode, decode and socket work. */
     NETWORK("Network", "Netty Epoll IO", "Netty Kqueue IO", "Netty NIO IO", "Netty Server IO"),
 
     /** Plugin work that already runs off the region: async tasks and command completion. */
     PLUGIN_ASYNC("Plugin async", "Paper Async Task Handler", "Paper Async Command Builder",
-        "Craft Scheduler Thread"),
+        "Craft Scheduler Thread", "SourbyCraft-BridgeIO-"),
 
     /** Sourby-owned computation on snapshots, which touches nothing a region owns. */
     ASYNC_COMPUTE("Async compute", "SourbyCraft-AsyncPath"),

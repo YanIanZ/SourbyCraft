@@ -55,13 +55,15 @@ public final class SourbyCraftBootstrap {
         catch (Throwable failure) { SourbyLogger.error("Path worker shutdown failed", failure); }
         try { VirtualExecutor.shutdown(); }
         catch (Throwable failure) { SourbyLogger.error("I/O shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.shutdown(10_000L); }
+        catch (Throwable failure) { SourbyLogger.error("Resource Governor shutdown failed", failure); }
         AuroraRuntime.transition(AuroraRuntime.State.STOPPED);
     }
 
     /**
-     * Starts metrics, configuration, plugin config provisioning, branding, diagnostics, the startup
-     * index, commands, listeners, player-slot settings, I/O workers, the updater and GC sampling,
-     * in that order.
+     * Starts metrics, network counters, configuration, plugin config provisioning, branding,
+     * diagnostics, the startup index, commands, listeners, player-slot settings, I/O workers, the
+     * updater and GC sampling, in that order.
      * A second invocation is a no-op, including after a partially failed startup. Individual stage
      * failures are logged and counted without skipping subsequent stages.
      */
@@ -79,6 +81,11 @@ public final class SourbyCraftBootstrap {
         // Before command and plugin loading; shutdown keeps it readable through plugin disable.
         stage("metrics runtime", () -> {
             dev.iyanz.sourbycraft.perf.MetricsRuntime.start(org.bukkit.Bukkit.getServicesManager(), owner);
+        });
+
+        // Wire bytes and packets per direction; rates are sampled by the metrics collector.
+        stage("network counters", () -> {
+            dev.iyanz.sourbycraft.perf.NetworkMetrics.install();
         });
 
         // The unified TOML: messages, /maxp, auto-updater settings.
@@ -155,7 +162,7 @@ public final class SourbyCraftBootstrap {
     }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
-    private static final int TOTAL_STAGES = 12;
+    private static final int TOTAL_STAGES = 13;
     private static int stageCount;
     private static int failureCount;
     private static final java.util.List<String> progress = new java.util.ArrayList<>();
