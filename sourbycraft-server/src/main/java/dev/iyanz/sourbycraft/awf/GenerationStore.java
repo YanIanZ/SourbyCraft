@@ -207,6 +207,37 @@ public final class GenerationStore {
         return new Generation(pointer.generation, verify(dir, manifestBytes));
     }
 
+    /**
+     * Every retained committed generation that still verifies, newest first. A retained
+     * generation that fails verification is skipped, not returned: callers use this to decide what
+     * must be kept, and damaged data keeps nothing alive.
+     */
+    public synchronized java.util.List<Generation> readRetained() throws IOException {
+        refuseRegionThread();
+        final Pointer pointer = readPointer();
+        if (pointer == null) return java.util.List.of();
+        final java.util.List<Generation> out = new java.util.ArrayList<>();
+        final java.util.List<Long> numbers = new java.util.ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(this.root.resolve(GENERATIONS))) {
+            for (final Path dir : stream) {
+                final String name = dir.getFileName().toString();
+                if (isNumber(name) && Long.parseLong(name) <= pointer.generation) numbers.add(Long.parseLong(name));
+            }
+        }
+        numbers.sort(Comparator.reverseOrder());
+        for (final long number : numbers) {
+            final Path dir = this.root.resolve(GENERATIONS).resolve(Long.toString(number));
+            try {
+                final byte[] manifest = Files.readAllBytes(dir.resolve(MANIFEST));
+                if (number == pointer.generation && !sha256(manifest).equals(pointer.manifestSha)) continue;
+                out.add(new Generation(number, verify(dir, manifest)));
+            } catch (final IOException damaged) {
+                // Skipped: see above.
+            }
+        }
+        return out;
+    }
+
     private void recover() throws IOException {
         final Path generations = this.root.resolve(GENERATIONS);
         Files.deleteIfExists(this.root.resolve(CURRENT + ".tmp"));
