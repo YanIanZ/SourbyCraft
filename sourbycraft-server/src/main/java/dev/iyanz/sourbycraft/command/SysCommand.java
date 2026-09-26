@@ -173,6 +173,24 @@ public class SysCommand extends Command {
                     SourbyCraftColors.DIM))
                 .build());
         }
+        final var profile = dev.iyanz.sourbycraft.startup.StartupTimeline.last();
+        if (profile != null) {
+            s.sendMessage(text()
+                .append(text("  Startup: ", SourbyCraftColors.HEADER))
+                .append(text(profile.totalMillis() + " ms to ready (" + profile.startClass() + ")",
+                    SourbyCraftColors.VALUE))
+                .append(text("  " + profile.compareTo(dev.iyanz.sourbycraft.startup.StartupTimeline.previous()),
+                    SourbyCraftColors.DIM))
+                .build());
+        }
+        final var graph = dev.iyanz.sourbycraft.startup.StartupIndexStage.lastGraph();
+        if (graph != null && !graph.clean()) {
+            s.sendMessage(text()
+                .append(text("  Dependencies: ", SourbyCraftColors.HEADER))
+                .append(text(graph.missing().size() + " plugin(s) missing a hard dependency, "
+                    + graph.cycles().size() + " cycle(s)", SourbyCraftColors.DANGER))
+                .build());
+        }
 
         s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
         return true;

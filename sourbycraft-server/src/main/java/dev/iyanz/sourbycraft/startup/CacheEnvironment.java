@@ -24,7 +24,7 @@ public record CacheEnvironment(String minecraftVersion, int sourbyAbi, int bridg
     /** Bump when the Aurora Bridge's compatibility analysis changes. */
     public static final int BRIDGE_ABI = 1;
     /** Bump when the on-disk layout changes. */
-    public static final int FORMAT_VERSION = 1;
+    public static final int FORMAT_VERSION = 2;
 
     public CacheEnvironment {
         Objects.requireNonNull(minecraftVersion, "minecraftVersion");
