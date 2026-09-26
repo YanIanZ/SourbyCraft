@@ -102,7 +102,12 @@ public final class PerfCommand extends Command {
                 ? snapshot.activeRegionCount() + " / " + snapshot.retainedGenerationCount() : "unavailable");
             add(lines, "Worst / median / aggregate average MSPT", TpsCommand.ms(tick.worstAverageMspt()) + " / "
                 + TpsCommand.ms(tick.medianAverageMspt()) + " / " + TpsCommand.ms(tick.aggregateAverageMspt()));
-            add(lines, "Region coordinates / queues", "not instrumented in this snapshot");
+            final dev.iyanz.sourbycraft.perf.SlowRegion slow = MetricsRuntime.slowestRegion();
+            add(lines, "Slowest region (5s)", slow == null ? "none measured"
+                : "world #" + slow.worldId() + " region #" + slow.regionId() + " gen " + slow.generationId()
+                    + ": " + TpsCommand.ms(slow.averageMspt()) + " avg, " + TpsCommand.ms(slow.maximumMspt())
+                    + " max over " + slow.samples() + " ticks");
+            add(lines, "Region coordinates / queues", "not instrumented");
         }
         if (view.equals("overview") || view.equals("health")) {
             add(lines, "Tick health", health(snapshot));
