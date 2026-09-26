@@ -38,12 +38,17 @@ public final class NetworkCounters {
     final LongAdder connections = new LongAdder();
     private Totals previous;
     private volatile Rates rates = Rates.UNAVAILABLE;
+    private volatile boolean enabled = true;
 
-    public void bytesIn(final long n) { this.bytesIn.add(n); }
-    public void bytesOut(final long n) { this.bytesOut.add(n); }
-    public void packetIn() { this.packetsIn.increment(); }
-    public void packetOut() { this.packetsOut.increment(); }
-    public void connectionOpened() { this.connections.increment(); }
+    /** {@code aurora.network.counters} (LIVE): false stops every increment; totals stop growing. */
+    public void setEnabled(final boolean value) { this.enabled = value; }
+    public boolean enabled() { return this.enabled; }
+
+    public void bytesIn(final long n) { if (this.enabled) this.bytesIn.add(n); }
+    public void bytesOut(final long n) { if (this.enabled) this.bytesOut.add(n); }
+    public void packetIn() { if (this.enabled) this.packetsIn.increment(); }
+    public void packetOut() { if (this.enabled) this.packetsOut.increment(); }
+    public void connectionOpened() { if (this.enabled) this.connections.increment(); }
 
     public Totals totals(final long nowNanos) {
         return new Totals(this.bytesIn.sum(), this.bytesOut.sum(), this.packetsIn.sum(), this.packetsOut.sum(),

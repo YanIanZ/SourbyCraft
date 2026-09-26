@@ -4,15 +4,22 @@ import java.util.List;
 import java.util.Objects;
 
 /** Typed, immutable settings for implemented Aurora behavior only. Parsing never writes config. */
-public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Bridge bridge) {
+public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Bridge bridge, Scheduler scheduler,
+                           Network network) {
     public static final String ASYNC_PATH_KEY = "aurora.entity.async-pathfinding";
     public static final String LEGACY_ASYNC_PATH_KEY = "perf.ai.async-pathfinding";
     public static final String LANE_SAMPLING_KEY = "aurora.diagnostics.lane-sampling";
     public static final String CPU_CORES_KEY = "aurora.cpu.cores";
     public static final String BRIDGE_MODE_KEY = "aurora.bridge.mode";
     public static final String BRIDGE_QUARANTINE_KEY = "aurora.bridge.quarantine-after";
+    public static final String BRIDGE_IO_THREADS_KEY = "aurora.scheduler.bridge-io-threads";
+    public static final String BRIDGE_IO_QUEUE_KEY = "aurora.scheduler.bridge-io-queue";
+    public static final String STORAGE_THREADS_KEY = "aurora.scheduler.storage-threads";
+    public static final String STORAGE_QUEUE_KEY = "aurora.scheduler.storage-queue";
+    public static final String NETWORK_COUNTERS_KEY = "aurora.network.counters";
     public static final AuroraConfig DEFAULT =
-        new AuroraConfig(new Entity(false), new Diagnostics(true), new Cpu(Cpu.AUTO), Bridge.DEFAULT);
+        new AuroraConfig(new Entity(false), new Diagnostics(true), new Cpu(Cpu.AUTO), Bridge.DEFAULT,
+            Scheduler.DEFAULT, Network.DEFAULT);
     public static final Setting ASYNC_PATH = new Setting(ASYNC_PATH_KEY, Lifecycle.LIVE);
     public static final Setting LANE_SAMPLING = new Setting(LANE_SAMPLING_KEY, Lifecycle.LIVE);
     // The region scheduler is sized during GlobalConfiguration load, long before a reload can
@@ -21,17 +28,58 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     // Plugins are admitted or refused once, at load; a reload cannot un-load or re-load them.
     public static final Setting BRIDGE_MODE = new Setting(BRIDGE_MODE_KEY, Lifecycle.RESTART_REQUIRED);
     public static final Setting BRIDGE_QUARANTINE = new Setting(BRIDGE_QUARANTINE_KEY, Lifecycle.LIVE);
+    // Governed lanes are created once with their budget and never resized.
+    public static final Setting SCHEDULER_BUDGETS = new Setting("aurora.scheduler.*", Lifecycle.RESTART_REQUIRED);
+    public static final Setting NETWORK_COUNTERS = new Setting(NETWORK_COUNTERS_KEY, Lifecycle.LIVE);
 
     public AuroraConfig {
         Objects.requireNonNull(entity, "entity");
         Objects.requireNonNull(diagnostics, "diagnostics");
         Objects.requireNonNull(cpu, "cpu");
         Objects.requireNonNull(bridge, "bridge");
+        Objects.requireNonNull(scheduler, "scheduler");
+        Objects.requireNonNull(network, "network");
     }
 
-    /** Settings without a bridge section, which then takes its defaults. */
+    /** Settings without bridge, scheduler or network sections, which then take their defaults. */
     public AuroraConfig(final Entity entity, final Diagnostics diagnostics, final Cpu cpu) {
         this(entity, diagnostics, cpu, Bridge.DEFAULT);
+    }
+
+    /** Settings without scheduler or network sections, which then take their defaults. */
+    public AuroraConfig(final Entity entity, final Diagnostics diagnostics, final Cpu cpu, final Bridge bridge) {
+        this(entity, diagnostics, cpu, bridge, Scheduler.DEFAULT, Network.DEFAULT);
+    }
+
+    /**
+     * Resource Governor lane budgets ({@code docs/architecture/aurora-resource-governor.md}).
+     * {@code 0} threads means the lane's documented default. RESTART_REQUIRED: a lane is created
+     * once, on first use, and never resized.
+     */
+    public record Scheduler(int bridgeIoThreads, int bridgeIoQueue, int storageThreads, int storageQueue) {
+        public static final int AUTO = 0;
+        public static final Scheduler DEFAULT = new Scheduler(AUTO, 256, 1, 64);
+
+        public Scheduler {
+            if (bridgeIoThreads < 0 || storageThreads < 0 || bridgeIoQueue < 1 || storageQueue < 1) {
+                throw new IllegalArgumentException("thread counts must be >= 0 and queues >= 1");
+            }
+        }
+
+        /** Bridge I/O threads on this machine: the setting, or max(2, processors / 4). */
+        public int resolvedBridgeIoThreads() {
+            return this.bridgeIoThreads > 0 ? this.bridgeIoThreads
+                : Math.max(2, Runtime.getRuntime().availableProcessors() / 4);
+        }
+
+        public int resolvedStorageThreads() {
+            return this.storageThreads > 0 ? this.storageThreads : 1;
+        }
+    }
+
+    /** Network measurement settings. {@code counters} stops the per-packet increments (LIVE). */
+    public record Network(boolean counters) {
+        public static final Network DEFAULT = new Network(true);
     }
 
     /**
@@ -122,7 +170,8 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         final var values = snapshot.values();
         // Malformed namespace containers must not expose a legacy true underneath them.
         for (final String parent : List.of("aurora", "aurora.entity", "aurora.diagnostics",
-                                          "aurora.cpu", "aurora.bridge")) {
+                                          "aurora.cpu", "aurora.bridge", "aurora.scheduler",
+                                          "aurora.network")) {
             if (values.containsKey(parent)) return new Parsed(DEFAULT, List.of(parent), List.of());
         }
         final boolean modern = values.containsKey(ASYNC_PATH_KEY);
@@ -187,11 +236,40 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
             }
         }
 
+        final int bridgeIoThreads = intSetting(values, BRIDGE_IO_THREADS_KEY, Scheduler.DEFAULT.bridgeIoThreads(), 0, invalid);
+        final int bridgeIoQueue = intSetting(values, BRIDGE_IO_QUEUE_KEY, Scheduler.DEFAULT.bridgeIoQueue(), 1, invalid);
+        final int storageThreads = intSetting(values, STORAGE_THREADS_KEY, Scheduler.DEFAULT.storageThreads(), 0, invalid);
+        final int storageQueue = intSetting(values, STORAGE_QUEUE_KEY, Scheduler.DEFAULT.storageQueue(), 1, invalid);
+        boolean networkCounters = Network.DEFAULT.counters();
+        final Object countersValue = values.get(NETWORK_COUNTERS_KEY);
+        if (countersValue != null) {
+            if (countersValue instanceof Boolean enabled) {
+                networkCounters = enabled;
+            } else {
+                invalid.add(NETWORK_COUNTERS_KEY);
+            }
+        }
+
         // Each key falls back on its own. A typo in one setting must not silently revert another
         // the operator set deliberately -- only a malformed namespace container, handled above,
         // discards everything, because then nothing underneath it can be trusted.
         return new Parsed(new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling),
-            new Cpu(cores), new Bridge(bridgeMode, quarantineAfter)), List.copyOf(invalid), deprecated);
+            new Cpu(cores), new Bridge(bridgeMode, quarantineAfter),
+            new Scheduler(bridgeIoThreads, bridgeIoQueue, storageThreads, storageQueue), new Network(networkCounters)),
+            List.copyOf(invalid), deprecated);
+    }
+
+    /** A whole number at or above {@code min}, else the default and an invalid-key report. */
+    private static int intSetting(final java.util.Map<String, Object> values, final String key, final int fallback,
+                                  final int min, final List<String> invalid) {
+        final Object value = values.get(key);
+        if (value == null) return fallback;
+        if (value instanceof Number number && number.doubleValue() == Math.floor(number.doubleValue())
+            && number.longValue() >= min && number.longValue() <= 100_000) {
+            return number.intValue();
+        }
+        invalid.add(key);
+        return fallback;
     }
 
     /** Counts only implemented Aurora settings, never upstream or cached utility settings. */
@@ -200,6 +278,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         if (entity.asyncPathfinding() != previous.entity.asyncPathfinding()) changed++;
         if (diagnostics.laneSampling() != previous.diagnostics.laneSampling()) changed++;
         if (bridge.quarantineAfter() != previous.bridge.quarantineAfter()) changed++;
+        if (network.counters() != previous.network.counters()) changed++;
         // Reported separately, never counted as applied. The region scheduler is sized during
         // GlobalConfiguration's load, so a reload cannot reach it; saying "restart required:
         // none" after an operator edited the CPU budget would be telling them it took effect.
@@ -209,6 +288,9 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         }
         if (bridge.mode() != previous.bridge.mode()) {
             restart.add(BRIDGE_MODE_KEY + " (" + previous.bridge.mode() + " -> " + bridge.mode() + ")");
+        }
+        if (!scheduler.equals(previous.scheduler)) {
+            restart.add("aurora.scheduler budgets");
         }
         return "Aurora: " + changed + " live change(s) applied; restart required: "
             + (restart.isEmpty() ? "none" : String.join(", ", restart) + ", takes effect on restart")

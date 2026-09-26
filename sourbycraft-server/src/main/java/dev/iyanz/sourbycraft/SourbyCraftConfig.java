@@ -84,6 +84,8 @@ public final class SourbyCraftConfig {
         // Apply before publication: a failed runtime activation must not report success.
         dev.iyanz.sourbycraft.perf.AsyncPathProcessor.setEnabled(parsed.config().entity().asyncPathfinding());
         dev.iyanz.sourbycraft.execution.LaneCpuSampler.setEnabled(parsed.config().diagnostics().laneSampling());
+        dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.configure(parsed.config().scheduler());
+        dev.iyanz.sourbycraft.perf.NetworkCounters.GLOBAL.setEnabled(parsed.config().network().counters());
         loaded = new LoadedConfig(utility, parsed.config());
         for (final String key : parsed.deprecatedKeys()) {
             SourbyLogger.warn("Deprecated config key '" + key + "'; use '"
@@ -272,6 +274,17 @@ public final class SourbyCraftConfig {
         seed(f, changed, AuroraConfig.BRIDGE_QUARANTINE_KEY, 3,
             "Fatal bridge violations after which a bridged plugin is quarantined: its bridged tasks are "
             + "cancelled and new ones rejected (LIVE). At least 1.");
+        seed(f, changed, AuroraConfig.BRIDGE_IO_THREADS_KEY, 0,
+            "Resource Governor: threads for bridged plugins' async tasks (RESTART). 0 = max(2, processors / 4).");
+        seed(f, changed, AuroraConfig.BRIDGE_IO_QUEUE_KEY, 256,
+            "Resource Governor: queued bridged async tasks before new ones are rejected (RESTART). At least 1.");
+        seed(f, changed, AuroraConfig.STORAGE_THREADS_KEY, 1,
+            "Resource Governor: threads for Aurora World Fabric commits (RESTART). 0 = 1.");
+        seed(f, changed, AuroraConfig.STORAGE_QUEUE_KEY, 64,
+            "Resource Governor: queued AWF commits before new ones are rejected (RESTART). At least 1.");
+        seed(f, changed, AuroraConfig.NETWORK_COUNTERS_KEY, true,
+            "Count wire bytes and packets per direction for /perf network (LIVE). The per-packet cost is "
+            + "not measured; false stops counting.");
         if (changed[0]) {
             f.save();
             SourbyLogger.info("seeded Aurora engine defaults into sourbycraft_config/aurora.toml");

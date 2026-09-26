@@ -57,4 +57,32 @@ class AuroraBridgeConfigTest {
             AuroraConfig.DEFAULT.cpu(), new AuroraConfig.Bridge(AuroraConfig.BridgeMode.OFF, 1));
         assertTrue(stricter.reloadSummary(AuroraConfig.DEFAULT).contains("1 live change(s)"));
     }
+
+    @Test
+    void schedulerBudgetsParseAndAreRestartRequired() {
+        final AuroraConfig.Parsed parsed = parse(Map.of(AuroraConfig.BRIDGE_IO_THREADS_KEY, 6,
+            AuroraConfig.BRIDGE_IO_QUEUE_KEY, 32, AuroraConfig.STORAGE_THREADS_KEY, 0, AuroraConfig.STORAGE_QUEUE_KEY, 8));
+        assertEquals(new AuroraConfig.Scheduler(6, 32, 0, 8), parsed.config().scheduler());
+        assertEquals(6, parsed.config().scheduler().resolvedBridgeIoThreads());
+        assertEquals(1, parsed.config().scheduler().resolvedStorageThreads());
+        final String summary = parsed.config().reloadSummary(AuroraConfig.DEFAULT);
+        assertTrue(summary.contains("aurora.scheduler budgets"), summary);
+    }
+
+    @Test
+    void invalidBudgetsFallBackPerKey() {
+        final AuroraConfig.Parsed parsed = parse(Map.of(AuroraConfig.BRIDGE_IO_QUEUE_KEY, 0,
+            AuroraConfig.STORAGE_THREADS_KEY, -1, AuroraConfig.BRIDGE_IO_THREADS_KEY, 2.5, AuroraConfig.STORAGE_QUEUE_KEY, 16));
+        assertEquals(new AuroraConfig.Scheduler(0, 256, 1, 16), parsed.config().scheduler());
+        assertEquals(3, parsed.invalidKeys().size());
+    }
+
+    @Test
+    void networkCountersAreLive() {
+        final AuroraConfig off = parse(Map.of(AuroraConfig.NETWORK_COUNTERS_KEY, false)).config();
+        assertEquals(false, off.network().counters());
+        assertTrue(off.reloadSummary(AuroraConfig.DEFAULT).startsWith("Aurora: 1 live change(s)"));
+        assertEquals(java.util.List.of(AuroraConfig.NETWORK_COUNTERS_KEY),
+            parse(Map.of(AuroraConfig.NETWORK_COUNTERS_KEY, "yes")).invalidKeys());
+    }
 }

@@ -73,6 +73,10 @@ public class VerCommand extends Command {
         // the commit were already here; an engine, a runtime and a channel that only exist in
         // the boot log cannot be checked by whoever is looking at a server months later.
         s.sendMessage(line("Engine", brand.engineName() + " Engine"));
+        // Build 47: whether the runtime came up whole, and whether legacy plugins are admitted,
+        // are properties of this run an operator should not have to dig out of the boot log.
+        s.sendMessage(line("Aurora runtime", dev.iyanz.sourbycraft.core.AuroraRuntime.state().name()));
+        s.sendMessage(line("Aurora Bridge", dev.iyanz.sourbycraft.bridge.AuroraBridge.runtimeMode().name().toLowerCase(java.util.Locale.ROOT)));
         s.sendMessage(line("Bukkit API", Bukkit.getBukkitVersion()));
         s.sendMessage(line("Java", Runtime.version().toString()));
         final String channel = dev.iyanz.sourbycraft.update.AutoUpdateSettings.channel;
