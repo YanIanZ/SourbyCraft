@@ -16,8 +16,9 @@ import java.util.function.IntSupplier;
  * refusing those plugins.</p>
  *
  * <p>Scheduling: a bridged plugin's Bukkit scheduler tasks are routed by {@link BridgeRouter}. A
- * sync task names nothing, so it runs on the global region; an async task runs on the async
- * scheduler. Every task body is guarded: an ownership violation it raises counts toward
+ * sync task scheduled while a region is ticking runs on that region (anchored on a chunk it owned;
+ * {@code aurora.bridge.sync-route = "caller-region"}, the default); from anywhere else, or with
+ * {@code "global"}, it runs on the global region. An async task runs on the async scheduler. Every task body is guarded: an ownership violation it raises counts toward
  * quarantine, any other exception is recorded as the plugin's last failure, and neither escapes
  * into the scheduler thread.</p>
  *
@@ -31,6 +32,9 @@ public final class BridgeRuntime {
     public interface Executor {
         Handle global(Object owner, Runnable body, long delayTicks, long periodTicks);
         Handle async(Object owner, Runnable body, long delayTicks, long periodTicks);
+        /** On whichever region owns the anchor's chunk when the work comes due. */
+        Handle region(Object owner, dev.iyanz.sourbycraft.execution.region.RegionAnchor anchor, Runnable body,
+                      long delayTicks, long periodTicks);
     }
 
     /** A scheduled piece of routed work. */
@@ -58,9 +62,28 @@ public final class BridgeRuntime {
     private final BiConsumer<String, Throwable> warn;
     private final Set<String> admitted = ConcurrentHashMap.newKeySet();
     private final Map<Integer, Scheduled> scheduled = new ConcurrentHashMap<>();
+    /** Task ids whose body is executing; a repeating task can overlap itself only across regions. */
+    private final Set<Integer> running = ConcurrentHashMap.newKeySet();
+    private final java.util.function.Supplier<dev.iyanz.sourbycraft.execution.region.RegionAnchor> callerRegion;
+    private final java.util.function.Supplier<dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute> syncRoute;
 
+    /** Every sync task to the global region: no caller-region lookup. */
     public BridgeRuntime(final BridgeMode mode, final IntSupplier quarantineAfter, final Executor executor,
                          final BridgeTelemetry telemetry, final BiConsumer<String, Throwable> warn) {
+        this(mode, quarantineAfter, executor, telemetry, warn, () -> null,
+            () -> dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.GLOBAL);
+    }
+
+    /**
+     * @param callerRegion the region the calling thread is ticking, or {@code null}
+     * @param syncRoute {@code aurora.bridge.sync-route}, read per task (LIVE)
+     */
+    public BridgeRuntime(final BridgeMode mode, final IntSupplier quarantineAfter, final Executor executor,
+                         final BridgeTelemetry telemetry, final BiConsumer<String, Throwable> warn,
+                         final java.util.function.Supplier<dev.iyanz.sourbycraft.execution.region.RegionAnchor> callerRegion,
+                         final java.util.function.Supplier<dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute> syncRoute) {
+        this.callerRegion = Objects.requireNonNull(callerRegion, "callerRegion");
+        this.syncRoute = Objects.requireNonNull(syncRoute, "syncRoute");
         this.mode = Objects.requireNonNull(mode, "mode");
         this.quarantineAfter = Objects.requireNonNull(quarantineAfter, "quarantineAfter");
         this.executor = Objects.requireNonNull(executor, "executor");
@@ -104,10 +127,14 @@ public final class BridgeRuntime {
      * @return {@code false} when the task was rejected; it has then been marked cancelled
      */
     public boolean submit(final String plugin, final Object owner, final Task task, final long delayTicks) {
+        final dev.iyanz.sourbycraft.execution.region.RegionAnchor anchor = task.sync()
+            && this.syncRoute.get() == dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.CALLER_REGION
+            ? this.callerRegion.get() : null;
         final BridgeRouter.Route route = !isBridged(plugin) || quarantined(plugin)
             ? BridgeRouter.Route.REJECT
-            : BridgeRouter.route(this.mode, task.sync() ? BridgeRouter.Operation.syncTask()
-                                                          : BridgeRouter.Operation.asyncTask());
+            : BridgeRouter.route(this.mode, task.sync()
+                ? new BridgeRouter.Operation(BridgeRouter.Kind.SYNC_TASK, false, anchor != null)
+                : BridgeRouter.Operation.asyncTask());
         if (route == BridgeRouter.Route.REJECT) {
             this.telemetry.rejected(plugin);
             task.markCancelled();
@@ -120,10 +147,13 @@ public final class BridgeRuntime {
         final LateHandle handle = new LateHandle();
         this.scheduled.put(task.id(), new Scheduled(plugin, handle, task));
         final Runnable body = () -> runGuarded(plugin, task, period > 0);
-        handle.bind(route == BridgeRouter.Route.IO_LANE
-            ? this.executor.async(owner, body, delay, period)
-            : this.executor.global(owner, body, delay, period));
+        handle.bind(switch (route) {
+            case IO_LANE -> this.executor.async(owner, body, delay, period);
+            case REGION_OWNER -> this.executor.region(owner, anchor, body, delay, period);
+            default -> this.executor.global(owner, body, delay, period);
+        });
         this.telemetry.redirect(plugin);
+        if (route == BridgeRouter.Route.REGION_OWNER) this.telemetry.handoff(plugin);
         return true;
     }
 
@@ -149,11 +179,13 @@ public final class BridgeRuntime {
             cancel(task.id());
             return;
         }
+        this.running.add(task.id());
         try {
             task.run();
         } catch (final Throwable thrown) {
             onFailure(plugin, thrown, task.id());
         } finally {
+            this.running.remove(task.id());
             if (!repeating) {
                 this.scheduled.remove(task.id());
             }
@@ -201,6 +233,16 @@ public final class BridgeRuntime {
             }
         }
         return cancelled;
+    }
+
+    /** Whether the bridge holds this task: scheduled, not yet finished (one-shot) or cancelled. */
+    public boolean knows(final int taskId) {
+        return this.scheduled.containsKey(taskId);
+    }
+
+    /** Whether the task's body is executing right now. */
+    public boolean running(final int taskId) {
+        return this.running.contains(taskId);
     }
 
     /** Bridged tasks currently scheduled for a plugin. */

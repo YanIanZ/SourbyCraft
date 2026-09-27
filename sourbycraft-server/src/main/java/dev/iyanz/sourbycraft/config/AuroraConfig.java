@@ -12,6 +12,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     public static final String CPU_CORES_KEY = "aurora.cpu.cores";
     public static final String BRIDGE_MODE_KEY = "aurora.bridge.mode";
     public static final String BRIDGE_QUARANTINE_KEY = "aurora.bridge.quarantine-after";
+    public static final String BRIDGE_SYNC_ROUTE_KEY = "aurora.bridge.sync-route";
     public static final String BRIDGE_IO_THREADS_KEY = "aurora.scheduler.bridge-io-threads";
     public static final String BRIDGE_IO_QUEUE_KEY = "aurora.scheduler.bridge-io-queue";
     public static final String STORAGE_THREADS_KEY = "aurora.scheduler.storage-threads";
@@ -28,6 +29,8 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     // Plugins are admitted or refused once, at load; a reload cannot un-load or re-load them.
     public static final Setting BRIDGE_MODE = new Setting(BRIDGE_MODE_KEY, Lifecycle.RESTART_REQUIRED);
     public static final Setting BRIDGE_QUARANTINE = new Setting(BRIDGE_QUARANTINE_KEY, Lifecycle.LIVE);
+    // Read when each task is scheduled.
+    public static final Setting BRIDGE_SYNC_ROUTE = new Setting(BRIDGE_SYNC_ROUTE_KEY, Lifecycle.LIVE);
     // Governed lanes are created once with their budget and never resized.
     public static final Setting SCHEDULER_BUDGETS = new Setting("aurora.scheduler.*", Lifecycle.RESTART_REQUIRED);
     public static final Setting NETWORK_COUNTERS = new Setting(NETWORK_COUNTERS_KEY, Lifecycle.LIVE);
@@ -94,16 +97,39 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
      *
      * @param mode whether legacy plugins are admitted
      * @param quarantineAfter fatal violations after which a bridged plugin is quarantined
+     * @param syncRoute where a legacy "sync" task runs
      */
-    public record Bridge(BridgeMode mode, int quarantineAfter) {
-        public static final Bridge DEFAULT = new Bridge(BridgeMode.OFF, 3);
+    public record Bridge(BridgeMode mode, int quarantineAfter, SyncRoute syncRoute) {
+        public static final Bridge DEFAULT = new Bridge(BridgeMode.OFF, 3, SyncRoute.CALLER_REGION);
+
+        /** With the default sync route. */
+        public Bridge(final BridgeMode mode, final int quarantineAfter) {
+            this(mode, quarantineAfter, SyncRoute.CALLER_REGION);
+        }
 
         public Bridge {
             Objects.requireNonNull(mode, "mode");
+            Objects.requireNonNull(syncRoute, "syncRoute");
             if (quarantineAfter < 1) {
                 throw new IllegalArgumentException("quarantineAfter must be at least 1: " + quarantineAfter);
             }
         }
+    }
+
+    /**
+     * Where a bridged plugin's Bukkit "sync" task runs.
+     *
+     * <p>Legacy code scheduled from a command or event usually goes on to touch the player or
+     * blocks that caused it, which live in the caller's region. {@link #CALLER_REGION} runs the
+     * task on the region that was ticking when it was scheduled, anchored on a chunk that region
+     * owned; a task scheduled from anywhere else (the global region, async code, startup) still
+     * goes to the global region. {@link #GLOBAL} sends every sync task to the global region, where
+     * any world access is refused. Either way the engine's ownership checks decide what a task may
+     * touch; the route only decides where it starts.</p>
+     */
+    public enum SyncRoute {
+        CALLER_REGION,
+        GLOBAL
     }
 
     /** Whether the bridge admits plugins that do not declare region-threading support. */
@@ -235,6 +261,16 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
                 invalid.add(BRIDGE_QUARANTINE_KEY);
             }
         }
+        SyncRoute syncRoute = DEFAULT.bridge().syncRoute();
+        final Object routeValue = values.get(BRIDGE_SYNC_ROUTE_KEY);
+        if (routeValue != null) {
+            if (routeValue instanceof String text
+                && (text.equalsIgnoreCase("caller-region") || text.equalsIgnoreCase("global"))) {
+                syncRoute = text.equalsIgnoreCase("global") ? SyncRoute.GLOBAL : SyncRoute.CALLER_REGION;
+            } else {
+                invalid.add(BRIDGE_SYNC_ROUTE_KEY);
+            }
+        }
 
         final int bridgeIoThreads = intSetting(values, BRIDGE_IO_THREADS_KEY, Scheduler.DEFAULT.bridgeIoThreads(), 0, invalid);
         final int bridgeIoQueue = intSetting(values, BRIDGE_IO_QUEUE_KEY, Scheduler.DEFAULT.bridgeIoQueue(), 1, invalid);
@@ -254,7 +290,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         // the operator set deliberately -- only a malformed namespace container, handled above,
         // discards everything, because then nothing underneath it can be trusted.
         return new Parsed(new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling),
-            new Cpu(cores), new Bridge(bridgeMode, quarantineAfter),
+            new Cpu(cores), new Bridge(bridgeMode, quarantineAfter, syncRoute),
             new Scheduler(bridgeIoThreads, bridgeIoQueue, storageThreads, storageQueue), new Network(networkCounters)),
             List.copyOf(invalid), deprecated);
     }
@@ -278,6 +314,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         if (entity.asyncPathfinding() != previous.entity.asyncPathfinding()) changed++;
         if (diagnostics.laneSampling() != previous.diagnostics.laneSampling()) changed++;
         if (bridge.quarantineAfter() != previous.bridge.quarantineAfter()) changed++;
+        if (bridge.syncRoute() != previous.bridge.syncRoute()) changed++;
         if (network.counters() != previous.network.counters()) changed++;
         // Reported separately, never counted as applied. The region scheduler is sized during
         // GlobalConfiguration's load, so a reload cannot reach it; saying "restart required:

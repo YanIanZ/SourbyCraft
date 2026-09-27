@@ -30,6 +30,15 @@ class BridgeRuntimeTest {
             return add("async", body, delay, period);
         }
 
+        final List<dev.iyanz.sourbycraft.execution.region.RegionAnchor> anchors = new ArrayList<>();
+
+        @Override
+        public BridgeRuntime.Handle region(final Object owner, final dev.iyanz.sourbycraft.execution.region.RegionAnchor anchor,
+                                           final Runnable body, final long delay, final long period) {
+            this.anchors.add(anchor);
+            return add("region", body, delay, period);
+        }
+
         private BridgeRuntime.Handle add(final String lane, final Runnable body, final long delay, final long period) {
             final Job job = new Job(lane, body, delay, period, new AtomicBoolean());
             this.jobs.add(job);
@@ -199,10 +208,107 @@ class BridgeRuntimeTest {
                 return () -> flag.set(true);
             }
             @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p) { return global(o, b, d, p); }
+            @Override public BridgeRuntime.Handle region(Object o, dev.iyanz.sourbycraft.execution.region.RegionAnchor a,
+                                                         Runnable b, long d, long p) { return global(o, b, d, p); }
         };
         holder[0] = new BridgeRuntime(BridgeMode.SAFE, () -> 3, cancelling, new BridgeTelemetry(), (m, t) -> {});
         holder[0].admit("Legacy");
         holder[0].submit("Legacy", null, new FakeTask(9, true, 1, () -> {}), 0);
         assertTrue(real.get(0).get());
+    }
+
+    private static final dev.iyanz.sourbycraft.execution.region.RegionAnchor HERE =
+        new dev.iyanz.sourbycraft.execution.region.RegionAnchor("world", 12, -4);
+
+    private BridgeRuntime routed(final FakeExecutor executor,
+                                 final java.util.function.Supplier<dev.iyanz.sourbycraft.execution.region.RegionAnchor> caller,
+                                 final dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute route) {
+        final BridgeRuntime bridge = new BridgeRuntime(BridgeMode.SAFE, () -> 3, executor, new BridgeTelemetry(),
+            (m, t) -> {}, caller, () -> route);
+        bridge.admit("Legacy");
+        return bridge;
+    }
+
+    @Test
+    void aSyncTaskFromARegionRunsOnThatRegion() {
+        final FakeExecutor executor = new FakeExecutor();
+        final BridgeRuntime bridge = routed(executor, () -> HERE,
+            dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.CALLER_REGION);
+        final FakeTask task = new FakeTask(1, true, 0, () -> {});
+        assertTrue(bridge.submit("Legacy", null, task, 0));
+        assertEquals("region", executor.jobs.get(0).lane());
+        assertEquals(HERE, executor.anchors.get(0));
+        executor.fire(0);
+        assertEquals(1, task.runs.get());
+        assertEquals(1, bridge.telemetry().stats("Legacy").ownerHandoffs());
+    }
+
+    @Test
+    void aSyncTaskFromOutsideAnyRegionRunsGlobally() {
+        final FakeExecutor executor = new FakeExecutor();
+        final BridgeRuntime bridge = routed(executor, () -> null,
+            dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.CALLER_REGION);
+        bridge.submit("Legacy", null, new FakeTask(1, true, 0, () -> {}), 0);
+        assertEquals("global", executor.jobs.get(0).lane());
+        assertEquals(0, bridge.telemetry().stats("Legacy").ownerHandoffs());
+    }
+
+    @Test
+    void theGlobalRouteIgnoresTheCallersRegion() {
+        final FakeExecutor executor = new FakeExecutor();
+        final int[] lookups = {0};
+        final BridgeRuntime bridge = routed(executor, () -> { lookups[0]++; return HERE; },
+            dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.GLOBAL);
+        bridge.submit("Legacy", null, new FakeTask(1, true, 0, () -> {}), 0);
+        assertEquals("global", executor.jobs.get(0).lane());
+        assertEquals(0, lookups[0], "no region lookup when it would not be used");
+    }
+
+    @Test
+    void asyncTasksNeverGoToARegion() {
+        final FakeExecutor executor = new FakeExecutor();
+        final BridgeRuntime bridge = routed(executor, () -> HERE,
+            dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.CALLER_REGION);
+        bridge.submit("Legacy", null, new FakeTask(1, false, 0, () -> {}), 0);
+        assertEquals("async", executor.jobs.get(0).lane());
+    }
+
+    @Test
+    void aRegionTimerIsCancelledLikeAnyOther() {
+        final FakeExecutor executor = new FakeExecutor();
+        final BridgeRuntime bridge = routed(executor, () -> HERE,
+            dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.CALLER_REGION);
+        final FakeTask timer = new FakeTask(5, true, 20, () -> {});
+        bridge.submit("Legacy", null, timer, 1);
+        assertEquals(20, executor.jobs.get(0).period());
+        assertTrue(bridge.cancel(5));
+        assertTrue(executor.jobs.get(0).cancelled().get());
+    }
+
+    @Test
+    void isQueuedAndIsCurrentlyRunningSeeBridgedTasks() {
+        final FakeExecutor executor = new FakeExecutor();
+        final BridgeRuntime bridge = routed(executor, () -> null,
+            dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.GLOBAL);
+        final boolean[] runningInside = {false};
+        final FakeTask task = new FakeTask(7, true, 0, () -> runningInside[0] = bridge.running(7));
+        bridge.submit("Legacy", null, task, 5);
+        assertTrue(bridge.knows(7), "queued until it runs");
+        assertTrue(!bridge.running(7));
+        executor.fire(0);
+        assertTrue(runningInside[0], "running while its body executes");
+        assertTrue(!bridge.knows(7) && !bridge.running(7), "a finished one-shot is neither");
+    }
+
+    @Test
+    void aRepeatingTaskStaysQueuedUntilCancelled() {
+        final FakeExecutor executor = new FakeExecutor();
+        final BridgeRuntime bridge = routed(executor, () -> null,
+            dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.GLOBAL);
+        bridge.submit("Legacy", null, new FakeTask(8, true, 10, () -> {}), 0);
+        executor.fire(0);
+        assertTrue(bridge.knows(8));
+        bridge.cancel(8);
+        assertTrue(!bridge.knows(8));
     }
 }

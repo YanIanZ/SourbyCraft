@@ -16,6 +16,22 @@
          // Paper start
          if (!this.isAsyncScheduler) {
              this.asyncScheduler.cancelTasks(plugin);
+@@ -355,6 +_,7 @@
+ 
+     @Override
+     public boolean isCurrentlyRunning(final int taskId) {
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.knows(taskId)) return dev.iyanz.sourbycraft.bridge.AuroraBridge.isRunning(taskId); // SourbyCraft - Aurora Bridge
+         // Paper start
+         if (!this.isAsyncScheduler) {
+             if (this.asyncScheduler.isCurrentlyRunning(taskId)) {
+@@ -380,6 +_,7 @@
+         if (taskId <= 0) {
+             return false;
+         }
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.knows(taskId)) return true; // SourbyCraft - Aurora Bridge: scheduled and not finished or cancelled
+         // Paper start
+         if (!this.isAsyncScheduler && this.asyncScheduler.isQueued(taskId)) {
+             return true;
 @@ -514,6 +_,12 @@
      }
  

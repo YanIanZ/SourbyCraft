@@ -274,6 +274,10 @@ public final class SourbyCraftConfig {
         seed(f, changed, AuroraConfig.BRIDGE_QUARANTINE_KEY, 3,
             "Fatal bridge violations after which a bridged plugin is quarantined: its bridged tasks are "
             + "cancelled and new ones rejected (LIVE). At least 1.");
+        seed(f, changed, AuroraConfig.BRIDGE_SYNC_ROUTE_KEY, "caller-region",
+            "Where a bridged plugin's Bukkit sync task runs (LIVE). caller-region = on the region that was "
+            + "ticking when it was scheduled (from a command or event), else the global region. global = always "
+            + "the global region, where world access is refused. Ownership checks apply either way.");
         seed(f, changed, AuroraConfig.BRIDGE_IO_THREADS_KEY, 0,
             "Resource Governor: threads for bridged plugins' async tasks (RESTART). 0 = max(2, processors / 4).");
         seed(f, changed, AuroraConfig.BRIDGE_IO_QUEUE_KEY, 256,

@@ -72,6 +72,8 @@ It is off unless configured and is not qualified; see "Engine integration" below
 
 ### Engine integration (RegionFileStorage)
 
+Operator guide: [testing AWF](../guides/testing-awf.md).
+
 Patch: `sourbycraft-server/minecraft-patches/sources/net/minecraft/world/level/chunk/storage/RegionFileStorage.java.patch`.
 Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
 
