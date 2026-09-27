@@ -147,7 +147,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [x] report Spark platform version as `Build44 (MC:26.2)` instead of the upstream `26.2-DEV-<git>` string
 - [x] provide Sourby config group
 - [ ] verify Spark web-viewer config rendering
-- [ ] add cheap Sourby runtime metadata
+- [x] add cheap Sourby runtime metadata — `SourbyMetadataProvider` via `createExtraMetadataProvider` ([SPARK.md](SPARK.md#aurora-runtime-metadata)); viewer rendering still unverified
 - [ ] improve region thread classification
 - [x] expose useful slow-region context — `/perf region` names the slowest active region (world/region/generation ids, 5 s average and maximum MSPT); coordinates not tracked
 - [x] document Spark update procedure — [SPARK.md](SPARK.md#updating-spark)

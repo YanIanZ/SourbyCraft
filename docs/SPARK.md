@@ -10,6 +10,22 @@ The `sourbycraft/` report group contains `global.toml` from
 and network keys), and `security.yml` from `sourbycraft-security.yml`. Missing files are omitted. Collection reads files and
 builds report JSON; it does not seed defaults, migrate files, or save configuration.
 
+## Aurora runtime metadata
+
+`FoliaSparkPlugin.createExtraMetadataProvider()` returns `SourbyMetadataProvider`, which adds one
+`sourbycraft` object to each report's extra platform metadata:
+
+- `build` — identity, build, codename, Minecraft version, engine;
+- `runtime` — Aurora state and processor count;
+- `bridge` — mode, bridged plugins, quarantined plugins, fatal violations;
+- `governor` — each used lane's threads, queue and rejections;
+- `switches` — async pathfinding, lane sampling, network counters, `aurora.cpu.cores`;
+- `startup` — total time to ready and start class.
+
+Every value is an in-memory read. No configuration strings are included, so there is nothing here
+for secret filtering to catch. Whether spark.lucko.me renders extra platform metadata, and how,
+is part of the open web-viewer verification.
+
 ## Secret filtering
 
 The provider inherits Spark's `BASE_HIDDEN_PATHS`, including management-server

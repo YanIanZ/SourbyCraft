@@ -26,12 +26,17 @@
      }
  
      @Override
-@@ -189,7 +_,7 @@
+@@ -189,7 +_,12 @@
  
      @Override
      public ServerConfigProvider createServerConfigProvider() {
 -        return new FoliaServerConfigProvider();
 +        return new SourbyServerConfigProvider();
++    }
++
++    @Override
++    public me.lucko.spark.paper.common.platform.MetadataProvider createExtraMetadataProvider() {
++        return new dev.iyanz.sourbycraft.spark.SourbyMetadataProvider(); // SourbyCraft - Aurora runtime metadata
      }
  
      @Override
