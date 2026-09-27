@@ -133,3 +133,21 @@ patch against vanilla behaviour, or build tooling.
 
 That is the shape §25 asks for. The upstream implementation is replaceable at four seams
 without redesigning anything above them — which is the claim, and now the test.
+
+---
+
+## 6. Remote services at runtime
+
+Audited 2026-09-27 against the `canvasRef` pin (`6a600b89`): Canvas `canvas-server` sources and
+every Canvas patch's added lines, plus SourbyCraft's own source and patches.
+
+| Candidate | Finding |
+|---|---|
+| Paper's startup update check (`PaperVersionFetcher`) | Removed by Canvas (`MinecraftServer.java.patch`, "Canvas - Rebrand") |
+| `CanvasVersionFetcher` (`/version`) | Builds text and a click-through link only; opens no connection |
+| `io.canvasmc.httpclient:httpclient` | Declared in Canvas's build, imported by no Canvas source or patch at this pin |
+| `https://maven.canvasmc.io` | Build-time only: Gradle plugin and dependency resolution (`settings.gradle.kts`, `build.gradle.kts`) |
+| SourbyCraft's own network I/O | GitHub (updater, Via), local GeoIP, speedtest, bootstrap libraries; see [region-io-audit.md](region-io-audit.md). None of it is a Canvas service |
+
+The core runtime therefore needs no Canvas remote service or API. The first boot still needs the
+library mirror that SourbyClip downloads from; that is SourbyClip's configuration, not Canvas's.
