@@ -137,6 +137,14 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
   exist and that no `.mca` file was written, then boots again from the store, then a third time
   with `export = ["world"]` and checks that region files appear and the store is retired. That
   is one small world with no players.
+  - **CI run 442 (`5ec849df`, 2026-09-27), green.** First boot: 529 chunks per dimension went
+    into AWF, and `committed and closed 9 storage(s) at shutdown` was logged. The second boot
+    reopened the stores with no region files written; it loaded no chunks, so it proved reopening
+    but not reading. The third boot exported 529 chunks per dimension (and 1 entity-storage
+    deletion each) back to region files and kept the stores as `*.awf.exported-*`. Run 441 had
+    found the lost-shutdown-commit bug fixed by feature patch 0020.
+  - The next CI run force-loads chunks on the second boot and fails unless the engine reads more
+    chunks from AWF than it falls through to region files.
 
 Not implemented: MongoDB/MySQL/Redis backends (the SPI exists; no driver is on the classpath and
 none is added without a qualification plan); a SlimeLoader compatibility adapter (AWF stores
