@@ -26,9 +26,10 @@ outside.
 
 ## Still open
 
-- A first-boot failure recovery test against a real server boot (the unit tests cover the
-  downloader's state after a failure, not a whole restart).
-- An offline boot in CI after a successful first boot.
+- CI step "Bootstrap failure recovery and offline boot" (added 2026-09-27) runs a fresh
+  server three times: with no network (a private network namespace with only loopback) it
+  must fail within 2 minutes, print the manual-download guidance and leave no `.tmp`; online it
+  must reach `Done`; with no network again it must reach `Done` without downloading.
 - SourbyClip's own downloader.
 - Documentation of remote repository fallbacks: the manifest has one URL per library and no
   mirror list, so there is no fallback to document yet.
