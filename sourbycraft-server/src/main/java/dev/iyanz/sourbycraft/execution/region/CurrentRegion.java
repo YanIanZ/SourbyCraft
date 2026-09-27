@@ -2,7 +2,7 @@ package dev.iyanz.sourbycraft.execution.region;
 
 /**
  * "Which region is this thread ticking?", as the Aurora Bridge needs it.
- * {@link FoliaCurrentRegion} supplies it from the current engine.
+ * {@link FoliaRegionBackend} supplies it from the current engine.
  */
 public interface CurrentRegion {
 

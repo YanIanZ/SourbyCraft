@@ -48,11 +48,10 @@ these supply today's implementation of it. This is the set the ledger test pins.
 
 | File | Upstream internals | Contract it implements |
 |---|---|---|
-| `execution/region/FoliaRegionBackend.java` | `io.papermc.paper.threadedregions.RegionizedServer`, `TickRegionScheduler` | `execution/region/RegionBackend` — region topology and tick scheduling. Swapping the backend does not touch callers. |
+| `execution/region/FoliaRegionBackend.java` | `io.papermc.paper.threadedregions.RegionizedServer`, `TickRegionScheduler` (incl. `getCurrentRegion()` / `ThreadedRegion.getCenterChunk()`) | `execution/region/RegionBackend` — region topology and tick scheduling; `execution/region/CurrentRegion` — the region the calling thread ticks, for the Aurora Bridge's caller-region route. Swapping the backend does not touch callers. |
 | `execution/RegionOwnerHandoff.java` | `io.papermc.paper.threadedregions.EntityScheduler` (internal, no `.scheduler.`) | `execution/OwnerHandoff` — moving work to the thread that owns an entity or region. |
 | `perf/RegionTickMetrics.java` | `ca.spottedleaf.common.time.TickData`, `TickTime` | Aurora's region tick telemetry, reading upstream's tick accounting rather than duplicating it. |
 | `perf/RegionTickMetricsHolder.java` | `ca.spottedleaf.common.time.TickTime` | Generation ownership for the above. |
-| `execution/region/FoliaCurrentRegion.java` | `io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion()`, `ThreadedRegion.getCenterChunk()`/`id`/`regioniser.world` | `execution/region/CurrentRegion` — the Aurora Bridge's caller-region route: a chunk owned by the region that scheduled a legacy sync task. |
 | `perf/RegionIoQueue.java` | `ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO` (`getControllerFor`, `getTotalWorkingTasks`) | `perf/StorageBacklog` — `/perf storage` backlog: reads Moonrise's per-world I/O task counters instead of keeping a second count. |
 
 ### 1.3 `COMPATIBILITY_ONLY`
