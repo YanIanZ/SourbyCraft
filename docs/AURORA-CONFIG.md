@@ -17,6 +17,12 @@ This document describes **what branch `26.2` actually consumes now**. It is not 
 | `aurora.scheduler.storage-queue` | integer ≥ 1 / `64` | RESTART_REQUIRED | same |
 | `aurora.network.counters` | boolean / `true` | LIVE | `NetworkCounters` increments (`/perf network`) |
 
+**Hot-path lookup audit (2026-09-27).** Every remaining dotted-string lookup
+(`SourbyCraftConfig.cfgGet/cfgBool/cfgInt`) runs at boot, at explicit reload, or on a join/leave
+event (`SourbyMessages` variants), never per tick. Each is one `get` on the immutable
+`ConfigSnapshot` map. Aurora settings are read once into the typed `AuroraConfig` and published
+at load boundaries.
+
 The typed runtime snapshot is owned by `AuroraConfig`. Tick code should consume typed values or already-published primitives rather than repeatedly parsing dotted configuration paths.
 
 ## Configuration files and boot order

@@ -43,7 +43,7 @@ Status:
 - [x] mark each config key LIVE / RESTART_REQUIRED / IMMUTABLE_FOR_RUN — every key has a `Setting` constant; see [AURORA-CONFIG.md](AURORA-CONFIG.md)
 - [x] report restart-required changes accurately on reload — `aurora.cpu.cores`, `aurora.bridge.mode` and `aurora.scheduler` budgets are reported as restart-required, never counted as applied
 - [x] add typed immutable config records/classes
-- [-] remove hot-path dotted-string config lookup where present — async path setting now resolves once into typed snapshot
+- [x] remove hot-path dotted-string config lookup where present — none remains on a tick path; audit in [AURORA-CONFIG.md](AURORA-CONFIG.md)
 - [x] ensure Spark shows SourbyCraft config — `sourbycraft/` group includes `aurora.toml` (provider test); viewer rendering still open below
 - [ ] verify Aurora config rendering in Spark web report
 - [x] preserve secret filtering requirements
@@ -163,7 +163,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [x] define minimal scheduler access contract — `execution/OwnerHandoff` ([execution-contract.md](architecture/execution-contract.md))
 - [x] define minimal engine config bridge contract — `config/upstream/UpstreamConfigBridge`
 - [ ] move large Sourby service bodies out of upstream classes
-- [ ] retain direct NMS algorithm patches when external indirection would be worse
+- [x] retain direct NMS algorithm patches when external indirection would be worse — policy in [compat-boundary.md §1.2](architecture/compat-boundary.md) and ledger §2.1; applied to patch 0006 (rules extracted to `AsyncPathValidity`, algorithm left in place)
 - [x] active build-path dependency inventory — ledger §3–4 and AGENTS.md CI description
 - [x] determine whether active CI still requires legacy `sourbypatcher` — no: CI requires the private SourbyPatcher `canvas-toolchain` adapter; the legacy Folia patcher is not used
 - [ ] clean-checkout reproducibility
@@ -179,7 +179,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] first-boot failure recovery test
 - [ ] offline-after-success test
 - [ ] remote repository/fallback documentation
-- [ ] verify core runtime needs no Canvas remote service/API
+- [x] verify core runtime needs no Canvas remote service/API — [dependency-ledger.md §6](architecture/dependency-ledger.md)
 
 ## J. Aurora release gate
 
