@@ -221,7 +221,7 @@ public final class PerfCommand extends Command {
         final var totals = dev.iyanz.sourbycraft.perf.RegionIoCounters.GLOBAL.totals();
         add(lines, "Chunk-system reads / writes / deletes", totals.reads() + " / " + totals.writes() + " / "
             + totals.deletes() + " since start");
-        final var queues = dev.iyanz.sourbycraft.perf.RegionIoQueue.sample();
+        final var queues = dev.iyanz.sourbycraft.perf.RegionIoQueue.INSTANCE.sample();
         if (queues.isEmpty()) {
             add(lines, "Pending storage I/O", "no world loaded");
             return;

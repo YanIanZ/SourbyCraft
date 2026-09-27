@@ -46,7 +46,7 @@ public final class AuroraBridge {
                     final AuroraConfig.Bridge settings = readEarly(AURORA_FILE, UNIFIED_FILE);
                     earlyQuarantineAfter = settings.quarantineAfter();
                     earlySyncRoute = settings.syncRoute();
-                    final dev.iyanz.sourbycraft.execution.region.FoliaCurrentRegion regions =
+                    final dev.iyanz.sourbycraft.execution.region.CurrentRegion regions =
                         new dev.iyanz.sourbycraft.execution.region.FoliaCurrentRegion();
                     current = new BridgeRuntime(settings.mode(), AuroraBridge::quarantineAfter,
                         new FoliaExecutor(), new BridgeTelemetry(),
