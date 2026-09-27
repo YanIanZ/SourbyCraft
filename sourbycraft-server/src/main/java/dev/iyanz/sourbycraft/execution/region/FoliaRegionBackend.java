@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * ticking" and "which region is this thread ticking", the other "hand this to whoever owns that
  * entity". Nothing else reaches the backend.</p>
  */
-public final class FoliaRegionBackend implements RegionBackend, CurrentRegion {
+public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, RegionPopulation {
 
     private static final int MAX_CACHED_ANCHORS = 4096;
     /** Anchors by region id; recomputed when the cached chunk has left the region. */
@@ -50,5 +50,28 @@ public final class FoliaRegionBackend implements RegionBackend, CurrentRegion {
         if (this.anchors.size() >= MAX_CACHED_ANCHORS) this.anchors.clear();
         this.anchors.put(region.id, anchor);
         return anchor;
+    }
+
+    /**
+     * Sums each region's own counters (entities, players, chunks), which the region refreshes as it
+     * ticks and publishes as atomics, so reading them needs no region's lock or thread.
+     */
+    @Override
+    public java.util.List<WorldCounts> population() {
+        final net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+        if (server == null) return java.util.List.of();
+        final java.util.List<WorldCounts> out = new java.util.ArrayList<>();
+        for (final net.minecraft.server.level.ServerLevel world : server.getAllLevels()) {
+            final long[] sums = new long[4];
+            world.regioniser.computeForAllRegionsUnsynchronised(region -> {
+                final var stats = region.getData().getRegionStats();
+                sums[0]++;
+                sums[1] += stats.getChunkCount();
+                sums[2] += stats.getEntityCount();
+                sums[3] += stats.getPlayerCount();
+            });
+            out.add(new WorldCounts(world.getWorld().getName(), (int)sums[0], sums[1], sums[2], sums[3]));
+        }
+        return out;
     }
 }

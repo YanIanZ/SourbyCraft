@@ -321,17 +321,16 @@ Current/active command family:
 | `/perf plugins` | plugin counts by compatibility state, bridge mode, and each bridged plugin's redirects/handoffs/rejections/violations |
 | `/perf history` | the last hour, one line per minute: worst region TPS and MSPT, process CPU, heap (60-sample ring) |
 | `/perf player <name>` | a player's world, block, chunk, ping, view/simulation distance, read on the thread that owns the player |
+| `/perf chunks`, `/perf entities` | loaded chunks and regions, entities and players per world, summed from each region's own counters |
 | `/perf awf` | Aurora World Fabric storages: resident/dirty chunks, pending commits, commit p50/p95/p99, reads vs region-file fall-throughs, failures |
 | `/perf region` | region count and MSPT spread, plus the slowest active region (world/region/generation ids) |
 | `/plugins <plugin>` | one plugin's compatibility state and, when bridged, its Aurora Bridge telemetry |
 | `/update` | SourbyCraft updater status/check |
 
 Implemented `/perf` views: `tick`, `cpu`, `memory`, `gc`, `lanes`, `async`, `network`,
-`governor`, `storage`, `awf`, `plugins`, `history`, `player <name>`, `region`, `health`. Still planned, not implemented:
+`governor`, `storage`, `awf`, `plugins`, `history`, `player <name>`, `chunks`, `entities`, `region`, `health`. Still planned, not implemented:
 
 ```text
-/perf chunks
-/perf entities
 /perf scheduler
 /perf profile
 ```

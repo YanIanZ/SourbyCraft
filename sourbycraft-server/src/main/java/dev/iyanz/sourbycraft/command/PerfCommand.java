@@ -18,7 +18,7 @@ import org.bukkit.command.CommandSender;
 /** Read-only diagnostics: one immutable generation per invocation, no world/OS queries. */
 public final class PerfCommand extends Command {
     static final List<String> VIEWS =
-        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "storage", "awf", "plugins", "history", "player", "region", "health");
+        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "storage", "awf", "plugins", "history", "player", "chunks", "entities", "region", "health");
 
     public PerfCommand(final String name) {
         super(name);
@@ -109,6 +109,9 @@ public final class PerfCommand extends Command {
         }
         if (view.equals("awf")) {
             renderAwf(lines);
+        }
+        if (view.equals("chunks") || view.equals("entities")) {
+            renderPopulation(lines, view.equals("chunks"));
         }
         if (view.equals("plugins")) {
             renderPlugins(lines);
@@ -229,6 +232,24 @@ public final class PerfCommand extends Command {
             add(lines, lane.name() + " submitted / completed / failed / rejected", lane.submitted() + " / "
                 + lane.completed() + " / " + lane.failed() + " / " + lane.rejected());
         }
+    }
+
+    private static final dev.iyanz.sourbycraft.execution.region.RegionPopulation POPULATION =
+        new dev.iyanz.sourbycraft.execution.region.FoliaRegionBackend();
+
+    private static void renderPopulation(final List<Component> lines, final boolean chunks) {
+        final var worlds = POPULATION.population();
+        if (worlds.isEmpty()) {
+            add(lines, chunks ? "Loaded chunks" : "Entities", "no world loaded");
+            return;
+        }
+        long total = 0;
+        for (final var world : worlds) {
+            total += chunks ? world.chunks() : world.entities();
+            add(lines, world.world() + (chunks ? " chunks / regions" : " entities / players"),
+                chunks ? world.chunks() + " / " + world.regions() : world.entities() + " / " + world.players());
+        }
+        add(lines, chunks ? "Total loaded chunks" : "Total entities", total + " (each region's own count, up to one tick old)");
     }
 
     private static void renderPlugins(final List<Component> lines) {
