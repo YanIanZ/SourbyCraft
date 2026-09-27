@@ -276,14 +276,17 @@ immutable PerformanceSnapshot
 
 Spark currently remains the upstream profiler implementation, but SourbyCraft extends its integration so that profiler data can understand SourbyCraft runtime semantics instead of maintaining a conflicting TPS/MSPT calculation.
 
-Current direction includes:
+Implemented:
 
 - SourbyCraft platform identity
-- SourbyCraft configuration metadata
+- SourbyCraft configuration metadata (including `aurora.toml`, with secret filtering)
 - Sourby tick/MSPT statistics
-- region-aware performance context
-- improved worker/thread classification
-- Sourby runtime metadata without expensive duplicate scans
+- Aurora runtime metadata in each report (in-memory reads only; see [SPARK.md](docs/SPARK.md))
+
+Still direction, not implemented:
+
+- region-aware performance context inside Spark reports
+- improved worker/thread classification in the Spark viewer
 
 A dedicated deeper SourbySpark fork will only be justified if the adapter layer can no longer provide the required region/runtime visibility.
 
@@ -311,24 +314,22 @@ Current/active command family:
 | `/maxp [n]` | max-player management |
 | `/perf lanes` | where the machine's time went, by execution lane |
 | `/spec` | full machine specification: processor, clock, cores, memory and heap allocation |
-| `/perf async` | async-path pool: solve times, and how often saturation put a solve back on a region thread |
+| `/perf async` | async-path pool: solve times, queue wait and depth, and how many solves saturation refused (they are never run on the region thread) |
+| `/perf network` | wire bytes and packets per second in each direction, totals, connections (`aurora.network.counters`) |
+| `/perf governor` | Resource Governor lanes: budget, queue, submitted/completed/failed/rejected |
+| `/perf region` | region count and MSPT spread, plus the slowest active region (world/region/generation ids) |
+| `/plugins <plugin>` | one plugin's compatibility state and, when bridged, its Aurora Bridge telemetry |
 | `/update` | SourbyCraft updater status/check |
 
-Planned `/perf` depth includes:
+Implemented `/perf` views: `tick`, `cpu`, `memory`, `gc`, `lanes`, `async`, `network`,
+`governor`, `region`, `health`. Still planned, not implemented:
 
 ```text
-/perf tick
-/perf cpu
-/perf memory
-/perf gc
-/perf region
 /perf player
 /perf chunks
 /perf entities
-/perf network
 /perf scheduler
 /perf plugins
-/perf health
 /perf history
 /perf profile
 ```
