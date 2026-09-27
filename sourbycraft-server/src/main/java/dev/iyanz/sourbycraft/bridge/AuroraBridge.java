@@ -33,6 +33,7 @@ public final class AuroraBridge {
     private static final Path UNIFIED_FILE = Path.of("sourbycraft_config", "sourbycraft_global_config.toml");
     private static volatile BridgeRuntime runtime;
     private static volatile int earlyQuarantineAfter = AuroraConfig.Bridge.DEFAULT.quarantineAfter();
+    private static volatile AuroraConfig.SyncRoute earlySyncRoute = AuroraConfig.Bridge.DEFAULT.syncRoute();
 
     private AuroraBridge() {}
 
@@ -44,14 +45,26 @@ public final class AuroraBridge {
                 if (current == null) {
                     final AuroraConfig.Bridge settings = readEarly(AURORA_FILE, UNIFIED_FILE);
                     earlyQuarantineAfter = settings.quarantineAfter();
+                    earlySyncRoute = settings.syncRoute();
+                    final dev.iyanz.sourbycraft.execution.region.FoliaCurrentRegion regions =
+                        new dev.iyanz.sourbycraft.execution.region.FoliaCurrentRegion();
                     current = new BridgeRuntime(settings.mode(), AuroraBridge::quarantineAfter,
                         new FoliaExecutor(), new BridgeTelemetry(),
-                        SourbyLogger::warn);
+                        SourbyLogger::warn, regions::anchor, AuroraBridge::syncRoute);
                     runtime = current;
                 }
             }
         }
         return current;
+    }
+
+    private static AuroraConfig.SyncRoute syncRoute() {
+        try {
+            final AuroraConfig loaded = dev.iyanz.sourbycraft.SourbyCraftConfig.aurora();
+            return loaded == AuroraConfig.DEFAULT ? earlySyncRoute : loaded.bridge().syncRoute();
+        } catch (final Throwable unavailable) {
+            return earlySyncRoute;
+        }
     }
 
     private static int quarantineAfter() {
@@ -75,7 +88,8 @@ public final class AuroraBridge {
             if (!Files.isRegularFile(file)) continue;
             try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
                 final var config = new com.electronwill.nightconfig.toml.TomlParser().parse(reader);
-                for (final String key : List.of(AuroraConfig.BRIDGE_MODE_KEY, AuroraConfig.BRIDGE_QUARANTINE_KEY)) {
+                for (final String key : List.of(AuroraConfig.BRIDGE_MODE_KEY, AuroraConfig.BRIDGE_QUARANTINE_KEY,
+                    AuroraConfig.BRIDGE_SYNC_ROUTE_KEY)) {
                     final Object value = config.get(key);
                     if (value != null) values.put(key, value);
                 }
@@ -90,6 +104,18 @@ public final class AuroraBridge {
             SourbyLogger.warn("Aurora config key '" + key + "' is invalid; the bridge uses its default");
         }
         return parsed.config().bridge();
+    }
+
+    /** {@code CraftScheduler.isQueued}: whether the bridge holds this task. Never creates the runtime. */
+    public static boolean knows(final int taskId) {
+        final BridgeRuntime current = runtime;
+        return current != null && current.knows(taskId);
+    }
+
+    /** {@code CraftScheduler.isCurrentlyRunning} for a task the bridge holds. */
+    public static boolean isRunning(final int taskId) {
+        final BridgeRuntime current = runtime;
+        return current != null && current.running(taskId);
     }
 
     /**
@@ -201,6 +227,21 @@ public final class AuroraBridge {
                 ? scheduler.runAtFixedRate(plugin, t -> body.run(), Math.max(1L, delayTicks), periodTicks)
                 : delayTicks > 0 ? scheduler.runDelayed(plugin, t -> body.run(), delayTicks)
                 : scheduler.run(plugin, t -> body.run());
+            return task::cancel;
+        }
+
+        @Override
+        public BridgeRuntime.Handle region(final Object owner, final dev.iyanz.sourbycraft.execution.region.RegionAnchor anchor,
+                                           final Runnable body, final long delayTicks, final long periodTicks) {
+            final Plugin plugin = (Plugin)owner;
+            final org.bukkit.World world = (org.bukkit.World)anchor.world();
+            final var scheduler = Bukkit.getRegionScheduler();
+            final var task = periodTicks > 0
+                ? scheduler.runAtFixedRate(plugin, world, anchor.chunkX(), anchor.chunkZ(), t -> body.run(),
+                    Math.max(1L, delayTicks), periodTicks)
+                : delayTicks > 0 ? scheduler.runDelayed(plugin, world, anchor.chunkX(), anchor.chunkZ(),
+                    t -> body.run(), delayTicks)
+                : scheduler.run(plugin, world, anchor.chunkX(), anchor.chunkZ(), t -> body.run());
             return task::cancel;
         }
 

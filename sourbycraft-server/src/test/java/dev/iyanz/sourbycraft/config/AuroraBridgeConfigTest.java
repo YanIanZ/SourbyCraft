@@ -85,4 +85,25 @@ class AuroraBridgeConfigTest {
         assertEquals(java.util.List.of(AuroraConfig.NETWORK_COUNTERS_KEY),
             parse(Map.of(AuroraConfig.NETWORK_COUNTERS_KEY, "yes")).invalidKeys());
     }
+
+    @Test
+    void syncTasksFollowTheCallersRegionByDefault() {
+        assertEquals(AuroraConfig.SyncRoute.CALLER_REGION, parse(Map.of()).config().bridge().syncRoute());
+    }
+
+    @Test
+    void theSyncRouteCanBeGlobalAndATypoKeepsTheDefault() {
+        assertEquals(AuroraConfig.SyncRoute.GLOBAL,
+            parse(Map.of(AuroraConfig.BRIDGE_SYNC_ROUTE_KEY, "global")).config().bridge().syncRoute());
+        final AuroraConfig.Parsed typo = parse(Map.of(AuroraConfig.BRIDGE_SYNC_ROUTE_KEY, "nearest"));
+        assertEquals(AuroraConfig.SyncRoute.CALLER_REGION, typo.config().bridge().syncRoute());
+        assertTrue(typo.invalidKeys().contains(AuroraConfig.BRIDGE_SYNC_ROUTE_KEY));
+    }
+
+    @Test
+    void changingTheSyncRouteIsALiveChange() {
+        final AuroraConfig before = parse(Map.of()).config();
+        final AuroraConfig after = parse(Map.of(AuroraConfig.BRIDGE_SYNC_ROUTE_KEY, "global")).config();
+        assertTrue(after.reloadSummary(before).startsWith("Aurora: 1 live change(s) applied; restart required: none"));
+    }
 }

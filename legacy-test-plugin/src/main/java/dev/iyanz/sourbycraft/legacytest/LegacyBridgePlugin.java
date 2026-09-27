@@ -35,9 +35,34 @@ public final class LegacyBridgePlugin extends JavaPlugin {
             }
         }, 1L, 1L);
 
-        // World access from a legacy "sync" task. The bridge runs it on the global region, which
-        // owns no chunks; whatever the base does is logged, and a thrown ownership violation is
-        // what the bridge counts toward quarantine.
+        // isQueued must see a bridged task (plugins use it to avoid double-scheduling).
+        final BukkitTask later = scheduler.runTaskLater(this, () -> { }, 40L);
+        this.getLogger().info(scheduler.isQueued(later.getTaskId())
+            ? "LEGACY_BRIDGE_QUEUED_OK" : "LEGACY_BRIDGE_QUEUED_MISSING");
+
+        // A legacy runTask called from region context, the way an event handler or a player
+        // command calls it. The chunk-load callback runs on the region owning the chunk; with
+        // aurora.bridge.sync-route = "caller-region" the task runs on that region and may read
+        // the block there.
+        final org.bukkit.World world = this.getServer().getWorlds().get(0);
+        world.getChunkAtAsync(0, 0).thenAccept(chunk -> {
+            world.addPluginChunkTicket(0, 0, this);
+            scheduler.runTask(this, () -> {
+                try {
+                    final String type = world.getBlockAt(8, 0, 8).getType().name();
+                    this.getLogger().info("LEGACY_BRIDGE_REGION_SYNC_OK thread=" + Thread.currentThread().getName()
+                        + " block=" + type);
+                } catch (final RuntimeException refused) {
+                    this.getLogger().info("LEGACY_BRIDGE_REGION_SYNC_REFUSED " + refused.getClass().getSimpleName()
+                        + " thread=" + Thread.currentThread().getName());
+                    throw refused;
+                }
+            });
+        });
+
+        // World access from a legacy "sync" task scheduled outside any region (onEnable). The
+        // bridge runs it on the global region, which owns no chunks; whatever the base does is
+        // logged, and a thrown ownership violation is what the bridge counts toward quarantine.
         scheduler.runTaskLater(this, () -> {
             try {
                 final String type = this.getServer().getWorlds().get(0).getBlockAt(0, 64, 0).getType().name();

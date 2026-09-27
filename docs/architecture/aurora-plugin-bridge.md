@@ -57,6 +57,14 @@ Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
   global region is not rewritten; the base's own thread checks decide what happens. Async tasks
   run as `CraftAsyncTask` bodies without its worker bookkeeping, so `getActiveWorkers` does not
   list them.
+- **Sync route.** `aurora.bridge.sync-route` (LIVE), default `caller-region`: a legacy sync task
+  scheduled while a region is ticking runs on that region, anchored on a chunk it owned
+  (`execution/region/FoliaCurrentRegion`, ledgered; anchors cached per region id). From anywhere
+  else it runs on the global region. `global` restores the previous behaviour. Tasks routed to
+  a region count as owner handoffs.
+- **`isQueued` / `isCurrentlyRunning`** answer for bridged tasks (CraftScheduler patch).
+  `getPendingTasks` / `getActiveWorkers` still do not list them.
+- **Operator guide:** [testing legacy plugins](../guides/testing-legacy-plugins.md).
 - **CI evidence (run 440, `9c933375`, 2026-09-27).** The Paper patches applied. A second CI boot
   with `aurora.bridge.mode = "safe"` loaded `legacy-test-plugin` (no `folia-supported`):
   - admission line logged; all 13 boot stages online;

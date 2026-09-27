@@ -208,7 +208,7 @@ See the status table in [releases/26.2-build-47-aurora-nexus.md](releases/26.2-b
 - [-] Aurora Bridge admission (`aurora.bridge.mode`, Paper load-gate patches)
 - [-] bridge scheduler routing (sync → global region, async → governed `BRIDGE_IO`), cancellation, disable cleanup
 - [-] SAFE-mode violation counting, quarantine, per-plugin telemetry (`/plugins <name>`)
-- [ ] entity-owner / region-owner routes with real callers
+- [-] entity-owner / region-owner routes with real callers — region-owner route for sync tasks scheduled from region context (`sync-route = "caller-region"`); entity-owner route not implemented (the scheduler call names no entity); CI fixture asserts a region-context runTask reads a block
 - [-] run representative legacy plugins through the bridge — one synthetic fixture (`legacy-test-plugin`) passes in CI run 440; no real plugin run yet
 - [x] startup cache mechanics: fingerprints, environment key, per-entry integrity, atomic write
 - [x] plugin descriptor index on a bounded STARTUP lane, with boot diagnostics
