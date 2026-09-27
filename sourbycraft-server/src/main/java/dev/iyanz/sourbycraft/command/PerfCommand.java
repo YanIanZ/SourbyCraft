@@ -18,7 +18,7 @@ import org.bukkit.command.CommandSender;
 /** Read-only diagnostics: one immutable generation per invocation, no world/OS queries. */
 public final class PerfCommand extends Command {
     static final List<String> VIEWS =
-        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "region", "health");
+        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "awf", "region", "health");
 
     public PerfCommand(final String name) {
         super(name);
@@ -95,6 +95,9 @@ public final class PerfCommand extends Command {
         }
         if (view.equals("governor")) {
             renderGovernor(lines);
+        }
+        if (view.equals("awf")) {
+            renderAwf(lines);
         }
         if (view.equals("overview") || view.equals("region")) {
             final boolean known = snapshot.freshness().state() != MetricState.UNAVAILABLE;
@@ -209,6 +212,44 @@ public final class PerfCommand extends Command {
             add(lines, lane.name() + " submitted / completed / failed / rejected", lane.submitted() + " / "
                 + lane.completed() + " / " + lane.failed() + " / " + lane.rejected());
         }
+    }
+
+    private static void renderAwf(final List<Component> lines) {
+        final var engine = dev.iyanz.sourbycraft.awf.AwfEngine.ifStarted();
+        final var storages = engine == null ? List.<dev.iyanz.sourbycraft.awf.AwfRegionStorage>of() : engine.storages();
+        if (storages.isEmpty()) {
+            add(lines, "Aurora World Fabric", "no world is stored in AWF (aurora.awf.worlds)");
+            return;
+        }
+        add(lines, "AWF settings", engine.settings().persistence() + ", commit every "
+            + engine.settings().commitIntervalSeconds() + "s, " + engine.settings().residentChunks() + " resident chunks per storage");
+        for (final var storage : storages) {
+            final var stats = storage.stats();
+            final var world = stats.world();
+            final String name = shortStorageName(stats.name());
+            add(lines, name + " resident / dirty / evicted",
+                world.residentChunks() + " / " + world.dirtyChunks() + " / " + stats.evicted());
+            add(lines, name + " pending commits / oldest", world.saveQueueDepth() + " / " + world.oldestPendingSaveMillis() + " ms");
+            final var commit = world.backend();
+            add(lines, name + " commit p50 / p95 / p99", commit.samples() == 0 ? "no commit yet"
+                : ms(commit.p50()) + " / " + ms(commit.p95()) + " / " + ms(commit.p99())
+                    + " (last " + commit.samples() + " commits)");
+            add(lines, name + " reads / from region files / deletes",
+                stats.reads() + " / " + stats.baseFallthroughs() + " / " + stats.deletes());
+            add(lines, name + " retries / failures / written", world.retries() + " / " + world.failures() + " / "
+                + (world.bytesWritten() / 1024) + " KiB");
+        }
+    }
+
+    /** The last three path elements: world/dimension/region rather than the whole absolute path. */
+    static String shortStorageName(final String path) {
+        final String[] parts = path.replace('\\', '/').split("/");
+        final int from = Math.max(0, parts.length - 3);
+        return String.join("/", java.util.Arrays.copyOfRange(parts, from, parts.length));
+    }
+
+    private static String ms(final double millis) {
+        return String.format(java.util.Locale.ROOT, "%.1f ms", millis);
     }
 
     public static String health(final PerformanceSnapshot snapshot) {

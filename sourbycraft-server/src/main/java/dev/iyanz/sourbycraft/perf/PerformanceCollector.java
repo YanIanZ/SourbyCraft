@@ -204,6 +204,8 @@ public final class PerformanceCollector implements AutoCloseable {
             this.publishUnlessClosed(next);
             this.slowestRegion = this.slowestCandidate;
             NetworkCounters.GLOBAL.sample(nowNanos);
+            // Starts due Aurora World Fabric commits on the storage lane; never blocks.
+            dev.iyanz.sourbycraft.awf.AwfEngine.maintainAll();
             final LaneCpuSampler.LaneLoads reading = this.lanes.sample();
             this.lanePortions = LanePortions.of(reading, runtime.availableProcessors());
             LaneLoadEvent.record(reading);

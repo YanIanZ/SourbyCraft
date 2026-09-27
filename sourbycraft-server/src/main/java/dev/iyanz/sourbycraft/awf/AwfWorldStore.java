@@ -27,6 +27,11 @@ import java.util.TreeMap;
 public final class AwfWorldStore implements ChunkSource {
 
     static final String INDEX_BLOB = "index";
+    /**
+     * Index value for a chunk this world deleted. It shadows the base (a region file or template)
+     * the way a write does, so a deleted chunk does not reappear from underneath.
+     */
+    static final String TOMBSTONE = "-";
 
     /** What a commit did. */
     public record CommitResult(long generation, int chunks, int objectsWritten, long bytesWritten, int objectsRemoved) {}
@@ -62,15 +67,34 @@ public final class AwfWorldStore implements ChunkSource {
         return this.generations.currentGeneration();
     }
 
+    /** Chunks with committed bytes; deleted chunks are not included. */
     @Override
     public Set<ChunkKey> keys() {
-        return this.index.keySet();
+        final Set<ChunkKey> live = new java.util.TreeSet<>();
+        this.index.forEach((key, name) -> {
+            if (!TOMBSTONE.equals(name)) live.add(key);
+        });
+        return live;
+    }
+
+    /** Chunks this world deleted: they read as absent and shadow the base. */
+    public Set<ChunkKey> deleted() {
+        final Set<ChunkKey> deleted = new java.util.TreeSet<>();
+        this.index.forEach((key, name) -> {
+            if (TOMBSTONE.equals(name)) deleted.add(key);
+        });
+        return deleted;
+    }
+
+    /** Whether the committed state says anything about a chunk: bytes or a deletion. */
+    public boolean has(final ChunkKey key) {
+        return this.index.containsKey(key);
     }
 
     @Override
     public Optional<byte[]> read(final ChunkKey key) throws IOException {
         final String name = this.index.get(key);
-        return name == null ? Optional.empty() : Optional.of(this.objects.get(name));
+        return name == null || TOMBSTONE.equals(name) ? Optional.empty() : Optional.of(this.objects.get(name));
     }
 
     /**
@@ -80,13 +104,24 @@ public final class AwfWorldStore implements ChunkSource {
      * @param changed chunk bytes that differ from the committed state; arrays are not retained
      * @param removed chunks to drop from the world
      */
+    public CommitResult commit(final Map<ChunkKey, byte[]> changed, final Set<ChunkKey> removed,
+                               final PersistenceMode mode) throws IOException {
+        return commit(changed, removed, Set.of(), mode);
+    }
+
+    /**
+     * As {@link #commit(Map, Set, PersistenceMode)}, also recording {@code deleted} chunks as
+     * deletions that shadow the base.
+     */
     public synchronized CommitResult commit(final Map<ChunkKey, byte[]> changed, final Set<ChunkKey> removed,
-                                            final PersistenceMode mode) throws IOException {
+                                            final Set<ChunkKey> deleted, final PersistenceMode mode)
+        throws IOException {
         if (mode == PersistenceMode.READ_ONLY || !this.role.acceptsCommits()) {
             throw new IllegalStateException("a " + this.role + " world in " + mode + " mode does not accept commits");
         }
         final SortedMap<ChunkKey, String> next = new TreeMap<>(this.index);
         removed.forEach(next::remove);
+        deleted.forEach(key -> next.put(key, TOMBSTONE));
 
         int written = 0;
         long bytes = 0;
@@ -103,7 +138,7 @@ public final class AwfWorldStore implements ChunkSource {
         if (mode == PersistenceMode.FULL) {
             // FULL rewrites unchanged chunks as well, from their committed (verified) bytes.
             for (final Map.Entry<ChunkKey, String> chunk : next.entrySet()) {
-                if (changed.containsKey(chunk.getKey())) continue;
+                if (changed.containsKey(chunk.getKey()) || TOMBSTONE.equals(chunk.getValue())) continue;
                 final ObjectStore.Written w = this.objects.put(this.objects.get(chunk.getValue()), true);
                 written++;
                 bytes += w.bytes();
@@ -112,6 +147,7 @@ public final class AwfWorldStore implements ChunkSource {
         }
         if (mode == PersistenceMode.CHECKPOINT) {
             toVerify.addAll(next.values());
+            toVerify.remove(TOMBSTONE);
         }
         // Verify before the commit point: a generation must never reference an object that
         // cannot be read back.
@@ -126,6 +162,7 @@ public final class AwfWorldStore implements ChunkSource {
         for (final GenerationStore.Generation retained : this.generations.readRetained()) {
             live.addAll(decodeIndex(retained).values());
         }
+        live.remove(TOMBSTONE);
         final int removedObjects = this.objects.retainOnly(live);
         return new CommitResult(generation, next.size(), written, bytes, removedObjects);
     }
@@ -146,7 +183,7 @@ public final class AwfWorldStore implements ChunkSource {
             if (line.isEmpty()) continue;
             final String[] parts = line.split(" ");
             try {
-                if (parts.length != 3 || parts[2].length() != 64) throw new NumberFormatException(line);
+                if (parts.length != 3 || (parts[2].length() != 64 && !TOMBSTONE.equals(parts[2]))) throw new NumberFormatException(line);
                 index.put(new ChunkKey(Integer.parseInt(parts[0]), Integer.parseInt(parts[1])), parts[2]);
             } catch (final NumberFormatException malformed) {
                 throw new GenerationStore.CorruptGenerationException("malformed index line: " + line);

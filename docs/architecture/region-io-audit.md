@@ -25,10 +25,12 @@ connections fails the build until it is added here with its thread context.
 | `spark/SourbyServerConfigProvider.java` | Config files for a Spark report | Spark's report thread |
 | `perf/RuntimeSampler.java`, `util/ContainerMemory.java` | `/proc`/cgroup pseudo-files | Metrics collector thread; `/spec` reads `memory.current` on the command thread (a kernel pseudo-file, no disk or network) |
 | `bootstrap/*` | CDS, hashes, libraries | Before server start |
-| `awf/*` | World storage | Blocking methods throw on a region tick thread; saves run on a caller-supplied executor (`STORAGE` lane) |
+| `awf/*` | World storage | Commits: `STORAGE` lane, or synchronously in `flush`/`close` off region threads (on a region thread `flush` only starts an async commit, and `GenerationStore` throws). `AwfRegionStorage.read` of a chunk no longer in memory reads its object on whatever thread the engine asks, like the region-file read it replaces |
+| `awf/AwfSettings.java` | Reads the `aurora.awf` TOML keys once | The first `RegionFileStorage` construction (world load) |
 
 ## Result
 
-No SourbyCraft code performs network I/O on a region tick thread, and no disk I/O on one outside
-the startup path. The one command-thread read is `/spec`'s cgroup pseudo-file. This is a static
+No SourbyCraft code performs network I/O on a region tick thread. The only disk I/O that can
+happen on one is an AWF chunk read standing in for the engine's own region-file read (worlds in
+`aurora.awf.worlds` only). The one command-thread read is `/spec`'s cgroup pseudo-file. This is a static
 audit: it does not prove that upstream code, or plugins, stay off region threads.

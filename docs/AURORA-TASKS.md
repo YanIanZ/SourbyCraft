@@ -209,14 +209,16 @@ See the status table in [releases/26.2-build-47-aurora-nexus.md](releases/26.2-b
 - [-] bridge scheduler routing (sync → global region, async → governed `BRIDGE_IO`), cancellation, disable cleanup
 - [-] SAFE-mode violation counting, quarantine, per-plugin telemetry (`/plugins <name>`)
 - [ ] entity-owner / region-owner routes with real callers
-- [ ] run representative legacy plugins through the bridge
+- [-] run representative legacy plugins through the bridge — one synthetic fixture (`legacy-test-plugin`) passes in CI run 440; no real plugin run yet
 - [x] startup cache mechanics: fingerprints, environment key, per-entry integrity, atomic write
 - [x] plugin descriptor index on a bounded STARTUP lane, with boot diagnostics
 - [x] class index and compatibility scan (constant pool), dependency graph, startup profile
 - [ ] cold vs warm startup benchmark
 - [ ] transform output caching
 - [x] AWF: world roles, atomic generations, `.awf` lazy images, FULL/INCREMENTAL/CHECKPOINT/READ_ONLY, COW instances, metrics
-- [ ] AWF integration with the engine's chunk load/save
+- [-] AWF integration with the engine's chunk load/save — FILE backend under `RegionFileStorage` for worlds in `aurora.awf.worlds` (off by default), `/perf awf`, tombstones; CI double-boot gate added. Not qualified: no crash, load or multi-world run ([aurora-world-fabric.md](architecture/aurora-world-fabric.md#engine-integration-regionfilestorage))
+- [ ] AWF export back to region files
+- [ ] AWF qualification: load/unload loops, crash at each commit stage, shutdown with pending saves under load, 1/50/250/1000 worlds
 - [ ] AWF database backends (MongoDB/MySQL/Redis), SlimeLoader adapter
 - [x] Resource Governor specification
 - [-] governed lanes with reject-not-caller-runs, `/perf governor`

@@ -464,6 +464,8 @@ ops.json
 whitelist.json
 usercache.json
 world*/
+# Minecraft source patches live under net/minecraft/world/; that is source, not a server world.
+!/sourbycraft-server/minecraft-patches/sources/net/minecraft/world/
 logs/
 crash-reports/
 *.log

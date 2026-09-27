@@ -214,4 +214,31 @@ class AwfWorldTest {
 
     @SuppressWarnings("unused")
     private static void unused(final CompletionException e) {}
+
+    @Test
+    void aDeletionShadowsTheBaseAndIsCommitted() throws Exception {
+        try (AwfFile template = template()) {
+            final Path storeDir = this.dir.resolve("deleting");
+            final AwfWorld world = new AwfWorld("w", WorldRole.INSTANCE, template,
+                AwfWorldStore.open(storeDir, WorldRole.INSTANCE, 1));
+            world.delete(new ChunkKey(0, 0));
+            assertTrue(world.read(new ChunkKey(0, 0)).isEmpty(), "not the template's floor");
+            assertTrue(world.owns(new ChunkKey(0, 0)));
+            assertFalse(world.keys().contains(new ChunkKey(0, 0)));
+            world.saveNow(PersistenceMode.INCREMENTAL, 1);
+
+            final AwfWorld reopened = new AwfWorld("w", WorldRole.INSTANCE, template,
+                AwfWorldStore.open(storeDir, WorldRole.INSTANCE, 1));
+            assertTrue(reopened.read(new ChunkKey(0, 0)).isEmpty(), "the deletion survived the restart");
+            assertEquals(java.util.Set.of(new ChunkKey(1, 0)), reopened.keys());
+            reopened.write(new ChunkKey(0, 0), b("rebuilt"));
+            assertArrayEquals(b("rebuilt"), reopened.read(new ChunkKey(0, 0)).orElseThrow());
+        }
+    }
+
+    @Test
+    void aReadOnlyWorldCannotDelete() {
+        final AwfWorld world = new AwfWorld("r", WorldRole.READ_ONLY, null, null);
+        assertThrows(IllegalStateException.class, () -> world.delete(new ChunkKey(0, 0)));
+    }
 }

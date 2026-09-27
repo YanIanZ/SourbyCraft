@@ -32,9 +32,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * chunk is read back from the store. Dirty chunks are never dropped, so the limit can be exceeded
  * by unsaved work; that is the price of never losing a write.</p>
  *
- * <p><b>Scope.</b> This is the AWF runtime model with tests. The server's chunk system does not read
- * from or save to it yet; wiring it in means patching chunk load/save in the engine, which has not
- * been done.</p>
+ * <p><b>Deletion.</b> {@link #delete} records that the world no longer has a chunk. The deletion
+ * shadows the base exactly as a write does, and is committed as a tombstone, so the chunk does not
+ * reappear from the base after a save or a restart.</p>
+ *
+ * <p><b>Scope.</b> The engine reaches this through {@link AwfRegionStorage}, for the worlds an
+ * operator lists in {@code aurora.awf.worlds}. Nothing else creates one.</p>
  */
 public final class AwfWorld {
 
@@ -56,6 +59,8 @@ public final class AwfWorld {
     private final AtomicLong accessClock = new AtomicLong();
     private final int residentLimit;
     private final AtomicLong evicted = new AtomicLong();
+    /** Stands in for a deleted chunk in {@link #owned}; compared by identity, never exposed. */
+    private static final byte[] DELETED = new byte[0];
 
     /**
      * @param base where unowned chunks are read from, or {@code null} for an empty world
@@ -94,10 +99,11 @@ public final class AwfWorld {
         final byte[] mine = this.owned.get(key);
         if (mine != null) {
             this.lastAccess.put(key, this.accessClock.incrementAndGet());
-            return Optional.of(mine.clone());
+            return mine == DELETED ? Optional.empty() : Optional.of(mine.clone());
         }
-        // A chunk this world wrote, committed and then dropped from memory lives in the store.
-        if (this.store != null && this.store.keys().contains(key)) {
+        // A chunk this world wrote (or deleted), committed and then dropped from memory lives in
+        // the store; a committed deletion reads as absent rather than falling through to the base.
+        if (this.store != null && this.store.has(key)) {
             final Optional<byte[]> committed = this.store.read(key);
             committed.ifPresent(bytes -> this.metrics.bytesRead.addAndGet(bytes.length));
             return committed;
@@ -113,9 +119,16 @@ public final class AwfWorld {
 
     /** Every chunk this world can return. */
     public Set<ChunkKey> keys() {
-        final Set<ChunkKey> keys = new TreeSet<>(this.owned.keySet());
-        if (this.store != null) keys.addAll(this.store.keys());
+        final Set<ChunkKey> keys = new TreeSet<>();
         if (this.base != null) keys.addAll(this.base.keys());
+        if (this.store != null) {
+            keys.addAll(this.store.keys());
+            keys.removeAll(this.store.deleted());
+        }
+        this.owned.forEach((key, bytes) -> {
+            if (bytes == DELETED) keys.remove(key);
+            else keys.add(key);
+        });
         return keys;
     }
 
@@ -129,9 +142,35 @@ public final class AwfWorld {
         this.lastAccess.put(key, this.accessClock.incrementAndGet());
     }
 
-    /** Whether a chunk has been written in this world rather than read through from the base. */
+    /**
+     * Records that the world no longer has a chunk. Called by the chunk's owning region. The
+     * deletion shadows the base until the chunk is written again.
+     */
+    public void delete(final ChunkKey key) {
+        if (!this.role.mutable()) {
+            throw new IllegalStateException("a " + this.role + " world is not mutable");
+        }
+        this.owned.put(key, DELETED);
+        this.dirty.put(key, this.versions.incrementAndGet());
+        this.lastAccess.put(key, this.accessClock.incrementAndGet());
+    }
+
+    /**
+     * Whether this world has written or deleted a chunk rather than reading it through from the
+     * base. A chunk it does not own is the base's business.
+     */
     public boolean owns(final ChunkKey key) {
-        return this.owned.containsKey(key) || (this.store != null && this.store.keys().contains(key));
+        return this.owned.containsKey(key) || (this.store != null && this.store.has(key));
+    }
+
+    /** Chunks written or deleted since the last successful save. */
+    public int dirtyCount() {
+        return this.dirty.size();
+    }
+
+    /** Saves queued or running. */
+    public int pendingSaveCount() {
+        return this.pendingSaves.size();
     }
 
     /** Whether a chunk's bytes are currently held in memory. */
@@ -173,20 +212,46 @@ public final class AwfWorld {
         return result.whenComplete((ok, failed) -> this.pendingSaves.remove(enqueued));
     }
 
+    /**
+     * Commits the dirty chunks on the calling thread and waits for it. For flushes and shutdown,
+     * where the caller is already off the region threads and must know the data is durable before
+     * it continues; the store refuses to run on a region thread.
+     *
+     * @throws IOException when every attempt failed; the chunks stay dirty
+     */
+    public AwfWorldStore.CommitResult saveNow(final PersistenceMode mode, final int maxAttempts) throws IOException {
+        if (this.store == null || !this.role.acceptsCommits() || mode == PersistenceMode.READ_ONLY) {
+            throw new IllegalStateException("a " + this.role + " world in " + mode + " mode does not save");
+        }
+        if (maxAttempts < 1) throw new IllegalArgumentException("maxAttempts must be at least 1");
+        try {
+            return commit(mode, maxAttempts);
+        } catch (final CompletionException failed) {
+            if (failed.getCause() instanceof IOException io) throw io;
+            throw failed;
+        }
+    }
+
     private AwfWorldStore.CommitResult commit(final PersistenceMode mode, final int maxAttempts) {
         final long prepared = System.nanoTime();
         final Map<ChunkKey, Long> taken = new HashMap<>(this.dirty);
         final Map<ChunkKey, byte[]> changed = new HashMap<>();
-        for (final ChunkKey key : taken.keySet()) {
-            changed.put(key, this.owned.get(key));
+        final Set<ChunkKey> deleted = new java.util.HashSet<>();
+        for (final Map.Entry<ChunkKey, Long> entry : taken.entrySet()) {
+            final byte[] bytes = this.owned.get(entry.getKey());
+            // A chunk dirtied after the snapshot of versions may carry newer bytes than its
+            // version says; that is harmless: its newer version keeps it dirty for the next save.
+            if (bytes == DELETED) deleted.add(entry.getKey());
+            else if (bytes != null) changed.put(entry.getKey(), bytes);
         }
         this.metrics.serialization.record(System.nanoTime() - prepared);
         for (int attempt = 1; ; attempt++) {
             final long begun = System.nanoTime();
             try {
-                final AwfWorldStore.CommitResult r = this.store.commit(changed, Set.of(), mode);
+                final AwfWorldStore.CommitResult r = this.store.commit(changed, Set.of(), deleted, mode);
                 this.metrics.backend.record(System.nanoTime() - begun);
                 this.metrics.bytesWritten.addAndGet(r.bytesWritten());
+                // Only entries whose version is unchanged: a chunk rewritten meanwhile stays dirty.
                 taken.forEach(this.dirty::remove);
                 evictCleanBeyondLimit();
                 return r;

@@ -115,4 +115,30 @@ class AwfWorldStoreTest {
         reopened.commit(Map.of(new ChunkKey(1, 1), b("b")), Set.of(), PersistenceMode.INCREMENTAL);
         assertTrue(!new ObjectStore(this.dir.resolve("objects")).contains(ObjectStore.name(b("orphan"))));
     }
+
+    @Test
+    void aDeletionIsRecordedAsATombstoneThatSurvivesReopening() throws Exception {
+        final AwfWorldStore store = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1);
+        store.commit(Map.of(new ChunkKey(0, 0), b("a"), new ChunkKey(1, 0), b("b")), Set.of(), PersistenceMode.INCREMENTAL);
+        store.commit(Map.of(), Set.of(), Set.of(new ChunkKey(0, 0), new ChunkKey(5, 5)), PersistenceMode.CHECKPOINT);
+
+        final AwfWorldStore reopened = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1);
+        assertTrue(reopened.has(new ChunkKey(0, 0)));
+        assertTrue(reopened.has(new ChunkKey(5, 5)), "a chunk only the base had can be deleted too");
+        assertTrue(reopened.read(new ChunkKey(0, 0)).isEmpty());
+        assertEquals(Set.of(new ChunkKey(1, 0)), reopened.keys());
+        assertEquals(Set.of(new ChunkKey(0, 0), new ChunkKey(5, 5)), reopened.deleted());
+        assertTrue(!new ObjectStore(this.dir.resolve("objects")).contains(ObjectStore.name(b("a"))),
+            "a deleted chunk's bytes are collected once no retained generation needs them");
+    }
+
+    @Test
+    void aFullCommitSkipsTombstones() throws Exception {
+        final AwfWorldStore store = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1);
+        store.commit(Map.of(new ChunkKey(0, 0), b("a")), Set.of(), Set.of(new ChunkKey(1, 1)), PersistenceMode.INCREMENTAL);
+        final var full = store.commit(Map.of(), Set.of(), PersistenceMode.FULL);
+        assertEquals(2, full.chunks());
+        assertEquals(1, full.objectsWritten());
+        assertTrue(store.read(new ChunkKey(1, 1)).isEmpty());
+    }
 }
