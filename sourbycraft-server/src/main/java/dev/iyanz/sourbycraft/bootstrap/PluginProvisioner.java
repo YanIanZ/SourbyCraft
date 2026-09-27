@@ -3,16 +3,12 @@ package dev.iyanz.sourbycraft.bootstrap;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.time.Duration;
 import java.util.List;
 
 /**
@@ -64,11 +60,6 @@ import java.util.List;
 public final class PluginProvisioner {
 
     private PluginProvisioner() {}
-
-    private static final HttpClient HTTP = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(15))
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .build();
 
     private static final Path UNIFIED_CONFIG =
         Paths.get("sourbycraft_config", "sourbycraft_global_config.toml");
@@ -217,18 +208,10 @@ public final class PluginProvisioner {
 
         Path tmp = dest.resolveSibling(dest.getFileName() + ".tmp");
         Files.deleteIfExists(tmp);
-        HttpRequest req = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(5)).GET().build();
-        HttpResponse<Path> resp;
         try {
-            resp = HTTP.send(req, HttpResponse.BodyHandlers.ofFile(tmp));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("interrupted during download of " + pin.downloadUrl(), e);
-        }
-        try {
-            if (resp.statusCode() != 200) {
-                throw new IOException("HTTP " + resp.statusCode() + " for " + pin.downloadUrl());
-            }
+            // Same bounded transport as the libraries: a whole-transfer deadline, and the body cut
+            // off once it passes the pinned size. A stall here would otherwise hang boot.
+            LibDownloader.HTTPS.fetch(uri, tmp, pin.sizeBytes());
             long got = Files.size(tmp);
             if (got != pin.sizeBytes()) {
                 throw new IOException("size mismatch for " + pin.fileName()
