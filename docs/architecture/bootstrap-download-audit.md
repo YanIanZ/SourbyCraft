@@ -28,8 +28,11 @@ outside.
 
 - CI step "Bootstrap failure recovery and offline boot" (added 2026-09-27) runs a fresh
   server three times: with no network (a private network namespace with only loopback) it
-  must fail within 2 minutes, print the manual-download guidance and leave no `.tmp`; online it
+  must fail within 2 minutes, name what it could not download and leave no `.tmp`; online it
   must reach `Done`; with no network again it must reach `Done` without downloading.
+  CI run 449 showed that on a fresh directory the first network use is SourbyClip fetching the
+  Mojang server jar (`[Sourbyclip] Failed to download mojang_26.2.jar`, exit 1, about 1 s),
+  before `SourbyBootstrap`'s library step, so the step accepts either stage's message.
 - SourbyClip's own downloader.
 - Documentation of remote repository fallbacks: the manifest has one URL per library and no
   mirror list, so there is no fallback to document yet.

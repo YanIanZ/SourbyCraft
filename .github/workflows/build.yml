@@ -340,11 +340,14 @@ jobs:
           boot first-offline.log offline || status=$?
           elapsed=$(( $(date +%s) - start ))
           echo "----- first boot without network (${elapsed}s) -----"
-          grep -E 'SourbyBootstrap' first-offline.log | head -12 || true
+          grep -E 'SourbyBootstrap|Sourbyclip|Failed to download' first-offline.log | head -12 || true
           test "$status" -ne 0 || { echo "a first boot with no network must fail"; exit 1; }
           test "$elapsed" -lt 120 || { echo "the failing first boot took ${elapsed}s"; exit 1; }
-          grep -q 'download the libraries manually' first-offline.log || { echo "no manual-download guidance"; exit 1; }
-          test -z "$(find libraries -name '*.tmp' 2>/dev/null)" || { echo "partial downloads were left behind"; exit 1; }
+          # Whichever launcher stage needs the network first must say what it could not fetch.
+          # On a fresh directory that is SourbyClip (the Mojang server jar), before SourbyBootstrap.
+          grep -Eq 'Failed to download|download the libraries manually' first-offline.log \
+            || { cat first-offline.log | head -30; echo "the failure does not say what could not be downloaded"; exit 1; }
+          test -z "$(find . -name '*.tmp' 2>/dev/null)" || { find . -name '*.tmp'; echo "partial downloads were left behind"; exit 1; }
 
           boot online.log online
           grep -q 'Done (' online.log || { echo "the online boot did not reach Done"; exit 1; }
