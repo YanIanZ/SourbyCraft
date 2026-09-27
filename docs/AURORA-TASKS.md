@@ -195,7 +195,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] no known region ownership regression
 - [ ] no known persistence regression
 - [x] dependency ledger updated — Build 47 Paper patches, bridge scheduler use, network hook
-- [ ] attribution/license review complete
+- [-] attribution/license review complete — Build 47 code is original and upstream edits are identified ([release doc](releases/26.2-build-47-aurora-nexus.md#attribution-and-license-notes-2026-09-27)); the PolyForm-NC vs GPLv3 (Paper server) question for the distributed jar is open for the owner
 - [-] README and release notes contain measured claims only — audited 2026-09-27: stale `/perf` and Spark statements corrected; the remaining numeric claims name their workload and link their evidence. Re-audit before tagging
 
 ## K. Build 47 Aurora Nexus pillars
