@@ -1,0 +1,7 @@
+# Deliberately legacy: no folia-supported and no canvas-supported. Without the Aurora Bridge the
+# region-threading base refuses to load this plugin.
+name: LegacyBridgeTest
+version: '${version}'
+main: dev.iyanz.sourbycraft.legacytest.LegacyBridgePlugin
+api-version: '${api_version}'
+description: CI fixture for the Aurora Bridge. Uses the Bukkit scheduler as a pre-Folia plugin would.
