@@ -172,13 +172,13 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 
 ## I. SourbyClip / free-running requirement
 
-- [ ] downloader timeout audit
-- [-] retry/failure handling
-- [ ] SHA/cache validation audit
-- [ ] bounded concurrency audit
-- [ ] first-boot failure recovery test
-- [ ] offline-after-success test
-- [ ] remote repository/fallback documentation
+- [-] downloader timeout audit — bootstrap downloads: whole-transfer deadline added (a stalled body could hang boot); SourbyClip (private) not audited ([bootstrap-download-audit.md](architecture/bootstrap-download-audit.md))
+- [-] retry/failure handling — 3 attempts with backoff, `.tmp` always cleaned; unit-tested
+- [-] SHA/cache validation audit — bootstrap downloads: verified before install, corrupt cache replaced, body cut off past the pinned size; SourbyClip not audited
+- [-] bounded concurrency audit — bootstrap downloads are sequential; SourbyClip not audited
+- [-] first-boot failure recovery test — downloader state after failure unit-tested; no whole-boot test
+- [-] offline-after-success test — cache hit touches no network (unit test); no offline CI boot
+- [ ] remote repository/fallback documentation — one URL per library, no mirrors exist to document
 - [x] verify core runtime needs no Canvas remote service/API — [dependency-ledger.md §6](architecture/dependency-ledger.md)
 
 ## J. Aurora release gate
@@ -227,7 +227,7 @@ See the status table in [releases/26.2-build-47-aurora-nexus.md](releases/26.2-b
 - [x] operator-configurable governor budgets (`[aurora.scheduler]`)
 - [ ] existing executors under the governor — deferred; each already has its own bound ([executor-inventory.md](architecture/executor-inventory.md))
 - [-] network counters: bytes/packets per direction, connections, `/perf network`
-- [ ] vanilla save-queue / region-file storage metrics
+- [-] vanilla save-queue / region-file storage metrics — `/perf storage`: chunk-system reads/writes/deletes (counted in the `RegionFileStorage` patch) and per-world pending I/O from Moonrise's controllers; no latency percentiles yet
 
 ---
 
