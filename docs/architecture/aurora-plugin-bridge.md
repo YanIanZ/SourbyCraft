@@ -75,6 +75,12 @@ Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
     counted as 1 fatal violation, below the quarantine threshold;
   - `/plugins LegacyBridgeTest` reported 4 scheduler redirects; `/perf governor` reported Bridge
     I/O 1 submitted, 1 completed, 0 rejected; clean exit.
+- **CI evidence (run 445, `2f2ecb64`, 2026-09-27), caller-region route.** `runTask` called from a
+  chunk-load callback ran on `Folia Region Scheduler Thread #0` and read the block there
+  (`LEGACY_BRIDGE_REGION_SYNC_OK ... block=AIR`). The same kind of access from a task scheduled in
+  `onEnable` ran on the global region and was refused (`WORLD_ACCESS_REFUSED`, 1 fatal
+  violation). `isQueued` saw a bridged task (`QUEUED_OK`). `/plugins`: 6 scheduler redirects,
+  1 owner handoff, not quarantined; 13 boot stages online.
 - **Still unverified.** That fixture is synthetic. No real legacy plugin has been run through the
   bridge, and nothing here qualifies one.
 

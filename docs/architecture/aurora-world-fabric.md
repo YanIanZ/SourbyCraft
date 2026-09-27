@@ -143,8 +143,11 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
     but not reading. The third boot exported 529 chunks per dimension (and 1 entity-storage
     deletion each) back to region files and kept the stores as `*.awf.exported-*`. Run 441 had
     found the lost-shutdown-commit bug fixed by feature patch 0020.
-  - The next CI run force-loads chunks on the second boot and fails unless the engine reads more
-    chunks from AWF than it falls through to region files.
+  - **CI run 445 (`2f2ecb64`), read-back.** The second boot force-loads the spawn area. The
+    overworld region storage saw 1089 reads, 560 of which fell through to (absent) region
+    files, so 529 chunks, exactly the ones the first boot generated, were served from AWF.
+    `/perf storage` showed 3267 chunk-system reads and no pending I/O at that point. The CI
+    gate fails unless AWF-served reads exceed fall-throughs.
 
 Not implemented: MongoDB/MySQL/Redis backends (the SPI exists; no driver is on the classpath and
 none is added without a qualification plan); a SlimeLoader compatibility adapter (AWF stores
