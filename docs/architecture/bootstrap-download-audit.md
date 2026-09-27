@@ -33,6 +33,10 @@ outside.
   CI run 449 showed that on a fresh directory the first network use is SourbyClip fetching the
   Mojang server jar (`[Sourbyclip] Failed to download mojang_26.2.jar`, exit 1, about 1 s),
   before `SourbyBootstrap`'s library step, so the step accepts either stage's message.
+- **CI run 450 (`38bc72be`, 2026-09-27), green.** Fresh directory without network: failed with
+  SourbyClip's download error and no `.tmp` left. Online: `Done`. Without network again:
+  `Done (9.282s)` with nothing downloaded. The only network error in that boot was Mojang's
+  `api.minecraftservices.com/publickeys` lookup (logged, not fatal, `online-mode=false`).
 - SourbyClip's own downloader.
 - Documentation of remote repository fallbacks: the manifest has one URL per library and no
   mirror list, so there is no fallback to document yet.
