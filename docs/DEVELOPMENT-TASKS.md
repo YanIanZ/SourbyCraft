@@ -210,11 +210,11 @@ Only measured hot spots should produce new performance patches.
 # K. Patch architecture
 
 - [x] **P2** initial patch inventory documentation
-- [ ] **P2** classify all active patches: FOUNDATION / INTEGRATION / PERFORMANCE / COMPATIBILITY / SECURITY / BRANDING / LEGACY
-- [ ] **P2** assign KEEP / SPLIT / MOVE TO SOURBY SOURCE / REPLACE / REMOVE / DEFER
+- [x] **P2** classify all active patches: FOUNDATION / INTEGRATION / PERFORMANCE / COMPATIBILITY / SECURITY / BRANDING / LEGACY — `architecture/patch-classification.md`
+- [x] **P2** assign KEEP / SPLIT / MOVE TO SOURBY SOURCE / REPLACE / REMOVE / DEFER — same doc
 - [ ] **P2** identify duplicate upstream optimizations
-- [ ] **P2** identify obsolete Folia-era patches
-- [ ] **P2** reduce giant mixed-responsibility patches
+- [x] **P2** identify obsolete Folia-era patches — none found; all apply at the pinned revisions
+- [-] **P2** reduce giant mixed-responsibility patches — identified (0006, 0013 split; 0002, 0005, 0016 move classes out); not done
 - [ ] **P2** keep implementation in Sourby-owned source where possible
 - [ ] **P2** add or preserve regression tests before patch removal
 
