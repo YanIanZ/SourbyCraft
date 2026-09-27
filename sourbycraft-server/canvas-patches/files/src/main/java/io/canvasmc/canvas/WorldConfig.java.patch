@@ -14,7 +14,7 @@
          }
  
 -        public boolean enableTpsBar = true;
-+        // SourbyCraft - coexistence: the SourbyCraft utility layer owns the TPS/RAM boss bars
++        // SourbyCraft - coexistence: SourbyCraft's HUD owns the TPS/RAM boss bars
 +        // (dev.iyanz.sourbycraft.hud.HudBars, exposed via /tpsbar and /rambar). Canvas' own
 +        // regionized TPS/RAM bars are a duplicate of that feature, and their toggle command
 +        // (/canvas region-bar) has been removed with the rest of /canvas. Default them OFF so

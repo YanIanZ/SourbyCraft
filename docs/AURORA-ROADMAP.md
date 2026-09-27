@@ -129,18 +129,18 @@ Create a reliable baseline of the current 26.2 engine before changing runtime ow
 
 ### Tasks
 
-- [ ] capture current branch head
-- [ ] record Java/JVM version
-- [ ] record upstream Canvas revision
-- [ ] record build number
-- [ ] record patch count
-- [ ] record direct Canvas references
-- [ ] record direct Folia references
-- [ ] record Sourby-owned executors
-- [ ] record active config surfaces
-- [ ] record current startup/shutdown lifecycle
-- [ ] record current Spark integration points
-- [ ] record performance command outputs
+- [x] capture current branch head — per release in `releases/26.2-build-47-aurora-nexus.md` (CI run/commit per gate)
+- [x] record Java/JVM version — Java 25 (Temurin) in AGENTS.md, CI and Dockerfile
+- [x] record upstream Canvas revision — `canvasRef` in `gradle.properties`; Paper ref via Canvas; `architecture/rebase-log.md`
+- [x] record build number — `sourbyBuild` in `gradle.properties`; verified by `scripts/verify_build_identity.py` in CI
+- [x] record patch count — `architecture/dependency-ledger.md` §2
+- [x] record direct Canvas references — `dependency-ledger.md` §1, enforced by `UpstreamDependencyLedgerTest`
+- [x] record direct Folia references — same ledger and test
+- [x] record Sourby-owned executors — `architecture/executor-inventory.md`
+- [x] record active config surfaces — AGENTS.md "Configuration surfaces", `AURORA-CONFIG.md`
+- [x] record current startup/shutdown lifecycle — `core/AuroraRuntime` states, `SourbyCraftBootstrap` stage list
+- [x] record current Spark integration points — `SPARK.md`
+- [x] record performance command outputs — README `/perf` table
 
 ### Deliverable
 
@@ -162,19 +162,19 @@ Make source, build metadata, runtime identity, and documentation describe the ac
 
 ### Tasks
 
-- [ ] replace stale "utility layer" wording
-- [ ] replace stale "Canvas re-platform" wording
-- [ ] fix root `package-info.java`
-- [ ] fix `SourbyCraftBootstrap` architecture comments
-- [ ] remove `SourbyCraft-on-Canvas` build terminology
-- [ ] create canonical `BuildInfo`
-- [ ] remove hard-coded Spark `Build44`
-- [ ] feed build number from canonical metadata
-- [ ] make startup banner use BuildInfo
-- [ ] make `/version` use BuildInfo
-- [ ] make Spark use BuildInfo
-- [ ] make crash reports use BuildInfo
-- [ ] expose upstream revisions only in developer/debug details
+- [x] replace stale "utility layer" wording — last occurrences removed 2026-09-27
+- [x] replace stale "Canvas re-platform" wording — last occurrence removed 2026-09-27
+- [x] fix root `package-info.java`
+- [x] fix `SourbyCraftBootstrap` architecture comments
+- [x] remove `SourbyCraft-on-Canvas` build terminology — removed from `build.gradle.kts.patch` 2026-09-27
+- [x] create canonical `BuildInfo` — `brand/BuildInfo`
+- [x] remove hard-coded Spark `Build44` — `FoliaPlatformInfo.java.patch`
+- [x] feed build number from canonical metadata — `writeBuildInfo` + manifest, verified in CI
+- [x] make startup banner use BuildInfo — `StartupBanner`, `SourbyCraftBanner`
+- [x] make `/version` use BuildInfo — `VerCommand`
+- [x] make Spark use BuildInfo — `FoliaPlatformInfo` patch, `SourbyMetadataProvider`
+- [-] make crash reports use BuildInfo — crash reports read the jar manifest `writeBuildInfo` writes; not checked in an actual crash report
+- [x] expose upstream revisions only in developer/debug details — `/ver` shows no upstream revision
 
 ### Target output
 
@@ -211,14 +211,14 @@ Finish first-party configuration ownership without automatic tuning.
 ### Add only when real consumers exist
 
 - [ ] `aurora.performance`
-- [ ] `aurora.scheduler`
+- [x] `aurora.scheduler` — Resource Governor budgets
 - [ ] `aurora.ai`
 - [ ] `aurora.chunk`
 - [ ] `aurora.world`
-- [ ] `aurora.network`
+- [x] `aurora.network` — `counters`
 - [ ] `aurora.memory`
-- [ ] `aurora.storage`
-- [ ] `aurora.diagnostics`
+- [-] `aurora.storage` — AWF lives under `aurora.awf` instead
+- [x] `aurora.diagnostics` — `lane-sampling`
 
 ### Configuration contract
 
@@ -282,17 +282,17 @@ FAILED
 
 ### Runtime-owned services
 
-- [ ] configuration
-- [ ] execution
-- [ ] metrics
-- [ ] GC telemetry
-- [ ] HUD
-- [ ] diagnostics
-- [ ] Spark bridge
-- [ ] updater
-- [ ] I/O executor
-- [ ] CPU workers
-- [ ] scheduler bridge
+- [x] configuration
+- [-] execution — governed lanes are shut down by the runtime; region execution is the base's
+- [x] metrics
+- [x] GC telemetry
+- [x] HUD
+- [x] diagnostics
+- [-] Spark bridge — Spark is Paper's; SourbyCraft supplies providers, not lifecycle
+- [x] updater
+- [x] I/O executor
+- [x] CPU workers
+- [-] scheduler bridge — Aurora Bridge is started lazily by the plugin loader, outside the stage list
 
 ### Rules
 
@@ -384,19 +384,19 @@ result
 
 - [ ] migrate pool behind AuroraExecution
 - [ ] add explicit owner-context callback
-- [ ] add path freshness token
-- [ ] validate entity/navigation version
-- [ ] reject stale paths
+- [x] add path freshness token — `AsyncPathValidity.stillRequested`
+- [x] validate entity/navigation version — `AsyncPathValidity.sameSubject`
+- [x] reject stale paths — `AsyncPathValidityTest`
 - [ ] test entity removal during solve
 - [ ] test world unload during solve
 - [ ] test target movement during solve
-- [ ] test queue saturation
-- [ ] test shutdown cancellation
+- [x] test queue saturation — `AsyncPathQueueTelemetryTest`
+- [x] test shutdown cancellation — `AsyncPathShutdownTest`
 - [ ] benchmark sync vs async
 - [ ] mob behavior compatibility soak
-- [ ] expose queue depth
-- [ ] expose wait latency
-- [ ] expose solve latency
+- [x] expose queue depth — `/perf async`
+- [x] expose wait latency — `/perf async`
+- [x] expose solve latency — `/perf async`
 
 ### Gate
 
@@ -463,16 +463,16 @@ Make Aurora telemetry the authoritative runtime truth.
 
 ### Add
 
-- [ ] scheduler queue depth
+- [x] scheduler queue depth — `/perf governor` (Sourby lanes); region scheduler queues not exposed
 - [ ] task wait latency
 - [x] async-path queue/solve latency — `/perf async`; see below
 - [ ] chunk lifecycle counters
 - [ ] entity tick counters
-- [ ] packet counters
-- [ ] bytes/sec
-- [ ] storage backlog
-- [ ] save latency
-- [ ] worker utilization
+- [x] packet counters — `/perf network`
+- [x] bytes/sec — `/perf network`
+- [x] storage backlog — `/perf storage` (Moonrise pending I/O per world), `/perf awf`
+- [-] save latency — AWF commit p50/p95/p99 only; region-file save latency not measured
+- [x] worker utilization — `/perf lanes` (CPU by execution lane)
 - [ ] incident history
 
 ### Consumer model

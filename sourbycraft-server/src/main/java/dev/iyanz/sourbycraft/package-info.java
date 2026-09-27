@@ -17,7 +17,7 @@
  * {@code /sys} / {@code /ver} / ... command suite), {@link dev.iyanz.sourbycraft.hud} (boss-bar
  * HUD), {@link dev.iyanz.sourbycraft.lang} (varied, config-driven messages),
  * {@link dev.iyanz.sourbycraft.maxplayers} ({@code /maxp} + the full-server bypass),
- * {@link dev.iyanz.sourbycraft.perf} (a display-only tier enum — not a perf engine), and
+ * {@link dev.iyanz.sourbycraft.perf} (metrics runtime, network counters, async pathfinding and the {@code /perf} data sources), and
  * {@link dev.iyanz.sourbycraft.update} (the GitHub-release auto-updater).
  */
 package dev.iyanz.sourbycraft;

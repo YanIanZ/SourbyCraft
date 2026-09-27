@@ -22,7 +22,7 @@
 +    paperclip("dev.iyanz:sourbyclip:${providers.gradleProperty("clipVersion").get()}")
  }
  
-+// SourbyCraft-on-Canvas - this must resolve against the "canvas" fork specifically (Canvas's
++// SourbyCraft (Canvas upstream) - this must resolve against the "canvas" fork specifically (Canvas's
 +// own AT-merge plumbing, unchanged from CraftCanvasMC/Canvas), NOT paperweight.activeFork —
 +// activeFork is now "sourbycraft" (our nested fork), which has no canvas.at of its own and
 +// would silently drop Canvas's real AT baseline, breaking every canvas-server minecraft-patch
@@ -45,7 +45,7 @@
      gitFilePatches = false
  
      val canvas = forks.register("canvas") {
-+        // SourbyCraft-on-Canvas (feat/canvas-engine): this fork registration is Canvas's own
++        // SourbyCraft (Canvas upstream): this fork registration is Canvas's own
 +        // upstream-of-Paper declaration (unchanged from CraftCanvasMC/Canvas). rootDirectory is
 +        // repointed at the canvas upstream checkout so the nested "sourbycraft" fork below (which
 +        // resolves ITS paths relative to this fork's rootDirectory) lands in the right place —
