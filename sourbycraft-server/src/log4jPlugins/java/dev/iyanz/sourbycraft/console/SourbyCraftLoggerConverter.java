@@ -128,7 +128,7 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
                       .append(RESET)
                       .append(']');
         } else if (matches(logger, SOURBY_PREFIXES)) {
-            // Outside the Minecraft system: the utility layer speaks as SourbyCraft.
+            // Outside the Minecraft system: SourbyCraft's own services speak as SourbyCraft.
             toAppendTo.append('[')
                       .append(PRIMARY).append(BRAND)
                       .append(DIM).append('/').append(simpleName(logger))
