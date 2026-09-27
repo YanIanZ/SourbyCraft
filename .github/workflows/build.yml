@@ -77,7 +77,7 @@ jobs:
         run: ./gradlew applyAllPatches --no-daemon --stacktrace
 
       - name: Test API and server; build metrics fixture
-        run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test :test-plugin:jar --no-daemon --stacktrace
+        run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test :test-plugin:jar :legacy-test-plugin:jar --no-daemon --stacktrace
 
       - name: Validate release identity and profiling scripts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
@@ -137,6 +137,7 @@ jobs:
           mkdir -p run fixture
           cp release/SourbyCraft-26.2-*.jar run/
           cp test-plugin/build/libs/test-plugin-1.0.0.jar fixture/
+          cp legacy-test-plugin/build/libs/legacy-test-plugin-1.0.0.jar fixture/
 
       - name: Boot server, verify metrics API, and stop cleanly
         working-directory: run
@@ -284,8 +285,168 @@ jobs:
             || { echo "spark command output marker missing."; exit 1; }
           grep -q 'SourbyCraft Memory' server.log || { echo "RAM marker missing"; exit 1; }
           grep -q 'SourbyCraft Performance' server.log || { echo "PERF marker missing"; exit 1; }
+          echo "----- Aurora boot summary -----"
+          grep -E 'stages (online|degraded)|Aurora startup|Aurora startup index|failed during Aurora boot' server.log || echo "(no Aurora boot summary line found)"
           jfr summary boot.jfr
           echo "Server reached Done, exposed metrics during load and enable, and exited cleanly."
+
+      - name: Boot with the Aurora Bridge and a legacy plugin
+        run: |
+          set -euo pipefail
+          # A second, separate boot: aurora.bridge.mode = "safe" and a plugin without
+          # folia-supported. Evidence that the bridge admits, routes and cancels legacy scheduler
+          # work on a real server; not a qualification of any real plugin.
+          mkdir -p run-bridge/plugins run-bridge/sourbycraft_config
+          cd run-bridge
+          jar=$(find ../run -maxdepth 1 -type f -name 'SourbyCraft-26.2-*.jar' -print -quit)
+          test -n "$jar"
+          cp ../fixture/legacy-test-plugin-1.0.0.jar plugins/
+          echo "eula=true" > eula.txt
+          printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
+          printf '[aurora.bridge]\nmode = "safe"\n' > sourbycraft_config/aurora.toml
+          mkfifo stdin.pipe
+          java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
+          PID=$!
+          stdin_open=0
+          java_status=
+          cleanup_required=1
+
+          close_stdin() {
+            if [ "$stdin_open" -eq 1 ]; then
+              exec 3>&- 2>/dev/null || true
+              stdin_open=0
+            fi
+          }
+
+          wait_for_exit() {
+            local attempts=$1
+            for _ in $(seq 1 "$attempts"); do
+              if ! kill -0 "$PID" 2>/dev/null; then
+                return 0
+              fi
+              sleep 1
+            done
+            # The process may exit during the final sleep.
+            ! kill -0 "$PID" 2>/dev/null
+          }
+
+          reap_if_exited() {
+            if kill -0 "$PID" 2>/dev/null; then
+              return 1
+            fi
+            if wait "$PID"; then
+              java_status=0
+            else
+              java_status=$?
+            fi
+            return 0
+          }
+
+          bounded_cleanup() {
+            close_stdin
+            if reap_if_exited; then
+              return
+            fi
+
+            kill -TERM "$PID" 2>/dev/null || true
+            if wait_for_exit 10; then
+              reap_if_exited || true
+              return
+            fi
+
+            kill -KILL "$PID" 2>/dev/null || true
+            if wait_for_exit 10; then
+              reap_if_exited || true
+            else
+              echo "Unable to confirm process $PID exited after SIGKILL."
+            fi
+          }
+
+          show_log() {
+            echo "----- last 40 log lines -----"
+            tail -40 server.log || true
+          }
+
+          fail_after_launch() {
+            local message=$1
+            bounded_cleanup
+            cleanup_required=0
+            show_log
+            if [ -n "$java_status" ]; then
+              echo "Java exit status: $java_status"
+            fi
+            echo "$message"
+            exit 1
+          }
+
+          cleanup_on_exit() {
+            local shell_status=$?
+            trap - EXIT
+            if [ "$cleanup_required" -eq 1 ]; then
+              bounded_cleanup
+            fi
+            exit "$shell_status"
+          }
+
+          trap cleanup_on_exit EXIT
+          if exec 3> stdin.pipe; then
+            stdin_open=1
+          else
+            fail_after_launch "Could not open the server console FIFO."
+          fi
+
+          ready=0
+          for _ in $(seq 1 240); do
+            if grep -q 'Done (' server.log && grep -q 'LEGACY_BRIDGE_ENABLED' server.log; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$PID" 2>/dev/null; then echo "server process exited early"; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            fail_after_launch "Legacy plugin did not load through the bridge and reach Done within 240s."
+          fi
+
+          settled=0
+          for _ in $(seq 1 30); do
+            if grep -q 'LEGACY_BRIDGE_SYNC_OK' server.log \
+              && grep -q 'LEGACY_BRIDGE_ASYNC_OK' server.log \
+              && grep -q 'LEGACY_BRIDGE_TIMER_OK' server.log \
+              && grep -Eq 'LEGACY_BRIDGE_WORLD_ACCESS_(ALLOWED|REFUSED)' server.log; then
+              settled=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$settled" -ne 1 ]; then
+            fail_after_launch "Bridged scheduler markers did not all appear within 30s."
+          fi
+
+          if ! printf 'plugins LegacyBridgeTest\nperf governor\nstop\n' >&3; then
+            fail_after_launch "Server console closed before accepting commands."
+          fi
+          close_stdin
+          if ! wait_for_exit 60; then
+            fail_after_launch "Server required forced cleanup after the 60s shutdown timeout."
+          fi
+          if ! reap_if_exited; then
+            fail_after_launch "Server was still running after shutdown polling completed."
+          fi
+          cleanup_required=0
+          echo "----- bridge evidence -----"
+          grep -E 'Aurora Bridge|LEGACY_BRIDGE|stages (online|degraded)|Bridge I/O|Scheduler redirects|Fatal violations|Quarantined' server.log || true
+          if [ "$java_status" -ne 0 ]; then
+            show_log
+            echo "Server exited with status $java_status."
+            exit 1
+          fi
+          grep -q 'Aurora Bridge admitted LegacyBridgeTest' server.log \
+            || { echo "bridge admission line missing"; exit 1; }
+          if grep -q 'LEGACY_BRIDGE_TIMER_RAN_AFTER_CANCEL' server.log; then
+            echo "a cancelled bridged timer kept running"; exit 1
+          fi
+          echo "Legacy plugin loaded through the Aurora Bridge; sync, async, timer-cancel and world-access paths ran; clean exit."
 
       - name: Upload boot diagnostics
         if: always()
@@ -294,6 +455,7 @@ jobs:
           name: SourbyCraft-boot-diagnostics
           path: |
             run/server.log
+            run-bridge/server.log
             run/boot.jfr
           retention-days: 7
 
