@@ -168,7 +168,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [x] determine whether active CI still requires legacy `sourbypatcher` — no: CI requires the private SourbyPatcher `canvas-toolchain` adapter; the legacy Folia patcher is not used
 - [ ] clean-checkout reproducibility
 - [ ] cached/offline boot validation
-- [ ] track rebase conflict count
+- [x] track rebase conflict count — [rebase-log.md](architecture/rebase-log.md) (last bump: 7 patch files needed intervention); recorded per bump from now on
 
 ## I. SourbyClip / free-running requirement
 
