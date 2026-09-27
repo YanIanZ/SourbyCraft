@@ -217,9 +217,11 @@ See the status table in [releases/26.2-build-47-aurora-nexus.md](releases/26.2-b
 - [ ] transform output caching
 - [x] AWF: world roles, atomic generations, `.awf` lazy images, FULL/INCREMENTAL/CHECKPOINT/READ_ONLY, COW instances, metrics
 - [-] AWF integration with the engine's chunk load/save — FILE backend under `RegionFileStorage` for worlds in `aurora.awf.worlds` (off by default), `/perf awf`, tombstones; CI double-boot gate added. Not qualified: no crash, load or multi-world run ([aurora-world-fabric.md](architecture/aurora-world-fabric.md#engine-integration-regionfilestorage))
-- [ ] AWF export back to region files
-- [ ] AWF qualification: load/unload loops, crash at each commit stage, shutdown with pending saves under load, 1/50/250/1000 worlds
-- [ ] AWF database backends (MongoDB/MySQL/Redis), SlimeLoader adapter
+- [-] AWF export back to region files — `aurora.awf.export`, resumable, store kept; unit-tested, CI export boot added
+- [-] AWF qualification — storage layer in-process: crash at each commit stage, 200 load/unload cycles, shutdown with a pending commit, concurrent writers, 1/50/250/1000 storages, corrupt object (`AwfQualificationTest`). Open: server-level crash with players, backend disconnect, load measurement
+- [-] AWF backend SPI (`AwfStore`, `AwfBackend`, `aurora.awf.backend`), FILE built in, no fallback on a missing backend
+- [ ] AWF database backends (MongoDB/MySQL/Redis) — none shipped
+- [ ] SlimeLoader adapter — needs a Slime-format converter
 - [x] Resource Governor specification
 - [-] governed lanes with reject-not-caller-runs, `/perf governor`
 - [x] operator-configurable governor budgets (`[aurora.scheduler]`)

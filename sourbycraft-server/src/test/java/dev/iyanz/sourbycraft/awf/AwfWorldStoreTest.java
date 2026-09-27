@@ -141,4 +141,66 @@ class AwfWorldStoreTest {
         assertEquals(1, full.objectsWritten());
         assertTrue(store.read(new ChunkKey(1, 1)).isEmpty());
     }
+
+    @Test
+    void objectsLeaveOnlyWhenTheirLastRetainedGenerationDoes() throws Exception {
+        final AwfWorldStore store = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 2);
+        final ObjectStore objects = new ObjectStore(this.dir.resolve("objects"));
+        final ChunkKey key = new ChunkKey(0, 0);
+        store.commit(Map.of(key, b("v1")), Set.of(), PersistenceMode.INCREMENTAL);
+        store.commit(Map.of(key, b("v2")), Set.of(), PersistenceMode.INCREMENTAL);
+        assertTrue(objects.contains(ObjectStore.name(b("v1"))), "generation 1 is still retained");
+        final var third = store.commit(Map.of(key, b("v3")), Set.of(), PersistenceMode.INCREMENTAL);
+        assertEquals(1, third.objectsRemoved());
+        assertTrue(!objects.contains(ObjectStore.name(b("v1"))));
+        assertTrue(objects.contains(ObjectStore.name(b("v2"))));
+    }
+
+    @Test
+    void aSharedObjectSurvivesWhileAnyRetainedGenerationUsesIt() throws Exception {
+        final AwfWorldStore store = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1);
+        final ObjectStore objects = new ObjectStore(this.dir.resolve("objects"));
+        store.commit(Map.of(new ChunkKey(0, 0), b("same"), new ChunkKey(1, 0), b("x")), Set.of(), PersistenceMode.INCREMENTAL);
+        store.commit(Map.of(new ChunkKey(0, 0), b("other")), Set.of(), PersistenceMode.INCREMENTAL);
+        store.commit(Map.of(new ChunkKey(2, 0), b("same")), Set.of(), PersistenceMode.INCREMENTAL);
+        assertTrue(objects.contains(ObjectStore.name(b("same"))), "chunk 2 now references it");
+        assertTrue(objects.contains(ObjectStore.name(b("x"))));
+    }
+
+    @Test
+    void objectsOfAFailedCommitAreCollectedByTheNextOne() throws Exception {
+        final boolean[] fail = {true};
+        final AwfWorldStore store = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1, stage -> {
+            if (fail[0] && stage == GenerationStore.Stage.VERIFIED) throw new java.io.IOException("injected");
+        });
+        final ObjectStore objects = new ObjectStore(this.dir.resolve("objects"));
+        assertThrows(java.io.IOException.class,
+            () -> store.commit(Map.of(new ChunkKey(0, 0), b("lost")), Set.of(), PersistenceMode.INCREMENTAL));
+        assertTrue(objects.contains(ObjectStore.name(b("lost"))), "written before the failure");
+        fail[0] = false;
+        store.commit(Map.of(new ChunkKey(1, 0), b("kept")), Set.of(), PersistenceMode.INCREMENTAL);
+        assertTrue(!objects.contains(ObjectStore.name(b("lost"))), "unreferenced, so collected");
+        assertTrue(store.read(new ChunkKey(0, 0)).isEmpty(), "the failed commit never became visible");
+    }
+
+    @Test
+    void reopeningScansForObjectsACrashLeftBehind() throws Exception {
+        final AwfWorldStore store = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1);
+        store.commit(Map.of(new ChunkKey(0, 0), b("a")), Set.of(), PersistenceMode.INCREMENTAL);
+        final ObjectStore objects = new ObjectStore(this.dir.resolve("objects"));
+        objects.put(b("crash-leftover"), false);
+        AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1);
+        assertTrue(!objects.contains(ObjectStore.name(b("crash-leftover"))));
+        assertTrue(objects.contains(ObjectStore.name(b("a"))));
+    }
+
+    @Test
+    void aReadOnlyOpenNeverDeletes() throws Exception {
+        AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1)
+            .commit(Map.of(new ChunkKey(0, 0), b("a")), Set.of(), PersistenceMode.INCREMENTAL);
+        final ObjectStore objects = new ObjectStore(this.dir.resolve("objects"));
+        objects.put(b("stray"), false);
+        AwfWorldStore.open(this.dir, WorldRole.READ_ONLY, 1);
+        assertTrue(objects.contains(ObjectStore.name(b("stray"))));
+    }
 }

@@ -86,40 +86,80 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
   Region files under an AWF store are never written or cleared.
 - **Durability.** A write is held in memory. A commit starts on the governed `STORAGE` lane once
   written chunks have waited `aurora.awf.commit-interval-seconds` (checked once a second by the
-  metrics collector). `flush()` (save-all flush) and `close()` (world unload and shutdown) commit
-  synchronously on the calling thread. A flush arriving on a region thread only starts an async
+  metrics collector, which stops early in shutdown). At shutdown, feature patch 0020 commits and
+  closes every open storage in `MinecraftServer.stopServer`, right after
+  `MoonriseRegionFileIO.flush(server)`, the point where every chunk save has reached its storage.
+  This is needed because Folia's shutdown never calls `RegionFileStorage.flush()`/`close()`; CI
+  run 441 found a stop that lost every chunk without it. `flush()` and `close()`, where the engine
+  does call them, also commit synchronously on the calling thread. A flush arriving on a region thread only starts an async
   commit, because region threads must not block on disk. **A crash loses the writes since the
   last commit**; region files lose less. `AwfRegionStorageTest.writesSinceTheLastCommitAreLostOnACrash`
   pins this.
 - **Memory.** `aurora.awf.resident-chunks` (default 1024) clean chunks per storage stay in memory
   after a commit. Dirty chunks are never dropped, so a storage can exceed the limit by what is
   unsaved.
-- **Once attached, attached.** If a store exists beside a folder, it is opened even when the world
-  is no longer listed, with a warning. Writing to the region files underneath would be overridden
-  by the older AWF data on a later run. There is no export back to region files yet.
+- **Once attached, attached.** If a store exists for a folder, it is opened even when the world is
+  no longer listed, with a warning. Writing to the region files underneath would be overridden by
+  the older AWF data on a later run.
+- **Export.** `aurora.awf.export = ["world"]` (and the world removed from `worlds`) writes every
+  chunk and deletion in the store into the region files at the next load, through the storage's
+  ordinary write path, flushes, then retires the store (FILE: renamed to
+  `<folder>.awf.exported-<millis>`, kept, not deleted). A failure part-way fails the world load and
+  leaves the store in place; the next load exports again from the start. A world in both lists
+  stays in AWF.
 - **Failure behavior.** A store that cannot be opened fails the world load rather than falling
   back to region files. A commit that fails after `aurora.awf.commit-attempts` leaves the chunks
   dirty and logs a warning; the next interval retries. A chunk over 64 MiB is refused as an I/O
   error.
 - **One writer per store.** Opening a folder that is already open throws. Two writers would each
   commit an index missing the other's chunks.
-- **Known costs, not measured.** Each commit rewrites the whole chunk index (O(chunks in the
-  storage)), decodes the retained generations' indexes, and scans the object directory for
-  garbage. Fine for small and medium worlds; unmeasured for large ones. Every NBT write is
-  serialized once more into a byte array.
+- **Commit cost.** Retained generations' object names are kept in memory. A commit only
+  considers objects of the generation that fell out of retention, plus those a failed commit
+  wrote, for deletion. The object directory is scanned once, when a writable store opens, for
+  objects a crash left behind. Still O(chunks in the storage) per commit: the whole chunk index is
+  rewritten. Unmeasured on large worlds. Every NBT write is serialized once more into a byte
+  array.
+- **Backends.** `AwfStore` is the backend contract: atomic commit, remembered deletions, caller
+  owns arrays. `AwfBackend` selects where stores live: `aurora.awf.backend`, default `file`, the
+  only one shipped. Another backend is server-internal code registered with
+  `AwfBackend.register` before listed worlds load; SourbyCraft ships no database backend or driver.
+  A listed or exporting world whose backend is not registered fails to load; there is no
+  fallback. Storage ids are region folders relative to the server directory (`world/region`).
 - **Observability.** `/perf awf` shows resident, dirty and evicted chunks, pending commits and the
   oldest one's age, commit p50/p95/p99, reads versus region-file fall-throughs and deletes,
   retries, failures and bytes written, per storage.
-- **Evidence.** Unit tests in `awf/` (`AwfRegionStorageTest`, `AwfSettingsTest`, tombstone tests
-  in `AwfWorldStoreTest` and `AwfWorldTest`). CI step "Boot twice with Aurora World Fabric
-  storing the world" boots a fresh world with `worlds = ["world"]`. It checks that a store and a
-  committed generation exist and that no `.mca` file was written, then boots again from the store.
-  That is one small world with no players, not a qualification.
+- **Evidence.** Unit tests in `awf/`: `AwfRegionStorageTest`, `AwfSettingsTest`, `AwfBackendTest`,
+  and the tombstone and garbage-collection tests in `AwfWorldStoreTest` and `AwfWorldTest`.
+  `AwfQualificationTest` (below). CI step "Boot twice with Aurora World Fabric storing the world"
+  boots a fresh world with `worlds = ["world"]`. It checks that a store and a committed generation
+  exist and that no `.mca` file was written, then boots again from the store, then a third time
+  with `export = ["world"]` and checks that region files appear and the store is retired. That
+  is one small world with no players.
 
-Not implemented: MongoDB/MySQL/Redis backends (no driver is on the classpath and none is added
-without a qualification plan); a SlimeLoader compatibility adapter; export from AWF back to
-region files; world-role use by the engine (every engine storage is `VANILLA`; templates and
-instances exist only in the library); any of the qualification workloads below.
+Not implemented: MongoDB/MySQL/Redis backends (the SPI exists; no driver is on the classpath and
+none is added without a qualification plan); a SlimeLoader compatibility adapter (AWF stores
+chunk NBT, not the Slime world format, so an adapter would need a format converter); world-role use
+by the engine (every engine storage is `VANILLA`; templates and instances exist only in the
+library).
 
 ## Qualification
 Load/unload loops, COW isolation, crash during each persistence stage, backend timeout/disconnect, shutdown with pending saves, corrupt cache/blob recovery, and 1/50/250/1000-world workloads.
+
+### Storage-layer qualification (`AwfQualificationTest`, in-process)
+
+These run the engine's own objects (`AwfEngine`, `AwfRegionStorage`, FILE backend) with byte
+stand-ins for NBT. They do not start a server, simulate power loss below the JVM, or measure
+anything under load.
+
+| Workload | Result |
+| --- | --- |
+| Crash at each commit stage (snapshot written, verified, generation published, committed), then restart | Before the pointer moves, the previous generation is intact; after it, the new one is. The store keeps committing after restart. Pass |
+| 200 load/unload cycles, 16 writes each | Every write read back on the next load; store file count stays flat after warm-up; no storage left registered. Pass |
+| Shutdown with a commit queued on a stalled lane, late commit runs after | Shutdown commit wins; the late commit does not roll it back. Pass |
+| 4 concurrent writers (own chunks) while the lane commits, then shutdown | Every chunk holds its last write after restart. Pass |
+| 1 / 50 / 250 / 1000 storages open, written, committed, reopened | All chunks read back; one commit per dirty storage. On the development container: 7 / 177 / 902 / 3871 ms total (one run, not a benchmark) |
+| Corrupted object | Read throws; other chunks unaffected. Pass |
+| COW isolation | `AwfWorldTest` (library). Pass |
+
+Still open: backend timeout/disconnect (no network backend exists), a server-level crash test
+(kill -9 during saves with players), and any measurement under real chunk load.

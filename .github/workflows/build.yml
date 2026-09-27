@@ -513,7 +513,17 @@ jobs:
             echo "AWF reported a storage failure on reopen"; exit 1
           fi
           test "$(find world -name '*.mca' | wc -l)" -eq 0 || { echo "region files appeared on the second boot"; exit 1; }
-          echo "World stored through AWF: created, committed on shutdown, reopened, no region files written."
+
+          # Third boot: export the world back to region files.
+          printf '[aurora.awf]\nworlds = []\nexport = ["world"]\n' > sourbycraft_config/aurora.toml
+          boot third.log ''
+          echo "----- AWF export boot -----"
+          grep -E 'Aurora World Fabric' third.log || true
+          grep -q 'Aurora World Fabric exported' third.log || { echo "no export line"; exit 1; }
+          test "$(find world -name '*.mca' | wc -l)" -gt 0 || { echo "export wrote no region files"; exit 1; }
+          test -z "$(find world -type d -name '*.awf')" || { echo "a store is still attached after export"; exit 1; }
+          test -n "$(find world -type d -name '*.awf.exported-*')" || { echo "the store backup is missing"; exit 1; }
+          echo "World stored through AWF: created, committed on shutdown, reopened with no region files written, then exported back to region files."
 
       - name: Upload boot diagnostics
         if: always()
@@ -525,6 +535,7 @@ jobs:
             run-bridge/server.log
             run-awf/first.log
             run-awf/second.log
+            run-awf/third.log
             run/boot.jfr
           retention-days: 7
 

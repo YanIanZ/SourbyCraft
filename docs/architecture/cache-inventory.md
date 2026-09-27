@@ -24,6 +24,8 @@ heap-retention test under player churn is still open.
 | `awf/AwfRegistry` | `worlds` | `unregister` | Library registry; the engine integration does not use it |
 | `awf/AwfEngine` | `storages` | Removed when the engine closes the region storage (`AwfRegionStorage.close`) | Open region storages of listed worlds (3 per dimension: chunks, entities, POI) |
 | `awf/AwfWorld` | `owned` (chunk → bytes), `lastAccess` | Replaced on write; clean chunks beyond `residentLimit` dropped LRU after each save and read back from the store | `residentLimit` + dirty chunks. The engine integration always passes `aurora.awf.resident-chunks` (default 1024); limit 0 (library default) is unbounded |
+| `awf/AwfWorldStore` | `retainedNames` (object names per retained generation), `orphanCandidates` | Oldest generation dropped each commit; candidates cleared after each successful commit | `retained-generations` × chunks in the storage; failed-commit writes until the next success |
+| `awf/AwfBackend.Registry` | `BACKENDS` | Process lifetime | Registered backends |
 | `awf/AwfWorld` | `dirty` | Cleared by a successful save | ≤ `owned` |
 | `awf/AwfWorld` | `pendingSaves` | Removed on completion | ≤ `STORAGE` queue + threads |
 | `awf/LatencyRecorder` | ring | Overwritten | 1024 samples |

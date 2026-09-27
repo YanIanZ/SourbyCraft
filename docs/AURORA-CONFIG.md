@@ -17,6 +17,8 @@ This document describes **what branch `26.2` actually consumes now**. It is not 
 | `aurora.scheduler.storage-queue` | integer ≥ 1 / `64` | RESTART_REQUIRED | same |
 | `aurora.network.counters` | boolean / `true` | LIVE | `NetworkCounters` increments (`/perf network`) |
 | `aurora.awf.worlds` | list of world folder names / `[]` | RESTART_REQUIRED | `AwfEngine.attach` from `RegionFileStorage`'s constructor; read from the files directly, not the config system |
+| `aurora.awf.export` | list of world folder names / `[]` | RESTART_REQUIRED | export to region files at the next load, then retire the store |
+| `aurora.awf.backend` | name / `file` | RESTART_REQUIRED | `AwfBackend` the stores live on; unregistered + listed world = load failure |
 | `aurora.awf.persistence` | `incremental` \| `checkpoint` \| `full` / `incremental` | RESTART_REQUIRED | AWF commit mode |
 | `aurora.awf.commit-interval-seconds` | 1–86400 / `30` | RESTART_REQUIRED | age at which the collector starts a commit |
 | `aurora.awf.resident-chunks` | ≥ 1 / `1024` | RESTART_REQUIRED | clean chunks kept per storage |

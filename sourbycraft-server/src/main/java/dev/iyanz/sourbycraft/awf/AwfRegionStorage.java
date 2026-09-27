@@ -2,7 +2,6 @@ package dev.iyanz.sourbycraft.awf;
 
 import dev.iyanz.sourbycraft.execution.ExecutionLane;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.Executor;
@@ -60,7 +59,7 @@ public final class AwfRegionStorage {
         this.onClose = onClose;
     }
 
-    /** The store directory used for a region folder. */
+    /** The FILE backend's store directory for a region folder. */
     public static Path storeFor(final Path regionFolder) {
         final Path absolute = regionFolder.toAbsolutePath().normalize();
         return absolute.resolveSibling(absolute.getFileName() + STORE_SUFFIX);
@@ -73,11 +72,6 @@ public final class AwfRegionStorage {
             if (worlds.contains(element.toString())) return true;
         }
         return false;
-    }
-
-    /** Whether a region folder already has an AWF store beside it. */
-    static boolean hasStore(final Path regionFolder) {
-        return Files.isDirectory(storeFor(regionFolder));
     }
 
     public String name() {

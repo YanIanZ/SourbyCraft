@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * One Aurora World Fabric world at runtime: chunks it owns, layered copy-on-write over a base
- * source, persisted through an {@link AwfWorldStore} on a storage executor.
+ * source, persisted through an {@link AwfStore} on a storage executor.
  *
  * <p><b>Ownership.</b> {@link #write} is called by the region that owns the chunk, with bytes it has
  * already serialized; the array is copied, so the region may reuse its buffer at once. Stored arrays
@@ -44,7 +44,7 @@ public final class AwfWorld {
     private final String name;
     private final WorldRole role;
     private final ChunkSource base;
-    private final AwfWorldStore store;
+    private final AwfStore store;
     private final AwfMetrics metrics = new AwfMetrics();
     private final Map<ChunkKey, byte[]> owned = new ConcurrentHashMap<>();
     /** Dirty chunks and the write version that dirtied them. */
@@ -66,14 +66,14 @@ public final class AwfWorld {
      * @param base where unowned chunks are read from, or {@code null} for an empty world
      * @param store where commits go, or {@code null} for a world that is never persisted
      */
-    public AwfWorld(final String name, final WorldRole role, final ChunkSource base, final AwfWorldStore store) {
+    public AwfWorld(final String name, final WorldRole role, final ChunkSource base, final AwfStore store) {
         this(name, role, base, store, 0);
     }
 
     /**
      * @param residentLimit world-owned chunks kept in memory after a save; 0 means unlimited
      */
-    public AwfWorld(final String name, final WorldRole role, final ChunkSource base, final AwfWorldStore store,
+    public AwfWorld(final String name, final WorldRole role, final ChunkSource base, final AwfStore store,
                     final int residentLimit) {
         if (residentLimit < 0) throw new IllegalArgumentException("residentLimit must be >= 0");
         this.residentLimit = residentLimit;
@@ -185,7 +185,7 @@ public final class AwfWorld {
      * whose version is unchanged are cleared. An {@link IOException} is retried up to
      * {@code maxAttempts} times in total; after that the stage fails and the chunks stay dirty.</p>
      */
-    public CompletionStage<AwfWorldStore.CommitResult> save(final PersistenceMode mode, final Executor storageLane,
+    public CompletionStage<AwfStore.CommitResult> save(final PersistenceMode mode, final Executor storageLane,
                                                             final int maxAttempts) {
         if (this.store == null || !this.role.acceptsCommits() || mode == PersistenceMode.READ_ONLY) {
             return CompletableFuture.failedFuture(new IllegalStateException(
@@ -201,7 +201,7 @@ public final class AwfWorld {
                 MAX_PENDING_SAVES + " saves already pending for " + this.name
                     + "; the backend is not keeping up, refusing rather than queueing more"));
         }
-        final CompletableFuture<AwfWorldStore.CommitResult> result;
+        final CompletableFuture<AwfStore.CommitResult> result;
         try {
             result = CompletableFuture.supplyAsync(() -> commit(mode, maxAttempts), storageLane);
         } catch (final RuntimeException rejected) {
@@ -219,7 +219,7 @@ public final class AwfWorld {
      *
      * @throws IOException when every attempt failed; the chunks stay dirty
      */
-    public AwfWorldStore.CommitResult saveNow(final PersistenceMode mode, final int maxAttempts) throws IOException {
+    public AwfStore.CommitResult saveNow(final PersistenceMode mode, final int maxAttempts) throws IOException {
         if (this.store == null || !this.role.acceptsCommits() || mode == PersistenceMode.READ_ONLY) {
             throw new IllegalStateException("a " + this.role + " world in " + mode + " mode does not save");
         }
@@ -232,7 +232,7 @@ public final class AwfWorld {
         }
     }
 
-    private AwfWorldStore.CommitResult commit(final PersistenceMode mode, final int maxAttempts) {
+    private AwfStore.CommitResult commit(final PersistenceMode mode, final int maxAttempts) {
         final long prepared = System.nanoTime();
         final Map<ChunkKey, Long> taken = new HashMap<>(this.dirty);
         final Map<ChunkKey, byte[]> changed = new HashMap<>();
@@ -248,7 +248,7 @@ public final class AwfWorld {
         for (int attempt = 1; ; attempt++) {
             final long begun = System.nanoTime();
             try {
-                final AwfWorldStore.CommitResult r = this.store.commit(changed, Set.of(), deleted, mode);
+                final AwfStore.CommitResult r = this.store.commit(changed, Set.of(), deleted, mode);
                 this.metrics.backend.record(System.nanoTime() - begun);
                 this.metrics.bytesWritten.addAndGet(r.bytesWritten());
                 // Only entries whose version is unchanged: a chunk rewritten meanwhile stays dirty.

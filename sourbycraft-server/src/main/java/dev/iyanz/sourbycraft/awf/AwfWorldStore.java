@@ -24,7 +24,7 @@ import java.util.TreeMap;
  * <p>Blocking; must not run on a region thread ({@link GenerationStore} refuses). {@link AwfWorld}
  * calls it from a storage executor.</p>
  */
-public final class AwfWorldStore implements ChunkSource {
+public final class AwfWorldStore implements AwfStore {
 
     static final String INDEX_BLOB = "index";
     /**
@@ -33,19 +33,25 @@ public final class AwfWorldStore implements ChunkSource {
      */
     static final String TOMBSTONE = "-";
 
-    /** What a commit did. */
-    public record CommitResult(long generation, int chunks, int objectsWritten, long bytesWritten, int objectsRemoved) {}
-
     private final GenerationStore generations;
     private final ObjectStore objects;
     private final WorldRole role;
+    private final int retainedGenerations;
     private volatile SortedMap<ChunkKey, String> index;
+    /**
+     * Object names each retained generation references, newest first. Kept in memory so a commit
+     * neither re-reads the retained indexes nor scans the object directory.
+     */
+    private final java.util.ArrayDeque<Set<String>> retainedNames = new java.util.ArrayDeque<>();
+    /** Objects written by commits that failed before their generation committed. */
+    private final Set<String> orphanCandidates = new HashSet<>();
 
     private AwfWorldStore(final GenerationStore generations, final ObjectStore objects, final WorldRole role,
-                          final SortedMap<ChunkKey, String> index) {
+                          final int retainedGenerations, final SortedMap<ChunkKey, String> index) {
         this.generations = generations;
         this.objects = objects;
         this.role = role;
+        this.retainedGenerations = retainedGenerations;
         this.index = index;
     }
 
@@ -56,13 +62,39 @@ public final class AwfWorldStore implements ChunkSource {
      */
     public static AwfWorldStore open(final Path root, final WorldRole role, final int retainedGenerations)
         throws IOException {
-        final GenerationStore generations = GenerationStore.open(root.resolve("generations-root"), role, retainedGenerations);
+        return open(root, role, retainedGenerations, stage -> {});
+    }
+
+    /** As {@link #open(Path, WorldRole, int)}, with a crash-injection hook for tests. */
+    static AwfWorldStore open(final Path root, final WorldRole role, final int retainedGenerations,
+                              final GenerationStore.StageHook hook) throws IOException {
+        final GenerationStore generations = GenerationStore.open(root.resolve("generations-root"), role,
+            retainedGenerations, hook);
         final ObjectStore objects = new ObjectStore(root.resolve("objects"));
         final GenerationStore.Generation current = generations.read();
         final SortedMap<ChunkKey, String> index = current == null ? new TreeMap<>() : decodeIndex(current);
-        return new AwfWorldStore(generations, objects, role, Collections.unmodifiableSortedMap(index));
+        final AwfWorldStore store = new AwfWorldStore(generations, objects, role, retainedGenerations,
+            Collections.unmodifiableSortedMap(index));
+        for (final GenerationStore.Generation retained : generations.readRetained()) {
+            store.retainedNames.addLast(names(decodeIndex(retained)));
+        }
+        if (store.retainedNames.isEmpty() && current != null) store.retainedNames.add(names(index));
+        // The one full scan: objects a crash left unreferenced. Only a writable store collects.
+        if (role.acceptsCommits()) {
+            final Set<String> live = new HashSet<>();
+            store.retainedNames.forEach(live::addAll);
+            objects.retainOnly(live);
+        }
+        return store;
     }
 
+    private static Set<String> names(final SortedMap<ChunkKey, String> index) {
+        final Set<String> names = new HashSet<>(index.values());
+        names.remove(TOMBSTONE);
+        return names;
+    }
+
+    @Override
     public long generation() throws IOException {
         return this.generations.currentGeneration();
     }
@@ -78,6 +110,7 @@ public final class AwfWorldStore implements ChunkSource {
     }
 
     /** Chunks this world deleted: they read as absent and shadow the base. */
+    @Override
     public Set<ChunkKey> deleted() {
         final Set<ChunkKey> deleted = new java.util.TreeSet<>();
         this.index.forEach((key, name) -> {
@@ -87,6 +120,7 @@ public final class AwfWorldStore implements ChunkSource {
     }
 
     /** Whether the committed state says anything about a chunk: bytes or a deletion. */
+    @Override
     public boolean has(final ChunkKey key) {
         return this.index.containsKey(key);
     }
@@ -113,6 +147,7 @@ public final class AwfWorldStore implements ChunkSource {
      * As {@link #commit(Map, Set, PersistenceMode)}, also recording {@code deleted} chunks as
      * deletions that shadow the base.
      */
+    @Override
     public synchronized CommitResult commit(final Map<ChunkKey, byte[]> changed, final Set<ChunkKey> removed,
                                             final Set<ChunkKey> deleted, final PersistenceMode mode)
         throws IOException {
@@ -126,44 +161,62 @@ public final class AwfWorldStore implements ChunkSource {
         int written = 0;
         long bytes = 0;
         final Set<String> toVerify = new HashSet<>();
-        for (final Map.Entry<ChunkKey, byte[]> chunk : changed.entrySet()) {
-            final ObjectStore.Written w = this.objects.put(chunk.getValue(), mode == PersistenceMode.FULL);
-            next.put(chunk.getKey(), w.name());
-            if (w.bytes() > 0) {
-                written++;
-                bytes += w.bytes();
-                toVerify.add(w.name());
+        final long generation;
+        try {
+            for (final Map.Entry<ChunkKey, byte[]> chunk : changed.entrySet()) {
+                final ObjectStore.Written w = this.objects.put(chunk.getValue(), mode == PersistenceMode.FULL);
+                next.put(chunk.getKey(), w.name());
+                if (w.bytes() > 0) {
+                    written++;
+                    bytes += w.bytes();
+                    toVerify.add(w.name());
+                }
             }
-        }
-        if (mode == PersistenceMode.FULL) {
-            // FULL rewrites unchanged chunks as well, from their committed (verified) bytes.
-            for (final Map.Entry<ChunkKey, String> chunk : next.entrySet()) {
-                if (changed.containsKey(chunk.getKey()) || TOMBSTONE.equals(chunk.getValue())) continue;
-                final ObjectStore.Written w = this.objects.put(this.objects.get(chunk.getValue()), true);
-                written++;
-                bytes += w.bytes();
-                toVerify.add(w.name());
+            if (mode == PersistenceMode.FULL) {
+                // FULL rewrites unchanged chunks as well, from their committed (verified) bytes.
+                for (final Map.Entry<ChunkKey, String> chunk : next.entrySet()) {
+                    if (changed.containsKey(chunk.getKey()) || TOMBSTONE.equals(chunk.getValue())) continue;
+                    final ObjectStore.Written w = this.objects.put(this.objects.get(chunk.getValue()), true);
+                    written++;
+                    bytes += w.bytes();
+                    toVerify.add(w.name());
+                }
             }
-        }
-        if (mode == PersistenceMode.CHECKPOINT) {
-            toVerify.addAll(next.values());
-            toVerify.remove(TOMBSTONE);
-        }
-        // Verify before the commit point: a generation must never reference an object that
-        // cannot be read back.
-        for (final String name : toVerify) {
-            this.objects.get(name);
-        }
+            if (mode == PersistenceMode.CHECKPOINT) {
+                toVerify.addAll(next.values());
+                toVerify.remove(TOMBSTONE);
+            }
+            // Verify before the commit point: a generation must never reference an object that
+            // cannot be read back.
+            for (final String name : toVerify) {
+                this.objects.get(name);
+            }
 
-        final long generation = this.generations.commit(Map.of(INDEX_BLOB, encodeIndex(next)));
+            generation = this.generations.commit(Map.of(INDEX_BLOB, encodeIndex(next)));
+        } catch (final IOException | RuntimeException failed) {
+            // Whatever this commit wrote may now be referenced by nothing; the next successful
+            // commit checks it. A crash instead is covered by the scan when the store is opened.
+            this.orphanCandidates.addAll(toVerify);
+            throw failed;
+        }
         this.index = Collections.unmodifiableSortedMap(next);
 
-        final Set<String> live = new HashSet<>(next.values());
-        for (final GenerationStore.Generation retained : this.generations.readRetained()) {
-            live.addAll(decodeIndex(retained).values());
+        // Collect only what can have become garbage: the objects of generations that just fell
+        // out of retention, and those of earlier failed commits, minus everything still retained.
+        this.retainedNames.addFirst(names(next));
+        final Set<String> candidates = new HashSet<>(this.orphanCandidates);
+        while (this.retainedNames.size() > this.retainedGenerations) {
+            candidates.addAll(this.retainedNames.removeLast());
         }
-        live.remove(TOMBSTONE);
-        final int removedObjects = this.objects.retainOnly(live);
+        int removedObjects = 0;
+        if (!candidates.isEmpty()) {
+            final Set<String> live = new HashSet<>();
+            this.retainedNames.forEach(live::addAll);
+            for (final String name : candidates) {
+                if (!live.contains(name) && this.objects.delete(name)) removedObjects++;
+            }
+        }
+        this.orphanCandidates.clear();
         return new CommitResult(generation, next.size(), written, bytes, removedObjects);
     }
 
