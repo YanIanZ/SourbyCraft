@@ -79,14 +79,14 @@ No major new optimization batch should be accepted before the missing representa
 - [x] **P1** `/perf gc`
 - [x] **P1** `/perf region` — region count, MSPT spread, slowest region
 - [ ] **P1** `/perf region <world> <x> <z>`
-- [ ] **P1** `/perf player <player>`
+- [x] **P1** `/perf player <player>` — gathered on the player's entity scheduler
 - [ ] **P1** `/perf chunks`
 - [ ] **P1** `/perf entities`
 - [x] **P1** `/perf network` — wire bytes/packets per direction, connections
 - [-] **P1** `/perf scheduler` — `/perf governor` (Sourby lanes) and `/perf async`; the region scheduler's own queues are not shown
-- [ ] **P1** `/perf plugins`
+- [x] **P1** `/perf plugins`
 - [x] **P1** `/perf health`
-- [ ] **P1** bounded `/perf history`
+- [x] **P1** bounded `/perf history` — 60 one-minute samples (`perf/PerformanceHistory`)
 - [ ] **P3** actionbar HUD mode
 
 ---

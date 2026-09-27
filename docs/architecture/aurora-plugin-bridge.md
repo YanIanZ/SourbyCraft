@@ -63,7 +63,8 @@ Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
   else it runs on the global region. `global` restores the previous behaviour. Tasks routed to
   a region count as owner handoffs.
 - **`isQueued` / `isCurrentlyRunning`** answer for bridged tasks (CraftScheduler patch).
-  `getPendingTasks` / `getActiveWorkers` still do not list them.
+  `getPendingTasks` lists them too; `getActiveWorkers` does not (bridged async bodies run on the
+  governed Bridge I/O lane, not as `CraftAsyncTask` workers).
 - **Operator guide:** [testing legacy plugins](../guides/testing-legacy-plugins.md).
 - **CI evidence (run 440, `9c933375`, 2026-09-27).** The Paper patches applied. A second CI boot
   with `aurora.bridge.mode = "safe"` loaded `legacy-test-plugin` (no `folia-supported`):

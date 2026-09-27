@@ -18,7 +18,7 @@ import org.bukkit.command.CommandSender;
 /** Read-only diagnostics: one immutable generation per invocation, no world/OS queries. */
 public final class PerfCommand extends Command {
     static final List<String> VIEWS =
-        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "storage", "awf", "region", "health");
+        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "storage", "awf", "plugins", "history", "player", "region", "health");
 
     public PerfCommand(final String name) {
         super(name);
@@ -32,6 +32,14 @@ public final class PerfCommand extends Command {
         if (!this.testPermission(sender)) return true;
         final String view = getName().equals("ram") ? "memory"
             : args.length == 0 ? "overview" : args[0].toLowerCase(Locale.ROOT);
+        if (view.equals("player")) {
+            if (args.length != 2) {
+                sender.sendMessage(Component.text("/" + getName() + " player <name>", SourbyCraftColors.DIM));
+            } else {
+                renderPlayer(sender, args[1]);
+            }
+            return true;
+        }
         if (args.length > (getName().equals("ram") ? 0 : 1)
             || !(view.equals("overview") || VIEWS.contains(view))) {
             sender.sendMessage(Component.text(this.usageMessage, SourbyCraftColors.DIM));
@@ -101,6 +109,12 @@ public final class PerfCommand extends Command {
         }
         if (view.equals("awf")) {
             renderAwf(lines);
+        }
+        if (view.equals("plugins")) {
+            renderPlugins(lines);
+        }
+        if (view.equals("history")) {
+            renderHistory(lines);
         }
         if (view.equals("overview") || view.equals("region")) {
             final boolean known = snapshot.freshness().state() != MetricState.UNAVAILABLE;
@@ -214,6 +228,74 @@ public final class PerfCommand extends Command {
                 lane.active() + " / " + lane.queued() + " / " + lane.peakQueued());
             add(lines, lane.name() + " submitted / completed / failed / rejected", lane.submitted() + " / "
                 + lane.completed() + " / " + lane.failed() + " / " + lane.rejected());
+        }
+    }
+
+    private static void renderPlugins(final List<Component> lines) {
+        final var plugins = org.bukkit.Bukkit.getPluginManager().getPlugins();
+        final java.util.Map<dev.iyanz.sourbycraft.bridge.CompatibilityState, Integer> counts =
+            new java.util.EnumMap<>(dev.iyanz.sourbycraft.bridge.CompatibilityState.class);
+        for (final var plugin : plugins) counts.merge(PluginsCommand.stateOf(plugin), 1, Integer::sum);
+        final StringBuilder summary = new StringBuilder();
+        for (final var state : dev.iyanz.sourbycraft.bridge.CompatibilityState.values()) {
+            if (summary.length() > 0) summary.append(" / ");
+            summary.append(state.name().toLowerCase(Locale.ROOT)).append(' ').append(counts.getOrDefault(state, 0));
+        }
+        add(lines, "Plugins by state", summary.toString());
+        add(lines, "Aurora Bridge mode", String.valueOf(dev.iyanz.sourbycraft.bridge.AuroraBridge.runtimeMode()).toLowerCase(Locale.ROOT));
+        for (final var stats : dev.iyanz.sourbycraft.bridge.AuroraBridge.allStats()) {
+            add(lines, stats.plugin() + " redirects / handoffs / rejected / violations",
+                stats.schedulerRedirects() + " / " + stats.ownerHandoffs() + " / " + stats.rejectedOperations()
+                    + " / " + stats.fatalViolations() + (stats.quarantined() ? " (quarantined)" : ""));
+        }
+    }
+
+    private static void renderHistory(final List<Component> lines) {
+        final var samples = dev.iyanz.sourbycraft.perf.PerformanceHistory.GLOBAL.samples();
+        if (samples.isEmpty()) {
+            add(lines, "History", "no minute recorded yet");
+            return;
+        }
+        add(lines, "Minutes kept", samples.size() + " of " + dev.iyanz.sourbycraft.perf.PerformanceHistory.CAPACITY
+            + " (worst region TPS / MSPT over each minute, process CPU, heap)");
+        final java.time.format.DateTimeFormatter clock = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+            .withZone(java.time.ZoneId.systemDefault());
+        // Newest first, at most 15 lines: chat is not a chart.
+        for (int i = samples.size() - 1, shown = 0; i >= 0 && shown < 15; i--, shown++) {
+            final var s = samples.get(i);
+            add(lines, clock.format(java.time.Instant.ofEpochMilli(s.epochMillis())),
+                TpsCommand.value(s.worstTps(), 2) + " TPS / " + TpsCommand.ms(s.worstMspt()) + " / "
+                    + percent(s.processCpuPercent()) + " CPU / " + bytes(s.heapUsedBytes()) + " of "
+                    + bytes(s.heapMaxBytes()));
+        }
+    }
+
+    /**
+     * The player's own view, gathered on the thread that owns the player (their entity
+     * scheduler) and sent from there: a command thread may not read an entity it does not own.
+     */
+    private static void renderPlayer(final CommandSender sender, final String name) {
+        final org.bukkit.entity.Player player = org.bukkit.Bukkit.getPlayerExact(name);
+        if (player == null) {
+            sender.sendMessage(Component.text(name + " is not online", SourbyCraftColors.DIM));
+            return;
+        }
+        final var scheduled = player.getScheduler().run(dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin.INSTANCE,
+            task -> {
+                final List<Component> lines = new ArrayList<>();
+                final org.bukkit.Location at = player.getLocation();
+                add(lines, "Player", player.getName());
+                add(lines, "World / block", at.getWorld().getName() + " / " + at.getBlockX() + ", " + at.getBlockY()
+                    + ", " + at.getBlockZ());
+                add(lines, "Chunk", (at.getBlockX() >> 4) + ", " + (at.getBlockZ() >> 4));
+                add(lines, "Ping", player.getPing() + " ms");
+                add(lines, "View / simulation distance", player.getViewDistance() + " / "
+                    + player.getSimulationDistance());
+                add(lines, "Owning thread", Thread.currentThread().getName());
+                lines.forEach(sender::sendMessage);
+            }, () -> sender.sendMessage(Component.text(name + " left before the view was taken", SourbyCraftColors.DIM)));
+        if (scheduled == null) {
+            sender.sendMessage(Component.text(name + " is being removed", SourbyCraftColors.DIM));
         }
     }
 

@@ -28,9 +28,9 @@ Aurora Bridge admitted <Plugin> (no folia-supported/canvas-supported). ...
 | `runTask`, `runTaskLater`, `runTaskTimer`, `scheduleSync*`, `callSyncMethod`, `BukkitRunnable.runTask*` from a command, event or task running on a region | That region, anchored on a chunk it owned when the task was scheduled |
 | The same from `onEnable`, the console, the global region or async code | The global region: server-wide state only; any block or entity access is refused by the engine |
 | `runTaskAsynchronously`, `runTaskTimerAsynchronously` | Timed by Folia's async scheduler, executed on the bounded `SourbyCraft-BridgeIO-*` lane (`/perf governor`) |
-| `BukkitTask.cancel`, `cancelTask`, `cancelTasks`, `isQueued`, `isCurrentlyRunning` | Answered by the bridge |
+| `BukkitTask.cancel`, `cancelTask`, `cancelTasks`, `isQueued`, `isCurrentlyRunning`, `getPendingTasks` | Answered by the bridge |
 
-Not covered: `getPendingTasks` and `getActiveWorkers` do not list bridged tasks. A task that
+Not covered: `getActiveWorkers` does not list bridged tasks. A task that
 touches a player or block in a *different* region than the one it runs on is refused by the
 engine (`IllegalStateException`). A long-running timer anchored on one region does not follow a
 player who walks away.
@@ -49,7 +49,8 @@ player who walks away.
    - **Quarantined**: after `quarantine-after` violations its tasks are cancelled and new ones
      rejected. The plugin is not disabled.
    - **Last failure**: the most recent exception.
-5. Run `/perf governor` for the Bridge I/O queue and rejections.
+5. Run `/perf governor` for the Bridge I/O queue and rejections, and `/perf plugins` for every
+   bridged plugin at once.
 6. Check the log for `Bridged plugin <name> violated region ownership` and
    `generated an exception while executing task`.
 

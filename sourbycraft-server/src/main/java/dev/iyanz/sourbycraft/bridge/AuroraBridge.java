@@ -112,6 +112,12 @@ public final class AuroraBridge {
         return current != null && current.knows(taskId);
     }
 
+    /** {@code CraftScheduler.getPendingTasks}: the bridged tasks still scheduled. Never creates the runtime. */
+    public static java.util.List<Object> pendingTasks() {
+        final BridgeRuntime current = runtime;
+        return current == null ? java.util.List.of() : current.pendingHandles();
+    }
+
     /** {@code CraftScheduler.isCurrentlyRunning} for a task the bridge holds. */
     public static boolean isRunning(final int taskId) {
         final BridgeRuntime current = runtime;

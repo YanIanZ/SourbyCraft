@@ -39,6 +39,8 @@ public final class LegacyBridgePlugin extends JavaPlugin {
         final BukkitTask later = scheduler.runTaskLater(this, () -> { }, 40L);
         this.getLogger().info(scheduler.isQueued(later.getTaskId())
             ? "LEGACY_BRIDGE_QUEUED_OK" : "LEGACY_BRIDGE_QUEUED_MISSING");
+        this.getLogger().info(scheduler.getPendingTasks().stream().anyMatch(t -> t.getTaskId() == later.getTaskId())
+            ? "LEGACY_BRIDGE_PENDING_OK" : "LEGACY_BRIDGE_PENDING_MISSING");
 
         // A legacy runTask called from region context, the way an event handler or a player
         // command calls it. The chunk-load callback runs on the region owning the chunk; with

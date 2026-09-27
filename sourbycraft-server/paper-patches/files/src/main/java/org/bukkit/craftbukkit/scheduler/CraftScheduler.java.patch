@@ -32,6 +32,14 @@
          // Paper start
          if (!this.isAsyncScheduler && this.asyncScheduler.isQueued(taskId)) {
              return true;
+@@ -442,6 +_,7 @@
+         // Paper start
+         if (!this.isAsyncScheduler) {
+             pending.addAll(this.asyncScheduler.getPendingTasks());
++            for (final Object bridged : dev.iyanz.sourbycraft.bridge.AuroraBridge.pendingTasks()) pending.add((BukkitTask) bridged); // SourbyCraft - Aurora Bridge
+         }
+         // Paper end
+         return pending;
 @@ -514,6 +_,12 @@
      }
  
@@ -57,6 +65,7 @@
 +            @Override public long period() { return task.getPeriod(); }
 +            @Override public boolean cancelled() { return task.isCancelled(); }
 +            @Override public void markCancelled() { task.cancel0(); }
+            @Override public Object handle() { return task; }
 +            @Override public void run() {
 +                // CraftAsyncTask#run swallows and logs exceptions and keeps worker lists the bridge
 +                // does not use; run the plugin's body directly so violations reach the bridge.

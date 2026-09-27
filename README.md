@@ -318,21 +318,21 @@ Current/active command family:
 | `/perf network` | wire bytes and packets per second in each direction, totals, connections (`aurora.network.counters`) |
 | `/perf governor` | Resource Governor lanes: budget, queue, submitted/completed/failed/rejected |
 | `/perf storage` | chunk-system storage reads/writes/deletes since start, and each world's pending storage I/O tasks (chunk/POI/entity) |
+| `/perf plugins` | plugin counts by compatibility state, bridge mode, and each bridged plugin's redirects/handoffs/rejections/violations |
+| `/perf history` | the last hour, one line per minute: worst region TPS and MSPT, process CPU, heap (60-sample ring) |
+| `/perf player <name>` | a player's world, block, chunk, ping, view/simulation distance, read on the thread that owns the player |
 | `/perf awf` | Aurora World Fabric storages: resident/dirty chunks, pending commits, commit p50/p95/p99, reads vs region-file fall-throughs, failures |
 | `/perf region` | region count and MSPT spread, plus the slowest active region (world/region/generation ids) |
 | `/plugins <plugin>` | one plugin's compatibility state and, when bridged, its Aurora Bridge telemetry |
 | `/update` | SourbyCraft updater status/check |
 
 Implemented `/perf` views: `tick`, `cpu`, `memory`, `gc`, `lanes`, `async`, `network`,
-`governor`, `storage`, `awf`, `region`, `health`. Still planned, not implemented:
+`governor`, `storage`, `awf`, `plugins`, `history`, `player <name>`, `region`, `health`. Still planned, not implemented:
 
 ```text
-/perf player
 /perf chunks
 /perf entities
 /perf scheduler
-/perf plugins
-/perf history
 /perf profile
 ```
 
