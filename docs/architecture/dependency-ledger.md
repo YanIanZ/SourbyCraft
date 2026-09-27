@@ -91,7 +91,7 @@ Sourby's own test suite.
 | Patch | Class | Reason |
 |---|---|---|
 | `spark/FoliaPlatformInfo.java` | `DIRECT_NMS_PATCH` | Platform identity and one canonical build version in Spark reports. |
-| `spark/FoliaSparkPlugin.java`, `spark/plugin/FoliaTickStatistics.java` | `DIRECT_NMS_PATCH` | Spark reads SourbyCraft's tick statistics rather than a parallel set. |
+| `spark/FoliaSparkPlugin.java`, `spark/plugin/FoliaTickStatistics.java` | `DIRECT_NMS_PATCH` | Spark reads SourbyCraft's tick statistics rather than a parallel set, SourbyCraft's config provider, and Aurora runtime metadata (`SourbyMetadataProvider`). |
 | `GlobalConfiguration.java`, `WorldConfig.java` | `COMPATIBILITY_ONLY` | Upstream config shape, paired with `CanvasConfigBridge`. |
 
 ### 2.3 `sourbycraft-server/paper-patches/files/` — 7 patches

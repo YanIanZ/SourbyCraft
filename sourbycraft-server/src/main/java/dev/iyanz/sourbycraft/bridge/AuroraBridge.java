@@ -155,6 +155,18 @@ public final class AuroraBridge {
         return plugin == null || current == null ? null : current.telemetry().stats(plugin.getName());
     }
 
+    /** Telemetry for every bridged plugin; empty before the bridge is first used. */
+    public static java.util.List<BridgeTelemetry.PluginStats> allStats() {
+        final BridgeRuntime current = runtime;
+        return current == null ? java.util.List.of() : current.telemetry().snapshot();
+    }
+
+    /** The bridge mode, or {@code null} when nothing has asked the bridge anything yet. */
+    public static AuroraConfig.BridgeMode modeIfStarted() {
+        final BridgeRuntime current = runtime;
+        return current == null ? null : current.mode();
+    }
+
     /** Records whether a plugin's startup analysis came from the startup cache. */
     public static void startupCacheState(final String pluginName, final String state) {
         final BridgeRuntime current = runtime;
