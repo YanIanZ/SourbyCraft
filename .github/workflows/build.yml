@@ -582,9 +582,10 @@ jobs:
           test "$mca" -eq 0 || { echo "region files were written under an AWF world"; exit 1; }
 
           # Force-load chunks the first boot generated, so the engine has to read them back from AWF.
-          boot second.log 'forceload add -48 -48 48 48' $'perf awf\nperf storage'
+          boot second.log 'forceload add -48 -48 48 48' $'perf awf\nperf storage\nperf chunks\nperf entities'
           echo "----- AWF second boot -----"
-          grep -E 'Aurora World Fabric|AWF|resident / dirty|reads / from region' second.log || true
+          grep -E 'Aurora World Fabric|AWF|resident / dirty|reads / from region|chunks / regions|Total loaded chunks|entities / players|Total entities' second.log || true
+          grep -q 'Total loaded chunks' second.log || { echo "/perf chunks printed nothing"; exit 1; }
           if grep -Eq 'Aurora World Fabric could not|AWF commit for .* failed|Failed to (read|write) chunk data' second.log; then
             echo "AWF reported a storage failure on reopen"; exit 1
           fi

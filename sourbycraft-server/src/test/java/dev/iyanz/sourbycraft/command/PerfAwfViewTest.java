@@ -11,7 +11,7 @@ class PerfAwfViewTest {
     void awfIsAView() {
         assertTrue(PerfCommand.VIEWS.contains("awf"));
         assertTrue(PerfCommand.VIEWS.contains("storage"));
-        for (final String view : new String[] {"plugins", "history", "player"}) {
+        for (final String view : new String[] {"plugins", "history", "player", "chunks", "entities"}) {
             assertTrue(PerfCommand.VIEWS.contains(view), view);
         }
     }
