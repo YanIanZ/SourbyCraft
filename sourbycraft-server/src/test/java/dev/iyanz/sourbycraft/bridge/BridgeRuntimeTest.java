@@ -51,7 +51,7 @@ class BridgeRuntimeTest {
         }
     }
 
-    static final class FakeTask implements BridgeRuntime.Task {
+    static class FakeTask implements BridgeRuntime.Task {
         final int id;
         final boolean sync;
         final long period;
@@ -310,5 +310,20 @@ class BridgeRuntimeTest {
         assertTrue(bridge.knows(8));
         bridge.cancel(8);
         assertTrue(!bridge.knows(8));
+    }
+
+    @Test
+    void pendingHandlesListScheduledTasksUntilTheyFinish() {
+        final FakeExecutor executor = new FakeExecutor();
+        final BridgeRuntime bridge = routed(executor, () -> null,
+            dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.GLOBAL);
+        final Object serverTask = new Object();
+        final FakeTask task = new FakeTask(11, true, 0, () -> {}) {
+            @Override public Object handle() { return serverTask; }
+        };
+        bridge.submit("Legacy", null, task, 5);
+        assertEquals(java.util.List.of(serverTask), bridge.pendingHandles());
+        executor.fire(0);
+        assertTrue(bridge.pendingHandles().isEmpty(), "a finished one-shot is no longer pending");
     }
 }

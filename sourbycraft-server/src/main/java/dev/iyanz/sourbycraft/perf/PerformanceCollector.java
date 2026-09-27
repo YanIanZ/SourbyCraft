@@ -202,6 +202,10 @@ public final class PerformanceCollector implements AutoCloseable {
                 new ImmutableFreshness(state, 0L, latenessMillis, duration, warmingReason),
                 windows[0], windows[1], windows[2], windows[3], windows[4], runtime, global);
             this.publishUnlessClosed(next);
+            final var minute = next.window(dev.iyanz.sourbycraft.api.metrics.MetricWindow.ONE_MINUTE);
+            PerformanceHistory.GLOBAL.offer(new PerformanceHistory.Sample(nowEpochMillis, minute.worstTps(),
+                minute.worstAverageMspt(), next.runtime().processCpuPercent(), next.runtime().heapUsedBytes(),
+                next.runtime().heapMaxBytes()));
             this.slowestRegion = this.slowestCandidate;
             NetworkCounters.GLOBAL.sample(nowNanos);
             // Starts due Aurora World Fabric commits on the storage lane; never blocks.

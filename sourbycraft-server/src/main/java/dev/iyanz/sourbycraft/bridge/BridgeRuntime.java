@@ -51,6 +51,11 @@ public final class BridgeRuntime {
         boolean cancelled();
         void markCancelled();
         void run();
+
+        /** The server's own task object (a {@code CraftTask}), for {@code getPendingTasks}. */
+        default Object handle() {
+            return null;
+        }
     }
 
     private record Scheduled(String plugin, Handle handle, Task task) {}
@@ -243,6 +248,16 @@ public final class BridgeRuntime {
     /** Whether the task's body is executing right now. */
     public boolean running(final int taskId) {
         return this.running.contains(taskId);
+    }
+
+    /** The server task objects of every bridged task still scheduled. */
+    public java.util.List<Object> pendingHandles() {
+        final java.util.List<Object> out = new java.util.ArrayList<>();
+        for (final Scheduled entry : this.scheduled.values()) {
+            final Object handle = entry.task().handle();
+            if (handle != null && !entry.task().cancelled()) out.add(handle);
+        }
+        return out;
     }
 
     /** Bridged tasks currently scheduled for a plugin. */
