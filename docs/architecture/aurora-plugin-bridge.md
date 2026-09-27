@@ -82,6 +82,9 @@ Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
   `onEnable` ran on the global region and was refused (`WORLD_ACCESS_REFUSED`, 1 fatal
   violation). `isQueued` saw a bridged task (`QUEUED_OK`). `/plugins`: 6 scheduler redirects,
   1 owner handoff, not quarantined; 13 boot stages online.
+- **CI run 450 (`38bc72be`).** `getPendingTasks` listed a bridged task (`PENDING_OK`). `/perf
+  plugins` showed `bridged 1` and `LegacyBridgeTest redirects / handoffs / rejected /
+  violations: 6 / 1 / 0 / 1`.
 - **Still unverified.** That fixture is synthetic. No real legacy plugin has been run through the
   bridge, and nothing here qualifies one.
 

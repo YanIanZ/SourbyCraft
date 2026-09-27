@@ -176,8 +176,8 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [-] retry/failure handling — 3 attempts with backoff, `.tmp` always cleaned; unit-tested
 - [-] SHA/cache validation audit — bootstrap downloads: verified before install, corrupt cache replaced, body cut off past the pinned size; SourbyClip not audited
 - [-] bounded concurrency audit — bootstrap downloads are sequential; SourbyClip not audited
-- [-] first-boot failure recovery test — unit-tested; CI step "Bootstrap failure recovery and offline boot" boots with no network (must fail fast, with guidance, no partial files) then online (added 2026-09-27, first run pending)
-- [-] offline-after-success test — unit test, plus the same CI step boots a third time with no network and must reach Done from the cache (first run pending)
+- [x] first-boot failure recovery test — unit tests plus CI step "Bootstrap failure recovery and offline boot": no network fails fast with a download error and no partial files, then online reaches Done (green in run 450)
+- [x] offline-after-success test — same CI step: third boot with no network reached Done from the cache without downloading (run 450). Mojang public-key lookup fails and is logged; with online-mode=true player auth would of course need the network
 - [ ] remote repository/fallback documentation — one URL per library, no mirrors exist to document
 - [x] verify core runtime needs no Canvas remote service/API — [dependency-ledger.md §6](architecture/dependency-ledger.md)
 

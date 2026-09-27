@@ -227,8 +227,8 @@ Only measured hot spots should produce new performance patches.
 - [-] **P0** SHA/cache validation audit — same scope
 - [-] **P1** concurrency/boundedness audit — bootstrap downloads are sequential and size-bounded; SourbyClip not audited
 - [ ] **P1** thread/executor ownership audit
-- [-] **P1** first-boot failure recovery test — downloader state after failure unit-tested; no whole-boot test
-- [-] **P1** offline-after-success test — cache hit touches no network (unit test); no offline CI boot
+- [x] **P1** first-boot failure recovery test — CI run 450
+- [x] **P1** offline-after-success test — CI run 450
 - [ ] **P2** document required remote repositories and fallback order
 
 ---
