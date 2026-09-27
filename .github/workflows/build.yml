@@ -489,9 +489,9 @@ jobs:
             if [ "$status" -ne 0 ]; then tail -60 "$log"; echo "AWF boot ($log) exited with $status"; return 1; fi
           }
 
-          boot first.log 'perf awf'
+          boot first.log $'perf awf\nperf storage'
           echo "----- AWF first boot -----"
-          grep -E 'Aurora World Fabric|AWF|resident / dirty|commit p50|reads / from region' first.log || true
+          grep -E 'Aurora World Fabric|AWF|resident / dirty|commit p50|reads / from region|Chunk-system reads|pending I/O' first.log || true
           grep -q 'Aurora World Fabric: storing \[world\]' first.log || { echo "AWF did not attach"; exit 1; }
           if grep -Eq 'Aurora World Fabric could not|AWF commit for .* failed|Failed to (read|write) chunk data' first.log; then
             echo "AWF reported a storage failure"; exit 1

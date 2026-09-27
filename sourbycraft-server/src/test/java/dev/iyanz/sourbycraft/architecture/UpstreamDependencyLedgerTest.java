@@ -49,6 +49,7 @@ public class UpstreamDependencyLedgerTest {
         "dev/iyanz/sourbycraft/execution/RegionOwnerHandoff.java",
         "dev/iyanz/sourbycraft/perf/RegionTickMetrics.java",
         "dev/iyanz/sourbycraft/perf/RegionTickMetricsHolder.java",
+        "dev/iyanz/sourbycraft/perf/RegionIoQueue.java",
         "dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java");
 
     private static final String LEDGER = "docs/architecture/dependency-ledger.md";
@@ -170,6 +171,7 @@ public class UpstreamDependencyLedgerTest {
         "dev/iyanz/sourbycraft/perf/RegionTickMetrics.java",
         "patch 0013: upstream TickData calls in; TickTime/TickReportData are the contract",
         "dev/iyanz/sourbycraft/perf/RegionTickMetricsHolder.java",
+        "dev/iyanz/sourbycraft/perf/RegionIoQueue.java",
         "patch 0013: generation ownership for the same patched call site");
 
     private static final Pattern IMPLEMENTS =

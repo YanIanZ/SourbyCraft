@@ -23,10 +23,11 @@
          if (compound == null) {
              return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData(
                  compound, ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData.WriteResult.DELETE,
-@@ -175,6 +_,12 @@
+@@ -175,6 +_,13 @@
      public final void moonrise$finishWrite(
          final int chunkX, final int chunkZ, final ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData writeData
      ) throws IOException {
++        dev.iyanz.sourbycraft.perf.RegionIoCounters.GLOBAL.write(writeData.result() == ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData.WriteResult.DELETE); // SourbyCraft - /perf storage
 +        // SourbyCraft start - Aurora World Fabric: the write goes to AWF, never to a region file
 +        if (this.sourby$awf != null) {
 +            writeData.write().run(null);
@@ -36,10 +37,11 @@
          final ChunkPos pos = new ChunkPos(chunkX, chunkZ);
          if (writeData.result() == ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData.WriteResult.DELETE) {
              final RegionFile regionFile = this.moonrise$getRegionFileIfExists(chunkX, chunkZ);
-@@ -192,6 +_,20 @@
+@@ -192,6 +_,21 @@
      public final ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData moonrise$readData(
          final int chunkX, final int chunkZ
      ) throws IOException {
++        dev.iyanz.sourbycraft.perf.RegionIoCounters.GLOBAL.read(); // SourbyCraft - /perf storage
 +        // SourbyCraft start - Aurora World Fabric: a chunk AWF owns never reaches the region file
 +        if (this.sourby$awf != null) {
 +            final byte[] owned = this.sourby$awf.read(chunkX, chunkZ);

@@ -18,7 +18,7 @@ import org.bukkit.command.CommandSender;
 /** Read-only diagnostics: one immutable generation per invocation, no world/OS queries. */
 public final class PerfCommand extends Command {
     static final List<String> VIEWS =
-        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "awf", "region", "health");
+        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "storage", "awf", "region", "health");
 
     public PerfCommand(final String name) {
         super(name);
@@ -95,6 +95,9 @@ public final class PerfCommand extends Command {
         }
         if (view.equals("governor")) {
             renderGovernor(lines);
+        }
+        if (view.equals("storage")) {
+            renderStorage(lines);
         }
         if (view.equals("awf")) {
             renderAwf(lines);
@@ -211,6 +214,21 @@ public final class PerfCommand extends Command {
                 lane.active() + " / " + lane.queued() + " / " + lane.peakQueued());
             add(lines, lane.name() + " submitted / completed / failed / rejected", lane.submitted() + " / "
                 + lane.completed() + " / " + lane.failed() + " / " + lane.rejected());
+        }
+    }
+
+    private static void renderStorage(final List<Component> lines) {
+        final var totals = dev.iyanz.sourbycraft.perf.RegionIoCounters.GLOBAL.totals();
+        add(lines, "Chunk-system reads / writes / deletes", totals.reads() + " / " + totals.writes() + " / "
+            + totals.deletes() + " since start");
+        final var queues = dev.iyanz.sourbycraft.perf.RegionIoQueue.sample();
+        if (queues.isEmpty()) {
+            add(lines, "Pending storage I/O", "no world loaded");
+            return;
+        }
+        for (final var queue : queues) {
+            add(lines, queue.world() + " pending I/O (chunk / poi / entity)",
+                queue.chunk() + " / " + queue.poi() + " / " + queue.entity());
         }
     }
 
