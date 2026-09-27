@@ -14,18 +14,15 @@ import net.minecraft.server.level.ServerLevel;
  * the dependency ledger lists. Reading them is a counter load per controller; safe from any
  * thread.</p>
  */
-public final class RegionIoQueue {
+public final class RegionIoQueue implements StorageBacklog {
 
-    public record WorldQueue(String world, long chunk, long poi, long entity) {
-        public long total() {
-            return this.chunk + this.poi + this.entity;
-        }
-    }
+    /** The process's instance. */
+    public static final StorageBacklog INSTANCE = new RegionIoQueue();
 
     private RegionIoQueue() {}
 
-    /** One entry per loaded world; empty before the server exists. */
-    public static List<WorldQueue> sample() {
+    @Override
+    public List<WorldQueue> sample() {
         final MinecraftServer server = MinecraftServer.getServer();
         if (server == null) return List.of();
         final List<WorldQueue> out = new ArrayList<>();

@@ -13,12 +13,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code getCenterChunk()}. The latter sorts every chunk the region owns, so anchors are cached
  * per region id and recomputed only when the cached chunk has left the region.</p>
  */
-public final class FoliaCurrentRegion {
+public final class FoliaCurrentRegion implements CurrentRegion {
 
     private static final int MAX_CACHED_ANCHORS = 4096;
     private final Map<Long, RegionAnchor> anchors = new ConcurrentHashMap<>();
 
-    /** A chunk owned by the calling thread's region, or {@code null} when it is ticking none. */
+    @Override
     public RegionAnchor anchor() {
         final var region = TickRegionScheduler.getCurrentRegion();
         if (region == null) return null;
