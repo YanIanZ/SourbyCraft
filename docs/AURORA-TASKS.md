@@ -196,7 +196,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] no known persistence regression
 - [x] dependency ledger updated — Build 47 Paper patches, bridge scheduler use, network hook
 - [ ] attribution/license review complete
-- [ ] README and release notes contain measured claims only
+- [-] README and release notes contain measured claims only — audited 2026-09-27: stale `/perf` and Spark statements corrected; the remaining numeric claims name their workload and link their evidence. Re-audit before tagging
 
 ## K. Build 47 Aurora Nexus pillars
 
