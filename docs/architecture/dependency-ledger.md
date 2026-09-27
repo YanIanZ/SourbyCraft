@@ -48,7 +48,7 @@ these supply today's implementation of it. This is the set the ledger test pins.
 
 | File | Upstream internals | Contract it implements |
 |---|---|---|
-| `execution/region/FoliaRegionBackend.java` | `io.papermc.paper.threadedregions.RegionizedServer`, `TickRegionScheduler` (incl. `getCurrentRegion()` / `ThreadedRegion.getCenterChunk()`) | `execution/region/RegionBackend` — region topology and tick scheduling; `execution/region/CurrentRegion` — the region the calling thread ticks, for the Aurora Bridge's caller-region route. Swapping the backend does not touch callers. |
+| `execution/region/FoliaRegionBackend.java` | `io.papermc.paper.threadedregions.RegionizedServer`, `TickRegionScheduler` (incl. `getCurrentRegion()` / `ThreadedRegion.getCenterChunk()`) | `execution/region/RegionBackend` — region topology and tick scheduling; `execution/region/CurrentRegion` — the region the calling thread ticks, for the Aurora Bridge's caller-region route.; `execution/region/RegionPopulation` — per-world chunk/entity/player counts summed from each region's `RegionStats` (`/perf chunks`, `/perf entities`). Swapping the backend does not touch callers. |
 | `execution/RegionOwnerHandoff.java` | `io.papermc.paper.threadedregions.EntityScheduler` (internal, no `.scheduler.`) | `execution/OwnerHandoff` — moving work to the thread that owns an entity or region. |
 | `perf/RegionTickMetrics.java` | `ca.spottedleaf.common.time.TickData`, `TickTime` | Aurora's region tick telemetry, reading upstream's tick accounting rather than duplicating it. |
 | `perf/RegionTickMetricsHolder.java` | `ca.spottedleaf.common.time.TickTime` | Generation ownership for the above. |
