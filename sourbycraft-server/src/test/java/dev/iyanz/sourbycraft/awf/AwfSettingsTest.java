@@ -26,13 +26,15 @@ class AwfSettingsTest {
     void parsesEveryKey() {
         final AwfSettings.Parsed parsed = AwfSettings.parse(Map.of(
             AwfSettings.WORLDS_KEY, List.of("lobby", "arena"),
+            AwfSettings.EXPORT_KEY, List.of("old"),
+            AwfSettings.BACKEND_KEY, "MongoDB",
             AwfSettings.PERSISTENCE_KEY, "checkpoint",
             AwfSettings.COMMIT_INTERVAL_KEY, 10,
             AwfSettings.RESIDENT_CHUNKS_KEY, 256,
             AwfSettings.RETAINED_GENERATIONS_KEY, 5,
             AwfSettings.COMMIT_ATTEMPTS_KEY, 4));
         assertEquals(List.of(), parsed.invalidKeys());
-        assertEquals(new AwfSettings(Set.of("lobby", "arena"), PersistenceMode.CHECKPOINT, 10, 256, 5, 4),
+        assertEquals(new AwfSettings(Set.of("lobby", "arena"), Set.of("old"), "mongodb", PersistenceMode.CHECKPOINT, 10, 256, 5, 4),
             parsed.settings());
     }
 
@@ -83,5 +85,12 @@ class AwfSettingsTest {
         final Path aurora = this.dir.resolve("aurora.toml");
         Files.writeString(aurora, "[aurora.awf\nworlds = [\"lobby\"]\n");
         assertEquals(AwfSettings.DEFAULT, AwfSettings.readEarly(aurora, this.dir.resolve("missing.toml")));
+    }
+
+    @Test
+    void aMalformedBackendNameIsInvalid() {
+        final AwfSettings.Parsed parsed = AwfSettings.parse(Map.of(AwfSettings.BACKEND_KEY, "../x"));
+        assertEquals(List.of(AwfSettings.BACKEND_KEY), parsed.invalidKeys());
+        assertEquals("file", parsed.settings().backend());
     }
 }

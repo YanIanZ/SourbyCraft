@@ -36,9 +36,9 @@ import java.util.regex.Pattern;
  * crash at any earlier step leaves the previous generation authoritative, and leftovers are removed
  * the next time the store is opened.</p>
  *
- * <p>Scope, stated plainly: this is a storage primitive with tests, not a world backend. No world,
- * chunk serializer or save path uses it yet, and it supports FULL commits only. MongoDB/MySQL/Redis backends, incremental and checkpoint modes, lazy materialisation and
- * copy-on-write templates are not implemented.</p>
+ * <p>Scope: this commits whole snapshots of small blobs. {@link AwfWorldStore} builds the FILE
+ * backend on it: the per-generation blob is the chunk index, and chunk bytes live in its
+ * content-addressed object store, which is where INCREMENTAL, CHECKPOINT and FULL differ.</p>
  *
  * <p>Ownership: the store never sees live region-owned state, only the byte snapshot a caller
  * already took. Every blocking method refuses to run on a region tick thread; region code must

@@ -207,4 +207,111 @@ class AwfRegionStorageTest {
         assertThrows(IOException.class, () -> storage.write(0, 0, new byte[AwfFile.MAX_CHUNK_BYTES + 1]));
         assertNull(storage.read(0, 0));
     }
+
+    /** A region file stand-in: what an export wrote, and whether it was flushed. */
+    private static final class RecordingSink implements AwfEngine.RegionSink {
+        final java.util.Map<ChunkKey, byte[]> written = new java.util.HashMap<>();
+        final java.util.Set<ChunkKey> deleted = new java.util.HashSet<>();
+        boolean flushed;
+        int failAfter = Integer.MAX_VALUE;
+
+        @Override
+        public void write(final int chunkX, final int chunkZ, final byte[] nbt) throws IOException {
+            if (this.written.size() + this.deleted.size() >= this.failAfter) throw new IOException("disk full");
+            if (nbt == null) this.deleted.add(new ChunkKey(chunkX, chunkZ));
+            else this.written.put(new ChunkKey(chunkX, chunkZ), nbt);
+        }
+
+        @Override
+        public void flush() {
+            this.flushed = true;
+        }
+    }
+
+    private AwfEngine exporting(final Set<String> worlds, final Set<String> export) {
+        return new AwfEngine(new AwfSettings(worlds, export, PersistenceMode.INCREMENTAL, 30, 1024, 2, 2),
+            DIRECT, this.clock::get);
+    }
+
+    @Test
+    void exportWritesChunksAndDeletionsBackAndMovesTheStoreAside() throws Exception {
+        final Path folder = region("world");
+        final AwfRegionStorage storage = engine(Set.of("world")).open(folder);
+        storage.write(0, 0, b("a"));
+        storage.write(1, 0, b("b"));
+        storage.write(2, 0, null);
+        storage.close();
+
+        final RecordingSink sink = new RecordingSink();
+        assertNull(exporting(Set.of(), Set.of("world")).open(folder, sink), "region files are authoritative again");
+        assertEquals(2, sink.written.size());
+        assertArrayEquals(b("a"), sink.written.get(new ChunkKey(0, 0)));
+        assertEquals(Set.of(new ChunkKey(2, 0)), sink.deleted);
+        assertTrue(sink.flushed);
+        assertTrue(Files.notExists(AwfRegionStorage.storeFor(folder)));
+        try (var siblings = Files.list(folder.getParent())) {
+            assertTrue(siblings.anyMatch(p -> p.getFileName().toString().startsWith("region.awf.exported-")),
+                "the store is kept as a backup, not deleted");
+        }
+        assertNull(engine(Set.of()).open(folder), "the next load no longer attaches AWF");
+    }
+
+    @Test
+    void aFailedExportLeavesTheStoreInPlaceForTheNextLoad() throws Exception {
+        final Path folder = region("world");
+        final AwfRegionStorage storage = engine(Set.of("world")).open(folder);
+        for (int x = 0; x < 5; x++) storage.write(x, 0, b("c" + x));
+        storage.close();
+
+        final RecordingSink failing = new RecordingSink();
+        failing.failAfter = 2;
+        assertThrows(IOException.class, () -> exporting(Set.of(), Set.of("world")).open(folder, failing),
+            "the world load fails rather than running on half-exported region files");
+        assertTrue(Files.isDirectory(AwfRegionStorage.storeFor(folder)));
+
+        final RecordingSink retry = new RecordingSink();
+        exporting(Set.of(), Set.of("world")).open(folder, retry);
+        assertEquals(5, retry.written.size(), "the export starts over and completes");
+    }
+
+    @Test
+    void aWorldInBothListsStaysInAwf() throws Exception {
+        final Path folder = region("world");
+        final AwfRegionStorage storage = engine(Set.of("world")).open(folder);
+        storage.write(0, 0, b("a"));
+        storage.close();
+        final RecordingSink sink = new RecordingSink();
+        assertNotNull(exporting(Set.of("world"), Set.of("world")).open(folder, sink));
+        assertTrue(sink.written.isEmpty());
+    }
+
+    @Test
+    void exportWithoutASinkRefusesToLoad() throws Exception {
+        final Path folder = region("world");
+        final AwfRegionStorage storage = engine(Set.of("world")).open(folder);
+        storage.write(0, 0, b("a"));
+        storage.close();
+        assertThrows(IOException.class, () -> exporting(Set.of(), Set.of("world")).open(folder, null));
+    }
+
+    @Test
+    void exportOfAWorldWithNoStoreDoesNothing() throws Exception {
+        final RecordingSink sink = new RecordingSink();
+        assertNull(exporting(Set.of(), Set.of("world")).open(region("world"), sink));
+        assertTrue(sink.written.isEmpty() && !sink.flushed);
+    }
+
+    @Test
+    void closeEveryCommitsAllOpenStoragesAtShutdown() throws Exception {
+        final AwfEngine engine = engine(Set.of("a", "b"));
+        final AwfRegionStorage a = engine.open(region("a"));
+        final AwfRegionStorage bStorage = engine.open(region("b"));
+        a.write(0, 0, b("a"));
+        bStorage.write(0, 0, b("b"));
+        assertEquals(0, engine.closeEvery());
+        assertTrue(engine.storages().isEmpty());
+        assertTrue(a.closed() && bStorage.closed());
+        assertArrayEquals(b("a"), engine(Set.of("a")).open(region("a")).read(0, 0));
+        assertArrayEquals(b("b"), engine(Set.of("b")).open(region("b")).read(0, 0));
+    }
 }

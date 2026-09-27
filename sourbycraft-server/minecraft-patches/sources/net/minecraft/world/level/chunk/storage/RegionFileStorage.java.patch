@@ -138,15 +138,27 @@
          // Paper start - rewrite chunk system
          synchronized (this) {
              final ExceptionCollector<IOException> exceptionCollector = new ExceptionCollector<>();
-@@ -462,6 +_,32 @@
+@@ -462,6 +_,44 @@
      public RegionStorageInfo info() {
          return this.info;
      }
 +
 +    // SourbyCraft start - Aurora World Fabric
-+    private static dev.iyanz.sourbycraft.awf.AwfRegionStorage sourby$attachAwf(final Path folder) {
++    // Runs in the constructor while sourby$awf is still null, so an export's writes go to the
++    // region files through the ordinary write/flush paths.
++    private dev.iyanz.sourbycraft.awf.AwfRegionStorage sourby$attachAwf(final Path folder) {
 +        try {
-+            return dev.iyanz.sourbycraft.awf.AwfEngine.attach(folder);
++            return dev.iyanz.sourbycraft.awf.AwfEngine.attach(folder, new dev.iyanz.sourbycraft.awf.AwfEngine.RegionSink() {
++                @Override
++                public void write(final int chunkX, final int chunkZ, final byte[] nbt) throws IOException {
++                    RegionFileStorage.this.write(new ChunkPos(chunkX, chunkZ), nbt == null ? null : sourby$decode(nbt));
++                }
++
++                @Override
++                public void flush() throws IOException {
++                    RegionFileStorage.this.flush();
++                }
++            });
 +        } catch (final IOException failed) {
 +            // Falling back to the region files would load chunks older than the ones AWF holds.
 +            throw new java.io.UncheckedIOException("Aurora World Fabric could not open the store for " + folder

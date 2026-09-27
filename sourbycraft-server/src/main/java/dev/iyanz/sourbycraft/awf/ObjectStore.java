@@ -110,6 +110,11 @@ final class ObjectStore {
         return raw;
     }
 
+    /** Deletes one object if it exists; returns whether it did. */
+    boolean delete(final String name) throws IOException {
+        return Files.deleteIfExists(path(name));
+    }
+
     /** Deletes every object not in {@code live}; returns how many were removed. */
     int retainOnly(final Set<String> live) throws IOException {
         int removed = 0;

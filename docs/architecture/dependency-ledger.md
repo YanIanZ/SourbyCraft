@@ -64,7 +64,7 @@ these supply today's implementation of it. This is the set the ledger test pins.
 
 ## 2. Patch dependencies — `DIRECT_NMS_PATCH`
 
-### 2.1 `sourbycraft-server/minecraft-patches/features/` — 16 patches
+### 2.1 `sourbycraft-server/minecraft-patches/features/` — 19 patches
 
 Patches against the materialised Minecraft source. They exist because the behaviour is inside a
 vanilla class; none of them is an Aurora contract.
@@ -82,6 +82,8 @@ vanilla class; none of them is an Aurora contract.
 | 0013 custom tick metrics | Aurora telemetry hooks |
 | 0015 reject a landed arrow before the projectile tag lookup | Upstream bug fix |
 | 0016 refuse a cross-region block test | Region-safety fix (PRD §108) |
+| 0017 hoist query bounds out of the entity intersection loop, 0019 translate block collision boxes without allocating | Measured optimisations |
+| 0020 commit Aurora World Fabric stores at shutdown | One call in `MinecraftServer.stopServer` after the region-file I/O drain; no-op without AWF worlds |
 
 Patch 0006 calls `perf/AsyncPathValidity` for its two staleness checks, so the rule is tested in
 Sourby's own test suite.

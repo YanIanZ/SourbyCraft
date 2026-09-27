@@ -290,8 +290,16 @@ public final class SourbyCraftConfig {
             + "Empty = none. Existing region files stay the read-only base; chunks written afterwards go "
             + "to <folder>.awf beside each region folder. Writes are durable only after a commit (every "
             + "commit-interval-seconds, on save-all flush and on shutdown): a crash loses the last interval. "
-            + "Once a store exists it stays in use even if the world is removed from this list; there is "
-            + "no export back to region files yet.");
+            + "Once a store exists it stays in use even if the world is removed from this list; use export "
+            + "to leave AWF.");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.EXPORT_KEY, new java.util.ArrayList<String>(),
+            "Aurora World Fabric export (RESTART). World folder names to move back to region files at the next "
+            + "load: every chunk and deletion in the store is written to .mca, then the store is renamed to "
+            + "<folder>.awf.exported-<time> (kept, not deleted). A world must not also be in worlds.");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.BACKEND_KEY, "file",
+            "AWF backend (RESTART). file = a directory beside each region folder, the only one shipped. Another "
+            + "name selects a backend registered by server-side code before worlds load; if it is not registered, "
+            + "listed worlds fail to load rather than falling back.");
         seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.PERSISTENCE_KEY, "incremental",
             "AWF commit mode (RESTART): incremental (new objects only), checkpoint (also re-verifies every "
             + "referenced object), full (rewrites every object).");
