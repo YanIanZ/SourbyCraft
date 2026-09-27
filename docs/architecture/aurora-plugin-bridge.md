@@ -59,7 +59,7 @@ Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
   list them.
 - **Sync route.** `aurora.bridge.sync-route` (LIVE), default `caller-region`: a legacy sync task
   scheduled while a region is ticking runs on that region, anchored on a chunk it owned
-  (`execution/region/FoliaCurrentRegion`, ledgered; anchors cached per region id). From anywhere
+  (`execution/region/CurrentRegion`, implemented by the existing `FoliaRegionBackend` adapter; anchors cached per region id). From anywhere
   else it runs on the global region. `global` restores the previous behaviour. Tasks routed to
   a region count as owner handoffs.
 - **`isQueued` / `isCurrentlyRunning`** answer for bridged tasks (CraftScheduler patch).

@@ -50,7 +50,6 @@ public class UpstreamDependencyLedgerTest {
         "dev/iyanz/sourbycraft/perf/RegionTickMetrics.java",
         "dev/iyanz/sourbycraft/perf/RegionTickMetricsHolder.java",
         "dev/iyanz/sourbycraft/perf/RegionIoQueue.java",
-        "dev/iyanz/sourbycraft/execution/region/FoliaCurrentRegion.java",
         "dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java");
 
     private static final String LEDGER = "docs/architecture/dependency-ledger.md";

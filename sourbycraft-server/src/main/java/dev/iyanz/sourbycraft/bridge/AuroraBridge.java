@@ -47,7 +47,7 @@ public final class AuroraBridge {
                     earlyQuarantineAfter = settings.quarantineAfter();
                     earlySyncRoute = settings.syncRoute();
                     final dev.iyanz.sourbycraft.execution.region.CurrentRegion regions =
-                        new dev.iyanz.sourbycraft.execution.region.FoliaCurrentRegion();
+                        new dev.iyanz.sourbycraft.execution.region.FoliaRegionBackend();
                     current = new BridgeRuntime(settings.mode(), AuroraBridge::quarantineAfter,
                         new FoliaExecutor(), new BridgeTelemetry(),
                         SourbyLogger::warn, regions::anchor, AuroraBridge::syncRoute);
