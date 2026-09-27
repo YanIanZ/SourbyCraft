@@ -468,7 +468,8 @@ jobs:
           printf '[aurora.awf]\nworlds = ["world"]\ncommit-interval-seconds = 5\n' > sourbycraft_config/aurora.toml
 
           boot() {
-            local log=$1 commands=$2 pid status=0
+            # $2 runs right after Done; $3 runs 10 s later, then stop.
+            local log=$1 commands=$2 later=${3:-} pid status=0
             rm -f stdin.pipe && mkfifo stdin.pipe
             java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > "$log" 2>&1 &
             pid=$!
@@ -482,7 +483,9 @@ jobs:
               exec 3>&-; kill -KILL "$pid" 2>/dev/null || true; tail -60 "$log"
               echo "AWF boot ($log) did not reach Done within 240s"; return 1
             fi
-            printf '%s\nstop\n' "$commands" >&3 || true
+            printf '%s\n' "$commands" >&3 || true
+            if [ -n "$later" ]; then sleep 10; printf '%s\n' "$later" >&3 || true; fi
+            printf 'stop\n' >&3 || true
             exec 3>&-
             for _ in $(seq 1 90); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
             if kill -0 "$pid" 2>/dev/null; then
@@ -510,13 +513,19 @@ jobs:
           echo "region files under world/: $mca"
           test "$mca" -eq 0 || { echo "region files were written under an AWF world"; exit 1; }
 
-          boot second.log 'perf awf'
+          # Force-load chunks the first boot generated, so the engine has to read them back from AWF.
+          boot second.log 'forceload add -48 -48 48 48' $'perf awf\nperf storage'
           echo "----- AWF second boot -----"
           grep -E 'Aurora World Fabric|AWF|resident / dirty|reads / from region' second.log || true
           if grep -Eq 'Aurora World Fabric could not|AWF commit for .* failed|Failed to (read|write) chunk data' second.log; then
             echo "AWF reported a storage failure on reopen"; exit 1
           fi
           test "$(find world -name '*.mca' | wc -l)" -eq 0 || { echo "region files appeared on the second boot"; exit 1; }
+          reads=$(sed 's/\x1b\[[0-9;]*m//g' second.log | grep -m1 'minecraft/overworld/region reads / from region files' \
+            | sed -E 's/.*: ([0-9]+) \/ ([0-9]+) \/ ([0-9]+)$/\1 \2/' || true)
+          echo "overworld chunk reads / region-file fall-throughs on reopen: $reads"
+          set -- $reads
+          test "${1:-0}" -gt "${2:-0}" || { echo "the second boot read no chunk back from AWF"; exit 1; }
 
           # Third boot: export the world back to region files.
           printf '[aurora.awf]\nworlds = []\nexport = ["world"]\n' > sourbycraft_config/aurora.toml
