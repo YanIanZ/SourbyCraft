@@ -10,6 +10,7 @@ class PerfAwfViewTest {
     @Test
     void awfIsAView() {
         assertTrue(PerfCommand.VIEWS.contains("awf"));
+        assertTrue(PerfCommand.VIEWS.contains("storage"));
     }
 
     @Test

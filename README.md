@@ -317,13 +317,14 @@ Current/active command family:
 | `/perf async` | async-path pool: solve times, queue wait and depth, and how many solves saturation refused (they are never run on the region thread) |
 | `/perf network` | wire bytes and packets per second in each direction, totals, connections (`aurora.network.counters`) |
 | `/perf governor` | Resource Governor lanes: budget, queue, submitted/completed/failed/rejected |
+| `/perf storage` | chunk-system storage reads/writes/deletes since start, and each world's pending storage I/O tasks (chunk/POI/entity) |
 | `/perf awf` | Aurora World Fabric storages: resident/dirty chunks, pending commits, commit p50/p95/p99, reads vs region-file fall-throughs, failures |
 | `/perf region` | region count and MSPT spread, plus the slowest active region (world/region/generation ids) |
 | `/plugins <plugin>` | one plugin's compatibility state and, when bridged, its Aurora Bridge telemetry |
 | `/update` | SourbyCraft updater status/check |
 
 Implemented `/perf` views: `tick`, `cpu`, `memory`, `gc`, `lanes`, `async`, `network`,
-`governor`, `awf`, `region`, `health`. Still planned, not implemented:
+`governor`, `storage`, `awf`, `region`, `health`. Still planned, not implemented:
 
 ```text
 /perf player
