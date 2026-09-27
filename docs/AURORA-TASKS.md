@@ -176,8 +176,8 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [-] retry/failure handling — 3 attempts with backoff, `.tmp` always cleaned; unit-tested
 - [-] SHA/cache validation audit — bootstrap downloads: verified before install, corrupt cache replaced, body cut off past the pinned size; SourbyClip not audited
 - [-] bounded concurrency audit — bootstrap downloads are sequential; SourbyClip not audited
-- [-] first-boot failure recovery test — downloader state after failure unit-tested; no whole-boot test
-- [-] offline-after-success test — cache hit touches no network (unit test); no offline CI boot
+- [-] first-boot failure recovery test — unit-tested; CI step "Bootstrap failure recovery and offline boot" boots with no network (must fail fast, with guidance, no partial files) then online (added 2026-09-27, first run pending)
+- [-] offline-after-success test — unit test, plus the same CI step boots a third time with no network and must reach Done from the cache (first run pending)
 - [ ] remote repository/fallback documentation — one URL per library, no mirrors exist to document
 - [x] verify core runtime needs no Canvas remote service/API — [dependency-ledger.md §6](architecture/dependency-ledger.md)
 

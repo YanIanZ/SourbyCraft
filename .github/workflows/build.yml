@@ -290,6 +290,72 @@ jobs:
           jfr summary boot.jfr
           echo "Server reached Done, exposed metrics during load and enable, and exited cleanly."
 
+      - name: Bootstrap failure recovery and offline boot
+        run: |
+          set -euo pipefail
+          # A fresh server directory with no library cache. First with no network at all: the
+          # bootstrap must fail fast and cleanly (no hang, no partial files). Then online: it
+          # must reach Done. Then offline again: it must reach Done from the cache alone.
+          mkdir -p run-offline
+          cd run-offline
+          jar=$(find ../run -maxdepth 1 -type f -name 'SourbyCraft-26.2-*.jar' -print -quit)
+          test -n "$jar"
+          jar=$(readlink -f "$jar")
+          java_bin="$JAVA_HOME/bin/java"
+          me=$(id -un)
+          echo "eula=true" > eula.txt
+          printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\n' > server.properties
+
+          offline() {
+            # A private network namespace with only loopback: every outbound connection fails.
+            sudo unshare --net -- sh -c "ip link set lo up && exec sudo -u $me -E env HOME=$HOME PATH=$PATH \"\$@\"" sh "$@"
+          }
+
+          boot() {
+            local log=$1 mode=$2 pid status=0
+            rm -f stdin.pipe && mkfifo stdin.pipe
+            if [ "$mode" = offline ]; then
+              offline "$java_bin" -Xmx2G -jar "$jar" --nogui < stdin.pipe > "$log" 2>&1 &
+            else
+              "$java_bin" -Xmx2G -jar "$jar" --nogui < stdin.pipe > "$log" 2>&1 &
+            fi
+            pid=$!
+            exec 3> stdin.pipe
+            for _ in $(seq 1 240); do
+              grep -q 'Done (' "$log" && break
+              [ -d "/proc/$pid" ] || break
+              sleep 1
+            done
+            if grep -q 'Done (' "$log"; then printf 'stop\n' >&3 || true; fi
+            exec 3>&-
+            for _ in $(seq 1 90); do [ -d "/proc/$pid" ] || break; sleep 1; done
+            if [ -d "/proc/$pid" ]; then sudo pkill -KILL -f "$jar" || true; tail -40 "$log"; echo "$log: did not stop"; return 1; fi
+            wait "$pid" || status=$?
+            echo "$log: exit $status"
+            return "$status"
+          }
+
+          start=$(date +%s)
+          status=0
+          boot first-offline.log offline || status=$?
+          elapsed=$(( $(date +%s) - start ))
+          echo "----- first boot without network (${elapsed}s) -----"
+          grep -E 'SourbyBootstrap' first-offline.log | head -12 || true
+          test "$status" -ne 0 || { echo "a first boot with no network must fail"; exit 1; }
+          test "$elapsed" -lt 120 || { echo "the failing first boot took ${elapsed}s"; exit 1; }
+          grep -q 'download the libraries manually' first-offline.log || { echo "no manual-download guidance"; exit 1; }
+          test -z "$(find libraries -name '*.tmp' 2>/dev/null)" || { echo "partial downloads were left behind"; exit 1; }
+
+          boot online.log online
+          grep -q 'Done (' online.log || { echo "the online boot did not reach Done"; exit 1; }
+
+          boot second-offline.log offline
+          echo "----- boot without network after a successful one -----"
+          grep -E 'SourbyBootstrap|Done \(' second-offline.log | head -8 || true
+          grep -q 'Done (' second-offline.log || { tail -40 second-offline.log; echo "the cached offline boot did not reach Done"; exit 1; }
+          if grep -q 'SourbyBootstrap\] downloaded' second-offline.log; then echo "the offline boot tried to download"; exit 1; fi
+          echo "First boot without network failed cleanly; online boot succeeded; later boot ran offline from the cache."
+
       - name: Boot with the Aurora Bridge and a legacy plugin
         run: |
           set -euo pipefail
@@ -548,6 +614,8 @@ jobs:
           path: |
             run/server.log
             run-bridge/server.log
+            run-offline/first-offline.log
+            run-offline/second-offline.log
             run-awf/first.log
             run-awf/second.log
             run-awf/third.log
