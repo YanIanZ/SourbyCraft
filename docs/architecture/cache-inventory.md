@@ -21,8 +21,9 @@ heap-retention test under player churn is still open.
 | `execution/ResourceGovernor` | `lanes` | Process lifetime; threads released when idle | Number of `Lane` values (2) |
 | `startup/StartupTimeline` | `PHASES` | Process lifetime | Boot stages + index phases |
 | `startup/StartupIndexStage` | `last`, `lastGraph` | Replaced each boot | Jar count |
-| `awf/AwfRegistry` | `worlds` | `unregister` | Loaded AWF worlds (none today: AWF is not wired) |
-| `awf/AwfWorld` | `owned` (chunk → bytes), `lastAccess` | Replaced on write; clean chunks beyond `residentLimit` dropped LRU after each save and read back from the store | `residentLimit` + dirty chunks. With limit 0 (the default) it is unbounded |
+| `awf/AwfRegistry` | `worlds` | `unregister` | Library registry; the engine integration does not use it |
+| `awf/AwfEngine` | `storages` | Removed when the engine closes the region storage (`AwfRegionStorage.close`) | Open region storages of listed worlds (3 per dimension: chunks, entities, POI) |
+| `awf/AwfWorld` | `owned` (chunk → bytes), `lastAccess` | Replaced on write; clean chunks beyond `residentLimit` dropped LRU after each save and read back from the store | `residentLimit` + dirty chunks. The engine integration always passes `aurora.awf.resident-chunks` (default 1024); limit 0 (library default) is unbounded |
 | `awf/AwfWorld` | `dirty` | Cleared by a successful save | ≤ `owned` |
 | `awf/AwfWorld` | `pendingSaves` | Removed on completion | ≤ `STORAGE` queue + threads |
 | `awf/LatencyRecorder` | ring | Overwritten | 1024 samples |
@@ -32,8 +33,7 @@ heap-retention test under player churn is still open.
 - Every collection in this table is either bounded or tied to something bounded (online
   players, plugins, config keys, lanes). `AwfWorld.owned` is bounded when a `residentLimit` is
   set: clean chunks are dropped LRU after a save. Dirty chunks are never dropped, so unsaved
-  work can exceed the limit until the next save. Whoever wires AWF into real worlds must pass a
-  limit.
+  work can exceed the limit until the next save. The engine integration always sets a limit.
 - Completed work does not accumulate:
   - A one-shot bridged task leaves `scheduled` when it runs (`BridgeRuntimeTest`
     `aOneShotTaskIsForgottenAfterItRuns`).

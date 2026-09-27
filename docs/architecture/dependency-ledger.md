@@ -86,6 +86,13 @@ vanilla class; none of them is an Aurora contract.
 Patch 0006 calls `perf/AsyncPathValidity` for its two staleness checks, so the rule is tested in
 Sourby's own test suite.
 
+Per-file source patches (`minecraft-patches/sources/`):
+
+| Patch | Class | Reason |
+|---|---|---|
+| `net/minecraft/commands/Commands.java` | `DIRECT_NMS_PATCH` | Removes the `/canvas` command tree. |
+| `net/minecraft/world/level/chunk/storage/RegionFileStorage.java` | `DIRECT_NMS_PATCH` | Aurora World Fabric: reads, writes, scans, flush and close go to `AwfRegionStorage` for worlds in `aurora.awf.worlds`. Without a listed world or an existing store, `sourby$awf` is null and every path is upstream's. Depends on Paper's Moonrise `RegionDataController` contract (`ReadData`/`WriteData`), so a Paper rebase that changes it breaks this patch. |
+
 ### 2.2 `sourbycraft-server/canvas-patches/files/` — 5 patches
 
 | Patch | Class | Reason |

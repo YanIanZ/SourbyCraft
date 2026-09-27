@@ -1,0 +1,173 @@
+--- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
++++ b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+@@ -26,6 +_,7 @@
+ 
+     // Paper start - recalculate region file headers
+     private final boolean isChunkData;
++    private final dev.iyanz.sourbycraft.awf.AwfRegionStorage sourby$awf; // SourbyCraft - Aurora World Fabric: null unless this folder's world is stored in AWF
+ 
+     @Nullable
+     public static ChunkPos getRegionFileCoordinates(Path file) {
+@@ -135,6 +_,14 @@
+     public final ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData moonrise$startWrite(
+         final int chunkX, final int chunkZ, final CompoundTag compound
+     ) throws IOException {
++        // SourbyCraft start - Aurora World Fabric: serialize here, hand the bytes to AWF in finishWrite
++        if (this.sourby$awf != null) {
++            final byte[] nbt = compound == null ? null : sourby$encode(compound);
++            return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData(
++                compound, compound == null ? ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData.WriteResult.DELETE : ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData.WriteResult.WRITE,
++                null, ignored -> this.sourby$awf.write(chunkX, chunkZ, nbt));
++        }
++        // SourbyCraft end - Aurora World Fabric
+         if (compound == null) {
+             return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData(
+                 compound, ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData.WriteResult.DELETE,
+@@ -175,6 +_,12 @@
+     public final void moonrise$finishWrite(
+         final int chunkX, final int chunkZ, final ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData writeData
+     ) throws IOException {
++        // SourbyCraft start - Aurora World Fabric: the write goes to AWF, never to a region file
++        if (this.sourby$awf != null) {
++            writeData.write().run(null);
++            return;
++        }
++        // SourbyCraft end - Aurora World Fabric
+         final ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+         if (writeData.result() == ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData.WriteResult.DELETE) {
+             final RegionFile regionFile = this.moonrise$getRegionFileIfExists(chunkX, chunkZ);
+@@ -192,6 +_,20 @@
+     public final ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData moonrise$readData(
+         final int chunkX, final int chunkZ
+     ) throws IOException {
++        // SourbyCraft start - Aurora World Fabric: a chunk AWF owns never reaches the region file
++        if (this.sourby$awf != null) {
++            final byte[] owned = this.sourby$awf.read(chunkX, chunkZ);
++            if (owned == dev.iyanz.sourbycraft.awf.AwfRegionStorage.DELETED) {
++                return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData(
++                    ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData.ReadResult.NO_DATA, null, null, 0);
++            }
++            if (owned != null) {
++                return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData(
++                    ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData.ReadResult.SYNC_READ, null, sourby$decode(owned), 0);
++            }
++            // Never touched since AWF was attached: the region file is still authoritative.
++        }
++        // SourbyCraft end - Aurora World Fabric
+         final RegionFile regionFile = this.moonrise$getRegionFileIfExists(chunkX, chunkZ);
+ 
+         final DataInputStream input = regionFile == null ? null : regionFile.getChunkDataInputStream(new ChunkPos(chunkX, chunkZ));
+@@ -271,6 +_,7 @@
+         this.sync = sync;
+         this.info = info;
+         this.isChunkData = info.dfuType()[0] == net.minecraft.util.datafix.DataFixTypes.CHUNK; // Paper - recalculate region file headers
++        this.sourby$awf = sourby$attachAwf(folder); // SourbyCraft - Aurora World Fabric
+     }
+ 
+     @org.jetbrains.annotations.Contract("_, false -> !null") private @Nullable RegionFile getRegionFile(final ChunkPos pos, boolean existingOnly) throws IOException { // CraftBukkit
+@@ -345,6 +_,13 @@
+     // Paper end
+ 
+     public @Nullable CompoundTag read(final ChunkPos pos) throws IOException {
++        // SourbyCraft start - Aurora World Fabric
++        if (this.sourby$awf != null) {
++            final byte[] owned = this.sourby$awf.read(pos.x(), pos.z());
++            if (owned == dev.iyanz.sourbycraft.awf.AwfRegionStorage.DELETED) return null;
++            if (owned != null) return sourby$decode(owned);
++        }
++        // SourbyCraft end - Aurora World Fabric
+         // CraftBukkit start - SPIGOT-5680: There's no good reason to preemptively create files on read, save that for writing
+         RegionFile region = this.getRegionFile(pos, true);
+         if (region == null) {
+@@ -382,6 +_,18 @@
+     }
+ 
+     public void scanChunk(final ChunkPos pos, final StreamTagVisitor scanner) throws IOException {
++        // SourbyCraft start - Aurora World Fabric: structure scans must see the chunk AWF holds
++        if (this.sourby$awf != null) {
++            final byte[] owned = this.sourby$awf.read(pos.x(), pos.z());
++            if (owned == dev.iyanz.sourbycraft.awf.AwfRegionStorage.DELETED) return;
++            if (owned != null) {
++                try (DataInputStream in = new DataInputStream(new java.io.ByteArrayInputStream(owned))) {
++                    NbtIo.parse(in, scanner, net.minecraft.nbt.NbtAccounter.unlimitedHeap());
++                }
++                return;
++            }
++        }
++        // SourbyCraft end - Aurora World Fabric
+         // CraftBukkit start - SPIGOT-5680: There's no good reason to preemptively create files on read, save that for writing
+         RegionFile region = this.getRegionFile(pos, true);
+         if (region == null) {
+@@ -397,6 +_,14 @@
+     }
+ 
+     public void write(final ChunkPos pos, final @Nullable CompoundTag value) throws IOException {
++        // SourbyCraft start - Aurora World Fabric: region files under an AWF store are never written
++        if (this.sourby$awf != null) {
++            if (!SharedConstants.DEBUG_DONT_SAVE_WORLD) {
++                this.sourby$awf.write(pos.x(), pos.z(), value == null ? null : sourby$encode(value));
++            }
++            return;
++        }
++        // SourbyCraft end - Aurora World Fabric
+         if (!SharedConstants.DEBUG_DONT_SAVE_WORLD) {
+             RegionFile region = this.getRegionFile(pos, value == null); // CraftBukkit // Paper - rewrite chunk system
+             // Paper start - rewrite chunk system
+@@ -427,6 +_,16 @@
+ 
+     @Override
+     public void close() throws IOException {
++        // SourbyCraft start - Aurora World Fabric: commit what is in memory before anything closes
++        if (this.sourby$awf != null) {
++            try {
++                this.sourby$awf.close();
++            } catch (final IOException | RuntimeException failed) {
++                LOGGER.error("Aurora World Fabric could not commit {} on close; its uncommitted chunks are lost", this.folder, failed);
++                throw failed;
++            }
++        }
++        // SourbyCraft end - Aurora World Fabric
+         // Paper start - rewrite chunk system
+         synchronized (this) {
+             final ExceptionCollector<IOException> exceptionCollector = new ExceptionCollector<>();
+@@ -443,6 +_,7 @@
+     }
+ 
+     public void flush() throws IOException {
++        if (this.sourby$awf != null) this.sourby$awf.flush(); // SourbyCraft - Aurora World Fabric: durable when flush returns (off region threads)
+         // Paper start - rewrite chunk system
+         synchronized (this) {
+             final ExceptionCollector<IOException> exceptionCollector = new ExceptionCollector<>();
+@@ -462,6 +_,32 @@
+     public RegionStorageInfo info() {
+         return this.info;
+     }
++
++    // SourbyCraft start - Aurora World Fabric
++    private static dev.iyanz.sourbycraft.awf.AwfRegionStorage sourby$attachAwf(final Path folder) {
++        try {
++            return dev.iyanz.sourbycraft.awf.AwfEngine.attach(folder);
++        } catch (final IOException failed) {
++            // Falling back to the region files would load chunks older than the ones AWF holds.
++            throw new java.io.UncheckedIOException("Aurora World Fabric could not open the store for " + folder
++                + "; refusing to fall back to the region files it shadows", failed);
++        }
++    }
++
++    private static byte[] sourby$encode(final CompoundTag tag) throws IOException {
++        final java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream(16 * 1024);
++        try (DataOutputStream out = new DataOutputStream(bytes)) {
++            NbtIo.write(tag, out);
++        }
++        return bytes.toByteArray();
++    }
++
++    private static CompoundTag sourby$decode(final byte[] nbt) throws IOException {
++        try (DataInputStream in = new DataInputStream(new java.io.ByteArrayInputStream(nbt))) {
++            return NbtIo.read(in);
++        }
++    }
++    // SourbyCraft end - Aurora World Fabric
+ 
+     // Paper start - don't write garbage data to disk if writing serialization fails
+     public static final class RegionFileSizeException extends RuntimeException {

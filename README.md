@@ -135,7 +135,7 @@ A single workload, machine, percentile or profiler sample must never be generali
 | Network throughput / storage backlog telemetry | **PARTIAL** — wire bytes/packets per direction (`/perf network`); no vanilla save-queue metrics |
 | Aurora Resource Governor / unified execution fabric | **PARTIAL** — fixed-budget governed lanes (`/perf governor`); existing executors not yet governed |
 | Aurora Compatibility Bridge | **IMPLEMENTED, UNQUALIFIED** — `aurora.bridge.mode = off` by default |
-| Aurora World Fabric | **LIBRARY, NOT WIRED** into world load/save |
+| Aurora World Fabric | **EXPERIMENTAL, OFF BY DEFAULT** — FILE backend under region storage for worlds in `aurora.awf.worlds` (`/perf awf`); unqualified, a crash loses writes since the last commit; no database backends |
 | Fully independent Aurora scheduler | **RESEARCH / PLANNED**, not current runtime |
 
 ### Aurora engine, and where it lives
@@ -317,12 +317,13 @@ Current/active command family:
 | `/perf async` | async-path pool: solve times, queue wait and depth, and how many solves saturation refused (they are never run on the region thread) |
 | `/perf network` | wire bytes and packets per second in each direction, totals, connections (`aurora.network.counters`) |
 | `/perf governor` | Resource Governor lanes: budget, queue, submitted/completed/failed/rejected |
+| `/perf awf` | Aurora World Fabric storages: resident/dirty chunks, pending commits, commit p50/p95/p99, reads vs region-file fall-throughs, failures |
 | `/perf region` | region count and MSPT spread, plus the slowest active region (world/region/generation ids) |
 | `/plugins <plugin>` | one plugin's compatibility state and, when bridged, its Aurora Bridge telemetry |
 | `/update` | SourbyCraft updater status/check |
 
 Implemented `/perf` views: `tick`, `cpu`, `memory`, `gc`, `lanes`, `async`, `network`,
-`governor`, `region`, `health`. Still planned, not implemented:
+`governor`, `awf`, `region`, `health`. Still planned, not implemented:
 
 ```text
 /perf player

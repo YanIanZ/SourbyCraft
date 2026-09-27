@@ -448,6 +448,73 @@ jobs:
           fi
           echo "Legacy plugin loaded through the Aurora Bridge; sync, async, timer-cancel and world-access paths ran; clean exit."
 
+      - name: Boot twice with Aurora World Fabric storing the world
+        run: |
+          set -euo pipefail
+          # A fresh world with aurora.awf.worlds = ["world"]: every chunk the first boot generates
+          # is written through AWF, and the second boot must load them back from it. Evidence that
+          # the RegionFileStorage hook reads, writes, commits on shutdown and reopens; not a
+          # qualification (no load, no crash test, one small world).
+          mkdir -p run-awf/sourbycraft_config
+          cd run-awf
+          jar=$(find ../run -maxdepth 1 -type f -name 'SourbyCraft-26.2-*.jar' -print -quit)
+          test -n "$jar"
+          echo "eula=true" > eula.txt
+          printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
+          printf '[aurora.awf]\nworlds = ["world"]\ncommit-interval-seconds = 5\n' > sourbycraft_config/aurora.toml
+
+          boot() {
+            local log=$1 commands=$2 pid status=0
+            rm -f stdin.pipe && mkfifo stdin.pipe
+            java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > "$log" 2>&1 &
+            pid=$!
+            exec 3> stdin.pipe
+            for _ in $(seq 1 240); do
+              grep -q 'Done (' "$log" && break
+              kill -0 "$pid" 2>/dev/null || break
+              sleep 1
+            done
+            if ! grep -q 'Done (' "$log"; then
+              exec 3>&-; kill -KILL "$pid" 2>/dev/null || true; tail -60 "$log"
+              echo "AWF boot ($log) did not reach Done within 240s"; return 1
+            fi
+            printf '%s\nstop\n' "$commands" >&3 || true
+            exec 3>&-
+            for _ in $(seq 1 90); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+            if kill -0 "$pid" 2>/dev/null; then
+              kill -KILL "$pid" 2>/dev/null || true; tail -60 "$log"
+              echo "AWF boot ($log) did not stop within 90s"; return 1
+            fi
+            wait "$pid" || status=$?
+            if [ "$status" -ne 0 ]; then tail -60 "$log"; echo "AWF boot ($log) exited with $status"; return 1; fi
+          }
+
+          boot first.log 'perf awf'
+          echo "----- AWF first boot -----"
+          grep -E 'Aurora World Fabric|AWF|resident / dirty|commit p50|reads / from region' first.log || true
+          grep -q 'Aurora World Fabric: storing \[world\]' first.log || { echo "AWF did not attach"; exit 1; }
+          if grep -Eq 'Aurora World Fabric could not|AWF commit for .* failed|Failed to (read|write) chunk data' first.log; then
+            echo "AWF reported a storage failure"; exit 1
+          fi
+          stores=$(find world -type d -name '*.awf' | sort)
+          echo "stores:"; echo "$stores"
+          test -n "$stores" || { echo "no AWF store was created under world/"; exit 1; }
+          generations=$(find world -path '*.awf/generations-root/*' -type f | wc -l)
+          echo "generation files: $generations"
+          test "$generations" -gt 0 || { echo "no AWF generation was committed"; exit 1; }
+          mca=$(find world -name '*.mca' | wc -l)
+          echo "region files under world/: $mca"
+          test "$mca" -eq 0 || { echo "region files were written under an AWF world"; exit 1; }
+
+          boot second.log 'perf awf'
+          echo "----- AWF second boot -----"
+          grep -E 'Aurora World Fabric|AWF|resident / dirty|reads / from region' second.log || true
+          if grep -Eq 'Aurora World Fabric could not|AWF commit for .* failed|Failed to (read|write) chunk data' second.log; then
+            echo "AWF reported a storage failure on reopen"; exit 1
+          fi
+          test "$(find world -name '*.mca' | wc -l)" -eq 0 || { echo "region files appeared on the second boot"; exit 1; }
+          echo "World stored through AWF: created, committed on shutdown, reopened, no region files written."
+
       - name: Upload boot diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -456,6 +523,8 @@ jobs:
           path: |
             run/server.log
             run-bridge/server.log
+            run-awf/first.log
+            run-awf/second.log
             run/boot.jfr
           retention-days: 7
 

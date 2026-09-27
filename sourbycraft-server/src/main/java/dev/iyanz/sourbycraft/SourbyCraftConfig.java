@@ -285,6 +285,24 @@ public final class SourbyCraftConfig {
         seed(f, changed, AuroraConfig.NETWORK_COUNTERS_KEY, true,
             "Count wire bytes and packets per direction for /perf network (LIVE). The per-packet cost is "
             + "not measured; false stops counting.");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.WORLDS_KEY, new java.util.ArrayList<String>(),
+            "Aurora World Fabric (RESTART). World folder names whose chunk, entity and POI data AWF stores. "
+            + "Empty = none. Existing region files stay the read-only base; chunks written afterwards go "
+            + "to <folder>.awf beside each region folder. Writes are durable only after a commit (every "
+            + "commit-interval-seconds, on save-all flush and on shutdown): a crash loses the last interval. "
+            + "Once a store exists it stays in use even if the world is removed from this list; there is "
+            + "no export back to region files yet.");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.PERSISTENCE_KEY, "incremental",
+            "AWF commit mode (RESTART): incremental (new objects only), checkpoint (also re-verifies every "
+            + "referenced object), full (rewrites every object).");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.COMMIT_INTERVAL_KEY, 30,
+            "AWF: seconds a written chunk may wait in memory before a commit starts (RESTART). 1-86400.");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.RESIDENT_CHUNKS_KEY, 1024,
+            "AWF: committed chunks kept in memory per storage (RESTART). Unsaved chunks are never dropped.");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.RETAINED_GENERATIONS_KEY, 3,
+            "AWF: committed generations kept for recovery (RESTART).");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.COMMIT_ATTEMPTS_KEY, 3,
+            "AWF: attempts per commit before it fails and its chunks stay in memory for the next (RESTART).");
         if (changed[0]) {
             f.save();
             SourbyLogger.info("seeded Aurora engine defaults into sourbycraft_config/aurora.toml");

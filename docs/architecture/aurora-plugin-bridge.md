@@ -57,8 +57,18 @@ Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
   global region is not rewritten; the base's own thread checks decide what happens. Async tasks
   run as `CraftAsyncTask` bodies without its worker bookkeeping, so `getActiveWorkers` does not
   list them.
-- **Unverified.** No legacy plugin has been run through the bridge. The Paper patches have not
-  been applied by the private toolchain in this change.
+- **CI evidence (run 440, `9c933375`, 2026-09-27).** The Paper patches applied. A second CI boot
+  with `aurora.bridge.mode = "safe"` loaded `legacy-test-plugin` (no `folia-supported`):
+  - admission line logged; all 13 boot stages online;
+  - `runTask` ran on `Folia Region Scheduler Thread #3` (the global region);
+  - `runTaskAsynchronously` ran on `SourbyCraft-BridgeIO-1`;
+  - a self-cancelling `runTaskTimer` ran 3 times and never after cancel;
+  - a world access from a sync task was refused by the base (`IllegalStateException`) and
+    counted as 1 fatal violation, below the quarantine threshold;
+  - `/plugins LegacyBridgeTest` reported 4 scheduler redirects; `/perf governor` reported Bridge
+    I/O 1 submitted, 1 completed, 0 rejected; clean exit.
+- **Still unverified.** That fixture is synthetic. No real legacy plugin has been run through the
+  bridge, and nothing here qualifies one.
 
 ## Qualification
 A plugin cannot be presented as BRIDGED until load, enable and bridge initialization succeed and no fatal compatibility violation is present.
