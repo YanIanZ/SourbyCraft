@@ -637,6 +637,15 @@ jobs:
           docker run --rm --entrypoint sh sourbycraft:ci -c \
             'id -un; test -x /app/entrypoint.sh && echo entrypoint-ok; test -f /app/server.jar && echo jar-ok'
 
+      - name: Upload verified slim jar for staging
+        if: github.ref == 'refs/heads/26.2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SourbyCraft-26.2-staging
+          path: build/libs/SourbyCraft-slim.jar
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Create GitHub release
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/release/26.2-canvas'
         env:
