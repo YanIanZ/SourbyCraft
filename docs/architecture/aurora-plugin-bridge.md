@@ -86,8 +86,12 @@ Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
 - **CI run 450 (`38bc72be`).** `getPendingTasks` listed a bridged task (`PENDING_OK`). `/perf
   plugins` showed `bridged 1` and `LegacyBridgeTest redirects / handoffs / rejected /
   violations: 6 / 1 / 0 / 1`.
-- **Still unverified.** That fixture is synthetic. No real legacy plugin has been run through the
-  bridge, and nothing here qualifies one.
+- **Panel staging (2026-09-29, `76813c8`).** With `mode = "safe"`, real Vault
+  `1.7.3-b131` and EssentialsX `2.22.1-dev+25-cfb6f12` enabled through the bridge.
+  EconomyShopGUI-Premium `6.4.1` loaded and hooked into Vault/EssentialsX Economy. `/plugins`
+  reported 6/6 active, 2 bridged, 0 failed; at the post-boot sample, Essentials had 5 scheduler
+  redirects and Vault 2, with 0 rejected operations or fatal region violations for both.
+  This is startup and economy-hook evidence on the demo panel, not gameplay or soak qualification.
 
 ## Qualification
 A plugin cannot be presented as BRIDGED until load, enable and bridge initialization succeed and no fatal compatibility violation is present.
