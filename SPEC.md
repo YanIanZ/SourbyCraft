@@ -2328,6 +2328,8 @@ V18: Official build resolves SourbyClip/SourbyPatcher only from Maven Local; pri
 
 V19: Entity tracking broadcasts recalculate effective range per recipient after prior synchronous plugin callbacks; empty broadcasts perform no range traversal (PRD §9, §49; AURORA-TASKS §D).
 
+V20: Updater stop/restart cancels only updater-owned scheduled checks and unregisters its own join listener; unrelated tasks owned by the internal plugin remain scheduled (DEVELOPMENT §20).
+
 # 153. Regression Log (§B)
 
 | id | date | cause | fix |
@@ -2371,6 +2373,7 @@ V19: Entity tracking broadcasts recalculate effective range per recipient after 
 | B30 | 2026-09-21 | Tracker patch 0018 cached passenger-dependent effective range across synchronous PlayerTrackEntityEvent callbacks, giving later recipients stale range and adding reads for empty broadcasts | V19; withdraw 0018; real list/region broadcast-loop regressions model callback range changes |
 
 | B31 | 2026-09-21 | Task D tests initially missed suite-only discovery; isolated tracker mocks then initialized Entity before registries | Add EntityOptimizationTestSuite and upstream Normal test environment; verify named cases actually execute; no new runtime invariant |
+| B32 | 2026-09-29 | Updater stop used owner-wide async cancellation, so stopping it could cancel unrelated internal-plugin tasks | V20; track updater task handles and cancel only those; lifecycle regression test |
 
 # 154. Delivery Scope
 

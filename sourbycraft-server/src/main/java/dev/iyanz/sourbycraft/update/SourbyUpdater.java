@@ -9,7 +9,9 @@ import dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin;
 import dev.iyanz.sourbycraft.brand.BuildInfo;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import org.bukkit.Bukkit;
+import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.Plugin;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.BufferedReader;
@@ -25,6 +27,8 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -73,7 +77,8 @@ public final class SourbyUpdater {
     private final Path latestPathFile = stageDir.resolve("latest.path");
 
     private final AtomicBoolean checkRunning = new AtomicBoolean(false);
-    private volatile boolean started = false;
+    private final List<ScheduledTask> scheduledChecks = new ArrayList<>();
+    private UpdateNotifier.JoinListener joinListener;
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -117,13 +122,13 @@ public final class SourbyUpdater {
                 LocalTime at = LocalTime.of(Integer.parseInt(parts[0].trim()), Integer.parseInt(parts[1].trim()));
                 Duration delay = Duration.between(now, at);
                 if (delay.isNegative()) delay = delay.plusDays(1);
-                Bukkit.getAsyncScheduler().runAtFixedRate(
+                track(Bukkit.getAsyncScheduler().runAtFixedRate(
                     owner,
                     task -> checkSafely(),
                     Math.max(1L, delay.toMillis()),
                     DAILY_MILLIS,
                     TimeUnit.MILLISECONDS
-                );
+                ));
                 scheduled++;
             } catch (Exception e) {
                 SourbyLogger.warn("auto-updater: ignoring illegal check time '" + time + "'");
@@ -132,27 +137,28 @@ public final class SourbyUpdater {
 
         // Notify permission holders who join AFTER an update was detected.
         try {
-            Bukkit.getPluginManager().registerEvents(new UpdateNotifier.JoinListener(), owner);
+            joinListener = new UpdateNotifier.JoinListener();
+            Bukkit.getPluginManager().registerEvents(joinListener, owner);
         } catch (Throwable t) {
+            joinListener = null;
             SourbyLogger.warn("auto-updater: could not register the join-notify listener: " + t.getMessage());
         }
 
         // One-shot check shortly after boot so a release published while the server was down is
         // picked up within minutes, not at the next daily slot.
-        Bukkit.getAsyncScheduler().runDelayed(owner, task -> checkSafely(), 2, TimeUnit.MINUTES);
+        track(Bukkit.getAsyncScheduler().runDelayed(owner, task -> checkSafely(), 2, TimeUnit.MINUTES));
 
         int intervalMin = Config.checkIntervalMinutes();
         if (intervalMin > 0) {
-            Bukkit.getAsyncScheduler().runAtFixedRate(
+            track(Bukkit.getAsyncScheduler().runAtFixedRate(
                 owner,
                 task -> checkSafely(),
                 TimeUnit.MINUTES.toMillis(intervalMin),
                 TimeUnit.MINUTES.toMillis(intervalMin),
                 TimeUnit.MILLISECONDS
-            );
+            ));
         }
 
-        started = true;
         SourbyLogger.info("auto-updater started: repo=" + Config.repo()
             + " channel=" + resolveChannel().suffix()
             + " mode=" + mode.name().toLowerCase(Locale.ROOT)
@@ -161,18 +167,18 @@ public final class SourbyUpdater {
             + " (AsyncScheduler)");
     }
 
-    /** Cancel any scheduled checks. */
+    void track(ScheduledTask task) {
+        scheduledChecks.add(task);
+    }
+
+    /** Cancel only this updater's scheduled checks and listener. */
     public synchronized void stop() {
-        if (started) {
-            Plugin owner = MinecraftInternalPlugin.INSTANCE;
-            if (owner != null) {
-                try {
-                    Bukkit.getAsyncScheduler().cancelTasks(owner);
-                } catch (Throwable ignored) { /* scheduler may not be up during early teardown */ }
-            }
+        for (ScheduledTask task : scheduledChecks) {
+            task.cancel();
         }
-        started = false;
-        checkRunning.set(false);
+        scheduledChecks.clear();
+        if (joinListener != null) HandlerList.unregisterAll(joinListener);
+        joinListener = null;
     }
 
     // ------------------------------------------------------------------ check
