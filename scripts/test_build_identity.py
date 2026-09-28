@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 import unittest
 import zipfile
-from verify_build_identity import verify
+from verify_build_identity import verify, verify_api_version
 
 
 def jar(directory, properties, manifest, api_metadata=None):
@@ -58,6 +58,7 @@ class BuildIdentityTest(unittest.TestCase):
             path = jar(directory, props, manifest,
                        {"version": "26.2-R0.1-SNAPSHOT", "currentApiVersion": "26.2"})
             self.assertEqual("26.2-DEV", verify(path, 47, "DEV", "26.2")["version"])
+            self.assertEqual("26.2-R0.1-SNAPSHOT", verify_api_version(path, "26.2")["version"])
 
             path = jar(directory, props, manifest,
                        {"version": "26.2-DEV", "currentApiVersion": "26.2"})

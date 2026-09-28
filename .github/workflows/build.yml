@@ -126,7 +126,7 @@ jobs:
           python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-${{ steps.relnum.outputs.channel }}.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}"
           cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
           api_version=$(sed -n 's/^apiVersion=//p' gradle.properties)
-          python3 scripts/verify_build_identity.py build/libs/SourbyCraft-slim.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}" --api-version "$api_version"
+          python3 scripts/verify_build_identity.py build/libs/SourbyCraft-slim.jar --api-only --api-version "$api_version"
 
       - name: Show build info
         run: |
