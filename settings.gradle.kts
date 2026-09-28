@@ -63,9 +63,10 @@ fun optionalInclude(name: String, op: (ProjectDescriptor.() -> Unit)? = null) {
 }
 
 // SourbyCraft — derive the clean channel version (e.g. "26.2-REL") from the git branch, matching
-// the root build's sourbycraftSuffixProvider so project.version (and therefore the API version
-// reported by "Implementing API version ...", read from apiVersioning.json) stays in lockstep with
+// the root build's sourbycraftSuffixProvider so artifact coordinates stay in lockstep with
 // /ver, the startup banner and the JAR manifest instead of emitting "<mc>.local-SNAPSHOT".
+// Bukkit's compatibility API version is generated separately as <apiVersion>-R0.1-SNAPSHOT;
+// plugins such as EssentialsX parse that value and reject a build-channel suffix.
 // The branch is read via providers.exec (config-cache compatible) rather than a raw ProcessBuilder
 // at configuration time, which the configuration cache forbids.
 gradle.lifecycle.beforeProject {

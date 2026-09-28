@@ -2330,6 +2330,8 @@ V19: Entity tracking broadcasts recalculate effective range per recipient after 
 
 V20: Updater stop/restart cancels only updater-owned scheduled checks and unregisters its own join listener; unrelated tasks owned by the internal plugin remain scheduled (DEVELOPMENT §20).
 
+V21: Bukkit compatibility version embedded in the server API JAR is `<apiVersion>-R0.1-SNAPSHOT`; SourbyCraft artifact/build channel remains separate. The packaged slim JAR must contain exactly one API JAR with matching `version` and `currentApiVersion` metadata (DEVELOPMENT §19).
+
 # 153. Regression Log (§B)
 
 | id | date | cause | fix |
@@ -2374,6 +2376,7 @@ V20: Updater stop/restart cancels only updater-owned scheduled checks and unregi
 
 | B31 | 2026-09-21 | Task D tests initially missed suite-only discovery; isolated tracker mocks then initialized Entity before registries | Add EntityOptimizationTestSuite and upstream Normal test environment; verify named cases actually execute; no new runtime invariant |
 | B32 | 2026-09-29 | Updater stop used owner-wide async cancellation, so stopping it could cancel unrelated internal-plugin tasks | V20; track updater task handles and cancel only those; lifecycle regression test |
+| B33 | 2026-09-29 | API metadata used the SourbyCraft build channel as `Bukkit.getBukkitVersion()`, which EssentialsX rejected and caused dependent economy plugins to fail | V21; generate Bukkit-compatible API metadata and verify it in the packaged slim JAR |
 
 # 154. Delivery Scope
 

@@ -17,7 +17,7 @@ Aurora Bridge adapts supported classes of legacy Paper/Spigot plugin behavior to
 Green means “running through Aurora Bridge”; it never means official Folia support.
 
 ## Safety
-Default mode is SAFE. Unknown/unsafe world mutation is rejected and diagnosed rather than run on an arbitrary thread.
+Default mode is OFF. Operators can enable SAFE on a test server; unknown/unsafe world mutation is rejected and diagnosed rather than run on an arbitrary thread.
 
 ## Routing
 Entity-owned -> entity owner. Location-owned -> region owner. Global-safe -> global region. I/O -> plugin/I/O lane. Unknown unsafe -> reject.
@@ -39,7 +39,8 @@ Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
 - **Admission.** `PaperPluginProviderFactory`, `SpigotPluginProviderFactory` and
   `CraftMagicNumbers#checkSupported` call `AuroraBridge.admitLegacy(name)` before throwing.
 - **Routing.** `CraftScheduler#handle` hands a bridged plugin's task to the bridge instead of
-  throwing. Sync tasks name no entity or location, so they go to the global region; async tasks are
+  throwing. Sync tasks scheduled from a region use that caller region by default; tasks from
+  startup, console, global or async contexts use the global region. Async tasks are
   timed by Folia's async scheduler and run on the Resource Governor's bounded `BRIDGE_IO` lane.
   `cancelTask`/`cancelTasks` cancel bridged tasks; disable cancels them too, because Folia no
   longer does for the Bukkit scheduler. `BridgeRouter` also defines the entity-owner and
