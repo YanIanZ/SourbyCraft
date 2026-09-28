@@ -48,6 +48,11 @@ version:  <releaseVersion>-<CHANNEL>   e.g. 26.2-REL on a release/* branch, 26.2
 auto-updater. CI (`jitpack.yml`) builds and `publishToMavenLocal`s this module for external
 consumption.
 
+The runtime `Bukkit.getBukkitVersion()` compatibility value is separate from this artifact
+coordinate: `apiVersioning.json` reports `<apiVersion>-R0.1-SNAPSHOT` (currently
+`26.2-R0.1-SNAPSHOT`). Plugins that parse Bukkit's API version need that format; the SourbyCraft
+build channel remains in the artifact version and `/ver`.
+
 ## Consuming it
 
 **From inside this repo** (e.g. `test-plugin`), reference the Gradle project directly:
