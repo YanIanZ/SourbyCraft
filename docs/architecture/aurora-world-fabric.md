@@ -148,6 +148,15 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
     files, so 529 chunks, exactly the ones the first boot generated, were served from AWF.
     `/perf storage` showed 3267 chunk-system reads and no pending I/O at that point. The CI
     gate fails unless AWF-served reads exceed fall-throughs.
+  - **Demo-panel staging (`76813c8`, 2026-09-29), fresh `world_awf_test`.** AWF FILE/INCREMENTAL
+    used a 5-second commit interval and created 9 stores with no `.mca` while attached.
+    After all dirty chunks drained, `/perf awf` showed 0 retries/failures and 0 pending commits.
+    A restart logged 6 stores committed/closed at shutdown. On the next boot, overworld
+    region read counters were 25 total, 0 region-file fall-throughs; pending I/O was 0.
+    Export on a subsequent restart wrote 14 `.mca` files, retired all 9 stores as
+    `*.awf.exported-*`, and left 0 active AWF stores. The server's original `world` and config
+    were restored after the test. The first 529-chunk overworld commit took 105.5 seconds on
+    this panel, a single unqualified observation requiring a separate latency investigation.
 
 Not implemented: MongoDB/MySQL/Redis backends (the SPI exists; no driver is on the classpath and
 none is added without a qualification plan); a SlimeLoader compatibility adapter (AWF stores
