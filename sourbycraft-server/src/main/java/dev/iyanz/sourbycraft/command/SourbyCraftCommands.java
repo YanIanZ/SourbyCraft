@@ -66,6 +66,12 @@ public final class SourbyCraftCommands {
             dropForeign(known, name);
             commandMap.register("sourbycraft", e.getValue()); // ensures a sourbycraft:<name> alias always exists
             known.put(name, e.getValue());                    // claim the bare name (runs AFTER Paper's own registration)
+            // Aliases are claimed the same way: /pl would otherwise keep reaching Bukkit's own
+            // plugin list, which looks nothing like /plugins.
+            for (String alias : e.getValue().getAliases()) {
+                dropForeign(known, alias);
+                known.put(alias.toLowerCase(Locale.ROOT), e.getValue());
+            }
         }
 
         try {

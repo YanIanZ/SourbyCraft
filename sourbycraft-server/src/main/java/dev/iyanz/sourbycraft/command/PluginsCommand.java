@@ -15,13 +15,16 @@ import org.bukkit.plugin.Plugin;
 
 import java.util.Arrays;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static net.kyori.adventure.text.Component.text;
 
 /**
- * Custom /plugins. Branded header with the SourbyCraft divider, then a single comma-separated
- * line of "Name vX" entries coloured by Aurora compatibility state (see
+ * Custom /plugins, also answering /pl so both show the same roster. Branded header with the
+ * SourbyCraft divider, then a single comma-separated line of plugin names (no versions) coloured
+ * by Aurora compatibility state (see
  * {@code docs/architecture/aurora-plugin-bridge.md}): blue NATIVE, green BRIDGED, red FAILED,
  * grey DISABLED. Plugins that never loaded are not in the plugin manager; they are listed after
  * the roster from the captured load failures, in red.
@@ -29,12 +32,25 @@ import static net.kyori.adventure.text.Component.text;
 public class PluginsCommand extends Command {
 
     private static final String DIVIDER = BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH);
+    /** A trailing version in a jar name: "-2.22.1-dev+26", "_v1.0", " 5.12.0". */
+    private static final Pattern JAR_VERSION = Pattern.compile("[-_ ]v?\\d[\\w.+-]*$");
 
     public PluginsCommand(String n) {
         super(n);
         this.description = "Plugin list";
         this.usageMessage = "/plugins [plugin]";
+        this.setAliases(List.of("pl"));
         this.setPermission("sourbycraft.command.plugins");
+    }
+
+    /**
+     * What a plugin that never loaded is listed as: its jar name without the extension or the
+     * version, so the roster reads the same as the loaded plugins, which show only their names.
+     */
+    static String failureName(final String jarName) {
+        String name = jarName.endsWith(".jar") ? jarName.substring(0, jarName.length() - 4) : jarName;
+        final String stripped = JAR_VERSION.matcher(name).replaceFirst("");
+        return stripped.isEmpty() ? name : stripped;
     }
 
     /** The state a loaded plugin is shown in, from what the server has observed about it. */
@@ -93,7 +109,7 @@ public class PluginsCommand extends Command {
             .build());
     }
 
-    /** Renders the branded plugin roster as one comma-separated "Name vX" line per plugin. */
+    /** Renders the branded plugin roster as one comma-separated line of plugin names. */
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
@@ -117,19 +133,14 @@ public class PluginsCommand extends Command {
         for (Plugin p : pl) {
             final CompatibilityState state = stateOf(p);
             counts.merge(state, 1, Integer::sum);
-            String pluginVer = p.getPluginMeta().getVersion();
-            // Strip leading v/V if plugin already prefixes — avoids "vv10".
-            final String label = pluginVer != null && (pluginVer.startsWith("v") || pluginVer.startsWith("V"))
-                ? p.getName() + " " + pluginVer
-                : p.getName() + " v" + (pluginVer == null ? "?" : pluginVer);
             if (!first) line.append(text(", ", SourbyCraftColors.DIM));
-            line.append(text(label, colorOf(state)));
+            line.append(text(p.getName(), colorOf(state)));
             first = false;
         }
         for (PluginLoadDiagnostics.Entry failure : loadFailures) {
             counts.merge(CompatibilityState.FAILED, 1, Integer::sum);
             if (!first) line.append(text(", ", SourbyCraftColors.DIM));
-            line.append(text(failure.pluginJar(), SourbyCraftColors.PLUGIN_FAILED));
+            line.append(text(failureName(failure.pluginJar()), SourbyCraftColors.PLUGIN_FAILED));
             first = false;
         }
         s.sendMessage(text().append(text("  ", SourbyCraftColors.DIM)).append(line.build()).build());
