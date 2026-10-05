@@ -3,10 +3,20 @@ package dev.iyanz.sourbycraft.util;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class IoLifecycleTest {
+    /**
+     * These tests stop the shared executor on purpose, and a stop is terminal until init. Leaving
+     * it stopped broke every later test in the same JVM that touched it (SysCommand prewarms on
+     * it), which only stayed hidden while each suite ran in its own order.
+     */
+    @AfterEach void restoreSharedExecutor() {
+        VirtualExecutor.init();
+    }
+
     @Test void saturationRejectsWithoutBlockingCallerAndShutdownRejects() throws Exception {
         final BoundedIoExecutor executor = new BoundedIoExecutor(1);
         final CountDownLatch entered = new CountDownLatch(1);
