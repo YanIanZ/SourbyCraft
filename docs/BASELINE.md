@@ -563,9 +563,50 @@ for "too many entities" — spread the spawn, not the count.
 
 Neither load came close to stressing the machine: 0.11 of 8 cores at the peak. A console-driven
 test cannot generate real load, because entity activation range is computed around players and
-this server runs `online-mode=true`, which the harness's offline-login clients cannot join. Load
-testing it needs either real players or an offline-mode staging server — and weakening the login
-mode of a public server to make a test easier is not a trade worth making.
+this server runs `online-mode=true`, which the harness's offline-login clients cannot join.
+
+**Update 2026-10-05:** the server owner authorised a temporary bench mode, implemented by
+`scripts/bench_panel.py` (next section). The public login mode is only lowered while a bench runs,
+behind a whitelist of the bench clients, and is restored afterwards.
+
+### Panel bench: players-10 with connected clients (NOT CERTIFIED)
+
+`scripts/bench_panel.py` runs a `baseline_workloads.py` plan unchanged on the panel server:
+
+- bench mode uses a separate world (`level-name=bench`, seed 440044), so the operator's world is
+  never touched; `online-mode=false` with `white-list` and `enforce-whitelist` listing only the
+  `BenchNNN` clients (no op); `allow-flight=true` because half the clients fly; bukkit.yml
+  `connection-throttle: -1` because every client logs in from one address;
+- `server.properties`, `whitelist.json`, `ops.json` and `bukkit.yml` are saved locally first and
+  restored in a `finally` block, then compared byte for byte;
+- the run aborts and restores if the whitelist is turned off or a non-bench player joins while
+  offline mode is open — written after an operator joined a bench window by turning the
+  whitelist off from the panel console;
+- metrics are `/perf tick|region|cpu|memory` read through the console every 30 s.
+
+It is not certified by construction: clients run on the operator's machine over the internet,
+metrics are console samples rather than a JFR recording, and the node is not known to be idle.
+Compare panel runs only with panel runs of the same workload, seed and client count.
+
+First full run, build `3562a859` (jar labelled `2540c48`), Xeon E3-1245 v5 node, 8 logical CPUs,
+heap max 10 GiB (`-XX:MaxRAMPercentage=95`, the panel's startup default), 10 clients in play for
+the whole window, 120 s warmup, 600 s window, 18 samples:
+
+| Metric | Median | Min | Max |
+| --- | ---: | ---: | ---: |
+| worst region TPS | 20.0 | 18.6 | 20.0 |
+| worst region average MSPT | 5.13 ms | 3.11 ms | 8.56 ms |
+| estimated p95 MSPT | 6.21 ms | 5.20 ms | 8.88 ms |
+| estimated p99 MSPT | 10.6 ms | 8.88 ms | 129.2 ms |
+| recent max MSPT | 21.5 ms | 9.65 ms | 448.6 ms |
+| active regions | 8.5 | 7 | 10 |
+| process CPU (of the machine) | 17.8 % | 9.7 % | 47.3 % |
+
+A shorter trial on the same setup (60 s warmup, 120 s window, 4 samples) read a median of 2.1 ms;
+the full run's higher median and its p99/max spikes are not explained yet. The players-N plan
+lets clients roam without a leash, so they keep reaching new terrain and generation lands inside
+the window — the likely cause, not a verified one. A pre-generated bench world or a leashed
+client run is the way to separate the two.
 
 ### Entity baseline, with the clients where the entities are
 

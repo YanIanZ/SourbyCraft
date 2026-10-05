@@ -69,6 +69,11 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
   sungguhan karena `online-mode=true`)
 
 ### Baseline tersertifikasi (DEV-B, AURORA-C, ROADMAP M8)
+- [-] Bench panel (Sourby Demo) dengan klien sungguhan: `scripts/bench_panel.py` siap (mode bench
+  dengan dunia terpisah, whitelist bot, pemulihan otomatis). Run pertama players-10: TPS 20, MSPT
+  median 5,1 ms, p99 10,6 ms (TIDAK tersertifikasi; lihat `docs/BASELINE.md`). Sisa: dunia bench
+  yang di-pre-generate atau klien ber-leash agar generate chunk tidak masuk jendela ukur, lalu
+  players-50 dan entity-stress
 - [ ] Baseline idle
 - [ ] 50 pemain dan 100 pemain (10 pemain sudah tersertifikasi)
 - [ ] Beban gameplay dengan klien nyata yang terhubung
