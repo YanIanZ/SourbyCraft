@@ -24,7 +24,6 @@ import static net.kyori.adventure.text.Component.text;
 /** Region-aware TPS panel rendered from one cached performance snapshot. */
 public class TpsCommand extends Command {
 
-    private static final String DIVIDER = BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH);
     private static final int TPS_BAR_WIDTH = 20;
 
     public TpsCommand(final String name) {
@@ -51,10 +50,8 @@ public class TpsCommand extends Command {
 
     private static List<Component> render(final PerformanceSnapshot snapshot) {
         final List<Component> lines = new ArrayList<>();
-        lines.add(text(DIVIDER, SourbyCraftColors.PRIMARY));
-        lines.add(text().append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
-            .append(text("SourbyCraft ", SourbyCraftColors.HEADER))
-            .append(text("TPS", SourbyCraftColors.LABEL)).build());
+        lines.add(UiPanel.header("TPS"));
+        lines.add(UiPanel.hint("Aurora region metrics · tick execution and freshness"));
 
         final double target = snapshot.targetTps();
         lines.add(text("  Target " + value(target, 2) + " TPS", SourbyCraftColors.DIM));
@@ -89,7 +86,8 @@ public class TpsCommand extends Command {
             lines.add(text("  Tier: unavailable", SourbyCraftColors.DIM));
         }
         lines.add(freshness(snapshot.freshness()));
-        lines.add(text(DIVIDER, SourbyCraftColors.DIM));
+        lines.add(UiPanel.actions(List.of("/perf tick", "/perf region")));
+        lines.add(UiPanel.footer());
         return List.copyOf(lines);
     }
 
@@ -107,8 +105,9 @@ public class TpsCommand extends Command {
         lines.add(text().append(text("  " + label + " ", SourbyCraftColors.DIM))
             .append(text(BarUtil.bar(progress, TPS_BAR_WIDTH), color))
             .append(text("  Worst " + value(worstTps, 2), color))
-            .append(text(" / Median " + value(medianTps, 2)
-                + " / Aggregate " + value(aggregateTps, 2), SourbyCraftColors.DIM)).build());
+            .build());
+        lines.add(text("      Median " + value(medianTps, 2) + " / Aggregate " + value(aggregateTps, 2),
+            SourbyCraftColors.DIM));
     }
 
     private static void renderRuntime(final List<Component> lines, final RuntimeMetrics runtime) {

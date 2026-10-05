@@ -219,6 +219,12 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 
 ## P3 — Rendah (polish dan fitur tambahan)
 
+- [x] UI/UX terminal dan command SourbyCraft/Aurora (2026-10-06): progress per tahap dengan
+  durasi/status, panel bersama, `/aurora`, `/pl` identik `/plugins`, pencarian/filter/halaman,
+  diagnosis loader JUL + Log4j, header dan contoh config beranotasi. Compile/suite server penuh,
+  243 tes Python, identitas server/API, boot command dan reload terisolasi lulus;
+  detail/batas bukti di `docs/AURORA-UX.md#local-validation-2026-10-06`.
+
 - [ ] Mode HUD actionbar
 - [!] Label `Aurora Engine` di Spark viewer (butuh viewer sendiri karena enum engine dirender oleh
   spark.lucko.me) dan desain presentasi viewer Aurora

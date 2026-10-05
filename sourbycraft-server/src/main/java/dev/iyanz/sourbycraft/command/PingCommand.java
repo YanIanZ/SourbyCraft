@@ -19,7 +19,6 @@ import static net.kyori.adventure.text.Component.text;
  */
 public class PingCommand extends Command {
 
-    private static final String DIVIDER = BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH);
 
     public PingCommand(String name) {
         super(name);
@@ -53,17 +52,10 @@ public class PingCommand extends Command {
         // Map 0-500ms onto 100-0% so a healthy ping shows a full bar.
         double pct = Math.max(0.0, 100.0 - Math.min(ping, 500) / 5.0);
 
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.PRIMARY));
-        s.sendMessage(text()
-            .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
-            .append(text("Ping ", SourbyCraftColors.HEADER))
-            .append(text(t.getName(), SourbyCraftColors.LABEL))
-            .build());
-        s.sendMessage(text()
-            .append(text("  ", SourbyCraftColors.DIM))
-            .append(text(BarUtil.bar(pct, BarUtil.DEFAULT_WIDTH), pc))
-            .append(text("  " + ping + "ms", pc))
-            .build());
+        s.sendMessage(UiPanel.header("Connection / " + t.getName()));
+        s.sendMessage(text("  Latency: ", SourbyCraftColors.LABEL)
+            .append(text(BarUtil.bar(pct, BarUtil.DEFAULT_WIDTH) + "  " + ping + "ms", pc)));
+        s.sendMessage(UiPanel.hint("Gauge is full at 0ms and empty at 500ms or more."));
 
         String brand = t.getClientBrandName() != null ? t.getClientBrandName() : "vanilla";
         s.sendMessage(text()

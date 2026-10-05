@@ -1,0 +1,9 @@
+# UI section for sourbycraft_config/sourbycraft_global_config.toml.
+# Merge this section into your existing file; it is not a full replacement.
+[ui]
+# RESTART_REQUIRED. auto = rich on interactive terminals, otherwise plain.
+# plain = ASCII progress/no ANSI; rich = Unicode/color. NO_COLOR disables color.
+# JVM override: -Dsourbycraft.console=plain|rich|auto
+console-style = "auto"
+# LIVE after /sourbycraft reload. Same pagination for /plugins and /pl (1-40).
+plugins-page-size = 12

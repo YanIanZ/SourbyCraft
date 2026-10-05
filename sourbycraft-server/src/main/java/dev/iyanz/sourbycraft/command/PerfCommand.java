@@ -61,9 +61,9 @@ public final class PerfCommand extends Command {
         final var runtime = snapshot.runtime();
         final var tick = snapshot.window(MetricWindow.FIVE_SECONDS);
         final List<Component> lines = new ArrayList<>();
-        lines.add(Component.text("SourbyCraft " + (view.equals("memory") ? "Memory" : "Performance"),
-            SourbyCraftColors.HEADER));
+        lines.add(UiPanel.header(view.equals("memory") ? "Memory" : "Performance / " + view));
         if (view.equals("overview") || view.equals("tick")) {
+            lines.add(UiPanel.section("Ticks"));
             add(lines, "Target TPS", TpsCommand.value(snapshot.targetTps(), 2));
             add(lines, "Worst region TPS", TpsCommand.value(TpsCommand.cappedTps(tick.worstTps(), snapshot.targetTps()), 2));
             add(lines, "Worst average MSPT", TpsCommand.ms(tick.worstAverageMspt()));
@@ -72,6 +72,7 @@ public final class PerfCommand extends Command {
             add(lines, "Recent maximum", TpsCommand.ms(tick.maximumMspt()));
         }
         if (view.equals("overview") || view.equals("cpu")) {
+            lines.add(UiPanel.section("CPU"));
             add(lines, "Process CPU / system CPU", percent(runtime.processCpuPercent()) + " / "
                 + percent(runtime.systemCpuPercent()));
             add(lines, "Available processors / live platform threads", count(runtime.availableProcessors())
@@ -79,6 +80,7 @@ public final class PerfCommand extends Command {
             add(lines, "Uptime", runtime.uptimeMillis() < 0 ? "unavailable" : runtime.uptimeMillis() / 1000 + "s");
         }
         if (view.equals("overview") || view.equals("memory")) {
+            lines.add(UiPanel.section("Memory"));
             add(lines, "Heap used / committed / maximum", bytes(runtime.heapUsedBytes()) + " / "
                 + bytes(runtime.heapCommittedBytes()) + " / " + bytes(runtime.heapMaxBytes()));
             add(lines, "Non-heap", bytes(runtime.nonHeapUsedBytes()));
@@ -86,6 +88,7 @@ public final class PerfCommand extends Command {
             add(lines, "Container memory usage", percent(runtime.rssPercent()));
         }
         if (view.equals("overview") || view.equals("gc") || view.equals("memory")) {
+            lines.add(UiPanel.section("Garbage collection"));
             add(lines, "GC collections / cumulative collection time", count(runtime.gcCollectionCount()) + " / "
                 + (runtime.gcCollectionTimeMillis() < 0 ? "unavailable" : runtime.gcCollectionTimeMillis() + "ms"));
             add(lines, "GC collections/min", TpsCommand.value(runtime.gcCollectionsPerMinute(), 1));
@@ -120,6 +123,7 @@ public final class PerfCommand extends Command {
             renderHistory(lines);
         }
         if (view.equals("overview") || view.equals("region")) {
+            lines.add(UiPanel.section("Regions"));
             final boolean known = snapshot.freshness().state() != MetricState.UNAVAILABLE;
             add(lines, "Active regions / retained generations", known
                 ? snapshot.activeRegionCount() + " / " + snapshot.retainedGenerationCount() : "unavailable");
@@ -133,10 +137,13 @@ public final class PerfCommand extends Command {
             add(lines, "Region coordinates / queues", "not instrumented");
         }
         if (view.equals("overview") || view.equals("health")) {
+            lines.add(UiPanel.section("Health"));
             add(lines, "Tick health", health(snapshot));
             add(lines, "Diagnostics", "settings are operator-owned; /spark profiler start for samples");
         }
         lines.add(TpsCommand.freshness(snapshot.freshness()));
+        lines.add(UiPanel.actions(List.of("/perf", "/perf lanes", "/perf network", "/perf plugins")));
+        lines.add(UiPanel.footer());
         return List.copyOf(lines);
     }
 

@@ -3,23 +3,12 @@ package dev.iyanz.sourbycraft.config.upstream;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * {@link UpstreamConfigBridge} over the Canvas configuration classes.
- *
- * <p>The only place SourbyCraft names Canvas. Runs the same
- * {@code GlobalConfiguration.reload()} and {@code WorldConfig.reload()} that the removed
- * {@code /canvas reload} ran.</p>
- *
- * <p>Each part is isolated: a file the engine cannot re-read leaves its previous values in force
- * and does not stop the other part, or the SourbyCraft reload around it. Options the engine cached
- * at construction update the config object but take effect on the next restart, which matches
- * Canvas's own contract that some options cannot change at runtime.</p>
- */
+/** Reloads Aurora's region configuration, retaining the historical canvas-*.yml paths. */
 public final class CanvasConfigBridge implements UpstreamConfigBridge {
 
     @Override
     public String name() {
-        return "Canvas";
+        return "Aurora region configuration";
     }
 
     @Override

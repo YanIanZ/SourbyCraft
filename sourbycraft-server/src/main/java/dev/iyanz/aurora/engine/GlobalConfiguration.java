@@ -1,7 +1,6 @@
 package dev.iyanz.aurora.engine;
 
 import ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom;
-import dev.iyanz.aurora.engine.commands.CanvasCommands;
 import dev.iyanz.aurora.engine.configuration.ConfigurationProvider;
 import dev.iyanz.aurora.engine.configuration.Part;
 import dev.iyanz.aurora.engine.configuration.Resolver;
@@ -9,12 +8,6 @@ import dev.iyanz.aurora.engine.configuration.Style;
 import dev.iyanz.aurora.engine.configuration.Undocumented;
 import dev.iyanz.aurora.engine.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
-import dev.iyanz.aurora.engine.subcommands.MobCapsSubCommand;
-import dev.iyanz.aurora.engine.subcommands.RegionBarSubCommand;
-import dev.iyanz.aurora.engine.subcommands.RegionTickSubCommand;
-import dev.iyanz.aurora.engine.subcommands.ReloadSubCommand;
-import dev.iyanz.aurora.engine.subcommands.SetMaxPlayersSubCommand;
-import dev.iyanz.aurora.engine.subcommands.WorldDistanceSubCommand;
 import dev.iyanz.aurora.engine.threadedregions.scheduler.AffinitySchedulerThreadPool;
 import dev.iyanz.aurora.engine.util.FasterRandomSource;
 import dev.iyanz.aurora.engine.util.LockedReference;
@@ -80,7 +73,7 @@ public class GlobalConfiguration extends Part {
     }
 
     public static void reload() {
-        LOGGER.info("Loading Canvas server configuration");
+        LOGGER.info("Loading Aurora region configuration (config/canvas-server.yml)");
         ConfigurationProvider.buildSolidConfiguration(
             CONFIG_PATH,
             GlobalConfiguration::new,
@@ -103,31 +96,16 @@ public class GlobalConfiguration extends Part {
                 }
             },
             Style.create()
-                .literal("Global Configuration for CanvasMC").endLine()
+                .literal("Aurora / Server configuration").endLine()
                 .blank()
-                .wordWrap(
-                    "This is the server-wide configuration file provided by CanvasMC. This config holds options",
-                    "that are set across the entire server, and cannot be overridden per-world. You are free to modify,",
-                    "add, or remove comments as you please."
-                ).endLine()
+                .wordWrap("Server-wide region-engine settings for SourbyCraft.",
+                    "The historical config/canvas-server.yml path is retained for existing servers.").endLine()
                 .blank()
-                .wordWrap(
-                    "You may refresh this configuration at runtime using the \"/canvas reload\" command, however",
-                    "it is not recommended to do this during production, as this can cause issues like unexpected crashes",
-                    "or unintended behavior."
-                ).endLine()
+                .wordWrap("Use /aurora for service status and /sourbycraft config for file locations.",
+                    "/sourbycraft reload re-reads supported settings; construction-cached options require restart.").endLine()
                 .blank()
-                .wordWrap(
-                    "All defaults for the options provided in this configuration are configured for upstream",
-                    "compatibility over performance. You must do some manual configuration to get some of the performance",
-                    "benefits Canvas provides."
-                ).endLine()
-                .blank()
-                .wordWrap(
-                    "If you have questions about certain configuration options please reach out in our discord. As a",
-                    "general rule, if you don't know what a certain option does, DO NOT TOUCH IT."
-                ).endLine()
-                .literal("https://canvasmc.io/discord")
+                .wordWrap("Messages, UI and updates belong to sourbycraft_global_config.toml.",
+                    "Aurora service budgets and toggles belong to aurora.toml.").endLine()
                 .compile(60)
         );
     }
@@ -213,18 +191,9 @@ public class GlobalConfiguration extends Part {
                 }
             }
 
-            // register our commands to the Canvas command tree
-            CanvasCommands.register(
-                SetMaxPlayersSubCommand.class,
-                RegionBarSubCommand.class,
-                WorldDistanceSubCommand.class,
-                ReloadSubCommand.class,
-                MobCapsSubCommand.class,
-                RegionTickSubCommand.class // TODO - merge this into regiondata command
-                // RegionDataCommand.class // TODO - regiondata command
-            );
-
-            broadcast("Registered all Canvas commands", INFO);
+            // The /canvas dispatcher is removed by the existing feature patch. Operator views
+            // are registered by SourbyCraftBootstrap under /aurora and /sourbycraft.
+            broadcast("Aurora region settings loaded; use /aurora for status and configuration", INFO);
         }
 
         // we do not want to allow larger unit values, nobody should autosave in units larger than

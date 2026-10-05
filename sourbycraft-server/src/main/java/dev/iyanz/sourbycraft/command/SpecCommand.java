@@ -73,7 +73,7 @@ public final class SpecCommand extends Command {
 
     public static List<Component> render() {
         final List<Component> lines = new ArrayList<>();
-        lines.add(text("SourbyCraft Specification", SourbyCraftColors.HEADER));
+        lines.add(UiPanel.header("Hardware & JVM"));
 
         final Hardware hw = hardware;
         final Runtime runtime = Runtime.getRuntime();
@@ -115,6 +115,8 @@ public final class SpecCommand extends Command {
         add(lines, "Java", System.getProperty("java.version", "unknown") + " ("
             + System.getProperty("os.arch", "unknown") + ")");
         add(lines, "Uptime", ManagementFactory.getRuntimeMXBean().getUptime() / 1000L + "s");
+        lines.add(UiPanel.actions(List.of("/sys", "/perf cpu")));
+        lines.add(UiPanel.footer());
         return List.copyOf(lines);
     }
 

@@ -275,16 +275,16 @@ jobs:
             echo "Server exited with status $java_status."
             exit 1
           fi
-          grep -Eq 'SourbyCraft .*TPS' server.log \
+          grep -Eq 'SourbyCraft.*TPS' server.log \
             || { echo "TPS command output marker missing."; exit 1; }
-          grep -Eq 'SourbyCraft .*MSPT' server.log \
+          grep -Eq 'SourbyCraft.*MSPT' server.log \
             || { echo "MSPT command output marker missing."; exit 1; }
           grep -q 'Profiler is already running' server.log \
             || { echo "spark command output marker missing."; exit 1; }
-          grep -q 'SourbyCraft Memory' server.log || { echo "RAM marker missing"; exit 1; }
-          grep -q 'SourbyCraft Performance' server.log || { echo "PERF marker missing"; exit 1; }
+          grep -Eq 'SourbyCraft.*Memory' server.log || { echo "RAM marker missing"; exit 1; }
+          grep -Eq 'SourbyCraft.*Performance' server.log || { echo "PERF marker missing"; exit 1; }
           echo "----- Aurora boot summary -----"
-          grep -E 'stages (online|degraded)|Aurora startup|Aurora startup index|failed during Aurora boot' server.log || echo "(no Aurora boot summary line found)"
+          grep -E 'stages completed without error|Aurora startup|Aurora startup index|failed during Aurora boot' server.log || echo "(no Aurora boot summary line found)"
           jfr summary boot.jfr
           echo "Server reached Done, exposed metrics during load and enable, and exited cleanly."
 
@@ -503,7 +503,7 @@ jobs:
           fi
           cleanup_required=0
           echo "----- bridge evidence -----"
-          grep -E 'Aurora Bridge|LEGACY_BRIDGE|stages (online|degraded)|Bridge I/O|Scheduler redirects|Owner handoffs|Fatal violations|Quarantined|Plugins by state|redirects / handoffs|Minutes kept|History' server.log || true
+          grep -E 'Aurora Bridge|LEGACY_BRIDGE|stages completed without error|Bridge I/O|Scheduler redirects|Owner handoffs|Fatal violations|Quarantined|Plugins by state|redirects / handoffs|Minutes kept|History' server.log || true
           grep -q 'Plugins by state' server.log || { echo "/perf plugins printed nothing"; exit 1; }
           if [ "$java_status" -ne 0 ]; then
             show_log

@@ -2332,6 +2332,10 @@ V20: Updater stop/restart cancels only updater-owned scheduled checks and unregi
 
 V21: Bukkit compatibility version embedded in the server API JAR is `<apiVersion>-R0.1-SNAPSHOT`; SourbyCraft artifact/build channel remains separate. The packaged slim JAR must contain exactly one API JAR with matching `version` and `currentApiVersion` metadata (DEVELOPMENT §19).
 
+V22: Bootstrap progress counts finished stage attempts; failures remain explicit at 100%; Minecraft readiness uses actual Done event; startup hints never emit its literal probe marker; redirected/plain console adds no ANSI; unavailable gauges never fabricate zero/full (AURORA-UX).
+V23: /pl and /plugins resolve same Command; claiming bare names preserves namespaced built-ins; sorted search/filter pages retain status and failure evidence; disabled alone ≠ failed; diagnostics captures both JUL and modern Log4j plugin failures (AURORA-UX).
+V24: New config files seed typed UI defaults with lifecycle comments; existing bytes stay unchanged; tracked restart changes compare against boot, not previous reload; partial reload failures surfaced (AURORA-CONFIG).
+
 # 153. Regression Log (§B)
 
 | id | date | cause | fix |
@@ -2380,6 +2384,16 @@ V21: Bukkit compatibility version embedded in the server API JAR is `<apiVersion
 | B34 | 2026-10-05 | SourbyClip original-JAR path deleted the previous cache and wrote unverified bytes directly; transport failure exited inside download instead of reaching mirror fallback | V18,V13; local candidate 3.1.1 stages/verifies before replace, sets connect/read timeouts and propagates IOException; four in-process HTTP regressions pass; official pin rollout pending |
 | B35 | 2026-10-05 | New Patcher identity-resource expansion captured a Gradle script/project object and failed configuration-cache serialization | Local candidate 3.1.0 captures a serializable value map; configuration-cache build and diagnostic reuse pass; verification orchestration bug, existing cache constraint covers it |
 | B36 | 2026-10-05 | Global cached download pool had no lifecycle owner; location lookup accepted the first failed completion and did not close its HTTP client; logger shared mutable date formatting | V2 and existing lifecycle/confinement constraints; local Clip 3.1.1 owns/joins bounded batch pools, waits for first usable lookup, cancels/joins workers, closes client and uses immutable formatter; controlled lifecycle/process regressions pass; official pin rollout pending |
+
+| B37 | 2026-10-06 | Bootstrap buffered progress until all stages ended and summary claimed online before Minecraft readiness; redirected logs emitted ANSI | V22; immediate stage/start logs, attempt-based result/duration, plain/rich console selection; ConsolePresentationTest and AuroraBootTest |
+| B38 | 2026-10-06 | Command registration removed upstream namespaces; /sys counted disabled plugins as errors; roster was unsorted/unbounded | V23; preserve namespaced built-ins, share alias instance, status-separated sorted pagination/search/filter; PluginsCommandTest |
+| B39 | 2026-10-06 | Reload swallowed region/Aurora read failures and compared restart changes against previous reload; new test re-read asynchronously saved TOML before closing writer | V24; detailed failure report and boot-baseline comparison; Config persistence uses synchronous saves; fixture follows it; AsyncFileConfig.close does not flush debounced saves; existing V4/V15 preserve operator files |
+
+| B40 | 2026-10-06 | TPS dynamic-target test coupled three values to one old line; sectioned UI moved median/aggregate without changing capping | V5 already covers semantic contract; MetricsConsumerTest asserts each capped value and rejects uncapped values, independent of line layout |
+
+| B41 | 2026-10-06 | New startup hint included literal readiness probe marker, so isolated test sent console commands before world creation and got null-level failure | V22; hint avoids probe marker; ConsolePresentationTest rejects it; boot harness waits for the actual timestamped ready event |
+
+| B42 | 2026-10-06 | Plugin diagnostics tailed JUL only; modern Paper loader logs through Log4j, so real jar failures were absent from /plugins despite direct-capture unit tests | V23; bounded process-owned Log4j appender alongside JUL, deduplicated per jar; PluginLoggingRouteTest emits through the actual logger |
 
 # 154. Delivery Scope
 

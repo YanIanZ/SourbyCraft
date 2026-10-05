@@ -5,24 +5,8 @@ import java.io.FileOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 
-/**
- * Orchestrates SourbyCraft's branded console startup output.
- *
- * <p>Bundles the two pieces the archived Paper tag {@code paper-26.2-pre-folia} ran from an NMS
- * patch in {@code MinecraftServer#runServer}:
- * <ol>
- *   <li>the branded {@link SourbyCraftBanner} box, and</li>
- *   <li>the {@link GcAdvisor} JVM/GC warning banner (warn-only, empty when the JVM
- *       is already tuned).</li>
- * </ol>
- *
- * <p>The third archived piece — a {@code HardeningAdvisor} paper-global.yml exploit-setting scan —
- * lived under the {@code security} package, which is DEFERRED on this build benchmark
- * build (feat/canvas-engine, PR #12) along with proxy-forwarding.
- *
- * <p>On this base this is invoked once from {@link dev.iyanz.sourbycraft.core.SourbyCraftBootstrap},
- * itself called from a hand-authored {@code minecraft-patch} to {@code DedicatedServer#initServer}.
- * Banner + GC advisor go straight to {@code System.out} (JLine renders the embedded ANSI truecolor).
+/** Prints the UTF-8 build/runtime panel once, then the warning-only JVM advisor.
+ * ConsoleStyle selects plain or rich output without cursor movement or animation delays.
  */
 public final class StartupBanner {
 

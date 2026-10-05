@@ -7,7 +7,7 @@ This document describes **what branch `26.2` actually consumes now**. It is not 
 | Key | Type / default | Lifecycle | Consumer |
 | --- | --- | --- | --- |
 | `aurora.entity.async-pathfinding` | boolean / `false` | LIVE | `AsyncPathProcessor` admission |
-| `aurora.diagnostics.lane-sampling` | boolean / implementation default | LIVE | execution-lane CPU attribution |
+| `aurora.diagnostics.lane-sampling` | boolean / `true` | LIVE | execution-lane CPU attribution |
 | `aurora.cpu.cores` | integer / `0` (AUTO) | RESTART_REQUIRED | early region-scheduler CPU budget |
 | `aurora.bridge.mode` | `off` / `safe`, default `off` | RESTART_REQUIRED | plugin loader admission via `AuroraBridge` (read from the TOML files directly, before `SourbyCraftBootstrap`) |
 | `aurora.bridge.quarantine-after` | integer ≥ 1 / `3` | LIVE | Aurora Bridge quarantine threshold |
@@ -27,7 +27,7 @@ This document describes **what branch `26.2` actually consumes now**. It is not 
 | `aurora.awf.commit-attempts` | ≥ 1 / `3` | RESTART_REQUIRED | attempts before a commit fails |
 
 **Hot-path lookup audit (2026-09-27).** Every remaining dotted-string lookup
-(`SourbyCraftConfig.cfgGet/cfgBool/cfgInt`) runs at boot, at explicit reload, or on a join/leave
+(`SourbyCraftConfig.cfgGet/cfgBool/cfgInt`) runs at boot, at explicit reload, on operator commands, or on a join/leave
 event (`SourbyMessages` variants), never per tick. Each is one `get` on the immutable
 `ConfigSnapshot` map. Aurora settings are read once into the typed `AuroraConfig` and published
 at load boundaries.
@@ -107,3 +107,30 @@ Do not say a config file is the single source of truth if an early-boot consumer
 Configuration tests validate parsing, precedence, lifecycle publication and compatibility behavior. They are correctness evidence only. They do not establish a performance improvement, soak stability, or release qualification.
 
 When this document conflicts with code on branch `26.2`, verify the active consumer and boot order, then update this document in the same change.
+
+## UI settings and reload presentation (2026-10-06)
+
+The utility TOML owns `[ui]`; Aurora service settings stay in `aurora.toml`.
+
+| Key | Default | Lifecycle |
+| --- | --- | --- |
+| `ui.console-style` | `"auto"` | RESTART_REQUIRED for startup output; `plain`/`rich` also supported, JVM property overrides |
+| `ui.plugins-page-size` | `12` | LIVE after reload, clamped to 1–40 |
+
+`/sourbycraft config` and `/aurora config` show loaded values and the file responsible for
+those values. Bridge mode shows configured and active values separately. `/sourbycraft reload`
+reports file-read/apply failures, invalid Aurora values and region-config reload failures.
+It does not claim that every engine option changed immediately.
+
+CPU, bridge admission, scheduler budgets and selected utility restart changes are compared
+against the boot snapshot, so repeated reloads do not clear a still-pending restart requirement.
+This comparison does not enumerate AWF or every historical region-engine option. AWF,
+construction-cached engine options, startup provisioning, MOTD, login bypass and a scheduled
+updater interval remain restart-required. Editing the saved max-player value requires restart;
+`/maxp` itself changes the live slot count and persists it.
+
+Existing utility and Aurora TOML files are never automatically reformatted by boot/reload. New utility files receive
+annotated UI defaults and Aurora files receive their own annotated service defaults. To add the
+new UI options to an existing server, merge [this section](config-examples/utility-ui.toml).
+[The Aurora example](config-examples/aurora.toml) lists all implemented defaults, including AWF;
+use it as a reference rather than replacing tuned operator settings.

@@ -18,14 +18,9 @@ import java.util.Locale;
 
 import static net.kyori.adventure.text.Component.text;
 
-/**
- * Custom /ver. Boxed banner with SourbyCraft branding header and a
- * matching {@link BarUtil#FILLED} divider so the layout reads as one
- * coherent SourbyCraft panel rather than the bare Paper /version dump.
- */
+/** Build identity and runtime information in the shared command panel. */
 public class VerCommand extends Command {
 
-    private static final String DIVIDER = BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH);
     // GMT+7 day-name format matching the GH release title convention
     // (e.g. "Friday, 19 June 2026 10:45"). Sourced from the buildTimestamp in
     // META-INF/sourbycraft-build.properties so /ver shows when the jar was
@@ -57,16 +52,9 @@ public class VerCommand extends Command {
             buildDate = "";
         }
 
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.PRIMARY));
-        var headerLine = text()
-            .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
-            .append(text("SourbyCraft ", SourbyCraftColors.HEADER))
-            .append(text(brand.releaseIdentity(), SourbyCraftColors.VALUE));
-        if (!buildDate.isEmpty()) {
-            headerLine.append(text("  " + buildDate, SourbyCraftColors.DIM));
-        }
-        s.sendMessage(headerLine.build());
-
+        s.sendMessage(UiPanel.header("Version"));
+        s.sendMessage(UiPanel.row("Release", brand.releaseIdentity()));
+        s.sendMessage(UiPanel.row("Built (Asia/Jakarta)", buildDate.isEmpty() ? "unavailable" : buildDate));
         s.sendMessage(line("Minecraft", bi.minecraftVersionId() + "  (" + bi.minecraftVersionName() + ")"));
         // Transition §14 names the build identity an operator should be able to read back:
         // SourbyCraft, Minecraft, Aurora Engine, build, Java, commit, channel. The first two and
@@ -91,14 +79,12 @@ public class VerCommand extends Command {
             .append(text("  Git: ", SourbyCraftColors.LABEL))
             .append(text(bi.gitBranch().orElse("?") + "@" + bi.gitCommit().orElse("?"), SourbyCraftColors.DIM))
             .build());
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
+        s.sendMessage(UiPanel.actions(java.util.List.of("/aurora", "/sourbycraft config")));
+        s.sendMessage(UiPanel.footer());
         return true;
     }
 
     private static Component line(String label, String value) {
-        return text()
-            .append(text("  " + label + ": ", SourbyCraftColors.LABEL))
-            .append(text(value, SourbyCraftColors.VALUE))
-            .build();
+        return UiPanel.row(label, value);
     }
 }

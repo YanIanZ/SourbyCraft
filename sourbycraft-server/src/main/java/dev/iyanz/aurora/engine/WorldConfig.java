@@ -63,7 +63,7 @@ public class WorldConfig extends Part {
             reload();
         } catch (final Throwable thrown) {
             // we at least need to make sure this is logged
-            LOGGER.error("Couldn't load Canvas worlds default configuration", thrown);
+            LOGGER.error("Couldn't load Aurora world defaults", thrown);
             throw thrown;
         }
     }
@@ -96,30 +96,13 @@ public class WorldConfig extends Part {
                 }
             },
             Style.create()
-                .literal("Worlds default configuration file for CanvasMC").endLine()
+                .literal("Aurora / World defaults").endLine()
                 .blank()
-                .wordWrap(
-                    "This is the defaults for the per-world configuration file for CanvasMC.",
-                    "Each option can be overridden by the patch variant in each dimension folder. You are",
-                    "free to modify, add, or remove comments as you please."
-                ).endLine()
+                .wordWrap("Default region-engine settings shared by worlds on SourbyCraft.",
+                    "The historical config/canvas-worlds.yml path is retained for existing servers.").endLine()
                 .blank()
-                .wordWrap(
-                    "You may refresh this configuration at runtime using the \"/canvas reload\" command, however",
-                    "it is not recommended to do this during production, as this can cause issues like unexpected crashes",
-                    "or unintended behavior."
-                ).endLine()
-                .blank()
-                .wordWrap(
-                    "All defaults for the options provided in this configuration are configured for upstream",
-                    "compatibility over performance. You must do some manual configuration to get some of the performance",
-                    "benefits Canvas provides."
-                ).endLine()
-                .blank()
-                .wordWrap(
-                    "If you have questions about certain configuration options please reach out in our discord"
-                ).endLine()
-                .literal("https://canvasmc.io/discord")
+                .wordWrap("Per-world overrides remain in each world's existing configuration file.",
+                    "/sourbycraft reload re-reads supported settings; cached options require restart.").endLine()
                 .compile(60)
         );
 
@@ -145,7 +128,7 @@ public class WorldConfig extends Part {
             BASE_FILE,
             WorldConfig::new,
             instance -> {
-                LOGGER.info("Loaded Canvas config patch for level {}", dimension.identifier());
+                LOGGER.info("Loaded Aurora world settings for level {}", dimension.identifier());
 
                 result[0] = instance;
 

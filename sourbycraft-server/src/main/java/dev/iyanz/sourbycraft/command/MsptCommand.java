@@ -46,11 +46,8 @@ public class MsptCommand extends Command {
     private static List<Component> render(final PerformanceSnapshot snapshot) {
         final WindowMetrics recent = snapshot.window(MetricWindow.FIVE_SECONDS);
         final List<Component> lines = new ArrayList<>();
-        lines.add(text(BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH), SourbyCraftColors.PRIMARY));
-        lines.add(text().append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
-            .append(text("SourbyCraft ", SourbyCraftColors.HEADER))
-            .append(text("MSPT", SourbyCraftColors.LABEL))
-            .append(text("  (tick execution time)", SourbyCraftColors.DIM)).build());
+        lines.add(UiPanel.header("MSPT"));
+        lines.add(UiPanel.hint("Aurora region metrics · tick execution and freshness"));
 
         final double average = recent.worstAverageMspt();
         final double target = snapshot.targetTps();
@@ -72,7 +69,8 @@ public class MsptCommand extends Command {
             SourbyCraftColors.VALUE));
         lines.add(text("  Exact recent max " + TpsCommand.ms(recent.maximumMspt()), SourbyCraftColors.VALUE));
         lines.add(TpsCommand.freshness(snapshot.freshness()));
-        lines.add(text(BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH), SourbyCraftColors.DIM));
+        lines.add(UiPanel.actions(List.of("/perf tick", "/perf region")));
+        lines.add(UiPanel.footer());
         return List.copyOf(lines);
     }
 }

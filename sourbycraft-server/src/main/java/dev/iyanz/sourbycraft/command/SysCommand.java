@@ -30,7 +30,6 @@ import static net.kyori.adventure.text.Component.text;
  */
 public class SysCommand extends Command {
 
-    private static final String DIVIDER = BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH);
 
     // CPU identity via OSHI is expensive to enumerate (WMI on Windows) — resolve it ONCE on a
     // virtual thread at registration; the command only ever reads these volatile snapshots.
@@ -70,12 +69,7 @@ public class SysCommand extends Command {
         if (!testPermission(s)) return true;
         final PerformanceSnapshot snapshot = MetricsRuntime.provider().snapshot();
 
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.PRIMARY));
-        s.sendMessage(text()
-            .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
-            .append(text("SourbyCraft ", SourbyCraftColors.HEADER))
-            .append(text("System Info", SourbyCraftColors.LABEL))
-            .build());
+        s.sendMessage(UiPanel.header("System"));
 
         long u = ManagementFactory.getRuntimeMXBean().getUptime();
         long d = u / 86400000, h = (u % 86400000) / 3600000, m = (u % 3600000) / 60000;
@@ -133,33 +127,11 @@ public class SysCommand extends Command {
             else inactive++;
         }
         var failures = PluginLoadDiagnostics.recent();
-        s.sendMessage(text()
-            .append(text("  Plugins: ", SourbyCraftColors.HEADER))
-            .append(text(active + " active", SourbyCraftColors.SUCCESS))
-            .append(text("  /  ", SourbyCraftColors.DIM))
-            .append(text(pl.length + " loaded", SourbyCraftColors.VALUE))
-            .append(text("  /  ", SourbyCraftColors.DIM))
-            .append(text((inactive + failures.size()) + " errored",
-                (inactive + failures.size()) > 0 ? SourbyCraftColors.DANGER : SourbyCraftColors.DIM))
-            .build());
-        // Disabled-but-registered plugins (enable phase aborted post-load).
-        for (Plugin p : pl) {
-            if (p.isEnabled()) continue;
-            s.sendMessage(text()
-                .append(text("    ✗ ", SourbyCraftColors.DANGER))
-                .append(text(p.getName(), SourbyCraftColors.VALUE))
-                .append(text("  disabled", SourbyCraftColors.DIM))
-                .build());
-        }
-        // Plugins that never reached the manager (load-time failure captured
-        // by PluginLoadDiagnostics).
-        for (PluginLoadDiagnostics.Entry entry : failures) {
-            s.sendMessage(text()
-                .append(text("    ✗ ", SourbyCraftColors.DANGER))
-                .append(text(entry.pluginJar(), SourbyCraftColors.VALUE))
-                .append(text("  " + entry.reason(), SourbyCraftColors.DIM))
-                .build());
-        }
+        s.sendMessage(UiPanel.section("Plugins"));
+        s.sendMessage(UiPanel.row("Enabled / loaded", active + " / " + pl.length));
+        s.sendMessage(UiPanel.row("Disabled / recent load failures", inactive + " / "
+            + failures.stream().map(PluginLoadDiagnostics.Entry::pluginJar).distinct().count()));
+        s.sendMessage(UiPanel.hint("Disabled does not mean failed. Use /plugins for names and reasons."));
 
         final var startup = dev.iyanz.sourbycraft.startup.StartupIndexStage.last();
         if (startup != null) {
@@ -192,7 +164,8 @@ public class SysCommand extends Command {
                 .build());
         }
 
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
+        s.sendMessage(UiPanel.actions(List.of("/spec", "/perf", "/plugins", "/aurora")));
+        s.sendMessage(UiPanel.footer());
         return true;
     }
 

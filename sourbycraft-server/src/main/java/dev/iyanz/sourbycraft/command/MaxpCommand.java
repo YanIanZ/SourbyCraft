@@ -28,7 +28,6 @@ import static net.kyori.adventure.text.Component.text;
  */
 public class MaxpCommand extends Command {
 
-    private static final String DIVIDER = BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH);
 
     // Sane upper bound: Bukkit stores max-players as an int; a slot count in the
     // hundreds of thousands is nonsensical and almost certainly a typo. Cap at
@@ -82,7 +81,7 @@ public class MaxpCommand extends Command {
         // 2) persist to the unified SourbyCraft config so it survives restart.
         boolean persisted = MaxPlayersConfig.persist(n);
 
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.PRIMARY));
+        s.sendMessage(UiPanel.header("Player slots"));
         s.sendMessage(text()
             .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
             .append(text("Max players ", SourbyCraftColors.HEADER))
@@ -94,7 +93,7 @@ public class MaxpCommand extends Command {
             s.sendMessage(text("  applied live, but could NOT persist (config unavailable) — will reset on restart",
                 SourbyCraftColors.WARNING));
         }
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
+        s.sendMessage(UiPanel.footer());
         return true;
     }
 
@@ -103,7 +102,7 @@ public class MaxpCommand extends Command {
         int online = Bukkit.getOnlinePlayers().size();
         double pct = max > 0 ? Math.min(100.0, online * 100.0 / max) : 0.0;
 
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.PRIMARY));
+        s.sendMessage(UiPanel.header("Player slots"));
         s.sendMessage(text()
             .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
             .append(text("Max players", SourbyCraftColors.HEADER))
@@ -114,6 +113,6 @@ public class MaxpCommand extends Command {
             .append(text("  " + online + " / " + max, SourbyCraftColors.VALUE))
             .build());
         s.sendMessage(text("  Set with /maxp <n> (persists across restarts)", SourbyCraftColors.DIM));
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
+        s.sendMessage(UiPanel.footer());
     }
 }

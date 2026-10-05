@@ -1,3 +1,6 @@
+# SourbyCraft security limits. Keep existing values when updating the server.
+# Sizes are bytes unless the key names a character count. Depth/list sizes are counts.
+# These limits are separate from Aurora scheduler settings and the utility TOML.
 crash-prevention:
   nbt:
     max-bytes: 2097152
@@ -15,6 +18,7 @@ crash-prevention:
   creative-item:
     # encoded item size cap for creative slot packets; values below ~16384 silently block cloning filled shulkers/bundles
     max-nbt-size: 16384
+# Packet admission limits; max-per-tick counts operations, not bytes.
 packet-guard:
   book-edit:
     max-total-chars: 65536

@@ -1,0 +1,53 @@
+# sourbycraft_config/aurora.toml — implemented defaults, not performance tuning.
+# LIVE means explicit /sourbycraft reload; RESTART_REQUIRED means the next process.
+# This file takes precedence over legacy Aurora keys in the utility TOML.
+
+[aurora.entity]
+# LIVE. Experimental/default-off; functional tests do not establish qualification.
+async-pathfinding = false
+
+[aurora.diagnostics]
+# LIVE. Attribute per-thread CPU to execution lanes once per second.
+lane-sampling = true
+
+[aurora.cpu]
+# RESTART_REQUIRED. 0 = JVM-visible processors; explicit paper-global thread count wins.
+cores = 0
+
+[aurora.bridge]
+# RESTART_REQUIRED. off = refuse undeclared plugins; safe = admit through Aurora Bridge.
+# Neither admission nor a NATIVE label certifies a plugin's correctness.
+mode = "off"
+# LIVE. Cancel bridged work after this many fatal violations (minimum 1).
+quarantine-after = 3
+# LIVE. caller-region routes from a ticking caller's region; otherwise global.
+# global always uses the global region, where world access is refused.
+sync-route = "caller-region"
+
+[aurora.scheduler]
+# RESTART_REQUIRED. Governed lane budgets; these do not resize active executors.
+# 0 bridge threads = max(2, JVM-visible processors / 4).
+bridge-io-threads = 0
+bridge-io-queue = 256
+# 0 storage threads = 1. Queues must be at least 1.
+storage-threads = 1
+storage-queue = 64
+
+[aurora.network]
+# LIVE. Stop/start wire-byte and packet counting for /perf network.
+counters = true
+
+[aurora.awf]
+# All AWF settings RESTART_REQUIRED. Empty lists leave new worlds on region files.
+# Existing AWF stores stay in use even after removing a name; use export to leave AWF.
+worlds = []
+# Move these worlds back to region files on next load; must not overlap worlds.
+export = []
+backend = "file"
+persistence = "incremental"
+# Writes become durable at commit/save-all/shutdown. A crash can lose this interval.
+commit-interval-seconds = 30
+# Clean chunks retained per storage; dirty chunks are never evicted by this limit.
+resident-chunks = 1024
+retained-generations = 3
+commit-attempts = 3

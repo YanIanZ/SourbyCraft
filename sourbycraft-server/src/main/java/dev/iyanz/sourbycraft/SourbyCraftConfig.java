@@ -57,6 +57,33 @@ public final class SourbyCraftConfig {
     private static volatile LoadedConfig loaded = new LoadedConfig(
         new ConfigSnapshot(java.util.Map.of()), AuroraConfig.DEFAULT);
 
+    private static volatile LoadedConfig bootConfig;
+
+    public record ReloadReport(boolean successful, List<String> lines) {
+        public ReloadReport { lines = List.copyOf(lines); }
+    }
+
+    /** Restart changes remain pending across repeated reloads until a new process starts. */
+    public static List<String> pendingRestartKeys() {
+        LoadedConfig boot = bootConfig;
+        if (boot == null) return List.of();
+        return restartChanges(boot.utility(), boot.aurora(), loaded.utility(), loaded.aurora());
+    }
+
+    static List<String> restartChanges(ConfigSnapshot before, AuroraConfig beforeAurora,
+                                       ConfigSnapshot after, AuroraConfig afterAurora) {
+        java.util.Set<String> keys = new java.util.TreeSet<>();
+        if (!beforeAurora.cpu().equals(afterAurora.cpu())) keys.add(AuroraConfig.CPU_CORES_KEY);
+        if (beforeAurora.bridge().mode() != afterAurora.bridge().mode()) keys.add(AuroraConfig.BRIDGE_MODE_KEY);
+        if (!beforeAurora.scheduler().equals(afterAurora.scheduler())) keys.add("aurora.scheduler.*");
+        for (String key : List.of("ui.console-style", "branding.gc-advisor.enabled",
+                "sourbycraft.max-players", "sourbycraft.maxplayers.bypass-enabled",
+                "viaversion.auto-provision", "messages.motd", "misc.auto_update.check_interval_minutes")) {
+            if (!java.util.Objects.equals(before.values().get(key), after.values().get(key))) keys.add(key);
+        }
+        return List.copyOf(keys);
+    }
+
     /** Effective immutable Aurora settings, published only at explicit load boundaries. */
     public static AuroraConfig aurora() { return loaded.aurora(); }
 
@@ -138,7 +165,7 @@ public final class SourbyCraftConfig {
                 continue;
             }
             final Object other = utility.values().get(key);
-            // Equal values are not a trap: both files agree, so editing either one is harmless.
+            // Only report differing copies; Aurora still takes precedence when both values agree.
             if (other != null && !other.equals(entry.getValue())) {
                 shadowed.add(key);
             }
@@ -167,6 +194,7 @@ public final class SourbyCraftConfig {
         }
         loadSnapshot(f, auroraFile());
         applyLiveConfig(false);
+        bootConfig = loaded;
     }
 
     /**
@@ -174,50 +202,59 @@ public final class SourbyCraftConfig {
      * Returns a short human summary.
      */
     public static synchronized String reload() {
+        ReloadReport report = reloadDetailed();
+        return (report.successful() ? "reloaded — " : "reload FAILED/PARTIAL — ") + String.join("; ", report.lines());
+    }
+
+    public static synchronized ReloadReport reloadDetailed() {
         CommentedFileConfig f = FILE;
-        if (f == null) return "reload FAILED: unified config not available";
+        if (f == null) return new ReloadReport(false, List.of("Utility config is not available."));
+        List<String> errors = new java.util.ArrayList<>();
         try {
             f.load();
         } catch (Throwable t) {
-            return "reload FAILED: could not re-read the config file: " + t.getMessage();
+            return new ReloadReport(false, List.of("Could not read " + CONFIG_PATH + ": " + t.getMessage()));
         }
-        // Aurora's own file has to be re-read too. auroraFile() returns a cached handle and only
-        // load()s it on creation, so without this the one file the split exists to give Aurora
-        // is the one file /sourbycraft reload ignores: an operator edits aurora.toml, reloads,
-        // is told it reloaded, and keeps the value from boot.
-        final CommentedFileConfig auroraFile = auroraFile();
-        if (auroraFile != null) {
-            try {
-                auroraFile.load();
-            } catch (final Throwable t) {
-                // Keep going with the last good Aurora values rather than failing the whole
-                // reload: the unified file's settings below are still worth applying.
-                SourbyLogger.error("could not re-read " + AURORA_PATH
-                    + "; Aurora settings keep the values loaded at startup", t);
-            }
+        // A reload never writes defaults back to an existing file, including after a failed initial save.
+        newFile = false;
+        final CommentedFileConfig engineFile = auroraFile();
+        if (engineFile == null) errors.add("Aurora file unavailable; using the utility layer and defaults.");
+        else try {
+            engineFile.load();
+        } catch (Throwable t) {
+            return new ReloadReport(false, List.of("Could not read " + AURORA_PATH + ": " + t.getMessage(),
+                "No new config snapshot published; runtime retains its previously loaded settings."));
         }
-        final AuroraConfig previous = aurora();
-        final AuroraConfig.Parsed parsed;
+        // Missing utility defaults are seeded in memory exactly as at boot; existing disk bytes stay unchanged.
+        seedDefaults(f);
+        AuroraConfig previous = aurora();
+        AuroraConfig.Parsed parsed;
         try {
-            parsed = loadSnapshot(f, auroraFile);
-            applyLiveConfig(true);
+            parsed = loadSnapshot(f, engineFile);
+            errors.addAll(applyLiveConfig(true));
         } catch (Throwable t) {
             SourbyLogger.error("config reload apply failed", t);
-            return "reload FAILED during apply: " + t.getMessage();
+            return new ReloadReport(false, List.of("Config apply failed; some consumers may already have changed: " + t.getMessage()));
         }
-        SourbyLogger.info("config reloaded from disk (/sourbycraft reload)");
-        return "reloaded — " + aurora().reloadSummary(previous)
-            + "; invalid Aurora keys: " + parsed.invalidKeys() + ". Messages, /maxp persistence, auto-updater settings applied "
-            + "live, plus the Canvas server/world configs (canvas-server.yml / canvas-worlds.yml). "
-            + "Options cached at construction (and a scheduled auto-update interval) only take effect "
-            + "on the next restart.";
+        List<String> lines = new java.util.ArrayList<>();
+        lines.add("Aurora LIVE: " + aurora().liveChangesComparedTo(previous) + " change(s) applied.");
+        lines.add("LIVE: messages read on use, plugin page size and supported Aurora toggles.");
+        lines.add("Updater fields re-read; an already scheduled interval requires restart.");
+        lines.add("RESTART_REQUIRED (changes since boot): " + (pendingRestartKeys().isEmpty() ? "none in tracked keys" : String.join(", ", pendingRestartKeys())));
+        lines.add("AWF settings and construction-cached engine options require restart; this report does not enumerate all legacy engine keys.");
+        if (!parsed.invalidKeys().isEmpty()) errors.add("Invalid Aurora keys (default fallback): " + parsed.invalidKeys());
+        lines.addAll(errors);
+        SourbyLogger.info("config reload " + (errors.isEmpty() ? "completed" : "partial; inspect reported errors"));
+        return new ReloadReport(errors.isEmpty(), lines);
     }
 
-    private static void applyLiveConfig(final boolean reloadEngine) {
+    private static List<String> applyLiveConfig(final boolean reloadEngine) {
+        List<String> failures = new java.util.ArrayList<>();
         try {
             dev.iyanz.sourbycraft.update.AutoUpdateSettings.loadFromToml();
         } catch (Throwable t) {
-            SourbyLogger.error("AutoUpdateSettings.loadFromToml failed; using defaults", t);
+            SourbyLogger.error("AutoUpdateSettings.loadFromToml failed", t);
+            failures.add("Auto-updater settings could not be applied: " + t.getMessage());
         }
 
         // Legacy automatic memory tuning is retired. Preserve operator files and explain the change.
@@ -229,18 +266,19 @@ public final class SourbyCraftConfig {
         // The engine's own configuration, folded into /sourbycraft reload so an operator has one
         // command. Which engine that is stays behind the bridge: nothing here names it, so
         // replacing the implementation is a new bridge rather than an edit to this path.
-        if (!reloadEngine) return;
+        if (!reloadEngine) return List.copyOf(failures);
         for (final String failure : ENGINE_CONFIG.reload()) {
+            failures.add(ENGINE_CONFIG.name() + " " + failure);
             SourbyLogger.error(ENGINE_CONFIG.name() + " " + failure
                 + "; keeping the previous values", null);
         }
+        return List.copyOf(failures);
     }
 
     /** The engine configuration SourbyCraft's reload also re-reads. */
     private static final dev.iyanz.sourbycraft.config.upstream.UpstreamConfigBridge ENGINE_CONFIG =
         new dev.iyanz.sourbycraft.config.upstream.CanvasConfigBridge();
 
-    /** Aurora's file, or {@code null} when it cannot be opened -- then only the unified file is read. */
     /**
      * Writes Aurora's defaults into its own file, once, when that file is new.
      *
@@ -257,19 +295,18 @@ public final class SourbyCraftConfig {
         seed(f, changed, AuroraConfig.ASYNC_PATH_KEY, false,
             "Aurora async pathfinding (LIVE). Experimental and default-off; requires region/snapshot qualification.");
         seed(f, changed, AuroraConfig.CPU_CORES_KEY, 0,
-            "Processors Aurora may use in total, cores and hardware threads alike (RESTART). "
+            "Processors Aurora may use in total, cores and hardware threads alike (RESTART_REQUIRED). "
             + "0 = every available processor. Counted as the JVM counts them, so a container CPU "
             + "quota is respected rather than the physical socket. A budget, not a reservation: a "
             + "region ticks on one thread, so threads past the number of separate active regions "
             + "idle. An explicit threaded-regions.threads in paper-global.yml still wins.");
         seed(f, changed, AuroraConfig.LANE_SAMPLING_KEY, true,
             "Aurora execution-lane CPU attribution (LIVE), behind /perf lanes. Walks every thread once a "
-            + "second: negligible beside a loaded server, and on an idle one the telemetry lane costs more "
-            + "than the region lane. false stops the sampling; the lanes view then reports it as disabled.");
+            + "second. Sampling has a cost that depends on the workload. false stops the sampling; the lanes view then reports it as disabled.");
         seed(f, changed, AuroraConfig.BRIDGE_MODE_KEY, "off",
-            "Aurora Compatibility Bridge (RESTART). off = plugins without folia-supported/canvas-supported "
+            "Aurora Compatibility Bridge (RESTART_REQUIRED). off = plugins without folia-supported/canvas-supported "
             + "are refused, as before. safe = they load, their Bukkit scheduler tasks are routed through "
-            + "the bridge (sync -> global region, async -> async scheduler) and failures are recorded. "
+            + "the bridge (sync -> configured ownership route, async -> governed bridge I/O lane) and failures are recorded. "
             + "Legacy plugins remain unqualified code on a region-threaded server.");
         seed(f, changed, AuroraConfig.BRIDGE_QUARANTINE_KEY, 3,
             "Fatal bridge violations after which a bridged plugin is quarantined: its bridged tasks are "
@@ -279,42 +316,42 @@ public final class SourbyCraftConfig {
             + "ticking when it was scheduled (from a command or event), else the global region. global = always "
             + "the global region, where world access is refused. Ownership checks apply either way.");
         seed(f, changed, AuroraConfig.BRIDGE_IO_THREADS_KEY, 0,
-            "Resource Governor: threads for bridged plugins' async tasks (RESTART). 0 = max(2, processors / 4).");
+            "Resource Governor: threads for bridged plugins' async tasks (RESTART_REQUIRED). 0 = max(2, processors / 4).");
         seed(f, changed, AuroraConfig.BRIDGE_IO_QUEUE_KEY, 256,
-            "Resource Governor: queued bridged async tasks before new ones are rejected (RESTART). At least 1.");
+            "Resource Governor: queued bridged async tasks before new ones are rejected (RESTART_REQUIRED). At least 1.");
         seed(f, changed, AuroraConfig.STORAGE_THREADS_KEY, 1,
-            "Resource Governor: threads for Aurora World Fabric commits (RESTART). 0 = 1.");
+            "Resource Governor: threads for Aurora World Fabric commits (RESTART_REQUIRED). 0 = 1.");
         seed(f, changed, AuroraConfig.STORAGE_QUEUE_KEY, 64,
-            "Resource Governor: queued AWF commits before new ones are rejected (RESTART). At least 1.");
+            "Resource Governor: queued AWF commits before new ones are rejected (RESTART_REQUIRED). At least 1.");
         seed(f, changed, AuroraConfig.NETWORK_COUNTERS_KEY, true,
             "Count wire bytes and packets per direction for /perf network (LIVE). The per-packet cost is "
             + "not measured; false stops counting.");
         seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.WORLDS_KEY, new java.util.ArrayList<String>(),
-            "Aurora World Fabric (RESTART). World folder names whose chunk, entity and POI data AWF stores. "
+            "Aurora World Fabric (RESTART_REQUIRED). World folder names whose chunk, entity and POI data AWF stores. "
             + "Empty = none. Existing region files stay the read-only base; chunks written afterwards go "
             + "to <folder>.awf beside each region folder. Writes are durable only after a commit (every "
             + "commit-interval-seconds, on save-all flush and on shutdown): a crash loses the last interval. "
             + "Once a store exists it stays in use even if the world is removed from this list; use export "
             + "to leave AWF.");
         seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.EXPORT_KEY, new java.util.ArrayList<String>(),
-            "Aurora World Fabric export (RESTART). World folder names to move back to region files at the next "
+            "Aurora World Fabric export (RESTART_REQUIRED). World folder names to move back to region files at the next "
             + "load: every chunk and deletion in the store is written to .mca, then the store is renamed to "
             + "<folder>.awf.exported-<time> (kept, not deleted). A world must not also be in worlds.");
         seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.BACKEND_KEY, "file",
-            "AWF backend (RESTART). file = a directory beside each region folder, the only one shipped. Another "
+            "AWF backend (RESTART_REQUIRED). file = a directory beside each region folder, the only one shipped. Another "
             + "name selects a backend registered by server-side code before worlds load; if it is not registered, "
             + "listed worlds fail to load rather than falling back.");
         seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.PERSISTENCE_KEY, "incremental",
-            "AWF commit mode (RESTART): incremental (new objects only), checkpoint (also re-verifies every "
+            "AWF commit mode (RESTART_REQUIRED): incremental (new objects only), checkpoint (also re-verifies every "
             + "referenced object), full (rewrites every object).");
         seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.COMMIT_INTERVAL_KEY, 30,
-            "AWF: seconds a written chunk may wait in memory before a commit starts (RESTART). 1-86400.");
+            "AWF: seconds a written chunk may wait in memory before a commit starts (RESTART_REQUIRED). 1-86400.");
         seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.RESIDENT_CHUNKS_KEY, 1024,
-            "AWF: committed chunks kept in memory per storage (RESTART). Unsaved chunks are never dropped.");
+            "AWF: committed chunks kept in memory per storage (RESTART_REQUIRED). Unsaved chunks are never dropped.");
         seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.RETAINED_GENERATIONS_KEY, 3,
-            "AWF: committed generations kept for recovery (RESTART).");
+            "AWF: committed generations kept for recovery (RESTART_REQUIRED).");
         seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.COMMIT_ATTEMPTS_KEY, 3,
-            "AWF: attempts per commit before it fails and its chunks stay in memory for the next (RESTART).");
+            "AWF: attempts per commit before it fails and its chunks stay in memory for the next (RESTART_REQUIRED).");
         if (changed[0]) {
             f.save();
             SourbyLogger.info("seeded Aurora engine defaults into sourbycraft_config/aurora.toml");
@@ -329,6 +366,7 @@ public final class SourbyCraftConfig {
             }
             newAuroraFile = !Files.exists(AURORA_PATH);
             final CommentedFileConfig f = CommentedFileConfig.builder(AURORA_PATH)
+                .sync() // save() completes before reporting persistence or allowing reload
                 .onFileNotFound(FileNotFoundAction.CREATE_EMPTY)
                 .build();
             f.load();
@@ -348,6 +386,7 @@ public final class SourbyCraftConfig {
             }
             newFile = !Files.exists(CONFIG_PATH);
             CommentedFileConfig f = CommentedFileConfig.builder(CONFIG_PATH)
+                .sync() // save() completes before reporting persistence or allowing reload
                 .onFileNotFound(FileNotFoundAction.CREATE_EMPTY)
                 .build();
             f.load();
@@ -451,20 +490,23 @@ public final class SourbyCraftConfig {
      */
     private static void seedDefaults(CommentedFileConfig f) {
         boolean[] changed = {false};
+        seed(f, changed, "ui.console-style", "auto",
+            "RESTART_REQUIRED. Startup console: auto (rich on interactive terminals), plain (no ANSI), rich (Unicode + color). -Dsourbycraft.console overrides this; NO_COLOR disables color.");
+        seed(f, changed, "ui.plugins-page-size", 12,
+            "LIVE after /sourbycraft reload. Rows per /plugins or /pl page; clamped to 1-40.");
 
         seed(f, changed, "branding.gc-advisor.enabled", true,
-            "Enable the startup GC/JVM-flags advisory log.");
+            "RESTART_REQUIRED. Enable the startup GC/JVM-flags advisory log.");
 
         seed(f, changed, "sourbycraft.max-players", 0,
-            "Server max-player slot count set by /maxp. Re-applied at boot so it wins over server.properties. 0 = use server.properties.");
+            "RESTART_REQUIRED when editing this file; /maxp applies its own change immediately. Server slot count. Re-applied at boot so it wins over server.properties. 0 = use server.properties.");
         seed(f, changed, "sourbycraft.maxplayers.bypass-enabled", false,
-            "Let sourbycraft.maxplayers.bypass holders (+ ops) join a full server. Default false: OFF keeps"
+            "RESTART_REQUIRED. Let sourbycraft.maxplayers.bypass holders (+ ops) join a full server. Default false: OFF keeps"
             + " the fast config-phase join path; enabling registers a PlayerLoginEvent listener that"
             + " disables that fast path and slows every join.");
 
         seed(f, changed, "viaversion.auto-provision", true,
-            "Whether ViaVersion/ViaBackwards (auto-provisioned by SourbyBootstrap on first boot) are also "
-            + "kept up to date by the auto-updater's cadence. false = manage Via yourself.");
+            "RESTART_REQUIRED. Provision verified ViaVersion/ViaBackwards jars and default configs before plugin loading. false = manage Via yourself.");
 
         dev.iyanz.sourbycraft.lang.SourbyMessages.seedDefaults(f, changed);
         dev.iyanz.sourbycraft.update.AutoUpdateSettings.seedDefaults(f, changed);

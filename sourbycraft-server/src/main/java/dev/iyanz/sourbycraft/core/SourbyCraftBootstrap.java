@@ -147,12 +147,10 @@ public final class SourbyCraftBootstrap {
             dev.iyanz.sourbycraft.perf.GcTracker.start();
         });
 
-        progress.add(dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
-            TOTAL_STAGES, failureCount, (System.nanoTime() - begun) / 1_000_000L));
-        // One event, so nothing can appear between the lines. Logged through a logger the console
-        // renders as the engine rather than as SourbyCraft: this is the engine coming up.
+        bootStages = java.util.List.copyOf(progress);
         java.util.logging.Logger.getLogger("Aurora Engine")
-            .info(String.join(System.lineSeparator(), progress));
+            .info(dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
+                TOTAL_STAGES, failureCount, (System.nanoTime() - begun) / 1_000_000L));
         progress.clear();
         // Build 47 lifecycle truth: a partial boot is operational but DEGRADED, not healthy.
         // FAILED is reserved for a bootstrap where no stage came up.
@@ -165,7 +163,11 @@ public final class SourbyCraftBootstrap {
     private static final int TOTAL_STAGES = 13;
     private static int stageCount;
     private static int failureCount;
-    private static final java.util.List<String> progress = new java.util.ArrayList<>();
+    private static final java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> progress = new java.util.ArrayList<>();
+    private static volatile java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> bootStages = java.util.List.of();
+
+    /** Completed bootstrap attempts, not a claim about Minecraft/plugin readiness. */
+    public static java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> bootStages() { return bootStages; }
 
     /**
      * Runs one boot stage and reports it.
@@ -176,20 +178,22 @@ public final class SourbyCraftBootstrap {
      * the progress line cannot read healthy while something is broken.</p>
      */
     private static void stage(final String name, final Runnable body) {
+        java.util.logging.Logger.getLogger("Aurora Engine").info("START " + (stageCount + 1) + "/" + TOTAL_STAGES + "  " + name);
         final long stageBegun = System.nanoTime();
+        boolean successful = true;
         try {
             body.run();
         } catch (final Throwable failure) {
             failureCount++;
+            successful = false;
             SourbyLogger.error(name + " failed during Aurora boot", failure);
         }
         dev.iyanz.sourbycraft.startup.StartupTimeline.phase("boot:" + name, System.nanoTime() - stageBegun);
         stageCount++;
-        // Held, not printed. Stages log their own output as they run -- the virtual executor and
-        // the command registry both announce themselves -- so emitting a bar line per stage
-        // interleaved the bar with those lines and neither read well. The whole bar goes out as
-        // one event below, before the server finishes starting.
-        progress.add(dev.iyanz.sourbycraft.brand.AuroraBoot.render(
-            stageCount, TOTAL_STAGES, name, failureCount > 0));
+        var result = new dev.iyanz.sourbycraft.brand.AuroraBoot.Stage(name, successful,
+            (System.nanoTime() - stageBegun) / 1_000_000L);
+        progress.add(result);
+        java.util.logging.Logger.getLogger("Aurora Engine").info(dev.iyanz.sourbycraft.brand.AuroraBoot.render(
+            stageCount, TOTAL_STAGES, result, failureCount, dev.iyanz.sourbycraft.brand.ConsoleStyle.current()));
     }
 }

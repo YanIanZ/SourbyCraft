@@ -14,7 +14,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Captures plugin-load failures by tailing the root JUL logger and pulling
+ * Captures plugin-load failures from the JUL and Log4j root loggers and pulling
  * the plugin name out of Paper's "Could not load plugin 'NAME.jar'" message.
  * The handler is installed once at SourbyCraftConfig.init(), which runs in
  * DedicatedServer#initServer before CraftServer#loadPlugins fires — that's
@@ -69,13 +69,27 @@ public final class PluginLoadDiagnostics {
             /** No-op — this handler is never detached; nothing to release. */
             @Override public void close() {}
         });
+        // Paper's modern loader logs directly through Log4j, bypassing JUL handlers.
+        // This process-owned appender holds no file, worker or queue; capture is bounded.
+        final var appender = new org.apache.logging.log4j.core.appender.AbstractAppender(
+            "SourbyPluginDiagnostics", null, null, true,
+            org.apache.logging.log4j.core.config.Property.EMPTY_ARRAY) {
+            @Override public void append(org.apache.logging.log4j.core.LogEvent event) {
+                if (!event.getLevel().isMoreSpecificThan(org.apache.logging.log4j.Level.WARN)
+                    || event.getMessage() == null) return;
+                capture(Level.WARNING, event.getMessage().getFormattedMessage(), event.getThrown());
+            }
+        };
+        appender.start();
+        ((org.apache.logging.log4j.core.Logger) org.apache.logging.log4j.LogManager.getRootLogger())
+            .addAppender(appender);
     }
 
     /**
      * Records one log line if it is a plugin load or enable failure. Package-visible so the
      * matching can be tested without a live logger.
      */
-    static void capture(final Level level, final String message, final Throwable thrown) {
+    static synchronized void capture(final Level level, final String message, final Throwable thrown) {
         if (level == null || message == null) return;
         if (level.intValue() < Level.WARNING.intValue()) return;
         final Matcher enable = ENABLE_FAILURE.matcher(message);
@@ -89,6 +103,7 @@ public final class PluginLoadDiagnostics {
         String jar = m.group(1);
         String reason = firstThrowableLine(thrown);
         if (reason == null) reason = message;
+        ENTRIES.removeIf(entry -> entry.pluginJar().equals(jar));
         if (ENTRIES.size() >= MAX_ENTRIES) {
             ENTRIES.remove(0);
         }

@@ -1,468 +1,137 @@
-# Aurora UX — SourbyCraft Operator Experience
+# Aurora UX — SourbyCraft operator experience
 
-## Goal
+This document describes the terminal and command UI implemented on branch `26.2`.
+Build identity remains SourbyCraft `Build N` with its codename, backed by Aurora Engine.
+The UI does not establish performance improvement or feature qualification.
 
-Aurora must feel immediately different from a generic Paper/Canvas fork while remaining fast, readable, and operationally useful.
+## Startup console
 
-The UX target is **high-impact, cinematic, energetic, and unmistakably SourbyCraft** without turning the server console or commands into visual noise.
+The new banner separates release, Minecraft/channel, Java, JVM-visible processors and
+maximum heap into labelled rows. Long build identities are preserved.
 
-Aurora UX is not decoration layered on top of the engine. It is a presentation system for the engine's real state.
-
-Core rule:
-
-> Every visual effect must communicate useful state, complete quickly, and have negligible runtime cost.
-
----
-
-## 1. Design language
-
-Aurora uses four visual states consistently:
-
-- **AURORA / cyan-blue** — SourbyCraft identity, normal engine state
-- **HEALTHY / green** — stable, within budget
-- **PRESSURE / gold-yellow** — approaching operational limits
-- **CRITICAL / red** — genuine performance or stability concern
-
-Use gradients sparingly for headers, bars, and major transitions. Do not gradient every line of output.
-
-Preferred feel:
+Aurora prints a `START` line before each of its 13 bootstrap service stages, followed by a
+16-cell progress gauge, stage result and monotonic elapsed time. Each completion is logged
+immediately; a blocked stage therefore leaves its name visible. Output is append-only, with
+no cursor movement, artificial waits or guessed time remaining.
 
 ```text
-premium terminal
-+ game-engine telemetry
-+ cinematic status transitions
-+ very fast interaction
+START 8/13  commands
+ 8/13  62% [==========......]  OK    commands  (4ms)
+...
+COMPLETE | 13/13 stages completed without error | 0 failed | 137ms
+Minecraft continues loading; wait for the server-ready message before connecting.
 ```
 
-Avoid:
+A caught stage exception prints `FAIL`, keeps the accumulated failure count visible on later
+stages and yields `DEGRADED` or `FAILED` in the summary. A 100% gauge means all stage attempts
+finished. A stage returning without an exception does not prove its internally managed services
+are ready. Minecraft, worlds and plugins finish loading afterwards; `Done (` remains the
+server-ready marker. `/aurora status` retains those stage results for inspection after boot.
+
+`ui.console-style` controls the banner, Aurora progress and JVM advisor renderers. In the utility TOML it selects `auto`, `plain` or `rich`. `auto` uses rich output
+when `System.console()` is available, otherwise plain. These renderers emit ASCII progress bars and no ANSI in plain mode. Other loggers retain their own formatting. `-Dsourbycraft.console=rich` is available for panels whose terminal support is not
+reported to the JVM. `NO_COLOR` and `TERM=dumb` disable ANSI even in rich mode. The startup
+panel and JVM advisor use a UTF-8 stream. Changes affect the next startup.
+
+## Commands
+
+Shared panels separate a title, sections, labelled values, navigation suggestions and footer.
+Suggested commands also appear as literal text, so they remain usable from the console.
+Clicking an action in Minecraft fills the command input; it does not execute it.
+
+| Command | Information |
+| --- | --- |
+| `/sourbycraft` | Operator hub and command guide |
+| `/aurora` or `/aurora status` | Aurora service state, active bridge mode and boot stages |
+| `/sourbycraft config` or `/aurora config` | File locations, loaded settings and lifecycle groups |
+| `/sourbycraft reload` | Explicit reload with errors and restart requirements |
+| `/ver`, `/version`, `/about` | Release, build time, runtime, API and source identity |
+| `/sys` | System summary, measured region health and plugin counts |
+| `/spec` | Hardware and JVM facts; unreadable fields say unavailable |
+| `/perf [view]` | Existing diagnostics with sectioned overview and navigation |
+| `/tps`, `/mspt` | Region metrics, tick budget and freshness |
+| `/ping [player]` | Latency, client and asynchronous location lookup |
+
+Existing command permissions still apply. `/aurora` uses `sourbycraft.command.admin`.
+The `/canvas` dispatcher was removed by the existing feature patch; `/aurora` provides the operator hub. Historical configuration paths remain in use.
+Namespaced built-ins are preserved when SourbyCraft claims bare names.
+
+## Plugins
+
+`/pl` and `/plugins` resolve to the same command instance and share permissions, output,
+search, filters and tab completion. Names are sorted without putting versions in the roster.
+Default page size is 12; `ui.plugins-page-size` is clamped to 1–40 and changes after reload.
 
 ```text
-rainbow spam
-20-line ASCII art on every command
-per-tick title animations
-particle/sound spam
-fake percentages
+/plugins                  first page
+/pl 2                     second page
+/plugins search vault     case-insensitive name search
+/plugins filter failed    failures observed during load, enable or bridge operation
+/plugins Vault            version, enabled state, support declaration and bridge telemetry
 ```
 
----
-
-## 2. Aurora boot experience
-
-Startup should have a distinctive but short sequence.
-
-Example:
-
-```text
-╭────────────────────────────────────────────────────╮
-│              SOURBYCRAFT · AURORA                 │
-│        Java 25 · Minecraft 26.2 · Build44         │
-╰────────────────────────────────────────────────────╯
-
-[Aurora] Initializing runtime core...
-[Aurora] Region engine ............... READY
-[Aurora] Telemetry ................... READY
-[Aurora] Diagnostics ................. READY
-[Aurora] Spark bridge ................ READY
-[Aurora] Configuration ............... READY
-
-[Aurora] Engine online in 3.82s
-```
-
-Requirements:
-
-- no artificial sleeps
-- no fake loading animation
-- each READY state corresponds to actual initialization
-- failed optional systems display DEGRADED rather than pretending success
-- startup timings come from real monotonic measurements
-
-Optional ANSI color may be used only where the console supports it safely.
-
----
-
-## 3. `/perf` becomes the hero command
-
-`/perf` should feel like opening Aurora's control center.
-
-Example compact view:
-
-```text
-╭─ SOURBYCRAFT · AURORA PERFORMANCE ───────────────╮
-│ HEALTH      EXCELLENT                            │
-│ TPS         20.00        MSPT       7.84 ms      │
-│ P95         11.42 ms     P99       16.21 ms      │
-│ CPU         36%          RAM       4.1 / 8.0 GB  │
-│ REGIONS     42 active    WORST     18.7 ms       │
-│ PLAYERS     86           UPTIME    7h 21m        │
-╰───────────────────────────────────────────────────╯
-
-[REGIONS] [MEMORY] [NETWORK] [SCHEDULER] [PROFILE]
-```
-
-The buttons should be clickable Adventure components where available.
-
-Hover text can expose detail without bloating the main output.
-
----
-
-## 4. Performance health transitions
-
-Aurora should make state changes noticeable.
-
-Example state transition:
-
-```text
-AURORA HEALTH  EXCELLENT → PRESSURE
-Cause: world region 18,-7 reached p95 44.3 ms
-```
-
-When recovered:
-
-```text
-AURORA HEALTH  PRESSURE → HEALTHY
-Region 18,-7 recovered below warning threshold.
-```
-
-Rules:
-
-- transition notifications are rate-limited
-- no repeated alert every second
-- thresholds are explicit/read-only operator settings
-- no automatic tuning is triggered by an alert
-
----
-
-## 5. `/perf health`
-
-Make health diagnosis visually strong but factual.
-
-```text
-⚡ AURORA HEALTH REPORT
-
-✓ Tick Engine       EXCELLENT   8.1 ms p95
-✓ Memory            HEALTHY     51%
-✓ GC                EXCELLENT   0.7% overhead
-! Region Engine     PRESSURE    1 hot region
-✓ Network           HEALTHY
-✓ Scheduler         HEALTHY
-
-Primary pressure point
-→ world / region 18,-7
-  MSPT p95 44.3 ms
-  317 entities · 21 ticking chunks
-
-[INSPECT REGION]  [START PROFILE]
-```
-
-Do not claim a root cause unless telemetry actually supports it.
-
----
-
-## 6. HUD design
-
-Aurora HUD should look alive but remain cheap.
-
-### `/perfbar`
-
-Recommended default:
-
-```text
-AURORA  TPS 20.0  │  8.2 ms  │  RAM 51%  │  CPU 36%
-```
-
-Bossbar progress should represent the most meaningful active pressure metric rather than decorative animation.
-
-Examples:
-
-- normal: tick-budget headroom
-- memory view: heap utilization
-- region view: worst-region tick-budget utilization
-
-Refresh target: once per second.
-
-No per-player metric recomputation.
-
----
-
-## 7. Actionbar pulse mode
-
-Optional command:
-
-```text
-/perfbar mode pulse
-```
-
-Example actionbar:
-
-```text
-⚡ AURORA · 20.0 TPS · 8.2ms · CPU 36% · RAM 51%
-```
-
-Use a single shared snapshot.
-
-No animation faster than operationally useful refresh cadence.
-
----
-
-## 8. Command transitions
-
-Commands should reveal information progressively.
-
-Examples:
-
-```text
-/perf
-/perf region
-/perf region world 18 -7
-/perf player YanIanZ
-```
-
-Each deeper command should feel like drilling into the same control system, not switching to unrelated formatting.
-
-All diagnostics share:
-
-- same header language
-- same status names
-- same units
-- same thresholds
-- same metric source
-
----
-
-## 9. Region heat presentation
-
-Aurora should make region threading understandable to operators.
-
-Example:
-
-```text
-AURORA REGION HEAT
-
-#1 world       18,-7   ████████░░  41.3ms
-#2 world       19,-7   ████░░░░░░  21.8ms
-#3 world_nether 4,2    ███░░░░░░░  16.1ms
-```
-
-Bars are text rendering only; never infer data not collected.
-
-Clickable region entries should run the corresponding `/perf region ...` command.
-
----
-
-## 10. Profiler integration UX
-
-Keep the upstream Spark web viewer for now.
-
-Aurora enhances the in-server workflow around it.
-
-Example start:
-
-```text
-⚡ AURORA PROFILER
-Profiler backend: async-profiler
-Scope: server
-Status: RECORDING
-
-[STOP & UPLOAD] [STATUS]
-```
-
-Example finish:
-
-```text
-✓ Aurora profiling complete
-Duration: 16m 15s
-Backend: async-profiler
-Platform: SourbyCraft
-Version: Build44 (MC:26.2)
-
-[OPEN PROFILE]
-```
-
-Do not rename the underlying Spark viewer engine enum while still using the upstream viewer.
-
----
-
-## 11. Aurora incident experience
-
-When an actual spike occurs, record a bounded incident entry.
-
-Example:
-
-```text
-⚠ AURORA INCIDENT #184
-P99 MSPT spike: 78.4 ms
-World: world
-Region: 18,-7
-Players: 7
-Entities: 412
-GC during window: no
-```
-
-Then `/perf history` can show:
-
-```text
-18:42:09  REGION PRESSURE   world 18,-7  78.4ms
-18:38:44  GC PAUSE          41ms
-18:20:17  SCHEDULER QUEUE   62 pending
-```
-
-Incident storage must be bounded.
-
----
-
-## 12. `/aurora`
-
-Introduce an Aurora identity command only if it provides real functionality.
-
-Suggested tree:
-
-```text
-/aurora
-/aurora status
-/aurora config
-/aurora reload
-/aurora version
-```
-
-`/aurora status` can summarize architecture state:
-
-```text
-Aurora Engine      ONLINE
-Telemetry          ONLINE
-Region metrics     ONLINE
-Spark bridge       ONLINE
-HUD service        ONLINE
-Configuration      VALID
-```
-
-Do not duplicate `/perf` metrics unnecessarily.
-
----
-
-## 13. Config UX
-
-Configuration messages should clearly explain lifecycle.
-
-Example reload:
-
-```text
-✓ Aurora configuration reloaded
-
-Applied live:       14 values
-Restart required:    3 values
-Invalid:             0 values
-```
-
-If restart-required values changed:
-
-```text
-Restart required for:
-- aurora.scheduler.worker-count
-- aurora.network.native-transport
-```
-
-Never silently restart or modify unrelated settings.
-
----
-
-## 14. Error UX
-
-Errors should be high-signal.
-
-Bad:
-
-```text
-An error occurred.
-```
-
-Preferred:
-
-```text
-✕ AURORA CONFIG ERROR
-Key: aurora.entity.async-pathfinding
-Value: "fast"
-Expected: boolean
-Runtime fallback: false
-File was not modified.
-```
-
-For severe runtime conditions:
-
-```text
-✕ AURORA RUNTIME DEGRADED
-Region metrics collector stopped unexpectedly.
-Core gameplay is still running.
-Use /aurora status for details.
-```
-
----
-
-## 15. Sound and title effects
-
-For operator/player-facing diagnostic UX, sounds and titles are allowed only as optional UX features.
-
-Recommended defaults:
-
-- command sounds: OFF
-- warning sounds: OFF
-- title alerts: OFF
-- bossbar diagnostics: opt-in/permission-based
-
-This preserves professional production behavior while allowing server owners to enable a more dramatic experience.
-
-No performance feature should depend on sounds, particles, or client animation.
-
----
-
-## 16. Explosive does not mean expensive
-
-Aurora should appear intense because of composition and state presentation, not because it performs extra work.
-
-Preferred techniques:
-
-- Adventure text components
-- gradients on limited headers
-- unicode separators
-- hover events
-- click events
-- shared metric snapshots
-- status transitions
-- bounded incident history
-
-Avoid:
-
-- per-tick rendering
-- repeated full-world scans
-- constantly changing random colors
-- animated console spam
-- packet-heavy HUD updates
-
-UX overhead target should remain negligible compared with telemetry itself.
-
----
-
-## 17. Acceptance criteria
-
-Aurora UX is complete enough for release when:
-
-- startup visually identifies SourbyCraft/Aurora
-- `/perf` has one coherent dashboard style
-- `/perf health` presents actionable health state
-- `/tpsbar`, `/rambar`, and `/perfbar` share one rendering system
-- status transitions are rate-limited
-- region diagnostics are visually understandable
-- Spark workflow is integrated cleanly without requiring a custom viewer
-- config reload shows live vs restart-required changes
-- error messages identify exact keys/subsystems
-- all displayed metrics come from authoritative Sourby telemetry
-- UX adds no meaningful measurable runtime regression
-
----
-
-## Product feel
-
-The desired reaction is:
-
-> "This does not feel like another Paper fork. It feels like a server engine with its own control system."
-
-Aurora's visual impact should come from **clarity, speed, live engine state, and strong identity** — not visual spam.
+Search and filter accept an optional page number. Previous/next suggestions retain the query
+or filter. Hover shows the status explanation; clicking suggests the detail command. Jar-load
+failures include their filename and reason in details. Captured failures are a bounded recent
+history, captured from both JUL and Log4j and deduplicated per jar, rather than a complete lifetime failure ledger.
+
+| Status | Meaning |
+| --- | --- |
+| NATIVE / blue | Declares region-threading support |
+| BRIDGED / green | Admitted through Aurora Bridge |
+| FAILED / red | A load/enable failure or fatal bridge violation was observed |
+| DISABLED / grey | Loaded but disabled; this alone does not establish a failure |
+
+Neither NATIVE nor BRIDGED certifies safety. `/sys` reports disabled plugins separately from
+recent jar-load failures and points to `/plugins` for details.
+
+## Gauges and unavailable data
+
+Command/HUD gauges use a compact bracketed `█`/`·` style. TPS shows progress against the
+configured target in the region diagnostics; MSPT shows tick-budget use; memory shows use of
+the reported maximum. Ping's gauge is full at 0ms and empty at 500ms or more. Unknown numeric
+measurements are displayed as unavailable rather than fabricated zero or full values.
+Performance command consumers retain the immutable-snapshot and freshness contract.
+
+## Configuration and verification
+
+See [Aurora configuration](AURORA-CONFIG.md) and the annotated
+[UI section](config-examples/utility-ui.toml) / [Aurora defaults](config-examples/aurora.toml).
+Boot/reload preserves existing utility and Aurora TOML files. New defaults and comments are written only for
+new files; message variants are not replaced in existing deployments.
+
+UI regression tests cover plain/rich rendering, failure summaries, alias registration,
+search/filter/page boundaries, typed defaults, file preservation and restart comparison.
+Compile, server-suite, policy and isolated boot evidence is recorded with this change's
+entry in `TODO.md`. These are functional checks; release qualification remains separate.
+
+Animated consoles, predicted remaining time, profiler controls and automatically suggested
+hardware tuning are not implemented by this UI change.
+
+## Local validation 2026-10-06
+
+- [x] Compile and complete server test task with Temurin 25.0.4.1 / Gradle 9.8.0 passed.
+  The final reload-report change was also checked through RuntimeModernizationTestSuite and
+  SourbyMetricsTestSuite, then packaged again with `slimServerJar`.
+- [x] `python3.12 -m unittest discover -s scripts -p 'test_*.py'`: 243 tests passed.
+- [x] Server JAR manifest and properties agree on Build 47 / DEV; slim API metadata is
+  `26.2-R0.1-SNAPSHOT` with `currentApiVersion=26.2`.
+- [x] Isolated console boot reached the actual ready event and stopped with exit code 0.
+  All 13 Aurora stages completed without an exception. `/pl` and `/plugins` panels were
+  identical; sorted pages, search, failed/disabled filters, operator/status/config/version
+  and system/hardware/performance/tick views were exercised.
+- [x] A real missing-main-class plugin fixture appeared as a load failure. UI page size changed
+  after reload. A CPU change remained restart-required across repeated reloads, without a
+  contradictory restart summary. Malformed Aurora TOML reported failure and preserved the
+  loaded snapshot. Existing utility/Aurora TOML bytes remained unchanged during boot/reload.
+
+Local evidence lives under ignored `build/ui-refresh/`: `verify_ui.py`,
+`run-accepted/server.log` and `run-accepted/command-panels.json`. This probe used a fresh world,
+loopback binding, an offline-mode fixture server and disabled update/provisioning settings.
+It checks console behavior; Minecraft-client click/hover rendering was not visually tested.
+
+Local artifact: `build/libs/SourbyCraft-slim.jar` (DEV, Build 47).
+SHA-256: `3b01edfa88b85641669cc54d714cd154859f1ed33b95f85f8048446684726a2f`.
+Official toolchain pins and `release=pre` were not changed; this is local functional evidence.
+The existing `writeBuildInfo` configuration-cache opt-out still produces a cache-serialization
+warning and discards that cache entry; the compile/test/package tasks complete successfully.

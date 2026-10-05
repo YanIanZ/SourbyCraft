@@ -308,14 +308,20 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         return fallback;
     }
 
-    /** Counts only implemented Aurora settings, never upstream or cached utility settings. */
-    public String reloadSummary(final AuroraConfig previous) {
+    /** Counts changed LIVE settings only; restart requirements need a separate boot baseline. */
+    public int liveChangesComparedTo(final AuroraConfig previous) {
         int changed = 0;
         if (entity.asyncPathfinding() != previous.entity.asyncPathfinding()) changed++;
         if (diagnostics.laneSampling() != previous.diagnostics.laneSampling()) changed++;
         if (bridge.quarantineAfter() != previous.bridge.quarantineAfter()) changed++;
         if (bridge.syncRoute() != previous.bridge.syncRoute()) changed++;
         if (network.counters() != previous.network.counters()) changed++;
+        return changed;
+    }
+
+    /** Change summary relative to the supplied snapshot, not an active-runtime status report. */
+    public String reloadSummary(final AuroraConfig previous) {
+        int changed = liveChangesComparedTo(previous);
         // Reported separately, never counted as applied. The region scheduler is sized during
         // GlobalConfiguration's load, so a reload cannot reach it; saying "restart required:
         // none" after an operator edited the CPU budget would be telling them it took effect.

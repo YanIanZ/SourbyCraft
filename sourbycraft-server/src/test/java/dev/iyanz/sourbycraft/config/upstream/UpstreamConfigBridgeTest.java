@@ -32,6 +32,6 @@ public class UpstreamConfigBridgeTest {
     @Test
     void theCanvasBridgeNamesWhatItReloads() {
         // The name reaches the operator's log line, so it has to say which engine failed.
-        assertEquals("Canvas", new CanvasConfigBridge().name());
+        assertEquals("Aurora region configuration", new CanvasConfigBridge().name());
     }
 }

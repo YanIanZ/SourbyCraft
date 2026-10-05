@@ -1,69 +1,49 @@
 package dev.iyanz.sourbycraft.command;
 
+import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.SourbyCraftColors;
 import dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics;
 import dev.iyanz.sourbycraft.bridge.AuroraBridge;
-import dev.iyanz.sourbycraft.bridge.BridgeTelemetry;
 import dev.iyanz.sourbycraft.bridge.CompatibilityClassifier;
 import dev.iyanz.sourbycraft.bridge.CompatibilityState;
-import dev.iyanz.sourbycraft.util.BarUtil;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
 
-import java.util.Arrays;
-import java.util.EnumMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Pattern;
-
 import static net.kyori.adventure.text.Component.text;
 
-/**
- * Custom /plugins, also answering /pl so both show the same roster. Branded header with the
- * SourbyCraft divider, then a single comma-separated line of plugin names (no versions) coloured
- * by Aurora compatibility state (see
- * {@code docs/architecture/aurora-plugin-bridge.md}): blue NATIVE, green BRIDGED, red FAILED,
- * grey DISABLED. Plugins that never loaded are not in the plugin manager; they are listed after
- * the roster from the captured load failures, in red.
- */
+/** One roster and detail view for /plugins and /pl, including captured load failures. */
 public class PluginsCommand extends Command {
-
-    private static final String DIVIDER = BarUtil.FILLED.repeat(BarUtil.DEFAULT_WIDTH);
-    /** A trailing version in a jar name: "-2.22.1-dev+26", "_v1.0", " 5.12.0". */
     private static final Pattern JAR_VERSION = Pattern.compile("[-_ ]v?\\d[\\w.+-]*$");
+    private static final List<String> STATES = List.of("native", "bridged", "failed", "disabled");
 
-    public PluginsCommand(String n) {
-        super(n);
-        this.description = "Plugin list";
-        this.usageMessage = "/plugins [plugin]";
-        this.setAliases(List.of("pl"));
-        this.setPermission("sourbycraft.command.plugins");
+    public PluginsCommand(String name) {
+        super(name);
+        description = "Plugin roster, search and Aurora compatibility details";
+        usageMessage = "/plugins [page|plugin|search <name> [page]|filter <state> [page]]";
+        setAliases(List.of("pl"));
+        setPermission("sourbycraft.command.plugins");
     }
 
-    /**
-     * What a plugin that never loaded is listed as: its jar name without the extension or the
-     * version, so the roster reads the same as the loaded plugins, which show only their names.
-     */
-    static String failureName(final String jarName) {
+    static String failureName(String jarName) {
         String name = jarName.endsWith(".jar") ? jarName.substring(0, jarName.length() - 4) : jarName;
-        final String stripped = JAR_VERSION.matcher(name).replaceFirst("");
+        String stripped = JAR_VERSION.matcher(name).replaceFirst("");
         return stripped.isEmpty() ? name : stripped;
     }
 
-    /** The state a loaded plugin is shown in, from what the server has observed about it. */
-    static CompatibilityState stateOf(final Plugin plugin) {
+    static CompatibilityState stateOf(Plugin plugin) {
         return CompatibilityClassifier.classify(new CompatibilityClassifier.Evidence(
-            plugin.getPluginMeta().isFoliaSupported(),
-            plugin.isEnabled(),
-            PluginLoadDiagnostics.enableFailed(plugin.getName()),
-            AuroraBridge.bridgeInitialized(plugin),
+            plugin.getPluginMeta().isFoliaSupported(), plugin.isEnabled(),
+            PluginLoadDiagnostics.enableFailed(plugin.getName()), AuroraBridge.bridgeInitialized(plugin),
             AuroraBridge.fatalViolation(plugin)));
     }
 
-    static TextColor colorOf(final CompatibilityState state) {
+    static TextColor colorOf(CompatibilityState state) {
         return switch (state) {
             case NATIVE -> SourbyCraftColors.PLUGIN_NATIVE;
             case BRIDGED -> SourbyCraftColors.PLUGIN_BRIDGED;
@@ -72,85 +52,159 @@ public class PluginsCommand extends Command {
         };
     }
 
-    /** One plugin's compatibility state and, when bridged, its bridge telemetry. */
-    private boolean detail(final CommandSender s, final String name) {
-        final Plugin plugin = Bukkit.getPluginManager().getPlugin(name);
+    record Row(String name, CompatibilityState state, String reason, String jar) {}
+    record Request(int page, String query, CompatibilityState filter, String detail) {}
+
+    /** Parsing is shared by both aliases; invalid pages are never silently treated as plugin names. */
+    static Request parse(String[] args) {
+        if (args.length == 0) return new Request(1, "", null, null);
+        if (args[0].equalsIgnoreCase("search")) {
+            if (args.length < 2 || args.length > 3) throw new IllegalArgumentException("Use /plugins search <name> [page]");
+            return new Request(args.length == 3 ? page(args[2]) : 1, args[1], null, null);
+        }
+        if (args[0].equalsIgnoreCase("filter")) {
+            if (args.length < 2 || args.length > 3 || !STATES.contains(args[1].toLowerCase(Locale.ROOT)))
+                throw new IllegalArgumentException("Filter: native, bridged, failed or disabled");
+            return new Request(args.length == 3 ? page(args[2]) : 1, "",
+                CompatibilityState.valueOf(args[1].toUpperCase(Locale.ROOT)), null);
+        }
+        if (args.length != 1) throw new IllegalArgumentException("Use /plugins <plugin> or /plugins search <name>");
+        if (args[0].matches("[+-]?\\d+")) return new Request(page(args[0]), "", null, null);
+        return new Request(1, "", null, args[0]);
+    }
+
+    private static int page(String value) {
+        try {
+            int page = Integer.parseInt(value);
+            if (page > 0) return page;
+        } catch (NumberFormatException ignored) {}
+        throw new IllegalArgumentException("Page must be a positive whole number");
+    }
+
+    static List<Row> select(List<Row> rows, Request request) {
+        String query = request.query().toLowerCase(Locale.ROOT);
+        return rows.stream().filter(row -> row.name().toLowerCase(Locale.ROOT).contains(query))
+            .filter(row -> request.filter() == null || row.state() == request.filter())
+            .sorted(Comparator.comparing(Row::name, String.CASE_INSENSITIVE_ORDER).thenComparing(Row::jar))
+            .toList();
+    }
+
+    private static List<Row> roster() {
+        List<Row> rows = new ArrayList<>();
+        for (Plugin plugin : Bukkit.getPluginManager().getPlugins()) {
+            CompatibilityState state = stateOf(plugin);
+            rows.add(new Row(plugin.getName(), state, switch (state) {
+                case NATIVE -> "Declares region-threading support; this is not a safety certification.";
+                case BRIDGED -> "Aurora Bridge admitted this plugin; inspect details for rejected work.";
+                case FAILED -> "Enable failure or fatal ownership violation observed; inspect logs.";
+                case DISABLED -> "Loaded but currently disabled; this alone does not indicate a failure.";
+            }, ""));
+        }
+        // One recent failure per jar, keeping the latest reason. Different jars remain visible.
+        Map<String, PluginLoadDiagnostics.Entry> failures = new LinkedHashMap<>();
+        for (var failure : PluginLoadDiagnostics.recent()) failures.put(failure.pluginJar(), failure);
+        for (var failure : failures.values()) rows.add(new Row(failureName(failure.pluginJar()),
+            CompatibilityState.FAILED, failure.reason(), failure.pluginJar()));
+        return rows;
+    }
+
+    private boolean detail(CommandSender sender, String name) {
+        Plugin plugin = Arrays.stream(Bukkit.getPluginManager().getPlugins())
+            .filter(p -> p.getName().equalsIgnoreCase(name)).findFirst().orElse(null);
+        sender.sendMessage(UiPanel.header("Plugin details"));
         if (plugin == null) {
-            s.sendMessage(text("No loaded plugin named " + name, SourbyCraftColors.DANGER));
-            return true;
-        }
-        final CompatibilityState state = stateOf(plugin);
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.PRIMARY));
-        s.sendMessage(text()
-            .append(text(plugin.getName() + " ", SourbyCraftColors.HEADER))
-            .append(text(state.display(), colorOf(state)))
-            .build());
-        final BridgeTelemetry.PluginStats stats = AuroraBridge.stats(plugin);
-        if (stats == null) {
-            s.sendMessage(text("  Not bridged: declares region-threading support or was not admitted.",
-                SourbyCraftColors.LABEL));
+            var failures = roster().stream().filter(row -> !row.jar().isEmpty()
+                && (row.name().equalsIgnoreCase(name) || row.jar().equalsIgnoreCase(name))).toList();
+            if (failures.isEmpty()) sender.sendMessage(UiPanel.row("Result", "No plugin found: " + name));
+            for (Row failure : failures) {
+                sender.sendMessage(UiPanel.row("Plugin", failure.name()));
+                sender.sendMessage(UiPanel.row("State", "FAILED — did not load"));
+                sender.sendMessage(UiPanel.row("Jar", failure.jar()));
+                sender.sendMessage(UiPanel.row("Reason", failure.reason()));
+            }
         } else {
-            line(s, "Scheduler redirects", Long.toString(stats.schedulerRedirects()));
-            line(s, "Owner handoffs", Long.toString(stats.ownerHandoffs()));
-            line(s, "Rejected operations", Long.toString(stats.rejectedOperations()));
-            line(s, "Fatal violations", Long.toString(stats.fatalViolations()));
-            line(s, "Quarantined", stats.quarantined() ? "yes" : "no");
-            line(s, "Startup cache", stats.startupCacheState());
-            line(s, "Last failure", stats.lastFailure() == null ? "none" : stats.lastFailure());
+            CompatibilityState state = stateOf(plugin);
+            sender.sendMessage(UiPanel.row("Plugin", plugin.getName()));
+            sender.sendMessage(UiPanel.row("Version", plugin.getPluginMeta().getVersion()));
+            sender.sendMessage(text("  State: ", SourbyCraftColors.LABEL).append(text(state.display(), colorOf(state))));
+            sender.sendMessage(UiPanel.row("Enabled", plugin.isEnabled() ? "yes" : "no"));
+            sender.sendMessage(UiPanel.row("Declares region support", plugin.getPluginMeta().isFoliaSupported() ? "yes" : "no"));
+            var stats = AuroraBridge.stats(plugin);
+            if (stats == null) sender.sendMessage(UiPanel.row("Bridge telemetry", "not available for this plugin"));
+            else {
+                sender.sendMessage(UiPanel.section("Aurora Bridge"));
+                sender.sendMessage(UiPanel.row("Scheduler redirects / owner handoffs", stats.schedulerRedirects() + " / " + stats.ownerHandoffs()));
+                sender.sendMessage(UiPanel.row("Rejected / fatal operations", stats.rejectedOperations() + " / " + stats.fatalViolations()));
+                sender.sendMessage(UiPanel.row("Quarantined", stats.quarantined() ? "yes" : "no"));
+                sender.sendMessage(UiPanel.row("Startup cache", stats.startupCacheState()));
+                sender.sendMessage(UiPanel.row("Last failure", stats.lastFailure() == null ? "none" : stats.lastFailure()));
+            }
         }
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
+        sender.sendMessage(UiPanel.actions(List.of("/plugins", "/plugins filter failed")));
+        sender.sendMessage(UiPanel.footer());
         return true;
     }
 
-    private static void line(final CommandSender s, final String label, final String value) {
-        s.sendMessage(text()
-            .append(text("  " + label + ": ", SourbyCraftColors.LABEL))
-            .append(text(value, SourbyCraftColors.VALUE))
-            .build());
+    static List<Component> render(List<Row> all, Request request, int requestedSize) {
+        int size = Math.clamp(requestedSize, 1, 40);
+        List<Row> rows = select(all, request);
+        int pages = Math.max(1, (rows.size() + size - 1) / size);
+        List<Component> lines = new ArrayList<>();
+        lines.add(UiPanel.header("Plugins"));
+        Map<CompatibilityState, Long> counts = new EnumMap<>(CompatibilityState.class);
+        all.forEach(row -> counts.merge(row.state(), 1L, Long::sum));
+        lines.add(UiPanel.row("Native / Bridged", counts.getOrDefault(CompatibilityState.NATIVE, 0L)
+            + " / " + counts.getOrDefault(CompatibilityState.BRIDGED, 0L)));
+        lines.add(UiPanel.row("Failed / Disabled", counts.getOrDefault(CompatibilityState.FAILED, 0L)
+            + " / " + counts.getOrDefault(CompatibilityState.DISABLED, 0L)));
+        lines.add(UiPanel.hint("Counts include recent load failures. Disabled does not mean failed."));
+        lines.add(UiPanel.section("Matches " + rows.size() + "  |  Page " + request.page() + "/" + pages
+            + (request.query().isEmpty() ? "" : "  |  Search: " + request.query())
+            + (request.filter() == null ? "" : "  |  " + request.filter().display())));
+        if (request.page() > pages) lines.add(UiPanel.hint("Page does not exist. Last page: " + pages));
+        else {
+            int start = (request.page() - 1) * size;
+            for (Row row : rows.subList(start, Math.min(start + size, rows.size()))) {
+                lines.add(text("  " + row.state().display() + "  ", colorOf(row.state()))
+                    .append(text(row.name(), SourbyCraftColors.VALUE))
+                    .append(row.jar().isEmpty() ? Component.empty() : text("  (load failed)", SourbyCraftColors.DIM))
+                    .hoverEvent(text(row.reason() + (row.jar().isEmpty() ? "" : "\nJar: " + row.jar())))
+                    .clickEvent(net.kyori.adventure.text.event.ClickEvent.suggestCommand("/plugins " + (row.jar().isEmpty() ? row.name() : row.jar()))));
+            }
+            if (rows.isEmpty()) lines.add(UiPanel.hint("No matching plugins."));
+        }
+        String base = request.filter() != null ? "/plugins filter " + request.filter().name().toLowerCase(Locale.ROOT)
+            : request.query().isEmpty() ? "/plugins" : "/plugins search " + request.query();
+        Component navigation = text("  ");
+        if (request.page() > 1) navigation = navigation.append(UiPanel.action("Previous", base + " " + Math.min(pages, request.page() - 1), "Previous page")).append(text("  "));
+        if (request.page() < pages) navigation = navigation.append(UiPanel.action("Next", base + " " + (request.page() + 1), "Next page"));
+        lines.add(navigation);
+        lines.add(UiPanel.hint("/plugins <plugin> · /plugins search <name> · /plugins filter <state>"));
+        lines.add(UiPanel.footer());
+        return List.copyOf(lines);
     }
 
-    /** Renders the branded plugin roster as one comma-separated line of plugin names. */
-    @Override
-    public boolean execute(CommandSender s, String alias, String[] args) {
-        if (!testPermission(s)) return true;
-        if (args.length == 1) {
-            return detail(s, args[0]);
+    @Override public boolean execute(CommandSender sender, String alias, String[] args) {
+        if (!testPermission(sender)) return true;
+        try {
+            Request request = parse(args);
+            if (request.detail() != null) return detail(sender, request.detail());
+            render(roster(), request, SourbyCraftConfig.cfgInt("ui.plugins-page-size", 12)).forEach(sender::sendMessage);
+        } catch (IllegalArgumentException invalid) {
+            sender.sendMessage(text(invalid.getMessage(), SourbyCraftColors.DANGER));
+            sender.sendMessage(UiPanel.hint(usageMessage));
         }
-        Plugin[] pl = Bukkit.getPluginManager().getPlugins();
-        long active = Arrays.stream(pl).filter(Plugin::isEnabled).count();
-        var loadFailures = PluginLoadDiagnostics.recent();
-
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.PRIMARY));
-        s.sendMessage(text()
-            .append(text(BarUtil.FILLED + " ", SourbyCraftColors.PRIMARY))
-            .append(text("Plugins ", SourbyCraftColors.HEADER))
-            .append(text("(" + active + "/" + pl.length + " active)", SourbyCraftColors.LABEL))
-            .build());
-
-        final Map<CompatibilityState, Integer> counts = new EnumMap<>(CompatibilityState.class);
-        var line = text();
-        boolean first = true;
-        for (Plugin p : pl) {
-            final CompatibilityState state = stateOf(p);
-            counts.merge(state, 1, Integer::sum);
-            if (!first) line.append(text(", ", SourbyCraftColors.DIM));
-            line.append(text(p.getName(), colorOf(state)));
-            first = false;
-        }
-        for (PluginLoadDiagnostics.Entry failure : loadFailures) {
-            counts.merge(CompatibilityState.FAILED, 1, Integer::sum);
-            if (!first) line.append(text(", ", SourbyCraftColors.DIM));
-            line.append(text(failureName(failure.pluginJar()), SourbyCraftColors.PLUGIN_FAILED));
-            first = false;
-        }
-        s.sendMessage(text().append(text("  ", SourbyCraftColors.DIM)).append(line.build()).build());
-
-        var legend = text().append(text("  ", SourbyCraftColors.DIM));
-        for (CompatibilityState state : CompatibilityState.values()) {
-            legend.append(text(state.display() + " " + counts.getOrDefault(state, 0) + "  ", colorOf(state)));
-        }
-        s.sendMessage(legend.build());
-        s.sendMessage(text(DIVIDER, SourbyCraftColors.DIM));
         return true;
+    }
+
+    @Override public List<String> tabComplete(CommandSender sender, String alias, String[] args) {
+        if (!testPermissionSilent(sender)) return List.of();
+        if (args.length == 2 && args[0].equalsIgnoreCase("filter"))
+            return STATES.stream().filter(s -> s.startsWith(args[1].toLowerCase(Locale.ROOT))).toList();
+        if (args.length != 1) return List.of();
+        List<String> options = new ArrayList<>(List.of("search", "filter", "1"));
+        Arrays.stream(Bukkit.getPluginManager().getPlugins()).map(Plugin::getName).forEach(options::add);
+        return options.stream().filter(s -> s.toLowerCase(Locale.ROOT).startsWith(args[0].toLowerCase(Locale.ROOT)))
+            .sorted(String.CASE_INSENSITIVE_ORDER).toList();
     }
 }

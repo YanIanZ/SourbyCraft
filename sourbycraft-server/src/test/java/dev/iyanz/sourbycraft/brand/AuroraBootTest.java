@@ -50,9 +50,9 @@ public class AuroraBootTest {
     void theSummarySaysDegradedRatherThanReportingSuccess() {
         // The failure mode this exists to prevent: a bar that fills to 100% and a line that says
         // everything is fine, while a stage threw on the way past.
-        assertTrue(plain(AuroraBoot.summary(11, 0, 42L)).contains("11 stages online"));
+        assertTrue(plain(AuroraBoot.summary(11, 0, 42L)).contains("11/11 stages completed without error"));
         final String degraded = plain(AuroraBoot.summary(11, 2, 42L));
-        assertTrue(degraded.contains("2 of 11 stages degraded"));
+        assertTrue(degraded.contains("DEGRADED") && degraded.contains("2 failed"));
         assertFalse(degraded.contains("online"));
     }
 
@@ -74,6 +74,6 @@ public class AuroraBootTest {
     }
 
     private static int filled(final String rendered) {
-        return (int) plain(rendered).chars().filter(c -> c == '\u2588').count();
+        return (int) plain(rendered).chars().filter(c -> c == '\u2588' || c == '=').count();
     }
 }

@@ -193,7 +193,12 @@ class MetricsConsumerTest {
         final String sys = plain(SysCommand.renderPerformance(() -> snapshot));
         final HudBars.TpsDisplay hud = HudBars.renderTps(() -> snapshot);
 
-        assertTrue(tps.contains("Worst 10.00 / Median 10.00 / Aggregate 10.00"));
+        assertTrue(tps.contains("Worst 10.00"));
+        assertTrue(tps.contains("Median 10.00"));
+        assertTrue(tps.contains("Aggregate 10.00"));
+        assertFalse(tps.contains("Worst 12.00"));
+        assertFalse(tps.contains("Median 14.00"));
+        assertFalse(tps.contains("Aggregate 16.00"));
         assertTrue(tps.contains("Global: TPS 10.00"));
         assertTrue(sys.contains("TPS: 10.00"));
         assertTrue(plain(hud.name()).contains("TPS 10.00/10.00"));

@@ -39,13 +39,6 @@ public final class GcAdvisor {
         return dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool("branding.gc-advisor.enabled", true);
     }
 
-    private static final String ESC = "\u001B";
-    private static final String RESET = ESC + "[0m";
-
-    private static String fg(TextColor c) {
-        return ESC + "[38;2;" + c.red() + ";" + c.green() + ";" + c.blue() + "m";
-    }
-
     private GcAdvisor() {}
 
     /**
@@ -151,14 +144,14 @@ public final class GcAdvisor {
     /** Compact WARN lines instead of the old box banner (whose advice was outdated anyway). */
     public static String renderWarningBanner(Result r) {
         if (r.acceptable()) return "";
-        final String w = fg(SourbyCraftColors.WARNING);
+        ConsoleStyle style = ConsoleStyle.current();
         StringBuilder sb = new StringBuilder();
-        sb.append(w).append("[SourbyCraft] JVM flag advisor:").append(RESET).append('\n');
-        for (String warn : r.warnings()) {
-            sb.append(w).append("[SourbyCraft]   - ").append(warn).append(RESET).append('\n');
+        sb.append(style.paint("[SourbyCraft] JVM flag advisor:", SourbyCraftColors.WARNING)).append('\n');
+        for (String warning : r.warnings()) {
+            sb.append(style.paint("[SourbyCraft]   - " + warning, SourbyCraftColors.WARNING)).append('\n');
         }
-        sb.append(w).append("[SourbyCraft]   Recommended (Java 25): -Xms2G -Xmx<75-85% of allocation> "
-            + "-XX:+UseZGC -XX:ZUncommitDelay=60 --add-modules=jdk.incubator.vector").append(RESET).append('\n');
+        sb.append(style.paint("[SourbyCraft]   Recommended (Java 25): -Xms2G -Xmx<75-85% of allocation> "
+            + "-XX:+UseZGC -XX:ZUncommitDelay=60 --add-modules=jdk.incubator.vector", SourbyCraftColors.WARNING)).append('\n');
         return sb.toString();
     }
 }
