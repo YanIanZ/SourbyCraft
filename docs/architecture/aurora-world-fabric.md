@@ -183,5 +183,14 @@ anything under load.
 | Corrupted object | Read throws; other chunks unaffected. Pass |
 | COW isolation | `AwfWorldTest` (library). Pass |
 
-Still open: backend timeout/disconnect (no network backend exists), a server-level crash test
-(kill -9 during saves with players), and any measurement under real chunk load.
+Server-level crash test (`scripts/verify_crash.py --awf`, 2026-10-05, post-migration build): a
+fresh world stored through AWF (5 s commit interval) is killed with SIGKILL three times, 3, 8 and
+15 s into save traffic from 4 moving clients and a block site rewritten every second. Before each
+kill the checkpoint is flushed and every storage reports 0 dirty chunks and 0 pending commits.
+After every crash the server boots, the checkpoint is exact (64/64 blocks, 24/24 entities), every
+store holding data points at a committed generation, and no region file is written: 53/53 checks.
+The world's game time rewinds to the last boot, which is not AWF's doing (see the level.dat
+finding in TODO.md); it fails the same way on region files.
+
+Still open: backend timeout/disconnect (no network backend exists) and any measurement under
+sustained real chunk load.

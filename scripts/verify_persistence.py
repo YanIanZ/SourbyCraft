@@ -105,7 +105,33 @@ def boot(jar, directory, heap_mib):
                "-jar", str(Path(jar).resolve()), "--nogui"]
     server = Server(command, directory)
     server.await_ready(READY_TIMEOUT)
+    server.console_ready_seconds = await_console(server)
     return server
+
+
+def await_console(server, timeout=60):
+    """Wait until a console command actually runs, and return how long that took.
+
+    "Done (" is not that moment on this engine. Rebooting a world stored through Aurora World
+    Fabric, the first console commands sent right after "Done" failed with a
+    NullPointerException in Commands.executeCommandInContext (the console CommandSourceStack had
+    no level) for about two seconds; a probe that sends its setup at "Done" then measures
+    nothing. Tracked in TODO.md as its own finding.
+    """
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        before = len(server.text)
+        server.send("time query gametime")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            produced = server.text[before:]
+            if "game time is" in produced:
+                return round(time.monotonic() - started, 1)
+            if "Command exception" in produced or "unexpected error" in produced:
+                break
+            time.sleep(0.2)
+        time.sleep(0.5)
+    raise RuntimeError(f"console commands still failing {timeout}s after Done")
 
 
 def stop_cleanly(server, checks, label):
@@ -175,11 +201,22 @@ def game_time(server):
 def write_state(server, checks):
     x, y, z = SITE
     server.send(f"forceload add {x} {z} {x + PROBE_SIDE} {z + PROBE_SIDE}")
-    time.sleep(2)
     # A solid floor first, so entities land on something deterministic instead of falling.
-    server.send(f"fill {x} {y - 1} {z} {x + PROBE_SIDE - 1} {y - 1} {z + PROBE_SIDE - 1} "
-                f"{PROBE_BLOCK}")
-    time.sleep(1.5)
+    # Retried until the chunks exist: on a fresh world the force-loaded chunks are still being
+    # generated for a few seconds, and a fill sent then answers "That position is not loaded"
+    # and writes nothing -- which a crash test then reported as 64 lost blocks.
+    fill = (f"fill {x} {y - 1} {z} {x + PROBE_SIDE - 1} {y - 1} {z + PROBE_SIDE - 1} "
+            f"{PROBE_BLOCK}")
+    produced = ""
+    for _ in range(20):
+        produced = run(server, fill, r"Successfully filled|No blocks were filled|not loaded")
+        if "not loaded" not in produced:
+            break
+        time.sleep(3)
+    written = re.search(r"Successfully filled (\d+) block", produced)
+    if not checks.record("write: probe floor placed", written is not None and int(written.group(1)) == PROBE_BLOCKS,
+                         f"{written.group(1) if written else 0} of {PROBE_BLOCKS} blocks"):
+        raise RuntimeError("probe floor was not written; nothing later in this run would mean anything")
     for i in range(PROBE_ENTITIES):
         server.send(f"summon {PROBE_ENTITY} {x + (i % PROBE_SIDE)} {y} "
                     f"{z + (i // PROBE_SIDE)} {{Tags:[\"persist_probe\"],NoGravity:1b}}")

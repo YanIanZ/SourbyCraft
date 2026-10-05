@@ -81,6 +81,7 @@ structurally valid and hold the wrong chunk.
 | Local fixture, build 46c | **16 / 16 checks** |
 | Deployment server, live restart | **4 / 4** — 64/64 blocks, 24/24 entities, game time advanced, gamerule survived |
 | Deployment server (Sourby Demo), post-migration build (2026-10-05) | **20 / 20** — `verify_persistence_panel.py`: 3 real panel stop/start cycles, each reading back 64 blocks, 24 entities and an advancing game time written by the previous boot; clean shutdowns, no boot errors; probe placed at y=300 and removed afterwards. No player check: the server is online-mode |
+| Crash (`verify_crash.py`), post-migration build (2026-10-05) | Region files **49 / 49**, AWF **53 / 53**: three SIGKILLs 3, 8 and 15 s into save traffic (4 moving clients, a block site rewritten every second); every boot comes up, logs no chunk corruption and holds the flushed checkpoint exactly. Known limitation, reported as XFAIL: game time rewinds to the last boot, because level.dat is only written at startup and clean stop |
 | Local fixture, post-migration build (2026-10-05) | **104 / 104** — 4 consecutive restarts each reading back the previous boot's writes; probe player's inventory, XP level and position round-tripped on disk and through the server; last stop issued with 6 moving clients and the probe player online |
 
 Two limits are stated rather than hidden:

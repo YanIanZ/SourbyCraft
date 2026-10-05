@@ -32,10 +32,22 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
   - deployment (Sourby Demo, panel.parama.cloud): `verify_persistence_panel.py` 20/20 (3 restart
     panel nyata; blok, entity, game time; shutdown bersih; probe dibersihkan). Data pemain tidak
     bisa diuji di sana karena `online-mode=true` menolak klien headless.
-- [ ] Tes restart/crash untuk setiap perubahan save async (DEV-G)
+- [x] Tes restart/crash untuk setiap perubahan save async (DEV-G), 2026-10-05:
+  `verify_crash.py` — region file 49/49, AWF 53/53; tiga `kill -9` (3/8/15 detik) saat penyimpanan
+  berjalan dengan 4 klien bergerak; checkpoint yang sudah di-flush/commit selalu utuh, tidak ada
+  korupsi. Satu keterbatasan diketahui (lihat item berikut)
+- [ ] **`level.dat` tidak disimpan oleh `save-all` maupun autosave** (warisan Folia/Canvas): game time
+  dan perubahan spawn dunia mundur ke boot terakhir setelah crash. Tidak ada korupsi; berkas lain
+  (chunk, entity, cuaca, gamerule, jam siang/malam) tersimpan. Bukti: `verify_crash.py` XFAIL.
+  Perbaikan perlu menyimpan level data dari global tick tanpa melanggar kepemilikan region
+- [ ] Perintah konsol kadang gagal dengan `NullPointerException` (`CommandSourceStack.getLevel()`
+  null) dalam ~2 detik setelah `Done`, teramati saat boot ulang dunia AWF (direproduksi sekali,
+  lalu tidak muncul di run berikutnya). Akar masalah belum ditemukan; harness sekarang menunggu
+  perintah konsol pertama yang berhasil
 - [ ] Review konkurensi penulisan region-file (DEV-G)
 - [ ] Bukti "tidak ada regresi kepemilikan region" dan "tidak ada regresi persistensi" (gate rilis)
-- [-] AWF: crash di level server dengan pemain, backend terputus, beban berkelanjutan, dan investigasi
+- [-] AWF: crash di level server dengan klien sudah lulus (53/53, `verify_crash.py --awf`). Sisa:
+  backend terputus (belum ada backend jaringan), beban berkelanjutan, dan investigasi
   commit awal 529 chunk yang butuh 105,5 detik di panel demo (`architecture/aurora-world-fabric.md`)
 
 ### Konkurensi
