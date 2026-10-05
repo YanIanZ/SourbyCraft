@@ -232,7 +232,21 @@ public final class AwfWorld {
         }
     }
 
+    /**
+     * Held from the snapshot of dirty chunks until the store has the commit, so commits reach the
+     * store in snapshot order. Without it a periodic commit that snapshotted a chunk could lose
+     * the race for the store to a flush that snapshotted the chunk's newer bytes, land last, and
+     * leave the store with the older bytes while the chunk was no longer dirty.
+     */
+    private final Object commitLock = new Object();
+
     private AwfStore.CommitResult commit(final PersistenceMode mode, final int maxAttempts) {
+        synchronized (this.commitLock) {
+            return commitInOrder(mode, maxAttempts);
+        }
+    }
+
+    private AwfStore.CommitResult commitInOrder(final PersistenceMode mode, final int maxAttempts) {
         final long prepared = System.nanoTime();
         final Map<ChunkKey, Long> taken = new HashMap<>(this.dirty);
         final Map<ChunkKey, byte[]> changed = new HashMap<>();

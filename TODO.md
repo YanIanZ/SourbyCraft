@@ -44,7 +44,10 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
   null) dalam ~2 detik setelah `Done`, teramati saat boot ulang dunia AWF (direproduksi sekali,
   lalu tidak muncul di run berikutnya). Akar masalah belum ditemukan; harness sekarang menunggu
   perintah konsol pertama yang berhasil
-- [ ] Review konkurensi penulisan region-file (DEV-G)
+- [-] Review konkurensi penulisan region-file (DEV-G), dimulai 2026-10-06. Diperbaiki: dua commit AWF
+  bisa mendarat di store dalam urutan terbalik dari snapshot-nya, sehingga store menyimpan isi chunk
+  lama (`AwfCommitOrderTest`). Sisa: `AwfRegionStorage.write` vs `close` (tulisan yang lolos cek
+  `closed` sesaat sebelum close bisa hilang), flush bersamaan dari banyak region, dan dokumen review
 - [ ] Bukti "tidak ada regresi kepemilikan region" dan "tidak ada regresi persistensi" (gate rilis)
 - [-] AWF: crash di level server dengan klien sudah lulus (53/53, `verify_crash.py --awf`). Sisa:
   backend terputus (belum ada backend jaringan), beban berkelanjutan, dan investigasi
