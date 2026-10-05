@@ -30,7 +30,7 @@ The CI workflow `.github/workflows/build.yml` (single `Build 26.2 jar` job, push
 - `:sourbyapi` — branded API artifact `dev.iyanz.sourbycraft:sourbyapi`. **Zero custom source**; it republishes `paper-api` + `canvas-api` under the SourbyCraft group id (see `sourbyapi/README.md`). Materialized from `canvas-api/build.gradle.kts` via the `upstreams.canvas { patchFile { ... } }` block in root `build.gradle.kts`.
 - `:sourbycraft-server` — the server. Source-set merge in `build.gradle.kts.patch` adds `paper-server` + `canvas-server` to the main and test source sets, and `src/log4jPlugins/java` (own log4j2 pattern plugins, e.g. `%scLogger`).
 - `:Metal` — vendored Minecraft library-decode codegen. `src/` empty until `setup_metal.sh` runs.
-- SourbyPatcher and SourbyClip are **not in this repository**. They live in private repos (`YanIanZ/SourbyPatcher`, `YanIanZ/SourbyClip`), pinned by `build-data/private-toolchain.lock.json` and by `patcherSha256`/`clipSha256` in `gradle.properties`. SourbyClip (`dev.iyanz:sourbyclip:${clipVersion}`) is wired in `sourbycraft-server/build.gradle.kts.patch`.
+- SourbyPatcher and SourbyClip are **not in this repository**. They live in private repos (`YanIanZ/SourbyPatcher`, `YanIanZ/SourbyClip`; local clones at `~/Sourby/SourbyPatcher` and `~/Sourby/SourbyClip`, each with its own `AGENTS.md` describing the release-into-SourbyCraft procedure), pinned by `build-data/private-toolchain.lock.json` and by `patcherSha256`/`clipSha256` in `gradle.properties`. SourbyClip (`dev.iyanz:sourbyclip:${clipVersion}`) is wired in `sourbycraft-server/build.gradle.kts.patch`.
 - `test-plugin/`, `legacy-test-plugin/` — opt-in projects; included when `-PincludeTestPlugin=true` (CI passes it). The pre-26.2 NMS-compat `test-harness/` and its `nms-compat.yml` workflow were removed; history has them if a 26.2 harness is ever rebuilt.
 
 ## Patch application
@@ -88,6 +88,10 @@ Wait for `Done (` in console. Build 47+ `/ver` reports a SourbyCraft-owned ident
 - The `slimServerJar` task's `externalizeArtifactDirs` list is matched by path prefix against the paperclip layout — when Canvas/weaver bumps versions, jars may move and the task will **fail loudly** with `stripped 0 libraries`. That's the intended signal to update the list.
 - `applyAllPatches` is config-cache friendly but `writeBuildInfo` is opted out (`notCompatibleWithConfigurationCache`) because it reads git branch via `providers.exec` at execution time.
 
+
+## Project to-do list
+
+`TODO.md` is the single prioritized (P0–P3) to-do list. When a task closes, tick it there and in its source doc with evidence.
 
 ## Non-misleading development rules
 
