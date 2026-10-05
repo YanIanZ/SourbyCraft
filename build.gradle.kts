@@ -68,7 +68,7 @@ paperweight {
 // on those public repos. Deliberately kept BUNDLED: paperclip/plugin-loader
 // bootstrap deps (maven-resolver*, sisu, plexus*, commons-codec, apache httpclient),
 // our own non-public artifacts (dev.iyanz.sourbycraft:sourbyapi,
-// io.canvasmc.httpclient, ca.spottedleaf:leafpile, net.openhft:affinity), and jline
+// ca.spottedleaf:leafpile, net.openhft:affinity), and jline
 // (console-critical). Versions are matched at task-execution time by artifact-dir
 // prefix, so a paperweight version bump doesn't silently no-op the strip.
 val externalizeArtifactDirs = listOf(
@@ -156,7 +156,6 @@ val slimServerJar = tasks.register("slimServerJar") {
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
-val canvasMavenPublicUrl = "https://maven.canvasmc.io/public/"
 
 // SourbyCraft — resolve the human-facing suffix version once (banner + /ver read this
 // through META-INF/sourbycraft-build.properties). Branch is read via providers.exec so
@@ -202,7 +201,6 @@ subprojects {
         }
         mavenCentral()
         maven(paperMavenPublicUrl)
-        maven(canvasMavenPublicUrl)
         maven { url = uri("${rootDir}/sourby-maven") }
     }
 

@@ -1,7 +1,6 @@
 package io.canvasmc.canvas.util;
 
 import com.google.common.base.Preconditions;
-import io.canvasmc.canvas.ClientV2;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import java.io.File;
 import java.io.IOException;
@@ -42,7 +41,6 @@ public class Util {
     /**
      * The API client for the {@code canvas} project slug
      */
-    public static final ClientV2 CANVAS_CLIENT = ClientV2.getClientFor("canvas");
 
     private static final ThreadLocal<XoroshiroRandomSource> XOROSHIRO = ThreadLocal.withInitial(() -> new XoroshiroRandomSource(0L, 0L));
     private static final ThreadLocal<SingleThreadedRandomSource> SIMPLE = ThreadLocal.withInitial(() -> new SingleThreadedRandomSource(0L));

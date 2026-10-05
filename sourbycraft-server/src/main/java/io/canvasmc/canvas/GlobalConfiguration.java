@@ -67,7 +67,6 @@ public class GlobalConfiguration extends Part {
 
     @UnknownNullability("nonnull after reload is called")
     private static GlobalConfiguration INSTANCE;
-    private static ClientV2.BuildStatus BUILD_STATUS = ClientV2.BuildStatus.UNKNOWN;
     private static boolean ENABLE_FASTER_RANDOM = true;
 
     static {
@@ -101,33 +100,6 @@ public class GlobalConfiguration extends Part {
                 public void onFinishLoad(final GlobalConfiguration instance) {
 
                     postLoad(instance);
-
-                    CompletableFuture.supplyAsync(() -> {
-                        final ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
-                        final int buildNum = buildInfo.buildNumber().orElse(-1);
-
-                        ClientV2.BuildStatus buildStatus = ClientV2.BuildStatus.UNKNOWN;
-                        if (buildNum == -1) {
-                            buildStatus = ClientV2.BuildStatus.LOCAL;
-                        }
-                        else {
-                            try {
-                                buildStatus = Util.CANVAS_CLIENT.getBuild(buildNum).buildStatus();
-                            } catch (final Throwable ignored) {
-                            }
-                        }
-
-                        return buildStatus;
-                    }).thenAccept(buildStatus -> RegionizedServer.getInstance().addTask(() -> {
-                        BUILD_STATUS = buildStatus;
-                        // SourbyCraft - suppress Canvas's build-channel nag. Our build is never a
-                        // recognized CanvasMC release/beta/local channel, so Canvas would otherwise
-                        // warn on every startup ("Running unknown build channel...", "Running a beta
-                        // build...", "You are running a development version of Canvas, which may not be
-                        // production-ready, be very careful!"). A SourbyCraft release must not advertise
-                        // Canvas's build status. BUILD_STATUS is still assigned above so getBuildStatus()
-                        // keeps working for any code that reads it.
-                    }));
                 }
             },
             Style.create()
@@ -267,9 +239,6 @@ public class GlobalConfiguration extends Part {
         return INSTANCE;
     }
 
-    public static ClientV2.BuildStatus getBuildStatus() {
-        return BUILD_STATUS;
-    }
 
     public static RandomSource createFastRandom() {
         return ENABLE_FASTER_RANDOM ? new FasterRandomSource(RandomSupport.generateUniqueSeed()) : new SimpleThreadUnsafeRandom(RandomSupport.generateUniqueSeed());

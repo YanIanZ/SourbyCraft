@@ -138,8 +138,9 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
   paperweight 2.0.0-beta.24; jar reproducible dari clone bersih. Sisa: sama dengan M-3.
 - [ ] Rename package internal `io.canvasmc.*` yang bukan API plugin (perlu dipetakan dulu mana yang
   dipakai plugin: `sourbyapi/src/main/java/io/canvasmc` adalah API)
-- [ ] Hapus dependency `io.canvasmc.httpclient` (tidak di-import siapa pun) beserta repo Maven
-  `maven.canvasmc.io` yang hanya dibutuhkan untuknya
+- [x] Hapus dependency `io.canvasmc.httpclient` beserta repo Maven `maven.canvasmc.io` (2026-10-05).
+  Ternyata dipakai: `ClientV2` memanggil `canvasmc.io/api/v2` dari `/version` dan setelah config
+  dimuat jika `Build-Number` terisi (tidak pernah di build CI). Panggilan itu ikut dihapus.
 - [ ] Putuskan nama branch rilis `release/26.2-canvas` (dipakai workflow publikasi dan auto-updater)
 - [ ] Rencana migrasi nama file konfigurasi `config/canvas-server.yml` / `canvas-worlds.yml`
   (sekarang sengaja tetap, agar konfigurasi server yang sudah ada tetap terbaca)

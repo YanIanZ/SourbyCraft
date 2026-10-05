@@ -1,15 +1,11 @@
 package io.canvasmc.canvas.util.version;
 
 import com.destroystokyo.paper.util.VersionFetcher;
-import io.canvasmc.canvas.ClientV2;
-import io.canvasmc.canvas.GlobalConfiguration;
-import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.ServerBuildInfoImpl;
 import java.lang.management.ManagementFactory;
 import java.util.Arrays;
 import java.util.List;
-import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicBoolean;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
@@ -204,28 +200,9 @@ public class CanvasVersionFetcher implements VersionFetcher {
     }
 
     private Status computeStatus() {
-        final ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
-        final OptionalInt buildNumber = buildInfo.buildNumber();
-
-        if (buildNumber.isEmpty()) {
-            return new LocalStatus();
-        }
-
-        final int localNum = buildNumber.getAsInt();
-        try {
-            ClientV2.Build build = Util.CANVAS_CLIENT.getLatestBuild(buildInfo.minecraftVersionId(), true);
-            final int distance = build.buildNumber() - localNum;
-
-            return switch (GlobalConfiguration.getBuildStatus()) {
-                case LOCAL -> new LocalStatus();
-                case STABLE -> new StableStatus(distance);
-                case EXPERIMENTAL -> new BetaStatus(distance);
-                case UNKNOWN -> new ErrorStatus();
-            };
-        } catch (Throwable thrown) {
-            GlobalConfiguration.LOGGER.error("Error parsing version information from CanvasMC's Jenkins API", thrown);
-            return new ErrorStatus();
-        }
+        // SourbyCraft - no remote build lookup. Canvas asked canvasmc.io for its own build channel
+        // here; SourbyCraft builds are not Canvas builds, and updates are SourbyCraft's auto-updater.
+        return new LocalStatus();
     }
 
     private static TextComponent formatList(final List<String> inputArguments) {
@@ -250,64 +227,11 @@ public class CanvasVersionFetcher implements VersionFetcher {
         boolean isError();
     }
 
-    private static class ErrorStatus implements Status {
-        @Contract(value = " -> new", pure = true)
-        @Override
-        public Component getStatus() {
-            return text("ERROR", RED, TextDecoration.BOLD);
-        }
-
-        @Override
-        public boolean isError() {
-            return true;
-        }
-    }
-
     private static class LocalStatus implements Status {
         @Contract(value = " -> new", pure = true)
         @Override
         public Component getStatus() {
             return text("DEV", RED, TextDecoration.BOLD);
-        }
-
-        @Override
-        public boolean isError() {
-            return false;
-        }
-    }
-
-    private record BetaStatus(int distance) implements Status {
-        @Contract(value = " -> new", pure = true)
-        @Override
-        public Component getStatus() {
-            TextComponent base = text("BETA", YELLOW, TextDecoration.BOLD);
-            if (distance > 0) {
-                base = base.hoverEvent(HoverEvent.showText(text("You are " + distance + " builds out of date, please update ASAP!", YELLOW)));
-            }
-            else {
-                base = base.hoverEvent(HoverEvent.showText(text("You are on the latest version! :)", GREEN)));
-            }
-            return base;
-        }
-
-        @Override
-        public boolean isError() {
-            return false;
-        }
-    }
-
-    private record StableStatus(int distance) implements Status {
-        @Contract(value = " -> new", pure = true)
-        @Override
-        public Component getStatus() {
-            TextComponent base = text("STABLE", GREEN, TextDecoration.BOLD);
-            if (distance > 0) {
-                base = base.hoverEvent(HoverEvent.showText(text("You are " + distance + " builds out of date, please update ASAP!", YELLOW)));
-            }
-            else {
-                base = base.hoverEvent(HoverEvent.showText(text("You are on the latest version! :)", GREEN)));
-            }
-            return base;
         }
 
         @Override
