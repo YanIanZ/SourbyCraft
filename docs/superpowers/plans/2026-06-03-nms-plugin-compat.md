@@ -16,7 +16,7 @@
 - `createReobfPaperclipJar` task already exists (paperweight-provided); no new task definition required, only wiring.
 - Spec: `/Users/rheninxy/Sourby/SourbyCraft/docs/superpowers/specs/2026-06-03-nms-plugin-compat-design.md`
 
-**Working tree precondition:** A `feat/pvp-server` branch with the unify-variants commits landed (commits `0c96424` through `4e9d1cc`). Boot of the existing mojmap jar verified in `/Users/rheninxy/Sourby/SourbyCraft/TestServer/`.
+**Working tree precondition:** A `feat/pvp-server` branch with the unify-variants commits landed (commits `477c2a9` through `1310dc2`). Boot of the existing mojmap jar verified in `/Users/rheninxy/Sourby/SourbyCraft/TestServer/`.
 
 ---
 

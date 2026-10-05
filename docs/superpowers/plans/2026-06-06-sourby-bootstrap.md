@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java 25 (JDK HttpClient + MessageDigest only; no external HTTP libs since those are what we're externalizing), gradle Kotlin DSL, paperweight v2.0-beta.19, jar-manipulation via `java.util.jar.JarFile` + `JarOutputStream`.
 
-**Spec:** `docs/superpowers/specs/2026-06-06-sourby-bootstrap-design.md` (committed `029eaa2`).
+**Spec:** `docs/superpowers/specs/2026-06-06-sourby-bootstrap-design.md` (committed `3a1585f`).
 
 ---
 

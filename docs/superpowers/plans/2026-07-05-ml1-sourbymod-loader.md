@@ -91,7 +91,7 @@ public final class ModLoader {
 
 - Replace the r47 mods/ WARN block in `SourbyCraftConfig.init` (the
   `java.nio.file.Files.createDirectories(Path.of("mods"))` + jar-count WARN added in
-  commit 0ce87d3): DELETE it — ModLoader.bootstrap now owns mods/ creation + reporting.
+  commit 2aaefe3): DELETE it — ModLoader.bootstrap now owns mods/ creation + reporting.
   (The other mods/ mkdir at ~line 451 inside the swm auto-install block can stay or go;
   prefer removing the duplicate since bootstrap creates it. Verify it's redundant.)
 

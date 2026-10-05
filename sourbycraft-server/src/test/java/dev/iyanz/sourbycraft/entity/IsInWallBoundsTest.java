@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
  * trade is only free while the scalars are exactly what the API would have produced, and
  * twice it was not: the translation was dropped once and a reference to the removed
  * variable was left behind once, taking three follow-up commits to settle
- * ({@code 676be16}, {@code c08e691}, {@code 15b4218}, {@code 40cc1ff}).
+ * ({@code ad40458}, {@code 3438c7b}, {@code 6234fdc}, {@code 24f1e63}).
  *
  * <p>These assertions are exact rather than approximate, deliberately. Halving by
  * {@code * 0.5} and by {@code / 2.0} are the same exact power-of-two scaling in IEEE 754,

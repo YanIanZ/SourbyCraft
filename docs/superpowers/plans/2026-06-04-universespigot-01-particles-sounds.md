@@ -926,9 +926,9 @@ Expected: `>= 6`.
 
 - [ ] **Step 4: Brand identity preserved**
 
-Run: `git diff 560d499..HEAD -- patches/server/0003-Changed-branding.patch`
+Run: `git diff e1df2f0..HEAD -- patches/server/0003-Changed-branding.patch`
 
-(Where `560d499` is the spec-commit SHA — the immediate pre-01 base. Use `git log --oneline | grep '01 particles' | head -1` to locate it if needed.)
+(Where `e1df2f0` is the spec-commit SHA — the immediate pre-01 base. Use `git log --oneline | grep '01 particles' | head -1` to locate it if needed.)
 
 Expected: empty output. (`0003-Changed-branding.patch` MUST NOT be modified by sub-project 01.)
 
@@ -938,7 +938,7 @@ Expected: `>= 1` (the existing line that aliases Paper as compatible is still pr
 
 - [ ] **Step 5: Foundation patch untouched**
 
-Run: `git diff 560d499..HEAD -- patches/minecraft/0042-us-particles-fall-death.patch`
+Run: `git diff e1df2f0..HEAD -- patches/minecraft/0042-us-particles-fall-death.patch`
 
 Expected: empty output.
 
@@ -979,8 +979,8 @@ After all 8 tasks complete, every row below must be true:
 | Accessor tests green | `./gradlew :sourbycraft-server:test --tests SourbyCraftConfigAccessorsTest` | 19/19 |
 | Full test suite green | `./gradlew :sourbycraft-server:test` | green |
 | `applyAllPatches` succeeds | `./gradlew applyAllPatches` | exit 0 |
-| Brand patch untouched | `git diff 560d499..HEAD -- patches/server/0003-Changed-branding.patch` | empty |
-| Foundation patch untouched | `git diff 560d499..HEAD -- patches/minecraft/0042-us-particles-fall-death.patch` | empty |
+| Brand patch untouched | `git diff e1df2f0..HEAD -- patches/server/0003-Changed-branding.patch` | empty |
+| Foundation patch untouched | `git diff e1df2f0..HEAD -- patches/minecraft/0042-us-particles-fall-death.patch` | empty |
 | Upstream cache clean after Tasks 5+7 | `git -C .gradle/caches/.../paper/src/minecraft/java status --porcelain` | empty |
 
 ## Self-Review Notes

@@ -55,7 +55,7 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
 
 ### Pengujian panel (panel.parama.cloud)
 - [ ] Jalankan build terbaru di panel setelah akses diberikan: boot, plugin legacy lewat bridge,
-  alur pemain nyata (Vault/EssentialsX sudah enable dengan 0 pelanggaran bridge pada `76813c8`)
+  alur pemain nyata (Vault/EssentialsX sudah enable dengan 0 pelanggaran bridge pada `9a15f51`)
 
 ### Baseline tersertifikasi (DEV-B, AURORA-C, ROADMAP M8)
 - [ ] Baseline idle

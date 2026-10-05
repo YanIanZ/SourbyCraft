@@ -183,10 +183,10 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 
 ## J. Aurora release gate
 
-- [x] patch regeneration clean — CI run 437 (`a5fc62a7`, 2026-09-26): `applyAllPatches` including the Build 47 Paper patches
-- [x] Java tests pass — CI run 437 (`a5fc62a7`, 2026-09-26): `:sourbyapi:test :sourbycraft-server:test :test-plugin:test` (9480 tests, 7 skipped) and 219 Python tests
-- [x] boot pass — CI run 437 (`a5fc62a7`, 2026-09-26): boot to `Done (` with the test plugin, both metrics markers, `/tps` `/mspt` spark RAM PERF output markers (single CI boot, not a soak)
-- [x] shutdown pass — CI run 437 (`a5fc62a7`, 2026-09-26): `stop`, worlds and player data saved, RegionFile I/O drained, clean exit
+- [x] patch regeneration clean — CI run 437 (`994025aa`, 2026-09-26): `applyAllPatches` including the Build 47 Paper patches
+- [x] Java tests pass — CI run 437 (`994025aa`, 2026-09-26): `:sourbyapi:test :sourbycraft-server:test :test-plugin:test` (9480 tests, 7 skipped) and 219 Python tests
+- [x] boot pass — CI run 437 (`994025aa`, 2026-09-26): boot to `Done (` with the test plugin, both metrics markers, `/tps` `/mspt` spark RAM PERF output markers (single CI boot, not a soak)
+- [x] shutdown pass — CI run 437 (`994025aa`, 2026-09-26): `stop`, worlds and player data saved, RegionFile I/O drained, clean exit
 - [ ] restart persistence pass
 - [ ] representative benchmark report
 - [ ] JFR reviewed
@@ -209,7 +209,7 @@ See the status table in [releases/26.2-build-47-aurora-nexus.md](releases/26.2-b
 - [-] bridge scheduler routing (sync → global region, async → governed `BRIDGE_IO`), cancellation, disable cleanup
 - [-] SAFE-mode violation counting, quarantine, per-plugin telemetry (`/plugins <name>`)
 - [-] entity-owner / region-owner routes with real callers — region-owner route for sync tasks scheduled from region context (`sync-route = "caller-region"`); entity-owner route not implemented (the scheduler call names no entity); CI fixture asserts a region-context runTask reads a block
-- [-] run representative legacy plugins through the bridge — synthetic fixture passes in CI; Vault and EssentialsX enabled on the demo panel at `76813c8` with 0 bridge violations at the post-boot sample, but player workflows and soak remain open
+- [-] run representative legacy plugins through the bridge — synthetic fixture passes in CI; Vault and EssentialsX enabled on the demo panel at `9a15f51` with 0 bridge violations at the post-boot sample, but player workflows and soak remain open
 - [x] startup cache mechanics: fingerprints, environment key, per-entry integrity, atomic write
 - [x] plugin descriptor index on a bounded STARTUP lane, with boot diagnostics
 - [x] class index and compatibility scan (constant pool), dependency graph, startup profile

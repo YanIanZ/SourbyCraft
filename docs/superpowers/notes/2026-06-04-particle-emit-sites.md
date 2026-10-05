@@ -1,7 +1,7 @@
 # NMS particle emit sites — fall + death (Paper 1.21.11 mojmap)
 
 Inputs for patch `0034-us-particles-fall-death.patch`. Captured after the upstream
-paperweight cache populated paper-server sources on commit `a9c6ec4`.
+paperweight cache populated paper-server sources on commit `19e81a0`.
 
 Source root: `.gradle/caches/paperweight/upstreams/server-work/paper/src/minecraft/java/`
 

@@ -4,7 +4,7 @@ Phase 2 of [AURORA-INDEPENDENT-ENGINE.md](AURORA-INDEPENDENT-ENGINE.md).
 This document extracts the current dependencies and specifies the first migration slice.
 It does not introduce a scheduler, worker pool, or replacement backend.
 
-Source baseline: local 42204c7; architecture proposal 1cb4eec. Existing configuration,
+Source baseline: local 99801ba; architecture proposal dec5d3c. Existing configuration,
 metrics, plugin compatibility, and completed tests remain in place.
 
 ## Current dependency map

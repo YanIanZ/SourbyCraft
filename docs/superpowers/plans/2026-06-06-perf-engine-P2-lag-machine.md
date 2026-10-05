@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java (Paper fork, mojmap), paperweight v2.0-beta.19, Brigadier (no new cmds; uses existing `Knobs.logLoaded("boot")` for verification).
 
-**Spec:** `docs/superpowers/specs/2026-06-06-perf-engine-P2-lag-machine-design.md` (committed `8fd262a`).
+**Spec:** `docs/superpowers/specs/2026-06-06-perf-engine-P2-lag-machine-design.md` (committed `44ad559`).
 
 ---
 

@@ -67,7 +67,7 @@ Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
   `getPendingTasks` lists them too; `getActiveWorkers` does not (bridged async bodies run on the
   governed Bridge I/O lane, not as `CraftAsyncTask` workers).
 - **Operator guide:** [testing legacy plugins](../guides/testing-legacy-plugins.md).
-- **CI evidence (run 440, `9c933375`, 2026-09-27).** The Paper patches applied. A second CI boot
+- **CI evidence (run 440, `7c2bb0db`, 2026-09-27).** The Paper patches applied. A second CI boot
   with `aurora.bridge.mode = "safe"` loaded `legacy-test-plugin` (no `folia-supported`):
   - admission line logged; all 13 boot stages online;
   - `runTask` ran on `Folia Region Scheduler Thread #3` (the global region);
@@ -77,16 +77,16 @@ Code: `dev.iyanz.sourbycraft.bridge` plus four Paper patches under
     counted as 1 fatal violation, below the quarantine threshold;
   - `/plugins LegacyBridgeTest` reported 4 scheduler redirects; `/perf governor` reported Bridge
     I/O 1 submitted, 1 completed, 0 rejected; clean exit.
-- **CI evidence (run 445, `2f2ecb64`, 2026-09-27), caller-region route.** `runTask` called from a
+- **CI evidence (run 445, `d919ea66`, 2026-09-27), caller-region route.** `runTask` called from a
   chunk-load callback ran on `Folia Region Scheduler Thread #0` and read the block there
   (`LEGACY_BRIDGE_REGION_SYNC_OK ... block=AIR`). The same kind of access from a task scheduled in
   `onEnable` ran on the global region and was refused (`WORLD_ACCESS_REFUSED`, 1 fatal
   violation). `isQueued` saw a bridged task (`QUEUED_OK`). `/plugins`: 6 scheduler redirects,
   1 owner handoff, not quarantined; 13 boot stages online.
-- **CI run 450 (`38bc72be`).** `getPendingTasks` listed a bridged task (`PENDING_OK`). `/perf
+- **CI run 450 (`52568fb0`).** `getPendingTasks` listed a bridged task (`PENDING_OK`). `/perf
   plugins` showed `bridged 1` and `LegacyBridgeTest redirects / handoffs / rejected /
   violations: 6 / 1 / 0 / 1`.
-- **Panel staging (2026-09-29, `76813c8`).** With `mode = "safe"`, real Vault
+- **Panel staging (2026-09-29, `9a15f51`).** With `mode = "safe"`, real Vault
   `1.7.3-b131` and EssentialsX `2.22.1-dev+25-cfb6f12` enabled through the bridge.
   EconomyShopGUI-Premium `6.4.1` loaded and hooked into Vault/EssentialsX Economy. `/plugins`
   reported 6/6 active, 2 bridged, 0 failed; at the post-boot sample, Essentials had 5 scheduler

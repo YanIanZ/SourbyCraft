@@ -6,9 +6,9 @@ upstream commits moved.
 
 | Date | Commit | `canvasRef` | Upstream delta | Patch files needing intervention | Detail |
 | --- | --- | --- | --- | --- | --- |
-| 2026-07-20 | `fa3a0b2c` | Folia → Canvas `df0f2ebb` | Re-platform, not a rebase | n/a | Upstream switched from Folia to Canvas; 146 vendored feature patches were removed rather than ported. Not comparable with later rows |
-| 2026-08-30 | `7a1dc150` | `df0f2ebb` → `6a600b89` | 86 commits, +4315 −7806 | **7** | 2 build-script hunks dropped (`sourbycraft-server/build.gradle.kts.patch`, `sourbyapi/build.gradle.kts.patch`); 2 config patches rebuilt (`GlobalConfiguration`, `WorldConfig`); 2 Spark patches deleted as obsolete (later re-added for Sourby metrics/config); 1 feature patch (`0003`, waypoint manager) parked in `.skipped/` because upstream moved the file into its region-threading patch |
-| 2026-10-05 | `cd9607f` | `6a600b89` → `2a3bf65c` | 6 commits (3 Paper upstream updates, Gradle 9.8.0) | **0** | All patches applied unchanged. Added one new source patch (`ShapelessRecipe`) because Paper's new PredicateChoice test exposed Canvas's Pufferfish greedy matcher; that was a latent upstream interaction, not a rebase conflict |
+| 2026-07-20 | `f06a45a1` | Folia → Canvas `df0f2ebb` | Re-platform, not a rebase | n/a | Upstream switched from Folia to Canvas; 146 vendored feature patches were removed rather than ported. Not comparable with later rows |
+| 2026-08-30 | `4be7187b` | `df0f2ebb` → `6a600b89` | 86 commits, +4315 −7806 | **7** | 2 build-script hunks dropped (`sourbycraft-server/build.gradle.kts.patch`, `sourbyapi/build.gradle.kts.patch`); 2 config patches rebuilt (`GlobalConfiguration`, `WorldConfig`); 2 Spark patches deleted as obsolete (later re-added for Sourby metrics/config); 1 feature patch (`0003`, waypoint manager) parked in `.skipped/` because upstream moved the file into its region-threading patch |
+| 2026-10-05 | `37325d5` | `6a600b89` → `2a3bf65c` | 6 commits (3 Paper upstream updates, Gradle 9.8.0) | **0** | All patches applied unchanged. Added one new source patch (`ShapelessRecipe`) because Paper's new PredicateChoice test exposed Canvas's Pufferfish greedy matcher; that was a latent upstream interaction, not a rebase conflict |
 
 ## Recording a bump
 

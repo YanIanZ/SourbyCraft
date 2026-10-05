@@ -8,7 +8,7 @@
 
 **Original plan** (approved 2026-06-03): ship dual paperclip jars (mojmap + reobf), so operators with legacy NMS plugins could pick the reobf jar.
 
-**Why pivoted**: paperweight 2.0 deprecated reobf jar builds (emits "Reobfuscated server jars are no longer supported and only exist for debugging purposes"). Bypassing the deprecation block via `paperweight.debug=true` produces a jar that crashes at boot with `ExceptionInInitializerError` in `ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry.<clinit>` (commit `5dee16a` removed the reobf wiring).
+**Why pivoted**: paperweight 2.0 deprecated reobf jar builds (emits "Reobfuscated server jars are no longer supported and only exist for debugging purposes"). Bypassing the deprecation block via `paperweight.debug=true` produces a jar that crashes at boot with `ExceptionInInitializerError` in `ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry.<clinit>` (commit `309c93b` removed the reobf wiring).
 
 **Revised plan**: ship a single mojmap jar. Rely on Paper's runtime plugin remapper to translate legacy reobf-built plugins. The investigation matrix becomes mojmap-only (4 rows: 4 plugins × 1 variant). The CompatHarness emits one JUnit XML. Tasks N2 (reobf smoke), `boot-reobf.sh`, `TestServer-reobf/`, `nmsCompatTestReobf` are dropped. The invariant simplifies to "every target plugin works on the mojmap jar" — failures are either upstream plugin bugs or SourbyCraft patch conflicts.
 

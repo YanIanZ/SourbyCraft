@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java (Paper fork, mojmap), gradle (Kotlin DSL), bash smoke harness, RCON for command-output assertions. No JUnit added — verification via boot smoke at `test-harness/TestServer-mojmap/`.
 
-**Spec:** `docs/superpowers/specs/2026-06-05-perf-engine-P1-load-sensor-tier-design.md` (committed `a7ae43d`).
+**Spec:** `docs/superpowers/specs/2026-06-05-perf-engine-P1-load-sensor-tier-design.md` (committed `ce03ff6`).
 
 ---
 
@@ -1263,7 +1263,7 @@ Walk through spec Section 7 acceptance criteria. Run each:
 
 - [ ] **A13. No new JUnit**
   ```bash
-  git diff a7ae43d..HEAD --stat sourbycraft-server/src/test/
+  git diff ce03ff6..HEAD --stat sourbycraft-server/src/test/
   ```
   Expected: empty
 
@@ -1271,7 +1271,7 @@ Walk through spec Section 7 acceptance criteria. Run each:
 
 - [ ] **A15. DynamicPerformanceScaler unchanged**
   ```bash
-  git diff a7ae43d..HEAD sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/perf/DynamicPerformanceScaler.java
+  git diff ce03ff6..HEAD sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/perf/DynamicPerformanceScaler.java
   ```
   Expected: empty (P7 owns removal)
 

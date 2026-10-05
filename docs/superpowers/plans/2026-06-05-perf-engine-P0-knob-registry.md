@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java (Paper fork, mojmap), gradle (Kotlin DSL), bash smoke harness, RCON for command-output assertions. No JUnit added — verification via boot smoke at `test-harness/TestServer-mojmap/`.
 
-**Spec:** `docs/superpowers/specs/2026-06-05-perf-engine-P0-knob-registry-design.md` (committed `ed367a0`).
+**Spec:** `docs/superpowers/specs/2026-06-05-perf-engine-P0-knob-registry-design.md` (committed `c4f41a1`).
 
 ---
 
@@ -824,13 +824,13 @@ ls -la .github/workflows/
 Read each file. Goal: find an existing workflow that runs gradle smoke tests on PRs (the existing `nmsCompatTest`/`particleSmokeTest` jobs). The simplest path is to add a sibling job to that workflow.
 
 Recent commits to model after (per git log):
-- `37fa054 ci: nms-compat gates accessor + yml paths; runs particleSmokeTest`
-- `40268f3 ci: NMS-compat gate on PRs touching patches/, release/, paperRef, or test-harness/`
+- `b9727a3 ci: nms-compat gates accessor + yml paths; runs particleSmokeTest`
+- `684277e ci: NMS-compat gate on PRs touching patches/, release/, paperRef, or test-harness/`
 
 Read those commits' diffs to see the exact workflow file modified:
 ```bash
-git show --stat 37fa054 | grep .github
-git show --stat 40268f3 | grep .github
+git show --stat b9727a3 | grep .github
+git show --stat 684277e | grep .github
 ```
 
 - [ ] **Step 2: Add new job (or extend existing)**

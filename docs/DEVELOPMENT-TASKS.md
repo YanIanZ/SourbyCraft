@@ -287,7 +287,7 @@ or a complete async pathfinding snapshot/staleness review. See
 Final integration Java verification: 9874 tests (24 skipped, no failures/errors),
 including retained-list removal guards, preserved Level query-overload descriptor,
 and four async completion cleanup tests. Python verification at baseline commit
-7ebd1eb: 65 tests passed. Subsequent in-progress baseline edits are separate work.
+0203e69: 65 tests passed. Subsequent in-progress baseline edits are separate work.
 Cold bootstrap on a new cache failed the Mojang download hash check and exited 0;
 that is tracked under SourbyClip (SPEC B16), not recorded as a successful boot.
 Runtime validation uses a cached Mojang JAR verified against META-INF/download-context.

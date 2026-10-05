@@ -137,18 +137,18 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
   exist and that no `.mca` file was written, then boots again from the store, then a third time
   with `export = ["world"]` and checks that region files appear and the store is retired. That
   is one small world with no players.
-  - **CI run 442 (`5ec849df`, 2026-09-27), green.** First boot: 529 chunks per dimension went
+  - **CI run 442 (`1e9a5c1a`, 2026-09-27), green.** First boot: 529 chunks per dimension went
     into AWF, and `committed and closed 9 storage(s) at shutdown` was logged. The second boot
     reopened the stores with no region files written; it loaded no chunks, so it proved reopening
     but not reading. The third boot exported 529 chunks per dimension (and 1 entity-storage
     deletion each) back to region files and kept the stores as `*.awf.exported-*`. Run 441 had
     found the lost-shutdown-commit bug fixed by feature patch 0020.
-  - **CI run 445 (`2f2ecb64`), read-back.** The second boot force-loads the spawn area. The
+  - **CI run 445 (`d919ea66`), read-back.** The second boot force-loads the spawn area. The
     overworld region storage saw 1089 reads, 560 of which fell through to (absent) region
     files, so 529 chunks, exactly the ones the first boot generated, were served from AWF.
     `/perf storage` showed 3267 chunk-system reads and no pending I/O at that point. The CI
     gate fails unless AWF-served reads exceed fall-throughs.
-  - **Demo-panel staging (`76813c8`, 2026-09-29), fresh `world_awf_test`.** AWF FILE/INCREMENTAL
+  - **Demo-panel staging (`9a15f51`, 2026-09-29), fresh `world_awf_test`.** AWF FILE/INCREMENTAL
     used a 5-second commit interval and created 9 stores with no `.mca` while attached.
     After all dirty chunks drained, `/perf awf` showed 0 retries/failures and 0 pending commits.
     A restart logged 6 stores committed/closed at shutdown. On the next boot, overworld

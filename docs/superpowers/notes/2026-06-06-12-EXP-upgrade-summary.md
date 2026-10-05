@@ -4,7 +4,7 @@
 **Date:** 2026-06-06
 **Jar size:** 33M (was 57M, -42%)
 **Branch:** `feat/pvp-server`
-**Commit range:** `ed367a0..HEAD`
+**Commit range:** `c4f41a1..HEAD`
 
 ---
 
@@ -14,11 +14,11 @@
 
 | Project | Status | Spec | Plan | Impl commits |
 |---|---|---|---|---|
-| Perf-engine P0 — Knob Registry | ✓ shipped | `2026-06-05-perf-engine-P0-knob-registry-design.md` | `2026-06-05-perf-engine-P0-knob-registry.md` | `49979ba` → `426515b` |
-| Perf-engine P1 — Load Sensor + Tier | ✓ shipped | `2026-06-05-perf-engine-P1-load-sensor-tier-design.md` | `2026-06-05-perf-engine-P1-load-sensor-tier.md` | `86500c6` → `9ced410` |
-| Sourby Bootstrap — Slim jar + lazy lib downloader | ✓ shipped | `2026-06-06-sourby-bootstrap-design.md` | `2026-06-06-sourby-bootstrap.md` | `3a7e3ea` → `eaf65c9` |
+| Perf-engine P0 — Knob Registry | ✓ shipped | `2026-06-05-perf-engine-P0-knob-registry-design.md` | `2026-06-05-perf-engine-P0-knob-registry.md` | `e8b57ff` → `d9aef05` |
+| Perf-engine P1 — Load Sensor + Tier | ✓ shipped | `2026-06-05-perf-engine-P1-load-sensor-tier-design.md` | `2026-06-05-perf-engine-P1-load-sensor-tier.md` | `99e3094` → `1d11c30` |
+| Sourby Bootstrap — Slim jar + lazy lib downloader | ✓ shipped | `2026-06-06-sourby-bootstrap-design.md` | `2026-06-06-sourby-bootstrap.md` | `eacceb6` → `fa77c8f` |
 | Perf-engine P2 — Lag-Machine Protection | spec drafted | `2026-06-06-perf-engine-P2-lag-machine-design.md` | (TBD) | (TBD) |
-| Version rename + EXP suffix | ✓ shipped | (chore) | (chore) | `f39597a`, `8d0cf14` |
+| Version rename + EXP suffix | ✓ shipped | (chore) | (chore) | `798ed16`, `c1ea6c4` |
 
 ---
 
@@ -120,8 +120,8 @@ Plan + implementation deferred until user signals.
 
 ## Version + chore (shipped)
 
-- `v12-REL` → `12-REL` (drop `v` prefix from `internalVersion` in `gradle.properties`). Commit `f39597a`. Affects jar filename + banner string + 3 smoke scripts + BuildInfoTest + README badges + RELEASE-NOTES.
-- `12-REL` → `12-EXP` (codename `rel` → `exp` per gradle.properties edit). Commit `8d0cf14`. Build artifact now `SourbyCraft-12-EXP.jar`.
+- `v12-REL` → `12-REL` (drop `v` prefix from `internalVersion` in `gradle.properties`). Commit `798ed16`. Affects jar filename + banner string + 3 smoke scripts + BuildInfoTest + README badges + RELEASE-NOTES.
+- `12-REL` → `12-EXP` (codename `rel` → `exp` per gradle.properties edit). Commit `c1ea6c4`. Build artifact now `SourbyCraft-12-EXP.jar`.
 
 ## Memory / policy notes (saved across sessions)
 
@@ -131,41 +131,41 @@ Plan + implementation deferred until user signals.
 - **`sourby-bootstrap-blocked` → fully shipped** — partial-shipment memory entry now flipped to "fully shipped" after final pass externalized all 6 libs.
 - **`proxy-support-deferred`** — BungeeCord/Waterfall/XCord/Velocity compat mega-project. Not started.
 
-## Commits since `ed367a0` (32 total)
+## Commits since `c4f41a1` (32 total)
 
 ```
-8d0cf14 fix build version (12-REL → 12-EXP)
-eaf65c9 feat: sourby-bootstrap full — externalize 6 libs (jar 57M → 33M, -42%)
-63f1ed7 docs: sourby-bootstrap — First Boot section + RELEASE-NOTES migration note
-a270764 feat: sourby-bootstrap — lazy speedtest binary download
-c86b7bc feat: sourby-bootstrap — slim release (~41M) via sqlite+mysql lazy download
-4e1ca14 revert: sourby-bootstrap — release stays fat (slim jar blocked on paperclip integration)
-030185f build: sourby-bootstrap — createSlimPaperclipJar gradle task
-4303fc3 feat: sourby-bootstrap — SourbyBootstrap main shim with manifest parse + delegate
-779dc98 feat: sourby-bootstrap — manifest + sha256 + downloader utilities
-3a7e3ea plan: sourby-bootstrap — slim jar + lazy lib downloader (6 tasks)
-029eaa2 docs: sourby-bootstrap — slim jar + first-boot lib downloader design spec
-f39597a chore: drop 'v' prefix from internalVersion (v12-REL → 12-REL)
-9ced410 chore: perf-engine P1 — delete smoke harness per user directive
-88cbde3 feat: perf-engine P1 — /perf tier + /perf sensors subcommands + SCENARIO_7
-d19b1f6 feat: perf-engine P1 Task 3 — PerfSensor + yml wiring + NMS tick hook + SCENARIO_1/2
-7323c4f feat: perf-engine P1 — Tier enum + SensorSnapshot record
-5ad2103 fix: perf-engine P1 — boot_and_assert kills server before return + RCON heredoc safe
-f732e69 test: perf-engine P1 — tier smoke skeleton (boot sanity scenario)
-86500c6 plan: perf-engine P1 — Load Sensor + Tier impl plan (6 tasks)
-a7ae43d docs: perf-engine P1 — Load Sensor + Tier classifier design spec
-426515b polish: perf-engine P0 — final-review followups
-435e5fa ci: gate smoke-step uploads on specific step failures
-d938004 ci: gate perf-engine P0 knob smoke on changed paths
-441cf6c polish: perf-engine P0 — exit-code map + tighten smoke assertion regexes
-cdd71ce test: perf-engine P0 — clamp + wrong-type smoke scenarios
-bc8d734 polish: perf-engine P0 — context label on logLoaded + explicit smoke guard
-a38731e refactor: migrate entityTickRate field → Knobs.ENTITY_TICK_RATE getter
-ce862d0 docs: perf-engine P0 — accurate yml + smoke comments per Task 2 review
-dc9a8f5 feat: perf-engine P0 — Knob abstraction + ENTITY_TICK_RATE + yml load
-69bc7df test: perf-engine P0 — smoke harness skeleton (boot sanity scenario)
-49979ba plan: perf-engine P0 — Knob Registry impl plan (5 tasks)
-ed367a0 docs: perf-engine P0 — Knob Registry design spec
+c1ea6c4 fix build version (12-REL → 12-EXP)
+fa77c8f feat: sourby-bootstrap full — externalize 6 libs (jar 57M → 33M, -42%)
+14df175 docs: sourby-bootstrap — First Boot section + RELEASE-NOTES migration note
+7bc8654 feat: sourby-bootstrap — lazy speedtest binary download
+615845e feat: sourby-bootstrap — slim release (~41M) via sqlite+mysql lazy download
+13f2471 revert: sourby-bootstrap — release stays fat (slim jar blocked on paperclip integration)
+ed31f35 build: sourby-bootstrap — createSlimPaperclipJar gradle task
+28c3a75 feat: sourby-bootstrap — SourbyBootstrap main shim with manifest parse + delegate
+7ed6d4a feat: sourby-bootstrap — manifest + sha256 + downloader utilities
+eacceb6 plan: sourby-bootstrap — slim jar + lazy lib downloader (6 tasks)
+3a1585f docs: sourby-bootstrap — slim jar + first-boot lib downloader design spec
+798ed16 chore: drop 'v' prefix from internalVersion (v12-REL → 12-REL)
+1d11c30 chore: perf-engine P1 — delete smoke harness per user directive
+0c93fbf feat: perf-engine P1 — /perf tier + /perf sensors subcommands + SCENARIO_7
+855112f feat: perf-engine P1 Task 3 — PerfSensor + yml wiring + NMS tick hook + SCENARIO_1/2
+e3dc715 feat: perf-engine P1 — Tier enum + SensorSnapshot record
+041a1db fix: perf-engine P1 — boot_and_assert kills server before return + RCON heredoc safe
+9f07f8e test: perf-engine P1 — tier smoke skeleton (boot sanity scenario)
+99e3094 plan: perf-engine P1 — Load Sensor + Tier impl plan (6 tasks)
+ce03ff6 docs: perf-engine P1 — Load Sensor + Tier classifier design spec
+d9aef05 polish: perf-engine P0 — final-review followups
+073a3ba ci: gate smoke-step uploads on specific step failures
+c4d9d3a ci: gate perf-engine P0 knob smoke on changed paths
+92fd38c polish: perf-engine P0 — exit-code map + tighten smoke assertion regexes
+d543086 test: perf-engine P0 — clamp + wrong-type smoke scenarios
+c74b1f4 polish: perf-engine P0 — context label on logLoaded + explicit smoke guard
+03da87c refactor: migrate entityTickRate field → Knobs.ENTITY_TICK_RATE getter
+c81e2bd docs: perf-engine P0 — accurate yml + smoke comments per Task 2 review
+8e6eb6b feat: perf-engine P0 — Knob abstraction + ENTITY_TICK_RATE + yml load
+79113d8 test: perf-engine P0 — smoke harness skeleton (boot sanity scenario)
+e8b57ff plan: perf-engine P0 — Knob Registry impl plan (5 tasks)
+c4f41a1 docs: perf-engine P0 — Knob Registry design spec
 ```
 
 ## Verified at 12-EXP
