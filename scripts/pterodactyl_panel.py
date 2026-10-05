@@ -10,11 +10,14 @@ Things learned against a real panel, kept here so every tool gets them right:
   process rotates it; the panel's own "running" state is the reliable readiness signal.
 * The console colours its output, which splits numbers from their suffixes; text read back
   is returned with the colour codes removed.
+* The client API is rate limited (240 requests a minute by default) and a burst ends in a
+  dropped TLS connection or a 429, so calls are retried with backoff and bulk senders pace.
 """
 import json
 import os
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -29,7 +32,27 @@ def configure(panel_url, server_id):
     _base = f"{panel_url.rstrip('/')}/api/client/servers/{server_id}"
 
 
+RETRIES = 5
+# Minimum spacing for bulk console commands: 240 requests a minute, with headroom for the
+# log reads that go alongside them.
+COMMAND_SPACING = 0.35
+
+
 def call(method, path, body=None, raw=False, data=None):
+    """One API request, retried on rate limiting and dropped connections, never on 4xx errors."""
+    for attempt in range(RETRIES):
+        try:
+            return _call(method, path, body, raw, data)
+        except urllib.error.HTTPError as error:
+            if error.code != 429 and error.code < 500 or attempt == RETRIES - 1:
+                raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            if attempt == RETRIES - 1:
+                raise
+        time.sleep(2 ** attempt)
+
+
+def _call(method, path, body, raw, data):
     request = urllib.request.Request(_base + path, method=method, headers={
         "Authorization": "Bearer " + os.environ["PTERODACTYL_KEY"],
         "Accept": "application/json",

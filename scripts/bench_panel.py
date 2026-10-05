@@ -207,7 +207,7 @@ def main():
                 time.sleep(int(command.split()[1]))
                 continue
             panel.command(vanilla(command))
-            time.sleep(0.15)
+            time.sleep(panel.COMMAND_SPACING)
         time.sleep(5)
         # Only what the server said since setup began: earlier boot output is not the workload's.
         produced = panel.log()[setup_start:]
@@ -225,6 +225,7 @@ def main():
             x, z = sites[index % len(sites)]
             panel.command(f"execute positioned {x} 0 {z} positioned over world_surface "
                           f"run minecraft:tp {PREFIX}{index:03d} ~ ~1 ~")
+            time.sleep(panel.COMMAND_SPACING)
         print(f"warmup {args.warmup}s", flush=True)
         warm_until = time.monotonic() + args.warmup
         while time.monotonic() < warm_until:
