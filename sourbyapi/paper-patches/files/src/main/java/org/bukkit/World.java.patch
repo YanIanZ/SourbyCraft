@@ -1,0 +1,24 @@
+--- a/src/main/java/org/bukkit/World.java
++++ b/src/main/java/org/bukkit/World.java
+@@ -119,6 +_,7 @@
+     /**
+      * @return The amount of tickable block entities in this world
+      */
++    @io.canvasmc.canvas.Unsupported // Canvas - region threading
+     int getTickableTileEntityCount();
+ 
+     /**
+@@ -4719,4 +_,13 @@
+             }
+         }
+     }
++    // Canvas start - region threading
++
++    /**
++     * Fetches the non-null regionizer for this world
++     * @return the regionizer
++     */
++    @NotNull
++    io.canvasmc.canvas.region.WorldRegionizer getRegionizer();
++    // Canvas end - region threading
+ }

@@ -1,0 +1,180 @@
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
+@@ -112,6 +_,11 @@
+         return this.apiScheduler;
+     };
+     // Paper end - Folia schedulers
++    // Folia start - region threading
++    public boolean isPurged() {
++        return this.taskScheduler.isRetiredOffThread();
++    }
++    // Folia end - region threading
+ 
+     public CraftEntity(final CraftServer server, final Entity entity) {
+         this.server = server;
+@@ -146,6 +_,7 @@
+     }
+ 
+     public Entity getHandle() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Accessing entity state off owning region's thread"); // Folia - region threading
+         return this.entity;
+     }
+ 
+@@ -308,6 +_,11 @@
+     }
+ 
+     protected boolean teleport0(Location location, TeleportCause cause, TeleportFlag... flags) {
++        // Folia start - region threading
++        if (true) {
++            throw new UnsupportedOperationException("Must use teleportAsync while in region threading");
++        }
++        // Folia end - region threading
+         Entity entity = this.getHandle();
+         if (!entity.isAlive() || !entity.valid) {
+             return false;
+@@ -768,7 +_,7 @@
+         ImmutableSet.Builder<Player> players = ImmutableSet.builder();
+ 
+         ServerLevel world = ((CraftWorld) this.getWorld()).getHandle();
+-        ChunkMap.TrackedEntity entityTracker = world.getChunkSource().chunkMap.entityMap.get(this.getEntityId());
++        ChunkMap.TrackedEntity entityTracker = this.getHandle().moonrise$getTrackedEntity(); // Folia - region threading
+ 
+         if (entityTracker != null) {
+             for (ServerPlayerConnection connection : entityTracker.seenBy) {
+@@ -785,7 +_,7 @@
+         Preconditions.checkArgument(player != null, "Player cannot be null");
+ 
+         ServerLevel world = ((CraftWorld) this.getWorld()).getHandle();
+-        ChunkMap.TrackedEntity entityTracker = world.getChunkSource().chunkMap.entityMap.get(this.getEntityId());
++        ChunkMap.TrackedEntity entityTracker = this.getHandle().moonrise$getTrackedEntity(); // Folia - region threading
+         if (entityTracker == null) return false;
+ 
+         return entityTracker.seenBy.contains(((CraftPlayer) player).getHandle().connection);
+@@ -1100,7 +_,7 @@
+         }
+ 
+         ServerLevel world = ((CraftWorld) this.getWorld()).getHandle();
+-        ChunkMap.TrackedEntity entityTracker = world.getChunkSource().chunkMap.entityMap.get(this.getEntityId());
++        ChunkMap.TrackedEntity entityTracker = this.getHandle().moonrise$getTrackedEntity(); // Folia - region threading
+ 
+         if (entityTracker == null) {
+             return;
+@@ -1117,7 +_,7 @@
+         }
+ 
+         ServerLevel world = ((CraftWorld) this.getWorld()).getHandle();
+-        ChunkMap.TrackedEntity entityTracker = world.getChunkSource().chunkMap.entityMap.get(this.getEntityId());
++        ChunkMap.TrackedEntity entityTracker = this.entity.moonrise$getTrackedEntity(); // Folia - region threading
+ 
+         if (entityTracker == null) {
+             return;
+@@ -1153,27 +_,81 @@
+         location.checkFinite();
+         Location locationClone = location.clone(); // clone so we don't need to worry about mutations after this call.
+ 
+-        ServerLevel world = ((CraftWorld)locationClone.getWorld()).getHandle();
+-        CompletableFuture<Boolean> ret = new CompletableFuture<>();
+-
+-        world.loadChunksForMoveAsync(this.getHandle().getBoundingBoxAt(locationClone.getX(), locationClone.getY(), locationClone.getZ()),
+-            this instanceof CraftPlayer ? ca.spottedleaf.concurrentutil.util.Priority.HIGHER : ca.spottedleaf.concurrentutil.util.Priority.NORMAL, (chunks) -> {
+-                MinecraftServer.getServer().scheduleOnMain(() -> {
+-                    final ServerChunkCache chunkCache = world.getChunkSource();
+-                    for (final net.minecraft.world.level.chunk.ChunkAccess chunk : chunks) {
+-                        chunkCache.addTicketAtLevel(TicketType.POST_TELEPORT, chunk.getPos(), ChunkLevel.FULL_CHUNK_LEVEL);
+-                    }
+-                    try {
+-                        ret.complete(CraftEntity.this.teleport0(locationClone, cause, teleportFlags) ? Boolean.TRUE : Boolean.FALSE);
+-                    } catch (Throwable throwable) {
+-                        MinecraftServer.LOGGER.error("Failed to teleport entity {}", CraftEntity.this, throwable);
+-                        ret.completeExceptionally(throwable);
+-                    }
+-                });
+-            });
++        // Folia start - region threading
++        final java.util.concurrent.CompletableFuture<Boolean> ret = new java.util.concurrent.CompletableFuture<>();
++        final java.util.function.Consumer<Entity> run = (Entity nmsEntity) -> {
++            boolean success = nmsEntity.teleportAsync(
++                ((CraftWorld)locationClone.getWorld()).getHandle(),
++                new net.minecraft.world.phys.Vec3(locationClone.getX(), locationClone.getY(), locationClone.getZ()),
++                locationClone.getYaw(), locationClone.getPitch(), net.minecraft.world.phys.Vec3.ZERO,
++                cause == null ? TeleportCause.UNKNOWN : cause,
++                Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS, // preserve behavior with old API: dismount the entity so it can teleport
++                (_) -> ret.complete(Boolean.TRUE)
++            );
++            if (!success) {
++                ret.complete(Boolean.FALSE);
++            }
++        };
++        // Canvas start - region threading
++
++        // we have to create this early so that the call-trace is
++        // properly created, or else we risk losing the caller
++
++        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState transferState =
++            new io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState(
++                "api-fronted teleport async call" + (
++                    // include this bit of debug since this can be called async from the entity context
++                    org.bukkit.Bukkit.isOwnedByCurrentRegion(this) ? " - synchronous" : " - to be scheduled"
++                ),
++                io.canvasmc.canvas.util.ServerLocation.fromBukkit(getLocation()),
++                io.canvasmc.canvas.util.ServerLocation.fromBukkit(locationClone)
++            );
++        // Canvas end - region threading
++
++        if (org.bukkit.Bukkit.isOwnedByCurrentRegion(this)) {
++            setPluginTransferState(transferState); // Canvas - region threading
++            run.accept(this.getHandle());
++            return ret;
++        }
++
++        final boolean scheduled = this.taskScheduler.schedule(
++            // success
++            // Canvas start - region threading
++            (newEntity) -> {
++                // set the transfer state first, then teleport
++                setPluginTransferState(transferState);
++                run.accept(newEntity);
++            },
++            // Canvas end - region threading
++            // retired
++            (_) -> ret.complete(Boolean.FALSE),
++            1L
++        );
++
++        if (!scheduled) {
++            ret.complete(Boolean.FALSE);
++        }
++        // Folia end - region threading
+ 
+         return ret;
+     }
++    // Canvas start - region threading
++
++    // API-fronted teleport requests need to be specifically handled differently than
++    // generic teleport states, so we have a utility method for doing this to just avoid
++    // copy-pasting this
++
++    private void setPluginTransferState(
++        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState setTo
++    ) {
++        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState previousTransferState = getHandleRaw().getRegionTransferState();
++        if (previousTransferState != null) {
++            throw new IllegalStateException("Cannot teleport async when another region handoff is present! Current: " + previousTransferState);
++        }
++
++        getHandleRaw().setRegionTransferState(setTo);
++    }
++    // Canvas end - region threading
+     // Paper end - more teleport API / async chunk API
+ 
+     private final org.bukkit.entity.Entity.Spigot spigot = new org.bukkit.entity.Entity.Spigot() {
+@@ -1245,8 +_,7 @@
+ 
+     @Override
+     public Set<org.bukkit.entity.Player> getTrackedPlayers() {
+-        ServerLevel world = (net.minecraft.server.level.ServerLevel)this.entity.level();
+-        ChunkMap.TrackedEntity tracker = world == null ? null : world.getChunkSource().chunkMap.entityMap.get(this.entity.getId());
++        ChunkMap.TrackedEntity tracker = this.entity.moonrise$getTrackedEntity(); // Folia - region threading
+         if (tracker == null) {
+             return java.util.Collections.emptySet();
+         }

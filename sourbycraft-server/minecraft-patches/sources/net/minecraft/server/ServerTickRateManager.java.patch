@@ -1,0 +1,16 @@
+--- a/net/minecraft/server/ServerTickRateManager.java
++++ b/net/minecraft/server/ServerTickRateManager.java
+@@ -94,12 +_,7 @@
+         );
+         this.scheduledCurrentSprintTicks = 0L;
+         this.sprintTimeSpend = 0L;
+-        // Paper start - silence feedback when API requests sprint
+-        if (!this.silent) this.server
+-            .createCommandSourceStack()
+-            .sendSuccess(() -> Component.translatable("commands.tick.sprint.report", ticksPerSecond, millisecondsPerTick), true);
+-        this.silent = false;
+-        // Paper end - silence feedback when API requests sprint
++        // Canvas - region threading
+         this.remainingSprintTicks = 0L;
+         this.setFrozen(this.previousIsFrozen);
+         this.server.onTickRateChanged();

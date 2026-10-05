@@ -1,0 +1,10 @@
+--- /dev/null
++++ b/io/canvasmc/canvas/commands/package-info.java
+@@ -1,0 +_,7 @@
++/**
++ * Package containing the backing system for Canvas' commands, part of the rebranding patch
++ */
++@NullMarked
++package io.canvasmc.canvas.commands;
++
++import org.jspecify.annotations.NullMarked;

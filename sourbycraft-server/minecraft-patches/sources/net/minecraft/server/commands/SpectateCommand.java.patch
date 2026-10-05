@@ -1,0 +1,29 @@
+--- a/net/minecraft/server/commands/SpectateCommand.java
++++ b/net/minecraft/server/commands/SpectateCommand.java
+@@ -38,7 +_,12 @@
+         );
+     }
+ 
+-    private static int spectate(final CommandSourceStack source, final @Nullable Entity target, final ServerPlayer player) throws CommandSyntaxException {
++    // Canvas start - region threading
++    private static int spectate(final CommandSourceStack source, final @Nullable Entity target, final ServerPlayer spectator) throws CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(spectator)
++            .executes((ServerPlayer player) -> {
++    // Canvas end - region threading
+         if (player == target) {
+             throw ERROR_SELF.create();
+         }
+@@ -58,6 +_,12 @@
+             source.sendSuccess(() -> Component.translatable("commands.spectate.success.stopped"), false);
+         }
+ 
++        // Canvas start - region threading
++                return (_) -> null;
++            })
++            .noCompletion()
++            .start(source);
++        // Canvas end - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ }

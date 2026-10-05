@@ -1,0 +1,67 @@
+--- a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
++++ b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
+@@ -21,7 +_,12 @@
+     OptionalInt buildNumber,
+     Instant buildTime,
+     Optional<String> gitBranch,
+-    Optional<String> gitCommit
++    // Canvas start - improve version command
++    Optional<String> gitCommit,
++    Optional<String> brandVendor,
++    Optional<String> brandWebsite,
++    String contributors
++    // Canvas end - improve version command
+ ) implements ServerBuildInfo {
+     private static final String ATTRIBUTE_BRAND_ID = "Brand-Id";
+     private static final String ATTRIBUTE_BRAND_NAME = "Brand-Name";
+@@ -29,8 +_,17 @@
+     private static final String ATTRIBUTE_BUILD_NUMBER = "Build-Number";
+     private static final String ATTRIBUTE_GIT_BRANCH = "Git-Branch";
+     private static final String ATTRIBUTE_GIT_COMMIT = "Git-Commit";
++    private static final String ATTRIBUTE_BRAND_VENDOR = "Brand-Vendor"; // Canvas - improve version command
++    private static final String ATTRIBUTE_BRAND_WEBSITE = "Brand-Website"; // Canvas - improve version command
++    private static final String ATTRIBUTE_CONTRIBUTORS = "Contributors"; // Canvas - improve version command
+ 
+     private static final String BRAND_PAPER_NAME = "Paper";
++    // Canvas start - Rebrand
++    private static final String BRAND_CANVAS_NAME = "Canvas";
++
++    // private static final Key BRAND_CANVAS_ID = Key.key("canvasmc", "canvas");
++    // private static final Key BRAND_FOLIA_ID = Key.key("papermc", "folia");
++    // Canvas end - Rebrand
+ 
+     private static final String BUILD_DEV = "DEV";
+ 
+@@ -42,9 +_,9 @@
+         this(
+             getManifestAttribute(manifest, ATTRIBUTE_BRAND_ID)
+                 .map(Key::key)
+-                .orElse(BRAND_PAPER_ID),
++                .orElse(BRAND_CANVAS_ID), // Canvas - Rebrand
+             getManifestAttribute(manifest, ATTRIBUTE_BRAND_NAME)
+-                .orElse(BRAND_PAPER_NAME),
++                .orElse(BRAND_CANVAS_NAME), // Canvas - Rebrand
+             SharedConstants.getCurrentVersion().id(),
+             SharedConstants.getCurrentVersion().name(),
+             getManifestAttribute(manifest, ATTRIBUTE_BUILD_NUMBER)
+@@ -55,13 +_,18 @@
+                 .map(Instant::parse)
+                 .orElse(Main.BOOT_TIME),
+             getManifestAttribute(manifest, ATTRIBUTE_GIT_BRANCH),
+-            getManifestAttribute(manifest, ATTRIBUTE_GIT_COMMIT)
++            // Canvas start - improve version command
++            getManifestAttribute(manifest, ATTRIBUTE_GIT_COMMIT),
++            getManifestAttribute(manifest, ATTRIBUTE_BRAND_VENDOR),
++            getManifestAttribute(manifest, ATTRIBUTE_BRAND_WEBSITE),
++            getManifestAttribute(manifest, ATTRIBUTE_CONTRIBUTORS).orElse("[]")
++            // Canvas end - improve version command
+         );
+     }
+ 
+     @Override
+     public boolean isBrandCompatible(final @NotNull Key brandId) {
+-        return brandId.equals(this.brandId);
++        return brandId.equals(this.brandId) || brandId.equals(BRAND_PAPER_ID) || brandId.equals(BRAND_FOLIA_ID); // Canvas - Rebrand
+     }
+ 
+     @Override

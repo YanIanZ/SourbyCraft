@@ -1,0 +1,93 @@
+--- a/net/minecraft/server/commands/ExperienceCommand.java
++++ b/net/minecraft/server/commands/ExperienceCommand.java
+@@ -122,19 +_,45 @@
+         dispatcher.register(Commands.literal("xp").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)).redirect(command));
+     }
+ 
+-    private static int queryExperience(final CommandSourceStack source, final ServerPlayer target, final ExperienceCommand.Type type) {
+-        int result = type.query.applyAsInt(target);
+-        source.sendSuccess(() -> Component.translatable("commands.experience.query." + type.name, target.getDisplayName(), result), false);
+-        return result;
++    // Canvas start - region threading
++    private static int queryExperience(final CommandSourceStack source, final ServerPlayer target, final ExperienceCommand.Type type) throws CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++            .with(target)
++            .executes((ServerPlayer entityPlayer) -> {
++                int result = type.query.applyAsInt(entityPlayer);
++                return (_) -> result;
++            })
++            .onComplete((result, targets, css) -> {
++                css.sendSuccess(() -> Component.translatable("commands.experience.query." + type.name, targets.getFirst().getDisplayName(), result), false);
++                return result;
++            })
++            .start(source);
++        return 1;
++    // Canvas end - region threading
+     }
+ 
+     private static int addExperience(
+         final CommandSourceStack source, final Collection<? extends ServerPlayer> players, final int amount, final ExperienceCommand.Type type
++    // Canvas start - region threading
++    ) throws CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(players)
++            .executes((ServerPlayer entityPlayer) -> {
++                type.add.accept(entityPlayer, amount);
++                return (_) -> null;
++            })
++            .onComplete((_, selected, css) -> addCallback(css, selected, amount, type))
++            .start(source);
++        return 1;
++    }
++
++    private static int addCallback(
++        final CommandSourceStack source,
++        final Collection<? extends ServerPlayer> players,
++        final int amount,
++        final ExperienceCommand.Type type
+     ) {
+-        for (ServerPlayer player : players) {
+-            type.add.accept(player, amount);
+-        }
+-
++    // Canvas end - region threading
+         if (players.size() == 1) {
+             source.sendSuccess(
+                 () -> Component.translatable("commands.experience.add." + type.name + ".success.single", amount, players.iterator().next().getDisplayName()),
+@@ -150,14 +_,28 @@
+     private static int setExperience(
+         final CommandSourceStack source, final Collection<? extends ServerPlayer> players, final int amount, final ExperienceCommand.Type type
+     ) throws CommandSyntaxException {
+-        int success = 0;
+-
+-        for (ServerPlayer player : players) {
+-            if (type.set.test(player, amount)) {
+-                success++;
+-            }
+-        }
+-
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++            .with(players)
++            .executes((ServerPlayer entityPlayer) -> {
++                if (type.set.test(entityPlayer, amount)) {
++                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                }
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++            })
++            .onComplete((success, selected, css) -> setCallback(css, selected, amount, type, success))
++            .start(source);
++        return 1;
++    }
++
++    private static int setCallback(
++        final CommandSourceStack source,
++        final Collection<? extends ServerPlayer> players,
++        final int amount,
++        final ExperienceCommand.Type type,
++        final int success
++    ) throws CommandSyntaxException {
++    // Canvas end - region threading
+         if (success == 0) {
+             throw ERROR_SET_POINTS_INVALID.create();
+         }

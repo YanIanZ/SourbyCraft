@@ -1,0 +1,456 @@
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -276,7 +_,7 @@
+     private final StructureManager structureManager;
+     final DedicatedServer console;
+     private final DedicatedPlayerList playerList;
+-    private final Map<String, World> worlds = new LinkedHashMap<>();
++    public final Map<String, World> worlds = new LinkedHashMap<>();
+     private YamlConfiguration configuration;
+     private YamlConfiguration commandsConfiguration;
+     private final Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
+@@ -284,7 +_,7 @@
+     private final EntityMetadataStore entityMetadata = new EntityMetadataStore();
+     private final PlayerMetadataStore playerMetadata = new PlayerMetadataStore();
+     private final WorldMetadataStore worldMetadata = new WorldMetadataStore();
+-    private final Object2IntOpenHashMap<SpawnCategory> spawnCategoryLimit = new Object2IntOpenHashMap<>();
++    public final Object2IntOpenHashMap<SpawnCategory> spawnCategoryLimit = new Object2IntOpenHashMap<>();
+     private File container;
+     private WarningState warningState = WarningState.DEFAULT;
+     public ApiVersion minimumAPI;
+@@ -306,7 +_,7 @@
+     private final ServerConfiguration serverConfig = new PaperServerConfiguration();
+ 
+     // Paper start - Folia region threading API
+-    private final io.papermc.paper.threadedregions.scheduler.FallbackRegionScheduler regionizedScheduler = new io.papermc.paper.threadedregions.scheduler.FallbackRegionScheduler();
++    private final io.papermc.paper.threadedregions.scheduler.FoliaRegionScheduler regionizedScheduler = new io.papermc.paper.threadedregions.scheduler.FoliaRegionScheduler(); // Folia - region threading
+     private final io.papermc.paper.threadedregions.scheduler.FoliaAsyncScheduler asyncScheduler = new io.papermc.paper.threadedregions.scheduler.FoliaAsyncScheduler();
+     private final io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler globalRegionScheduler = new io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler();
+ 
+@@ -381,9 +_,21 @@
+         return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(((org.bukkit.craftbukkit.entity.CraftEntity) entity).getHandleRaw());
+     }
+ 
++    // Canvas start - expand region threading api
++    @Override
++    public boolean isOwnedByCurrentRegion(@org.jspecify.annotations.NonNull final World world, final org.bukkit.util.@org.jspecify.annotations.NonNull BoundingBox aabb) {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(((CraftWorld) world).getHandle(), new net.minecraft.world.phys.AABB(aabb.getMinX(), aabb.getMinY(), aabb.getMinZ(), aabb.getMaxX(), aabb.getMaxY(), aabb.getMaxZ()));
++    }
++
++    @Override
++    public boolean isOwnedByCurrentRegion(@org.jspecify.annotations.NonNull final Location position, final org.bukkit.util.@org.jspecify.annotations.NonNull Vector velocity, final int buffer) {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(((CraftWorld) position.getWorld()).getHandle(), CraftLocation.toVec3(position), org.bukkit.craftbukkit.util.CraftVector.toVec3(velocity), buffer);
++    }
++
++    // Canvas end - expand region threading api
+     @Override
+     public final boolean isGlobalTickThread() {
+-        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThread();
++        return io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread(); // Folia - region threading API
+     }
+     // Paper end - Folia reagion threading API
+ 
+@@ -917,6 +_,18 @@
+         Preconditions.checkArgument(rawSender != null, "sender cannot be null");
+         Preconditions.checkArgument(commandLine != null, "commandLine cannot be null");
+         org.spigotmc.AsyncCatcher.catchOp("Command Dispatched Async: " + commandLine); // Spigot // Paper - Include command in error message
++        // Folia start - region threading
++        if ((rawSender instanceof Entity entity)) {
++            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(((org.bukkit.craftbukkit.entity.CraftEntity)entity).getHandle(), "Dispatching command async");
++        } else if (rawSender instanceof ConsoleCommandSender || rawSender instanceof net.minecraft.server.rcon.RconConsoleSource
++                || rawSender instanceof org.bukkit.craftbukkit.command.CraftRemoteConsoleCommandSender
++                || rawSender instanceof io.papermc.paper.commands.FeedbackForwardingSender) {
++            io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Dispatching command async");
++        } else {
++            // huh?
++            throw new UnsupportedOperationException("Dispatching command for " + rawSender);
++        }
++        // Folia end - region threading
+         CommandSourceStack sourceStack = VanillaCommandWrapper.getListener(rawSender);
+ 
+         String command = StringUtils.normalizeSpace(commandLine.trim());
+@@ -948,6 +_,11 @@
+ 
+     @Override
+     public void reload() {
++        // Canvas start - region threading
++        if (true) {
++            throw new UnsupportedOperationException("Unsupported in region threading");
++        }
++        // Canvas end - region threading
+         // Paper start - lifecycle events
+         if (io.papermc.paper.plugin.lifecycle.event.LifecycleEventRunner.INSTANCE.blocksPluginReloading()) {
+             throw new IllegalStateException(org.bukkit.command.defaults.ReloadCommand.RELOADING_DISABLED_MESSAGE);
+@@ -1084,6 +_,11 @@
+ 
+     @Override
+     public void reloadData() {
++        // Canvas start - region threading
++        if (true) {
++            throw new UnsupportedOperationException("Unsupported in region threading");
++        }
++        // Canvas end - region threading
+         ReloadCommand.reload(this.console);
+     }
+ 
+@@ -1164,6 +_,7 @@
+ 
+     @Override
+     public World createWorld(WorldCreator creator) {
++        io.canvasmc.canvas.util.TickGuard.ensureGlobalOrStartup("Cannot create worlds off global tick"); // Canvas - region threading
+         Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
+         //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
+         Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
+@@ -1313,6 +_,126 @@
+ 
+         return serverLevel.getWorld();
+     }
++    // Canvas start - region threading
++
++    // note: we need to check these things:
++    //       - joining players
++    //       - teleporting players -- we need to check all players in the server, see if their world
++    //                                points to the unloading world. this is a safer way, since we
++    //                                can guarentee each player will have the destination world set correctly
++    //                                for teleporting on same-world regions
++    //       - portaling players   -- during region unloading, check the pending teleports and if there is a player
++    //                                then we send them back to their origin pos. this covers cross-dimension
++    //                                teleportation and also portaling between dimensions
++
++    @Override
++    public void unloadWorldAsync(@NotNull final String name, final boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback) {
++        unloadWorldAsync(Preconditions.checkNotNull(this.worlds.get(name), "Unknown world with name " + name), save, callback);
++    }
++
++    @Override
++    public void unloadWorldAsync(@NotNull final World world, final boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Can only unload worlds on global tick"); // Canvas - region threading
++        ServerLevel handle = ((CraftWorld) world).getHandle();
++        try {
++            handle.canvas$obtainWorldStageLock();
++
++            // after obtaining locks, check preconditions required by bukkit
++            // this includes:
++            // - not already unloading
++            // - not overworld
++            // - isn't in shutdown
++            // - no players in the world
++
++            if (handle.canvas$unloadTicket.isPresent()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_ALREADY_UNLOADING);
++                return;
++            }
++            if (handle.dimension() == net.minecraft.world.level.Level.OVERWORLD) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_IS_OVERWORLD);
++                return;
++            }
++            if (this.console.hasStartedShutdownThread.get()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_IS_SHUTDOWN);
++                return;
++            }
++
++            // kinda a funky one, but we have to ensure no players
++            // are actively joining into this world, since they can be stuck
++            // in limbo on login if they are joining an unloading world
++
++            if (!handle.canvas$joiningPlayers.isEmpty()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_JOINING);
++                return;
++            }
++
++            // we check every single player here, since if a player is cross-region teleporting
++            // but in the same world, they get removed from ServerLevel#players, but we don't
++            // change the level in ServerPlayer, so ServerPlayer is a safe place to check this
++
++            for (final net.minecraft.server.level.ServerPlayer player : console.getPlayerList().getPlayers()) {
++                if (player.level() == handle) {
++                    callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_PRESENT);
++                    return;
++                }
++            }
++
++            // call unload async event
++
++            if (!new io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent(handle.getWorld()).callEvent()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNLOAD_EVENT);
++                return;
++            }
++
++            // propagate the unload ticket for regions to start descheduling
++            handle.canvas$unloadTicket.propagate(new io.canvasmc.canvas.util.ticket.UnloadTicket(callback, save));
++
++            final io.canvasmc.canvas.threadedregions.WorldShutdownThread worldShutdownThread = new io.canvasmc.canvas.threadedregions.WorldShutdownThread(
++                handle, () -> {
++                    List<io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>>
++                        regions = new ArrayList<>();
++                    handle.regioniser.computeForAllRegions(regions::add);
++
++                    waiter:
++                    for (;;) {
++                        java.util.concurrent.locks.LockSupport.parkNanos("waiting on next pass", 1_000_000);
++
++                        // check for alive regions, if we have one, continue waiting
++                        boolean hasAliveRegion = false;
++
++                        checker:
++                        for (final io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData> region : regions) {
++                            if (
++                                // we check if the region has been marked non schedulable, or if the region is completely dead
++                                // as to avoid issues with regions being killed by the regionizer, and not our ticket
++                                !region.getData().getRegionSchedulingHandle().isMarkedAsNonSchedulable()
++                                && !(region.hasNoAliveSections() && region.isDead())
++                            ) {
++                                hasAliveRegion = true;
++                                break checker;
++                            }
++                        }
++
++                        if (!hasAliveRegion) {
++                            break waiter;
++                        }
++                    }
++
++                    return regions;
++                }
++            );
++
++            // start shutdown thread
++            worldShutdownThread.start();
++        } catch (final Throwable thrown) {
++            MinecraftServer.LOGGER.error("Failed to prepare unload for world", thrown);
++            callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNKNOWN);
++        } finally {
++            handle.canvas$releaseWorldStageLock();
++        }
++    }
++
++    // Canvas end - region threading
+ 
+     @Override
+     public boolean unloadWorld(String name, boolean save) {
+@@ -1321,6 +_,7 @@
+ 
+     @Override
+     public boolean unloadWorld(World world, boolean save) {
++        if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - not implemented properly yet
+         //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot unload a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
+         if (world == null) {
+             return false;
+@@ -2699,8 +_,23 @@
+ 
+     @Override
+     public double getAverageTickTime() {
+-        final TickData.MSPTData reportData = this.getServer().getMSPTData5s();
+-        return reportData == null ? 0.0 : reportData.avg();
++        // Folia start - region threading
++        ca.spottedleaf.concurrentutil.scheduler.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask();
++        if (task == null) {
++            // might be on the shutdown thread, try retrieving the current region
++            if (io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion() != null) {
++                // we are on the shutdown thread
++                task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion().getData().getRegionSchedulingHandle();
++            }
++        }
++        if (!(task instanceof io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle tickHandle)) {
++            throw new UnsupportedOperationException("Not on any region");
++        }
++
++
++        long currTime = System.nanoTime();
++        return tickHandle.getTickReport5s(currTime).timePerTickData().segmentAll().average() / 1.0E6;
++        // Folia end - region threading
+     }
+ 
+     private final org.bukkit.Server.Spigot spigot = new org.bukkit.Server.Spigot() {
+@@ -2752,12 +_,38 @@
+ 
+     @Override
+     public void restart() {
++        // Canvas start - region threading
++        // we disable this command, why the fuck isn't this throwing already
++        if (true) {
++            throw new UnsupportedOperationException("Unsupported in region threading");
++        }
++        // Canvas end - region threading
+         org.spigotmc.RestartCommand.restart();
+     }
+ 
+     @Override
+     public double[] getTPS() {
+-        return this.getServer().getTPS();
++        // Folia start - region threading
++        ca.spottedleaf.concurrentutil.scheduler.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask();
++        if (task == null) {
++            // might be on the shutdown thread, try retrieving the current region
++            if (io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion() != null) {
++                // we are on the shutdown thread
++                task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion().getData().getRegionSchedulingHandle();
++            }
++        }
++        if (!(task instanceof io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle tickHandle)) {
++            throw new UnsupportedOperationException("Not on any region");
++        }
++
++        // 1m, 5m, 15m
++        long currTime = System.nanoTime();
++        return new double[] {
++                tickHandle.getTickReport1m(currTime).tpsData().segmentAll().average(),
++                tickHandle.getTickReport5m(currTime).tpsData().segmentAll().average(),
++                tickHandle.getTickReport15m(currTime).tpsData().segmentAll().average(),
++        };
++        // Folia end - region threading
+     }
+ 
+     @Override
+@@ -2927,7 +_,7 @@
+ 
+     @Override
+     public int getCurrentTick() {
+-        return net.minecraft.server.MinecraftServer.currentTick;
++        return (int)io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick(); // Folia - region threading
+     }
+ 
+     @Override
+@@ -2961,4 +_,142 @@
+     public void allowPausing(final Plugin plugin, final boolean value) {
+         this.console.addPluginAllowingSleep(plugin.getName(), value);
+     }
++    // Folia start - region TPS API
++
++    /**
++     * Gets the TPS from the region which owns the specified location, or {@code null} if no region owns
++     * the specified location.
++     *
++     * @param location The location for which to get the TPS
++     * @return TPS (5s, 15s, 1m, 5m, 15m), or null if the region doesn't exist
++     */
++    @Override
++    public double[] getRegionTPS(@NotNull Location location) {
++        return this.getRegionTPS(location.getWorld(), location.getBlockX() >> 4, location.getBlockZ() >> 4);
++    }
++
++    /**
++     * Gets the TPS from the region which owns the specified chunk, or {@code null} if no region owns
++     * the specified location.
++     *
++     * @param chunk - The specified chunk
++     * @return TPS (5s, 15s, 1m, 5m, 15m), or null if the region doesn't exist
++     */
++    @Override
++    public double[] getRegionTPS(@NotNull org.bukkit.Chunk chunk) {
++        return this.getRegionTPS(chunk.getWorld(), chunk.getX(), chunk.getZ());
++    }
++
++    /**
++     * Gets the TPS from the region which owns the specified chunk, or {@code null} if no region owns
++     * the specified location.
++     *
++     * @param world - World containing the chunk
++     * @param chunkX - X-coordinate of the chunk
++     * @param chunkZ - Z-coordinate of the chunk
++     * @return TPS (5s, 15s, 1m, 5m, 15m), or null if the region doesn't exist
++     */
++    @Override
++    public double[] getRegionTPS(@NotNull World world, int chunkX, int chunkZ) {
++        return getTPSFromRegion(((CraftWorld)world).getHandle(), chunkX, chunkZ);
++    }
++
++    private static double[] getTPSFromRegion(final ServerLevel world, final int chunkX, final int chunkZ) {
++        io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>
++                region = world.regioniser.getRegionAtSynchronised(chunkX, chunkZ);
++        if (region == null) {
++            return null;
++        } else {
++            io.papermc.paper.threadedregions.TickRegions.TickRegionData regionData = region.getData();
++            final long currTime = System.nanoTime();
++            final io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle regionScheduleHandle = regionData.getRegionSchedulingHandle();
++            return new double[] {
++                    regionScheduleHandle.getTickReport5s(currTime).tpsData().segmentAll().average(),
++                    regionScheduleHandle.getTickReport15s(currTime).tpsData().segmentAll().average(),
++                    regionScheduleHandle.getTickReport1m(currTime).tpsData().segmentAll().average(),
++                    regionScheduleHandle.getTickReport5m(currTime).tpsData().segmentAll().average(),
++                    regionScheduleHandle.getTickReport15m(currTime).tpsData().segmentAll().average(),
++            };
++        }
++    }
++    // Folia end - region TPS API
++    // Canvas start - expand region TPS API (pulled from Folia#391)
++    /**
++     * Gets the average tick time from the region which owns the specified location, or {@code null} if no region owns
++     * the specified location.
++     *
++     * @param location The location for which to get the TPS
++     * @return Average tick time (5s, 15s, 1m, 5m, 15m), or null if the region doesn't exist
++     */
++    @Override
++    public double[] getRegionAverageTickTimes(final @NotNull Location location) {
++        return this.getRegionAverageTickTimes(location.getWorld(), location.getBlockX() >> 4, location.getBlockZ() >> 4);
++    }
++
++    /**
++     * Gets the average tick time from the region which owns the specified chunk, or {@code null} if no region owns
++     * the specified location.
++     *
++     * @param chunk - The specified chunk
++     * @return Average tick time (5s, 15s, 1m, 5m, 15m), or null if the region doesn't exist
++     */
++    @Override
++    public double[] getRegionAverageTickTimes(final @NotNull org.bukkit.Chunk chunk) {
++        return this.getRegionAverageTickTimes(chunk.getWorld(), chunk.getX(), chunk.getZ());
++    }
++
++    /**
++     * Gets the average tick time from the region which owns the specified chunk, or {@code null} if no region owns
++     * the specified location.
++     *
++     * @param world - World containing the chunk
++     * @param chunkX - X-coordinate of the chunk
++     * @param chunkZ - Z-coordinate of the chunk
++     * @return Average tick time (5s, 15s, 1m, 5m, 15m), or null if the region doesn't exist
++     */
++    @Override
++    public double[] getRegionAverageTickTimes(final @NotNull World world, final int chunkX, final int chunkZ) {
++        return getAverageTickTimesFromRegion(((CraftWorld)world).getHandle(), chunkX, chunkZ);
++    }
++
++    private static double[] getAverageTickTimesFromRegion(ServerLevel world, int chunkX, int chunkZ) {
++        io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>
++            region = world.regioniser.getRegionAtSynchronised(chunkX, chunkZ);
++        if (region == null) {
++            return null;
++        } else {
++            io.papermc.paper.threadedregions.TickRegions.TickRegionData regionData = region.getData();
++            final long currTime = System.nanoTime();
++            final io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle regionScheduleHandle = regionData.getRegionSchedulingHandle();
++            return new double[] {
++                regionScheduleHandle.getTickReport5s(currTime).timePerTickData().segmentAll().average() / 1.0E6,
++                regionScheduleHandle.getTickReport15s(currTime).timePerTickData().segmentAll().average() / 1.0E6,
++                regionScheduleHandle.getTickReport1m(currTime).timePerTickData().segmentAll().average() / 1.0E6,
++                regionScheduleHandle.getTickReport5m(currTime).timePerTickData().segmentAll().average() / 1.0E6,
++                regionScheduleHandle.getTickReport15m(currTime).timePerTickData().segmentAll().average() / 1.0E6
++            };
++        }
++    }
++    // Canvas end - expand region TPS API (pulled from Folia#391)
++    // Canvas start - region threading
++
++    // note: in impl the world is provided, same as 'getWorld()'
++    @Override
++    public <T> io.canvasmc.canvas.region.RegionTickData.@NotNull IRegionizedData<T> createRegionizedData(final java.util.function.@NotNull BiFunction<io.canvasmc.canvas.region.RegionTickData, org.bukkit.World, T> supplier, final io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<T> callback) {
++        return io.papermc.paper.threadedregions.TickRegions.TickRegionData.createRegionizedDataApiHandle(supplier, callback);
++    }
++
++    @Override
++    public <T> T getLocalRegionizedData(final @NotNull io.canvasmc.canvas.region.RegionTickData.IRegionizedData<T> regionizedData) {
++        io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>
++            region = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion();
++        if (region == null) throw new IllegalStateException("Must be on a tick thread runner that currently owns a region");
++        return region.getData().getOrCreateFromIRegionizedData(regionizedData);
++    }
++
++    @Override
++    public io.canvasmc.canvas.region.RegionThreadingTickManager getRegionThreadingTickRateManager() {
++        return io.canvasmc.canvas.threadedregions.ServerRegionTickManager.API_INSTANCE;
++    }
++    // Canvas end - region threading
+ }

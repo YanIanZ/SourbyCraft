@@ -1,0 +1,19 @@
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
+@@ -115,6 +_,7 @@
+ 
+     @Override
+     public net.minecraft.world.entity.LivingEntity getHandle() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Accessing entity state off owning region's thread"); // Folia - region threading
+         return (net.minecraft.world.entity.LivingEntity) this.entity;
+     }
+ 
+@@ -505,7 +_,7 @@
+ 
+     @Override
+     public boolean addPotionEffect(PotionEffect effect) {
+-        org.spigotmc.AsyncCatcher.catchOp("effect add"); // Paper
++        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot add potion effect async"); // Canvas - region guards
+         return this.getHandle().addEffect(org.bukkit.craftbukkit.potion.CraftPotionUtil.fromBukkit(effect), EntityPotionEffectEvent.Cause.PLUGIN); // Paper - Don't ignore icon
+     }
+ 

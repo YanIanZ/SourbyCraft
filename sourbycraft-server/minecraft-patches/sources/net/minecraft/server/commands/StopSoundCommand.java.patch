@@ -1,0 +1,30 @@
+--- a/net/minecraft/server/commands/StopSoundCommand.java
++++ b/net/minecraft/server/commands/StopSoundCommand.java
+@@ -46,13 +_,23 @@
+ 
+     private static int stopSound(
+         final CommandSourceStack source, final Collection<ServerPlayer> targets, final @Nullable SoundSource soundSource, final @Nullable Identifier sound
+-    ) {
++    ) throws com.mojang.brigadier.exceptions.CommandSyntaxException { // Canvas - region threading
+         ClientboundStopSoundPacket packet = new ClientboundStopSoundPacket(sound, soundSource);
+ 
+-        for (ServerPlayer player : targets) {
+-            player.connection.send(packet);
+-        }
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(targets)
++            .executes((ServerPlayer entityPlayer) -> {
++                entityPlayer.connection.send(packet);
++                return (_) -> null;
++            })
++            .onComplete((_, selected, css) -> stopSoundCallback(css, selected, soundSource, sound))
++            .start(source);
++        return 1;
++    }
+ 
++    private static int stopSoundCallback(final CommandSourceStack source, final Collection<? extends ServerPlayer> targets, final @Nullable SoundSource soundSource, final @Nullable Identifier sound) {
++    // Canvas end - region threading
+         if (soundSource != null) {
+             if (sound != null) {
+                 source.sendSuccess(

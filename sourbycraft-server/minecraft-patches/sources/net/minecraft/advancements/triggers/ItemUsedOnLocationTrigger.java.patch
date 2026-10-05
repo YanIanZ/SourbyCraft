@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/ItemUsedOnLocationTrigger.java
++++ b/net/minecraft/advancements/triggers/ItemUsedOnLocationTrigger.java
+@@ -36,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final BlockPos pos, final ItemInstance tool) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         ServerLevel level = player.level();
+         BlockState state = level.getBlockState(pos);
+         LootParams params = new LootParams.Builder(level)

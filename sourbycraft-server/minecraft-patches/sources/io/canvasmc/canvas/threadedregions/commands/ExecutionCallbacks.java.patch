@@ -1,0 +1,183 @@
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/commands/ExecutionCallbacks.java
+@@ -1,0 +_,180 @@
++package io.canvasmc.canvas.threadedregions.commands;
++
++import java.util.function.Function;
++import org.jetbrains.annotations.Contract;
++
++@SuppressWarnings("unused")
++public interface ExecutionCallbacks {
++
++    @Contract(pure = true)
++    static <A extends Number, B extends Number> Function<NumericPair<A, B>, NumericPair<A, B>> mapPairFirst(
++        Function<A, ? extends Number> fa
++    ) {
++        return pair -> pair.mapFirst(fa);
++    }
++
++    @Contract(pure = true)
++    static <A extends Number, B extends Number> Function<NumericPair<A, B>, NumericPair<A, B>> mapPairSecond(
++        Function<B, ? extends Number> fb
++    ) {
++        return pair -> pair.mapSecond(fb);
++    }
++
++    @Contract(pure = true)
++    static <A extends Number, B extends Number> Function<NumericPair<A, B>, NumericPair<A, B>> mapPairBoth(
++        Function<A, ? extends Number> fa, Function<B, ? extends Number> fb
++    ) {
++        return pair -> pair.mapBoth(fa, fb);
++    }
++
++    @Contract(pure = true)
++    static <A, B> Function<A, B> nothing() {
++        //noinspection unchecked
++        return (a) -> (B) a;
++    }
++
++    @Contract(pure = true)
++    static Function<Integer, Integer> incrementInt() {
++        return (a) -> a + 1;
++    }
++
++    @Contract(pure = true)
++    static Function<Integer, Integer> decrement() {
++        return (a) -> a - 1;
++    }
++
++    @Contract(pure = true)
++    static Function<Integer, Integer> addInt(final int amount) {
++        return (a) -> a + amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Integer, Integer> subtractInt(final int amount) {
++        return (a) -> a - amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Integer, Integer> multiplyInt(final int amount) {
++        return (a) -> a * amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Integer, Integer> divideInt(final int amount) {
++        return (a) -> a / amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Long, Long> incrementLong() {
++        return (a) -> a + 1L;
++    }
++
++    @Contract(pure = true)
++    static Function<Long, Long> decrementLong() {
++        return (a) -> a - 1L;
++    }
++
++    @Contract(pure = true)
++    static Function<Long, Long> addLong(final long amount) {
++        return (a) -> a + amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Long, Long> subtractLong(final long amount) {
++        return (a) -> a - amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Long, Long> multiplyLong(final long amount) {
++        return (a) -> a * amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Long, Long> divideLong(final long amount) {
++        return (a) -> a / amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Float, Float> incrementFloat() {
++        return (a) -> a + 1.0F;
++    }
++
++    @Contract(pure = true)
++    static Function<Float, Float> decrementFloat() {
++        return (a) -> a - 1.0F;
++    }
++
++    @Contract(pure = true)
++    static Function<Float, Float> addFloat(final float amount) {
++        return (a) -> a + amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Float, Float> subtractFloat(final float amount) {
++        return (a) -> a - amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Float, Float> multiplyFloat(final float amount) {
++        return (a) -> a * amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Float, Float> divideFloat(final float amount) {
++        return (a) -> a / amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Double, Double> incrementDouble() {
++        return (a) -> a + 1.0D;
++    }
++
++    @Contract(pure = true)
++    static Function<Double, Double> decrementDouble() {
++        return (a) -> a - 1.0D;
++    }
++
++    @Contract(pure = true)
++    static Function<Double, Double> addDouble(final double amount) {
++        return (a) -> a + amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Double, Double> subtractDouble(final double amount) {
++        return (a) -> a - amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Double, Double> multiplyDouble(final double amount) {
++        return (a) -> a * amount;
++    }
++
++    @Contract(pure = true)
++    static Function<Double, Double> divideDouble(final double amount) {
++        return (a) -> a / amount;
++    }
++
++    record NumericPair<A extends Number, B extends Number>(A first, B second) {
++
++        @Contract("_, _ -> new")
++        public static <A extends Number, B extends Number> NumericPair<A, B> of(final A first, final B second) {
++            return new NumericPair<>(first, second);
++        }
++
++        @Contract("_ -> new")
++        @SuppressWarnings("unchecked")
++        public NumericPair<A, B> mapFirst(final Function<A, ? extends Number> f) {
++            return new NumericPair<>((A) f.apply(this.first), this.second);
++        }
++
++        @Contract("_ -> new")
++        @SuppressWarnings("unchecked")
++        public NumericPair<A, B> mapSecond(final Function<B, ? extends Number> f) {
++            return new NumericPair<>(this.first, (B) f.apply(this.second));
++        }
++
++        @Contract("_, _ -> new")
++        public NumericPair<A, B> mapBoth(final Function<A, ? extends Number> fa, final Function<B, ? extends Number> fb) {
++            return mapFirst(fa).mapSecond(fb);
++        }
++    }
++}

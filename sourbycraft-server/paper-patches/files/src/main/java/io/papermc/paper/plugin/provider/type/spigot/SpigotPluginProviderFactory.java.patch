@@ -1,11 +1,19 @@
 --- a/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
 +++ b/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
-@@ -27,7 +_,7 @@
+@@ -26,6 +_,11 @@
+ 
      @Override
      public SpigotPluginProvider build(JarFile file, PluginDescriptionFile configuration, Path source) throws InvalidDescriptionException {
-         // Folia start - block plugins not marked as supported
--        if (!configuration.isFoliaSupported()) {
-+        if (!configuration.isFoliaSupported() && !dev.iyanz.sourbycraft.bridge.AuroraBridge.admitLegacy(configuration.getName())) { // SourbyCraft - Aurora Bridge
-             throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia!");
-         }
-         // Folia end - block plugins not marked as supported
++        // Folia start - block plugins not marked as supported
++        if (!configuration.isFoliaSupported()) {
++            throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia!");
++        }
++        // Folia end - block plugins not marked as supported
+         // Copied from SimplePluginManager#loadPlugins
+         // Spigot doesn't validate the name when the config is created, and instead when the plugin is loaded.
+         // Paper plugin configuration will do these checks in config serializer instead of when this is created.
+@@ -72,4 +_,3 @@
+         return descriptionFile;
+     }
+ }
+-

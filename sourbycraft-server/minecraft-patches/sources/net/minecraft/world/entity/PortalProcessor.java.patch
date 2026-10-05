@@ -1,0 +1,15 @@
+--- a/net/minecraft/world/entity/PortalProcessor.java
++++ b/net/minecraft/world/entity/PortalProcessor.java
+@@ -32,6 +_,12 @@
+         return this.portal.getPortalDestination(serverLevel, entity, this.entryPosition);
+     }
+ 
++    // Folia start - region threading
++    public boolean portalAsync(ServerLevel sourceWorld, Entity portalTarget) {
++        return this.portal.portalAsync(sourceWorld, portalTarget, this.entryPosition);
++    }
++
++    // Folia end - region threading
+     public Portal.Transition getPortalLocalTransition() {
+         return this.portal.getLocalTransition();
+     }

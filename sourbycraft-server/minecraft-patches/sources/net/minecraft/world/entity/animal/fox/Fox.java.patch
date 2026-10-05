@@ -1,0 +1,18 @@
+--- a/net/minecraft/world/entity/animal/fox/Fox.java
++++ b/net/minecraft/world/entity/animal/fox/Fox.java
+@@ -917,8 +_,13 @@
+                 // CraftBukkit end - call EntityBreedEvent
+ 
+                 if (loveCause != null) {
+-                    loveCause.awardStat(Stats.ANIMALS_BRED);
+-                    CriteriaTriggers.BRED_ANIMALS.trigger(loveCause, this.animal, this.partner, offspring);
++                    // Canvas start - region threading
++                    final Animal partner = this.partner;
++                    loveCause.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++                        entityPlayer.awardStat(Stats.ANIMALS_BRED);
++                        CriteriaTriggers.BRED_ANIMALS.trigger(entityPlayer, this.animal, partner, offspring);
++                    });
++                    // Canvas end - region threading
+                 }
+ 
+                 this.animal.setAge(6000);

@@ -1,0 +1,31 @@
+--- a/io/papermc/paper/redstone/RedstoneWireTurbo.java
++++ b/io/papermc/paper/redstone/RedstoneWireTurbo.java
+@@ -622,6 +_,11 @@
+             // this is a List, preserving the insertion order of
+             // left-to-right based on direction of information flow.
+             for (UpdateNode upd : thisLayer) {
++                // Folia start - thread check redstone updates
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(worldIn, upd.self, 24)) {
++                    continue;
++                }
++                // Folia end - thread check redstone updates
+                 if (upd.type == UpdateNode.Type.REDSTONE) {
+                     // If the node is is redstone wire,
+                     // schedule updates to neighbors if its value
+@@ -827,14 +_,14 @@
+         j = getMaxCurrentStrength(upd, j);
+         int l = 0;
+ 
+-        wire.shouldSignal = false;
++        io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData().shouldSignal = false; // Folia - region threading
+         // Unfortunately, World.isBlockIndirectlyGettingPowered is complicated,
+         // and I'm not ready to try to replicate even more functionality from
+         // elsewhere in Minecraft into this accelerator.  So sadly, we must
+         // suffer the performance hit of this very expensive call.  If there
+         // is consistency to what this call returns, we may be able to cache it.
+         final int k = worldIn.getBestNeighborSignal(upd.self);
+-        wire.shouldSignal = true;
++        io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData().shouldSignal = true; // Folia - region threading
+ 
+         // The variable 'k' holds the maximum redstone power value of any adjacent blocks.
+         // If 'k' has the highest level of all neighbors, then the power level of this

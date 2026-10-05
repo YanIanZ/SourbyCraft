@@ -1,0 +1,88 @@
+--- /dev/null
++++ b/io/papermc/paper/threadedregions/TeleportUtils.java
+@@ -1,0 +_,85 @@
++package io.papermc.paper.threadedregions;
++
++import ca.spottedleaf.concurrentutil.completable.CallbackCompletable;
++import java.util.function.Consumer;
++import java.util.function.Predicate;
++import net.minecraft.world.entity.Entity;
++import net.minecraft.world.phys.Vec3;
++import org.bukkit.Location;
++import org.bukkit.craftbukkit.CraftWorld;
++import org.bukkit.event.player.PlayerTeleportEvent;
++import org.jspecify.annotations.NonNull;
++import org.jspecify.annotations.Nullable;
++
++public final class TeleportUtils {
++
++    public static <T extends Entity> void teleport(final T from, final boolean useFromRootVehicle, final @NonNull Entity to, final @Nullable Float yaw, final @Nullable Float pitch,
++                                                   final long teleportFlags, final PlayerTeleportEvent.TeleportCause cause, final Consumer<Entity> onComplete) {
++        teleport(from, useFromRootVehicle, to, yaw, pitch, teleportFlags, cause, onComplete, null);
++    }
++
++    public static <T extends Entity> void teleport(final T from, final boolean useFromRootVehicle, final @NonNull Entity to, final @Nullable Float yaw, final @Nullable Float pitch,
++                                                   final long teleportFlags, final PlayerTeleportEvent.TeleportCause cause, final Consumer<Entity> onComplete,
++                                                   final @Nullable Predicate<T> preTeleport) {
++        // retrieve coordinates
++        final CallbackCompletable<Location> positionCompletable = new CallbackCompletable<>();
++
++        positionCompletable.addWaiter(
++            (final Location loc, final Throwable _) -> {
++                if (loc == null) {
++                    if (onComplete != null) {
++                        onComplete.accept(null);
++                    }
++                    return;
++                }
++                final boolean scheduled = from.getBukkitEntity().taskScheduler.schedule(
++                    (final T realFrom) -> {
++                        final Vec3 pos = new Vec3(
++                            loc.getX(), loc.getY(), loc.getZ()
++                        );
++                        if (preTeleport != null && !preTeleport.test(realFrom)) {
++                            if (onComplete != null) {
++                                onComplete.accept(null);
++                            }
++                            return;
++                        }
++                        (useFromRootVehicle ? realFrom.getRootVehicle() : realFrom).teleportAsync(
++                            ((CraftWorld)loc.getWorld()).getHandle(), pos, yaw, pitch, null, // Canvas - region threading
++                            cause, teleportFlags, onComplete
++                        );
++                    },
++                    (final Entity _) -> {
++                        if (onComplete != null) {
++                            onComplete.accept(null);
++                        }
++                    },
++                    1L
++                );
++                if (!scheduled) {
++                    if (onComplete != null) {
++                        onComplete.accept(null);
++                    }
++                }
++            }
++        );
++
++        final boolean scheduled = to.getBukkitEntity().taskScheduler.schedule(
++            (final Entity target) -> {
++                positionCompletable.complete(target.getBukkitEntity().getLocation());
++            },
++            (final Entity _) -> {
++                if (onComplete != null) {
++                    onComplete.accept(null);
++                }
++            },
++            1L
++        );
++        if (!scheduled) {
++            if (onComplete != null) {
++                onComplete.accept(null);
++            }
++        }
++    }
++
++    private TeleportUtils() {}
++}

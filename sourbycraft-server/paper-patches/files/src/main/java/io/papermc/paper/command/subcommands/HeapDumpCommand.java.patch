@@ -1,0 +1,12 @@
+--- a/src/main/java/io/papermc/paper/command/subcommands/HeapDumpCommand.java
++++ b/src/main/java/io/papermc/paper/command/subcommands/HeapDumpCommand.java
+@@ -18,7 +_,9 @@
+ public final class HeapDumpCommand implements PaperSubcommand {
+     @Override
+     public boolean execute(final CommandSender sender, final String subCommand, final String[] args) {
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> { // Folia - region threading
+         this.dumpHeap(sender);
++        }); // Folia - region threading
+         return true;
+     }
+ 

@@ -1,0 +1,34 @@
+--- a/net/minecraft/world/entity/animal/happyghast/HappyGhast.java
++++ b/net/minecraft/world/entity/animal/happyghast/HappyGhast.java
+@@ -12,8 +_,6 @@
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.Mth;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.damagesource.DamageSource;
+@@ -404,13 +_,8 @@
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+         if (this.isBaby()) {
+-            ProfilerFiller profiler = Profiler.get();
+-            profiler.push("happyGhastBrain");
+             this.getBrain().tick(level, this);
+-            profiler.pop();
+-            profiler.push("happyGhastActivityUpdate");
+             HappyGhastAi.updateActivity(this);
+-            profiler.pop();
+         }
+ 
+         this.checkRestriction();
+@@ -560,7 +_,7 @@
+             happyGhastBb.maxZ + 1.0
+         );
+ 
+-        for (Player player : this.level().players()) {
++        for (Player player : this.level().getLocalPlayers()) { // Folia - region threading - Vanilla should do an AABB lookup but whatever
+             if (!player.isSpectator()) {
+                 Entity rootVehicle = player.getRootVehicle();
+                 if (!(rootVehicle instanceof HappyGhast) && ghastDetectionBox.contains(rootVehicle.position())) {

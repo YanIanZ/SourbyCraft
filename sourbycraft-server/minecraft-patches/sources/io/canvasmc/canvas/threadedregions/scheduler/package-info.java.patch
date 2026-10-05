@@ -1,0 +1,7 @@
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/scheduler/package-info.java
+@@ -1,0 +_,4 @@
++@NullMarked
++package io.canvasmc.canvas.threadedregions.scheduler;
++
++import org.jspecify.annotations.NullMarked;

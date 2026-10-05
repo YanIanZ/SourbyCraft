@@ -1,0 +1,42 @@
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/queue/ChunkUnloadQueue.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/queue/ChunkUnloadQueue.java
+@@ -29,6 +_,39 @@
+ 
+     public static record SectionToUnload(int sectionX, int sectionZ, long order, int count) {}
+ 
++    // Folia start - region threading
++    public List<SectionToUnload> retrieveForCurrentRegion() {
++        final io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData> region =
++            io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion();
++        final io.papermc.paper.threadedregions.ThreadedRegionizer<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData> regionizer = region.regioniser;
++        final int shift = this.coordinateShift;
++
++        final List<SectionToUnload> ret = new ArrayList<>();
++
++        for (final Iterator<ConcurrentChainedLong2ReferenceHashTable.TableEntry<UnloadSection>> iterator = this.unloadSections.entryIterator(); iterator.hasNext();) {
++            final ConcurrentChainedLong2ReferenceHashTable.TableEntry<UnloadSection> entry = iterator.next();
++            final long key = entry.getKey();
++            final UnloadSection section = entry.getValue();
++            final int sectionX = CoordinateUtils.getChunkX(key);
++            final int sectionZ = CoordinateUtils.getChunkZ(key);
++            final int chunkX = sectionX << shift;
++            final int chunkZ = sectionZ << shift;
++
++            if (regionizer.getRegionAtUnsynchronised(chunkX, chunkZ) != region) {
++                continue;
++            }
++
++            ret.add(new SectionToUnload(sectionX, sectionZ, section.order, section.chunks.size()));
++        }
++
++        ret.sort((final SectionToUnload s1, final SectionToUnload s2) -> {
++            return Long.compare(s1.order, s2.order);
++        });
++
++        return ret;
++    }
++
++    // Folia end - region threading
+     public List<SectionToUnload> retrieveForAllRegions() {
+         final List<SectionToUnload> ret = new ArrayList<>();
+ 

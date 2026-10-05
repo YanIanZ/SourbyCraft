@@ -1,0 +1,37 @@
+--- a/net/minecraft/world/entity/monster/zombie/ZombieVillager.java
++++ b/net/minecraft/world/entity/monster/zombie/ZombieVillager.java
+@@ -268,7 +_,16 @@
+                 if (this.conversionStarter != null) {
+                     Player player = level.getGlobalPlayerByUUID(this.conversionStarter); // Paper - check global player list where appropriate
+                     if (player instanceof ServerPlayer serverPlayer) {
+-                        CriteriaTriggers.CURED_ZOMBIE_VILLAGER.trigger(serverPlayer, this, villager);
++                        // Canvas start - region threading
++
++                        // note: getGlobalPlayerByUUID is overridden in ServerLevel to get
++                        //       from full player list, not local players like in EntityGetter
++                        //       so player may be out of region, schedule this
++
++                        serverPlayer.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++                            CriteriaTriggers.CURED_ZOMBIE_VILLAGER.trigger(entityPlayer, this, villager);
++                        });
++                        // Canvas end - region threading
+                         level.onReputationEvent(ReputationEventType.ZOMBIE_VILLAGER_CURED, player, villager);
+                     }
+                 }
+@@ -277,6 +_,16 @@
+                 if (!this.isSilent()) {
+                     level.levelEvent(null, LevelEvent.SOUND_ZOMBIE_CONVERTED, this.blockPosition(), 0);
+                 }
++                // Canvas start - MC-200418
++                if (
++                    io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc200418
++                        && villager.isPassenger()
++                        && villager.getVehicle() instanceof net.minecraft.world.entity.animal.chicken.Chicken
++                        && villager.isBaby())
++                {
++                    villager.removeVehicle();
++                }
++                // Canvas end - MC-200418
+                 // CraftBukkit start
+             }, org.bukkit.event.entity.EntityTransformEvent.TransformReason.CURED, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CURED // CraftBukkit
+         );

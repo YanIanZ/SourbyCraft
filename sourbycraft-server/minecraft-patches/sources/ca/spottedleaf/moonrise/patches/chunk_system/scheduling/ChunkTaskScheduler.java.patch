@@ -1,0 +1,124 @@
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
+@@ -108,13 +_,15 @@
+ 
+     public final ServerLevel world;
+     public final AreaDependentQueue radiusAwareScheduler;
+-    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue parallelGenExecutor;
+-    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue loadExecutor;
+-    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue ioExecutor;
+-    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue compressionExecutor;
+-    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue saveExecutor;
++    // Canvas start - replace moonrise executor
++    public final io.canvasmc.canvas.world.chunk.ChunkSystemExecutor parallelGenExecutor;
++    public final io.canvasmc.canvas.world.chunk.ChunkSystemExecutor loadExecutor;
++    public final io.canvasmc.canvas.world.chunk.ChunkSystemExecutor compressionExecutor;
++    public final io.canvasmc.canvas.world.chunk.ChunkSystemExecutor saveExecutor;
++    public final io.canvasmc.canvas.world.chunk.ChunkSystemExecutor ioExecutor;
++    // Canvas end - replace moonrise executor
+ 
+-    private final PrioritisedTaskQueue mainThreadExecutor = new PrioritisedTaskQueue();
++    // Folia - region threading
+ 
+     public final ChunkHolderManager chunkHolderManager;
+ 
+@@ -328,25 +_,18 @@
+         };
+ 
+         // this may not be good enough, specifically thanks to stupid ass plugins swallowing exceptions
+-        this.scheduleChunkTask(chunkX, chunkZ, crash, Priority.BLOCKING);
++        this.scheduleChunkTaskEventually(chunkX, chunkZ, crash, Priority.BLOCKING); // Folia - region threading
+         // so, make the main thread pick it up
+         ((ChunkSystemMinecraftServer)this.world.getServer()).moonrise$setChunkSystemCrash(new RuntimeException("Chunk system crash propagated from unrecoverableChunkSystemFailure", reportedException));
+     }
+ 
+     public boolean executeMainThreadTask() {
+-        TickThread.ensureTickThread("Cannot execute main thread task off-main");
+-        return this.mainThreadExecutor.executeTask();
++        throw new UnsupportedOperationException("Use region threading hooks"); // Folia - region threading
+     }
+ 
+     // run only tasks queued before this function was invoked
+     public void executeAllRecentlyQueuedMainThreadTasks() {
+-        // note: order of retrieval is important to avoid race conditions
+-        final long executed = this.mainThreadExecutor.getTotalTasksExecuted();
+-        final long scheduled = this.mainThreadExecutor.getTotalTasksScheduled();
+-
+-        final long left = scheduled - executed;
+-        // may execute more tasks than expected due to recursion
+-        for (long i = 0; i < left && this.mainThreadExecutor.executeTask(); ++i);
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
+     }
+ 
+     public void raisePriority(final int x, final int z, final Priority priority) {
+@@ -553,9 +_,20 @@
+ 
+         // we could do a simple spinwait here, since we do not need to process tasks while performing this load
+         // but we process tasks only because it's a better use of the time spent
+-        this.world.getChunkSource().mainThreadProcessor.managedBlock(() -> {
+-            return ((ChunkSystemServerLevel)this.world).moonrise$getSpecificChunkIfLoaded(chunkX, chunkZ, status) != null;
+-        });
++        // Folia start - region threading
++        io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>
++                region = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion();
++        if (region == null) {
++            while (((ChunkSystemServerLevel)this.world).moonrise$getSpecificChunkIfLoaded(chunkX, chunkZ, status) == null) {
++                Thread.yield();
++                java.util.concurrent.locks.LockSupport.parkNanos(100_000L);
++            }
++        } else {
++            region.regioniser.world.getChunkSource().mainThreadProcessor.managedBlock(() -> {
++                return ((ChunkSystemServerLevel)this.world).moonrise$getSpecificChunkIfLoaded(chunkX, chunkZ, status) != null;
++            });
++        }
++        // Folia end - region threading
+ 
+         loaded = ((ChunkSystemServerLevel)this.world).moonrise$getSpecificChunkIfLoaded(chunkX, chunkZ, status);
+ 
+@@ -831,7 +_,7 @@
+      */
+     @Deprecated
+     public PrioritisedExecutor.PrioritisedTask scheduleChunkTask(final Runnable run, final Priority priority) {
+-        return this.mainThreadExecutor.queueTask(run, priority);
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
+     }
+ 
+     public PrioritisedExecutor.PrioritisedTask createChunkTask(final int chunkX, final int chunkZ, final Runnable run) {
+@@ -840,7 +_,7 @@
+ 
+     public PrioritisedExecutor.PrioritisedTask createChunkTask(final int chunkX, final int chunkZ, final Runnable run,
+                                                                final Priority priority) {
+-        return this.mainThreadExecutor.createTask(run, priority);
++        return io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.createChunkTask(this.world, chunkX, chunkZ, run, priority); // Folia - region threading
+     }
+ 
+     public PrioritisedExecutor.PrioritisedTask scheduleChunkTask(final int chunkX, final int chunkZ, final Runnable run) {
+@@ -849,8 +_,26 @@
+ 
+     public PrioritisedExecutor.PrioritisedTask scheduleChunkTask(final int chunkX, final int chunkZ, final Runnable run,
+                                                                  final Priority priority) {
+-        return this.mainThreadExecutor.queueTask(run, priority);
+-    }
++        return io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(this.world, chunkX, chunkZ, run, priority); // Folia - region threading
++    }
++
++    // Folia start - region threading
++    // this function is guaranteed to never touch the ticket lock or schedule lock
++    // yes, this IS a hack so that we can avoid deadlock due to region threading introducing the
++    // ticket lock in the schedule logic
++    public PrioritisedExecutor.PrioritisedTask scheduleChunkTaskEventually(final int chunkX, final int chunkZ, final Runnable run) {
++        return this.scheduleChunkTaskEventually(chunkX, chunkZ, run, Priority.NORMAL);
++    }
++
++    public PrioritisedExecutor.PrioritisedTask scheduleChunkTaskEventually(final int chunkX, final int chunkZ, final Runnable run,
++                                                                           final Priority priority) {
++        final PrioritisedExecutor.PrioritisedTask ret = this.createChunkTask(chunkX, chunkZ, run, priority);
++        this.world.taskQueueRegionData.pushGlobalChunkTask(() -> {
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(ChunkTaskScheduler.this.world, chunkX, chunkZ, run, priority);
++        });
++        return ret;
++    }
++    // Folia end - region threading
+ 
+     public boolean halt(final boolean sync, final long maxWaitNS) {
+         this.parallelGenExecutor.halt();

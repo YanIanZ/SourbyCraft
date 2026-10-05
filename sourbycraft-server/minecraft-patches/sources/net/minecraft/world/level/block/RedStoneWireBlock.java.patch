@@ -1,0 +1,95 @@
+--- a/net/minecraft/world/level/block/RedStoneWireBlock.java
++++ b/net/minecraft/world/level/block/RedStoneWireBlock.java
+@@ -65,7 +_,7 @@
+     private final Function<BlockState, VoxelShape> shapes;
+     private final BlockState crossState;
+     private final RedstoneWireEvaluator evaluator = new DefaultRedstoneWireEvaluator(this);
+-    public boolean shouldSignal = true;
++    // public boolean shouldSignal = true; // Folia - region threading - move to regionized world data
+ 
+     @Override
+     public MapCodec<RedStoneWireBlock> codec() {
+@@ -215,8 +_,9 @@
+         BlockPos.MutableBlockPos blockPos = new BlockPos.MutableBlockPos();
+ 
+         for (Direction direction : Direction.Plane.HORIZONTAL) {
++            BlockState currState; blockPos.setWithOffset(pos, direction); // Folia - block updates in unloaded chunks
+             RedstoneSide value = state.getValue(PROPERTY_BY_DIRECTION.get(direction));
+-            if (value != RedstoneSide.NONE && !level.getBlockState(blockPos.setWithOffset(pos, direction)).is(this)) {
++            if (value != RedstoneSide.NONE && (currState = (level instanceof net.minecraft.server.level.ServerLevel serverLevel && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, blockPos, 25) ? null : level.getBlockStateIfLoaded(blockPos))) != null && !currState.is(this)) { // Folia - block updates in unloaded chunks
+                 blockPos.move(Direction.DOWN);
+                 BlockState blockStateDown = level.getBlockState(blockPos);
+                 if (blockStateDown.is(this)) {
+@@ -271,7 +_,14 @@
+ 
+     // Paper start - Optimize redstone (Eigencraft)
+     // The bulk of the new functionality is found in RedstoneWireTurbo.java
+-    io.papermc.paper.redstone.RedstoneWireTurbo turbo = new io.papermc.paper.redstone.RedstoneWireTurbo(this);
++    // Folia start - region threading
++    // note: turbo moved to regionized data
++    // io.papermc.paper.redstone.RedstoneWireTurbo turbo = new io.papermc.paper.redstone.RedstoneWireTurbo(this);
++
++    private io.papermc.paper.redstone.RedstoneWireTurbo getTurbo(Level world) {
++        return world.getCurrentWorldData().turbo;
++    }
++    // Folia end - region threading
+ 
+     /*
+      * Modified version of pre-existing updateSurroundingRedstone, which is called from
+@@ -287,7 +_,7 @@
+             if (orientation != null) {
+                 source = pos.relative(orientation.getFront().getOpposite());
+             }
+-            turbo.updateSurroundingRedstone(worldIn, pos, state, source);
++            getTurbo(worldIn).updateSurroundingRedstone(worldIn, pos, state, source); // Folia - region threading
+             return;
+         }
+         updatePowerStrength(worldIn, pos, state, orientation, blockAdded);
+@@ -311,7 +_,7 @@
+                 // [Space Walker] suppress shape updates and emit those manually to
+                 // bypass the new neighbor update stack.
+                 if (level.setBlock(pos, state, Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_CLIENTS)) {
+-                    turbo.updateNeighborShapes(level, pos, state);
++                    this.getTurbo(level).updateNeighborShapes(level, pos, state); // Folia - region threading
+                 }
+             }
+         }
+@@ -334,9 +_,9 @@
+     }
+ 
+     public int getBlockSignal(final Level level, final BlockPos pos) {
+-        this.shouldSignal = false;
++        io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData().shouldSignal = false; // Folia - region threading
+         int blockSignal = level.getBestNeighborSignal(pos);
+-        this.shouldSignal = true;
++        io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData().shouldSignal = true; // Folia - region threading
+         return blockSignal;
+     }
+ 
+@@ -430,12 +_,12 @@
+ 
+     @Override
+     protected int getDirectSignal(final BlockState state, final BlockGetter level, final BlockPos pos, final Direction direction) {
+-        return !this.shouldSignal ? Redstone.SIGNAL_MIN : state.getSignal(level, pos, direction);
++        return !io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData().shouldSignal ? Redstone.SIGNAL_MIN : state.getSignal(level, pos, direction); // Folia - region threading
+     }
+ 
+     @Override
+     protected int getSignal(final BlockState state, final BlockGetter level, final BlockPos pos, final Direction direction) {
+-        if (this.shouldSignal && direction != Direction.DOWN) {
++        if (io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData().shouldSignal && direction != Direction.DOWN) { // Folia - region threading
+             int power = this.ownSignal(state, level, pos);
+             if (power == 0) {
+                 return Redstone.SIGNAL_MIN;
+@@ -472,7 +_,10 @@
+ 
+     @Override
+     protected boolean isSignalSource(final BlockState state) {
+-        return this.shouldSignal;
++        // Folia start - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
++        return worldData == null || worldData.shouldSignal;
++        // Folia end - region threading
+     }
+ 
+     public static int getColorForPower(final int power) {

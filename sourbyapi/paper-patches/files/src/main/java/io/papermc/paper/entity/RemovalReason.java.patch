@@ -1,0 +1,14 @@
+--- a/src/main/java/io/papermc/paper/entity/RemovalReason.java
++++ b/src/main/java/io/papermc/paper/entity/RemovalReason.java
+@@ -13,6 +_,11 @@
+     DISCARDED(true, false),
+     UNLOADED_TO_CHUNK(false, true),
+     UNLOADED_WITH_PLAYER(false, false),
++    // Canvas start - region threading
++    /**
++     * Note, this is also the removal reason used when switching regions
++     */
++    // Canvas end - region threading
+     CHANGED_DIMENSION(false, false);
+     // End generate - RemovalReason
+ 

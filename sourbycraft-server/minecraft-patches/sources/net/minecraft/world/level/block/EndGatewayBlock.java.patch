@@ -1,0 +1,84 @@
+--- a/net/minecraft/world/level/block/EndGatewayBlock.java
++++ b/net/minecraft/world/level/block/EndGatewayBlock.java
+@@ -96,6 +_,7 @@
+     ) {
+         if (!new io.papermc.paper.event.entity.EntityInsideBlockEvent(entity.getBukkitEntity(), org.bukkit.craftbukkit.block.CraftBlock.at(level, pos)).callEvent()) { return; } // Paper - Add EntityInsideBlockEvent
+         if (entity.canUsePortal(false)
++            && (!io.canvasmc.canvas.GlobalConfiguration.getInstance().blacklistNonPlayerEntitiesFromEnteringGatewayPortals || entity instanceof net.minecraft.server.level.ServerPlayer) // Canvas - blacklist non player entities from portals configs
+             && !level.isClientSide()
+             && level.getBlockEntity(pos) instanceof TheEndGatewayBlockEntity endGatewayBlockEntity
+             && !endGatewayBlockEntity.isCoolingDown()) {
+@@ -112,26 +_,53 @@
+     public @Nullable TeleportTransition getPortalDestination(final ServerLevel currentLevel, final Entity entity, final BlockPos portalEntryPos) {
+         if (currentLevel.getBlockEntity(portalEntryPos) instanceof TheEndGatewayBlockEntity endGatewayBlockEntity) {
+             Vec3 teleportPosition = endGatewayBlockEntity.getPortalPosition(currentLevel, portalEntryPos);
+-            if (teleportPosition == null) {
+-                return null;
+-            } else {
+-                return entity instanceof ThrownEnderpearl
+-                    ? new TeleportTransition(currentLevel, teleportPosition, Vec3.ZERO, 0.0F, 0.0F, Set.of(), TeleportTransition.PLACE_PORTAL_TICKET).withCause(org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.END_GATEWAY) // CraftBukkit
+-                    : new TeleportTransition(
+-                        currentLevel,
+-                        teleportPosition,
+-                        Vec3.ZERO,
+-                        0.0F,
+-                        0.0F,
+-                        Relative.union(Relative.DELTA, Relative.ROTATION),
+-                        TeleportTransition.PLACE_PORTAL_TICKET
+-                    ).withCause(org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.END_GATEWAY);  // CraftBukkit;
+-            }
+-        } else {
+-            return null;
+-        }
+-    }
+-
++            return getTeleportTransition(currentLevel, entity, teleportPosition); // Folia - region threading - move down
++        } else {
++            return null;
++        }
++    }
++
++    // Folia start - region threading
++    @Override
++    public boolean portalAsync(ServerLevel sourceWorld, Entity portalTarget, BlockPos portalPos) {
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(portalTarget)) {
++            return false;
++        }
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(sourceWorld, portalPos)) {
++            return false;
++        }
++
++        BlockEntity tile = sourceWorld.getBlockEntity(portalPos);
++
++        if (!(tile instanceof TheEndGatewayBlockEntity endGateway)) {
++            return false;
++        }
++
++        return TheEndGatewayBlockEntity.teleportRegionThreading(
++            sourceWorld, portalPos, portalTarget, endGateway, TeleportTransition.PLACE_PORTAL_TICKET
++        );
++    }
++
++    public static TeleportTransition getTeleportTransition(final ServerLevel currentLevel, final Entity entity, final Vec3 teleportPosition) {
++        // moved from above
++        if (teleportPosition == null) {
++            return null;
++        } else {
++            return entity instanceof ThrownEnderpearl
++                ? new TeleportTransition(currentLevel, teleportPosition, Vec3.ZERO, 0.0F, 0.0F, Set.of(), TeleportTransition.PLACE_PORTAL_TICKET).withCause(org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.END_GATEWAY) // CraftBukkit
++                : new TeleportTransition(
++                currentLevel,
++                teleportPosition,
++                Vec3.ZERO,
++                0.0F,
++                0.0F,
++                Relative.union(Relative.DELTA, Relative.ROTATION),
++                TeleportTransition.PLACE_PORTAL_TICKET
++            ).withCause(org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.END_GATEWAY);  // CraftBukkit;
++        }
++    }
++
++    // Folia end - region threading
+     @Override
+     protected RenderShape getRenderShape(final BlockState state) {
+         return RenderShape.INVISIBLE;

@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/entity/monster/hoglin/Hoglin.java
++++ b/net/minecraft/world/entity/monster/hoglin/Hoglin.java
+@@ -12,8 +_,6 @@
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.RandomSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+@@ -142,10 +_,7 @@
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("hoglinBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+         HoglinAi.updateActivity(this);
+         if (this.isConverting()) {
+             this.timeInOverworld++;

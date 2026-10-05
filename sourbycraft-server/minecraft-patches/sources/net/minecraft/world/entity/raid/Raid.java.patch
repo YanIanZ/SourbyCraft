@@ -1,0 +1,79 @@
+--- a/net/minecraft/world/entity/raid/Raid.java
++++ b/net/minecraft/world/entity/raid/Raid.java
+@@ -133,6 +_,13 @@
+     private int celebrationTicks;
+     private Optional<BlockPos> waveSpawnPos = Optional.empty();
+ 
++    // Folia start - make raids thread-safe
++    public boolean ownsRaid(ServerLevel world) {
++        BlockPos center = this.getCenter();
++        return center != null && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(world, center.getX() >> 4, center.getZ() >> 4, 8);
++    }
++
++    // Folia end - make raids thread-safe
+     public Raid(final BlockPos center, final Difficulty difficulty) {
+         this.active = true;
+         this.raidCooldownTicks = 300;
+@@ -228,7 +_,7 @@
+     private Predicate<ServerPlayer> validPlayer() {
+         return player -> {
+             BlockPos pos = player.blockPosition();
+-            return player.isAlive() && player.level().getRaidAt(pos) == this;
++            return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player) && player.isAlive() && player.level().getRaidAt(pos) == this; // Folia - make raids thread-safe
+         };
+     }
+ 
+@@ -423,12 +_,21 @@
+                         for (UUID heroUUID : this.heroesOfTheVillage) {
+                             Entity entity = level.getEntity(heroUUID);
+                             if (entity instanceof LivingEntity hero && !entity.isSpectator()) {
+-                                hero.addEffect(new MobEffectInstance(MobEffects.HERO_OF_THE_VILLAGE, 48000, this.raidOmenLevel - 1, false, false, true));
++                                // hero.addEffect(new MobEffectInstance(MobEffects.HERO_OF_THE_VILLAGE, 48000, this.raidOmenLevel - 1, false, false, true)); // Folia start - Fix off region raid heroes - moved down
+                                 if (hero instanceof ServerPlayer playerHero) {
+-                                    playerHero.awardStat(Stats.RAID_WIN);
+-                                    CriteriaTriggers.RAID_WIN.trigger(playerHero);
++                                    // playerHero.awardStat(Stats.RAID_WIN); // Folia start - Fix off region raid heroes - moved down
++                                    // CriteriaTriggers.RAID_WIN.trigger(playerHero); // Folia start - Fix off region raid heroes - moved down
+                                     winners.add(playerHero.getBukkitEntity()); // CraftBukkit
+                                 }
++                                // Folia start - Fix off region raid heroes
++                                hero.getBukkitEntity().taskScheduler.scheduleOrExecute((LivingEntity lv) -> { // Canvas - region threading
++                                    lv.addEffect(new MobEffectInstance(MobEffects.HERO_OF_THE_VILLAGE, 48000, this.raidOmenLevel - 1, false, false, true));
++                                    if (lv instanceof ServerPlayer serverPlayer) {
++                                        serverPlayer.awardStat(Stats.RAID_WIN);
++                                        CriteriaTriggers.RAID_WIN.trigger(serverPlayer);
++                                    }
++                                }); // Canvas - region threading
++                                // Folia end - Fix off region raid heroes
+                             }
+                         }
+                         org.bukkit.craftbukkit.event.CraftEventFactory.callRaidFinishEvent(level, this, winners); // CraftBukkit
+@@ -532,14 +_,14 @@
+         Collection<ServerPlayer> playersInRaid = this.raidEvent.getPlayers();
+         long seed = this.random.nextLong();
+ 
+-        for (ServerPlayer player : level.players()) {
++        for (ServerPlayer player : level.getLocalPlayers()) { // Folia - region threading
+             Vec3 playerLoc = player.position();
+             Vec3 raidLoc = Vec3.atCenterOf(soundOrigin);
+             double distBtwn = Math.sqrt((raidLoc.x - playerLoc.x) * (raidLoc.x - playerLoc.x) + (raidLoc.z - playerLoc.z) * (raidLoc.z - playerLoc.z));
+             double x3 = playerLoc.x + 13.0 / distBtwn * (raidLoc.x - playerLoc.x);
+             double z3 = playerLoc.z + 13.0 / distBtwn * (raidLoc.z - playerLoc.z);
+             if (distBtwn <= 64.0 || playersInRaid.contains(player)) {
+-                player.connection.send(new ClientboundSoundPacket(SoundEvents.RAID_HORN, SoundSource.NEUTRAL, x3, player.getY(), z3, 64.0F, 1.0F, seed));
++                player.connection.send(new ClientboundSoundPacket(SoundEvents.RAID_HORN, io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc245394 ? SoundSource.HOSTILE : SoundSource.NEUTRAL, x3, player.getY(), z3, 64.0F, 1.0F, seed)); // Canvas - MC-245394
+             }
+         }
+     }
+@@ -721,6 +_,11 @@
+     }
+ 
+     private boolean addWaveMob(final ServerLevel level, final int wave, final Raider raider) {
++        // Folia start - make raids thread-safe
++        if (!this.ownsRaid(level)) {
++            return false;
++        }
++        // Folia end - make raids thread-safe
+         return this.addWaveMob(level, wave, raider, true);
+     }
+ 

@@ -1,0 +1,123 @@
+--- a/net/minecraft/world/entity/ai/village/VillageSiege.java
++++ b/net/minecraft/world/entity/ai/village/VillageSiege.java
+@@ -23,64 +_,70 @@
+ 
+ public class VillageSiege implements CustomSpawner {
+     private static final Logger LOGGER = LogUtils.getLogger();
+-    private boolean hasSetupSiege;
+-    private VillageSiege.State siegeState = VillageSiege.State.SIEGE_DONE;
+-    private int zombiesToSpawn;
+-    private int nextSpawnTime;
+-    private int spawnX;
+-    private int spawnY;
+-    private int spawnZ;
++    // Folia - region threading
+ 
+     @Override
+     public void tick(final ServerLevel level, final boolean spawnEnemies) {
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = level.getCurrentWorldData(); // Folia - region threading
++        // Folia start - region threading
++        // check if the spawn pos is no longer owned by this region
++        if (worldData.villageSiegeState.siegeState != VillageSiege.State.SIEGE_DONE
++                && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, worldData.villageSiegeState.spawnX >> 4, worldData.villageSiegeState.spawnZ >> 4, 8)) {
++            // can't spawn here, just re-set
++            worldData.villageSiegeState = new io.papermc.paper.threadedregions.RegionizedWorldData.VillageSiegeState();
++        }
++        // Folia end - region threading
+         if (!level.isBrightOutside() && spawnEnemies) {
+             Optional<Holder<WorldClock>> defaultClock = level.dimensionType().defaultClock();
+             if (defaultClock.isPresent() && level.clockManager().isAtTimeMarker(defaultClock.get(), ClockTimeMarkers.ROLL_VILLAGE_SIEGE)) {
+-                this.siegeState = level.getRandom().nextInt(10) == 0 ? VillageSiege.State.SIEGE_TONIGHT : VillageSiege.State.SIEGE_DONE;
++                worldData.villageSiegeState.siegeState = level.getRandom().nextInt(10) == 0 ? VillageSiege.State.SIEGE_TONIGHT : VillageSiege.State.SIEGE_DONE; // Folia - region threading
+             }
+ 
+-            if (this.siegeState != VillageSiege.State.SIEGE_DONE) {
+-                if (!this.hasSetupSiege) {
++            if (worldData.villageSiegeState.siegeState != VillageSiege.State.SIEGE_DONE) { // Folia - region threading
++                if (!worldData.villageSiegeState.hasSetupSiege) { // Folia - region threading
+                     if (!this.tryToSetupSiege(level)) {
+                         return;
+                     }
+ 
+-                    this.hasSetupSiege = true;
++                    worldData.villageSiegeState.hasSetupSiege = true; // Folia - region threading
+                 }
+ 
+-                if (this.nextSpawnTime > 0) {
+-                    this.nextSpawnTime--;
++                if (worldData.villageSiegeState.nextSpawnTime > 0) { // Folia - region threading
++                    worldData.villageSiegeState.nextSpawnTime--; // Folia - region threading
+                 } else {
+-                    this.nextSpawnTime = 2;
+-                    if (this.zombiesToSpawn > 0) {
++                    worldData.villageSiegeState.nextSpawnTime = 2; // Folia - region threading
++                    if (worldData.villageSiegeState.zombiesToSpawn > 0) { // Folia - region threading
+                         this.trySpawn(level);
+-                        this.zombiesToSpawn--;
++                        worldData.villageSiegeState.zombiesToSpawn--; // Folia - region threading
+                     } else {
+-                        this.siegeState = VillageSiege.State.SIEGE_DONE;
++                        worldData.villageSiegeState.siegeState = VillageSiege.State.SIEGE_DONE; // Folia - region threading
+                     }
+                 }
+             }
+         } else {
+-            this.siegeState = VillageSiege.State.SIEGE_DONE;
+-            this.hasSetupSiege = false;
++            worldData.villageSiegeState.siegeState = VillageSiege.State.SIEGE_DONE; // Folia - region threading
++            worldData.villageSiegeState.hasSetupSiege = false; // Folia - region threading
+         }
+     }
+ 
+     private boolean tryToSetupSiege(final ServerLevel level) {
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = level.getCurrentWorldData(); // Folia - region threading
+         RandomSource random = level.getRandom();
+ 
+-        for (Player player : level.players()) {
++        for (Player player : level.getLocalPlayers()) { // Folia - region threading
+             if (!player.isSpectator()) {
+                 BlockPos center = player.blockPosition();
+                 if (level.isVillage(center) && !level.getBiome(center).is(BiomeTags.WITHOUT_ZOMBIE_SIEGES)) {
+                     for (int i = 0; i < 10; i++) {
+                         float angle = random.nextFloat() * (float) (Math.PI * 2);
+-                        this.spawnX = center.getX() + Mth.floor(Mth.cos(angle) * 32.0F);
+-                        this.spawnY = center.getY();
+-                        this.spawnZ = center.getZ() + Mth.floor(Mth.sin(angle) * 32.0F);
+-                        if (this.findRandomSpawnPos(level, new BlockPos(this.spawnX, this.spawnY, this.spawnZ)) != null) {
+-                            this.nextSpawnTime = 0;
+-                            this.zombiesToSpawn = 20;
++                        // Folia start - region threading
++                        worldData.villageSiegeState.spawnX = center.getX() + Mth.floor(Mth.cos(angle) * 32.0F);
++                        worldData.villageSiegeState.spawnY = center.getY();
++                        worldData.villageSiegeState.spawnZ = center.getZ() + Mth.floor(Mth.sin(angle) * 32.0F);
++                        if (this.findRandomSpawnPos(level, new BlockPos(worldData.villageSiegeState.spawnX, worldData.villageSiegeState.spawnY, worldData.villageSiegeState.spawnZ)) != null) {
++                            worldData.villageSiegeState.nextSpawnTime = 0;
++                            worldData.villageSiegeState.zombiesToSpawn = 20;
++                        // Folia end - region threading
+                             break;
+                         }
+                     }
+@@ -94,11 +_,13 @@
+     }
+ 
+     private void trySpawn(final ServerLevel level) {
+-        Vec3 spawnPos = this.findRandomSpawnPos(level, new BlockPos(this.spawnX, this.spawnY, this.spawnZ));
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = level.getCurrentWorldData(); // Folia - region threading
++        Vec3 spawnPos = this.findRandomSpawnPos(level, new BlockPos(worldData.villageSiegeState.spawnX, worldData.villageSiegeState.spawnY, worldData.villageSiegeState.spawnZ)); // Folia - region threading
+         if (spawnPos != null) {
+             Zombie zombie;
+             try {
+                 zombie = new Zombie(level);
++                zombie.snapTo(spawnPos.x, spawnPos.y, spawnPos.z, level.getRandom().nextFloat() * 360.0F, 0.0F); // Folia - region threading - move up
+                 zombie.finalizeSpawn(level, level.getCurrentDifficultyAt(zombie.blockPosition()), EntitySpawnReason.EVENT, null);
+             } catch (Exception e) {
+                 LOGGER.warn("Failed to create zombie for village siege at {}", spawnPos, e);
+@@ -106,7 +_,7 @@
+                 return;
+             }
+ 
+-            zombie.snapTo(spawnPos.x, spawnPos.y, spawnPos.z, level.getRandom().nextFloat() * 360.0F, 0.0F);
++            // zombie.snapTo(spawnPos.x, spawnPos.y, spawnPos.z, level.getRandom().nextFloat() * 360.0F, 0.0F); // Folia - region threading - move up
+             level.addFreshEntityWithPassengers(zombie, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.VILLAGE_INVASION); // CraftBukkit
+         }
+     }

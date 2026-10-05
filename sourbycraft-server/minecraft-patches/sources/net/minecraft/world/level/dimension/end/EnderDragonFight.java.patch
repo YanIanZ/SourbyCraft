@@ -1,0 +1,124 @@
+--- a/net/minecraft/world/level/dimension/end/EnderDragonFight.java
++++ b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
+@@ -223,7 +_,34 @@
+         } else {
+             this.level.getChunkSource().removeTicketWithRadius(TicketType.DRAGON, new ChunkPos(0, 0), 9);
+         }
+-    }
++        autosaveTick(); // Canvas - region threading
++    }
++    // Canvas start - region threading
++    private long lastDragonFightSave = System.nanoTime();
++    public volatile boolean forceSaveAttemptOnNextTick = false;
++
++    private void autosaveTick() {
++        final net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
++
++        final int autoSavePeriod = server.autosavePeriod;
++        if (!forceSaveAttemptOnNextTick && autoSavePeriod <= 0) return;
++        final long periodNanos = autoSavePeriod * io.papermc.paper.threadedregions.TickRegionScheduler.getTimeBetweenTicks();
++        final long currTime = System.nanoTime();
++        final long last = lastDragonFightSave;
++
++        if (forceSaveAttemptOnNextTick || ((currTime - last) > periodNanos)) {
++            lastDragonFightSave = currTime;
++            forceSaveAttemptOnNextTick = false;
++
++            if (!isDirty()) {
++                return;
++            }
++
++            LOGGER.info("Auto saving dirty dragon fight data");
++            level.getDataStorage().saveSpecific(() -> List.of(EnderDragonFight.class));
++        }
++    }
++    // Canvas end - region threading
+ 
+     private void scanState() {
+         LOGGER.info("Scanning for legacy world dragon fight...");
+@@ -240,6 +_,12 @@
+         }
+ 
+         List<? extends EnderDragon> entities = this.level.getDragons();
++        // Folia start - region threading
++        // we do not want to deal with any dragons NOT nearby
++        entities.removeIf((EnderDragon dragon) -> {
++            return !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(dragon);
++        });
++        // Folia end - region threading
+         if (entities.isEmpty()) {
+             this.dragonKilled = true;
+         } else {
+@@ -284,6 +_,7 @@
+             this.dragonKilled = false;
+             EnderDragon dragon = this.createNewDragon();
+             if (dragon != null) {
++                updatePlayers(); this.ticksSinceLastPlayerScan = 0; // Canvas - region threading - update players
+                 for (ServerPlayer player : this.dragonEvent.getPlayers()) {
+                     CriteriaTriggers.SUMMONED_ENTITY.trigger(player, dragon);
+                 }
+@@ -300,7 +_,7 @@
+             for (int z = -8; z <= 8; z++) {
+                 LevelChunk chunk = this.level.getChunk(x, z);
+ 
+-                for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
++                for (BlockEntity blockEntity : chunk.canvas$getAllBlockEntities()) { // Canvas - optimize block entity fetching
+                     if (blockEntity instanceof TheEndPortalBlockEntity) {
+                         return true;
+                     }
+@@ -318,7 +_,7 @@
+             for (int z = -8 + chunkOrigin.z(); z <= 8 + chunkOrigin.z(); z++) {
+                 LevelChunk chunk = this.level.getChunk(x, z);
+ 
+-                for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
++                for (BlockEntity blockEntity : chunk.canvas$getAllBlockEntities()) { // Canvas - optimize block entity fetching
+                     if (blockEntity instanceof TheEndPortalBlockEntity) {
+                         BlockPattern.BlockPatternMatch match = this.exitPortalPattern.find(this.level, blockEntity.getBlockPos());
+                         if (match != null) {
+@@ -360,8 +_,14 @@
+ 
+         ChunkPos chunkOrigin = ChunkPos.containing(this.origin);
+ 
+-        for (int x = -8 + chunkOrigin.x(); x <= 8 + chunkOrigin.x(); x++) {
+-            for (int z = 8 + chunkOrigin.z(); z <= 8 + chunkOrigin.z(); z++) {
++        // Folia start - region threading
++        final int regionRadiusChk = 8 + this.level.regioniser.regionSectionChunkSize;
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkOrigin.x(), chunkOrigin.z(), regionRadiusChk)) {
++            return false;
++        }
++        // Folia end - region threading
++        for (int x = -8 + chunkOrigin.x(); x <= 8 + chunkOrigin.x(); x++) { // Folia - diff on change - use above for radius
++            for (int z = 8 + chunkOrigin.z(); z <= 8 + chunkOrigin.z(); z++) { // Folia - diff on change - use above for radius
+                 if (!(this.level.getChunk(x, z, ChunkStatus.FULL, false) instanceof LevelChunk levelChunk)) {
+                     return false;
+                 }
+@@ -379,7 +_,7 @@
+     private void updatePlayers() {
+         Set<ServerPlayer> newPlayers = Sets.newHashSet();
+ 
+-        for (ServerPlayer player : this.level.getPlayers(this.validPlayer)) {
++        for (ServerPlayer player : this.level.getLocalPlayers(this.validPlayer)) { // Canvas - region threading
+             this.dragonEvent.addPlayer(player);
+             newPlayers.add(player);
+         }
+@@ -529,6 +_,11 @@
+     }
+ 
+     public void onCrystalDestroyed(final EndCrystal crystal, final DamageSource source) {
++        // Folia start - region threading
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, this.origin)) {
++            return;
++        }
++        // Folia end - region threading
+         if (this.respawnStage != null && this.respawnCrystals.stream().anyMatch(ref -> ref.matches(crystal))) {
+             this.abortRespawnSequence();
+         } else {
+@@ -559,7 +_,7 @@
+ 
+     public boolean tryRespawn(@Nullable final BlockPos placedEndCrystalPos) { // placedEndCrystalPos is null if the tryRespawn() call was not caused by a placed end crystal
+         // Paper end - Perf: Do crystal-portal proximity check before entity lookup
+-        if (this.dragonKilled && this.respawnStage == null) {
++        if (this.dragonKilled && this.respawnStage == null && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, this.origin)) { // Folia - region threading
+             BlockPos location = this.exitPortalLocation;
+             if (location == null) {
+                 LOGGER.debug("Tried to respawn, but need to find the portal first.");

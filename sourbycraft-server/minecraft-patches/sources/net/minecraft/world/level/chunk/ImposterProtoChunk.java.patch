@@ -1,0 +1,14 @@
+--- a/net/minecraft/world/level/chunk/ImposterProtoChunk.java
++++ b/net/minecraft/world/level/chunk/ImposterProtoChunk.java
+@@ -83,6 +_,11 @@
+ 
+     @Override
+     public @Nullable BlockEntity getBlockEntity(final BlockPos pos) {
++        // Folia start - block reading possibly in-world block data for worldgen threads
++        if (!this.allowWrites && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) {
++            return null;
++        }
++        // Folia end - block reading possibly in-world block data for worldgen threads
+         return this.wrapped.getBlockEntity(pos);
+     }
+ 

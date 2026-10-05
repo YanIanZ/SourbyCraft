@@ -1,0 +1,40 @@
+--- a/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
++++ b/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
+@@ -184,6 +_,11 @@
+ 
+     @Override
+     public void tick() {
++        // Folia start - region threading - make sure entities do not move into regions they do not own
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor((net.minecraft.server.level.ServerLevel)this.level(), this.position(), this.getDeltaMovement(), 1)) {
++            return;
++        }
++        // Folia end - region threading - make sure entities do not move into regions they do not own
+         boolean physicsEnabled = !this.isNoPhysics();
+         Vec3 movement = this.getDeltaMovement();
+         BlockPos blockPos = this.blockPosition();
+@@ -530,11 +_,20 @@
+                     this.piercedAndKilledEntities.add(mob);
+                 }
+ 
+-                if (!this.level().isClientSide() && currentOwner instanceof ServerPlayer player) {
+-                    if (this.piercedAndKilledEntities != null) {
+-                        CriteriaTriggers.KILLED_BY_ARROW.trigger(player, this.piercedAndKilledEntities, this.firedFromWeapon);
+-                    } else if (!entity.isAlive()) {
+-                        CriteriaTriggers.KILLED_BY_ARROW.trigger(player, List.of(entity), this.firedFromWeapon);
++                // Canvas start - region threading
++
++                // Folia makes getOwner return null if the entity is out of region,
++                // making it so that criterion never gets triggered when the entity
++                // is out of region, so we use getOwnerRaw and schedule if necessary
++                // to restore this behavior
++
++                if (!this.level().isClientSide() && getOwnerRaw() instanceof ServerPlayer player) {
++                    final List<Entity> pierced = this.piercedAndKilledEntities != null ? this.piercedAndKilledEntities : !entity.isAlive() ? List.of(entity) : null;
++                    if (pierced != null) {
++                        player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++                            CriteriaTriggers.KILLED_BY_ARROW.trigger(entityPlayer, pierced, this.firedFromWeapon);
++                        });
++                // Canvas end - region threading
+                     }
+                 }
+             }

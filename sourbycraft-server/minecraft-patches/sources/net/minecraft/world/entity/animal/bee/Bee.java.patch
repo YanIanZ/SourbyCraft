@@ -1,0 +1,26 @@
+--- a/net/minecraft/world/entity/animal/bee/Bee.java
++++ b/net/minecraft/world/entity/animal/bee/Bee.java
+@@ -812,6 +_,11 @@
+ 
+         @Override
+         public boolean canBeeUse() {
++            // Folia start - region threading
++            if (Bee.this.hivePos != null && Bee.this.isTooFarAway(Bee.this.hivePos)) {
++                Bee.this.hivePos = null;
++            }
++            // Folia end - region threading
+             return Bee.this.hivePos != null
+                 && !Bee.this.isTooFarAway(Bee.this.hivePos)
+                 && !Bee.this.hasHome()
+@@ -922,6 +_,11 @@
+ 
+         @Override
+         public boolean canBeeUse() {
++            // Folia start - region threading
++            if (Bee.this.savedFlowerPos != null && Bee.this.isTooFarAway(Bee.this.savedFlowerPos)) {
++                Bee.this.savedFlowerPos = null;
++            }
++            // Folia end - region threading
+             return Bee.this.savedFlowerPos != null && !Bee.this.hasHome() && this.wantsToGoToKnownFlower() && !Bee.this.closerThan(Bee.this.savedFlowerPos, 2);
+         }
+ 

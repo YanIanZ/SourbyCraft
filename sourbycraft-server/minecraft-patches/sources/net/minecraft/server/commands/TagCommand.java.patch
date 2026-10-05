@@ -1,0 +1,117 @@
+--- a/net/minecraft/server/commands/TagCommand.java
++++ b/net/minecraft/server/commands/TagCommand.java
+@@ -58,15 +_,29 @@
+     }
+ 
+     private static int addTag(final CommandSourceStack source, final Collection<? extends Entity> targets, final String name) throws CommandSyntaxException {
+-        int count = 0;
+-
+-        for (Entity entity : targets) {
+-            if (entity.addTag(name)) {
+-                count++;
+-            }
+-        }
+-
+-        if (count == 0) {
++    // Canvas start - region threading
++
++        // again, with this command, if 1 entity passes then the feedback says they all pass...
++        // that's stupid! so we fixy :)
++
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._abstract(new io.canvasmc.canvas.util.CollectingList<Entity>())
++            .with(targets)
++            .executes((Entity entity) -> {
++                if (entity.addTag(name)) {
++                    return (list) -> list.add(entity);
++                }
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++            })
++            .onComplete((passed, _, css) -> addCallback(css, passed.copyOf(), name))
++            .start(source);
++        return 1;
++    }
++
++    private static int addCallback(
++        final CommandSourceStack source, final Collection<? extends Entity> targets, final String name
++    ) throws CommandSyntaxException {
++        if (targets.isEmpty()) {
++    // Canvas end - region threading
+             throw ERROR_ADD_FAILED.create();
+         }
+ 
+@@ -76,19 +_,33 @@
+             source.sendSuccess(() -> Component.translatable("commands.tag.add.success.multiple", name, targets.size()), true);
+         }
+ 
+-        return count;
++        return targets.size(); // Canvas - region threading
+     }
+ 
+     private static int removeTag(final CommandSourceStack source, final Collection<? extends Entity> targets, final String name) throws CommandSyntaxException {
+-        int count = 0;
+-
+-        for (Entity entity : targets) {
+-            if (entity.removeTag(name)) {
+-                count++;
+-            }
+-        }
+-
+-        if (count == 0) {
++    // Canvas start - region threading
++
++        // again, with this command, if 1 entity passes then the feedback says they all pass...
++        // that's stupid! so we fixy :)
++
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._abstract(new io.canvasmc.canvas.util.CollectingList<Entity>())
++            .with(targets)
++            .executes((Entity entity) -> {
++                if (entity.removeTag(name)) {
++                    return (list) -> list.add(entity);
++                }
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++            })
++            .onComplete((passed, _, css) -> removeCallback(css, passed.copyOf(), name))
++            .start(source);
++        return 1;
++    }
++
++    private static int removeCallback(
++        final CommandSourceStack source, final Collection<? extends Entity> targets, final String name
++    ) throws CommandSyntaxException {
++        if (targets.isEmpty()) {
++    // Canvas end - region threading
+             throw ERROR_REMOVE_FAILED.create();
+         }
+ 
+@@ -98,16 +_,21 @@
+             source.sendSuccess(() -> Component.translatable("commands.tag.remove.success.multiple", name, targets.size()), true);
+         }
+ 
+-        return count;
+-    }
+-
+-    private static int listTags(final CommandSourceStack source, final Collection<? extends Entity> targets) {
+-        Set<String> tags = Sets.newHashSet();
+-
+-        for (Entity entity : targets) {
+-            tags.addAll(entity.entityTags());
+-        }
+-
++        return targets.size(); // Canvas - region threading
++    }
++
++    // Canvas start - region threading
++    private static int listTags(final CommandSourceStack source, final Collection<? extends Entity> targets) throws CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._abstract(new io.canvasmc.canvas.util.CollectingList<String>())
++            .with(targets)
++            .executes((Entity entity) -> (list) -> list.addAll(entity.entityTags()))
++            .onComplete((tags, selected, css) -> listCallback(tags.copyOf(), css, selected))
++            .start(source);
++        return 1;
++    }
++
++    private static int listCallback(final Collection<String> tags, final CommandSourceStack source, final Collection<? extends Entity> targets) {
++    // Canvas end - region threading
+         if (targets.size() == 1) {
+             Entity entity = targets.iterator().next();
+             if (tags.isEmpty()) {

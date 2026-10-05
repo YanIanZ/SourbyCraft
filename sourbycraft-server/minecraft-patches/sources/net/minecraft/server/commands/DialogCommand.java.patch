@@ -1,0 +1,54 @@
+--- a/net/minecraft/server/commands/DialogCommand.java
++++ b/net/minecraft/server/commands/DialogCommand.java
+@@ -44,11 +_,21 @@
+         );
+     }
+ 
+-    private static int showDialog(final CommandSourceStack sender, final Collection<ServerPlayer> targets, final Holder<Dialog> dialog) {
+-        for (ServerPlayer target : targets) {
+-            target.openDialog(dialog);
+-        }
++    // Canvas start - region threading
++    private static int showDialog(final CommandSourceStack sender, final Collection<ServerPlayer> targets, final Holder<Dialog> dialog) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(targets)
++            .executes((ServerPlayer entityPlayer) -> {
++                entityPlayer.openDialog(dialog);
++                return (_) -> null;
++            })
++            .onComplete((_, selected, css) -> showCallback(selected, css))
++            .start(sender);
++        return 1;
++    }
+ 
++    private static int showCallback(final Collection<? extends ServerPlayer> targets, final CommandSourceStack sender) {
++    // Canvas end - region threading
+         if (targets.size() == 1) {
+             sender.sendSuccess(() -> Component.translatable("commands.dialog.show.single", targets.iterator().next().getDisplayName()), true);
+         } else {
+@@ -58,11 +_,21 @@
+         return targets.size();
+     }
+ 
+-    private static int clearDialog(final CommandSourceStack sender, final Collection<ServerPlayer> targets) {
+-        for (ServerPlayer target : targets) {
+-            target.connection.send(ClientboundClearDialogPacket.INSTANCE);
+-        }
++    // Canvas start - region threading
++    private static int clearDialog(final CommandSourceStack sender, final Collection<ServerPlayer> targets) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(targets)
++            .executes((ServerPlayer entityPlayer) -> {
++                entityPlayer.connection.send(ClientboundClearDialogPacket.INSTANCE);
++                return (_) -> null;
++            })
++            .onComplete((_, selected, css) -> clearCallback(selected, css))
++            .start(sender);
++        return 1;
++    }
+ 
++    private static int clearCallback(final Collection<? extends ServerPlayer> targets, final CommandSourceStack sender) {
++    // Canvas end - region threading
+         if (targets.size() == 1) {
+             sender.sendSuccess(() -> Component.translatable("commands.dialog.clear.single", targets.iterator().next().getDisplayName()), true);
+         } else {

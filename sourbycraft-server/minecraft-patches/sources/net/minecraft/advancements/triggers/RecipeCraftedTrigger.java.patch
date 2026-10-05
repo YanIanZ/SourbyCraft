@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/RecipeCraftedTrigger.java
++++ b/net/minecraft/advancements/triggers/RecipeCraftedTrigger.java
+@@ -21,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final ResourceKey<Recipe<?>> id, final List<ItemStack> usedIngredients) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         this.trigger(player, t -> t.matches(id, usedIngredients));
+     }
+ 

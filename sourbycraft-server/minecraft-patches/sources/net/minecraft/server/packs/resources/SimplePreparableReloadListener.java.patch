@@ -1,0 +1,22 @@
+--- a/net/minecraft/server/packs/resources/SimplePreparableReloadListener.java
++++ b/net/minecraft/server/packs/resources/SimplePreparableReloadListener.java
+@@ -2,7 +_,6 @@
+ 
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.Executor;
+-import net.minecraft.util.profiling.Profiler;
+ import net.minecraft.util.profiling.ProfilerFiller;
+ 
+ public abstract class SimplePreparableReloadListener<T> implements PreparableReloadListener {
+@@ -14,9 +_,9 @@
+         final Executor reloadExecutor
+     ) {
+         ResourceManager manager = currentReload.resourceManager();
+-        return CompletableFuture.<T>supplyAsync(() -> this.prepare(manager, Profiler.get()), taskExecutor)
++        return CompletableFuture.<T>supplyAsync(() -> this.prepare(manager, net.minecraft.util.profiling.InactiveProfiler.INSTANCE), taskExecutor)
+             .thenCompose(preparationBarrier::wait)
+-            .thenAcceptAsync(preparations -> this.apply((T)preparations, manager, Profiler.get()), reloadExecutor);
++            .thenAcceptAsync(preparations -> this.apply((T)preparations, manager, net.minecraft.util.profiling.InactiveProfiler.INSTANCE), reloadExecutor);
+     }
+ 
+     protected abstract T prepare(final ResourceManager manager, final ProfilerFiller profiler);

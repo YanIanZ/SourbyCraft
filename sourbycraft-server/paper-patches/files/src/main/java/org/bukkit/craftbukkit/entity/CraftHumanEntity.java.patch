@@ -1,0 +1,28 @@
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java
+@@ -94,6 +_,7 @@
+ 
+     @Override
+     public Player getHandle() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Accessing entity state off owning region's thread"); // Folia - region threading
+         return (Player) this.entity;
+     }
+ 
+@@ -501,6 +_,8 @@
+     @Override
+     public InventoryView openMerchant(Merchant merchant, boolean force) {
+         Preconditions.checkNotNull(merchant, "merchant cannot be null");
++        if (merchant instanceof CraftEntity merchantAsCraftEntity) io.canvasmc.canvas.util.TickGuard.guard(merchantAsCraftEntity.entity, "Cannot open merchant screen of merchant not in same region"); // Canvas - region guards
++        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot open merchant screen async from target player"); // Canvas - region guards
+ 
+         if (!force && merchant.isTrading()) {
+             return null;
+@@ -563,7 +_,7 @@
+     }
+ 
+     private InventoryView openInventory(Location location, boolean force, Material material) {
+-        org.spigotmc.AsyncCatcher.catchOp("open" + material);
++        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot open inventory async"); // Canvas - region guards
+         if (location == null) {
+             location = this.getLocation();
+         }

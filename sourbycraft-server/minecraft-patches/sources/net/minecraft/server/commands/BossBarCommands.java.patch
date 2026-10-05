@@ -1,0 +1,162 @@
+--- a/net/minecraft/server/commands/BossBarCommands.java
++++ b/net/minecraft/server/commands/BossBarCommands.java
+@@ -176,16 +_,21 @@
+     }
+ 
+     private static int getValue(final CommandSourceStack source, final CustomBossEvent bossBar) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         source.sendSuccess(() -> Component.translatable("commands.bossbar.get.value", bossBar.getDisplayName(), bossBar.value()), true);
+         return bossBar.value();
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int getMax(final CommandSourceStack source, final CustomBossEvent bossBar) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         source.sendSuccess(() -> Component.translatable("commands.bossbar.get.max", bossBar.getDisplayName(), bossBar.max()), true);
+         return bossBar.max();
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int getVisible(final CommandSourceStack source, final CustomBossEvent bossBar) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (bossBar.isVisible()) {
+             source.sendSuccess(() -> Component.translatable("commands.bossbar.get.visible.visible", bossBar.getDisplayName()), true);
+             return 1;
+@@ -193,9 +_,11 @@
+             source.sendSuccess(() -> Component.translatable("commands.bossbar.get.visible.hidden", bossBar.getDisplayName()), true);
+             return 0;
+         }
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int getPlayers(final CommandSourceStack source, final CustomBossEvent bossBar) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (bossBar.getPlayers().isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.bossbar.get.players.none", bossBar.getDisplayName()), true);
+         } else {
+@@ -211,9 +_,11 @@
+         }
+ 
+         return bossBar.getPlayers().size();
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setVisible(final CommandSourceStack source, final CustomBossEvent bossBar, final boolean visible) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (bossBar.isVisible() == visible) {
+             if (visible) {
+                 throw ERROR_ALREADY_VISIBLE.create();
+@@ -230,9 +_,11 @@
+ 
+             return 0;
+         }
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setValue(final CommandSourceStack source, final CustomBossEvent bossBar, final int value) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (bossBar.value() == value) {
+             throw ERROR_NO_VALUE_CHANGE.create();
+         }
+@@ -240,9 +_,11 @@
+         bossBar.setValue(value);
+         source.sendSuccess(() -> Component.translatable("commands.bossbar.set.value.success", bossBar.getDisplayName(), value), true);
+         return value;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setMax(final CommandSourceStack source, final CustomBossEvent bossBar, final int value) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (bossBar.max() == value) {
+             throw ERROR_NO_MAX_CHANGE.create();
+         }
+@@ -250,9 +_,11 @@
+         bossBar.setMax(value);
+         source.sendSuccess(() -> Component.translatable("commands.bossbar.set.max.success", bossBar.getDisplayName(), value), true);
+         return value;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setColor(final CommandSourceStack source, final CustomBossEvent bossBar, final BossEvent.BossBarColor color) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (bossBar.getColor().equals(color)) {
+             throw ERROR_NO_COLOR_CHANGE.create();
+         }
+@@ -260,9 +_,11 @@
+         bossBar.setColor(color);
+         source.sendSuccess(() -> Component.translatable("commands.bossbar.set.color.success", bossBar.getDisplayName()), true);
+         return 0;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setStyle(final CommandSourceStack source, final CustomBossEvent bossBar, final BossEvent.BossBarOverlay style) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (bossBar.getOverlay().equals(style)) {
+             throw ERROR_NO_STYLE_CHANGE.create();
+         }
+@@ -270,9 +_,11 @@
+         bossBar.setOverlay(style);
+         source.sendSuccess(() -> Component.translatable("commands.bossbar.set.style.success", bossBar.getDisplayName()), true);
+         return 0;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setName(final CommandSourceStack source, final CustomBossEvent bossBar, final Component name) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         Component replaced = ComponentUtils.resolve(ResolutionContext.builder().withSource(source).withEntityOverride(null).build(), name);
+         if (bossBar.getName().equals(replaced)) {
+             throw ERROR_NO_NAME_CHANGE.create();
+@@ -281,9 +_,11 @@
+         bossBar.setName(replaced);
+         source.sendSuccess(() -> Component.translatable("commands.bossbar.set.name.success", bossBar.getDisplayName()), true);
+         return 0;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setPlayers(final CommandSourceStack source, final CustomBossEvent bossBar, final Collection<ServerPlayer> targets) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         boolean changed = bossBar.setPlayers(targets);
+         if (!changed) {
+             throw ERROR_NO_PLAYER_CHANGE.create();
+@@ -304,9 +_,11 @@
+         }
+ 
+         return bossBar.getPlayers().size();
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int listBars(final CommandSourceStack source) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         Collection<CustomBossEvent> events = source.getServer().getCustomBossEvents().getEvents();
+         if (events.isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.bossbar.list.bars.none"), false);
+@@ -320,9 +_,11 @@
+         }
+ 
+         return events.size();
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int createBar(final CommandSourceStack source, final Identifier id, final Component name) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         CustomBossEvents events = source.getServer().getCustomBossEvents();
+         if (events.get(id) != null) {
+             throw ERROR_ALREADY_EXISTS.create(id.toString());
+@@ -333,14 +_,17 @@
+         );
+         source.sendSuccess(() -> Component.translatable("commands.bossbar.create.success", event.getDisplayName()), true);
+         return events.getEvents().size();
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int removeBar(final CommandSourceStack source, final CustomBossEvent bossBar) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         CustomBossEvents events = source.getServer().getCustomBossEvents();
+         bossBar.removeAllPlayers();
+         events.remove(bossBar);
+         source.sendSuccess(() -> Component.translatable("commands.bossbar.remove.success", bossBar.getDisplayName()), true);
+         return events.getEvents().size();
++        }, source); // Canvas - region threading
+     }
+ 
+     public static CustomBossEvent getBossBar(final CommandContext<CommandSourceStack> context) throws CommandSyntaxException {

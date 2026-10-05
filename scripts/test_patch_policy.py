@@ -99,34 +99,47 @@ class UpstreamDefaultTest(unittest.TestCase):
     reviewable, and makes a new one fail until somebody writes down the reason.
     """
 
-    APPROVED = {
-        # Console prefix. These are engine configuration, so they speak as the engine:
-        # Aurora is inside the Minecraft system, SourbyCraft is the layer outside it.
-        "GlobalConfiguration.java.patch:LOGGER": ("LoggerFactory.getLogger(\"CanvasMC\")",
-                                                  "LoggerFactory.getLogger(\"Aurora\")"),
-        "WorldConfig.java.patch:LOGGER": ("LoggerFactory.getLogger(\"CanvasWorlds\")",
-                                          "LoggerFactory.getLogger(\"Aurora\")"),
-        # Canvas ships THROW, which crashes the server when a plugin touches state
-        # off-region. On a production server that should be logged, not fatal.
-        # Operators can restore THROW in config/canvas-server.yml.
-        "GlobalConfiguration.java.patch:guardSeverity": ("GuardSeverity.THROW", "GuardSeverity.LOG"),
-        # Debug logging on every ender pearl save/load: console spam on an active server.
-        "GlobalConfiguration.java.patch:logEnderPearlRewriteActions": ("true", "false"),
-        # Canvas' own TPS/RAM bars duplicate the SourbyCraft HUD (/tpsbar, /rambar).
-        # Section 23 says keep one implementation, not two.
-        "WorldConfig.java.patch:enableTpsBar": ("true", "false"),
-        "WorldConfig.java.patch:enableRamBar": ("true", "false"),
-    }
+    # Upstream defaults the SourbyCraft feature patches change. None at the moment.
+    APPROVED = {}
 
     def test_the_shipped_default_changes_are_exactly_the_approved_ones(self):
         found = patch_policy.upstream_default_changes(REPO)
-        # LOGGER is changed in two files to the same value; compare by field name.
         self.assertEqual(sorted(found), sorted(self.APPROVED),
                          "a patch changes an upstream default that is not written down; add it "
                          "to APPROVED with the reason, or drop the change")
         for field, transition in found.items():
             with self.subTest(field=field):
                 self.assertEqual(transition, self.APPROVED[field])
+
+    ENGINE_CONFIG = "sourbycraft-server/src/main/java/io/canvasmc/canvas/"
+
+    # Engine configuration defaults SourbyCraft ships differently from Canvas, which these
+    # classes came from. They were canvas-patches before Paper became the only upstream; now
+    # they are owned source, so the shipped value is pinned here instead of diffed.
+    ENGINE_DEFAULTS = {
+        # Console prefix. These are engine configuration, so they speak as the engine:
+        # Aurora is inside the Minecraft system, SourbyCraft is the layer outside it.
+        ("GlobalConfiguration.java", "LOGGER"): 'LoggerFactory.getLogger("Aurora")',
+        ("WorldConfig.java", "LOGGER"): 'LoggerFactory.getLogger("Aurora")',
+        # Canvas shipped THROW, which crashes the server when a plugin touches state
+        # off-region. On a production server that should be logged, not fatal.
+        # Operators can restore THROW in config/canvas-server.yml.
+        ("GlobalConfiguration.java", "guardSeverity"): "GuardSeverity.LOG",
+        # Canvas logged every ender pearl save/load: console spam on an active server.
+        ("GlobalConfiguration.java", "logEnderPearlRewriteActions"): "false",
+        # Canvas' own TPS/RAM bars duplicate the SourbyCraft HUD (/tpsbar, /rambar).
+        # Section 23 says keep one implementation, not two.
+        ("WorldConfig.java", "enableTpsBar"): "false",
+        ("WorldConfig.java", "enableRamBar"): "false",
+    }
+
+    def test_engine_config_ships_the_recorded_defaults(self):
+        for (source, field), value in self.ENGINE_DEFAULTS.items():
+            with self.subTest(source=source, field=field):
+                defaults = patch_policy.source_field_defaults(REPO, self.ENGINE_CONFIG + source)
+                self.assertEqual(defaults.get(field), value,
+                                 "an engine configuration default changed; record the new "
+                                 "value and the reason in ENGINE_DEFAULTS, or revert it")
 
     def test_detects_a_default_change_in_a_fixture(self):
         with tempfile.TemporaryDirectory() as directory:

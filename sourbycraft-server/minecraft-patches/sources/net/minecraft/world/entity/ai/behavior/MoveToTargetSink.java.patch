@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java
++++ b/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java
+@@ -117,7 +_,7 @@
+ 
+     private boolean tryComputePath(final Mob body, final WalkTarget walkTarget, final long timestamp) {
+         BlockPos targetPos = walkTarget.getTarget().currentBlockPosition();
+-        this.path = body.getNavigation().createPath(targetPos, 0);
++        this.path = ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(body.level(), targetPos) ? body.getNavigation().createPath(targetPos, 0) : null; // Canvas - region threading
+         this.speedModifier = walkTarget.getSpeedModifier();
+         Brain<?> brain = body.getBrain();
+         if (this.reachedTarget(body, walkTarget)) {

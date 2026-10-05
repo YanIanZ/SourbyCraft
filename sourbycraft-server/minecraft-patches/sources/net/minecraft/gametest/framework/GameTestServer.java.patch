@@ -1,0 +1,17 @@
+--- a/net/minecraft/gametest/framework/GameTestServer.java
++++ b/net/minecraft/gametest/framework/GameTestServer.java
+@@ -252,8 +_,12 @@
+     }
+ 
+     @Override
+-    protected void tickServer(final BooleanSupplier haveTime) {
+-        super.tickServer(haveTime);
++    // Folia start - region threading
++    public void tickServer(final long startTime, final long scheduledEnd, final long targetBuffer,
++                           final io.papermc.paper.threadedregions.TickRegions.TickRegionData region) {
++        if (true) throw new UnsupportedOperationException("Unsupported in region threading");
++        super.tickServer(startTime, scheduledEnd, targetBuffer, region);
++        // Folia end - region threading
+         ServerLevel level = this.overworld();
+         if (!this.haveTestsStarted()) {
+             this.startTests(level);

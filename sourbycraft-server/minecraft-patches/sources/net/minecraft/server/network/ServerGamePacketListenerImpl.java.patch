@@ -1,0 +1,560 @@
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -301,10 +_,10 @@
+     private int knownMovePacketCount;
+     private boolean receivedMovementThisTick;
+     // CraftBukkit start - add fields
+-    private int lastTick = MinecraftServer.currentTick;
++    private long lastTick = Util.getMillis() / 50L; // Folia - region threading
+     private int allowedPlayerTicks = 1;
+-    private int lastDropTick = MinecraftServer.currentTick;
+-    private int lastBookTick = MinecraftServer.currentTick;
++    private long lastDropTick = Util.getMillis() / 50L; // Folia - region threading
++    private long lastBookTick  = Util.getMillis() / 50L; // Folia - region threading
+     private int dropCount = 0;
+ 
+     private boolean hasMoved = false;
+@@ -322,13 +_,20 @@
+     private int nextChatIndex;
+     private final MessageSignatureCache messageSignatureCache = MessageSignatureCache.createDefault();
+     private final FutureChain chatMessageChain;
+-    public boolean waitingForSwitchToConfig;
++    public volatile boolean waitingForSwitchToConfig; // Folia - rewrite login process - fix bad ordering of this field write
+     private boolean waitingForRespawn;
+     private int clientLoadedTimeoutTimer;
+     private static final int MAX_SIGN_LINE_LENGTH = Integer.getInteger("Paper.maxSignLength", 80); // Paper - Limit client sign length
+     private final io.papermc.paper.event.packet.ClientTickEndEvent tickEndEvent; // Paper - add client tick end event
+     public final io.papermc.paper.connection.PaperPlayerGameConnection playerGameConnection; // Paper
+ 
++    // Folia start - region threading
++    public net.minecraft.world.level.ChunkPos disconnectPos;
++    private static final java.util.concurrent.atomic.AtomicLong DISCONNECT_TICKET_ID_GENERATOR = new java.util.concurrent.atomic.AtomicLong();
++    public static final net.minecraft.server.level.TicketType<Long> DISCONNECT_TICKET = ca.spottedleaf.moonrise.patches.chunk_system.ticket.ChunkSystemTicketType.create("disconnect_ticket", Long::compareTo);
++    public final Long disconnectTicketId = Long.valueOf(DISCONNECT_TICKET_ID_GENERATOR.getAndIncrement());
++
++    // Folia end - region threading
+     public ServerGamePacketListenerImpl(final MinecraftServer server, final Connection connection, final ServerPlayer player, final CommonListenerCookie cookie) {
+         super(server, connection, cookie);
+         this.commandSpamThrottler = new TickThrottler(20, 20 * server.getCommandSpamThresholdSeconds());
+@@ -338,7 +_,7 @@
+         this.player = player;
+         player.connection = this;
+         player.getTextFilter().join();
+-        this.signedMessageDecoder = SignedMessageChain.Decoder.unsigned(player.getUUID(), server::enforceSecureProfile);
++        this.signedMessageDecoder = SignedMessageChain.Decoder.unsigned(player.getUUID(), server::canvas$ncrEnforceSecureProfile); // Canvas - no chat reports
+         this.chatMessageChain = new FutureChain(server.chatExecutor); // CraftBukkit - async chat
+         this.tickEndEvent = new io.papermc.paper.event.packet.ClientTickEndEvent(player.getBukkitEntity()); // Paper - add client tick end event
+         this.playerGameConnection = new io.papermc.paper.connection.PaperPlayerGameConnection(this); // Paper
+@@ -358,13 +_,19 @@
+ 
+     @Override
+     public void tick() {
++        // Folia start - region threading
++        this.keepConnectionAlive();
++        if (this.player.wonGame) {
++            return;
++        }
++        // Folia end - region threading
+         if (this.ackBlockChangesUpTo > -1) {
+             this.send(new ClientboundBlockChangedAckPacket(this.ackBlockChangesUpTo));
+             this.ackBlockChangesUpTo = -1;
+         }
+ 
+         if (this.server.isPaused() || !this.tickPlayer()) {
+-            this.keepConnectionAlive();
++            // this.keepConnectionAlive(); // Folia - region threading - moved to beginning of method
+             this.chatSpamThrottler.tick();
+             this.commandSpamThrottler.tick();
+             this.dropSpamThrottler.tick();
+@@ -454,6 +_,19 @@
+         this.lastGoodX = this.player.getX();
+         this.lastGoodY = this.player.getY();
+         this.lastGoodZ = this.player.getZ();
++        // Folia start - support vehicle teleportations
++        this.lastVehicle = this.player.getRootVehicle();
++        if (this.lastVehicle != this.player && this.lastVehicle.getControllingPassenger() == this.player) {
++            this.vehicleFirstGoodX = this.lastVehicle.getX();
++            this.vehicleFirstGoodY = this.lastVehicle.getY();
++            this.vehicleFirstGoodZ = this.lastVehicle.getZ();
++            this.vehicleLastGoodX = this.lastVehicle.getX();
++            this.vehicleLastGoodY = this.lastVehicle.getY();
++            this.vehicleLastGoodZ = this.lastVehicle.getZ();
++        } else {
++            this.lastVehicle = null;
++        }
++        // Folia end - support vehicle teleportations
+     }
+ 
+     @Override
+@@ -584,9 +_,10 @@
+                 movedDist = Math.max(movedDist, (otherFieldX * otherFieldX + otherFieldY * otherFieldY + otherFieldZ * otherFieldZ) - 1);
+                 // Paper end - fix large move vectors killing the server
+ 
+-                this.allowedPlayerTicks += (System.currentTimeMillis() / 50) - this.lastTick;
++                int currTick = (int)(Util.getMillis() / 50); // Folia - region threading
++                this.allowedPlayerTicks += currTick - this.lastTick; // Folia - region threading
+                 this.allowedPlayerTicks = Math.max(this.allowedPlayerTicks, 1);
+-                this.lastTick = (int) (System.currentTimeMillis() / 50);
++                this.lastTick = (int) currTick; // Folia - region threading
+ 
+                 ++this.receivedMovePacketCount;
+                 int i = this.receivedMovePacketCount - this.knownMovePacketCount;
+@@ -671,7 +_,13 @@
+ 
+                 vehicle.absSnapTo(targetX, targetY, targetZ, targetYRot, targetXRot);
+                 // CraftBukkit start - fire PlayerMoveEvent TODO: this should be removed.
+-                this.player.absSnapTo(targetX, targetY, targetZ, this.player.getYRot(), this.player.getXRot()); // Paper - TODO: This breaks alot of stuff
++                // Folia start - move to positionRider
++                // this correction is required on folia since we move the connection tick to the beginning of the server
++                // tick, which would make any desync here visible
++                // this will correctly update the passenger positions for all mounted entities
++                // this prevents desync and ensures that all passengers have the correct rider-adjusted position
++                vehicle.repositionAllPassengers(false);
++                // Folia end - move to positionRider
+                 org.bukkit.entity.Player player = this.getCraftPlayer();
+                 if (!this.hasMoved) {
+                     this.lastPosX = startX;
+@@ -701,7 +_,23 @@
+ 
+                     // If the event is cancelled we move the player back to their old location.
+                     if (event.isCancelled()) {
+-                        this.internalTeleport(from);
++                        // Canvas start - region threading
++                        // TODO - should we prevent teleportAsync calls in the move event?
++                        this.player.teleportAsync(
++                            ((org.bukkit.craftbukkit.CraftWorld) from.getWorld()).getHandle(),
++                            CraftLocation.toVec3(from),
++                            from.getYaw(),
++                            from.getPitch(),
++                            Vec3.ZERO,
++                            PlayerTeleportEvent.TeleportCause.PLUGIN,
++
++                            // use these flags specifically because that's what the Paper
++                            // CraftEntity#teleportAsync method would do, so we should match
++
++                            Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
++                            null // no callback necessary
++                        );
++                        // Canvas end - region threading
+                         return;
+                     }
+ 
+@@ -709,7 +_,23 @@
+                     // there to avoid any 'Moved wrongly' or 'Moved too quickly' errors.
+                     // We only do this if the Event was not cancelled.
+                     if (!oldTo.equals(event.getTo()) && !event.isCancelled()) {
+-                        this.player.getBukkitEntity().teleport(event.getTo(), PlayerTeleportEvent.TeleportCause.PLUGIN);
++                        // Canvas start - region threading
++                        // TODO - should we prevent teleportAsync calls in the move event?
++                        this.player.teleportAsync(
++                            ((org.bukkit.craftbukkit.CraftWorld) event.getTo().getWorld()).getHandle(),
++                            CraftLocation.toVec3(event.getTo()),
++                            event.getTo().getYaw(),
++                            event.getTo().getPitch(),
++                            Vec3.ZERO,
++                            PlayerTeleportEvent.TeleportCause.PLUGIN,
++
++                            // use these flags specifically because that's what the Paper
++                            // CraftEntity#teleportAsync method would do, so we should match
++
++                            Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
++                            null // no callback necessary
++                        );
++                        // Canvas end - region threading
+                         return;
+                     }
+ 
+@@ -777,6 +_,19 @@
+                 this.disconnect(Component.translatable("multiplayer.disconnect.invalid_player_movement"), org.bukkit.event.player.PlayerKickEvent.Cause.INVALID_PLAYER_MOVEMENT); // Paper - kick event cause
+                 return;
+             }
++            // Folia start - region threading - do not allow out of region teleport accept
++
++            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++                this.player.level(),
++                ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkCoordinate(this.awaitingPositionFromClient.x),
++                ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkCoordinate(this.awaitingPositionFromClient.z),
++                1
++            )) {
++                LOGGER.warn("Disconnecting '{}' for out of region teleport accept", this.player.getScoreboardName());
++                this.disconnect(Component.translatable("multiplayer.disconnect.invalid_player_movement"), org.bukkit.event.player.PlayerKickEvent.Cause.INVALID_PLAYER_MOVEMENT);
++                return;
++            }
++            // Folia end - region threading - do not allow out of region teleport accept
+ 
+             this.player
+                 .absSnapTo(
+@@ -883,7 +_,7 @@
+             }
+ 
+             // This needs to be on main
+-            this.server.scheduleOnMain(() -> this.sendServerSuggestions(packet, command));
++            this.player.getBukkitEntity().taskScheduler.schedule((ServerPlayer player) -> this.sendServerSuggestions(packet, command), null, 1L); // Folia - region threading
+         } else if (!completions.isEmpty()) {
+             final com.mojang.brigadier.suggestion.SuggestionsBuilder builder0 = new com.mojang.brigadier.suggestion.SuggestionsBuilder(packet.getCommand(), command.getTotalLength());
+             final com.mojang.brigadier.suggestion.SuggestionsBuilder builder = builder0.createOffset(builder0.getInput().lastIndexOf(' ') + 1);
+@@ -940,6 +_,12 @@
+     @Override
+     public void handleSetCommandBlock(final ServerboundSetCommandBlockPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        // Canvas start - region threading
++        if (true) {
++            this.player.sendSystemMessage(Component.literal("Command blocks are not enabled with region threading"));
++            return;
++        }
++        // Canvas end - region threading
+         if (!this.player.canUseGameMasterBlocks() && (!this.player.isCreative() || !this.player.getBukkitEntity().hasPermission("minecraft.commandblock"))) { // Paper - command block permission
+             this.player.sendSystemMessage(Component.translatable("advMode.notAllowed"));
+         } else {
+@@ -1001,6 +_,12 @@
+     @Override
+     public void handleSetCommandMinecart(final ServerboundSetCommandMinecartPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        // Canvas start - region threading
++        if (true) {
++            this.player.sendSystemMessage(Component.literal("Command block minecarts are not enabled with region threading"));
++            return;
++        }
++        // Canvas end - region threading
+         if (!this.player.canUseGameMasterBlocks() && (!this.player.isCreative() || !this.player.getBukkitEntity().hasPermission("minecraft.commandblock"))) { // Paper - command block permission
+             this.player.sendSystemMessage(Component.translatable("advMode.notAllowed"));
+         } else {
+@@ -1340,7 +_,7 @@
+     public void handleEditBook(final ServerboundEditBookPacket packet) {
+         // Paper start - Book size limits
+         final io.papermc.paper.configuration.type.number.IntOr.Disabled pageMax = io.papermc.paper.configuration.GlobalConfiguration.get().itemValidation.bookSize.pageMax;
+-        if (!this.cserver.isPrimaryThread() && pageMax.enabled()) {
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.player) && pageMax.enabled()) { // Canvas - region threading
+             final List<String> pageList = packet.pages();
+             long byteTotal = 0;
+             final int maxBookPageSize = pageMax.intValue();
+@@ -1377,11 +_,11 @@
+         }
+         // Paper end - Book size limits
+         // CraftBukkit start
+-        if (this.lastBookTick + 20 > MinecraftServer.currentTick) {
++        if (this.lastBookTick + 20 > this.lastTick) { // Folia - region threading
+             this.disconnectAsync(Component.literal("Book edited too quickly!"), org.bukkit.event.player.PlayerKickEvent.Cause.ILLEGAL_ACTION); // Paper - kick event cause // Paper - add proper async disconnect
+             return;
+         }
+-        this.lastBookTick = MinecraftServer.currentTick;
++        this.lastBookTick = this.lastTick; // Folia - region threading
+         // CraftBukkit end
+         int slot = packet.slot();
+         if (Inventory.isHotbarSlot(slot) || slot == 40) {
+@@ -1392,7 +_,13 @@
+             Consumer<List<FilteredText>> handler = title.isPresent()
+                 ? filteredContents -> this.signBook(filteredContents.get(0), filteredContents.subList(1, filteredContents.size()), slot)
+                 : filteredContents -> this.updateBookContents(filteredContents, slot);
+-            this.filterTextPacket(contents).thenAcceptAsync(handler, this.server);
++            // Folia start - region threading
++            this.filterTextPacket(contents).thenAcceptAsync(handler, this.player::queuePacketTask).whenComplete((_, thrown) -> {
++                if (thrown != null) {
++                    LOGGER.error("Failed to handle book update packet", thrown);
++                }
++            });
++            // Folia end - region threading
+         }
+     }
+ 
+@@ -1516,13 +_,14 @@
+                                 }
+                             } else {
+                                 boolean isFallFlying = this.player.isFallFlying();
+-                                if (level.tickRateManager().runsNormally()) {
++                                if (true) { // Canvas - region threading
+                                     this.receivedMovePacketCount++;
+                                     int deltaPackets = this.receivedMovePacketCount - this.knownMovePacketCount;
+                                     // CraftBukkit start - handle custom speeds and skipped ticks
+-                                    this.allowedPlayerTicks += (System.currentTimeMillis() / 50) - this.lastTick;
++                                    int currTick = (int)(Util.getMillis() / 50); // Folia - region threading
++                                    this.allowedPlayerTicks += currTick - this.lastTick; // Folia - region threading
+                                     this.allowedPlayerTicks = Math.max(this.allowedPlayerTicks, 1);
+-                                    this.lastTick = (int) (System.currentTimeMillis() / 50);
++                                    this.lastTick = currTick; // Folia - region threading
+ 
+                                     if (deltaPackets > Math.max(this.allowedPlayerTicks, 5)) {
+                                     // CraftBukkit end
+@@ -1692,7 +_,23 @@
+ 
+                                         // If the event is cancelled we move the player back to their old location.
+                                         if (event.isCancelled()) {
+-                                            this.internalTeleport(from);
++                                            // Canvas start - region threading
++                                            // TODO - should we prevent teleportAsync calls in the move event?
++                                            this.player.teleportAsync(
++                                                ((org.bukkit.craftbukkit.CraftWorld) from.getWorld()).getHandle(),
++                                                CraftLocation.toVec3(from),
++                                                from.getYaw(),
++                                                from.getPitch(),
++                                                Vec3.ZERO,
++                                                PlayerTeleportEvent.TeleportCause.PLUGIN,
++
++                                                // use these flags specifically because that's what the Paper
++                                                // CraftEntity#teleportAsync method would do, so we should match
++
++                                                Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
++                                                null // no callback necessary
++                                            );
++                                            // Canvas end - region threading
+                                             return;
+                                         }
+ 
+@@ -1700,7 +_,23 @@
+                                         // there to avoid any 'Moved wrongly' or 'Moved too quickly' errors.
+                                         // We only do this if the Event was not cancelled.
+                                         if (!oldTo.equals(event.getTo()) && !event.isCancelled()) {
+-                                            this.player.getBukkitEntity().teleport(event.getTo(), PlayerTeleportEvent.TeleportCause.PLUGIN);
++                                            // Canvas start - region threading
++                                            // TODO - should we prevent teleportAsync calls in the move event?
++                                            this.player.teleportAsync(
++                                                ((org.bukkit.craftbukkit.CraftWorld) event.getTo().getWorld()).getHandle(),
++                                                CraftLocation.toVec3(event.getTo()),
++                                                event.getTo().getYaw(),
++                                                event.getTo().getPitch(),
++                                                Vec3.ZERO,
++                                                PlayerTeleportEvent.TeleportCause.PLUGIN,
++
++                                                // use these flags specifically because that's what the Paper
++                                                // CraftEntity#teleportAsync method would do, so we should match
++
++                                                Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
++                                                null // no callback necessary
++                                            );
++                                            // Canvas end - region threading
+                                             return;
+                                         }
+ 
+@@ -1989,9 +_,9 @@
+                     if (!this.player.isSpectator()) {
+                         // limit how quickly items can be dropped
+                         // If the ticks aren't the same then the count starts from 0 and we update the lastDropTick.
+-                        if (this.lastDropTick != MinecraftServer.currentTick) {
++                        if (this.lastDropTick != io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick()) { // Folia - region threading
+                             this.dropCount = 0;
+-                            this.lastDropTick = MinecraftServer.currentTick;
++                            this.lastDropTick = io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick(); // Folia - region threading
+                         } else {
+                             // Else we increment the drop count and check the amount.
+                             this.dropCount++;
+@@ -2022,7 +_,7 @@
+                 case ABORT_DESTROY_BLOCK:
+                 case STOP_DESTROY_BLOCK:
+                     // Paper start - Don't allow digging into unloaded chunks
+-                    if (this.player.level().getChunkIfLoadedImmediately(pos.getX() >> 4, pos.getZ() >> 4) == null || !this.player.isWithinBlockInteractionRange(pos, 1.0)) {
++                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.player.level(), pos.getX() >> 4, pos.getZ() >> 4, 8) || this.player.level().getChunkIfLoadedImmediately(pos.getX() >> 4, pos.getZ() >> 4) == null || !this.player.isWithinBlockInteractionRange(pos, 1.0)) { // Folia - region threading - don't destroy blocks not owned
+                         this.player.connection.ackBlockChangesUpTo(packet.getSequence());
+                         return;
+                     }
+@@ -2111,7 +_,7 @@
+                 }
+                 // Paper end - improve distance check
+                 BlockPos pos = blockHit.getBlockPos();
+-                if (this.player.isWithinBlockInteractionRange(pos, 1.0)) {
++                if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.player.level(), pos.getX() >> 4, pos.getZ() >> 4, 8) &&  this.player.isWithinBlockInteractionRange(pos, 1.0)) { // Folia - do not allow players to interact with blocks outside the current region
+                     Vec3 distance = location.subtract(Vec3.atCenterOf(pos));
+                     double limit = 1.0000001;
+                     if (Math.abs(distance.x()) < 1.0000001 && Math.abs(distance.y()) < 1.0000001 && Math.abs(distance.z()) < 1.0000001) {
+@@ -2251,7 +_,7 @@
+             for (ServerLevel level : this.server.getAllLevels()) {
+                 Entity entity = packet.getEntity(level);
+                 if (entity != null) {
+-                    this.player.teleportTo(level, entity.getX(), entity.getY(), entity.getZ(), Set.of(), entity.getYRot(), entity.getXRot(), true, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.SPECTATE); // CraftBukkit
++                    io.papermc.paper.threadedregions.TeleportUtils.teleport(this.player, false, entity, null, null, Entity.TELEPORT_FLAG_LOAD_CHUNK, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.SPECTATE, null); // Folia - region threading
+                     return;
+                 }
+             }
+@@ -2271,7 +_,7 @@
+         LOGGER.info("{} lost connection: {}", this.player.getPlainTextName(), details.reason().getString());
+         // Paper start - Fix kick event leave message not being sent
+         final net.kyori.adventure.text.Component quitMessage = details.quitMessage().map(io.papermc.paper.adventure.PaperAdventure::asAdventure).orElse(null);
+-        this.removePlayerFromWorld(quitMessage);
++        if (!this.waitingForSwitchToConfig) this.removePlayerFromWorld(quitMessage); // Folia - region threading - don't double remove
+         // Paper end - Fix kick event leave message not being sent
+         super.onDisconnect(details);
+     }
+@@ -2281,6 +_,7 @@
+         this.removePlayerFromWorld(null);
+     }
+ 
++    public boolean hackSwitchingConfig; // Folia - rewrite login process
+     private void removePlayerFromWorld(net.kyori.adventure.text.@Nullable Component quitMessage) {
+         // Paper end - Fix kick event leave message not being sent
+         this.chatMessageChain.close();
+@@ -2294,6 +_,13 @@
+         this.player.disconnect();
+         // Paper start - Adventure
+         quitMessage = quitMessage == null ? this.server.getPlayerList().remove(this.player) : this.server.getPlayerList().remove(this.player, quitMessage); // Paper - pass in quitMessage to fix kick message not being used
++        // Folia - region threading
++        // note: only set after removing, since it can tick the player
++        if (!this.hackSwitchingConfig) this.disconnectPos = this.player.chunkPosition();
++        if (!this.hackSwitchingConfig)
++            // force chunk to be loaded so that the region is not lost
++            this.player.level().moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(DISCONNECT_TICKET, this.disconnectPos, ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.MAX_TICKET_LEVEL, this.disconnectTicketId);
++        // Folia - region threading
+         if ((quitMessage != null) && !quitMessage.equals(net.kyori.adventure.text.Component.empty())) {
+             this.server.getPlayerList().broadcastSystemMessage(PaperAdventure.asVanilla(quitMessage), false);
+             // Paper end - Adventure
+@@ -2342,7 +_,7 @@
+     public void handleChat(final ServerboundChatPacket packet) {
+         // CraftBukkit start - async chat
+         // SPIGOT-3638
+-        if (this.server.isStopped()) {
++        if (io.papermc.paper.threadedregions.RegionShutdownThread.isShuttingDown()) { // Canvas - region threading
+             return;
+         }
+         // CraftBukkit end
+@@ -2397,7 +_,7 @@
+         command = event.getMessage().substring(1);
+         // CraftBukkit end
+         ParseResults<CommandSourceStack> parsed = this.parseCommand(command);
+-        if (this.server.enforceSecureProfile() && SignableCommand.hasSignableArguments(parsed)) {
++        if (this.server.canvas$ncrEnforceSecureProfile() && SignableCommand.hasSignableArguments(parsed)) { // Canvas - no chat reports
+             LOGGER.error(
+                 "Received unsigned command packet from {}, but the command requires signable arguments: {}", this.player.getGameProfile().name(), command
+             );
+@@ -2533,7 +_,7 @@
+             this.player.resetLastActionTime();
+             // CraftBukkit start
+             if (sync) {
+-                this.server.execute(chatHandler);
++                this.player.getBukkitEntity().taskScheduler.scheduleOrExecute((_) -> chatHandler.run()); // Folia - region threading
+             } else {
+                 chatHandler.run();
+             }
+@@ -2613,6 +_,7 @@
+         if (rawMessage.isEmpty()) {
+             LOGGER.warn("{} tried to send an empty message", this.player.getScoreboardName());
+         } else if (this.getCraftPlayer().isConversing()) {
++            if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
+             final String conversationInput = rawMessage;
+             this.server.processQueue.add(() -> ServerGamePacketListenerImpl.this.getCraftPlayer().acceptConversationInput(conversationInput));
+         } else if (this.player.getChatVisibility() == ChatVisiblity.SYSTEM) { // Re-add "Command Only" flag check
+@@ -2820,8 +_,26 @@
+     // Spigot end
+ 
+     public void switchToConfig() {
+-        this.waitingForSwitchToConfig = true;
++        // Folia start - rewrite login process
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.player, "Cannot switch config off-main");
++        if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) {
++            throw new IllegalStateException("Cannot switch config while on global tick thread");
++        }
++        // fix bad ordering of this field write - move after removed from world the field write ordering is
++        // bad as it allows the client to send the response packet before the player is removed from the world
++        try {
++            // avoid adding logout ticket here
++            this.hackSwitchingConfig = true;
++        // Folia end - rewrite login process
+         this.removePlayerFromWorld();
++        // Folia start - rewrite login process - move connection ownership to global region
++        } finally {
++            final io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.player.level().getCurrentWorldData();
++            worldData.removeConnection(this.player);
++            // once waitingForSwitchToConfig is set, the global tick will own the connection
++        }
++        // Folia end - rewrite login process - move connection ownership to global region
++        this.waitingForSwitchToConfig = true; // Folia - rewrite login process - fix bad ordering of this field write - moved down
+         this.send(ClientboundStartConfigurationPacket.INSTANCE);
+         this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
+     }
+@@ -2845,7 +_,7 @@
+             }
+             // Spigot end
+             this.player.resetLastActionTime();
+-            if (target != null && level.getWorldBorder().isWithinBounds(target.blockPosition())) {
++            if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(target) && target != null && level.getWorldBorder().isWithinBounds(target.blockPosition())) { // Folia - region threading - do not allow interaction of entities outside the current region
+                 AABB targetBounds = target.getBoundingBox();
+                 ItemStack mainHandItem = this.player.getMainHandItem();
+                 if (this.player.isWithinAttackRange(mainHandItem, targetBounds, io.papermc.paper.configuration.GlobalConfiguration.get().misc.clientInteractionLeniencyDistance.or(3.0))) { // Paper - configurable lenience
+@@ -2888,7 +_,7 @@
+             // Spigot end
+             this.player.resetLastActionTime();
+             this.player.setShiftKeyDown(packet.usingSecondaryAction());
+-            if (target != null && level.getWorldBorder().isWithinBounds(target.blockPosition())) {
++            if (target != null && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(target) && level.getWorldBorder().isWithinBounds(target.blockPosition())) { // Folia - region threading
+                 AABB targetBounds = target.getBoundingBox();
+                 if (this.player.isWithinEntityInteractionRange(targetBounds, io.papermc.paper.configuration.GlobalConfiguration.get().misc.clientInteractionLeniencyDistance.or(3.0))) { // Paper - configurable lenience value for interact range
+                     InteractionHand hand = packet.hand();
+@@ -2992,6 +_,13 @@
+         switch (action) {
+             case PERFORM_RESPAWN:
+                 if (this.player.wonGame) {
++                    // Folia start - region threading
++                    if (true) {
++                        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.player, "Cannot exit from end credits async"); // Canvas - region threading
++                        this.player.exitEndCredits();
++                        return;
++                    }
++                    // Folia end - region threading
+                     this.player.wonGame = false;
+                     this.player = this.server.getPlayerList().respawn(this.player, true, Entity.RemovalReason.CHANGED_DIMENSION, RespawnReason.END_PORTAL); // CraftBukkit
+                     this.resetPosition();
+@@ -3002,6 +_,17 @@
+                         return;
+                     }
+ 
++                    // Folia start - region threading
++                    if (true) {
++                        this.player.respawn((_) -> {
++                            if (this.server.isHardcore()) {
++                                this.player.setGameMode(GameType.SPECTATOR, org.bukkit.event.player.PlayerGameModeChangeEvent.Cause.HARDCORE_DEATH, null); // Paper - Expand PlayerGameModeChangeEvent
++                                this.player.level().getGameRules().set(GameRules.SPECTATORS_GENERATE_CHUNKS, false, this.player.level()); // CraftBukkit - per-world
++                            }
++                        }, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason.DEATH);
++                        return;
++                    }
++                    // Folia end - region threading
+                     this.player = this.server.getPlayerList().respawn(this.player, false, Entity.RemovalReason.KILLED, RespawnReason.DEATH); // CraftBukkit
+                     this.resetPosition();
+                     this.restartClientLoadTimerAfterRespawn();
+@@ -3554,7 +_,13 @@
+         }
+         List<String> lines = Stream.of(linesArray).map(ChatFormatting::stripFormatting).collect(Collectors.toList());
+         // Paper end - Limit client sign length
+-        this.filterTextPacket(lines).thenAcceptAsync(filteredLines -> this.updateSignText(packet, (List<FilteredText>)filteredLines), this.server);
++        // Folia start - region threading
++        this.filterTextPacket(lines).thenAcceptAsync(filteredLines -> this.updateSignText(packet, filteredLines), this.player::queuePacketTask).whenComplete((_, thrown) -> {
++            if (thrown != null) {
++                LOGGER.error("Failed to handle sign update packet", thrown);
++            }
++        });
++        // Folia end - region threading
+     }
+ 
+     private void updateSignText(final ServerboundSignUpdatePacket packet, final List<FilteredText> lines) {
+@@ -3707,11 +_,11 @@
+     private void resetPlayerChatState(final RemoteChatSession chatSession) {
+         this.chatSession = chatSession;
+         this.hasLoggedExpiry = false; // Paper - Prevent causing expired keys from impacting new joins
+-        this.signedMessageDecoder = chatSession.createMessageDecoder(this.player.getUUID());
++        if (!io.canvasmc.canvas.GlobalConfiguration.getInstance().chat.disableChatReporting) this.signedMessageDecoder = chatSession.createMessageDecoder(this.player.getUUID()); // Canvas - no chat reports
+         this.chatMessageChain
+             .append(
+                 () -> {
+-                    this.server.executeBlocking(() -> { // Paper - Broadcast chat session update sync
++                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().blockOn(() -> { // Paper - Broadcast chat session update sync // Folia - region threading
+                     this.player.setChatSession(chatSession);
+                     this.server
+                         .getPlayerList()
+@@ -3812,19 +_,7 @@
+ 
+     @Override
+     public void disconnectAsync(final net.minecraft.network.DisconnectionDetails disconnectionInfo) {
+-        if (this.cserver.isPrimaryThread()) {
+-            this.disconnect(disconnectionInfo);
+-            return;
+-        }
+-
+-        this.connection.setReadOnly();
+-        this.server.scheduleOnMain(() -> {
+-            this.disconnect(disconnectionInfo);
+-            if (this.player.quitReason == null) {
+-                // cancelled
+-                this.connection.enableAutoRead();
+-            }
+-        });
++        this.disconnect(disconnectionInfo); // Folia - region threading
+     }
+ 
+     public final boolean isDisconnected() {

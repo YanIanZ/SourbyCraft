@@ -1,0 +1,99 @@
+--- a/net/minecraft/world/entity/EntityReference.java
++++ b/net/minecraft/world/entity/EntityReference.java
+@@ -17,22 +_,22 @@
+ import org.jetbrains.annotations.Contract;
+ import org.jspecify.annotations.Nullable;
+ 
+-public final class EntityReference<StoredEntityType extends UniquelyIdentifyable> {
++public final class EntityReference<StoredEntityType extends Entity> { // Folia - region threading - force Entity type
+     private static final Codec<? extends EntityReference<?>> CODEC = UUIDUtil.CODEC.xmap(EntityReference::new, EntityReference::getUUID);
+     private static final StreamCodec<ByteBuf, ? extends EntityReference<?>> STREAM_CODEC = UUIDUtil.STREAM_CODEC
+         .map(EntityReference::new, EntityReference::getUUID);
+-    private Either<UUID, StoredEntityType> entity;
++    private Either<UUID, org.bukkit.craftbukkit.entity.CraftEntity> entity; // Folia - region threading - force usage of CraftEntity
+ 
+-    public static <Type extends UniquelyIdentifyable> Codec<EntityReference<Type>> codec() {
++    public static <Type extends Entity> Codec<EntityReference<Type>> codec() { // Folia - region threading - force Entity type
+         return (Codec<EntityReference<Type>>)CODEC;
+     }
+ 
+-    public static <Type extends UniquelyIdentifyable> StreamCodec<ByteBuf, EntityReference<Type>> streamCodec() {
++    public static <Type extends Entity> StreamCodec<ByteBuf, EntityReference<Type>> streamCodec() { // Folia - region threading - force Entity type
+         return (StreamCodec<ByteBuf, EntityReference<Type>>)STREAM_CODEC;
+     }
+ 
+     private EntityReference(final StoredEntityType entity) {
+-        this.entity = Either.right(entity);
++        this.entity = Either.right(entity.getBukkitEntity()); // Folia - region threading - force usage of CraftEntity
+     }
+ 
+     private EntityReference(final UUID uuid) {
+@@ -40,22 +_,22 @@
+     }
+ 
+     @Contract("!null -> !null; null -> null")
+-    public static <T extends UniquelyIdentifyable> @Nullable EntityReference<T> of(final @Nullable T entity) {
++    public static <T extends Entity> @Nullable EntityReference<T> of(final @Nullable T entity) { // Folia - region threading - force Entity type
+         return entity != null ? new EntityReference<>(entity) : null;
+     }
+ 
+-    public static <T extends UniquelyIdentifyable> EntityReference<T> of(final UUID uuid) {
++    public static <T extends Entity> EntityReference<T> of(final UUID uuid) { // Folia - region threading - force Entity type
+         return new EntityReference<>(uuid);
+     }
+ 
+     public UUID getUUID() {
+-        return this.entity.map(uuid -> (UUID)uuid, UniquelyIdentifyable::getUUID);
++        return this.entity.map(uuid -> (UUID)uuid, org.bukkit.craftbukkit.entity.CraftEntity::getUniqueId); // Folia - region threading - force usage of CraftEntity
+     }
+ 
+     public @Nullable StoredEntityType getEntity(final UUIDLookup<? extends UniquelyIdentifyable> lookup, final Class<StoredEntityType> clazz) {
+-        Optional<StoredEntityType> stored = this.entity.right();
++        Optional<org.bukkit.craftbukkit.entity.CraftEntity> stored = this.entity.right(); // Folia - region threading - force usage of CraftEntity
+         if (stored.isPresent()) {
+-            StoredEntityType storedEntity = stored.get();
++            StoredEntityType storedEntity = (StoredEntityType)stored.get().getHandleRaw(); // Folia - region threading - force usage of CraftEntity
+             if (!storedEntity.isRemoved()) {
+                 return storedEntity;
+             }
+@@ -67,7 +_,7 @@
+         if (uuid.isPresent()) {
+             StoredEntityType resolved = this.resolve(lookup.lookup(uuid.get()), clazz);
+             if (resolved != null && !resolved.isRemoved()) {
+-                this.entity = Either.right(resolved);
++                this.entity = Either.right(resolved.getBukkitEntity()); // Folia - region threading - force usage of CraftEntity
+                 return resolved;
+             }
+         }
+@@ -99,7 +_,7 @@
+         }
+     }
+ 
+-    public static <StoredEntityType extends UniquelyIdentifyable> @Nullable StoredEntityType get(
++    public static <StoredEntityType extends Entity> @Nullable StoredEntityType get( // Folia - region threading - force Entity type
+         final @Nullable EntityReference<StoredEntityType> reference, final Level level, final Class<StoredEntityType> clazz
+     ) {
+         return reference != null ? reference.getEntity(level, clazz) : null;
+@@ -117,11 +_,11 @@
+         return get(reference, level, Player.class);
+     }
+ 
+-    public static <StoredEntityType extends UniquelyIdentifyable> @Nullable EntityReference<StoredEntityType> read(final ValueInput input, final String key) {
++    public static <StoredEntityType extends Entity> @Nullable EntityReference<StoredEntityType> read(final ValueInput input, final String key) { // Folia - region threading - force Entity type
+         return (EntityReference<StoredEntityType>)input.read(key, codec()).orElse(null);
+     }
+ 
+-    public static <StoredEntityType extends UniquelyIdentifyable> @Nullable EntityReference<StoredEntityType> readWithOldOwnerConversion(
++    public static <StoredEntityType extends Entity> @Nullable EntityReference<StoredEntityType> readWithOldOwnerConversion( // Folia - region threading - force Entity type
+         final ValueInput input, final String key, final Level level
+     ) {
+         Optional<UUID> uuid = input.read(key, UUIDUtil.CODEC);
+@@ -145,7 +_,7 @@
+ 
+     // Paper start - utility for reading an entity from a nullable entity reference via a UUIDLookup
+     @Nullable
+-    public static <StoredEntityType extends UniquelyIdentifyable> StoredEntityType getEntity(
++    public static <StoredEntityType extends Entity> StoredEntityType getEntity( // Folia - region threading - force Entity type
+         final @Nullable EntityReference<StoredEntityType> ref,
+         final UUIDLookup<? extends UniquelyIdentifyable> uuidLookup,
+         final Class<StoredEntityType> entityClass

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/projectile/hurtingprojectile/SmallFireball.java
++++ b/net/minecraft/world/entity/projectile/hurtingprojectile/SmallFireball.java
+@@ -25,7 +_,7 @@
+     public SmallFireball(final Level level, final LivingEntity mob, final Vec3 direction) {
+         super(EntityTypes.SMALL_FIREBALL, mob, direction, level);
+         // CraftBukkit start
+-        if (this.getOwner() != null && this.getOwner() instanceof Mob) {
++        if (mob != null && mob instanceof Mob) { // Folia - region threading
+             this.isIncendiary = (level instanceof ServerLevel serverLevel) && serverLevel.getGameRules().get(GameRules.MOB_GRIEFING);
+         }
+         // CraftBukkit end

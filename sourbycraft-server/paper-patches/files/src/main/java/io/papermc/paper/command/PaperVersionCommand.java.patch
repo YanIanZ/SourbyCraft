@@ -1,0 +1,18 @@
+--- a/src/main/java/io/papermc/paper/command/PaperVersionCommand.java
++++ b/src/main/java/io/papermc/paper/command/PaperVersionCommand.java
+@@ -170,9 +_,13 @@
+                this.versionFetcher.getVersionMessage()
+            );
+ 
++           // Canvas start - improve version command
++           final Component bukkitComponent = message.hoverEvent(Component.translatable("chat.copy.click", NamedTextColor.WHITE))
++               .clickEvent(ClickEvent.copyToClipboard(PlainTextComponentSerializer.plainText().serialize(message)));
++           final Component versionFetcherComponent = this.versionFetcher.getFullOutMessage();
+            return new ComputedVersion(
+-               message.hoverEvent(Component.translatable("chat.copy.click", NamedTextColor.WHITE))
+-                   .clickEvent(ClickEvent.copyToClipboard(PlainTextComponentSerializer.plainText().serialize(message))),
++               versionFetcherComponent == null ? bukkitComponent : versionFetcherComponent,
++           // Canvas end - improve version command
+                System.currentTimeMillis()
+            );
+        });

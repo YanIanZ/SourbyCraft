@@ -1,0 +1,163 @@
+--- a/net/minecraft/server/commands/data/DataCommands.java
++++ b/net/minecraft/server/commands/data/DataCommands.java
+@@ -54,7 +_,7 @@
+         (start, end) -> Component.translatableEscape("commands.data.modify.invalid_substring", start, end)
+     );
+     public static final List<Function<String, DataCommands.DataProvider>> ALL_PROVIDERS = ImmutableList.of(
+-        EntityDataAccessor.PROVIDER, BlockDataAccessor.PROVIDER, StorageDataAccessor.PROVIDER
++        EntityDataAccessor.PROVIDER, BlockDataAccessor.PROVIDER // StorageDataAccessor.PROVIDER // Canvas - region threading
+     );
+     public static final List<DataCommands.DataProvider> TARGET_PROVIDERS = ALL_PROVIDERS.stream()
+         .map(f -> f.apply("target"))
+@@ -163,6 +_,38 @@
+ 
+         dispatcher.register(root);
+     }
++    // Canvas start - region threading
++
++    // we disallow getting/modifying data of accessors not in the same region unless the sender is
++    // calling from the global tick(most likely meaning console or RCON). we can't add the global
++    // data accessor back since that's not quite thread safe and that implementation I haven't quite
++    // figured out yet, but that is something we can revisit in the future
++
++    // TODO - bring back global storage data accessor?
++
++    private static int handleAction(
++        final io.canvasmc.canvas.util.command.CSEFunction<DataAccessor, Integer> iAction,
++        final DataAccessor accessor,
++        final CommandSourceStack sourceStack
++    ) throws CommandSyntaxException {
++        if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) {
++            // just schedule to the instance in question
++            accessor.scheduleOrExecute((da) -> {
++                try {
++                    iAction.act(da);
++                } catch (final CommandSyntaxException cse) {
++                    sourceStack.sendFailure(Component.literal(cse.getMessage()));
++                }
++            });
++        }
++        else {
++            // on a region thread
++            accessor.ensureTickThread("Cannot access or modify data of target off region");
++            iAction.act(accessor);
++        }
++        return Command.SINGLE_SUCCESS;
++    }
++    // Canvas end - region threading
+ 
+     private static String getAsText(final Tag tag) throws CommandSyntaxException {
+         return switch (tag) {
+@@ -312,7 +_,10 @@
+         final DataCommands.DataManipulator manipulator,
+         final List<Tag> source
+     ) throws CommandSyntaxException {
+-        DataAccessor target = targetProvider.access(context);
++        // Canvas start - region threading
++        DataAccessor providerAccessed = targetProvider.access(context);
++        return handleAction((target) -> {
++        // Canvas end - region threading
+         NbtPathArgument.NbtPath targetPath = NbtPathArgument.getPath(context, "targetPath");
+         CompoundTag targetData = target.getData();
+         int result = manipulator.modify(context, targetData, targetPath, source);
+@@ -323,18 +_,25 @@
+         target.setData(targetData);
+         context.getSource().sendSuccess(() -> target.getModifiedSuccess(), true);
+         return result;
++        }, providerAccessed, context.getSource()); // Canvas - region threading
+     }
+ 
+     private static int removeData(final CommandSourceStack source, final DataAccessor accessor, final NbtPathArgument.NbtPath path) throws CommandSyntaxException {
+-        CompoundTag result = accessor.getData();
++        // Canvas start - region threading
++        return handleAction((dataAccessor) -> {
++        CompoundTag result = dataAccessor.getData();
++        // Canvas end - region threading
+         int count = path.remove(result);
+         if (count == 0) {
+             throw ERROR_MERGE_UNCHANGED.create();
+         }
+ 
+-        accessor.setData(result);
+-        source.sendSuccess(() -> accessor.getModifiedSuccess(), true);
++        // Canvas start - region threading
++        dataAccessor.setData(result);
++        source.sendSuccess(dataAccessor::getModifiedSuccess, true);
++        // Canvas end - region threading
+         return count;
++        }, accessor, source); // Canvas - region threading
+     }
+ 
+     public static Tag getSingleTag(final NbtPathArgument.NbtPath path, final DataAccessor accessor) throws CommandSyntaxException {
+@@ -349,7 +_,10 @@
+     }
+ 
+     private static int getData(final CommandSourceStack source, final DataAccessor accessor, final NbtPathArgument.NbtPath path) throws CommandSyntaxException {
+-        Tag tag = getSingleTag(path, accessor);
++        // Canvas start - region threading
++        return handleAction((dataAccessor) -> {
++        Tag tag = getSingleTag(path, dataAccessor);
++        // Canvas end - region threading
+ 
+         int result = switch (tag) {
+             case NumericTag numericTag -> Mth.floor(numericTag.doubleValue());
+@@ -359,11 +_,13 @@
+             case EndTag ignored -> throw ERROR_GET_NON_EXISTENT.create(path.toString());
+             default -> throw new MatchException(null, null);
+         };
+-        source.sendSuccess(() -> accessor.getPrintSuccess(tag), false);
++        source.sendSuccess(() -> dataAccessor.getPrintSuccess(tag), false); // Canvas - region threading
+         return result;
++        }, accessor, source); // Canvas - region threading
+     }
+ 
+-    private static int getNumeric(final CommandSourceStack source, final DataAccessor accessor, final NbtPathArgument.NbtPath path, final double scale) throws CommandSyntaxException {
++    private static int getNumeric(final CommandSourceStack source, final DataAccessor dataAccessor, final NbtPathArgument.NbtPath path, final double scale) throws CommandSyntaxException { // Canvas - region threading
++        return handleAction((accessor) -> { // Canvas - region threading
+         if (getSingleTag(path, accessor) instanceof NumericTag numericTag) {
+             int result = Mth.floor(numericTag.doubleValue() * scale);
+             source.sendSuccess(() -> accessor.getPrintSuccess(path, scale, result), false);
+@@ -371,16 +_,25 @@
+         } else {
+             throw ERROR_GET_NOT_NUMBER.create(path.toString());
+         }
++        }, dataAccessor, source); // Canvas - region threading
+     }
+ 
+     private static int getData(final CommandSourceStack source, final DataAccessor accessor) throws CommandSyntaxException {
+-        CompoundTag data = accessor.getData();
+-        source.sendSuccess(() -> accessor.getPrintSuccess(data), false);
++        // Canvas start - region threading
++        handleAction((dataAccessor) -> {
++            CompoundTag data = dataAccessor.getData();
++            source.sendSuccess(() -> dataAccessor.getPrintSuccess(data), false);
++            return Command.SINGLE_SUCCESS;
++        }, accessor, source);
++        // Canvas end - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ 
+     private static int mergeData(final CommandSourceStack source, final DataAccessor accessor, final CompoundTag nbt) throws CommandSyntaxException {
+-        CompoundTag old = accessor.getData();
++        // Canvas start - region threading
++        return handleAction((dataAccessor) -> {
++        CompoundTag old = dataAccessor.getData();
++        // Canvas end - region threading
+         if (NbtPathArgument.NbtPath.isTooDeep(nbt, 0)) {
+             throw NbtPathArgument.ERROR_DATA_TOO_DEEP.create();
+         }
+@@ -390,9 +_,12 @@
+             throw ERROR_MERGE_UNCHANGED.create();
+         }
+ 
+-        accessor.setData(result);
+-        source.sendSuccess(() -> accessor.getModifiedSuccess(), true);
++        // Canvas start - region threading
++        dataAccessor.setData(result);
++        source.sendSuccess(dataAccessor::getModifiedSuccess, true);
++        // Canvas end - region threading
+         return Command.SINGLE_SUCCESS;
++        }, accessor, source); // Canvas - region threading
+     }
+ 
+     @FunctionalInterface

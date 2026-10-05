@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/entity/monster/warden/Warden.java
++++ b/net/minecraft/world/entity/monster/warden/Warden.java
+@@ -25,8 +_,6 @@
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.Unit;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.effect.MobEffectInstance;
+@@ -287,10 +_,7 @@
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("wardenBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+         if ((this.tickCount + this.getId()) % 120 == 0) {
+             applyDarknessAround(level, this.position(), this, 20);

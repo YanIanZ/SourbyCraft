@@ -1,0 +1,77 @@
+--- a/net/minecraft/server/commands/EnchantCommand.java
++++ b/net/minecraft/server/commands/EnchantCommand.java
+@@ -67,20 +_,33 @@
+         final CommandSourceStack source, final Collection<? extends Entity> targets, final Holder<Enchantment> enchantmentHolder, final int level
+     ) throws CommandSyntaxException {
+         Enchantment enchantment = enchantmentHolder.value();
+-        if (level > enchantment.getMaxLevel()) {
+-            throw ERROR_LEVEL_TOO_HIGH.create(level, enchantment.getMaxLevel());
++        if (level > (io.canvasmc.canvas.GlobalConfiguration.getInstance().enchantCommand.uncapMaxLevel ? 255 : enchantment.getMaxLevel())) { // Canvas - enchant command configs
++            throw ERROR_LEVEL_TOO_HIGH.create(level, (io.canvasmc.canvas.GlobalConfiguration.getInstance().enchantCommand.uncapMaxLevel ? 255 : enchantment.getMaxLevel())); // Canvas - enchant command configs
+         }
+ 
+-        int success = 0;
+-
+-        for (Entity entity : targets) {
++        // Canvas start - region threading
++
++        // note: not all of this is annotated with Canvas start/end
++        //       comments, since we revert this to Paper's version before
++        //       we do any patching since Folia's is... interesting
++
++        // also why tf does Vanilla have a weird issue where if 1 entity
++        // in the selection passes, it says all of them passed in the feedback?
++        // we fix this now...
++
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._abstract(new io.canvasmc.canvas.util.CollectingList<Entity>())
++            .with(targets)
++            .executes((Entity entity) -> {
++        // Canvas end - region threading
+             if (entity instanceof LivingEntity target) {
+                 ItemStack item = target.getMainHandItem();
+                 if (!item.isEmpty()) {
+-                    if (enchantment.canEnchant(item)
+-                        && EnchantmentHelper.isEnchantmentCompatible(EnchantmentHelper.getEnchantmentsForCrafting(item).keySet(), enchantmentHolder)) {
++                    // Canvas start - enchant command configs
++                    if ((io.canvasmc.canvas.GlobalConfiguration.getInstance().enchantCommand.allowEnchantsOnUnsupportedItems || enchantment.canEnchant(item))
++                        && (io.canvasmc.canvas.GlobalConfiguration.getInstance().enchantCommand.allowEnchantingWithIncompatibleEnchants || EnchantmentHelper.isEnchantmentCompatible(EnchantmentHelper.getEnchantmentsForCrafting(item).keySet(), enchantmentHolder))) {
++                    // Canvas end - enchant command configs
+                         item.enchant(enchantmentHolder, level);
+-                        success++;
++                        return (list) -> list.add(entity); // Canvas - region threading
+                     } else if (targets.size() == 1) {
+                         throw ERROR_INCOMPATIBLE.create(item.getHoverName().getString());
+                     }
+@@ -90,9 +_,22 @@
+             } else if (targets.size() == 1) {
+                 throw ERROR_NOT_LIVING_ENTITY.create(entity.getName().getString());
+             }
+-        }
++    // Canvas start - region threading
++            return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++            })
++            .onComplete((changed, _, css) -> enchantCallback(css, changed, enchantmentHolder, level))
++            .start(source);
++        return 1;
++    }
+ 
+-        if (success == 0) {
++    private static int enchantCallback(
++        final CommandSourceStack source,
++        final io.canvasmc.canvas.util.CollectingList<Entity> targets,
++        final Holder<Enchantment> enchantmentHolder,
++        final int level
++    ) throws CommandSyntaxException {
++        if (targets.isEmpty()) {
++    // Canvas end - region threading
+             throw ERROR_NOTHING_HAPPENED.create();
+         }
+ 
+@@ -109,6 +_,6 @@
+             );
+         }
+ 
+-        return success;
++        return targets.size(); // Canvas - region threading
+     }
+ }

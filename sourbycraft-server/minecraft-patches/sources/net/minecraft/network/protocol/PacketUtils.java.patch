@@ -1,0 +1,21 @@
+--- a/net/minecraft/network/protocol/PacketUtils.java
++++ b/net/minecraft/network/protocol/PacketUtils.java
+@@ -19,8 +_,16 @@
+     }
+ 
+     public static <T extends PacketListener> void ensureRunningOnSameThread(final Packet<T> packet, final T listener, final PacketProcessor packetProcessor) throws RunningOnDifferentThreadException {
+-        if (!packetProcessor.isSameThread()) {
+-            packetProcessor.scheduleIfPossible(listener, packet);
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) { // Folia - region threading
++            // Folia start - region threading
++            if (listener instanceof net.minecraft.server.network.ServerGamePacketListenerImpl gamePacketListener) {
++                gamePacketListener.player.getBukkitEntity().schedulePacket(listener, packet);
++            } else if (listener instanceof net.minecraft.server.network.ServerConfigurationPacketListenerImpl || listener instanceof net.minecraft.server.network.ServerLoginPacketListenerImpl) {
++                io.papermc.paper.threadedregions.RegionizedServer.getInstance().schedulePacket(listener, packet);
++            } else {
++                throw new UnsupportedOperationException("Unknown listener: " + listener);
++            }
++            // Folia end - region threading
+             throw RunningOnDifferentThreadException.RUNNING_ON_DIFFERENT_THREAD;
+         }
+     }

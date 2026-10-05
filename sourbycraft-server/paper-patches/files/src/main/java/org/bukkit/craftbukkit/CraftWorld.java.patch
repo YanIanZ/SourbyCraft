@@ -1,0 +1,357 @@
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -230,14 +_,14 @@
+             if (chunk == null) {
+                 continue;
+             }
+-            size += chunk.blockEntities.size();
++            size += chunk.canvas$getBlockEntitiesCount(); // Canvas - optimize block entity fetching
+         }
+         return size;
+     }
+ 
+     @Override
+     public int getTickableTileEntityCount() {
+-        return world.blockEntityTickers.size();
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading - TODO fix this?
+     }
+ 
+     @Override
+@@ -304,7 +_,7 @@
+         // Paper start - per world spawn limits
+         for (SpawnCategory spawnCategory : SpawnCategory.values()) {
+             if (CraftSpawnCategory.isValidForLimits(spawnCategory)) {
+-                setSpawnLimit(spawnCategory, this.world.paperConfig().entities.spawning.spawnLimits.getInt(CraftSpawnCategory.toNMS(spawnCategory)));
++                this.spawnCategoryLimit.put(spawnCategory, this.world.paperConfig().entities.spawning.spawnLimits.getInt(CraftSpawnCategory.toNMS(spawnCategory))); // Folia - region threading
+             }
+         }
+         // Paper end - per world spawn limits
+@@ -370,6 +_,7 @@
+ 
+     @Override
+     public Chunk getChunkAt(int x, int z) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.getHandle(), x, z, "Async chunk retrieval"); // Folia - region threading
+         warnUnsafeChunk("getting a faraway chunk", x, z); // Paper
+         net.minecraft.world.level.chunk.LevelChunk chunk = (net.minecraft.world.level.chunk.LevelChunk) this.world.getChunk(x, z, ChunkStatus.FULL, true);
+         return new CraftChunk(chunk);
+@@ -400,10 +_,10 @@
+     @Override
+     public boolean isChunkGenerated(int x, int z) {
+         // Paper start - Fix this method
+-        if (!Bukkit.isPrimaryThread()) {
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.getHandle(), x, z)) { // Folia - region threading
+             return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                 return CraftWorld.this.isChunkGenerated(x, z);
+-            }, world.getChunkSource().mainThreadProcessor).join();
++            }, (run) -> { io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(this.getHandle(), x, z, run);}).join(); // Folia - region threading
+         }
+         ChunkAccess chunk = world.getChunkSource().getChunkAtImmediately(x, z);
+         if (chunk != null) {
+@@ -458,7 +_,7 @@
+     }
+ 
+     private boolean unloadChunk0(int x, int z, boolean save) {
+-        org.spigotmc.AsyncCatcher.catchOp("chunk unload"); // Spigot
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.world, x, z, "Cannot unload chunk asynchronously"); // Folia - region threading
+         if (!this.isChunkLoaded(x, z)) {
+             return true;
+         }
+@@ -475,6 +_,7 @@
+ 
+     @Override
+     public boolean refreshChunk(int x, int z) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.world, x, z, "Cannot refresh chunk asynchronously"); // Folia - region threading
+         ChunkHolder playerChunk = this.world.getChunkSource().chunkMap.getVisibleChunkIfPresent(ChunkPos.pack(x, z));
+         if (playerChunk == null) return false;
+ 
+@@ -525,7 +_,7 @@
+ 
+     @Override
+     public boolean loadChunk(int x, int z, boolean generate) {
+-        org.spigotmc.AsyncCatcher.catchOp("chunk load"); // Spigot
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.getHandle(), x, z, "May not sync load chunks asynchronously"); // Folia - region threading
+         warnUnsafeChunk("loading a faraway chunk", x, z); // Paper
+         ChunkAccess chunk = this.world.getChunkSource().getChunk(x, z, generate || isChunkGenerated(x, z) ? ChunkStatus.FULL : ChunkStatus.EMPTY, true); // Paper
+ 
+@@ -565,7 +_,7 @@
+ 
+         final DistanceManager distanceManager = this.world.getChunkSource().chunkMap.getDistanceManager();
+         if (distanceManager.ticketStorage.addPluginRegionTicket(new ChunkPos(x, z), plugin)) {
+-            this.getChunkAt(x, z); // ensure it's loaded
++            // this.getChunkAt(x, z); // ensure it's loaded // Folia - region threading - do not load chunks for tickets anymore to make this mt-safe
+             return true;
+         }
+ 
+@@ -619,17 +_,20 @@
+ 
+     @Override
+     public boolean isChunkForceLoaded(int x, int z) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot read force-loaded chunk off global region"); // Folia - region threading
+         return this.getHandle().getForceLoadedChunks().contains(ChunkPos.pack(x, z));
+     }
+ 
+     @Override
+     public void setChunkForceLoaded(int x, int z, boolean forced) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify force-loaded chunks off global region"); // Folia - region threading
+         warnUnsafeChunk("forceloading a faraway chunk", x, z); // Paper
+         this.getHandle().setChunkForced(x, z, forced);
+     }
+ 
+     @Override
+     public Collection<Chunk> getForceLoadedChunks() {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot read force-loaded chunks off global region"); // Folia - region threading
+         Set<Chunk> chunks = new HashSet<>();
+ 
+         for (long pos : this.getHandle().getForceLoadedChunks()) {
+@@ -738,18 +_,20 @@
+ 
+     @Override
+     public boolean generateTree(Location loc, TreeType type, BlockChangeDelegate delegate) {
+-        this.world.captureTreeGeneration = true;
+-        this.world.captureBlockStates = true;
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.world, loc.getX(), loc.getZ(), "Cannot generate tree asynchronously"); // Folia - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = world.getCurrentWorldData(); // Folia - region threading
++        worldData.captureTreeGeneration = true; // Folia - region threading
++        worldData.captureBlockStates = true; // Folia - region threading
+         List<org.bukkit.craftbukkit.block.CraftBlockState> capturedBlockStates;
+         boolean grownTree;
+         try {
+             grownTree = this.generateTree(loc, type);
+         } finally {
+-            this.world.captureTreeGeneration = false;
+-            this.world.captureBlockStates = false;
++            worldData.captureTreeGeneration = false; // Folia - region threading
++            worldData.captureBlockStates = false; // Folia - region threading
+ 
+-            capturedBlockStates = new ArrayList<>(this.world.capturedBlockStates.values());
+-            this.world.capturedBlockStates.clear();
++            capturedBlockStates = new ArrayList<>(worldData.capturedBlockStates.values()); // Folia - region threading
++            worldData.capturedBlockStates.clear(); // Folia - region threading
+         }
+         if (grownTree) { // Copy block data to delegate
+             for (CraftBlockState snapshot : capturedBlockStates) {
+@@ -793,6 +_,7 @@
+ 
+     @Override
+     public void setTime(long time) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify time off of the global region"); // Folia - region threading
+         long margin = (time - this.getFullTime()) % SharedConstants.TICKS_PER_GAME_DAY;
+         if (margin < 0) margin += SharedConstants.TICKS_PER_GAME_DAY;
+         this.setFullTime(this.getFullTime() + margin);
+@@ -805,6 +_,7 @@
+ 
+     @Override
+     public void setFullTime(long time) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify time off of the global region"); // Folia - region threading
+         if (this.world.dimensionType().defaultClock().isEmpty()) {
+             throw new IllegalArgumentException("Cannot set time in world without world clock");
+         }
+@@ -829,7 +_,7 @@
+ 
+     @Override
+     public long getGameTime() {
+-        return this.world.getLevelData().getGameTime();
++        return this.getHandle().getGameTime(); // Folia - region threading
+     }
+ 
+     @Override
+@@ -840,6 +_,7 @@
+ 
+     private boolean createExplosion(double x, double y, double z, float power, boolean setFire, boolean breakBlocks, Entity source, Consumer<net.minecraft.world.level.ServerExplosion> configurator) {
+         // Paper end - expand explosion API
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.world, x, z, "Cannot create explosion asynchronously"); // Folia - region threading
+         net.minecraft.world.level.Level.ExplosionInteraction explosionType;
+         if (!breakBlocks) {
+             explosionType = net.minecraft.world.level.Level.ExplosionInteraction.NONE; // Don't break blocks
+@@ -898,6 +_,7 @@
+ 
+     @Override
+     public int getHighestBlockYAt(int x, int z, org.bukkit.HeightMap heightMap) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.world, x >> 4, z >> 4, "Cannot retrieve chunk asynchronously"); // Folia - region threading
+         warnUnsafeChunk("getting a faraway chunk", x >> 4, z >> 4); // Paper
+         // Transient load for this tick
+         return this.world.getChunk(x >> 4, z >> 4).getHeight(CraftHeightMap.toNMS(heightMap), x, z);
+@@ -913,6 +_,7 @@
+     @Override
+     public void setBiome(int x, int y, int z, Holder<net.minecraft.world.level.biome.Biome> biome) {
+         BlockPos pos = new BlockPos(x, 0, z);
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.world, pos, "Cannot retrieve chunk asynchronously"); // Folia - region threading
+         if (this.world.hasChunkAt(pos)) {
+             net.minecraft.world.level.chunk.LevelChunk chunk = this.world.getChunkAt(pos);
+ 
+@@ -1135,12 +_,13 @@
+     public void save(boolean flush) {
+         org.spigotmc.AsyncCatcher.catchOp("world save"); // Spigot
+         this.server.checkSaveState();
+-        boolean oldSave = this.world.noSave;
+-
+-        this.world.noSave = false;
+-        this.world.save(null, flush, false);
+-
+-        this.world.noSave = oldSave;
++        // Canvas start - region threading
++        this.world.regioniser.computeForAllRegionsUnsynchronised((region) -> {
++            region.getData().canvas$saveAllTicket.propagate(
++                new io.canvasmc.canvas.util.ticket.SaveAllTicket(() -> {}, (thrown) -> net.minecraft.server.MinecraftServer.LOGGER.error("Failed to save region", thrown), flush)
++            );
++        });
++        // Canvas end - region threading
+     }
+ 
+     @Override
+@@ -1184,6 +_,7 @@
+ 
+     @Override
+     public void setStorm(boolean hasStorm) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify weather off of the global region"); // Folia - region threading
+         this.world.getWeatherData().setRaining(hasStorm, WeatherChangeEvent.Cause.PLUGIN);
+         this.setWeatherDuration(0); // Reset weather duration (legacy behaviour)
+         this.setClearWeatherDuration(0); // Reset clear weather duration (reset "/weather clear" commands)
+@@ -1196,6 +_,7 @@
+ 
+     @Override
+     public void setWeatherDuration(int duration) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify weather off of the global region"); // Folia - region threading
+         this.world.getWeatherData().setRainTime(duration);
+     }
+ 
+@@ -1206,6 +_,7 @@
+ 
+     @Override
+     public void setThundering(boolean thundering) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify weather off of the global region"); // Folia - region threading
+         this.world.getWeatherData().setThundering(thundering, ThunderChangeEvent.Cause.PLUGIN);
+         this.setThunderDuration(0); // Reset weather duration (legacy behaviour)
+         this.setClearWeatherDuration(0); // Reset clear weather duration (reset "/weather clear" commands)
+@@ -1218,6 +_,7 @@
+ 
+     @Override
+     public void setThunderDuration(int duration) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify weather off of the global region"); // Folia - region threading
+         this.world.getWeatherData().setThunderTime(duration);
+     }
+ 
+@@ -1228,6 +_,7 @@
+ 
+     @Override
+     public void setClearWeatherDuration(int duration) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify weather off of the global region"); // Folia - region threading
+         this.world.getWeatherData().setClearWeatherTime(duration);
+     }
+ 
+@@ -1480,11 +_,13 @@
+ 
+     @Override
+     public void setHardcore(boolean hardcore) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
+         this.world.serverLevelData.setHardcore(hardcore);
+     }
+ 
+     @Override
+     public void setTicksPerSpawns(SpawnCategory spawnCategory, int ticksPerCategorySpawn) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
+         Preconditions.checkArgument(spawnCategory != null, "SpawnCategory cannot be null");
+         Preconditions.checkArgument(CraftSpawnCategory.isValidForLimits(spawnCategory), "SpawnCategory.%s are not supported", spawnCategory);
+ 
+@@ -1501,21 +_,25 @@
+ 
+     @Override
+     public void setMetadata(String metadataKey, MetadataValue newMetadataValue) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify metadata off of the global region"); // Folia - region threading
+         this.server.getWorldMetadata().setMetadata(this, metadataKey, newMetadataValue);
+     }
+ 
+     @Override
+     public List<MetadataValue> getMetadata(String metadataKey) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot retrieve metadata off of the global region"); // Folia - region threading
+         return this.server.getWorldMetadata().getMetadata(this, metadataKey);
+     }
+ 
+     @Override
+     public boolean hasMetadata(String metadataKey) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot retrieve metadata off of the global region"); // Folia - region threading
+         return this.server.getWorldMetadata().hasMetadata(this, metadataKey);
+     }
+ 
+     @Override
+     public void removeMetadata(String metadataKey, Plugin owningPlugin) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify metadata off of the global region"); // Folia - region threading
+         this.server.getWorldMetadata().removeMetadata(this, metadataKey, owningPlugin);
+     }
+ 
+@@ -1537,6 +_,7 @@
+ 
+     @Override
+     public void setSpawnLimit(SpawnCategory spawnCategory, int limit) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
+         Preconditions.checkArgument(spawnCategory != null, "SpawnCategory cannot be null");
+         Preconditions.checkArgument(CraftSpawnCategory.isValidForLimits(spawnCategory), "SpawnCategory.%s are not supported", spawnCategory);
+ 
+@@ -1594,7 +_,7 @@
+         if (!(entity instanceof CraftEntity craftEntity) || entity.getWorld() != this || sound == null || category == null) return;
+ 
+         ClientboundSoundEntityPacket packet = new ClientboundSoundEntityPacket(CraftSound.bukkitToMinecraftHolder(sound), net.minecraft.sounds.SoundSource.valueOf(category.name()), craftEntity.getHandle(), volume, pitch, seed);
+-        ChunkMap.TrackedEntity entityTracker = this.getHandle().getChunkSource().chunkMap.entityMap.get(entity.getEntityId());
++        ChunkMap.TrackedEntity entityTracker = ((CraftEntity) entity).getHandle().moonrise$getTrackedEntity(); // Folia - region threading
+         if (entityTracker != null) {
+             entityTracker.sendToTrackingPlayersAndSelf(packet);
+         }
+@@ -1615,7 +_,7 @@
+         if (!(entity instanceof CraftEntity craftEntity) || entity.getWorld() != this || sound == null || category == null) return;
+ 
+         ClientboundSoundEntityPacket packet = new ClientboundSoundEntityPacket(Holder.direct(SoundEvent.createVariableRangeEvent(Identifier.parse(sound))), net.minecraft.sounds.SoundSource.valueOf(category.name()), craftEntity.getHandle(), volume, pitch, seed);
+-        ChunkMap.TrackedEntity entityTracker = this.getHandle().getChunkSource().chunkMap.entityMap.get(entity.getEntityId());
++        ChunkMap.TrackedEntity entityTracker = ((CraftEntity)entity).getHandle().moonrise$getTrackedEntity(); // Folia - region threading
+         if (entityTracker != null) {
+             entityTracker.sendToTrackingPlayersAndSelf(packet);
+         }
+@@ -1666,6 +_,7 @@
+     @SuppressWarnings({"unchecked", "rawtypes"})
+     @Override
+     public boolean setGameRuleValue(String rule, String value) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
+         // No null values allowed
+         if (rule == null || value == null) return false;
+ 
+@@ -1711,6 +_,7 @@
+ 
+     @Override
+     public <T> boolean setGameRule(org.bukkit.@NotNull GameRule<T> rule, @NotNull T newValue) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
+         Preconditions.checkArgument(rule != null, "GameRule cannot be null");
+         Preconditions.checkArgument(newValue != null, "GameRule value cannot be null");
+ 
+@@ -1863,6 +_,12 @@
+ 
+     @Override
+     public void sendGameEvent(Entity sourceEntity, org.bukkit.GameEvent gameEvent, Vector position) {
++        // Folia start - region threading
++        if (sourceEntity != null && !Bukkit.isOwnedByCurrentRegion(sourceEntity)) {
++            throw new IllegalStateException("Cannot send game event asynchronously");
++        }
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.world, position.getX(), position.getZ(), "Cannot send game event asynchronously");
++        // Folia end - region threading
+         getHandle().gameEvent(sourceEntity != null ? ((CraftEntity) sourceEntity).getHandle(): null, net.minecraft.core.registries.BuiltInRegistries.GAME_EVENT.get(org.bukkit.craftbukkit.util.CraftNamespacedKey.toMinecraft(gameEvent.getKey())).orElseThrow(), org.bukkit.craftbukkit.util.CraftVector.toBlockPos(position));
+     }
+     // Paper end
+@@ -1926,7 +_,7 @@
+         Preconditions.checkArgument(radius >= 0, "Radius value (%s) cannot be negative", radius);
+ 
+         Raids persistentRaid = this.world.getRaids();
+-        net.minecraft.world.entity.raid.Raid raid = persistentRaid.getNearbyRaid(CraftLocation.toBlockPos(location), radius * radius);
++        net.minecraft.world.entity.raid.Raid raid = persistentRaid.getNearbyRaid(this.world, CraftLocation.toBlockPos(location), radius * radius); // Folia - make raids thread-safe - add ServerLevel param
+         return (raid == null) ? null : new CraftRaid(raid, this.world);
+     }
+ 
+@@ -2049,4 +_,11 @@
+         return POINTERS_SUPPLIER.view(this);
+     }
+     // Paper end
++    // Canvas start - region threading
++
++    @Override
++    public io.canvasmc.canvas.region.@org.jspecify.annotations.NonNull WorldRegionizer getRegionizer() {
++        return this.world.regioniser;
++    }
++    // Canvas end - region threading
+ }

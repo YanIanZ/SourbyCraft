@@ -1,0 +1,28 @@
+--- a/net/minecraft/world/timeline/AttributeTrackSampler.java
++++ b/net/minecraft/world/timeline/AttributeTrackSampler.java
+@@ -33,6 +_,25 @@
+         this.argumentSampler = argumentTrack.bakeSampler(periodTicks, argumentLerp);
+     }
+ 
++    // Folia start - region threading
++    private AttributeTrackSampler(
++        final Holder<WorldClock> clock,
++        final AttributeModifier<Value, Argument> modifier,
++        final KeyframeTrackSampler<Argument> argumentSampler,
++        final ClockManager clockManager
++    ) {
++        this.clock = clock;
++        this.modifier = modifier;
++        this.argumentSampler = argumentSampler;
++        this.clockManager = clockManager;
++    }
++
++    @Override
++    public AttributeTrackSampler<Value, Argument> copy() {
++        return new AttributeTrackSampler<>(this.clock, this.modifier, this.argumentSampler, this.clockManager);
++    }
++
++    // Folia end - region threading
+     @Override
+     public Value applyTimeBased(final Value baseValue, final int cacheTickId) {
+         if (this.cachedArgument == null || cacheTickId != this.cachedTickId) {

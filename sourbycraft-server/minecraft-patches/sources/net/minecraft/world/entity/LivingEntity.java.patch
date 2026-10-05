@@ -1,0 +1,598 @@
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -65,8 +_,6 @@
+ import net.minecraft.util.BlockUtil;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.Util;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.damagesource.CombatRules;
+@@ -279,7 +_,7 @@
+     private BlockPos lastPos;
+     private Optional<BlockPos> lastClimbablePos = Optional.empty();
+     private @Nullable DamageSource lastDamageSource;
+-    private long lastDamageStamp;
++    private long lastDamageStamp = Long.MIN_VALUE; // Folia - region threading
+     protected int autoSpinAttackTicks;
+     protected float autoSpinAttackDmg;
+     protected @Nullable ItemStack autoSpinAttackItemStack;
+@@ -299,6 +_,8 @@
+     public @Nullable List<DefaultDrop> deathDropItems = null;
+     public final org.bukkit.craftbukkit.attribute.CraftAttributeMap craftAttributes;
+     public boolean collides = true;
++    public boolean canvas$fromSpawner = false; // Canvas - spawner configs
++    protected boolean canvas$isDyingFromWitherRose = false; // Canvas - fix Folia#388
+     public Set<UUID> collidableExemptions = new java.util.HashSet<>();
+     public boolean bukkitPickUpLoot;
+     public org.bukkit.craftbukkit.entity.CraftLivingEntity getBukkitLivingEntity() { return (org.bukkit.craftbukkit.entity.CraftLivingEntity) super.getBukkitEntity(); } // Paper
+@@ -306,6 +_,36 @@
+     public net.kyori.adventure.util.TriState frictionState = net.kyori.adventure.util.TriState.NOT_SET; // Paper - Friction API
+     public int invulnerableDuration = LivingEntity.INVULNERABLE_DURATION; // Paper - configurable invulnerable duration
+     // CraftBukkit end
++    // Folia start - region threading
++    // Canvas start - region threading
++    public volatile double waypointTransmitRangeCached = Attributes.WAYPOINT_TRANSMIT_RANGE.value().getDefaultValue();
++
++    public void updateWaypointCache() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot update waypoint cache async");
++
++        waypointTransmitRangeCached = attributes.getValue(Attributes.WAYPOINT_TRANSMIT_RANGE);
++    }
++
++    // Canvas end - region threading
++    @Override
++    public void updateTicks(long fromTickOffset, long fromRedstoneTimeOffset) {
++        super.updateTicks(fromTickOffset, fromRedstoneTimeOffset);
++        if (this.lastDamageStamp != Long.MIN_VALUE) {
++            this.lastDamageStamp += fromRedstoneTimeOffset;
++        }
++    }
++
++    @Override
++    public boolean canBeSpectated() {
++        return super.canBeSpectated() && this.getHealth() > 0.0F;
++    }
++
++    @Override
++    protected void resetStoredPositions() {
++        super.resetStoredPositions();
++        this.lastClimbablePos = Optional.empty();
++    }
++    // Folia end - region threading
+ 
+     protected LivingEntity(final EntityType<? extends LivingEntity> type, final Level level) {
+         super(type, level);
+@@ -394,7 +_,7 @@
+         if (this.level() instanceof ServerLevel level && onGround && this.fallDistance > 0.0) {
+             this.onChangedBlock(level, pos);
+             double power = Math.max(0, Mth.floor(this.calculateFallPower(this.fallDistance)));
+-            if (power > 0.0 && !onState.isAir()) {
++            if (power > 0.0 && !(onState.isAir() || (io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc30391 && (this instanceof net.minecraft.world.entity.animal.chicken.Chicken || this instanceof net.minecraft.world.entity.monster.Blaze || this instanceof WitherBoss)))) { // Canvas - MC-30391
+                 double x = this.getX();
+                 double y = this.getY();
+                 double z = this.getZ();
+@@ -410,11 +_,13 @@
+                 double scale = Math.min(0.2F + power / 15.0, 2.5);
+                 int particles = (int)(150.0 * scale);
+                 // CraftBukkit start - visibility api
++                if (!level().canvasConfig().visuals.particles.disableFallParticles) { // Canvas - particles config
+                 if (this instanceof ServerPlayer) {
+                     level.sendParticlesSource((ServerPlayer)this, new BlockParticleOption(ParticleTypes.BLOCK, onState), false, false, x, y, z, particles, 0.0, 0.0, 0.0, 0.15F);
+                 } else {
+                 level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, onState), x, y, z, particles, 0.0, 0.0, 0.0, 0.15F);
+                 }
++                } // Canvas - particles config
+                 // CraftBukkit end
+             }
+         }
+@@ -449,11 +_,9 @@
+         }
+ 
+         super.baseTick();
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("livingEntityBaseTick");
+         if (this.isAlive() && this.level() instanceof ServerLevel level) {
+             boolean isPlayer = this instanceof Player;
+-            if (this.isInWall()) {
++            if (shouldCheckForSuffocation() && this.isInWall()) { // Pufferfish - optimize suffocation
+                 this.hurtServer(level, this.damageSources().inWall(), 1.0F);
+             } else if (isPlayer && !level.getWorldBorder().isWithinBounds(this.getBoundingBox())) {
+                 double dist = level.getWorldBorder().getDistanceToBorder(this) + level.getWorldBorder().getSafeZone();
+@@ -505,7 +_,7 @@
+ 
+         if (this.isDeadOrDying() && this.level().shouldTickDeath(this)) {
+             this.tickDeath();
+-        }
++        } else { this.broadcastedDeath = false; } // Folia - region threading
+ 
+         if (this.lastHurtByPlayerMemoryTime > 0) {
+             this.lastHurtByPlayerMemoryTime--;
+@@ -531,8 +_,20 @@
+         this.yBodyRotO = this.yBodyRot;
+         this.yRotO = this.getYRot();
+         this.xRotO = this.getXRot();
+-        profiler.pop();
+-    }
++    }
++    // Pufferfish start - optimize suffocation
++
++    public boolean couldPossiblyBeHurt(final float amount) {
++        if ((float) this.invulnerableTime > (float) this.invulnerableDuration / 2.0F && amount <= this.lastHurt) {
++            return false;
++        }
++        return true;
++    }
++
++    public boolean shouldCheckForSuffocation() {
++        return !level().canvasConfig().enableSuffocationOptimization || (tickCount % 10 == 0 && couldPossiblyBeHurt(1.0F));
++    }
++    // Pufferfish end
+ 
+     protected boolean shouldTakeDrowningDamage() {
+         return this.getAirSupply() <= -20;
+@@ -561,9 +_,9 @@
+     }
+ 
+     protected void tryAddFrost() {
+-        if (!this.getBlockStateOnLegacy().isAir()) {
++        if (true) { // Canvas - check frozen ticks before landing block
+             int ticksFrozen = this.getTicksFrozen();
+-            if (ticksFrozen > 0) {
++            if (ticksFrozen > 0 && !this.getBlockStateOnLegacy().isAir()) { // Canvas - check frozen ticks before landing block
+                 AttributeInstance speed = this.getAttribute(Attributes.MOVEMENT_SPEED);
+                 if (speed == null) {
+                     return;
+@@ -600,11 +_,14 @@
+         return true;
+     }
+ 
++    public boolean broadcastedDeath = false; // Folia - region threading
+     protected void tickDeath() {
+         this.deathTime++;
++        if (level().canvasConfig().combat.removeRedDeathAnimation) this.deathTime = 20; // Canvas - remove red death animation
+         if (this.deathTime >= 20 && !this.level().isClientSide() && !this.isRemoved()) {
+-            this.level().broadcastEntityEvent(this, EntityEvent.POOF);
+-            this.remove(Entity.RemovalReason.KILLED, org.bukkit.event.entity.EntityRemoveEvent.Cause.DEATH); // CraftBukkit - add Bukkit remove cause
++            this.level().broadcastEntityEvent(this, EntityEvent.POOF); this.broadcastedDeath = true; // Folia - region threading - death has been broadcasted
++            if (!(this instanceof ServerPlayer)) this.remove(Entity.RemovalReason.KILLED, org.bukkit.event.entity.EntityRemoveEvent.Cause.DEATH); // CraftBukkit - add Bukkit remove cause // Folia - region threading - don't remove, we want the tick scheduler to be running
++            if (this instanceof ServerPlayer) this.unRide(); // Folia - region threading - unmount player when dead
+         }
+     }
+ 
+@@ -760,6 +_,7 @@
+ 
+         super.remove(reason, eventCause); // CraftBukkit
+         this.brain.clearMemories();
++        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc298464) this.combatTracker.resetCombatState(); // Canvas - fix MC-298464
+     }
+ 
+     @Override
+@@ -817,6 +_,7 @@
+         if (this.locatorBarIcon.hasData()) {
+             output.store("locator_bar_icon", Waypoint.Icon.CODEC, this.locatorBarIcon);
+         }
++        output.store("from_spawner", com.mojang.serialization.Codec.BOOL, this.canvas$fromSpawner); // Canvas - spawner configs
+     }
+ 
+     // Paper start - Extend dropItem API
+@@ -904,7 +_,7 @@
+         // CraftBukkit end
+         this.setHealth(input.getFloatOr("Health", this.getMaxHealth()));
+         this.hurtTime = input.getShortOr("HurtTime", (short)0);
+-        this.deathTime = input.getShortOr("DeathTime", (short)0);
++        this.deathTime = input.getShortOr("DeathTime", (short)0); this.broadcastedDeath = false; // Folia - region threading
+         input.getString("Team").ifPresent(teamName -> {
+             Scoreboard scoreboard = this.level().getScoreboard();
+             PlayerTeam team = scoreboard.getPlayerTeam(teamName);
+@@ -933,6 +_,7 @@
+         this.locatorBarIcon = input.read("locator_bar_icon", Waypoint.Icon.CODEC).orElseGet(Waypoint.Icon::new);
+         this.currentImpulseContextResetGraceTime = input.getIntOr("current_impulse_context_reset_grace_time", 0);
+         this.currentImpulseImpactPos = input.read("current_explosion_impact_pos", Vec3.CODEC).orElse(null);
++        this.canvas$fromSpawner = input.read("from_spawner", com.mojang.serialization.Codec.BOOL).orElse(this.canvas$fromSpawner); // Canvas - spawner configs
+     }
+ 
+     @Override
+@@ -981,7 +_,7 @@
+             }
+ 
+             List<ParticleOptions> particles = this.entityData.get(DATA_EFFECT_PARTICLES);
+-            if (!particles.isEmpty()) {
++            if (!particles.isEmpty() && !level().canvasConfig().visuals.particles.disableEffectParticles) { // Canvas - particles config
+                 boolean isAmbient = this.entityData.get(DATA_EFFECT_AMBIENCE_ID);
+                 int bound = this.isInvisible() ? 15 : 4;
+                 int ambientFactor = isAmbient ? 5 : 1;
+@@ -1012,14 +_,18 @@
+     }
+ 
+     private void updateSynchronizedMobEffectParticles() {
+-        List<ParticleOptions> visibleEffectParticles = this.activeEffects
+-            .values()
+-            .stream()
+-            .filter(MobEffectInstance::isVisible)
+-            .map(MobEffectInstance::getParticleOptions)
+-            .toList();
++        // Canvas start - remove streams
++        List<ParticleOptions> visibleEffectParticles = new java.util.ArrayList<>();
++        final Collection<MobEffectInstance> effectsValues = this.activeEffects.values(); // Canvas - optimized collection
++
++        for (MobEffectInstance effect : effectsValues) { // Canvas - optimized collection
++            if (effect.isVisible()) {
++                visibleEffectParticles.add(effect.getParticleOptions());
++            }
++        }
++        // Canvas end - remove streams
+         this.entityData.set(DATA_EFFECT_PARTICLES, visibleEffectParticles);
+-        this.entityData.set(DATA_EFFECT_AMBIENCE_ID, areAllEffectsAmbient(this.activeEffects.values()));
++        this.entityData.set(DATA_EFFECT_AMBIENCE_ID, areAllEffectsAmbient(effectsValues)); // Canvas - optimized collection
+     }
+ 
+     private void updateGlowingStatus() {
+@@ -1158,6 +_,7 @@
+ 
+     public boolean addEffect(final MobEffectInstance newEffect, final @Nullable Entity source, final EntityPotionEffectEvent.Cause cause, final boolean fireEvent) {
+         // Paper end - Don't fire sync event during generation
++        if (!this.hasNullCallback()) ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot add effects to entities asynchronously"); // Folia - region threading
+         if (this.tickingEffects) {
+             this.deferredEffectUpdates.offer(() -> this.addEffect(newEffect, source, cause, fireEvent));
+             return true;
+@@ -1351,7 +_,10 @@
+             this.refreshDimensions();
+         } else if (attribute.is(Attributes.WAYPOINT_TRANSMIT_RANGE) && this.level() instanceof ServerLevel serverLevel) {
+             ServerWaypointManager waypointManager = serverLevel.getWaypointManager();
+-            if (this.attributes.getValue(attribute) > 0.0) {
++            // Canvas start - region threading
++            updateWaypointCache();
++            if (waypointTransmitRangeCached > 0.0) {
++            // Canvas end - region threading
+                 waypointManager.trackWaypoint(this);
+             } else {
+                 waypointManager.untrackWaypoint(this);
+@@ -1538,7 +_,7 @@
+         boolean success = !blocked; // CraftBukkit - Ensure to return false if damage is blocked
+         if (success) {
+             this.lastDamageSource = source;
+-            this.lastDamageStamp = this.level().getGameTime();
++            this.lastDamageStamp = this.level().getRedstoneGameTime(); // Folia - region threading
+ 
+             for (MobEffectInstance effect : this.getActiveEffects()) {
+                 effect.onMobHurt(level, this, source, damage);
+@@ -1553,7 +_,16 @@
+         }
+ 
+         if (source.getEntity() instanceof ServerPlayer sourcePlayer) {
+-            CriteriaTriggers.PLAYER_HURT_ENTITY.trigger(sourcePlayer, this, source, originalDamage, damage, blocked);
++            // Canvas start - region threading
++            final float fDamage = damage;
++
++            // indirect damage sources for example can cause this to fail given you cannot
++            // trigger criterion asynchronously, so we schedule
++
++            sourcePlayer.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++                CriteriaTriggers.PLAYER_HURT_ENTITY.trigger(entityPlayer, this, source, originalDamage, fDamage, blocked);
++            });
++            // Canvas end - region threading
+         }
+ 
+         return success;
+@@ -1792,7 +_,7 @@
+     }
+ 
+     public @Nullable DamageSource getLastDamageSource() {
+-        if (this.level().getGameTime() - this.lastDamageStamp > 40L) {
++        if (this.level().getRedstoneGameTime() - this.lastDamageStamp > 40L || this.lastDamageStamp == Long.MIN_VALUE) { // Folia - region threading
+             this.lastDamageSource = null;
+         }
+ 
+@@ -1826,6 +_,7 @@
+     public List<Runnable> postDeathEventTasks = new java.util.ArrayList<>(); // Paper - after death event and death (no revive as converted entity in killedEntity)
+ 
+     public void die(final DamageSource source) {
++        io.canvasmc.canvas.util.TickGuard.guard(this, "Cannot die async"); // Canvas - region guards
+         if (!this.isRemoved() && !this.dead) {
+             Entity sourceEntity = source.getEntity();
+             LivingEntity killer = this.getKillCredit();
+@@ -1868,6 +_,7 @@
+                 if (sourceEntity == null || sourceEntity.killedEntity(serverLevel, this, source)) {
+                     this.gameEvent(GameEvent.ENTITY_DIE);
+                     this.postDeathEventTasks.forEach(Runnable::run); // Paper
++                    if (source.is(DamageTypes.WITHER_SKULL)) this.canvas$isDyingFromWitherRose = true; // Canvas - fix Folia#388
+                     this.createWitherRose(killer);
+                 }
+ 
+@@ -1886,7 +_,7 @@
+     protected void createWitherRose(final @Nullable LivingEntity killer) {
+         if (this.level() instanceof ServerLevel serverLevel) {
+             boolean var6 = false;
+-            if (killer instanceof WitherBoss) {
++            if (killer instanceof WitherBoss || this.canvas$isDyingFromWitherRose) { // Canvas - fix Folia#388
+                 if (serverLevel.getGameRules().get(GameRules.MOB_GRIEFING)) {
+                     BlockPos pos = this.blockPosition();
+                     BlockState state = Blocks.WITHER_ROSE.defaultBlockState();
+@@ -2184,7 +_,7 @@
+ 
+     @Override
+     public boolean isAlive() {
+-        return !this.isRemoved() && this.getHealth() > 0.0F && !this.dead; // Paper - Check this.dead
++        return !this.dead && !this.isRemoved() && this.getHealth() > 0.0F; // Paper - Check this.dead // Canvas - cheapest check first
+     }
+ 
+     public boolean isLookingAtMe(
+@@ -2561,7 +_,15 @@
+                     }
+ 
+                     if (source.getEntity() instanceof ServerPlayer sourcePlayer) {
+-                        CriteriaTriggers.PLAYER_HURT_ENTITY.trigger(sourcePlayer, this, source, originalDamage, dmg, true); // Paper - fix taken/dealt param order
++                        // Canvas start - region threading
++
++                        // indirect damage sources for example can cause this to fail given you cannot
++                        // trigger criterion asynchronously, so we schedule
++
++                        sourcePlayer.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++                            CriteriaTriggers.PLAYER_HURT_ENTITY.trigger(entityPlayer, this, source, originalDamage, dmg, true); // Paper - fix taken/dealt param order
++                        });
++                        // Canvas end - region threading
+                     }
+ 
+                     return !io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.skipVanillaDamageTickWhenShieldBlocked; // Paper - this should always return true, however expose an unsupported setting to flip this to false to enable "shield stunning".
+@@ -2579,10 +_,10 @@
+     }
+ 
+     public @Nullable LivingEntity getKillCredit() {
+-        if (this.lastHurtByPlayer != null) {
++        if (this.lastHurtByPlayer != null && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.lastHurtByPlayer.getEntity(this.level(), Player.class))) { // Folia - region threading
+             return this.lastHurtByPlayer.getEntity(this.level(), Player.class);
+         } else {
+-            return this.lastHurtByMob != null ? this.lastHurtByMob.getEntity(this.level(), LivingEntity.class) : null;
++            return this.lastHurtByMob != null && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.lastHurtByMob.getEntity(this.level(), LivingEntity.class)) ? this.lastHurtByMob.getEntity(this.level(), LivingEntity.class) : null; // Folia - region threading
+         }
+     }
+ 
+@@ -2668,7 +_,7 @@
+         }
+ 
+         this.lastDamageSource = source;
+-        this.lastDamageStamp = this.level().getGameTime();
++        this.lastDamageStamp = this.level().getRedstoneGameTime(); // Folia - region threading
+     }
+ 
+     @Override
+@@ -2727,7 +_,7 @@
+                 this.swapHandItems();
+                 break;
+             case 60:
+-                this.makePoofParticles();
++                if (!level().canvasConfig().visuals.particles.disableDeathParticles) this.makePoofParticles(); // Canvas - particles config
+                 break;
+             case 65:
+                 this.breakItem(this.getItemBySlot(EquipmentSlot.BODY));
+@@ -2792,6 +_,7 @@
+     }
+ 
+     protected void updateSwingTime() {
++        if (!this.swinging && this.swingTime == 0) return; // Canvas - skip unnecessary calculations if player is not flying or swing
+         int currentSwingDuration = this.getCurrentSwingDuration();
+         if (this.swinging) {
+             this.swingTime++;
+@@ -3148,7 +_,7 @@
+             waterWalker *= 0.5F;
+         }
+ 
+-        if (waterWalker > 0.0F) {
++        if (waterWalker > 0.0F && (!io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc136249 || autoSpinAttackTicks == 0)) { // Canvas - MC-136249
+             slowDown += (0.54600006F - slowDown) * waterWalker;
+             speed += (this.getSpeed() - speed) * waterWalker;
+         }
+@@ -3455,11 +_,7 @@
+             yBodyRotT = this.getYRot();
+         }
+ 
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("headTurn");
+         this.tickHeadTurn(yBodyRotT);
+-        profiler.pop();
+-        profiler.push("rangeChecks");
+ 
+         // Paper start - stop large pitch and yaw changes from crashing the server
+         this.yRotO += Math.round((this.getYRot() - this.yRotO) / 360.0F) * 360.0F;
+@@ -3471,7 +_,6 @@
+         this.yHeadRotO += Math.round((this.yHeadRot - this.yHeadRotO) / 360.0F) * 360.0F;
+         // Paper end - stop large pitch and yaw changes from crashing the server
+ 
+-        profiler.pop();
+         if (this.isFallFlying()) {
+             this.fallFlyTicks++;
+         } else {
+@@ -3719,21 +_,15 @@
+         }
+ 
+         this.setDeltaMovement(dx, dy, dz);
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("ai");
+         this.applyInput();
+         if (this.isImmobile()) {
+             this.jumping = false;
+             this.xxa = 0.0F;
+             this.zza = 0.0F;
+         } else if (this.isEffectiveAi() && !this.level().isClientSide()) {
+-            profiler.push("newAi");
+             this.serverAiStep();
+-            profiler.pop();
+         }
+ 
+-        profiler.pop();
+-        profiler.push("jump");
+         if (this.jumping && this.isAffectedByFluids()) {
+             double fluidHeight;
+             if (this.isInLava()) {
+@@ -3762,8 +_,6 @@
+             this.noJumpDelay = 0;
+         }
+ 
+-        profiler.pop();
+-        profiler.push("travel");
+         if (this.isFallFlying()) {
+             this.updateFallFlying();
+         }
+@@ -3788,9 +_,7 @@
+             this.calculateEntityAnimation(this.omnidirectionalAirMover());
+         }
+ 
+-        profiler.pop();
+         if (this.level() instanceof ServerLevel serverLevel) {
+-            profiler.push("freezing");
+             if ((!this.isInPowderSnow || !this.canFreeze()) && !this.freezeLocked) { // Paper - Freeze Tick Lock API
+                 this.setTicksFrozen(Math.max(0, this.getTicksFrozen() - 2));
+             }
+@@ -3800,20 +_,16 @@
+             if (this.tickCount % 40 == 0 && this.isFullyFrozen() && this.canFreeze()) {
+                 this.hurtServer(serverLevel, this.damageSources().freeze(), 1.0F);
+             }
+-
+-            profiler.pop();
+         }
+ 
+-        profiler.push("push");
+         if (this.autoSpinAttackTicks > 0) {
+             this.autoSpinAttackTicks--;
+             this.checkAutoSpinAttack(beforeTravelBox, this.getBoundingBox());
+         }
+ 
+-        this.pushEntities();
+-        profiler.pop();
++        if (level().canvasConfig().entities.entityCollisionMode.allEntitiesCanBePushed()) this.pushEntities(); // Canvas - entity collision mode config
+         // Paper start - Add EntityMoveEvent
+-        if (((ServerLevel) this.level()).hasEntityMoveEvent && !(this instanceof Player)) {
++        if (((ServerLevel) this.level()).getCurrentWorldData().hasEntityMoveEvent && !(this instanceof Player)) { // Folia - region threading
+             if (this.xo != this.getX() || this.yo != this.getY() || this.zo != this.getZ() || this.yRotO != this.getYRot() || this.xRotO != this.getXRot()) {
+                 Location from = new Location(this.level().getWorld(), this.xo, this.yo, this.zo, this.yRotO, this.xRotO);
+                 Location to = new Location(this.level().getWorld(), this.getX(), this.getY(), this.getZ(), this.getYRot(), this.getXRot());
+@@ -3847,6 +_,7 @@
+     protected void updateFallFlying() {
+         this.checkFallDistanceAccumulation();
+         if (!this.level().isClientSide()) {
++            if (!this.isFallFlying() && this.fallFlyTicks == 0) return; // Canvas - skip unnecessary calculations if player is not flying
+             if (!this.canGlide()) {
+                 if (this.getSharedFlag(Entity.FLAG_FALL_FLYING) && !CraftEventFactory.callToggleGlideEvent(this, false).isCancelled()) // CraftBukkit
+                 this.setSharedFlag(Entity.FLAG_FALL_FLYING, false);
+@@ -3885,6 +_,12 @@
+     }
+ 
+     protected void pushEntities() {
++        // Canvas start - only players push config
++        io.canvasmc.canvas.WorldConfig.Entities.EntityCollisionMode collisionMode = level().canvasConfig().entities.entityCollisionMode;
++        if (collisionMode.noCollisions()) {
++            return;
++        }
++        // Canvas end - only players push config
+         // Paper start - don't run getEntities if we're not going to use its result
+         if (!this.isPushable()) {
+             return;
+@@ -3900,7 +_,11 @@
+             return;
+         }
+         // Paper end - don't run getEntities if we're not going to use its result
+-        List<Entity> pushableEntities = this.level().getPushableEntities(this, this.getBoundingBox());
++        // Canvas start - only players push config
++        List<? extends Entity> pushableEntities = collisionMode.onlyPlayersPushable() ?
++            this.level().canvas$getIntersectingPlayers(this, this.getBoundingBox(), EntitySelector.pushableBy(this))
++            : this.level().getPushableEntities(this, this.getBoundingBox());
++        // Canvas end - only players push config
+         if (!pushableEntities.isEmpty()) {
+             if (this.level() instanceof ServerLevel serverLevel) {
+                 // Paper - don't run getEntities if we're not going to use its result; moved up
+@@ -4016,7 +_,16 @@
+ 
+     public void onItemPickup(final ItemEntity entity) {
+         if (EntityReference.getEntity(entity.thrower, this.level()::getGlobalPlayerByUUID, Entity.class) instanceof ServerPlayer serverPlayer) { // Paper - check global player list where appropriate
+-            CriteriaTriggers.THROWN_ITEM_PICKED_UP_BY_ENTITY.trigger(serverPlayer, entity.getItem(), this);
++            // Canvas start - region threading
++
++            // note: getGlobalPlayerByUUID is overridden in ServerLevel to get
++            //       from full player list, not local players like in EntityGetter
++            //       so player may be out of region, schedule this
++
++            serverPlayer.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++                CriteriaTriggers.THROWN_ITEM_PICKED_UP_BY_ENTITY.trigger(entityPlayer, entity.getItem(), this);
++            });
++            // Canvas end - region threading
+         }
+     }
+ 
+@@ -4075,6 +_,7 @@
+ 
+     @Override
+     public boolean isCollidable(boolean ignoreClimbing) {
++        if (this.canvas$fromSpawner && level().canvasConfig().blocks.spawner.spawnedEntitiesHaveNoCollision) return false; // Canvas - spawner configs
+         return this.isAlive() && !this.isSpectator() && (ignoreClimbing || !this.onClimbable()) && this.collides; // CraftBukkit
+         // Paper end - Climbing should not bypass cramming gamerule
+     }
+@@ -4193,6 +_,18 @@
+             );
+         }
+ 
++        // Canvas start - item entity spread config
++        if (this.isDeadOrDying()) {
++            float power = this.random.nextFloat() * 0.5F;
++            float direction = this.random.nextFloat() * (float) (Math.PI * 2);
++            double factor = level().canvasConfig().entities.itemEntities.itemEntityVelocityOnDeathFactor;
++            entity.setDeltaMovement(
++                (-Mth.sin(direction) * power) * factor,
++                0.2F * factor,
++                (Mth.cos(direction) * power) * factor
++            );
++        }
++        // Canvas end - item entity spread config
+         return entity;
+     }
+ 
+@@ -4512,7 +_,7 @@
+         boolean ok = false;
+         BlockPos pos = BlockPos.containing(xx, y, zz);
+         Level level = this.level();
+-        if (level.hasChunkAt(pos)) {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor((ServerLevel)level, pos) && level.hasChunkAt(pos)) { // Folia - region threading
+             boolean landed = false;
+ 
+             while (!landed && pos.getY() > level.getMinY()) {
+@@ -4537,21 +_,12 @@
+                 this.setPos(xo, yo, zo);
+ 
+                 if (ok) {
+-                    if (!(this instanceof ServerPlayer)) {
+-                        org.bukkit.event.entity.EntityTeleportEvent teleport = new org.bukkit.event.entity.EntityTeleportEvent(this.getBukkitEntity(), new Location(this.level().getWorld(), xo, yo, zo), new Location(this.level().getWorld(), xx, y, zz));
+-                        this.level().getCraftServer().getPluginManager().callEvent(teleport);
+-                        if (!teleport.isCancelled() && teleport.getTo() != null) { // Paper
+-                            Location to = teleport.getTo();
+-                            this.teleportTo(to.getX(), to.getY(), to.getZ());
+-                        } else {
+-                            return Optional.empty();
+-                        }
+-                    } else {
+-                        // player teleport event is called in the underlining code
+-                        if (!((ServerPlayer) this).connection.teleport(xx, y, zz, this.getYRot(), this.getXRot(), cause)) {
+-                            return Optional.empty();
+-                        }
+-                    }
++                    // Canvas start - region threading
++                    boolean teleportResult = this.teleportAsync(
++                        (ServerLevel) this.level(), new Vec3(xx, y, zz), this.getYRot(), this.getXRot(), this.getDeltaMovement(), cause, Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_UNMOUNT, null
++                    );
++                    if (!teleportResult) return Optional.empty();
++                    // Canvas end - region threading
+                 }
+                 // CraftBukkit end
+             }
+@@ -4674,6 +_,11 @@
+                 this.setXRot(0.0F);
+             }
+         });
++        // Folia start - separate out
++        this.stopSleepingRaw();
++    }
++    public void stopSleepingRaw() {
++        // Folia end - separate out
+         Vec3 pos = this.position();
+         this.setPose(Pose.STANDING);
+         this.setPos(pos.x, pos.y, pos.z);

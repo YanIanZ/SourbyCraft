@@ -1,0 +1,81 @@
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -53,6 +_,7 @@
+     private @Nullable SynchronizeRegistriesTask synchronizeRegistriesTask;
+     private @Nullable PrepareSpawnTask prepareSpawnTask;
+     public io.papermc.paper.connection.PaperPlayerConfigurationConnection paperConnection; // Paper
++    public net.minecraft.server.level.ServerPlayer switchToMain; // Folia - region threading - rewrite login process
+ 
+     public ServerConfigurationPacketListenerImpl(final MinecraftServer server, final Connection connection, final CommonListenerCookie cookie) {
+         super(server, connection, cookie);
+@@ -89,6 +_,13 @@
+         if (this.prepareSpawnTask != null) {
+             this.prepareSpawnTask.close();
+             this.prepareSpawnTask = null;
++            // Canvas start - region threading
++            // ensure that if we disconnect for some reason, we clear us from the join list
++            // this covers if exceptions are thrown during join
++            for (final net.minecraft.server.level.ServerLevel level : net.minecraft.server.MinecraftServer.getServer().getAllLevels()) {
++                level.canvas$decrementJoiningPlayers(gameProfile.name());
++            }
++            // Canvas end - region threading
+         }
+ 
+         super.onDisconnect(details);
+@@ -205,13 +_,38 @@
+                 return;
+             }
+ 
+-            Component loginError = org.bukkit.craftbukkit.event.CraftEventFactory.handleLoginResult(playerList.canPlayerLogin(this.connection.getRemoteAddress(), new NameAndId(this.gameProfile)), this.paperConnection, this.connection, this.gameProfile, this.server, false); // Paper - Login event logic
++            Component loginError = org.bukkit.craftbukkit.event.CraftEventFactory.handleLoginResult(playerList.canPlayerLogin(this.connection.getRemoteAddress(), new NameAndId(this.gameProfile), this.connection), this.paperConnection, this.connection, this.gameProfile, this.server, false); // Paper - Login event logic // Folia - region threading - add connection parameter
+             if (loginError != null) {
+                 this.disconnect(loginError);
+                 return;
+             }
+ 
+-            Objects.requireNonNull(this.prepareSpawnTask).spawnPlayer(this.connection, this.createCookie(this.clientInformation));
++            // Folia start - region threading
++            final Connection connection = this.connection;
++            final CommonListenerCookie commonListenerCookie = this.createCookie(this.clientInformation);
++            final net.minecraft.server.level.ServerPlayer serverPlayer = this.prepareSpawnTask.createPlayer(connection, commonListenerCookie);
++
++            this.switchToMain = serverPlayer;
++            // now the connection responsibility is transferred to the region
++            final net.minecraft.server.level.ServerLevel world = this.prepareSpawnTask.getSpawnWorld();
++            final net.minecraft.world.level.ChunkPos chunkPos = net.minecraft.world.level.ChunkPos.containing(net.minecraft.core.BlockPos.containing(this.prepareSpawnTask.getSpawnPosition()));
++            world.moonrise$getChunkTaskScheduler().scheduleTickingState(
++                chunkPos.x(), chunkPos.z(), net.minecraft.server.level.FullChunkStatus.ENTITY_TICKING, true,
++                ca.spottedleaf.concurrentutil.util.Priority.HIGHER,
++                (final net.minecraft.world.level.chunk.LevelChunk chunk) -> {
++                    world.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
++                        net.minecraft.server.level.TicketType.PLAYER_SPAWN, chunkPos,
++                        ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.ENTITY_TICKING_TICKET_LEVEL,
++                        null
++                    );
++                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                        world, chunkPos.x(), chunkPos.z(), () -> ServerConfigurationPacketListenerImpl.this.prepareSpawnTask.spawnPlayer(
++                            this.connection, commonListenerCookie, serverPlayer
++                        )
++                    );
++                }
++            );
++            // Folia end - region threading - rewrite login process
+         } catch (Exception e) {
+             LOGGER.error("Couldn't place player in world", e);
+             this.disconnect(DISCONNECT_REASON_INVALID_DATA);
+@@ -271,13 +_,13 @@
+     // Paper start
+     @Override
+     public void disconnectAsync(final net.minecraft.network.DisconnectionDetails disconnectionInfo) {
+-        if (this.cserver.isPrimaryThread()) {
++        if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) { // Canvas - region threading
+             this.disconnect(disconnectionInfo);
+             return;
+         }
+ 
+         this.connection.setReadOnly();
+-        this.server.scheduleOnMain(() -> {
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> { // Canvas - region threading
+             this.disconnect(disconnectionInfo); // Currently you cannot cancel disconnect during the config stage
+         });
+     }

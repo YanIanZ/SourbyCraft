@@ -5,21 +5,20 @@ SourbyCraft plugin (and any Bukkit/Paper plugin running on SourbyCraft) compiles
 
 ## What this actually is
 
-**`sourbyapi` republishes the Canvas/Paper API surface under the SourbyCraft group id and additionally
-owns `dev.iyanz.sourbycraft.api.metrics`.** It is not a reimplementation of the upstream APIs. Its
-`build.gradle.kts` (materialized from Canvas's own
-`canvas-api/build.gradle.kts` by the weaver patcher — see `sourbyapi/build.gradle.kts.patch` and the
-`upstreams.canvas { ... }` block in the root `build.gradle.kts`) points its Gradle source sets
-directly at:
+**`sourbyapi` republishes the Paper API surface under the SourbyCraft group id, plus the
+region-threading API additions (`io.canvasmc.*`, formerly Canvas's API) and
+`dev.iyanz.sourbycraft.api.metrics`.** It is not a reimplementation of the upstream APIs. Its
+`build.gradle.kts` (materialized from Paper's `paper-api/build.gradle.kts` by paperweight — see
+`sourbyapi/build.gradle.kts.patch` and the `upstreams.paper { ... }` block in the root
+`build.gradle.kts`) points its Gradle source sets at:
 
 - `../paper-api/src/main/java` — upstream Paper's public API (`org.bukkit.*`, `io.papermc.paper.*`)
-- `../canvas-api/src/main/java` — Canvas's additions on top of Paper's API
-- `src/main/java` — SourbyCraft's read-only metrics service contract
+- `src/main/java` — SourbyCraft-owned API: the region-threading additions (package names kept for
+  plugin compatibility) and the read-only metrics service contract
 
-Upstream classes retain their existing `org.bukkit`, `io.papermc.paper`, and Canvas package names.
-The `paper-patches/` directory holds patches Canvas/SourbyCraft applies to the *upstream Paper API
-sources* before they land in `paper-api/` (e.g. Javadoc/behavioral fixes); the metrics package is the
-SourbyCraft-owned addition.
+Upstream classes retain their existing `org.bukkit`, `io.papermc.paper`, and `io.canvasmc` package
+names. `paper-patches/files/` holds the changes to the *upstream Paper API sources* that used to come
+from Canvas (region-threading API hooks, javadoc); they apply before the sources land in `paper-api/`.
 
 What SourbyCraft *does* change is the packaging:
 
@@ -105,9 +104,10 @@ api-version: '26.2'
 
 ## Directory contents
 
-- `build.gradle.kts` / `build.gradle.kts.patch` — the weaver-materialized build script + the patch
-  that produced it from `canvas-api/build.gradle.kts`.
+- `build.gradle.kts` / `build.gradle.kts.patch` — the paperweight-materialized build script + the
+  patch that produced it from Paper's `paper-api/build.gradle.kts`.
 - `paper-patches/` — patches applied to the upstream `paper-api` sources before they land in the
   sibling `paper-api/` project that this module's source set reads from.
+- `src/main/java/io/canvasmc/` — region-threading API additions (formerly Canvas's API).
 - `src/main/java/dev/iyanz/sourbycraft/api/metrics/` — SourbyCraft's public read-only metrics API.
 - `src/test/` — API contract tests.

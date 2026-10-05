@@ -1,0 +1,149 @@
+--- a/net/minecraft/server/waypoints/ServerWaypointManager.java
++++ b/net/minecraft/server/waypoints/ServerWaypointManager.java
+@@ -20,7 +_,7 @@
+     private final Set<ServerPlayer> players = new HashSet<>();
+     private final Table<ServerPlayer, WaypointTransmitter, WaypointTransmitter.Connection> connections = HashBasedTable.create();
+     // Paper start - optimize ServerWaypointManager with locator bar disabled
+-    public boolean locatorBarEnabled; // Avoid a gamerule lookup for each player
++    public volatile boolean locatorBarEnabled; // Avoid a gamerule lookup for each player // Canvas - region threading - volatile
+ 
+     public ServerWaypointManager(net.minecraft.server.level.ServerLevel serverLevel) {
+         this.locatorBarEnabled = serverLevel.getGameRules().get(GameRules.LOCATOR_BAR);
+@@ -29,89 +_,41 @@
+ 
+     @Override
+     public void trackWaypoint(final WaypointTransmitter waypoint) {
+-        this.waypoints.add(waypoint);
+-
+-        if (!this.locatorBarEnabled) return; // Paper - optimize ServerWaypointManager with locator bar disabled
+-        for (ServerPlayer player : this.players) {
+-            this.createConnection(player, waypoint);
+-        }
++        // Folia - region threading
+     }
+ 
+     @Override
+     public void updateWaypoint(final WaypointTransmitter waypoint) {
+-        if (!this.locatorBarEnabled) return; // Paper - optimize ServerWaypointManager with locator bar disabled
+-        if (this.waypoints.contains(waypoint)) {
+-            Map<ServerPlayer, WaypointTransmitter.Connection> playerConnection = Tables.transpose(this.connections).row(waypoint);
+-            SetView<ServerPlayer> potentialPlayers = Sets.difference(this.players, playerConnection.keySet());
+-
+-            for (Entry<ServerPlayer, WaypointTransmitter.Connection> waypointConnection : ImmutableSet.copyOf(playerConnection.entrySet())) {
+-                this.updateConnection(waypointConnection.getKey(), waypoint, waypointConnection.getValue());
+-            }
+-
+-            for (ServerPlayer player : potentialPlayers) {
+-                this.createConnection(player, waypoint);
+-            }
+-        }
++        // Canvas - region threading
+     }
+ 
+     @Override
+     public void untrackWaypoint(final WaypointTransmitter waypoint) {
+-        this.connections.column(waypoint).forEach((player, connection) -> connection.disconnect());
+-        Tables.transpose(this.connections).row(waypoint).clear();
+-        this.waypoints.remove(waypoint);
++        // Canvas - region threading
+     }
+ 
+     public void addPlayer(final ServerPlayer player) {
+-        this.players.add(player);
+-
+-        if (this.locatorBarEnabled) { // Paper - optimize ServerWaypointManager with locator bar disabled
+-        for (WaypointTransmitter waypoint : this.waypoints) {
+-            this.createConnection(player, waypoint);
+-        }
+-        } // Paper - optimize ServerWaypointManager with locator bar disabled
+-
+-        if (player.isTransmittingWaypoint()) {
+-            this.trackWaypoint(player);
+-        }
++        // Folia - region threading
+     }
+ 
+     public void updatePlayer(final ServerPlayer player) {
+-        if (!this.locatorBarEnabled) return; // Paper - optimize ServerWaypointManager with locator bar disabled
+-        Map<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnections = this.connections.row(player);
+-        SetView<WaypointTransmitter> potentialWaypoints = Sets.difference(this.waypoints, waypointConnections.keySet());
+-
+-        for (Entry<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnection : ImmutableSet.copyOf(waypointConnections.entrySet())) {
+-            this.updateConnection(player, waypointConnection.getKey(), waypointConnection.getValue());
+-        }
+-
+-        for (WaypointTransmitter waypoint : potentialWaypoints) {
+-            this.createConnection(player, waypoint);
+-        }
++        // Folia - region threading
+     }
+ 
+     public void removePlayer(final ServerPlayer player) {
+-        this.connections.row(player).values().removeIf(connection -> {
+-            connection.disconnect();
+-            return true;
+-        });
+-        this.untrackWaypoint(player);
+-        this.players.remove(player);
++        // Folia - region threading
+     }
+ 
+     public void breakAllConnections() {
+-        this.connections.values().forEach(WaypointTransmitter.Connection::disconnect);
+-        this.connections.clear();
++        // Canvas - region threading
+     }
+ 
+     public void remakeConnections(final WaypointTransmitter waypoint) {
+-        if (!this.locatorBarEnabled) return; // Paper - optimize ServerWaypointManager with locator bar disabled
+-        for (ServerPlayer player : this.players) {
+-            this.createConnection(player, waypoint);
+-        }
++        // Canvas - region threading
+     }
+ 
+     public Set<WaypointTransmitter> transmitters() {
+-        return this.waypoints;
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     // Paper start - optimize ServerWaypointManager with locator bar disabled
+@@ -122,36 +_,10 @@
+     }
+ 
+     private void createConnection(final ServerPlayer player, final WaypointTransmitter waypoint) {
+-        if (player != waypoint) {
+-            if (isLocatorBarEnabledFor(player)) {
+-                waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(connection -> {
+-                    this.connections.put(player, waypoint, connection);
+-                    connection.connect();
+-                }, () -> {
+-                    WaypointTransmitter.Connection connection = this.connections.remove(player, waypoint);
+-                    if (connection != null) {
+-                        connection.disconnect();
+-                    }
+-                });
+-            }
+-        }
++        // Canvas - region threading
+     }
+ 
+     private void updateConnection(final ServerPlayer player, final WaypointTransmitter waypoint, final WaypointTransmitter.Connection connection) {
+-        if (player != waypoint) {
+-            if (isLocatorBarEnabledFor(player)) {
+-                if (!connection.isBroken()) {
+-                    connection.update();
+-                } else {
+-                    waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(newConnection -> {
+-                        newConnection.connect();
+-                        this.connections.put(player, waypoint, newConnection);
+-                    }, () -> {
+-                        connection.disconnect();
+-                        this.connections.remove(player, waypoint);
+-                    });
+-                }
+-            }
+-        }
++        // Canvas - region threading
+     }
+ }

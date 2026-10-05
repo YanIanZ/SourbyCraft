@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/level/saveddata/maps/MapIndex.java
++++ b/net/minecraft/world/level/saveddata/maps/MapIndex.java
+@@ -10,23 +_,23 @@
+ public class MapIndex extends SavedData {
+     private static final int NO_MAP_ID = -1;
+     public static final Codec<MapIndex> CODEC = RecordCodecBuilder.create(
+-        i -> i.group(Codec.INT.optionalFieldOf("map", -1).forGetter(m -> m.lastMapId)).apply(i, MapIndex::new)
++        i -> i.group(Codec.INT.optionalFieldOf("map", -1).forGetter(m -> m.lastMapId.get())).apply(i, MapIndex::new) // Folia - make map data thread-safe
+     );
+     public static final SavedDataType<MapIndex> TYPE = new SavedDataType<>(
+         Identifier.withDefaultNamespace("maps/last_id"), MapIndex::new, CODEC, DataFixTypes.SAVED_DATA_MAP_INDEX
+     );
+-    private int lastMapId;
++    private final java.util.concurrent.atomic.AtomicInteger lastMapId = new java.util.concurrent.atomic.AtomicInteger(); // Folia - make map data thread-safe
+ 
+     public MapIndex() {
+         this(-1);
+     }
+ 
+     public MapIndex(final int lastMapId) {
+-        this.lastMapId = lastMapId;
++        this.lastMapId.set(lastMapId); // Folia - make map data thread-safe
+     }
+ 
+     public MapId getNextMapId() {
+-        MapId id = new MapId(++this.lastMapId);
++        MapId id = new MapId(this.lastMapId.incrementAndGet()); // Folia - make map data thread-safe
+         this.setDirty();
+         return id;
+     }

@@ -1,14 +1,128 @@
 --- a/net/minecraft/commands/Commands.java
 +++ b/net/minecraft/commands/Commands.java
-@@ -299,7 +_,10 @@
+@@ -56,7 +_,6 @@
+ import net.minecraft.server.commands.DamageCommand;
+ import net.minecraft.server.commands.DataPackCommand;
+ import net.minecraft.server.commands.DeOpCommands;
+-import net.minecraft.server.commands.DebugCommand;
+ import net.minecraft.server.commands.DebugConfigCommand;
+ import net.minecraft.server.commands.DebugMobSpawningCommand;
+ import net.minecraft.server.commands.DebugPathCommand;
+@@ -146,7 +_,6 @@
+ import net.minecraft.server.permissions.Permissions;
+ import net.minecraft.tags.TagKey;
+ import net.minecraft.util.Util;
+-import net.minecraft.util.profiling.Profiler;
+ import net.minecraft.util.profiling.jfr.JvmProfiler;
+ import net.minecraft.world.flag.FeatureFlagSet;
+ import net.minecraft.world.flag.FeatureFlags;
+@@ -204,7 +_,6 @@
+         DamageCommand.register(this.dispatcher, context);
+         DataCommands.register(this.dispatcher);
+         DataPackCommand.register(this.dispatcher, context);
+-        DebugCommand.register(this.dispatcher);
+         DefaultGameModeCommands.register(this.dispatcher);
+         DialogCommand.register(this.dispatcher, context);
+         DifficultyCommand.register(this.dispatcher);
+@@ -215,12 +_,12 @@
+         FillCommand.register(this.dispatcher, context);
+         FillBiomeCommand.register(this.dispatcher, context);
+         ForceLoadCommand.register(this.dispatcher);
+-        FunctionCommand.register(this.dispatcher);
++        //FunctionCommand.register(this.dispatcher); // Folia - region threading - TODO
+         GameModeCommand.register(this.dispatcher);
+         GameRuleCommand.register(this.dispatcher, context);
+         GiveCommand.register(this.dispatcher, context);
+         HelpCommand.register(this.dispatcher);
+-        ItemCommands.register(this.dispatcher, context);
++        //ItemCommands.register(this.dispatcher, context); // Folia - region threading - TODO later
+         KickCommand.register(this.dispatcher);
+         KillCommand.register(this.dispatcher);
+         ListPlayersCommand.register(this.dispatcher);
+@@ -232,14 +_,14 @@
+         PlaceCommand.register(this.dispatcher);
+         PlaySoundCommand.register(this.dispatcher);
+         RandomCommand.register(this.dispatcher);
+-        ReloadCommand.register(this.dispatcher);
++        //ReloadCommand.register(this.dispatcher); // Folia - region threading
+         RecipeCommand.register(this.dispatcher);
+         FetchProfileCommand.register(this.dispatcher);
+-        ReturnCommand.register(this.dispatcher);
++        //ReturnCommand.register(this.dispatcher); // Folia - region threading
+         RideCommand.register(this.dispatcher);
+         RotateCommand.register(this.dispatcher);
+         SayCommand.register(this.dispatcher);
+-        ScheduleCommand.register(this.dispatcher);
++        //ScheduleCommand.register(this.dispatcher); // Folia - region threading
+         ScoreboardCommand.register(this.dispatcher, context);
+         SeedCommand.register(this.dispatcher, commandSelection != Commands.CommandSelection.INTEGRATED);
+         VersionCommand.register(this.dispatcher, commandSelection != Commands.CommandSelection.INTEGRATED);
+@@ -256,8 +_,8 @@
+         TeamMsgCommand.register(this.dispatcher);
+         TeleportCommand.register(this.dispatcher);
+         TellRawCommand.register(this.dispatcher, context);
+-        TestCommand.register(this.dispatcher, context);
+-        TickCommand.register(this.dispatcher);
++        //TestCommand.register(this.dispatcher, context); // Folia - region threading
++        //TickCommand.register(this.dispatcher); // Folia - region threading - TODO later
+         TimeCommand.register(this.dispatcher, context);
+         TitleCommand.register(this.dispatcher, context);
+         TriggerCommand.register(this.dispatcher);
+@@ -292,7 +_,7 @@
+             OpCommand.register(this.dispatcher);
+             PardonCommand.register(this.dispatcher);
+             PardonIpCommand.register(this.dispatcher);
+-            PerfCommand.register(this.dispatcher);
++            //PerfCommand.register(this.dispatcher); // Folia - region threading - TODO later
+             SaveAllCommand.register(this.dispatcher);
+             SaveOffCommand.register(this.dispatcher);
+             SaveOnCommand.register(this.dispatcher);
+@@ -302,6 +_,7 @@
              WhitelistCommand.register(this.dispatcher);
          }
  
--        io.canvasmc.canvas.commands.CanvasCommands.INSTANCE.build(this.dispatcher, context); // Canvas - Rebrand - register commands
-+        // SourbyCraft - /canvas command removed: do not register the Canvas command tree (root
-+        // /canvas + subcommands region-bar/region-tick/reload/etc.). This is the actual dispatcher
-+        // registration; the CanvasCommands.register(...) population in GlobalConfiguration is also
-+        // removed. (was: io.canvasmc.canvas.commands.CanvasCommands.INSTANCE.build(this.dispatcher, context);)
++        io.canvasmc.canvas.commands.CanvasCommands.INSTANCE.build(this.dispatcher, context); // Canvas - Rebrand - register commands
          if (commandSelection.includeIntegrated) {
              PublishCommand.register(this.dispatcher);
              UnpublishCommand.register(this.dispatcher);
+@@ -370,7 +_,6 @@
+         org.spigotmc.AsyncCatcher.catchOp("Cannot perform command async");
+         // Paper end
+         CommandSourceStack sender = command.getContext().getSource();
+-        Profiler.get().push(() -> "/" + commandString);
+         ContextChain<CommandSourceStack> commandChain = finishParsing(command, commandString, sender);
+ 
+         try {
+@@ -405,8 +_,6 @@
+                 sender.sendFailure(Component.literal(Util.describeError(e)));
+                 LOGGER.error("'/{}' threw an exception", commandString, e);
+             }
+-        } finally {
+-            Profiler.get().pop();
+         }
+     }
+ 
+@@ -464,7 +_,7 @@
+             int chainLimit = Math.max(1, gameRules.get(GameRules.MAX_COMMAND_SEQUENCE_LENGTH));
+             int forkLimit = gameRules.get(GameRules.MAX_COMMAND_FORKS);
+ 
+-            try (ExecutionContext<CommandSourceStack> executionContext = new ExecutionContext<>(chainLimit, forkLimit, Profiler.get())) {
++            try (ExecutionContext<CommandSourceStack> executionContext = new ExecutionContext<>(chainLimit, forkLimit)) {
+                 CURRENT_EXECUTION_CONTEXT.set(executionContext);
+                 config.accept(executionContext);
+                 executionContext.runCommandQueue();
+@@ -515,9 +_,11 @@
+         }
+         // Paper start - Perf: Async command map building
+         new com.destroystokyo.paper.event.brigadier.AsyncPlayerSendCommandsEvent<CommandSourceStack>(player.getBukkitEntity(), (RootCommandNode) root, false).callEvent(); // Paper - Brigadier API
+-        net.minecraft.server.MinecraftServer.getServer().execute(() -> {
+-            runSync(player, bukkit, root);
+-        });
++        // Folia start - region threading
++        player.getBukkitEntity().taskScheduler.schedule((ServerPlayer updatedPlayer) -> {
++            runSync(updatedPlayer, bukkit, root);
++        }, null, 1L);
++        // Folia end - region threading
+     }
+ 
+     private void runSync(ServerPlayer player, java.util.Collection<String> bukkit, RootCommandNode<CommandSourceStack> root) {

@@ -1,0 +1,70 @@
+--- a/net/minecraft/world/entity/TamableAnimal.java
++++ b/net/minecraft/world/entity/TamableAnimal.java
+@@ -253,6 +_,11 @@
+     public void tryToTeleportToOwner() {
+         LivingEntity owner = this.getOwner();
+         if (owner != null) {
++            // Folia start - region threading
++            if (owner.isRemoved() || owner.level() != this.level()) {
++                return;
++            }
++            // Folia end - region threading
+             this.teleportToAroundBlockPos(owner.blockPosition());
+         }
+     }
+@@ -286,7 +_,22 @@
+             return false;
+         }
+         org.bukkit.Location to = event.getTo();
+-        this.snapTo(to.getX(), to.getY(), to.getZ(), to.getYaw(), to.getPitch());
++        // Folia start - region threading - can't teleport here, we may be removed by teleport logic - delay until next tick
++        // also, use teleportAsync so that crossing region boundaries will not blow up
++        org.bukkit.Location finalTo = to;
++        Level sourceWorld = this.level();
++        this.getBukkitEntity().taskScheduler.schedule((TamableAnimal nmsEntity) -> {
++            if (nmsEntity.level() == sourceWorld) {
++                nmsEntity.teleportAsync(
++                        (net.minecraft.server.level.ServerLevel)nmsEntity.level(),
++                        new net.minecraft.world.phys.Vec3(finalTo.getX(), finalTo.getY(), finalTo.getZ()),
++                        Float.valueOf(finalTo.getYaw()), Float.valueOf(finalTo.getPitch()),
++                        net.minecraft.world.phys.Vec3.ZERO, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN, Entity.TELEPORT_FLAG_LOAD_CHUNK,
++                        null
++                );
++            }
++        }, null, 1L);
++        // Folia end - region threading - can't teleport here, we may be removed by teleport logic - delay until next tick
+         // CraftBukkit end
+         this.navigation.stop();
+         return true;
+@@ -298,13 +_,29 @@
+             return false;
+         }
+ 
+-        BlockState blockStateBelow = this.level().getBlockState(pos.below());
+-        if (!this.canFlyToOwner() && blockStateBelow.getBlock() instanceof LeavesBlock) {
++        // Canvas start - region threading
++
++        // we don't want to try and load chunks as this could be outside the current region
++        BlockState blockStateBelow = this.level().getBlockStateIfLoaded(pos.below());
++        if (!this.canFlyToOwner() && (blockStateBelow == null || blockStateBelow.getBlock() instanceof LeavesBlock)) {
++        // Canvas end - region threading
+             return false;
+         }
+ 
+         BlockPos delta = pos.subtract(this.blockPosition());
++        // Canvas start - region threading
++
++        // Folia makes chunks outside the current region count as collidable which can
++        // make this check fail when it's checking at a location in a different region
++
++        // assume we can if not same region. the path type eval check actually covers this a lot, so this should be safe
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), this.getBoundingBox().move(delta))) {
++           return true;
++        }
++
++        // same region, run Vanilla check
+         return this.level().noCollision(this, this.getBoundingBox().move(delta));
++        // Canvas end - region threading
+     }
+ 
+     public final boolean unableToMoveToOwner() {

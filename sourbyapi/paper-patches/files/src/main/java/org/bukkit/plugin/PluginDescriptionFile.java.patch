@@ -1,0 +1,52 @@
+--- a/src/main/java/org/bukkit/plugin/PluginDescriptionFile.java
++++ b/src/main/java/org/bukkit/plugin/PluginDescriptionFile.java
+@@ -267,6 +_,20 @@
+         return this.paperPluginLoader;
+     }
+     // Paper end - plugin loader api
++    // Folia start - block plugins not marked as supported
++    private String foliaSupported;
++    private static final String FOLIA_SUPPORTED_KEY = "folia-supported";
++    private static final String CANVAS_SUPPORTED_KEY = "canvas-supported"; // Canvas - canvas supported flag
++
++    /**
++     * Returns whether the plugin has been marked to be compatible with regionised threading as provided
++     * by Folia
++     */
++    @Override
++    public boolean isFoliaSupported() {
++        return this.foliaSupported != null && this.foliaSupported.equalsIgnoreCase("true");
++    }
++    // Folia end - block plugins not marked as supported
+     // Paper start - oh my goddddd
+     /**
+      * @hidden
+@@ -1267,6 +_,16 @@
+         if (map.get("prefix") != null) {
+             prefix = map.get("prefix").toString();
+         }
++        // Folia start - block plugins not marked as supported
++        if (map.get(FOLIA_SUPPORTED_KEY) != null) {
++            foliaSupported = map.get(FOLIA_SUPPORTED_KEY).toString();
++        }
++        // Canvas start - canvas supported flag
++        if ((foliaSupported == null || foliaSupported.equalsIgnoreCase("false")) && map.containsKey(CANVAS_SUPPORTED_KEY)) {
++            foliaSupported = map.get(CANVAS_SUPPORTED_KEY).toString();
++        }
++        // Canvas end - canvas supported flag
++        // Folia end - block plugins not marked as supported
+     }
+ 
+     @NotNull
+@@ -1343,6 +_,11 @@
+         if (prefix != null) {
+             map.put("prefix", prefix);
+         }
++        // Folia start - block plugins not marked as supported
++        if (foliaSupported != null) {
++            map.put(FOLIA_SUPPORTED_KEY, foliaSupported);
++        }
++        // Folia end - block plugins not marked as supported
+ 
+         return map;
+     }

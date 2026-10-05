@@ -82,7 +82,7 @@ def competing_servers(jar, own_pid):
 # cannot, so it must not fail a measurement: reading raw `git status --porcelain`
 # counts every stray note and scratch file as a dirty tree.
 BUILD_INPUT_PREFIXES = ("sourbycraft-server/", "sourbyapi/", "sourbyclip/", "build-data/private-toolchain.lock.json", "Metal/",
-                        "build-data/", "gradle/", "paper-server/", "canvas-server/")
+                        "build-data/", "gradle/", "paper-server/", "paper-api/")
 BUILD_INPUT_SUFFIXES = (".gradle.kts", ".gradle", ".properties", ".patch", ".java", ".at")
 
 

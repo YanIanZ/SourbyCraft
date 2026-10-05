@@ -1,0 +1,45 @@
+--- a/net/minecraft/server/commands/GameModeCommand.java
++++ b/net/minecraft/server/commands/GameModeCommand.java
+@@ -47,21 +_,27 @@
+         }
+     }
+ 
+-    private static int setMode(final CommandContext<CommandSourceStack> context, final Collection<ServerPlayer> players, final GameType type) {
+-        int count = 0;
+-        MinecraftServer server = context.getSource().getServer();
+-
+-        for (ServerPlayer player : players) {
+-            if (server.isSingleplayerOwner(player.nameAndId())) {
+-                server.setDefaultGameType(type);
+-            }
+-
+-            if (setGameMode(context.getSource(), player, type)) {
+-                count++;
+-            }
+-        }
+-
+-        return count;
++    // Canvas start - region threading
++    private static int setMode(final CommandContext<CommandSourceStack> context, final Collection<ServerPlayer> players, final GameType type) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++            .with(players)
++            .executes((ServerPlayer entityPlayer) -> {
++
++                // this is always false so we don't care
++                // if (server.isSingleplayerOwner(entityPlayer.nameAndId())) {
++                //     server.setDefaultGameType(type);
++                // }
++
++                if (setGameMode(context.getSource(), entityPlayer, type)) {
++                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                }
++
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++            })
++            .onComplete((count,_,_) -> count)
++            .start(context.getSource());
++        return 1;
++    // Canvas end - region threading
+     }
+ 
+     public static void setGameMode(final ServerPlayer player, final GameType type) {

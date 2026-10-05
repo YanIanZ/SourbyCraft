@@ -1,0 +1,18 @@
+--- a/net/minecraft/stats/ServerRecipeBook.java
++++ b/net/minecraft/stats/ServerRecipeBook.java
+@@ -59,6 +_,7 @@
+     }
+ 
+     public int addRecipes(final Collection<RecipeHolder<?>> recipes, final ServerPlayer player) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(player, "Cannot add recipes async"); // Canvas - region threading
+         List<ClientboundRecipeBookAddPacket.Entry> recipesToAdd = new ArrayList<>();
+ 
+         for (RecipeHolder<?> recipe : recipes) {
+@@ -86,6 +_,7 @@
+     }
+ 
+     public int removeRecipes(final Collection<RecipeHolder<?>> recipes, final ServerPlayer player) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(player, "Cannot remove recipes async"); // Canvas - region threading
+         List<RecipeDisplayId> recipesToRemove = Lists.newArrayList();
+ 
+         for (RecipeHolder<?> recipe : recipes) {

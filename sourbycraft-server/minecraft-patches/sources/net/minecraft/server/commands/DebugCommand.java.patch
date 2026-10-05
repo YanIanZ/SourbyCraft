@@ -1,0 +1,36 @@
+--- a/net/minecraft/server/commands/DebugCommand.java
++++ b/net/minecraft/server/commands/DebugCommand.java
+@@ -71,32 +_,11 @@
+     }
+ 
+     private static int start(final CommandSourceStack source) throws CommandSyntaxException {
+-        MinecraftServer server = source.getServer();
+-        if (server.isTimeProfilerRunning()) {
+-            throw ERROR_ALREADY_RUNNING.create();
+-        }
+-
+-        server.startTimeProfiler();
+-        source.sendSuccess(() -> Component.translatable("commands.debug.started"), true);
+         return 0;
+     }
+ 
+     private static int stop(final CommandSourceStack source) throws CommandSyntaxException {
+-        MinecraftServer server = source.getServer();
+-        if (!server.isTimeProfilerRunning()) {
+-            throw ERROR_NOT_RUNNING.create();
+-        }
+-
+-        ProfileResults results = server.stopTimeProfiler();
+-        double seconds = (double)results.getNanoDuration() / TimeUtil.NANOSECONDS_PER_SECOND;
+-        double tps = results.getTickDuration() / seconds;
+-        source.sendSuccess(
+-            () -> Component.translatable(
+-                "commands.debug.stopped", String.format(Locale.ROOT, "%.2f", seconds), results.getTickDuration(), String.format(Locale.ROOT, "%.2f", tps)
+-            ),
+-            true
+-        );
+-        return (int)tps;
++        return 0;
+     }
+ 
+     private static class TraceCustomExecutor

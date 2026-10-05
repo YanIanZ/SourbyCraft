@@ -76,7 +76,11 @@ public class UpstreamDependencyLedgerTest {
 
     private static List<Leak> leaks(final Path root) throws IOException {
         final List<Leak> found = new ArrayList<>();
-        try (Stream<Path> files = Files.walk(root)) {
+        // Only Aurora's own source is under audit. Since the migration off Canvas, the region
+        // threading implementation (io/canvasmc, plus its spark overrides under me/lucko) is
+        // SourbyCraft-owned source in the same root; it is the thing Aurora must stay decoupled
+        // from, not a dependent of it.
+        try (Stream<Path> files = Files.walk(root.resolve("dev/iyanz"))) {
             for (final Path file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
                 final String relative = root.relativize(file).toString().replace('\\', '/');
                 final Matcher matcher = INTERNAL.matcher(Files.readString(file));

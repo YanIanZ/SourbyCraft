@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/TameAnimalTrigger.java
++++ b/net/minecraft/advancements/triggers/TameAnimalTrigger.java
+@@ -18,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final Animal animal) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         LootContext animalContext = EntityPredicate.createContext(player, animal);
+         this.trigger(player, t -> t.matches(animalContext));
+     }

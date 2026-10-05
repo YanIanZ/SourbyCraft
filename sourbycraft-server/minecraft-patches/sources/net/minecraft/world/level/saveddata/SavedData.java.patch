@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/saveddata/SavedData.java
++++ b/net/minecraft/world/level/saveddata/SavedData.java
+@@ -1,7 +_,7 @@
+ package net.minecraft.world.level.saveddata;
+ 
+ public abstract class SavedData {
+-    private boolean dirty;
++    private volatile boolean dirty; // Folia - make map data thread-safe - volatile
+ 
+     public void setDirty() {
+         this.setDirty(true);

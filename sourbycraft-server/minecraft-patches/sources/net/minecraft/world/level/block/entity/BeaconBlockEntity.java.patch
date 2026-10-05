@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/level/block/entity/BeaconBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BeaconBlockEntity.java
+@@ -211,7 +_,7 @@
+         }
+ 
+         int previousLevels = entity.levels;
+-        if (level.getGameTime() % 80L == 0L) {
++        if (level.getRedstoneGameTime() % 80L == 0L) { // Folia - region threading
+             if (!entity.beamSections.isEmpty()) {
+                 entity.levels = updateBase(level, x, y, z);
+             }
+@@ -370,7 +_,7 @@
+             list = level.getEntitiesOfClass(Player.class, aabb); // Diff from applyEffect
+         } else {
+             list = new java.util.ArrayList<>();
+-            for (final Player player : level.players()) {
++            for (final Player player : level.getLocalPlayers()) { // Folia - region threading
+                 if (!net.minecraft.world.entity.EntitySelector.NO_SPECTATORS.test(player)) continue;
+                 if (player.getBoundingBox().intersects(aabb)) {
+                     list.add(player);

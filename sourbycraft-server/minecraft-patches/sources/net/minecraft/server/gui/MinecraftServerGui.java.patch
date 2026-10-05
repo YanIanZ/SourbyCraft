@@ -1,0 +1,11 @@
+--- a/net/minecraft/server/gui/MinecraftServerGui.java
++++ b/net/minecraft/server/gui/MinecraftServerGui.java
+@@ -58,7 +_,7 @@
+         // Paper start - Improve ServerGUI
+         frame.setName("Minecraft server");
+         try {
+-            frame.setIconImage(javax.imageio.ImageIO.read(java.util.Objects.requireNonNull(MinecraftServerGui.class.getClassLoader().getResourceAsStream("logo.png"))));
++            frame.setIconImage(javax.imageio.ImageIO.read(java.util.Objects.requireNonNull(MinecraftServerGui.class.getClassLoader().getResourceAsStream("canvas-logo.png")))); // Canvas - Use our logo
+         } catch (java.io.IOException ignore) {
+         }
+         // Paper end - Improve ServerGUI

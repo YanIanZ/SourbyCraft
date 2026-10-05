@@ -14,7 +14,7 @@ class PrivateToolchainTest(unittest.TestCase):
         self.config = {'clipVersion': '1', 'patcherVersion': '2'}
         for base, artifact, version, key in [
             ('dev/iyanz/sourbyclip', 'sourbyclip', '1', 'clipSha256'),
-            ('dev/iyanz/sourbypatcher/canvas-toolchain', 'canvas-toolchain', '2', 'patcherSha256'),
+            ('dev/iyanz/sourbypatcher/paper-toolchain', 'paper-toolchain', '2', 'patcherSha256'),
         ]:
             path = self.repo / base / version / f'{artifact}-{version}.jar'
             path.parent.mkdir(parents=True)
@@ -33,7 +33,7 @@ class PrivateToolchainTest(unittest.TestCase):
             toolchain.verify(self.repo)
 
     def test_substituted_patcher_is_refused(self):
-        (self.repo / 'dev/iyanz/sourbypatcher/canvas-toolchain/2/canvas-toolchain-2.jar').write_bytes(b'replacement')
+        (self.repo / 'dev/iyanz/sourbypatcher/paper-toolchain/2/paper-toolchain-2.jar').write_bytes(b'replacement')
         with self.assertRaisesRegex(ValueError, 'SourbyPatcher SHA-256 mismatch'):
             toolchain.verify(self.repo)
 

@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/inventory/ChestMenu.java
++++ b/net/minecraft/world/inventory/ChestMenu.java
+@@ -66,9 +_,29 @@
+         return new ChestMenu(MenuType.GENERIC_9x6, containerId, inventory, 6);
+     }
+ 
++    // Purpur start - Barrels and enderchests 6 rows
++    public static ChestMenu oneRow(final int containerId, final Inventory inventory, final Container container) {
++        return new ChestMenu(MenuType.GENERIC_9x1, containerId, inventory, container, 1);
++    }
++
++    public static ChestMenu twoRows(final int containerId, final Inventory inventory, final Container container) {
++        return new ChestMenu(MenuType.GENERIC_9x2, containerId, inventory, container, 2);
++    }
++    // Purpur end - Barrels and enderchests 6 rows
++
+     public static ChestMenu threeRows(final int containerId, final Inventory inventory, final Container container) {
+         return new ChestMenu(MenuType.GENERIC_9x3, containerId, inventory, container, 3);
+     }
++
++    // Purpur start - Barrels and enderchests 6 rows
++    public static ChestMenu fourRows(final int containerId, final Inventory inventory, final Container container) {
++        return new ChestMenu(MenuType.GENERIC_9x4, containerId, inventory, container, 4);
++    }
++
++    public static ChestMenu fiveRows(final int containerId, final Inventory inventory, final Container container) {
++        return new ChestMenu(MenuType.GENERIC_9x5, containerId, inventory, container, 5);
++    }
++    // Purpur end - Barrels and enderchests 6 rows
+ 
+     public static ChestMenu sixRows(final int containerId, final Inventory inventory, final Container container) {
+         return new ChestMenu(MenuType.GENERIC_9x6, containerId, inventory, container, 6);

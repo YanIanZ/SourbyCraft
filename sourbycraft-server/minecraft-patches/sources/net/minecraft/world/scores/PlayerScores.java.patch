@@ -1,0 +1,15 @@
+--- a/net/minecraft/world/scores/PlayerScores.java
++++ b/net/minecraft/world/scores/PlayerScores.java
+@@ -9,7 +_,11 @@
+ import org.jspecify.annotations.Nullable;
+ 
+ public class PlayerScores {
+-    private final Reference2ObjectOpenHashMap<Objective, Score> scores = new Reference2ObjectOpenHashMap<>(16, 0.5F);
++    // Canvas start - region threading
++    // we synchronize instead of make concurrent since we want to make this atomic of sorts
++    private final it.unimi.dsi.fastutil.objects.Reference2ObjectMap<Objective, Score> scores =
++        it.unimi.dsi.fastutil.objects.Reference2ObjectMaps.synchronize(new Reference2ObjectOpenHashMap<>(16, 0.5F));
++    // Canvas end - region threading
+ 
+     public @Nullable Score get(final Objective objective) {
+         return this.scores.get(objective);

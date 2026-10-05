@@ -1,0 +1,37 @@
+--- a/net/minecraft/world/level/BaseCommandBlock.java
++++ b/net/minecraft/world/level/BaseCommandBlock.java
+@@ -91,6 +_,7 @@
+     }
+ 
+     public boolean performCommand(final ServerLevel level) {
++        if (true) return false; // Folia - region threading
+         if (level.getGameTime() == this.lastExecution) {
+             return false;
+         }
+@@ -172,10 +_,15 @@
+     public abstract CommandSourceStack createCommandSourceStack(ServerLevel level, CommandSource source);
+ 
+     public abstract boolean isValid();
++    // Folia start - region threading
++
++    public void threadCheck() {
++    }
++    // Folia end - region threading
+ 
+     public class CloseableCommandBlockSource implements CommandSource, AutoCloseable { // Paper - public
+         private final ServerLevel level;
+-        private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT);
++        private static final ThreadLocal<DateTimeFormatter> TIME_FORMAT = ThreadLocal.withInitial(() -> DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT)); // Folia - region threading - SDF is not thread-safe
+         private boolean closed;
+ 
+         // Paper start - add back source when output disabled
+@@ -209,7 +_,8 @@
+         public void sendSystemMessage(final Component message) {
+             if (this.trackOutput && !this.closed) { // Paper - add back source when output disabled
+                 org.spigotmc.AsyncCatcher.catchOp("sendSystemMessage to a command block"); // Paper - Don't broadcast messages to command blocks
+-                BaseCommandBlock.this.lastOutput = Component.literal("[" + TIME_FORMAT.format(ZonedDateTime.now()) + "] ").append(message);
++                BaseCommandBlock.this.threadCheck(); // Folia - region threading
++                BaseCommandBlock.this.lastOutput = Component.literal("[" + TIME_FORMAT.get().format(ZonedDateTime.now()) + "] ").append(message); // Folia - region threading - SDF is not thread-safe
+                 BaseCommandBlock.this.onUpdated(this.level);
+             }
+         }

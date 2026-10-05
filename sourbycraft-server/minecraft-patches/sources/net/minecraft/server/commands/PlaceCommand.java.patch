@@ -1,0 +1,63 @@
+--- a/net/minecraft/server/commands/PlaceCommand.java
++++ b/net/minecraft/server/commands/PlaceCommand.java
+@@ -255,12 +_,14 @@
+         ConfiguredFeature<?, ?> feature = featureHolder.value();
+         ChunkPos chunkPos = ChunkPos.containing(pos);
+         checkLoaded(level, new ChunkPos(chunkPos.x() - 1, chunkPos.z() - 1), new ChunkPos(chunkPos.x() + 1, chunkPos.z() + 1));
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
+         if (!feature.place(level, level.getChunkSource().getGenerator(), level.getRandom(), pos)) {
+             throw ERROR_FEATURE_FAILED.create();
+         }
+ 
+         String id = featureHolder.key().identifier().toString();
+         source.sendSuccess(() -> Component.translatable("commands.place.feature.success", id, pos.getX(), pos.getY(), pos.getZ()), true);
++        }, pos, 16, level, source); // Canvas - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ 
+@@ -270,11 +_,13 @@
+         ServerLevel level = source.getLevel();
+         ChunkPos chunk = ChunkPos.containing(pos);
+         checkLoaded(level, chunk, chunk);
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
+         if (!JigsawPlacement.generateJigsaw(level, pool, target, maxDepth, pos, false)) {
+             throw ERROR_JIGSAW_FAILED.create();
+         }
+ 
+         source.sendSuccess(() -> Component.translatable("commands.place.jigsaw.success", pos.getX(), pos.getY(), pos.getZ()), true);
++        }, pos, 16, level, source); // Canvas - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ 
+@@ -282,6 +_,7 @@
+         ServerLevel level = source.getLevel();
+         Structure structure = structureHolder.value();
+         ChunkGenerator chunkGenerator = level.getChunkSource().getGenerator();
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
+         StructureStart start = structure.generate(
+             structureHolder,
+             level.dimension(),
+@@ -318,6 +_,7 @@
+             );
+         String id = structureHolder.key().identifier().toString();
+         source.sendSuccess(() -> Component.translatable("commands.place.structure.success", id, pos.getX(), pos.getY(), pos.getZ()), true);
++        }, pos, 16, level, source); // Canvas - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ 
+@@ -332,6 +_,7 @@
+         final boolean strict
+     ) throws CommandSyntaxException {
+         ServerLevel level = source.getLevel();
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
+         StructureTemplateManager manager = level.getStructureManager();
+ 
+         Optional<StructureTemplate> maybeStructureTemplate;
+@@ -362,6 +_,7 @@
+         source.sendSuccess(
+             () -> Component.translatable("commands.place.template.success", Component.translationArg(template), pos.getX(), pos.getY(), pos.getZ()), true
+         );
++        }, pos, 16, level, source); // Canvas - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ 

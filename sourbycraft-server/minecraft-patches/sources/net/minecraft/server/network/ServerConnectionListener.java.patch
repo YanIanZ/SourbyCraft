@@ -1,0 +1,26 @@
+--- a/net/minecraft/server/network/ServerConnectionListener.java
++++ b/net/minecraft/server/network/ServerConnectionListener.java
+@@ -138,12 +_,13 @@
+                                     }
+                                     // Paper end - Add support for proxy protocol
+                                     // ServerConnectionListener.this.connections.add(connection); // Paper - prevent blocking on adding a new connection while the server is ticking
+-                                    ServerConnectionListener.this.pending.add(connection); // Paper - prevent blocking on adding a new connection while the server is ticking
++                                    //ServerConnectionListener.this.pending.add(connection); // Paper - prevent blocking on adding a new connection while the server is ticking // Folia - connection fixes - move down
+                                     connection.configurePacketHandler(pipeline);
+                                     connection.setListenerForServerboundHandshake(
+                                         new ServerHandshakePacketListenerImpl(ServerConnectionListener.this.server, connection)
+                                     );
+                                     io.papermc.paper.network.ChannelInitializeListenerHolder.callListeners(channel); // Paper - Add Channel initialization listeners
++                                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().addConnection(connection); // Folia - region threading
+                                 }
+                             }
+                         )
+@@ -278,7 +_,7 @@
+             // Spigot start
+             this.addPending(); // Paper - prevent blocking on adding a new connection while the server is ticking
+             // This prevents players from 'gaming' the server, and strategically relogging to increase their position in the tick order
+-            if (org.spigotmc.SpigotConfig.playerShuffle > 0 && MinecraftServer.currentTick % org.spigotmc.SpigotConfig.playerShuffle == 0) {
++            if (org.spigotmc.SpigotConfig.playerShuffle > 0 && 0 % org.spigotmc.SpigotConfig.playerShuffle == 0) { // Folia - region threading
+                 Collections.shuffle(this.connections);
+             }
+             // Spigot end

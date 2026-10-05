@@ -1,0 +1,10 @@
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftOminousItemSpawner.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftOminousItemSpawner.java
+@@ -13,6 +_,7 @@
+ 
+     @Override
+     public net.minecraft.world.entity.OminousItemSpawner getHandle() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Accessing entity state off owning region's thread"); // Folia - region threading
+         return (net.minecraft.world.entity.OminousItemSpawner) this.entity;
+     }
+ 

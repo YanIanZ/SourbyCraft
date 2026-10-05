@@ -1,0 +1,111 @@
+--- a/net/minecraft/server/commands/TitleCommand.java
++++ b/net/minecraft/server/commands/TitleCommand.java
+@@ -101,13 +_,23 @@
+         );
+     }
+ 
+-    private static int clearTitle(final CommandSourceStack source, final Collection<ServerPlayer> targets) {
++    private static int clearTitle(final CommandSourceStack source, final Collection<ServerPlayer> targets) throws CommandSyntaxException { // Canvas - region threading
+         ClientboundClearTitlesPacket packet = new ClientboundClearTitlesPacket(false);
+ 
+-        for (ServerPlayer player : targets) {
+-            player.connection.send(packet);
+-        }
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(targets)
++            .executes((ServerPlayer entityPlayer) -> {
++                entityPlayer.connection.send(packet);
++                return (_) -> null;
++            })
++            .onComplete((_, selected, css) -> clearCallback(css, selected))
++            .start(source);
++        return 1;
++    }
+ 
++    private static int clearCallback(final CommandSourceStack source, final Collection<? extends ServerPlayer> targets) {
++    // Canvas end - region threading
+         if (targets.size() == 1) {
+             source.sendSuccess(() -> Component.translatable("commands.title.cleared.single", targets.iterator().next().getDisplayName()), true);
+         } else {
+@@ -117,13 +_,23 @@
+         return targets.size();
+     }
+ 
+-    private static int resetTitle(final CommandSourceStack source, final Collection<ServerPlayer> targets) {
++    private static int resetTitle(final CommandSourceStack source, final Collection<ServerPlayer> targets) throws CommandSyntaxException { // Canvas - region threading
+         ClientboundClearTitlesPacket packet = new ClientboundClearTitlesPacket(true);
+ 
+-        for (ServerPlayer player : targets) {
+-            player.connection.send(packet);
+-        }
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(targets)
++            .executes((ServerPlayer entityPlayer) -> {
++                entityPlayer.connection.send(packet);
++                return (_) -> null;
++            })
++            .onComplete((_, selected, css) -> resetCallback(css, selected))
++            .start(source);
++        return 1;
++    }
+ 
++    private static int resetCallback(final CommandSourceStack source, final Collection<? extends ServerPlayer> targets) {
++    // Canvas end - region threading
+         if (targets.size() == 1) {
+             source.sendSuccess(() -> Component.translatable("commands.title.reset.single", targets.iterator().next().getDisplayName()), true);
+         } else {
+@@ -140,11 +_,20 @@
+         final String type,
+         final Function<Component, Packet<?>> factory
+     ) throws CommandSyntaxException {
+-        for (ServerPlayer player : targets) {
+-            player.connection
+-                .send(factory.apply(ComponentUtils.resolve(ResolutionContext.builder().withSource(source).withEntityOverride(player).build(), title)));
+-        }
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(targets)
++            .executes((ServerPlayer entityPlayer) -> {
++                entityPlayer.connection.send(factory.apply(ComponentUtils.resolve(ResolutionContext.builder().withSource(source).withEntityOverride(entityPlayer).build(), title)));
++                return (_) -> null;
++            })
++            .onComplete((_, selected, css) -> showCallback(css, selected, type))
++            .start(source);
++        return 1;
++    }
+ 
++    private static int showCallback(final CommandSourceStack source, final Collection<? extends ServerPlayer> targets, final String type) {
++    // Canvas end - region threading
+         if (targets.size() == 1) {
+             source.sendSuccess(() -> Component.translatable("commands.title.show." + type + ".single", targets.iterator().next().getDisplayName()), true);
+         } else {
+@@ -154,13 +_,23 @@
+         return targets.size();
+     }
+ 
+-    private static int setTimes(final CommandSourceStack source, final Collection<ServerPlayer> targets, final int fadeIn, final int stay, final int fadeOut) {
++    private static int setTimes(final CommandSourceStack source, final Collection<ServerPlayer> targets, final int fadeIn, final int stay, final int fadeOut) throws CommandSyntaxException { // Canvas - region threading
+         ClientboundSetTitlesAnimationPacket packet = new ClientboundSetTitlesAnimationPacket(fadeIn, stay, fadeOut);
+ 
+-        for (ServerPlayer player : targets) {
+-            player.connection.send(packet);
+-        }
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(targets)
++            .executes((ServerPlayer entityPlayer) -> {
++                entityPlayer.connection.send(packet);
++                return (_) -> null;
++            })
++            .onComplete((_, selected, css) -> setCallback(css, selected))
++            .start(source);
++        return 1;
++    }
+ 
++    private static int setCallback(final CommandSourceStack source, final Collection<? extends ServerPlayer> targets) {
++    // Canvas end - region threading
+         if (targets.size() == 1) {
+             source.sendSuccess(() -> Component.translatable("commands.title.times.single", targets.iterator().next().getDisplayName()), true);
+         } else {

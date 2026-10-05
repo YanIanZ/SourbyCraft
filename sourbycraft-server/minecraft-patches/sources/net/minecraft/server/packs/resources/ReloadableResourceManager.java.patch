@@ -1,0 +1,11 @@
+--- a/net/minecraft/server/packs/resources/ReloadableResourceManager.java
++++ b/net/minecraft/server/packs/resources/ReloadableResourceManager.java
+@@ -46,7 +_,7 @@
+         LOGGER.info("Reloading ResourceManager: {}", LogUtils.defer(() -> resourcePacks.stream().map(PackResources::packId).collect(Collectors.joining(", "))));
+         this.resources.close();
+         this.resources = new MultiPackResourceManager(this.type, resourcePacks);
+-        return SimpleReloadInstance.create(this.resources, this.listeners, backgroundExecutor, mainThreadExecutor, initialTask, LOGGER.isDebugEnabled());
++        return SimpleReloadInstance.create(this.resources, this.listeners, backgroundExecutor, mainThreadExecutor, initialTask, false);
+     }
+ 
+     @Override

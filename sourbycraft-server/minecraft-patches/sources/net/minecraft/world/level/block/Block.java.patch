@@ -1,0 +1,13 @@
+--- a/net/minecraft/world/level/block/Block.java
++++ b/net/minecraft/world/level/block/Block.java
+@@ -486,8 +_,8 @@
+             ItemEntity entity = entityFactory.get();
+             entity.setDefaultPickUpDelay();
+             // CraftBukkit start
+-            if (level.captureDrops != null) {
+-                level.captureDrops.add(entity);
++            if (level.getCurrentWorldData().captureDrops != null) { // Folia - region threading
++                level.getCurrentWorldData().captureDrops.add(entity); // Folia - region threading
+             } else {
+                 level.addFreshEntity(entity);
+             }

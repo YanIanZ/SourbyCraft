@@ -1,0 +1,409 @@
+--- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+@@ -1,5 +_,11 @@
+ package ca.spottedleaf.moonrise.common.util;
+ 
++import io.papermc.paper.threadedregions.RegionShutdownThread;
++import io.papermc.paper.threadedregions.RegionizedServer;
++import io.papermc.paper.threadedregions.RegionizedWorldData;
++import io.papermc.paper.threadedregions.ThreadedRegionizer;
++import io.papermc.paper.threadedregions.TickRegionScheduler;
++import io.papermc.paper.threadedregions.TickRegions;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.level.ChunkPos;
+@@ -15,9 +_,114 @@
+ 
+     private static final Logger LOGGER = LoggerFactory.getLogger(TickThread.class);
+ 
+-    private static String getThreadContext() {
+-        return "thread=" + Thread.currentThread().getName();
+-    }
++    // Canvas start - region threading
++    private static String getRegionInfo() {
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
++            region = TickRegionScheduler.getCurrentRegion();
++
++        if (region == null) {
++            return RegionizedServer.isGlobalTickThread() ? "{god-tick}" : "{null}";
++        }
++    // Canvas end - region threading
++
++        final ChunkPos center = region.getCenterChunk();
++        final net.minecraft.server.level.ServerLevel world = region.regioniser.world;
++
++        return "{center=" + center + ",world=" + (world == null ? "null" : WorldUtil.getWorldName(world)) + "}";
++    }
++
++    public static String getThreadContext() {
++        final Thread thread = Thread.currentThread();
++
++        if (!(thread instanceof TickThread)) {
++            return "[thread=" + thread + ",class=" + thread.getClass().getName() + "]";
++        }
++
++        return "[thread=" + thread.getName() + ",class=" + thread.getClass().getName() + ",region=" + getRegionInfo() + "]";
++
++    }
++    // Canvas start - region threading
++
++    private static final ThreadLocal<java.text.DecimalFormat> TWO_DECIMALS = ThreadLocal.withInitial(() -> {
++        return new java.text.DecimalFormat("#,##0.00");
++    });
++
++    private static String formatVec(final Vec3 vec) {
++        final java.text.DecimalFormat format = TWO_DECIMALS.get();
++
++        return "(" + format.format(vec.x) + "," + format.format(vec.y) + "," + format.format(vec.z) + ")";
++    }
++
++    private static String dumpEntityWithoutReferences(final Entity entity) {
++        if (entity == null) {
++            return "{null}";
++        }
++
++        final String base = "{" +
++            "type=" + entity.getClass().getSimpleName() +
++            ",entity_id=" + entity.getId() +
++            ",uuid=" + entity.getStringUUID() +
++            ",position=" + formatVec(entity.position()) +
++            ",delta=" + formatVec(entity.getDeltaMovement()) +
++            ",aabb=" + entity.getBoundingBox() +
++            ",removed=" + entity.getRemovalReason() +
++            ",has_vehicle=" + (entity.getVehicle() != null) +
++            ",passenger_count=" + entity.getPassengers().size();
++
++        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState transferState =
++            entity.getRegionTransferState();
++
++        if (transferState != null) {
++            final StringBuilder stateTransferDump = new StringBuilder(base + "\n\tregion_transfer_state=[reason=\"" + transferState.getReason() + "\",type=\"" + transferState.getType() + "\"],called_by=[\n");
++            final java.util.List<StackTraceElement> callTrace = transferState.getCallTrace();
++
++            for (final StackTraceElement ste : callTrace) {
++                stateTransferDump.append("\t\tat ").append(ste.toString()).append("\n");
++            }
++
++            stateTransferDump.append("\t],extra=[").append(transferState.getExtra()).append("]");
++            return stateTransferDump.toString();
++        }
++
++        return base + "}";
++    }
++
++    public static String getEntityContext(final Entity entity) {
++        final java.util.List<Entity> passengers = entity.getPassengers();
++        final java.util.List<String> passengerStrings = new java.util.ArrayList<>(passengers.size());
++        final Entity vehicle = entity.getVehicle();
++
++        for (final Entity passenger : passengers) {
++            passengerStrings.add("(" + dumpEntityWithoutReferences(passenger) + ")");
++        }
++
++        final StringBuilder builder = new StringBuilder();
++        builder.append("EntityContext:{");
++
++        builder.append("self=[").append(dumpEntityWithoutReferences(entity)).append("]");
++
++        boolean addedIndented = false;
++
++        if (!passengers.isEmpty()) {
++            builder.append("\t\npassengers=[\n\t").append(String.join(",\n\t", passengerStrings)).append("\n]");
++            addedIndented = true;
++        }
++
++        if (vehicle != null) {
++            builder.append("\t\nvehicle[").append(dumpEntityWithoutReferences(vehicle)).append("]");
++            addedIndented = true;
++        }
++
++        if (addedIndented) {
++            builder.append("\n}");
++        }
++
++        return builder.toString();
++    }
++
++    public static final class ThreadViolationException extends RuntimeException {
++    }
++    // Canvas end - region threading
+ 
+     /**
+      * @deprecated
+@@ -25,7 +_,7 @@
+     @Deprecated
+     public static void ensureTickThread(final String reason) {
+         if (!isTickThread()) {
+-            LOGGER.error("Thread failed main thread check: " + reason + ", context=" + getThreadContext(), new Throwable());
++            LOGGER.error("Thread failed main thread check: " + reason + ", context=" + getThreadContext(), new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(reason);
+         }
+     }
+@@ -34,7 +_,7 @@
+         if (!isTickThreadFor(world, pos)) {
+             final String ex = "Thread failed main thread check: " +
+                                reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -43,7 +_,7 @@
+         if (!isTickThreadFor(world, pos, blockRadius)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos + ", block_radius=" + blockRadius;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -52,7 +_,7 @@
+         if (!isTickThreadFor(world, pos)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + pos;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -61,7 +_,7 @@
+         if (!isTickThreadFor(world, chunkX, chunkZ)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + new ChunkPos(chunkX, chunkZ);
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -69,8 +_,10 @@
+     public static void ensureTickThread(final Entity entity, final String reason) {
+         if (!isTickThreadFor(entity)) {
+             final String ex = "Thread failed main thread check: " +
+-                reason + ", context=" + getThreadContext() + ", entity=" + EntityUtil.dumpEntity(entity);
+-            LOGGER.error(ex, new Throwable());
++            // Canvas start - region threading
++                reason + ", context=" + getThreadContext() + ", entity=" + getEntityContext(entity);
++            LOGGER.error(ex, new ThreadViolationException());
++            // Canvas end - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -79,7 +_,7 @@
+         if (!isTickThreadFor(world, aabb)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", aabb=" + aabb;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -88,7 +_,7 @@
+         if (!isTickThreadFor(world, blockX, blockZ)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + new Vec3(blockX, 0.0, blockZ);
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -123,50 +_,188 @@
+     }
+ 
+     public static boolean isShutdownThread() {
+-        return false;
++        return Thread.currentThread() instanceof RegionShutdownThread; // Canvas - region threading
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final BlockPos pos) {
+-        return isTickThread();
++        return isTickThreadFor(world, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final BlockPos pos, final int blockRadius) {
+-        return isTickThread();
++        return isTickThreadFor(
++                world,
++                (pos.getX() - blockRadius) >> 4, (pos.getZ() - blockRadius) >> 4,
++                (pos.getX() + blockRadius) >> 4, (pos.getZ() + blockRadius) >> 4
++        );
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final ChunkPos pos) {
+-        return isTickThread();
++        return isTickThreadFor(world, pos.x(), pos.z());
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final Vec3 pos) {
+-        return isTickThread();
++        return isTickThreadFor(world, net.minecraft.util.Mth.floor(pos.x) >> 4, net.minecraft.util.Mth.floor(pos.z) >> 4);
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final int chunkX, final int chunkZ) {
+-        return isTickThread();
++        // Canvas start - optimize thread check
++        final Thread thread = Thread.currentThread();
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
++        if (!(thread instanceof TickRegionScheduler.TickThreadRunner threadRunner)) {
++            if (thread instanceof RegionShutdownThread shutdownThread) {
++                region = shutdownThread.shuttingDown;
++            }
++            else region = null;
++        }
++        else region = threadRunner.currentTickingRegion;
++        // Canvas end - optimize thread check
++        if (region == null) {
++            return thread instanceof RegionShutdownThread; // Canvas - optimize thread check
++        }
++        return ((net.minecraft.server.level.ServerLevel)world).regioniser.getRegionAtUnsynchronised(chunkX, chunkZ) == region;
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final AABB aabb) {
+-        return isTickThread();
++        return isTickThreadFor(
++            world,
++            CoordinateUtils.getChunkCoordinate(aabb.minX), CoordinateUtils.getChunkCoordinate(aabb.minZ),
++            CoordinateUtils.getChunkCoordinate(aabb.maxX), CoordinateUtils.getChunkCoordinate(aabb.maxZ)
++        );
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final double blockX, final double blockZ) {
+-        return isTickThread();
++        return isTickThreadFor(world, CoordinateUtils.getChunkCoordinate(blockX), CoordinateUtils.getChunkCoordinate(blockZ));
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final Vec3 position, final Vec3 deltaMovement, final int buffer) {
+-        return isTickThread();
++        final int fromChunkX = CoordinateUtils.getChunkX(position);
++        final int fromChunkZ = CoordinateUtils.getChunkZ(position);
++
++        final int toChunkX = CoordinateUtils.getChunkCoordinate(position.x + deltaMovement.x);
++        final int toChunkZ = CoordinateUtils.getChunkCoordinate(position.z + deltaMovement.z);
++
++        // expect from < to, but that may not be the case
++        return isTickThreadFor(
++            world,
++            Math.min(fromChunkX, toChunkX) - buffer,
++            Math.min(fromChunkZ, toChunkZ) - buffer,
++            Math.max(fromChunkX, toChunkX) + buffer,
++            Math.max(fromChunkZ, toChunkZ) + buffer
++        );
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final int fromChunkX, final int fromChunkZ, final int toChunkX, final int toChunkZ) {
+-        return isTickThread();
++        // Canvas start - optimize thread check
++        final Thread thread = Thread.currentThread();
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
++        if (!(thread instanceof TickRegionScheduler.TickThreadRunner threadRunner)) {
++            if (thread instanceof RegionShutdownThread shutdownThread) {
++                region = shutdownThread.shuttingDown;
++            }
++            else region = null;
++        }
++        else region = threadRunner.currentTickingRegion;
++        // Canvas end - optimize thread check
++        if (region == null) {
++            return thread instanceof RegionShutdownThread; // Canvas - optimize thread check
++        }
++
++        final int shift = ((net.minecraft.server.level.ServerLevel)world).regioniser.sectionChunkShift;
++
++        final int minSectionX = fromChunkX >> shift;
++        final int maxSectionX = toChunkX >> shift;
++        final int minSectionZ = fromChunkZ >> shift;
++        final int maxSectionZ = toChunkZ >> shift;
++
++        for (int secZ = minSectionZ; secZ <= maxSectionZ; ++secZ) {
++            for (int secX = minSectionX; secX <= maxSectionX; ++secX) {
++                final int lowerLeftCX = secX << shift;
++                final int lowerLeftCZ = secZ << shift;
++                if (((net.minecraft.server.level.ServerLevel)world).regioniser.getRegionAtUnsynchronised(lowerLeftCX, lowerLeftCZ) != region) {
++                    return false;
++                }
++            }
++        }
++
++        return true;
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final int chunkX, final int chunkZ, final int radius) {
+-        return isTickThread();
++        return isTickThreadFor(world, chunkX - radius, chunkZ - radius, chunkX + radius, chunkZ + radius);
+     }
+ 
+     public static boolean isTickThreadFor(final Entity entity) {
+-        return isTickThread();
++        if (entity == null) {
++            return true;
++        }
++        // Canvas start - optimize thread check
++        final Thread thread = Thread.currentThread();
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
++        if (!(thread instanceof TickRegionScheduler.TickThreadRunner threadRunner)) {
++            if (thread instanceof RegionShutdownThread shutdownThread) {
++                region = shutdownThread.shuttingDown;
++            }
++            else region = null;
++        }
++        else region = threadRunner.currentTickingRegion;
++
++        // the region shutdown thread bypasses all thread checks,
++        // so we can just check this early
++        if (thread instanceof RegionShutdownThread) {
++            return true;
++        }
++        // Canvas end - optimize thread check
++        if (region == null) {
++            if (thread instanceof TickRegionScheduler.TickThreadRunner threadRunner && RegionizedServer.getGlobalTickData() == threadRunner.currentTickingTask) { // Canvas - optimize thread check
++                if (entity instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
++                    final net.minecraft.server.network.ServerGamePacketListenerImpl possibleBad = serverPlayer.connection;
++                    if (possibleBad == null) {
++                        return true;
++                    }
++
++                    final net.minecraft.network.PacketListener packetListener = possibleBad.connection.getPacketListener();
++                    if (packetListener instanceof net.minecraft.server.network.ServerGamePacketListenerImpl gamePacketListener) {
++                        return gamePacketListener.waitingForSwitchToConfig;
++                    }
++                    if (packetListener instanceof net.minecraft.server.network.ServerConfigurationPacketListenerImpl configurationPacketListener) {
++                        return configurationPacketListener.switchToMain == null;
++                    }
++                    return true;
++                } else {
++                    return false;
++                }
++            }
++            // Canvas - optimize thread check
++            if (entity instanceof net.minecraft.server.level.ServerPlayer) {
++                // off-main access to server player is never ok, server player is owned by one of global context or region context always
++                return false;
++            }
++            // only own entities that have not yet been added to the world
++
++            // if the entity is removed, then it was in the world previously - which means that a region containing its location
++            // owns it
++            // if the entity has a callback, then it is contained in a world
++            return entity.hasNullCallback() && !entity.isRemoved();
++        }
++
++        final Level world = entity.level();
++        if (world != region.regioniser.world) {
++            // world mismatch
++            return false;
++        }
++
++        final RegionizedWorldData worldData = region.getData().world.worldRegionData.get(); // Canvas - optimize thread check
++
++        // pass through the check if the entity is removed and we own its chunk
++        if (worldData.hasEntity(entity)) {
++            return true;
++        }
++
++        if (entity instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
++            net.minecraft.server.network.ServerGamePacketListenerImpl conn = serverPlayer.connection;
++            return conn != null && worldData.hasConnection(conn.connection);
++        } else {
++            return ((entity.hasNullCallback() || entity.isRemoved())) && isTickThreadFor(world, entity.chunkPosition());
++        }
+     }
+ }

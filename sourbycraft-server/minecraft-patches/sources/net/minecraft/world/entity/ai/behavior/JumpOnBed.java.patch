@@ -1,0 +1,14 @@
+--- a/net/minecraft/world/entity/ai/behavior/JumpOnBed.java
++++ b/net/minecraft/world/entity/ai/behavior/JumpOnBed.java
+@@ -101,6 +_,11 @@
+     }
+ 
+     private boolean isBed(final ServerLevel level, final BlockPos bodyPos) {
++        // Canvas start - region threading
++        if (!level.hasChunkAt(bodyPos)) {
++            return false;
++        }
++        // Canvas end - region threading
+         return level.getBlockState(bodyPos).is(BlockTags.BEDS);
+     }
+ 

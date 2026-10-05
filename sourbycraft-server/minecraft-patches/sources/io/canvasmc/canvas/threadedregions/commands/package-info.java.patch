@@ -1,0 +1,10 @@
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/commands/package-info.java
+@@ -1,0 +_,7 @@
++/**
++ * This package is dedicated to the ACE command system for region threading
++ */
++@NullMarked
++package io.canvasmc.canvas.threadedregions.commands;
++
++import org.jspecify.annotations.NullMarked;

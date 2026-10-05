@@ -1,0 +1,10 @@
+--- a/net/minecraft/world/scores/ScoreboardSaveData.java
++++ b/net/minecraft/world/scores/ScoreboardSaveData.java
+@@ -31,6 +_,7 @@
+     }
+ 
+     public void setData(final ScoreboardSaveData.Packed data) {
++        net.minecraft.server.MinecraftServer.getServer().getScoreboard().ensureMainThread("Cannot save scoreboard data async"); // Canvas - region threading
+         if (!data.equals(this.data)) {
+             this.data = data;
+             this.setDirty();

@@ -7,7 +7,7 @@ import org.gradle.api.tasks.testing.logging.TestLogEvent
 
 plugins {
     java // TODO java launcher tasks
-    id("dev.iyanz.sourbypatcher.canvas")
+    id("dev.iyanz.sourbypatcher.paper")
 }
 
 repositories {
@@ -19,51 +19,37 @@ repositories {
 
 paperweight {
     filterPatches = false
-    // SourbyPatcher's Canvas adapter applies Weaver unchanged for nested Paper -> Canvas
-    // patch sequencing. The legacy Folia patcher is retained only in the private repository.
-    upstreams.canvas {
-        ref = providers.gradleProperty("canvasRef")
-
-        println("Upstream commit ref: " + ref.get())
+    // Paper is SourbyCraft's only upstream. Region threading and every other change that used to
+    // come from Canvas/Folia now lives in SourbyCraft's own patches and sources.
+    upstreams.paper {
+        ref = providers.gradleProperty("paperRef")
 
         patchFile {
-            path = "canvas-server/build.gradle.kts"
+            path = "paper-server/build.gradle.kts"
             outputFile = file("sourbycraft-server/build.gradle.kts")
             patchFile = file("sourbycraft-server/build.gradle.kts.patch")
         }
         patchFile {
-            path = "canvas-api/build.gradle.kts"
+            path = "paper-api/build.gradle.kts"
             outputFile = file("sourbyapi/build.gradle.kts")
             patchFile = file("sourbyapi/build.gradle.kts.patch")
         }
-        // Two levels deep (sourbycraft -> canvas -> paper): paper-api does not exist in Canvas's
-        // raw checkout, only as CANVAS's OWN nested-build output, so this must be a patchRepo
-        // (wires a proper task dependency on that nested output) rather than a plain patchDir
-        // (which only reads a literal path inside the immediate "canvas" checkout).
-        patchRepo("paperApi") {
+        patchDir("paperApi") {
             upstreamPath = "paper-api"
+            excludes = setOf("build.gradle.kts")
             patchesDir = file("sourbyapi/paper-patches")
             outputDir = file("paper-api")
-        }
-        // One level deep: canvas-api is a literal folder in Canvas's raw checkout, so a plain
-        // patchDir is correct (mirrors the server-side canvasServer patchDir wired inside
-        // sourbycraft-server/build.gradle.kts.patch's own forks.register("sourbycraft") block).
-        patchDir("canvasApi") {
-            upstreamPath = "canvas-api"
-            excludes = listOf("build.gradle.kts", "build.gradle.kts.patch", "paper-patches")
-            patchesDir = file("sourbyapi/canvas-patches")
-            outputDir = file("canvas-api")
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// SourbyCraft server-jar SLIMMING (Path B / weaver) — restores the old
+// SourbyCraft server-jar SLIMMING (paperweight) — restores the old
 // sourbypatcher SlimPaperclipJar size win WITHOUT any sourbypatcher/paperweight
-// dependency. Plain Gradle task; runs on weaver's stock createPaperclipJar output.
+// dependency. Plain Gradle task; runs on paperweight's stock createPaperclipJar output.
 //
 // How it works (no new manifest needed — this is the key vs the old approach):
-// weaver's createPaperclipJar already writes META-INF/libraries.list (one line per
+// paperweight's createPaperclipJar already writes META-INF/libraries.list (one line per
 // library: `sha256 <TAB> maven-coordinate <TAB> relpath`) AND bundles each library
 // under META-INF/libraries/<relpath>. SourbyClip (our Leavesclip fork) reads that
 // same libraries.list at boot via FileEntry.downloadFromMvnRepo: for each entry it
@@ -84,7 +70,7 @@ paperweight {
 // our own non-public artifacts (dev.iyanz.sourbycraft:sourbyapi,
 // io.canvasmc.httpclient, ca.spottedleaf:leafpile, net.openhft:affinity), and jline
 // (console-critical). Versions are matched at task-execution time by artifact-dir
-// prefix, so a weaver version bump doesn't silently no-op the strip.
+// prefix, so a paperweight version bump doesn't silently no-op the strip.
 val externalizeArtifactDirs = listOf(
     "org/xerial/sqlite-jdbc",
     "com/github/luben/zstd-jni",
@@ -159,7 +145,7 @@ val slimServerJar = tasks.register("slimServerJar") {
         if (strippedCount == 0) {
             throw GradleException(
                 "slimServerJar stripped 0 libraries — externalizeArtifactDirs no longer match the " +
-                    "paperclip layout (weaver version/library set changed?). Refusing to emit a non-slim jar."
+                    "paperclip layout (paperweight version/library set changed?). Refusing to emit a non-slim jar."
             )
         }
         logger.lifecycle(
@@ -227,9 +213,8 @@ subprojects {
     if (project.name == "sourbycraft-server") {
         dependencies {
             // SourbyCraft - unified TOML config (own nightconfig CommentedFileConfig, resolved
-            // directly by SourbyCraftConfig). Added here instead of via build.gradle.kts.patch
-            // because the weaver patcher rejects the surrounding hunk after Canvas ref bumps
-            // (the patch hunk count drifts as upstream hunks shift line offsets).
+            // directly by SourbyCraftConfig). Added here instead of via build.gradle.kts.patch so an
+            // upstream bump that shifts the dependencies block cannot reject the hunk.
             "implementation"("com.electronwill.night-config:toml:3.9.0")
             // SourbyCraft - offline GeoIP for /ping (reads a local MaxMind-DB .mmdb; no player IP
             // leaves the server). Pulls maxmind-db + jackson (databind/core/annotations/jsr310)

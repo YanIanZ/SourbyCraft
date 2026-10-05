@@ -1,0 +1,12 @@
+--- a/net/minecraft/world/entity/decoration/ItemFrame.java
++++ b/net/minecraft/world/entity/decoration/ItemFrame.java
+@@ -268,7 +_,9 @@
+         if (mapId != null) {
+             MapItemSavedData mapItemSavedData = MapItem.getSavedData(mapId, this.level());
+             if (mapItemSavedData != null) {
++                synchronized (mapItemSavedData) { // Folia - make map data thread-safe
+                 mapItemSavedData.removedFromFrame(this.pos, this.getId());
++                } // Folia - make map data thread-safe
+             }
+         }
+     }

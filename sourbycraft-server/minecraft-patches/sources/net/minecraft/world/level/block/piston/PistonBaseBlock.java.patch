@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/block/piston/PistonBaseBlock.java
++++ b/net/minecraft/world/level/block/piston/PistonBaseBlock.java
+@@ -117,7 +_,7 @@
+                 && pushedState.getValue(FACING) == direction
+                 && level.getBlockEntity(pushedPos) instanceof PistonMovingBlockEntity pistonEntity
+                 && pistonEntity.isExtending()
+-                && (pistonEntity.getProgress(0.0F) < 0.5F || level.getGameTime() == pistonEntity.getLastTicked() || ((ServerLevel)level).isHandlingTick())) {
++                && (pistonEntity.getProgress(0.0F) < 0.5F || level.getRedstoneGameTime() == pistonEntity.getLastTicked() || ((ServerLevel)level).isHandlingTick())) { // Folia - region threading
+                 event = 2;
+             }
+ 

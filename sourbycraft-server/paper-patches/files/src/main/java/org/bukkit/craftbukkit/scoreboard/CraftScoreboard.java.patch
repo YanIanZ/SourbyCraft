@@ -1,0 +1,26 @@
+--- a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboard.java
++++ b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboard.java
+@@ -40,6 +_,7 @@
+         Preconditions.checkArgument(renderType != null, "RenderType cannot be null");
+         Preconditions.checkArgument(name.length() <= Short.MAX_VALUE, "The name '%s' is longer than the limit of 32767 characters (%s)", name, name.length());
+         Preconditions.checkArgument(this.getHandle().getObjective(name) == null, "An objective of name '%s' already exists", name);
++        this.getHandle().ensureMainThread("Cannot register new objective async"); // Canvas - region threading
+         // Paper start - lazily track plugin scoreboards
+         if (((CraftCriteria) criteria).criteria != net.minecraft.world.scores.criteria.ObjectiveCriteria.DUMMY && !this.registeredGlobally) {
+             net.minecraft.server.MinecraftServer.getServer().server.getScoreboardManager().registerScoreboardForVanilla(this);
+@@ -180,6 +_,7 @@
+         Preconditions.checkArgument(name != null, "Team name cannot be null");
+         Preconditions.checkArgument(name.length() <= Short.MAX_VALUE, "Team name '%s' is longer than the limit of 32767 characters (%s)", name, name.length());
+         Preconditions.checkArgument(this.getHandle().getPlayerTeam(name) == null, "Team name '%s' is already in use", name);
++        this.getHandle().ensureMainThread("Cannot register new team async"); // Canvas - region threading
+ 
+         return new CraftTeam(this, this.getHandle().addPlayerTeam(name));
+     }
+@@ -205,6 +_,7 @@
+     @Override
+     public void clearSlot(DisplaySlot slot) {
+         Preconditions.checkArgument(slot != null, "Slot cannot be null");
++        this.getHandle().ensureMainThread("Cannot clear display slot async"); // Canvas - region threading
+         this.getHandle().setDisplayObjective(CraftScoreboardTranslations.fromBukkitSlot(slot), null);
+     }
+ 

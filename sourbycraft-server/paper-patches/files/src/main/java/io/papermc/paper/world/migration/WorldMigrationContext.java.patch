@@ -1,0 +1,29 @@
+--- a/src/main/java/io/papermc/paper/world/migration/WorldMigrationContext.java
++++ b/src/main/java/io/papermc/paper/world/migration/WorldMigrationContext.java
+@@ -10,22 +_,22 @@
+ import org.jspecify.annotations.NullMarked;
+ 
+ @NullMarked
+-record WorldMigrationContext(
++public record WorldMigrationContext(
+     LevelStorageSource.LevelStorageAccess rootAccess,
+     HolderLookup.Provider registryAccess,
+     String worldName,
+     ResourceKey<LevelStem> stemKey,
+     ResourceKey<Level> dimensionKey
+ ) {
+-    Path baseRoot() {
++    public Path baseRoot() {
+         return this.rootAccess.getLevelDirectory().path();
+     }
+ 
+-    Path targetDimensionPath() {
++    public Path targetDimensionPath() {
+         return this.rootAccess.getDimensionPath(this.dimensionKey);
+     }
+ 
+-    Path targetDataRoot() {
++    public Path targetDataRoot() {
+         return this.targetDimensionPath().resolve(LevelResource.DATA.id());
+     }
+ }

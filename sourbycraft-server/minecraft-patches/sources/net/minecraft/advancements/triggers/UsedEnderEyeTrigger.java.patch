@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/UsedEnderEyeTrigger.java
++++ b/net/minecraft/advancements/triggers/UsedEnderEyeTrigger.java
+@@ -16,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final BlockPos feature) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         double xd = player.getX() - feature.getX();
+         double zd = player.getZ() - feature.getZ();
+         double sqrDist = xd * xd + zd * zd;

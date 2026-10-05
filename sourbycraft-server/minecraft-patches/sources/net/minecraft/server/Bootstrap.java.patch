@@ -1,0 +1,10 @@
+--- a/net/minecraft/server/Bootstrap.java
++++ b/net/minecraft/server/Bootstrap.java
+@@ -49,6 +_,7 @@
+                 throw new IllegalStateException("Unable to load registries");
+             }
+ 
++            io.canvasmc.canvas.GlobalConfiguration.init(); // Canvas - Rebrand - load global configuration
+             FireBlock.bootStrap();
+             ComposterBlock.bootStrap();
+             if (EntityType.getKey(EntityTypes.PLAYER) == null) {

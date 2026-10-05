@@ -1,0 +1,588 @@
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -37,7 +_,6 @@
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.StringRepresentable;
+-import net.minecraft.util.profiling.Profiler;
+ import net.minecraft.util.random.WeightedList;
+ import net.minecraft.world.TickRateManager;
+ import net.minecraft.world.attribute.EnvironmentAttributeSystem;
+@@ -119,10 +_,13 @@
+         .add(new ExplosionParticleInfo(ParticleTypes.POOF, 0.5F, 1.0F))
+         .add(new ExplosionParticleInfo(ParticleTypes.SMOKE, 1.0F, 1.0F))
+         .build();
+-    public final List<TickingBlockEntity> blockEntityTickers = Lists.newArrayList();
+-    protected final CollectingNeighborUpdater neighborUpdater;
+-    private final List<TickingBlockEntity> pendingBlockEntityTickers = Lists.newArrayList();
+-    private boolean tickingBlockEntities;
++    // Folia start - region threading - moved to regionized data
++    public final int neighbourUpdateMax;
++    // public final List<TickingBlockEntity> blockEntityTickers = Lists.newArrayList();
++    // protected final CollectingNeighborUpdater neighborUpdater;
++    // private final List<TickingBlockEntity> pendingBlockEntityTickers = Lists.newArrayList();
++    // private boolean tickingBlockEntities;
++    // Folia end - region threading - moved to regionized data
+     protected final Thread thread;
+     private final boolean isDebug;
+     private int skyDarken;
+@@ -132,7 +_,7 @@
+     public float rainLevel;
+     protected float oThunderLevel;
+     public float thunderLevel;
+-    protected final RandomSource random = new ca.spottedleaf.moonrise.common.util.ThreadUnsafeRandom(net.minecraft.world.level.levelgen.RandomSupport.generateUniqueSeed()); // Paper - replace random
++    protected final RandomSource random = io.papermc.paper.threadedregions.util.ThreadLocalRandomSource.INSTANCE; // Paper - replace random // Folia - region threading
+     @Deprecated
+     private final RandomSource soundSeedGenerator = RandomSource.createThreadSafe();
+     private final Holder<DimensionType> dimensionTypeRegistration;
+@@ -143,27 +_,16 @@
+     private final RegistryAccess registryAccess;
+     private final DamageSources damageSources;
+     private final PalettedContainerFactory palettedContainerFactory;
+-    private long subTickCount;
++    private final java.util.concurrent.atomic.AtomicLong subTickCount = new java.util.concurrent.atomic.AtomicLong(); // Folia - region threading
+ 
+     // CraftBukkit start
+     public final io.papermc.paper.antixray.ChunkPacketBlockController chunkPacketBlockController; // Paper - Anti-Xray
+     private final CraftWorld world;
+     public org.bukkit.generator.@Nullable ChunkGenerator generator;
+ 
+-    public boolean captureBlockStates = false;
+-    public boolean captureTreeGeneration = false;
+-    public Map<BlockPos, org.bukkit.craftbukkit.block.CraftBlockState> capturedBlockStates = new java.util.LinkedHashMap<>(); // Paper
+-    public Map<BlockPos, BlockEntity> capturedBlockEntities = new java.util.LinkedHashMap<>(); // Paper - Retain block place order when capturing blockstates
+-    @Nullable
+-    public List<net.minecraft.world.entity.item.ItemEntity> captureDrops;
++    // Folia - region threading - moved to regionized data
+     public final it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<SpawnCategory> ticksPerSpawnCategory = new it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<>();
+-    // Paper start - EAR 2
+-    public int wakeupInactiveRemainingAnimals;
+-    public int wakeupInactiveRemainingFlying;
+-    public int wakeupInactiveRemainingMonsters;
+-    public int wakeupInactiveRemainingVillagers;
+-    // Paper end - EAR 2
+-    public boolean populating;
++    // Folia - region threading - moved to regionized data
+     public final org.spigotmc.SpigotWorldConfig spigotConfig; // Spigot
+     // Paper start - add paper world config
+     private final io.papermc.paper.configuration.WorldConfiguration paperConfig;
+@@ -171,10 +_,21 @@
+         return this.paperConfig;
+     }
+     // Paper end - add paper world config
++    // Canvas start - Rebrand - world config
++    private io.canvasmc.canvas.WorldConfig canvasConfig;
++
++    public io.canvasmc.canvas.WorldConfig canvasConfig() {
++        return this.canvasConfig;
++    }
++
++    public void reloadCanvasConfig() {
++        this.canvasConfig = io.canvasmc.canvas.WorldConfig.buildForLevel((ServerLevel) this, dimension);
++    }
++    // Canvas end - Rebrand - world config
+ 
+     public static @Nullable BlockPos lastPhysicsProblem; // Spigot
+-    public final Map<ServerExplosion.CacheKey, Float> explosionDensityCache = new java.util.HashMap<>(); // Paper - Optimize explosions
+-    public java.util.ArrayDeque<net.minecraft.world.level.block.RedstoneTorchBlock.Toggle> redstoneUpdateInfos; // Paper - Faster redstone torch rapid clock removal; Move from Map in BlockRedstoneTorch to here
++    // public final Map<ServerExplosion.CacheKey, Float> explosionDensityCache = new java.util.HashMap<>(); // Paper - Optimize explosions // Folia - region threading
++    // public java.util.ArrayDeque<net.minecraft.world.level.block.RedstoneTorchBlock.Toggle> redstoneUpdateInfos; // Paper - Faster redstone torch rapid clock removal; Move from Map in BlockRedstoneTorch to here // Folia - region threading
+ 
+     public CraftWorld getWorld() {
+         return this.world;
+@@ -220,8 +_,7 @@
+ 
+     @Override
+     public final <T extends Entity> List<T> getEntitiesOfClass(final Class<T> entityClass, final AABB boundingBox, final Predicate<? super T> predicate) {
+-        Profiler.get().incrementCounter("getEntities");
+-        final List<T> ret = new java.util.ArrayList<>();
++        final List<T> ret = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // Canvas - use optimized collection
+ 
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getEntities(entityClass, null, boundingBox, ret, predicate);
+ 
+@@ -230,8 +_,7 @@
+ 
+     @Override
+     public final List<Entity> moonrise$getHardCollidingEntities(final Entity entity, final AABB box, final Predicate<? super Entity> predicate) {
+-        Profiler.get().incrementCounter("getEntities");
+-        final List<Entity> ret = new java.util.ArrayList<>();
++        final List<Entity> ret = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // Canvas - use optimized collection
+ 
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getHardCollidingEntities(entity, box, ret, predicate);
+ 
+@@ -823,6 +_,31 @@
+         return chunk != null ? chunk.getNoiseBiome(x, y, z) : this.getUncachedNoiseBiome(x, y, z);
+     }
+     // Paper end - optimise random ticking
++    // Folia start - region threading
++    public final io.papermc.paper.threadedregions.RegionizedData<io.papermc.paper.threadedregions.RegionizedWorldData> worldRegionData
++        = new io.papermc.paper.threadedregions.RegionizedData<>(
++        (ServerLevel)this, (regionData) -> new io.papermc.paper.threadedregions.RegionizedWorldData((ServerLevel)Level.this, regionData),
++        io.papermc.paper.threadedregions.RegionizedWorldData.REGION_CALLBACK
++    );
++    public volatile io.papermc.paper.threadedregions.RegionizedServer.WorldLevelData tickData;
++
++    public io.papermc.paper.threadedregions.RegionizedWorldData getCurrentWorldData() {
++        final io.papermc.paper.threadedregions.RegionizedWorldData ret = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
++        if (ret == null) {
++            return ret;
++        }
++        Level world = ret.world;
++        if (world != this) {
++            throw new IllegalStateException("World mismatch: expected " + this.getWorld().getName() + " but got " + world.getWorld().getName());
++        }
++        return ret;
++    }
++
++    @Override
++    public List<net.minecraft.server.level.ServerPlayer> getLocalPlayers() {
++        return this.getCurrentWorldData().getLocalPlayers();
++    }
++    // Folia end - region threading
+ 
+     protected Level(
+         final WritableLevelData levelData,
+@@ -869,12 +_,13 @@
+         this.thread = Thread.currentThread();
+         this.biomeManager = new BiomeManager(this, biomeZoomSeed);
+         this.isDebug = isDebug;
+-        this.neighborUpdater = new CollectingNeighborUpdater(this, maxChainedNeighborUpdates);
++        this.neighbourUpdateMax = maxChainedNeighborUpdates; // Folia - region threading
+         this.registryAccess = registryAccess;
+         this.palettedContainerFactory = PalettedContainerFactory.create(registryAccess);
+         this.damageSources = new DamageSources(registryAccess);
+         this.entityLookup = new ca.spottedleaf.moonrise.patches.chunk_system.level.entity.dfl.DefaultEntityLookup(this); // Paper - rewrite chunk system
+         this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray
++        reloadCanvasConfig(); // Canvas - Rebrand - world config
+     }
+ 
+     public int getNextEntityId() {
+@@ -991,8 +_,8 @@
+     @Nullable
+     public final BlockState getBlockStateIfLoaded(BlockPos pos) {
+         // CraftBukkit start - tree generation
+-        if (this.captureTreeGeneration) {
+-            CraftBlockState previous = this.capturedBlockStates.get(pos);
++        if (this.getCurrentWorldData().captureTreeGeneration) { // Folia - region threading
++            CraftBlockState previous = this.getCurrentWorldData().capturedBlockStates.get(pos); // Folia - region threading
+             if (previous != null) {
+                 return previous.getHandle();
+             }
+@@ -1054,16 +_,18 @@
+ 
+     @Override
+     public boolean setBlock(final BlockPos pos, final BlockState blockState, final @Block.UpdateFlags int updateFlags, final int updateLimit) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)this, pos, "Updating block asynchronously"); // Folia - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.getCurrentWorldData(); // Folia - region threading
+         // CraftBukkit start - tree generation
+-        if (this.captureTreeGeneration) {
++        if (worldData.captureTreeGeneration) { // Folia - region threading
+             // Paper start - Protect Bedrock and End Portal/Frames from being destroyed
+             BlockState type = getBlockState(pos);
+             if (!type.isDestroyable()) return false;
+             // Paper end - Protect Bedrock and End Portal/Frames from being destroyed
+-            CraftBlockState blockstate = this.capturedBlockStates.get(pos);
++            CraftBlockState blockstate = worldData.capturedBlockStates.get(pos); // Folia - region threading
+             if (blockstate == null) {
+                 blockstate = org.bukkit.craftbukkit.block.CapturedBlockState.getTreeBlockState(this, pos, updateFlags);
+-                this.capturedBlockStates.put(pos.immutable(), blockstate);
++                worldData.capturedBlockStates.put(pos.immutable(), blockstate); // Folia - region threading
+             }
+             blockstate.setBlock(blockState);
+             blockstate.setFlags(updateFlags);
+@@ -1082,14 +_,14 @@
+         Block block = blockState.getBlock();
+         // CraftBukkit start - capture blockstates
+         boolean captured = false;
+-        if (this.captureBlockStates) {
++        if (worldData.captureBlockStates) { // Folia - region threading
+             final CraftBlockState snapshot;
+-            if (!this.capturedBlockStates.containsKey(pos)) {
++            if (!worldData.capturedBlockStates.containsKey(pos)) { // Folia - region threading
+                 snapshot = (CraftBlockState) org.bukkit.craftbukkit.block.CraftBlock.at(this, pos).getState(); // Paper - use CB getState to get a suitable snapshot
+-                this.capturedBlockStates.put(pos.immutable(), snapshot);
++                worldData.capturedBlockStates.put(pos.immutable(), snapshot); // Folia - region threading
+                 captured = true;
+             } else {
+-                snapshot = this.capturedBlockStates.get(pos);
++                snapshot = worldData.capturedBlockStates.get(pos); // Folia - region threading
+             }
+             snapshot.setFlags(updateFlags); // Paper - always set the flag of the most recent call to mitigate issues with multiple update at the same pos with different flags
+         }
+@@ -1098,8 +_,8 @@
+         this.chunkPacketBlockController.onBlockChange(this, pos, blockState, oldState, updateFlags, updateLimit); // Paper - Anti-Xray
+         if (oldState == null) {
+             // CraftBukkit start - remove blockstate if failed (or the same)
+-            if (this.captureBlockStates && captured) {
+-                this.capturedBlockStates.remove(pos);
++            if (worldData.captureBlockStates && captured) { // Folia - region threading
++                worldData.capturedBlockStates.remove(pos); // Folia - region threading
+             }
+             // CraftBukkit end
+             return false;
+@@ -1137,7 +_,7 @@
+         */ // CraftBukkit
+ 
+         // CraftBukkit start
+-        if (!this.captureBlockStates) { // Don't notify clients or update physics while capturing blockstates
++        if (!worldData.captureBlockStates) { // Don't notify clients or update physics while capturing blockstates // Folia - region threading
+             // Modularize client and physic updates
+             // Spigot start
+             try {
+@@ -1176,7 +_,7 @@
+                 // CraftBukkit start
+                 oldState.updateIndirectNeighbourShapes(this, pos, neighbourUpdateFlags, updateLimit - 1); // Don't call an event for the old block to limit event spam
+                 boolean cancelledUpdates = false; // Paper - Fix block place logic
+-                if (((ServerLevel)this).hasPhysicsEvent) { // Paper - BlockPhysicsEvent
++                if (((ServerLevel)this).getCurrentWorldData().hasPhysicsEvent) { // Paper - BlockPhysicsEvent // Folia - region threading
+                     org.bukkit.event.block.BlockPhysicsEvent event = new org.bukkit.event.block.BlockPhysicsEvent(org.bukkit.craftbukkit.block.CraftBlock.at(this, pos), blockState.asBlockData());
+                     cancelledUpdates = !event.callEvent(); // Paper - Fix block place logic
+                 }
+@@ -1282,7 +_,7 @@
+         final @Block.UpdateFlags int updateFlags,
+         final int updateLimit
+     ) {
+-        this.neighborUpdater.shapeUpdate(direction, neighborState, pos, neighborPos, updateFlags, updateLimit);
++        this.getCurrentWorldData().neighborUpdater.shapeUpdate(direction, neighborState, pos, neighborPos, updateFlags, updateLimit); // Folia - region threading
+     }
+ 
+     @Override
+@@ -1306,11 +_,87 @@
+         return this.getChunkSource().getLightEngine();
+     }
+ 
++    // Folia start - region threading
++    @Nullable
++    public BlockState getBlockStateFromEmptyChunkIfLoaded(BlockPos pos) {
++        net.minecraft.server.level.ServerChunkCache chunkProvider = (net.minecraft.server.level.ServerChunkCache)this.getChunkSource();
++        ChunkAccess chunk = chunkProvider.getChunkAtImmediately(pos.getX() >> 4, pos.getZ() >> 4);
++        if (chunk != null) {
++            return chunk.getBlockState(pos);
++        }
++        return null;
++    }
++
++    @Nullable
++    public BlockState getBlockStateFromEmptyChunk(BlockPos pos) {
++        net.minecraft.server.level.ServerChunkCache chunkProvider = (net.minecraft.server.level.ServerChunkCache)this.getChunkSource();
++        ChunkAccess chunk = chunkProvider.getChunkAtImmediately(pos.getX() >> 4, pos.getZ() >> 4);
++        if (chunk != null) {
++            return chunk.getBlockState(pos);
++        }
++        chunk = chunkProvider.getChunk(pos.getX() >> 4, pos.getZ() >> 4, ChunkStatus.EMPTY, true);
++        return chunk.getBlockState(pos);
++    }
++    // Canvas start - region threading
++
++    public final void canvas$loadOrRunAtChunksAsync(final BlockPos pos, final int radiusBlocks,
++                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
++                                                    final Runnable callback) {
++        if (!(this instanceof ServerLevel serverLevel)) throw new UnsupportedOperationException();
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++            this, pos, radiusBlocks
++        )) {
++            // already on the running region, run callback
++            callback.run();
++        } else if (moonrise$areChunksLoaded(
++            (pos.getX() - radiusBlocks) >> 4,
++            (pos.getX() + radiusBlocks) >> 4,
++            (pos.getZ() - radiusBlocks) >> 4,
++            (pos.getZ() + radiusBlocks) >> 4
++        )) {
++            // chunks are loaded, schedule callback
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                serverLevel, pos.getX() >> 4, pos.getZ() >> 4, callback, priority
++            );
++        } else {
++            // chunks are not loaded, schedule load and callback
++            serverLevel.moonrise$loadChunksAsync(
++                pos, radiusBlocks, priority, (_) -> callback.run()
++            );
++        }
++    }
++
++    public final void canvas$loadOrRunAtChunksAsync(final int minChunkX, final int maxChunkX, final int minChunkZ, final int maxChunkZ,
++                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
++                                                    final Runnable callback) {
++        if (!(this instanceof ServerLevel serverLevel)) throw new UnsupportedOperationException();
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++            this, minChunkX, minChunkZ, maxChunkX, maxChunkZ
++        )) {
++            // already on the running region, run callback
++            callback.run();
++        } else if (moonrise$areChunksLoaded(
++            minChunkX, minChunkZ, maxChunkX, maxChunkZ
++        )) {
++            // chunks are loaded, schedule callback
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                serverLevel, minChunkX, minChunkZ, callback, priority
++            );
++        } else {
++            // chunks are not loaded, schedule load and callback
++            serverLevel.moonrise$loadChunksAsync(
++                minChunkX, minChunkZ, maxChunkX, maxChunkZ, priority, (_) -> callback.run()
++            );
++        }
++    }
++    // Canvas end - region threading
++
++    // Folia end - region threading
+     @Override
+     public BlockState getBlockState(final BlockPos pos) {
+         // CraftBukkit start - tree generation
+-        if (this.captureTreeGeneration) {
+-            CraftBlockState previous = this.capturedBlockStates.get(pos); // Paper
++        if (this.getCurrentWorldData().captureTreeGeneration) { // Folia - region threading
++            CraftBlockState previous = this.getCurrentWorldData().capturedBlockStates.get(pos); // Paper // Folia - region threading
+             if (previous != null) {
+                 return previous.getHandle();
+             }
+@@ -1481,51 +_,83 @@
+ 
+     public void addBlockEntityTicker(final TickingBlockEntity ticker) {
+         if (!this.paperConfig().unsupportedSettings.ticking.blockEntities) return; // Paper - option to disable ticking
+-        (this.tickingBlockEntities ? this.pendingBlockEntityTickers : this.blockEntityTickers).add(ticker);
++        this.getCurrentWorldData().addBlockEntityTicker(ticker); // Folia - region threading
+     }
+ 
+     public void tickBlockEntities() {
+-        this.tickingBlockEntities = true;
+-        if (!this.pendingBlockEntityTickers.isEmpty()) {
+-            this.blockEntityTickers.addAll(this.pendingBlockEntityTickers);
+-            this.pendingBlockEntityTickers.clear();
+-        }
++        // Folia start - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = this.getCurrentWorldData();
++        regionizedWorldData.setTickingBlockEntities(true);
++        regionizedWorldData.pushPendingTickingBlockEntities();
++        List<TickingBlockEntity> blockEntityTickers = regionizedWorldData.getBlockEntityTickers();
++        // Folia end - region threading
+ 
+         // Paper - Fix MC-117075 use removeAll - remove iterator in favour of indexed for loop, ensuring compile error if something uses iter incorrectly
+-        boolean tickBlockEntities = this.tickRateManager().runsNormally();
+-
+-        int tickedEntities = 0; // Paper - rewrite chunk system
+-        // Paper start - Fix MC-117075 use removeAll
+-        final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<@Nullable TickingBlockEntity> toRemove = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
+-        toRemove.add(null);
+-        for (int tickerIndex = 0; tickerIndex < this.blockEntityTickers.size(); tickerIndex++) {
+-            final TickingBlockEntity ticker = this.blockEntityTickers.get(tickerIndex);
+-        // Paper end - Fix MC-117075 use removeAll
++        boolean tickBlockEntities = regionizedWorldData.regionData.tickHandle.getTickManager().doesRunGameElements(); // Canvas - region threading
++
++        // Canvas start - optimize BE iteration
++        int tickedEntities = 0;
++        int size = blockEntityTickers.size();
++        int writeIdx = 0;
++
++        for (int readIdx = 0; readIdx < size; readIdx++) {
++            TickingBlockEntity ticker = blockEntityTickers.get(readIdx);
++
+             if (ticker.isRemoved()) {
+-                toRemove.add(ticker); // Paper - Fix MC-117075 use removeAll
+-            } else if (tickBlockEntities && this.shouldTickBlocksAt(ticker.getPos())) {
++                continue;
++            }
++
++            if (tickBlockEntities && ticker.getPos() != null) { // block entity sleeping
+                 ticker.tick();
+-                // Paper start - rewrite chunk system
+                 if ((++tickedEntities & 7) == 0) {
+-                    ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)(Level)(Object)this).moonrise$midTickTasks();
++                    this.moonrise$midTickTasks();
+                 }
+-                // Paper end - rewrite chunk system
+-            }
+-        }
+-
+-        this.blockEntityTickers.removeAll(toRemove); // Paper - Fix MC-117075 use removeAll
+-        this.tickingBlockEntities = false;
++            }
++
++            if (writeIdx != readIdx) {
++                blockEntityTickers.set(writeIdx, ticker);
++            }
++            writeIdx++;
++        }
++
++        if (writeIdx < size) {
++            blockEntityTickers.subList(writeIdx, size).clear();
++        }
++
++        // Canvas end - optimize BE iteration
++        regionizedWorldData.setTickingBlockEntities(false); // Folia - region threading
+     }
+ 
+     public <T extends Entity> void guardEntityTick(final Consumer<T> tick, final T entity) {
+         try {
+             tick.accept(entity);
++        // Canvas start - region threading
++        // This segment prevents CMEs from extreme single-tick movement. See #164:
++        // https://github.com/CraftCanvasMC/Canvas/pull/164
++        // This is also a modified version of Luminol's approach to deal with this issue. See:
++        // https://github.com/LuminolMC/Luminol/commit/41df3b26452fc9df6cfea1cc205503924cb364e4
++        } catch (final io.canvasmc.canvas.threadedregions.entities.EntityMoveOutOfRegionException moore) {
++            final Entity movingEntity = moore.entity();
++            final Vec3 currentPosition = movingEntity.position();
++            final Vec3 destinationPosition = currentPosition.add(moore.movement());
++            movingEntity.getBukkitEntity().taskScheduler.scheduleOrExecute((Entity newEntity) -> newEntity.teleportAsync(
++                (ServerLevel) newEntity.level(),
++                destinationPosition,
++                newEntity.getYRot(),
++                newEntity.getXRot(),
++                newEntity.getDeltaMovement(),
++                org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN,
++                Entity.TELEPORT_FLAG_LOAD_CHUNK,
++                null
++            ));
++        // Canvas end - region threading
+         } catch (Throwable t) {
+             // Paper start - Prevent block entity and entity crashes
+             final String msg = String.format("Entity threw exception at %s:%s,%s,%s", io.papermc.paper.util.MCUtil.getLevelName(entity.level()), entity.getX(), entity.getY(), entity.getZ());
+             MinecraftServer.LOGGER.error(msg, t);
+             getCraftServer().getPluginManager().callEvent(new com.destroystokyo.paper.event.server.ServerExceptionEvent(new com.destroystokyo.paper.exception.ServerInternalException(msg, t))); // Paper - ServerExceptionEvent
+-            entity.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DISCARD);
++            if (!(entity instanceof net.minecraft.server.level.ServerPlayer)) entity.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DISCARD); // Folia - properly disconnect players
++            if (entity instanceof net.minecraft.server.level.ServerPlayer player) player.connection.disconnect(net.minecraft.network.chat.Component.translatable("multiplayer.disconnect.generic"), org.bukkit.event.player.PlayerKickEvent.Cause.UNKNOWN); // Folia - properly disconnect players
+             // Paper end - Prevent block entity and entity crashes
+         }
+         this.moonrise$midTickTasks(); // Paper - rewrite chunk system
+@@ -1679,9 +_,14 @@
+ 
+     @Override
+     public @Nullable BlockEntity getBlockEntity(final BlockPos pos) {
++        // Folia start - region threading
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) {
++            return null;
++        }
++        // Folia end - region threading
+         // Paper start - Perf: Optimize capturedTileEntities lookup
+         net.minecraft.world.level.block.entity.BlockEntity blockEntity;
+-        if (!this.capturedBlockEntities.isEmpty() && (blockEntity = this.capturedBlockEntities.get(pos)) != null) {
++        if (!this.getCurrentWorldData().capturedBlockEntities.isEmpty() && (blockEntity = this.getCurrentWorldData().capturedBlockEntities.get(pos)) != null) { // Folia - region threading
+             return blockEntity;
+         }
+         // Paper end - Perf: Optimize capturedTileEntities lookup
+@@ -1698,8 +_,8 @@
+         BlockPos pos = blockEntity.getBlockPos();
+         if (this.isInValidBounds(pos)) {
+             // CraftBukkit start
+-            if (this.captureBlockStates) {
+-                this.capturedBlockEntities.put(pos.immutable(), blockEntity);
++            if (this.getCurrentWorldData().captureBlockStates) { // Folia - region threading
++                this.getCurrentWorldData().capturedBlockEntities.put(pos.immutable(), blockEntity); // Folia - region threading
+                 return;
+             }
+             // CraftBukkit end
+@@ -1767,7 +_,7 @@
+ 
+     @Override
+     public List<Entity> getEntities(final @Nullable Entity except, final AABB bb, final Predicate<? super Entity> selector) {
+-        Profiler.get().incrementCounter("getEntities");
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)this, bb, "Cannot getEntities asynchronously"); // Folia - region threading
+         // Paper start - rewrite chunk system
+         final List<Entity> ret = new java.util.ArrayList<>();
+ 
+@@ -1796,8 +_,7 @@
+     public <T extends Entity> void getEntities(final EntityTypeTest<Entity, T> entityTypeTest,
+                                                final AABB boundingBox, final Predicate<? super T> predicate,
+                                                final List<? super T> into, final int maxCount) {
+-        Profiler.get().incrementCounter("getEntities");
+-
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, boundingBox, "Cannot getEntities asynchronously"); // Folia - region threading
+         if (entityTypeTest instanceof net.minecraft.world.entity.EntityType<T> byType) {
+             if (maxCount != Integer.MAX_VALUE) {
+                 ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getEntities(byType, boundingBox, into, predicate, maxCount);
+@@ -1882,7 +_,6 @@
+     // Paper end - rewrite chunk system
+ 
+     public <T extends Entity> boolean hasEntities(final EntityTypeTest<Entity, T> type, final AABB bb, final Predicate<? super T> selector) {
+-        Profiler.get().incrementCounter("hasEntities");
+         MutableBoolean hasEntities = new MutableBoolean();
+         this.getEntities().get(type, bb, e -> {
+             if (selector.test(e)) {
+@@ -1908,6 +_,35 @@
+     public List<Entity> getPushableEntities(final Entity pusher, final AABB boundingBox) {
+         return this.getEntities(pusher, boundingBox, EntitySelector.pushableBy(pusher));
+     }
++    // Canvas start - only players push config
++
++    public it.unimi.dsi.fastutil.objects.ObjectArrayList<net.minecraft.server.level.ServerPlayer> canvas$getIntersectingPlayers(Entity calling, AABB boundingBox, Predicate<Entity> predicate) {
++        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> players = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel) this).moonrise$getNearbyPlayers().getPlayers(
++            calling.blockPosition(), calling.level().canvasConfig().entities.entityCollisionMode.isLargePushRange() ?
++                ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.SPAWN_RANGE :
++                ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.GENERAL_REALLY_REALLY_SMALL
++        );
++
++        if (players == null) {
++            return new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
++        }
++
++        final net.minecraft.server.level.ServerPlayer[] arr = players.getRawDataUnchecked();
++        final it.unimi.dsi.fastutil.objects.ObjectArrayList<net.minecraft.server.level.ServerPlayer> serverPlayers = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
++        for (int i = 0; i < arr.length; i++) {
++            net.minecraft.server.level.ServerPlayer player = arr[i];
++            if (
++                player != calling
++                && boundingBox.intersects(player.getBoundingBox())
++                && predicate.test(player)
++            ) {
++                serverPlayers.add(player);
++            }
++        }
++
++        return serverPlayers;
++    }
++    // Canvas end - only players push config
+ 
+     public abstract @Nullable Entity getEntity(int id);
+ 
+@@ -1934,6 +_,20 @@
+     public void onBlockEntityAdded(final BlockEntity blockEntity) {
+     }
+ 
++    // Folia start - region threading
++    @Override
++    public long getRedstoneGameTime() {
++        return this.getCurrentWorldData().getRedstoneGameTime();
++    }
++
++    @Override
++    public long getGameTime() {
++        // Dumb world gen thread calls this for some reason. So, check for null.
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.getCurrentWorldData();
++        return worldData == null ? this.getLevelData().getGameTime() : worldData.getTickData().nonRedstoneGameTime();
++    }
++
++    // Folia end - region threading
+     public long getOverworldClockTime() {
+         return this.getClockTimeTicks(this.registryAccess().get(WorldClocks.OVERWORLD));
+     }
+@@ -2056,7 +_,7 @@
+     public void updateNeighbourForOutputSignal(final BlockPos pos, final Block changedBlock) {
+         for (Direction direction : Direction.Plane.HORIZONTAL) {
+             BlockPos relativePos = pos.relative(direction);
+-            if (this.hasChunkAt(relativePos)) {
++            if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this, relativePos, 25) && this.hasChunkAt(relativePos)) { // Folia - block updates in unloaded chunks
+                 BlockState state = this.getBlockState(relativePos);
+                 if (state.is(Blocks.COMPARATOR)) {
+                     this.neighborChanged(state, relativePos, changedBlock, null, false);
+@@ -2114,8 +_,7 @@
+     public abstract RecipeAccess recipeAccess();
+ 
+     public BlockPos getBlockRandomPos(final int xo, final int yo, final int zo, final int yMask) {
+-        this.randValue = this.randValue * 3 + 1013904223;
+-        int val = this.randValue >> 2;
++        int val = this.random.nextInt() >> 2; // Folia - region threading
+         return new BlockPos(xo + (val & 15), yo + (val >> 16 & yMask), zo + (val >> 8 & 15));
+     }
+ 
+@@ -2136,7 +_,7 @@
+ 
+     @Override
+     public long nextSubTickCount() {
+-        return this.subTickCount++;
++        return this.subTickCount.getAndIncrement(); // Folia - region threading
+     }
+ 
+     @Override

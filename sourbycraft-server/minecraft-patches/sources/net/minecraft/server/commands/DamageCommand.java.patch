@@ -1,0 +1,30 @@
+--- a/net/minecraft/server/commands/DamageCommand.java
++++ b/net/minecraft/server/commands/DamageCommand.java
+@@ -103,12 +_,20 @@
+         );
+     }
+ 
+-    private static int damage(final CommandSourceStack stack, final Entity target, final float amount, final DamageSource source) throws CommandSyntaxException {
+-        if (target.hurtServer(stack.getLevel(), source, amount)) {
+-            stack.sendSuccess(() -> Component.translatable("commands.damage.success", amount, target.getDisplayName()), true);
+-            return Command.SINGLE_SUCCESS;
+-        } else {
+-            throw ERROR_INVULNERABLE.create();
+-        }
++    // Canvas start - region threading
++    private static int damage(final CommandSourceStack stack, final Entity selected, final float amount, final DamageSource source) throws CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._boolean(false)
++            .with(selected)
++            .executes((Entity target) -> (_) -> target.hurtServer(stack.getLevel(), source, amount))
++            .onComplete((passed, targets, css) -> {
++                if (!passed) {
++                    throw ERROR_INVULNERABLE.create();
++                }
++                css.sendSuccess(() -> Component.translatable("commands.damage.success", amount, targets.getFirst().getDisplayName()), true);
++                return Command.SINGLE_SUCCESS;
++            })
++            .start(stack);
++        return Command.SINGLE_SUCCESS;
++    // Canvas end - region threading
+     }
+ }

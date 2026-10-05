@@ -1,6 +1,6 @@
 # AGENTS.md — SourbyCraft 26.2 Aurora
 
-Region-threaded Minecraft 26.2 server fork with the **Aurora** runtime/engine architecture. Canvas/Folia/Paper remain upstream implementation inputs where the current branch still depends on them; they are not the product/runtime identity. Do not describe planned Aurora ownership as already independent. The active build/toolchain must be verified from the current branch before repeating historical Path-B or private-toolchain statements.
+Region-threaded Minecraft 26.2 server fork with the **Aurora** runtime/engine architecture. Paper is the only upstream (pinned by `paperRef`). Region threading and the other changes that used to come from Canvas/Folia are SourbyCraft-owned patches and sources since the 2026-10-05 migration; package names such as `io.canvasmc.*` and `io.papermc.paper.threadedregions.*` are kept for plugin compatibility and are not the product identity. Do not describe planned Aurora ownership as already independent. The active build/toolchain must be verified from the current branch before repeating historical Path-B or private-toolchain statements.
 
 ## Toolchain
 
@@ -11,7 +11,7 @@ Region-threaded Minecraft 26.2 server fork with the **Aurora** runtime/engine ar
 ## Build commands (root)
 
 ```bash
-./gradlew applyAllPatches            # materialize Paper → Canvas → SourbyCraft sources
+./gradlew applyAllPatches            # materialize Paper → SourbyCraft sources
 ./gradlew :sourbycraft-server:compileJava
 ./gradlew slimServerJar              # → build/libs/SourbyCraft-slim.jar (~34 MiB; rest fetched on first boot)
 ```
@@ -19,7 +19,7 @@ Region-threaded Minecraft 26.2 server fork with the **Aurora** runtime/engine ar
 Slim-jar task: `slimServerJar` strips 19 hard-coded artifact dirs from the paperclip jar (`build.gradle.kts:90-110`); `sourbyclip` re-downloads them by coordinate on first boot via `META-INF/libraries` manifest. If the strip count is 0, the task **fails** — update the prefix list when libraries move.
 
 The CI workflow `.github/workflows/build.yml` (single `Build 26.2 jar` job, push/dispatch only) does:
-1. Checks out the private `YanIanZ/SourbyPatcher` and `YanIanZ/SourbyClip` at the revisions in `build-data/private-toolchain.lock.json` (deploy keys) and publishes them to Maven Local with `scripts/private_toolchain.py --publish`. `settings.gradle.kts` refuses to configure without the hash-verified SourbyPatcher `canvas-toolchain` jar. See `docs/development/PRIVATE-TOOLCHAIN.md`.
+1. Checks out the private `YanIanZ/SourbyPatcher` and `YanIanZ/SourbyClip` at the revisions in `build-data/private-toolchain.lock.json` (deploy keys) and publishes them to Maven Local with `scripts/private_toolchain.py --publish`. `settings.gradle.kts` refuses to configure without the hash-verified SourbyPatcher `paper-toolchain` jar. See `docs/development/PRIVATE-TOOLCHAIN.md`.
 2. `bash scripts/setup_metal.sh` — Metal is **vendored** at `Metal/`, not a submodule (upstream LuminolMC/Metal went offline). `setup_metal.sh` calls `Metal/gen_sources.sh`.
 3. `applyAllPatches`, then `:sourbyapi:test :sourbycraft-server:test :test-plugin:test`, then the Python `scripts/test_*.py` suite, clip probes, then `slimServerJar -PsourbyBuild=N` and `verify_build_identity.py`.
 4. Boot test in the same job: boots with the test plugin, `online-mode=false`, `level-type=minecraft:normal`, waits up to 240s for `Done (` plus the metrics markers, sends `stop`, and fails on timeout or unclean exit.
@@ -27,26 +27,31 @@ The CI workflow `.github/workflows/build.yml` (single `Build 26.2 jar` job, push
 
 ## Module layout
 
-- `:sourbyapi` — branded API artifact `dev.iyanz.sourbycraft:sourbyapi`. **Zero custom source**; it republishes `paper-api` + `canvas-api` under the SourbyCraft group id (see `sourbyapi/README.md`). Materialized from `canvas-api/build.gradle.kts` via the `upstreams.canvas { patchFile { ... } }` block in root `build.gradle.kts`.
-- `:sourbycraft-server` — the server. Source-set merge in `build.gradle.kts.patch` adds `paper-server` + `canvas-server` to the main and test source sets, and `src/log4jPlugins/java` (own log4j2 pattern plugins, e.g. `%scLogger`).
+- `:sourbyapi` — branded API artifact `dev.iyanz.sourbycraft:sourbyapi`. Publishes `paper-api` (with `sourbyapi/paper-patches`) plus its own `sourbyapi/src` (the former Canvas API, `io.canvasmc.*`, and the SourbyCraft metrics API) under the SourbyCraft group id (see `sourbyapi/README.md`). Its build file is materialized from `paper-api/build.gradle.kts` via the `upstreams.paper { patchFile { ... } }` block in root `build.gradle.kts`.
+- `:sourbycraft-server` — the server. Source-set merge in `build.gradle.kts.patch` adds `paper-server` to the main and test source sets (the module's own `src/main/java` holds SourbyCraft code plus the region-threading engine sources formerly in `canvas-server`), and `src/log4jPlugins/java` (own log4j2 pattern plugins, e.g. `%scLogger`).
 - `:Metal` — vendored Minecraft library-decode codegen. `src/` empty until `setup_metal.sh` runs.
 - SourbyPatcher and SourbyClip are **not in this repository**. They live in private repos (`YanIanZ/SourbyPatcher`, `YanIanZ/SourbyClip`; local clones at `~/Sourby/SourbyPatcher` and `~/Sourby/SourbyClip`, each with its own `AGENTS.md` describing the release-into-SourbyCraft procedure), pinned by `build-data/private-toolchain.lock.json` and by `patcherSha256`/`clipSha256` in `gradle.properties`. SourbyClip (`dev.iyanz:sourbyclip:${clipVersion}`) is wired in `sourbycraft-server/build.gradle.kts.patch`.
 - `test-plugin/`, `legacy-test-plugin/` — opt-in projects; included when `-PincludeTestPlugin=true` (CI passes it). The pre-26.2 NMS-compat `test-harness/` and its `nms-compat.yml` workflow were removed; history has them if a 26.2 harness is ever rebuilt.
 
 ## Patch application
 
-Three-stage fork via weaver's own `ForkConfig`: Paper → Canvas (own `base/` git-format foundational patches + `sources/` codechicken diffpatch + `features/` git-format) → SourbyCraft (`paper-patches/`, `canvas-patches/`, `folia-patches/`, `minecraft-patches/`, plus `log4jPlugins/`). `gitFilePatches = false` project-wide — sources/ diffpatches go through `java-diff-utils` instead of `git apply`.
+Single-level fork through the private SourbyPatcher `paper-toolchain` plugin, which applies paperweight's patcher (2.0.0-beta.24; `io.papermc.paperweight.core` in `settings.gradle.kts` must be the same release) with Paper as the only upstream. `gitFilePatches = false` — file patches are codechicken diffpatch format and go through `java-diff-utils`.
 
-Critical gotcha in `sourbycraft-server/build.gradle.kts.patch`: `mergeMinecraftATs` MUST read Canvas's own `.at`, not `paperweight.activeFork` (activeFork is now `sourbycraft`, which has no `canvas.at` — silently breaks canvas-server minecraft-patches). Same patch adds an `afterEvaluate { ... }` to override `importCanvasLibraryFiles.devImports` to `build-data/canvas-dev-imports.txt` (upstream's list is empty; canvas.base/ uses `ca.spottedleaf.concurrentutil.*` classes that need explicit vendoring). And `sortFoliaATs` is made an explicit dependency of `mergeMinecraftATs` to avoid out-of-order execution under `rebuildMinecraftFeaturePatches`.
+Two kinds of patch, and the policy scripts depend on keeping them apart:
 
-`paper-patches/`, `canvas-patches/`, `folia-patches/`, `minecraft-patches/` under `sourbycraft-server/` are the actual patch source of truth — **edit patch files there, never the materialized sources** under `paper-server/`, `canvas-server/`, `paper-api/`, `canvas-api/` (those are git working copies, regenerated by `applyAllPatches`).
+- **Engine baseline** — `sourbycraft-server/minecraft-patches/sources/`, `sourbycraft-server/paper-patches/files/`, `sourbyapi/paper-patches/files/`. These hold what Canvas/Folia used to supply (region threading, Canvas features). `scripts/*_policy.py` deliberately do not scan them.
+- **SourbyCraft changes** — `sourbycraft-server/minecraft-patches/features/` and `sourbycraft-server/paper-patches/features/`. Every SourbyCraft edit to Minecraft or Paper code goes here as a git-format feature patch, even when the file is also in the baseline, so the policy scripts see it.
+
+Access transformers: `build-data/sourbycraft.at` (includes the former `canvas.at` + `folia.at`), `build-data/paperServer.at`, `build-data/paperApi.at`. Library imports: `build-data/dev-imports.txt` (includes the leafpile classes region threading uses without patching).
+
+The patch directories are the source of truth — **edit patch files (or the materialized repos followed by `rebuild*Patches`), never commit the materialized sources** under `paper-server/`, `paper-api/`, `sourbycraft-server/src/minecraft/` (git working copies regenerated by `applyAllPatches`). Workflow for a change: edit the materialized repo, commit there, run the matching `rebuild*Patches` task, commit the patch files.
 
 ## Configuration surfaces
 
 Configuration surfaces (do not conflate, and verify boot-order consumers before documenting reloadability):
 
 - **SourbyCraft utility layer** → `sourbycraft_config/sourbycraft_global_config.toml` (nightconfig). Messages, `/maxp` persistence, auto-updater, ViaVersion auto-provision.
-- **Canvas engine** → `config/canvas-server.yml` + `config/canvas-worlds.yml` (region scheduler, tick rate, autosave). Default `region-scheduler.guard-severity: LOG` (not Canvas's crash-prone `THROW`).
+- **Region-threading engine** (formerly Canvas; file names kept so existing servers keep their settings) → `config/canvas-server.yml` + `config/canvas-worlds.yml` (region scheduler, tick rate, autosave). Default `region-scheduler.guard-severity: LOG` (not Canvas's crash-prone `THROW`); pinned with the other engine defaults in `scripts/test_patch_policy.py`.
 - **Crash-prevention + packet-guard limits** → `sourbycraft-security.yml` (checked in; sampled at `sourbycraft-security.yml`).
 
 ## Cherry mixin engine
@@ -82,10 +87,10 @@ Wait for `Done (` in console. Build 47+ `/ver` reports a SourbyCraft-owned ident
 
 - Bump `sourbyBuild` in `gradle.properties` per release. Build 47+ MUST NOT append an upstream-platform letter to public version strings.
 - `releaseVersion` defaults to `26.2`; Build 47 codename is `aurora-nexus`.
-- Do not commit `paper-server/`, `canvas-server/`, `paper-api/`, `canvas-api/` working-copy edits — those are generated by `applyAllPatches` from the `canvasRef` pin in `gradle.properties` (Canvas `2a3bf65c...`).
+- Do not commit `paper-server/`, `paper-api/` or `sourbycraft-server/src/minecraft/` working-copy edits — those are generated by `applyAllPatches` from the `paperRef` pin in `gradle.properties` (Paper `9240f586...`).
 - The private toolchain is required: without the pinned SourbyPatcher jar in Maven Local, Gradle fails at settings time. When changing a tool, bump its version and update both the lock file and the SHA-256 in `gradle.properties`.
 - Keep `release=pre` in `gradle.properties` until the build passes every gate in its release doc; `release=true` publishes to every server running the default auto-updater.
-- The `slimServerJar` task's `externalizeArtifactDirs` list is matched by path prefix against the paperclip layout — when Canvas/weaver bumps versions, jars may move and the task will **fail loudly** with `stripped 0 libraries`. That's the intended signal to update the list.
+- The `slimServerJar` task's `externalizeArtifactDirs` list is matched by path prefix against the paperclip layout — when Paper/paperweight bumps versions, jars may move and the task will **fail loudly** with `stripped 0 libraries`. That's the intended signal to update the list.
 - `applyAllPatches` is config-cache friendly but `writeBuildInfo` is opted out (`notCompatibleWithConfigurationCache`) because it reads git branch via `providers.exec` at execution time.
 
 

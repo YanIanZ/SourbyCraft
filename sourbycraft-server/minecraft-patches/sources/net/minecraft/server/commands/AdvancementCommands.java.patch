@@ -1,0 +1,102 @@
+--- a/net/minecraft/server/commands/AdvancementCommands.java
++++ b/net/minecraft/server/commands/AdvancementCommands.java
+@@ -238,18 +_,38 @@
+         final Collection<AdvancementHolder> advancements,
+         final boolean showAdvancements
+     ) throws CommandSyntaxException {
+-        int advancementCount = 0;
+-        int playerCount = 0;
+-
+-        for (ServerPlayer player : players) {
+-            int changedAdvancements = action.perform(player, advancements, showAdvancements);
+-            if (changedAdvancements > 0) {
+-                playerCount++;
+-            }
+-
+-            advancementCount += changedAdvancements;
+-        }
+-
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.
++                <io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.NumericPair<Integer, Integer>, ServerPlayer>
++                _abstract(new io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.NumericPair<>(0, 0))
++            .with(players)
++            .executes((ServerPlayer entityPlayer) -> {
++                int changedAdvancements = action.perform(entityPlayer, advancements, showAdvancements);
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.mapPairBoth(
++                    (advancementCount) -> advancementCount + changedAdvancements,
++                    (playerCount) -> changedAdvancements > 0 ? playerCount + 1 : playerCount
++                );
++            })
++            .onComplete((pair, _, css) -> performCallback(
++                pair.first(), pair.second(),
++                css,
++                players,
++                action,
++                advancements
++            ))
++            .start(source);
++        return 1;
++    }
++
++    private static int performCallback(
++        final int advancementCount,
++        final int playerCount,
++        final CommandSourceStack source,
++        final Collection<ServerPlayer> players,
++        final AdvancementCommands.Action action,
++        final Collection<AdvancementHolder> advancements
++    ) throws CommandSyntaxException {
++    // Canvas end - region threading
+         if (advancementCount == 0) {
+             if (advancements.size() == 1) {
+                 Component advancementName = Advancement.name(Iterables.getOnlyElement(advancements));
+@@ -307,18 +_,40 @@
+         final AdvancementHolder holder,
+         final String criterion
+     ) throws CommandSyntaxException {
+-        int playerCount = 0;
++        // Canvas - region threading
+         Advancement advancement = holder.value();
+         if (!advancement.criteria().containsKey(criterion)) {
+             throw ERROR_CRITERION_NOT_FOUND.create(Advancement.name(holder), criterion);
+         }
+-
+-        for (ServerPlayer player : players) {
+-            if (action.performCriterion(player, holder, criterion)) {
+-                playerCount++;
+-            }
+-        }
+-
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++            .with(players)
++            .executes((ServerPlayer entityPlayer) -> {
++                if (action.performCriterion(entityPlayer, holder, criterion)) {
++                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                }
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++            })
++            .onComplete((playerCount, _, css) -> criterionCallback(
++                playerCount, css,
++                players,
++                action,
++                holder,
++                criterion
++            ))
++            .start(source);
++        return 1;
++    }
++
++    private static int criterionCallback(
++        final int playerCount,
++        final CommandSourceStack source,
++        final Collection<ServerPlayer> players,
++        final AdvancementCommands.Action action,
++        final AdvancementHolder holder,
++        final String criterion
++    ) throws CommandSyntaxException {
++    // Canvas end - region threading
+         if (playerCount == 0) {
+             if (players.size() == 1) {
+                 throw ERROR_NO_ACTION_PERFORMED.create(

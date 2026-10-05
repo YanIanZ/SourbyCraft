@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: agent <agent@local>
+Date: Mon, 5 Oct 2026 15:02:20 +0700
+Subject: [PATCH] SourbyCraft - admit and route legacy plugins through Aurora
+ Bridge
+
+
+diff --git a/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginProviderFactory.java b/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginProviderFactory.java
+index 6369b13e1fcdbdb25dd9d6e4d3bffdedbee4f739..d8cd5ce6588e09052b8b53b161d1b65fb4df77de 100644
+--- a/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginProviderFactory.java
++++ b/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginProviderFactory.java
+@@ -25,7 +25,7 @@ class PaperPluginProviderFactory implements PluginTypeFactory<PaperPluginParent,
+     @Override
+     public PaperPluginParent build(JarFile file, PaperPluginMeta configuration, Path source) {
+         // Folia start - block plugins not marked as supported
+-        if (!configuration.isFoliaSupported()) {
++        if (!configuration.isFoliaSupported() && !dev.iyanz.sourbycraft.bridge.AuroraBridge.admitLegacy(configuration.getName())) { // SourbyCraft - Aurora Bridge
+             throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia!");
+         }
+         // Folia end - block plugins not marked as supported
+diff --git a/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java b/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
+index 5b09eee406ffe038e9b22e0d49d3ec533f011025..c489d50411fa26e8894b56d8bb6e85164f54c21b 100644
+--- a/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
++++ b/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
+@@ -27,7 +27,7 @@ class SpigotPluginProviderFactory implements PluginTypeFactory<SpigotPluginProvi
+     @Override
+     public SpigotPluginProvider build(JarFile file, PluginDescriptionFile configuration, Path source) throws InvalidDescriptionException {
+         // Folia start - block plugins not marked as supported
+-        if (!configuration.isFoliaSupported()) {
++        if (!configuration.isFoliaSupported() && !dev.iyanz.sourbycraft.bridge.AuroraBridge.admitLegacy(configuration.getName())) { // SourbyCraft - Aurora Bridge
+             throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia!");
+         }
+         // Folia end - block plugins not marked as supported
+diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+index 8c6892ec60c1841cae45889da764cdd7d314d1f9..aee27c0e8783859b2810fb3e6ee44a04eb3f9327 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
++++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+@@ -264,6 +264,7 @@ public class CraftScheduler implements BukkitScheduler {
+         if (taskId <= 0) {
+             return;
+         }
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.cancel(taskId)) return; // SourbyCraft - Aurora Bridge
+         // Paper start
+         if (!this.isAsyncScheduler) {
+             this.asyncScheduler.cancelTask(taskId);
+@@ -311,6 +312,7 @@ public class CraftScheduler implements BukkitScheduler {
+     @Override
+     public void cancelTasks(final Plugin plugin) {
+         Preconditions.checkArgument(plugin != null, "Cannot cancel tasks of null plugin");
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.cancelAll(plugin)) return; // SourbyCraft - Aurora Bridge
+         // Paper start
+         if (!this.isAsyncScheduler) {
+             this.asyncScheduler.cancelTasks(plugin);
+@@ -355,6 +357,7 @@ public class CraftScheduler implements BukkitScheduler {
+ 
+     @Override
+     public boolean isCurrentlyRunning(final int taskId) {
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.knows(taskId)) return dev.iyanz.sourbycraft.bridge.AuroraBridge.isRunning(taskId); // SourbyCraft - Aurora Bridge
+         // Paper start
+         if (!this.isAsyncScheduler) {
+             if (this.asyncScheduler.isCurrentlyRunning(taskId)) {
+@@ -380,6 +383,7 @@ public class CraftScheduler implements BukkitScheduler {
+         if (taskId <= 0) {
+             return false;
+         }
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.knows(taskId)) return true; // SourbyCraft - Aurora Bridge: scheduled and not finished or cancelled
+         // Paper start
+         if (!this.isAsyncScheduler && this.asyncScheduler.isQueued(taskId)) {
+             return true;
+@@ -442,6 +446,7 @@ public class CraftScheduler implements BukkitScheduler {
+         // Paper start
+         if (!this.isAsyncScheduler) {
+             pending.addAll(this.asyncScheduler.getPendingTasks());
++            for (final Object bridged : dev.iyanz.sourbycraft.bridge.AuroraBridge.pendingTasks()) pending.add((BukkitTask) bridged); // SourbyCraft - Aurora Bridge
+         }
+         // Paper end
+         return pending;
+@@ -514,6 +519,12 @@ public class CraftScheduler implements BukkitScheduler {
+     }
+ 
+     protected CraftTask handle(final CraftTask task, final long delay) { // Paper
++        // SourbyCraft start - Aurora Bridge: route a bridged legacy plugin's task instead of refusing it
++        if (dev.iyanz.sourbycraft.bridge.AuroraBridge.handles(task.getOwner())) {
++            dev.iyanz.sourbycraft.bridge.AuroraBridge.submit(task.getOwner(), bridgeTask(task), delay);
++            return task;
++        }
++        // SourbyCraft end - Aurora Bridge
+         if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
+         // Paper start
+         if (!this.isAsyncScheduler && !task.isSync()) {
+@@ -526,6 +537,31 @@ public class CraftScheduler implements BukkitScheduler {
+         return task;
+     }
+ 
++    // SourbyCraft start - Aurora Bridge
++    private static dev.iyanz.sourbycraft.bridge.BridgeRuntime.Task bridgeTask(final CraftTask task) {
++        return new dev.iyanz.sourbycraft.bridge.BridgeRuntime.Task() {
++            @Override public int id() { return task.getTaskId(); }
++            @Override public boolean sync() { return task.isSync(); }
++            @Override public long period() { return task.getPeriod(); }
++            @Override public boolean cancelled() { return task.isCancelled(); }
++            @Override public void markCancelled() { task.cancel0(); }
++            @Override public Object handle() { return task; }
++            @Override public void run() {
++                // CraftAsyncTask#run swallows and logs exceptions and keeps worker lists the bridge
++                // does not use; run the plugin's body directly so violations reach the bridge.
++                // CraftFuture must run itself: its run() is what completes the future.
++                if (task instanceof CraftFuture<?> || (task.rTask == null && task.cTask == null)) {
++                    task.run();
++                } else if (task.rTask != null) {
++                    task.rTask.run();
++                } else {
++                    task.cTask.accept(task);
++                }
++            }
++        };
++    }
++    // SourbyCraft end - Aurora Bridge
++
+     private static void validate(final Plugin plugin, final Object task) {
+         Preconditions.checkArgument(plugin != null, "Plugin cannot be null");
+         Preconditions.checkArgument(task instanceof Runnable || task instanceof Consumer || task instanceof Callable, "Task must be Runnable, Consumer, or Callable");
+diff --git a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java b/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
+index e5bfd3681c1f4c29cc2b8daed3ae80e9a0f0ed13..4a71c68f6239af95d0b8c51b2a6c9685c9752e16 100644
+--- a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
++++ b/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
+@@ -396,7 +396,7 @@ public final class CraftMagicNumbers implements UnsafeValues {
+         }
+ 
+         // Folia start - block plugins not marked as supported
+-        if (!descriptionFile.isFoliaSupported()) {
++        if (!descriptionFile.isFoliaSupported() && !dev.iyanz.sourbycraft.bridge.AuroraBridge.admitLegacy(descriptionFile.getName())) { // SourbyCraft - Aurora Bridge
+             throw new InvalidPluginException("Plugin " + descriptionFile.getFullName() + " is not marked as supporting regionized multithreading");
+         }
+ 

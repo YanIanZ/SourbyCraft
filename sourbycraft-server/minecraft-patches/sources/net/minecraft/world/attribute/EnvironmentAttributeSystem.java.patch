@@ -1,0 +1,67 @@
+--- a/net/minecraft/world/attribute/EnvironmentAttributeSystem.java
++++ b/net/minecraft/world/attribute/EnvironmentAttributeSystem.java
+@@ -95,12 +_,45 @@
+         });
+     }
+ 
++    // Folia start - region threading
++    // we need to copy the samplers so that the tick caching is not subject to race conditions
++    // global region is here, per region is in RegionizedWorldData
++    private volatile Reference2ObjectOpenHashMap<EnvironmentAttribute<?>, EnvironmentAttributeSystem.ValueSampler<?>> global;
++
++    private Reference2ObjectOpenHashMap<EnvironmentAttribute<?>, EnvironmentAttributeSystem.ValueSampler<?>> getSamplers() {
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
++        if (worldData == null || worldData.world.environmentAttributes() != this) {
++            if (this.global == null) {
++                synchronized (this) {
++                    if (this.global == null) {
++                        this.global = this.cloneSamplers();
++                    }
++                }
++            }
++            return this.global;
++        }
++
++        if (worldData.attributeSamplers == null) {
++            worldData.attributeSamplers = this.cloneSamplers();
++        }
++        return worldData.attributeSamplers;
++    }
++
++    private Reference2ObjectOpenHashMap<EnvironmentAttribute<?>, EnvironmentAttributeSystem.ValueSampler<?>> cloneSamplers() {
++        final Reference2ObjectOpenHashMap<EnvironmentAttribute<?>, EnvironmentAttributeSystem.ValueSampler<?>> ret = new Reference2ObjectOpenHashMap<>(this.attributeSamplers.size());
++        for (final Map.Entry<EnvironmentAttribute<?>, EnvironmentAttributeSystem.ValueSampler<?>> entry : this.attributeSamplers.entrySet()) {
++            ret.put(entry.getKey(), entry.getValue().copy());
++        }
++        return ret;
++    }
++
++    // Folia end - region threading
+     public void invalidateTickCache() {
+-        this.attributeSamplers.values().forEach(EnvironmentAttributeSystem.ValueSampler::invalidateTickCache);
++        this.getSamplers().values().forEach(EnvironmentAttributeSystem.ValueSampler::invalidateTickCache); // Folia - region threading
+     }
+ 
+     private <Value> EnvironmentAttributeSystem.@Nullable ValueSampler<Value> getValueSampler(final EnvironmentAttribute<Value> attribute) {
+-        return (EnvironmentAttributeSystem.ValueSampler<Value>)this.attributeSamplers.get(attribute);
++        return (EnvironmentAttributeSystem.ValueSampler<Value>)this.getSamplers().get(attribute); // Folia - region threading
+     }
+ 
+     @Override
+@@ -211,6 +_,16 @@
+         private @Nullable Value cachedTickValue;
+         private int cacheTickId;
+ 
++        // Folia start - region threading
++        public ValueSampler<Value> copy() {
++            final List<EnvironmentAttributeLayer<Value>> newLayers = new ArrayList<>(this.layers.size());
++            for (final EnvironmentAttributeLayer<Value> layer : this.layers) {
++                newLayers.add(layer.copy());
++            }
++            return new ValueSampler<>(this.attribute, this.baseValue, newLayers, this.isAffectedByPosition);
++        }
++
++        // Folia end - region threading
+         private ValueSampler(
+             final EnvironmentAttribute<Value> attribute,
+             final Value baseValue,

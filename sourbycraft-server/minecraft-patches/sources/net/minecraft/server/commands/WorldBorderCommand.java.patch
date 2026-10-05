@@ -1,0 +1,86 @@
+--- a/net/minecraft/server/commands/WorldBorderCommand.java
++++ b/net/minecraft/server/commands/WorldBorderCommand.java
+@@ -127,6 +_,7 @@
+     }
+ 
+     private static int setDamageBuffer(final CommandSourceStack source, final float distance) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         WorldBorder border = source.getLevel().getWorldBorder();
+         if (border.getSafeZone() == distance) {
+             throw ERROR_SAME_DAMAGE_BUFFER.create();
+@@ -135,9 +_,11 @@
+         border.setSafeZone(distance);
+         source.sendSuccess(() -> Component.translatable("commands.worldborder.damage.buffer.success", String.format(Locale.ROOT, "%.2f", distance)), true);
+         return (int)distance;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setDamageAmount(final CommandSourceStack source, final float damagePerBlock) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         WorldBorder border = source.getLevel().getWorldBorder();
+         if (border.getDamagePerBlock() == damagePerBlock) {
+             throw ERROR_SAME_DAMAGE_AMOUNT.create();
+@@ -146,9 +_,11 @@
+         border.setDamagePerBlock(damagePerBlock);
+         source.sendSuccess(() -> Component.translatable("commands.worldborder.damage.amount.success", String.format(Locale.ROOT, "%.2f", damagePerBlock)), true);
+         return (int)damagePerBlock;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setWarningTime(final CommandSourceStack source, final int ticks) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         WorldBorder border = source.getLevel().getWorldBorder();
+         if (border.getWarningTime() == ticks) {
+             throw ERROR_SAME_WARNING_TIME.create();
+@@ -157,9 +_,11 @@
+         border.setWarningTime(ticks);
+         source.sendSuccess(() -> Component.translatable("commands.worldborder.warning.time.success", formatTicksToSeconds(ticks)), true);
+         return ticks;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setWarningDistance(final CommandSourceStack source, final int distance) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         WorldBorder border = source.getLevel().getWorldBorder();
+         if (border.getWarningBlocks() == distance) {
+             throw ERROR_SAME_WARNING_DISTANCE.create();
+@@ -168,15 +_,19 @@
+         border.setWarningBlocks(distance);
+         source.sendSuccess(() -> Component.translatable("commands.worldborder.warning.distance.success", distance), true);
+         return distance;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int getSize(final CommandSourceStack source) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         double size = source.getLevel().getWorldBorder().getSize();
+         source.sendSuccess(() -> Component.translatable("commands.worldborder.get", String.format(Locale.ROOT, "%.0f", size)), false);
+         return Mth.floor(size + 0.5);
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setCenter(final CommandSourceStack source, final Vec2 center) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         WorldBorder border = source.getLevel().getWorldBorder();
+         if (border.getCenterX() == center.x && border.getCenterZ() == center.y) {
+             throw ERROR_SAME_CENTER.create();
+@@ -192,9 +_,11 @@
+         } else {
+             throw ERROR_TOO_FAR_OUT.create();
+         }
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setSize(final CommandSourceStack source, final double distance, final long ticks) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         ServerLevel level = source.getLevel();
+         WorldBorder border = level.getWorldBorder();
+         double current = border.getSize();
+@@ -224,6 +_,7 @@
+         }
+ 
+         return (int)(distance - current);
++        }, source); // Canvas - region threading
+     }
+ 
+     private static String formatTicksToSeconds(final long ticks) {

@@ -1,12 +1,79 @@
 # This file is auto generated, any changes may be overridden!
 # See CONTRIBUTING.md on how to add access transformers.
+default-f net.minecraft.world.entity.Entity isInvulnerableToBase(Lnet/minecraft/world/damagesource/DamageSource;)Z
+private-f net.minecraft.world.clock.ServerClockManager clocks
+private-f net.minecraft.world.clock.ServerClockManager$ClockInstance timeMarkers
+private-f net.minecraft.world.level.block.RedstoneTorchBlock$Toggle when
+protected ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool groupTimeSliceNS
+public ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool threadFactory
+public ca.spottedleaf.concurrentutil.scheduler.SchedulableTick getScheduledStart()J
+public ca.spottedleaf.concurrentutil.scheduler.SchedulableTick scheduledStart
+public ca.spottedleaf.concurrentutil.scheduler.SchedulableTick setScheduledStart(J)V
+public ca.spottedleaf.concurrentutil.scheduler.SchedulableTick setState(Ljava/lang/Object;)Z
+public ca.spottedleaf.concurrentutil.scheduler.SchedulableTick state
+public net.minecraft.core.Direction VALUES
 public net.minecraft.core.component.DataComponentExactPredicate <init>(Ljava/util/List;)V
 public net.minecraft.core.component.DataComponentPatch <init>(Lit/unimi/dsi/fastutil/objects/Reference2ObjectMap;)V
 public net.minecraft.core.component.PatchedDataComponentMap patch
 public net.minecraft.core.component.PatchedDataComponentMap prototype
+public net.minecraft.data.registries.TradeRebalanceRegistries BUILDER
+public net.minecraft.server.MinecraftServer STATUS_EXPIRE_TIME_NANOS
+public net.minecraft.server.MinecraftServer isRestarting
+public net.minecraft.server.dedicated.DedicatedServer jsonRpcServer
+public net.minecraft.server.dedicated.DedicatedServer stopServer()V
+public net.minecraft.server.level.PlayerSpawnFinder PLAYER_DIMENSIONS
+public net.minecraft.server.level.ServerChunkCache ticketStorage
+public net.minecraft.server.level.ServerLevel advanceWeatherCycle()V
+public net.minecraft.server.level.ServerLevel saveLevelData(Z)V
+public net.minecraft.server.level.ServerLevel tickTime
+public net.minecraft.server.level.ServerPlayer checkRidingStatistics(DDD)V
+public net.minecraft.server.network.ServerCommonPacketListenerImpl suspendFlushingOnServerThread
+public net.minecraft.server.network.ServerGamePacketListenerImpl waitingForSwitchToConfig
+public net.minecraft.server.players.PlayerList SEND_PLAYER_INFO_INTERVAL
+public net.minecraft.server.players.PlayerList save(Lnet/minecraft/server/level/ServerPlayer;)V
+public net.minecraft.world.attribute.EnvironmentAttributeSystem$ValueSampler
 public net.minecraft.world.entity.Display$TextDisplay DATA_TEXT_ID
 public net.minecraft.world.entity.Entity DATA_CUSTOM_NAME
+public net.minecraft.world.entity.Entity handlePortal()V
+public net.minecraft.world.entity.ai.memory.NearestVisibleLivingEntities lineOfSightTest
+public net.minecraft.world.entity.ai.village.VillageSiege$State
 public net.minecraft.world.item.ItemStack components
+public net.minecraft.world.level.ServerExplosion$CacheKey
+public net.minecraft.world.level.block.NetherPortalBlock createDimensionTransition(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/util/BlockUtil$FoundRectangle;Lnet/minecraft/core/Direction$Axis;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/level/portal/TeleportTransition$PostTeleportTransition;)Lnet/minecraft/world/level/portal/TeleportTransition;
+public net.minecraft.world.level.block.RedstoneTorchBlock$Toggle pos
+public net.minecraft.world.level.border.WorldBorder extent
+public net.minecraft.world.level.border.WorldBorder$BorderExtent
+public net.minecraft.world.level.chunk.LevelChunk$RebindableTickingBlockEntityWrapper
+public net.minecraft.world.level.chunk.LevelChunk$RebindableTickingBlockEntityWrapper rebind(Lnet/minecraft/world/level/block/entity/TickingBlockEntity;)V
+public net.minecraft.world.level.chunk.storage.RegionFile getOversizedData(II)Lnet/minecraft/nbt/CompoundTag;
+public net.minecraft.world.level.chunk.storage.RegionFile isOversized(II)Z
+public net.minecraft.world.level.chunk.storage.RegionFile recalculateHeader()Z
+public net.minecraft.world.level.chunk.storage.RegionFile setOversized(IIZ)V
+public net.minecraft.world.level.chunk.storage.RegionFile write(Lnet/minecraft/world/level/ChunkPos;Ljava/nio/ByteBuffer;)V
+public net.minecraft.world.level.dimension.end.EnderDragonFight origin
+public net.minecraft.world.level.levelgen.Heightmap isOpaque
+public net.minecraft.world.level.levelgen.Heightmap setHeight(III)V
+public net.minecraft.world.level.material.FlowingFluid canHoldAnyFluid(Lnet/minecraft/world/level/block/state/BlockState;)Z
+public net.minecraft.world.level.material.FlowingFluid canHoldSpecificFluid(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/material/Fluid;)Z
+public net.minecraft.world.level.material.FlowingFluid canMaybePassThrough(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/core/Direction;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/material/FluidState;)Z
+public net.minecraft.world.level.material.FlowingFluid canPassThrough(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/world/level/material/Fluid;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/core/Direction;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/material/FluidState;)Z
+public net.minecraft.world.level.material.FlowingFluid canPassThroughWall(Lnet/minecraft/core/Direction;Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)Z
+public net.minecraft.world.level.material.FlowingFluid getDropOff(Lnet/minecraft/world/level/LevelReader;)I
+public net.minecraft.world.level.material.FlowingFluid isWaterHole(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)Z
+public net.minecraft.world.scores.PlayerScores
+public net.minecraft.world.scores.PlayerScores <init>()V
+public net.minecraft.world.ticks.LevelTicks alreadyRunThisTick
+public net.minecraft.world.ticks.LevelTicks forContainersInArea(Lnet/minecraft/world/level/levelgen/structure/BoundingBox;Lnet/minecraft/world/ticks/LevelTicks$PosAndContainerConsumer;)V
+public net.minecraft.world.ticks.LevelTicks toRunThisTick
+public net.minecraft.world.ticks.LevelTicks$PosAndContainerConsumer
+public-f ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool
 public-f net.minecraft.core.component.DataComponentExactPredicate expectedComponents
 public-f net.minecraft.world.entity.Entity despawnTime
 public-f net.minecraft.world.level.chunk.ChunkAccess sections
+public-f net.minecraft.world.level.chunk.LevelChunk$RebindableTickingBlockEntityWrapper ticker
+public-f net.minecraft.world.level.levelgen.LegacyRandomSource$LegacyPositionalRandomFactory seed
+public-f net.minecraft.world.level.levelgen.Xoroshiro128PlusPlus seedHi
+public-f net.minecraft.world.level.levelgen.Xoroshiro128PlusPlus seedLo
+public-f net.minecraft.world.level.levelgen.XoroshiroRandomSource randomNumberGenerator
+public-f net.minecraft.world.level.levelgen.XoroshiroRandomSource$XoroshiroPositionalRandomFactory seedHi
+public-f net.minecraft.world.level.levelgen.XoroshiroRandomSource$XoroshiroPositionalRandomFactory seedLo

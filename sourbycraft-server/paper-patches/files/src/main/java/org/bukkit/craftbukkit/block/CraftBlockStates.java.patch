@@ -1,0 +1,29 @@
+--- a/src/main/java/org/bukkit/craftbukkit/block/CraftBlockStates.java
++++ b/src/main/java/org/bukkit/craftbukkit/block/CraftBlockStates.java
+@@ -188,7 +_,7 @@
+     }
+ 
+     public static BlockState getBlockState(Block block) {
+-        return CraftBlockStates.getBlockState(block, true);
++        return CraftBlockStates.getBlockState(block, io.canvasmc.canvas.GlobalConfiguration.getInstance().tileEntitySnapshotCreation); // Canvas - don't use snapshots for acquiring blockstate
+     }
+ 
+     public static BlockState getBlockState(Block block, boolean useSnapshot) {
+@@ -198,14 +_,14 @@
+         BlockPos pos = craftBlock.getPosition();
+         net.minecraft.world.level.block.state.BlockState state = craftBlock.getBlockState();
+         BlockEntity blockEntity = craftBlock.getLevel().getBlockEntity(pos);
+-        boolean prev = CraftBlockEntityState.DISABLE_SNAPSHOT;
+-        CraftBlockEntityState.DISABLE_SNAPSHOT = !useSnapshot;
++        boolean prev = CraftBlockEntityState.DISABLE_SNAPSHOT.get().booleanValue(); // Folia - region threading
++        CraftBlockEntityState.DISABLE_SNAPSHOT.set(Boolean.valueOf(!useSnapshot)); // Folia - region threading
+         try {
+             CraftBlockState blockState = CraftBlockStates.getBlockState(world, pos, state, blockEntity);
+             blockState.setWorldHandle(craftBlock.getLevel()); // Inject the block's level accessor
+             return blockState;
+         } finally {
+-            CraftBlockEntityState.DISABLE_SNAPSHOT = prev;
++            CraftBlockEntityState.DISABLE_SNAPSHOT.set(Boolean.valueOf(prev)); // Folia - region threading
+         }
+     }
+ 

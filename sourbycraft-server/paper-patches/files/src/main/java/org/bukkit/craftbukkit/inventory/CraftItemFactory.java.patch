@@ -1,0 +1,11 @@
+--- a/src/main/java/org/bukkit/craftbukkit/inventory/CraftItemFactory.java
++++ b/src/main/java/org/bukkit/craftbukkit/inventory/CraftItemFactory.java
+@@ -40,7 +_,7 @@
+ public final class CraftItemFactory implements ItemFactory {
+     static final Color DEFAULT_LEATHER_COLOR = Color.fromRGB(0xA06540);
+     private static final CraftItemFactory instance;
+-    private static final RandomSource randomSource = RandomSource.create();
++    private static final RandomSource randomSource = io.papermc.paper.threadedregions.util.ThreadLocalRandomSource.INSTANCE; // Canvas - region threading
+ 
+     static {
+         instance = new CraftItemFactory();

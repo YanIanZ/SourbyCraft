@@ -1,0 +1,650 @@
+--- /dev/null
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -1,0 +_,647 @@
++package io.papermc.paper.threadedregions;
++
++import ca.spottedleaf.common.util.TimeUtil;
++import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
++import ca.spottedleaf.concurrentutil.completable.Completable;
++import ca.spottedleaf.moonrise.common.util.TickThread;
++import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.threadedregions.entities.EnderPearls;
++import io.papermc.paper.adventure.providers.ClickCallbackProviderImpl;
++import io.papermc.paper.configuration.GlobalConfiguration;
++import io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler;
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.List;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.CopyOnWriteArrayList;
++import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.function.BooleanSupplier;
++import net.minecraft.CrashReport;
++import net.minecraft.ReportedException;
++import net.minecraft.network.Connection;
++import net.minecraft.network.PacketListener;
++import net.minecraft.network.PacketProcessor;
++import net.minecraft.network.PacketSendListener;
++import net.minecraft.network.chat.Component;
++import net.minecraft.network.chat.MutableComponent;
++import net.minecraft.network.protocol.Packet;
++import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.bossevents.CustomBossEvents;
++import net.minecraft.server.dedicated.DedicatedServer;
++import net.minecraft.server.gui.PlayerListComponent;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.network.ServerConfigurationPacketListenerImpl;
++import net.minecraft.server.network.ServerGamePacketListenerImpl;
++import net.minecraft.world.Stopwatches;
++import net.minecraft.world.clock.ServerClockManager;
++import net.minecraft.world.level.gamerules.GameRuleMap;
++import net.minecraft.world.level.saveddata.SavedData;
++import net.minecraft.world.level.saveddata.WeatherData;
++import net.minecraft.world.level.saveddata.maps.MapIndex;
++import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
++import net.minecraft.world.scores.ScoreboardSaveData;
++import org.apache.commons.lang3.mutable.MutableLong;
++import org.bukkit.Bukkit;
++import org.jspecify.annotations.NullMarked;
++import org.slf4j.Logger;
++
++@NullMarked
++public final class RegionizedServer {
++
++    private static final Logger LOGGER = LogUtils.getClassLogger(); // Canvas - region threading
++    private static final RegionizedServer INSTANCE = new RegionizedServer();
++
++    public final RegionizedTaskQueue taskQueue = new RegionizedTaskQueue();
++
++    public final CopyOnWriteArrayList<ServerLevel> worlds = new CopyOnWriteArrayList<>();
++    private final CopyOnWriteArrayList<Connection> connections = new CopyOnWriteArrayList<>();
++
++    private final MultiThreadedQueue<Runnable> globalTickQueue = new MultiThreadedQueue<>();
++
++    private final GlobalTickTickHandle tickHandle = new GlobalTickTickHandle(this);
++
++    public final PacketProcessor packetProcessor = new PacketProcessor(null);
++
++    public static RegionizedServer getInstance() {
++        return INSTANCE;
++    }
++
++    public void addConnection(final Connection conn) {
++        this.connections.add(conn);
++    }
++
++    public boolean removeConnection(final Connection conn) {
++        return this.connections.remove(conn);
++    }
++
++    public void addWorld(final ServerLevel world) {
++        this.worlds.add(world);
++    }
++
++    public void init() {
++        // call init event _before_ scheduling anything
++        new RegionizedServerInitEvent().callEvent();
++
++        // now we can schedule
++        this.tickHandle.setInitialStart(System.nanoTime() + TickRegionScheduler.getTimeBetweenTicks()); // Canvas - region threading
++        TickRegions.getScheduler().scheduleRegion(this.tickHandle);
++        TickRegions.start();
++    }
++
++    public void invalidateStatus() {
++        this.lastServerStatus = 0L;
++    }
++
++    public void addTaskWithoutNotify(final Runnable run) {
++        this.globalTickQueue.add(run);
++    }
++
++    public void addTask(final Runnable run) {
++        this.addTaskWithoutNotify(run);
++        this.notifyTasks();
++    }
++    // Canvas start - region threading
++
++    public void scheduleToOrExecute(final Runnable run) {
++        if (isGlobalTickThread()) {
++            run.run();
++            return;
++        }
++        addTask(run);
++    }
++    // Canvas end - region threading
++
++    public void notifyTasks() {
++        TickRegions.getScheduler().setHasTasks(this.tickHandle);
++    }
++
++    private boolean hasAnyGlobalChunkTasks() {
++        for (final ServerLevel world : this.worlds) {
++            if (world.canvas$unloadTicket.isPresent()) continue; // Canvas - region threading
++            if (world.taskQueueRegionData.hasGlobalChunkTasks()) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    public <T extends PacketListener> void schedulePacket(final T packetListener, final Packet<T> packet) {
++        if (this.packetProcessor.scheduleIfPossible(packetListener, packet)) {
++            this.notifyTasks();
++        }
++    }
++
++    public void blockOn(final Runnable run) {
++        if (isGlobalTickThread()) {
++            run.run();
++            return;
++        }
++        Completable.suppliedAsync(() -> {
++            run.run();
++            return null;
++        }, this::addTask).join();
++    }
++
++    /**
++     * Returns the current tick of the region ticking.
++     * @throws IllegalStateException If there is no current region.
++     */
++    public static long getCurrentTick() throws IllegalStateException {
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
++            TickRegionScheduler.getCurrentRegion();
++        if (region == null) {
++            if (TickThread.isShutdownThread()) {
++                return 0L;
++            }
++            throw new IllegalStateException("No currently ticking region");
++        }
++        return region.getData().getCurrentTick();
++    }
++
++    public static boolean isGlobalTickThread() {
++        return INSTANCE.tickHandle == TickRegionScheduler.getCurrentTickingTask();
++    }
++
++    public static void ensureGlobalTickThread(final String reason) {
++        if (!isGlobalTickThread()) {
++            LOGGER.error(reason, new Throwable()); // Canvas - log ts like TickThread does
++            throw new IllegalStateException(reason);
++        }
++    }
++
++    public static TickRegionScheduler.RegionScheduleHandle getGlobalTickData() {
++        return INSTANCE.tickHandle;
++    }
++
++    public static final class GlobalTickTickHandle extends TickRegionScheduler.RegionScheduleHandle {
++
++        private final RegionizedServer server;
++
++        private final AtomicBoolean scheduled = new AtomicBoolean();
++        private final AtomicBoolean ticking = new AtomicBoolean();
++
++        public GlobalTickTickHandle(final RegionizedServer server) {
++            super(null, TimeUtil.DEADLINE_NOT_SET);
++            this.server = server;
++        }
++
++        /**
++         * Only valid to call BEFORE scheduled!!!!
++         */
++        final void setInitialStart(final long start) {
++            if (this.scheduled.getAndSet(true)) {
++                throw new IllegalStateException("Double scheduling global tick");
++            }
++            this.updateScheduledStart(start);
++        }
++
++        @Override
++        protected boolean tryMarkTicking() {
++            return !this.ticking.getAndSet(true);
++        }
++
++        @Override
++        protected boolean markNotTicking() {
++            return this.ticking.getAndSet(false);
++        }
++
++        @Override
++        protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
++            this.drainTasks();
++            this.server.globalTick(tickCount);
++        }
++
++        private void drainTasks() {
++            //noinspection StatementWithEmptyBody
++            while (this.runOneTask() || this.runOnePacketTask());
++        }
++
++        private boolean runOneTask() {
++            final Runnable run = this.server.globalTickQueue.poll();
++            if (run == null) {
++                return false;
++            }
++
++            run.run();
++
++            return true;
++        }
++
++        private boolean runOnePacketTask() {
++            return this.server.packetProcessor.executeSinglePacket();
++        }
++
++        private boolean runGlobalTask() {
++            boolean ret = false;
++            for (final ServerLevel world : this.server.worlds) {
++                if (world.canvas$unloadTicket.isPresent()) continue; // Canvas - region threading
++                ret |= world.taskQueueRegionData.executeGlobalChunkTask();
++            }
++            return ret;
++        }
++
++        @Override
++        protected void runRegionTasks(final BooleanSupplier canContinue) {
++            do {
++                if (!this.runOneTask() && !this.runOnePacketTask() && !this.runGlobalTask()) {
++                    return;
++                }
++            } while (canContinue.getAsBoolean());
++        }
++
++        @Override
++        protected boolean hasIntermediateTasks() {
++            return !this.server.globalTickQueue.isEmpty() || this.server.packetProcessor.hasPackets() || this.server.hasAnyGlobalChunkTasks();
++        }
++    }
++
++    private long lastServerStatus;
++    private long tickCount;
++
++    private void globalTick(final long tickCount) {
++        final DedicatedServer minecraftServer = (DedicatedServer) MinecraftServer.getServer();
++
++        ++this.tickCount;
++
++        // expire invalid click command callbacks
++        ClickCallbackProviderImpl.ADVENTURE_CLICK_MANAGER.handleQueue((int)this.tickCount); // Paper // Folia - region threading - moved to global tick
++        ClickCallbackProviderImpl.DIALOG_CLICK_MANAGER.handleQueue((int)this.tickCount); // Paper // Folia - region threading - moved to global tick
++
++        // scheduler
++        ((FoliaGlobalRegionScheduler)Bukkit.getGlobalRegionScheduler()).tick();
++
++        // clock tick
++        this.tickClocks();
++
++        // commands
++        minecraftServer.handleConsoleInputs();
++
++        // needs
++        // player ping sample
++        // world global tick
++        // connection tick
++        // ender pearls
++        // gui tick
++        // global tick autosave
++        // management protocol tick
++
++        // tick player ping sample
++        this.tickPlayerSample();
++
++        // tick worlds
++        for (final ServerLevel world : this.worlds) {
++            this.globalTick(world, tickCount);
++        }
++
++        // tick connections
++        this.tickConnections();
++
++        // player list
++        minecraftServer.getPlayerList().tick();
++        // Canvas start - region threading
++
++        // gui tick
++        PlayerListComponent.tick();
++
++        // global tick autosave
++        autosaveSafeGlobalData(false, false);
++
++        // management protocol tick
++        if (minecraftServer.jsonRpcServer != null) {
++            minecraftServer.jsonRpcServer.tick();
++        }
++        // Canvas end - region threading
++    }
++    // Canvas start - region threading
++
++    private static final MutableLong LAST_GLOBAL_AUTOSAVE = new MutableLong(System.nanoTime());
++
++    // note: not every saved data type is thread-safe, only a few things are thread-safe
++    //       due to specific design of these reimplementations. these are listed in the
++    //       respective methods themselves
++
++    // note: for server clock manager autosave
++    /*
++        we call "packState" in "ServerClockManager" in the codec, which
++        is a mapped version of all the clocks into their packed form
++        which the packed form takes the values from the unpacked form,
++        which is only mutated on the global tick and on load of the clock
++        which is at startup. the actual registered clocks are also
++        immutable after init of the clock manager instance, so we can be
++        sure that this won't encounter any odd exceptions.
++     */
++
++    public void autosaveSafeGlobalData(final boolean force, final boolean sync) {
++        ensureGlobalTickThread("Cannot save global data async");
++
++        final MinecraftServer server = MinecraftServer.getServer();
++        final io.canvasmc.canvas.GlobalConfiguration.Autosave autosaveConfig =
++            io.canvasmc.canvas.GlobalConfiguration.getInstance().autosave;
++
++        final long periodNanos = io.canvasmc.canvas.GlobalConfiguration.AUTOSAVE_SPAN.getValue().asNanoSpan();
++        if (periodNanos <= 0 && !force) return;
++        final long currTime = System.nanoTime();
++        final long last = LAST_GLOBAL_AUTOSAVE.longValue();
++
++        if (force || ((currTime - last) > periodNanos)) {
++            LAST_GLOBAL_AUTOSAVE.setValue(currTime);
++
++            // needs
++            // pearls - our rewrite
++            // scoreboards
++            // stopwatches
++            // custom boss events
++            // world clocks - only if affects all worlds
++
++            // we have to do this for the scoreboard system or else the scoreboard
++            // system won't actually save. see MinecraftServer#saveGlobalData
++
++            server.getScoreboard().storeToSaveDataIfDirty(server.getDataStorage().computeIfAbsent(ScoreboardSaveData.TYPE));
++
++            CompletableFuture<?> future = server.getDataStorage().saveSpecific(() -> {
++                final ArrayList<Class<? extends SavedData>> toSave = new ArrayList<>();
++
++                // both of these are SWMR, only mutatable on the global tick
++                if (autosaveConfig.autosaveScoreboards) {
++                    toSave.add(ScoreboardSaveData.class);
++                }
++                if (autosaveConfig.autosaveStopwatches) {
++                    toSave.add(Stopwatches.class);
++                }
++
++                // our pearl rewrite is threadsafe
++                if (autosaveConfig.autosavePearls) {
++                    toSave.add(EnderPearls.class);
++                }
++
++                // made threadsafe by Canvas
++                if (autosaveConfig.autosaveCustomBossEvents) {
++                    toSave.add(CustomBossEvents.class);
++                }
++
++                // only should be saved globally if affects all worlds
++                if (autosaveConfig.autosaveTime && GlobalConfiguration.get().time.affectsAllWorlds) {
++                    toSave.add(ServerClockManager.class);
++                }
++
++                return toSave;
++            });
++
++            // if sync we need to just join here. this shouldn't be done
++            // for autosave or every tick since this blocks waiting for completion
++
++            if (sync) {
++                future.join();
++            }
++        }
++    }
++
++    public void autosaveSafeWorldData(final boolean force, final boolean sync, final ServerLevel level) {
++        ensureGlobalTickThread("Cannot save global world data async");
++
++        final io.canvasmc.canvas.GlobalConfiguration.Autosave autosaveConfig =
++            io.canvasmc.canvas.GlobalConfiguration.getInstance().autosave;
++
++        final long periodNanos = io.canvasmc.canvas.GlobalConfiguration.AUTOSAVE_SPAN.getValue().asNanoSpan();
++        if (periodNanos <= 0 && !force) return;
++        final long currTime = System.nanoTime();
++        final long last = level.lastMapAutoSave;
++
++        if (force || ((currTime - last) > periodNanos)) {
++            level.lastMapAutoSave = currTime;
++
++            // needs
++            // world clocks
++            // world border
++            // raids
++            // weather
++            // game rules
++            // maps
++
++            // note: wandering trader data is regionized now, can't autosave
++
++            CompletableFuture<?> future = level.getDataStorage().saveSpecific(() -> {
++                final ArrayList<Class<? extends SavedData>> toSave = new ArrayList<>();
++
++                // maps is represented in 2 data types, the index and the item
++                if (autosaveConfig.autosaveMaps) {
++                    toSave.add(MapItemSavedData.class);
++                    toSave.add(MapIndex.class);
++                }
++
++                // only should be autosaved here if worlds have independent time
++                if (autosaveConfig.autosaveTime && !GlobalConfiguration.get().time.affectsAllWorlds) {
++                    toSave.add(ServerClockManager.class);
++                }
++
++                // TODO - world border - needs MASSIVE changes...
++                // TODO - raids - can we even do this?
++
++                // folia already only ticks this on the global tick and both canvas
++                // and folia have thread checks against modifying this data async, so this is fine
++                if (autosaveConfig.autosaveWeather) {
++                    toSave.add(WeatherData.class);
++                }
++                // already made threadsafe from folia, just needed the codec adjusted to copy the
++                // backing map to prevent exceptions or torn read/write issues
++                if (autosaveConfig.autosaveGamerules) {
++                    toSave.add(GameRuleMap.class);
++                }
++
++                // note: the dragon fight is autosaved on the region owning the fight in question.
++                //       this is because this is specific per-dimension and is also region-specific
++                //       in that dimension to a single region, and is ticked there too, so no point
++                //       in saving here if we don't even own the data in question
++
++                return toSave;
++            });
++
++            // if sync we need to just join here. this shouldn't be done
++            // for autosave or every tick since this blocks waiting for completion
++
++            if (sync) {
++                future.join();
++            }
++        }
++    }
++    // Canvas end - region threading
++
++    private void tickPlayerSample() {
++        final MinecraftServer mcServer = MinecraftServer.getServer();
++
++        final long currtime = System.nanoTime();
++
++        // player ping sample
++        // copied from MinecraftServer#tickServer
++        // note: we need to reorder setPlayers to be the last operation it does, rather than the first to avoid publishing
++        // an uncomplete status
++        if (currtime - this.lastServerStatus >= MinecraftServer.STATUS_EXPIRE_TIME_NANOS) {
++            this.lastServerStatus = currtime;
++            mcServer.rebuildServerStatus();
++        }
++    }
++
++    public static boolean isNotOwnedByGlobalRegion(final Connection conn) {
++        final PacketListener packetListener = conn.getPacketListener();
++
++        if (packetListener instanceof ServerGamePacketListenerImpl gamePacketListener) {
++            return !gamePacketListener.waitingForSwitchToConfig;
++        }
++
++        if (conn.getPacketListener() instanceof ServerConfigurationPacketListenerImpl configurationPacketListener) {
++            return configurationPacketListener.switchToMain != null;
++        }
++
++        return false;
++    }
++
++    private void tickConnections() {
++        final List<Connection> connections = new ArrayList<>(this.connections);
++        Collections.shuffle(connections); // shuffle to prevent people from "gaming" the server by re-logging
++        for (final Connection conn : connections) {
++            if (!conn.becomeActive()) {
++                continue;
++            }
++
++            if (isNotOwnedByGlobalRegion(conn)) {
++
++                // we actually require that the owning regions remove the connection for us, as it is possible
++                // that ownership is transferred back to us
++
++                continue;
++            }
++
++            if (!conn.isConnected()) {
++                this.removeConnection(conn);
++                conn.handleDisconnection();
++                continue;
++            }
++            // Canvas start - region threading
++
++            // see https://github.com/PaperMC/Paper/pull/13616, April 25th 2026
++
++            // Folia doesn't add this check, and keeps ticking the connection instead,
++            // add this back so we match ServerConnectionListener
++
++            if (conn.handleConnectionDisconnectOnNextTick) {
++                continue;
++            }
++            // Canvas end - region threading
++
++            try {
++                conn.tick();
++            } catch (final Throwable thrown) {
++                if (conn.isMemoryConnection()) {
++                    throw new ReportedException(CrashReport.forThrowable(thrown, "Ticking memory connection"));
++                }
++
++                LOGGER.warn("Failed to handle packet for {}", conn.getLoggableAddress(MinecraftServer.getServer().logIPs()), thrown);
++                final MutableComponent ichatmutablecomponent = Component.literal("Internal server error");
++
++                conn.send(new ClientboundDisconnectPacket(ichatmutablecomponent), PacketSendListener.thenRun(() -> {
++                    conn.disconnect(ichatmutablecomponent);
++                }));
++                conn.setReadOnly();
++                continue;
++            }
++        }
++    }
++
++    // A global tick only updates things like weather / worldborder, basically anything in the world that is
++    // NOT tied to a specific region, but rather shared amongst all of them.
++    private void globalTick(final ServerLevel world, final long tickCount) {
++        // Canvas start - region threading
++        if (world.canvas$unloadTicket.isPresent()) {
++            // we are unloading, return
++            return;
++        }
++        // Canvas end - region threading
++        // needs
++        // tick env attributes
++        // worldborder tick
++        // advancing the weather cycle
++        // sleep status thing
++        // updating sky brightness
++        // time ticking (game time + daylight), plus PrimayLevelDat#getScheduledEvents ticking
++
++        // tick environment attribute system
++        world.environmentAttributes().invalidateTickCache();
++
++        // Typically, we expect there to be a running region to drain a world's global chunk tasks. However,
++        // this may not be the case - and thus, only the global tick thread can do anything.
++        world.taskQueueRegionData.drainGlobalChunkTasks();
++
++        // worldborder tick
++        this.tickWorldBorder(world);
++
++        // weather cycle
++        this.advanceWeatherCycle(world);
++
++        // sleep status
++        this.checkNightSkip(world);
++
++        // update raids
++        this.updateRaids(world);
++
++        // sky brightness
++        this.updateSkyBrightness(world);
++
++        // time ticking (TODO API synchronisation?)
++        this.tickTime(world, tickCount);
++
++        world.updateTickData();
++
++        world.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates(); // required to eventually process ticket updates
++
++        this.autoSaveMaps(world);
++    }
++
++    private void updateRaids(final ServerLevel world) {
++        world.getRaids().globalTick();
++    }
++
++    private void checkNightSkip(final ServerLevel world) {
++        world.tickSleep();
++    }
++
++    private void advanceWeatherCycle(final ServerLevel world) {
++        if (!getGlobalTickData().getTickManager().doesRunGameElements()) return; // Canvas - region threading
++        world.advanceWeatherCycle();
++    }
++
++    private void updateSkyBrightness(final ServerLevel world) {
++        world.updateSkyBrightness();
++    }
++
++    private void tickWorldBorder(final ServerLevel world) {
++        world.getWorldBorder().tick();
++    }
++
++    private void tickClocks() {
++        if (!getGlobalTickData().getTickManager().doesRunGameElements()) return; // Canvas - region threading
++        // Paper start - per-world time
++        if (GlobalConfiguration.get().time.affectsAllWorlds) {
++            MinecraftServer.getServer().clockManager().tick();
++        } else {
++            for (ServerLevel level : this.worlds) {
++                if (level.canvas$unloadTicket.isPresent()) continue; // Canvas - region threading
++                level.clockManager().tick();
++            }
++        }
++        // Paper end - per-world time
++    }
++
++    private void tickTime(final ServerLevel world, final long tickCount) {
++        if (!getGlobalTickData().getTickManager().doesRunGameElements()) return; // Canvas - region threading
++        if (world.tickTime) {
++            world.serverLevelData.setGameTime(world.serverLevelData.getGameTime() + tickCount);
++        }
++    }
++
++    private void autoSaveMaps(final ServerLevel world) {
++        autosaveSafeWorldData(false, false, world); // Canvas - region threading
++    }
++
++    public record WorldLevelData(ServerLevel world, long nonRedstoneGameTime) {}
++}

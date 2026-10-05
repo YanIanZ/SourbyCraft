@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/InventoryChangeTrigger.java
++++ b/net/minecraft/advancements/triggers/InventoryChangeTrigger.java
+@@ -24,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final Inventory inventory, final ItemStack changedItem) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         int slotsFull = 0;
+         int slotsEmpty = 0;
+         int slotsOccupied = 0;

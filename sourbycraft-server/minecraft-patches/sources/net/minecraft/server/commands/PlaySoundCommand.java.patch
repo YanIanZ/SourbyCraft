@@ -1,0 +1,48 @@
+--- a/net/minecraft/server/commands/PlaySoundCommand.java
++++ b/net/minecraft/server/commands/PlaySoundCommand.java
+@@ -164,6 +_,14 @@
+         long seed = level.getRandom().nextLong();
+         List<ServerPlayer> playedFor = new ArrayList<>();
+ 
++        // Canvas start - region threading
++
++        // we can't try and filter or do anything beyond this because
++        // the volume can be high enough that the source can be millions
++        // of blocks away, and it can still be heard
++
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPos(() -> {
++        // Canvas end - region threading
+         for (ServerPlayer player : players) {
+             if (player.level() == level) {
+                 double deltaX = position.x - player.getX();
+@@ -184,10 +_,21 @@
+                     localVolume = minVolume;
+                 }
+ 
+-                player.connection
++                // Canvas start - region threading
++
++                // we schedule this because the stop sound command is scheduled to the player
++                // so we schedule this to make sure everything remains in sync and ordered
++
++                final Vec3 finalPos = localPosition;
++                final float finalVolume = localVolume;
++
++                player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++                entityPlayer.connection
+                     .send(
+-                        new ClientboundSoundPacket(soundHolder, soundSource, localPosition.x(), localPosition.y(), localPosition.z(), localVolume, pitch, seed)
++                        new ClientboundSoundPacket(soundHolder, soundSource, finalPos.x(), finalPos.y(), finalPos.z(), finalVolume, pitch, seed)
+                     );
++                });
++                // Canvas end - region threading
+                 playedFor.add(player);
+             }
+         }
+@@ -206,5 +_,6 @@
+         }
+ 
+         return count;
++        }, position, level, source); // Canvas - region threading
+     }
+ }

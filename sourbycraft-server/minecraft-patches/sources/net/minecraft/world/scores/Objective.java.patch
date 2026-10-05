@@ -1,0 +1,135 @@
+--- a/net/minecraft/world/scores/Objective.java
++++ b/net/minecraft/world/scores/Objective.java
+@@ -17,11 +_,16 @@
+     private final Scoreboard scoreboard;
+     private final String name;
+     private final ObjectiveCriteria criteria;
+-    private Component displayName;
+-    private Component formattedDisplayName;
+-    private ObjectiveCriteria.RenderType renderType;
+-    private boolean displayAutoUpdate;
+-    private @Nullable NumberFormat numberFormat;
++    // Canvas start - region threading
++    private final io.canvasmc.canvas.util.LockedReference<io.canvasmc.canvas.threadedregions.scores.ObjectiveData> objectiveData;
++
++    private void ensureMainThread(final String reason) {
++        // some plugins, like fastboard, pass a null scoreboard object
++        if (this.scoreboard != null) {
++            this.scoreboard.ensureMainThread(reason);
++        }
++    }
++    // Canvas end - region threading
+ 
+     public Objective(
+         final Scoreboard scoreboard,
+@@ -35,15 +_,15 @@
+         this.scoreboard = scoreboard;
+         this.name = name;
+         this.criteria = criteria;
+-        this.displayName = displayName;
+-        this.formattedDisplayName = this.createFormattedDisplayName();
+-        this.renderType = renderType;
+-        this.displayAutoUpdate = displayAutoUpdate;
+-        this.numberFormat = numberFormat;
++        // Canvas start - region threading
++        this.objectiveData = new io.canvasmc.canvas.util.LockedReference<>(new io.canvasmc.canvas.threadedregions.scores.ObjectiveData(
++            createFormattedDisplayName(displayName), renderType, displayAutoUpdate, numberFormat, displayName
++        ));
++        // Canvas end - region threading
+     }
+ 
+     public Objective.Packed pack() {
+-        return new Objective.Packed(this.name, this.criteria, this.displayName, this.renderType, this.displayAutoUpdate, Optional.ofNullable(this.numberFormat));
++        return this.objectiveData.getValue().pack(this.name, this.criteria); // Canvas - region threading
+     }
+ 
+     public Scoreboard getScoreboard() {
+@@ -59,53 +_,76 @@
+     }
+ 
+     public Component getDisplayName() {
+-        return this.displayName;
++        return this.objectiveData.getValue().getDisplayName(); // Canvas - region threading
+     }
+ 
+     public boolean displayAutoUpdate() {
+-        return this.displayAutoUpdate;
++        return this.objectiveData.getValue().doesDisplayAutoUpdate(); // Canvas - region threading
+     }
+ 
+     public @Nullable NumberFormat numberFormat() {
+-        return this.numberFormat;
++        return this.objectiveData.getValue().getNumberFormat(); // Canvas - region threading
+     }
+ 
+     public NumberFormat numberFormatOrDefault(final NumberFormat _default) {
+-        return Objects.requireNonNullElse(this.numberFormat, _default);
++        return Objects.requireNonNullElse(numberFormat(), _default); // Canvas - region threading
+     }
+ 
+     private Component createFormattedDisplayName() {
++    // Canvas start - region threading
++        return createFormattedDisplayName(getDisplayName());
++    }
++
++    private Component createFormattedDisplayName(final Component displayName) {
++    // Canvas end - region threading
+         return ComponentUtils.wrapInSquareBrackets(
+-            this.displayName.copy().withStyle(s -> s.withHoverEvent(new HoverEvent.ShowText(Component.literal(this.name))))
++            displayName.copy().withStyle(s -> s.withHoverEvent(new HoverEvent.ShowText(Component.literal(this.name)))) // Canvas - region threading
+         );
+     }
+ 
+     public Component getFormattedDisplayName() {
+-        return this.formattedDisplayName;
++        return this.objectiveData.getValue().getFormattedDisplayName(); // Canvas - region threading
+     }
+ 
+     public void setDisplayName(final Component name) {
+-        this.displayName = name;
+-        this.formattedDisplayName = this.createFormattedDisplayName();
++        // Canvas start - region threading
++        ensureMainThread("Cannot set display name of objective async");
++        this.objectiveData.swapValue((data) -> {
++            final io.canvasmc.canvas.threadedregions.scores.ObjectiveData newData =
++                io.canvasmc.canvas.threadedregions.scores.ObjectiveData.copyOf(data);
++            newData.setDisplayName(name);
++            newData.setFormattedDisplayName(createFormattedDisplayName(name));
++            return newData;
++        });
++        // Canvas end - region threading
+         this.scoreboard.onObjectiveChanged(this);
+     }
+ 
+     public ObjectiveCriteria.RenderType getRenderType() {
+-        return this.renderType;
++        return this.objectiveData.getValue().getRenderType(); // Canvas - region threading
+     }
+ 
+     public void setRenderType(final ObjectiveCriteria.RenderType renderType) {
+-        this.renderType = renderType;
++        // Canvas start - region threading
++        ensureMainThread("Cannot set render type of objective async");
++        this.objectiveData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.ObjectiveData.copyOf(data).setRenderType(renderType));
++        // Canvas end - region threading
+         this.scoreboard.onObjectiveChanged(this);
+     }
+ 
+     public void setDisplayAutoUpdate(final boolean displayAutoUpdate) {
+-        this.displayAutoUpdate = displayAutoUpdate;
++        // Canvas start - region threading
++        ensureMainThread("Cannot set display auto update flag of objective async");
++        this.objectiveData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.ObjectiveData.copyOf(data).setDisplayAutoUpdate(displayAutoUpdate));
++        // Canvas end - region threading
+         this.scoreboard.onObjectiveChanged(this);
+     }
+ 
+     public void setNumberFormat(final @Nullable NumberFormat numberFormat) {
+-        this.numberFormat = numberFormat;
++        // Canvas start - region threading
++        ensureMainThread("Cannot set number format of objective async");
++        this.objectiveData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.ObjectiveData.copyOf(data).setNumberFormat(numberFormat));
++        // Canvas end - region threading
+         this.scoreboard.onObjectiveChanged(this);
+     }
+ 

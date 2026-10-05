@@ -1,0 +1,250 @@
+--- a/net/minecraft/server/commands/CloneCommands.java
++++ b/net/minecraft/server/commands/CloneCommands.java
+@@ -163,6 +_,70 @@
+                     )
+             );
+     }
++    // Canvas start - region threading
++
++    private record BlockInfo(
++        // note: if blockEntityInfo != null, we should set the block entity data
++        BlockPos pos, BlockState state, CloneCommands.@Nullable CloneBlockEntityInfo blockEntityInfo, BlockPos offset
++    ) {
++        BlockPos destinationPos() {
++            return pos.offset(offset);
++        }
++    }
++
++    private static class Area {
++        // in Vanilla, this would be "clearBlockList"
++        final Deque<net.minecraft.core.BlockPos> allPositions = Lists.newLinkedList();
++        final List<BlockInfo> collectedStates = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
++        final org.apache.commons.lang3.mutable.MutableBoolean hasBlockEntities = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++
++        void collect(
++            final BlockPos pos,
++            final BlockPos offset,
++            final BlockInWorld block,
++            final ServerLevel level,
++            final Predicate<BlockInWorld> predicate,
++            final ProblemReporter reporter,
++            final net.minecraft.core.HolderLookup.Provider registryAccess
++        ) {
++            if (!predicate.test(block)) {
++                return;
++            }
++
++            boolean last;
++
++            final BlockEntity blockEntity = level.getBlockEntity(pos);
++            final BlockState blockState = block.getState();
++
++            if (blockEntity != null) {
++                TagValueOutput output = TagValueOutput.createWithContext(reporter.forChild(blockEntity.problemPath()), registryAccess);
++                blockEntity.saveCustomOnly(output);
++                CloneCommands.CloneBlockEntityInfo blockEntityInfo = new CloneCommands.CloneBlockEntityInfo(
++                    output.buildResult(), blockEntity.components()
++                );
++                collectedStates.add(new CloneCommands.BlockInfo(pos, blockState, blockEntityInfo, offset));
++                hasBlockEntities.setTrue();
++                last = true;
++            }
++            else {
++                collectedStates.add(new CloneCommands.BlockInfo(pos, blockState, null, offset));
++                last = !(!blockState.isSolidRender() && !blockState.isCollisionShapeFullBlock(level, pos));
++            }
++
++            // add to our list of blocks
++            if (last) {
++                allPositions.addLast(pos);
++            }
++            else {
++                allPositions.addFirst(pos);
++            }
++        }
++
++        List<BlockInfo> reversed() {
++            return this.collectedStates.reversed();
++        }
++    }
++    // Canvas end - region threading
+ 
+     private static int clone(
+         final CommandSourceStack source,
+@@ -199,6 +_,176 @@
+             throw ERROR_FAILED.create();
+         }
+ 
++        // Canvas start - region threading
++        if (true) {
++
++            // we use a snapshot copy-paste style thing, since we can't just directly
++            // clone it over since we may not even be in the correct region for either of these
++
++            // we need to schedule to "from" first to collect our snapshot
++
++            // physics can spill into neighbor chunks, so we add a buffer for precaution
++            final int buffer = 32;
++
++            fromDimension.canvas$loadOrRunAtChunksAsync(
++                (from.minX() - buffer) >> 4,
++                (from.maxX() + buffer) >> 4,
++                (from.minZ() - buffer) >> 4,
++                (from.maxZ() + buffer) >> 4,
++                ca.spottedleaf.concurrentutil.util.Priority.NORMAL, () -> {
++
++                    // we need to collect the blocks in this area now and copy-paste
++
++                    final Area snapshot = new CloneCommands.Area();
++                    final net.minecraft.world.ticks.LevelTicks<Block> fromBlockTicks = fromDimension.getBlockTicks();
++                    final BlockPos offset = new BlockPos(destination.minX() - from.minX(), destination.minY() - from.minY(), destination.minZ() - from.minZ());
++
++                    try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(LOGGER)) {
++
++                        // note: for merging block ticks, we need can follow this similar to how Folia does
++                        //       merging of these for region merges. the Vanilla version seems to update lists
++                        //       that are actually transient, only used during the tick, so we don't actually
++                        //       need to do anything about those, which simplifies this logic greatly
++
++                        // copy ticks first, based from LevelTicks#copyAreaFrom
++
++                        List<net.minecraft.world.ticks.ScheduledTick<Block>> ticksToAdd = new java.util.ArrayList<>();
++                        Predicate<net.minecraft.world.ticks.ScheduledTick<Block>> tickInsideBB = t -> from.isInside(t.pos());
++                        fromBlockTicks.alreadyRunThisTick.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
++                        fromBlockTicks.toRunThisTick.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
++                        fromBlockTicks.forContainersInArea(from, (_, container) -> container.getAll().filter(tickInsideBB).forEach(ticksToAdd::add));
++                        java.util.LongSummaryStatistics info = ticksToAdd.stream().mapToLong(net.minecraft.world.ticks.ScheduledTick::subTickOrder).summaryStatistics();
++                        long minSubTick = info.getMin();
++                        long maxSubTick = info.getMax();
++
++                        final net.minecraft.core.BlockPos.MutableBlockPos sourcePos = new net.minecraft.core.BlockPos.MutableBlockPos();
++
++                        for (int z = from.minZ(); z <= from.maxZ(); z++) {
++                            for (int y = from.minY(); y <= from.maxY(); y++) {
++                                for (int x = from.minX(); x <= from.maxX(); x++) {
++                                    sourcePos.set(x, y, z);
++                                    BlockInWorld block = new BlockInWorld(fromDimension, sourcePos, false);
++                                    snapshot.collect(sourcePos.immutable(), offset, block, fromDimension, predicate, problemReporter, source.registryAccess());
++                                }
++                            }
++                        }
++
++                        // now that we have collected everything, we need to try to set things in the source
++                        // before we move to the destination
++
++                        // note: clearBlockList is basically just a list of all the blocks we collected that
++                        //       at least passed the predicate
++
++                        int defaultUpdateFlags = 2 | (strict ? 816 : 0);
++                        if (mode == CloneCommands.Mode.MOVE) {
++                            for (BlockPos pos : snapshot.allPositions) {
++                                fromDimension.setBlock(pos, Blocks.BARRIER.defaultBlockState(), defaultUpdateFlags | Block.UPDATE_SKIP_ALL_SIDEEFFECTS);
++                            }
++
++                            int standardUpdateFlags = strict ? defaultUpdateFlags : Block.UPDATE_ALL;
++
++                            for (BlockPos pos : snapshot.allPositions) {
++                                fromDimension.setBlock(pos, Blocks.AIR.defaultBlockState(), standardUpdateFlags);
++                            }
++                        }
++
++                        // we have finished our work in the source dimension, now we move to the destination
++
++                        toDimension.canvas$loadOrRunAtChunksAsync(
++                            (destination.minX() - buffer) >> 4,
++                            (destination.maxX() + buffer) >> 4,
++                            (destination.minZ() - buffer) >> 4,
++                            (destination.maxZ() + buffer) >> 4,
++                            ca.spottedleaf.concurrentutil.util.Priority.NORMAL, () -> {
++
++                                // we need the reversed version of this for later usage
++
++                                final it.unimi.dsi.fastutil.objects.Object2ObjectMap<BlockPos, BlockState> previousStates = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>();
++                                final List<BlockInfo> reversedInfo = snapshot.reversed();
++                                final org.apache.commons.lang3.mutable.MutableInt count = new org.apache.commons.lang3.mutable.MutableInt(0);
++
++                                // if the position isn't there, just guess air, but that shouldn't happen
++                                previousStates.defaultReturnValue(Blocks.AIR.defaultBlockState());
++
++                                // we set everything to barriers first, then we need to set the state and then BE data
++
++                                for (CloneCommands.BlockInfo cloneInfo : reversedInfo) {
++
++                                    final BlockPos destinationPos = cloneInfo.destinationPos();
++
++                                    // we are iterating over everything, so we can set the previous states map here but only
++                                    // if not strict, since "strict" just hard-sets the states with no neighbor updates
++
++                                    if (!strict) {
++                                        previousStates.put(
++                                            destinationPos, toDimension.getBlockState(destinationPos)
++                                        );
++                                    }
++
++                                    toDimension.setBlock(destinationPos, Blocks.BARRIER.defaultBlockState(), defaultUpdateFlags | Block.UPDATE_SKIP_ALL_SIDEEFFECTS);
++                                }
++
++                                for (CloneCommands.BlockInfo cloneInfo : snapshot.collectedStates) {
++                                    if (toDimension.setBlock(cloneInfo.destinationPos(), cloneInfo.state, defaultUpdateFlags)) {
++                                        count.increment();
++                                    }
++                                }
++
++                                // we check if we even have block entities first, since if we don't then why should we
++                                // ever iterate over this, that's just dumb
++
++                                if (snapshot.hasBlockEntities.isTrue()) {
++
++                                    try (final ProblemReporter.ScopedCollector blockEntitiesReporter = new ProblemReporter.ScopedCollector(LOGGER)) {
++
++                                        // if we are here, we have block entities, so we now iterate over all entries
++                                        // until we find any
++
++                                        for (CloneCommands.BlockInfo cloneInfo : snapshot.collectedStates) {
++                                            if (cloneInfo.blockEntityInfo == null) continue; // skip entries with no data
++
++                                            BlockEntity newBlockEntity = toDimension.getBlockEntity(cloneInfo.destinationPos());
++                                            if (newBlockEntity != null) {
++                                                newBlockEntity.loadCustomOnly(
++                                                    TagValueInput.create(blockEntitiesReporter.forChild(newBlockEntity.problemPath()), toDimension.registryAccess(), cloneInfo.blockEntityInfo.tag)
++                                                );
++                                                newBlockEntity.setComponents(cloneInfo.blockEntityInfo.components);
++                                                newBlockEntity.setChanged();
++                                            }
++
++                                            toDimension.setBlock(cloneInfo.destinationPos(), cloneInfo.state, defaultUpdateFlags);
++                                        }
++
++                                    }
++
++                                }
++
++                                if (!strict) {
++                                    for (CloneCommands.BlockInfo cloneInfo : reversedInfo) {
++                                        final BlockPos destinationPos = cloneInfo.destinationPos();
++                                        toDimension.updateNeighboursOnBlockSet(destinationPos, previousStates.get(destinationPos));
++                                    }
++                                }
++
++                                ticksToAdd.forEach(
++                                    tick -> toDimension.getBlockTicks().schedule(
++                                        new net.minecraft.world.ticks.ScheduledTick<>(
++                                            tick.type(), tick.pos().offset(offset), tick.triggerTick(), tick.priority(), tick.subTickOrder() - minSubTick + maxSubTick + 1L
++                                        )
++                                    )
++                                );
++
++                                source.sendSuccess(() -> Component.translatable("commands.clone.success", count.get()), true);
++                            }
++                        );
++
++                    }
++                }
++            );
++
++            return 1;
++        }
++        // Canvas end - region threading
+         List<CloneCommands.CloneBlockInfo> solidList = Lists.newArrayList();
+         List<CloneCommands.CloneBlockInfo> blockEntitiesList = Lists.newArrayList();
+         List<CloneCommands.CloneBlockInfo> otherBlocksList = Lists.newArrayList();

@@ -1,0 +1,50 @@
+--- a/net/minecraft/world/waypoints/WaypointTransmitter.java
++++ b/net/minecraft/world/waypoints/WaypointTransmitter.java
+@@ -20,20 +_,38 @@
+     Waypoint.Icon waypointIcon();
+ 
+     static boolean doesSourceIgnoreReceiver(final LivingEntity source, final ServerPlayer receiver) {
+-        if (!receiver.getBukkitEntity().canSee(source.getBukkitEntity())) return true; // Paper - ignore if entity is hidden from player
++        // Canvas start - region threading
++        if (!receiver.getBukkitEntity().canSeeNMS(source)) return true; // Paper - ignore if entity is hidden from player
+         if (receiver.isSpectator()) {
+             return false;
+-        } else if (!source.isSpectator() && !source.hasIndirectPassenger(receiver)) {
+-            double broadcastRange = Math.min(
+-                source.getAttributeValue(Attributes.WAYPOINT_TRANSMIT_RANGE), receiver.getAttributeValue(Attributes.WAYPOINT_RECEIVE_RANGE)
+-            );
+-            return source.distanceToSqr(receiver) >= Mth.square(broadcastRange); // Paper - optimize waypoint distance check by using squared distance
+-        } else {
+-            return true;
+-        }
++        }
++
++        if (!source.isSpectator()) {
++            final double dx = source.getX() - receiver.getX();
++            final double dz = source.getZ() - receiver.getZ();
++            final double horizontalDistSq = dx * dx + dz * dz;
++
++            if (horizontalDistSq < 4.0) {
++                // close enough together that they are in the same region
++                if (source.hasIndirectPassenger(receiver)) {
++                    return true;
++                }
++            }
++
++            // use cached variants, volatile
++            final double transmitRange = source.waypointTransmitRangeCached;
++            final double receiveRange = receiver.waypointReceiveRangeCached;
++            final double minRange = Math.min(transmitRange, receiveRange);
++
++            return source.distanceTo(receiver) >= minRange;
++        }
++
++        return true;
++        // Canvas end - region threading
+     }
+ 
+     static boolean isChunkVisible(final ChunkPos chunkPos, final ServerPlayer receiver) {
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(receiver)) return false; // Canvas - region threading - if isn't current tick thread, not visible
+         // Paper start - rewrite chunk system
+         final ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.PlayerChunkLoaderData playerChunkLoader = ((ca.spottedleaf.moonrise.patches.chunk_system.player.ChunkSystemServerPlayer)receiver).moonrise$getChunkLoader();
+         return playerChunkLoader != null && playerChunkLoader.getSentChunksRaw().contains(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkPos));

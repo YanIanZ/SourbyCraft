@@ -1,0 +1,259 @@
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -236,7 +_,7 @@
+     private long lastPlayed = 0;
+     private boolean hasPlayedBefore = false;
+     private final ConversationTracker conversationTracker = new ConversationTracker();
+-    private final Map<UUID, Set<WeakReference<Plugin>>> invertedVisibilityEntities = new HashMap<>();
++    private final Map<UUID, it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>>> invertedVisibilityEntities = new java.util.concurrent.ConcurrentHashMap<>(); // Canvas - fix folia visibility api
+     private final Set<UUID> unlistedEntities = new HashSet<>(); // Paper - Add Listing API for Player
+     private static final WeakHashMap<Plugin, WeakReference<Plugin>> pluginWeakReferences = new WeakHashMap<>();
+     private int hash = 0;
+@@ -247,6 +_,35 @@
+     private BorderChangeListener clientWorldBorderListener = this.createWorldBorderListener();
+     private long lastSaveTime; // Paper - getLastPlayed replacement API
+     private @Nullable CraftScoreboard scoreboardOverride;
++    // Folia start - region threading
++    public final net.minecraft.network.PacketProcessor packetProcessor = new net.minecraft.network.PacketProcessor(null);
++
++    // used only to notify tasks for packets
++    private volatile io.papermc.paper.threadedregions.RegionizedWorldData lastRegion;
++
++    public void stopAcceptingPackets() {
++        this.packetProcessor.close();
++    }
++
++    public void updateRegion(final io.papermc.paper.threadedregions.RegionizedWorldData region) {
++        this.lastRegion = region;
++        if (region != null && this.packetProcessor.hasPackets()) {
++            region.regionData.setHasPackets();
++            region.regionData.getRegionSchedulingHandle().getTickManager().sendStateToPlayer(getHandle()); // Canvas - region threading
++        }
++    }
++
++    public <T extends net.minecraft.network.PacketListener> void schedulePacket(T listener, net.minecraft.network.protocol.Packet<T> packet) {
++        if (!this.packetProcessor.scheduleIfPossible(listener, packet)) {
++            return;
++        }
++
++        final io.papermc.paper.threadedregions.RegionizedWorldData region = this.lastRegion;
++        if (region != null) {
++            region.regionData.setHasPackets();
++        }
++    }
++    // Folia end - region threading
+ 
+     public CraftPlayer(CraftServer server, ServerPlayer entity) {
+         super(server, entity);
+@@ -256,7 +_,7 @@
+ 
+     @Override
+     public ServerPlayer getHandle() {
+-        return (ServerPlayer) this.entity;
++        return (ServerPlayer) this.entity; // Folia - region threading - no checks for players, as it's a total mess
+     }
+ 
+     @Override
+@@ -655,13 +_,13 @@
+ 
+     @Override
+     public void kickPlayer(String message) {
+-        org.spigotmc.AsyncCatcher.catchOp("player kick"); // Spigot
++        // org.spigotmc.AsyncCatcher.catchOp("player kick"); // Spigot // Folia - thread-safe now, as it will simply delay the kick
+         this.getHandle().connection.disconnect(CraftChatMessage.fromStringOrEmpty(message, true), org.bukkit.event.player.PlayerKickEvent.Cause.PLUGIN); // Paper - kick event cause
+     }
+ 
+     @Override
+     public void kick(net.kyori.adventure.text.Component message, org.bukkit.event.player.PlayerKickEvent.Cause cause) {
+-        org.spigotmc.AsyncCatcher.catchOp("player kick");
++        // org.spigotmc.AsyncCatcher.catchOp("player kick"); // Folia - region threading - no longer needed
+         final ServerGamePacketListenerImpl connection = this.getHandle().connection;
+         if (connection != null) {
+             connection.disconnect(message == null ? net.kyori.adventure.text.Component.empty() : message, cause);
+@@ -1313,6 +_,11 @@
+ 
+     @Override
+     protected boolean teleport0(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, io.papermc.paper.entity.TeleportFlag... flags) {
++        // Folia start - region threading
++        if (true) {
++            throw new UnsupportedOperationException("Must use teleportAsync while in region threading");
++        }
++        // Folia end - region threading
+         if (this.getHandle().connection == null) {
+             return false;
+         }
+@@ -1347,6 +_,7 @@
+ 
+     @Override
+     public void loadData() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Cannot load data async"); // Canvas - region guards
+         this.server.getHandle().playerIo.load(this.getHandle().nameAndId())
+             .map(tag -> TagValueInput.create(ProblemReporter.DISCARDING, this.server.getServer().registryAccess(), tag))
+             .ifPresent(this.getHandle()::load);
+@@ -1354,6 +_,7 @@
+ 
+     @Override
+     public void saveData() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Cannot save data async"); // Canvas - region guards
+         this.server.getHandle().playerIo.save(this.getHandle());
+     }
+ 
+@@ -1415,6 +_,7 @@
+ 
+     @Override
+     public Collection<EnderPearl> getEnderPearls() {
++        io.canvasmc.canvas.util.TickGuard.guard(this.getHandle(), "Cannot get player ender pearls async"); // Canvas - region threading
+         return this.getHandle().getEnderPearls().stream().map((e) -> (EnderPearl) e.getBukkitEntity()).collect(Collectors.toList());
+     }
+ 
+@@ -1668,6 +_,7 @@
+     @Override
+     public void setGameMode(GameMode mode) {
+         Preconditions.checkArgument(mode != null, "GameMode cannot be null");
++        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot set gamemode async"); // Canvas - region guards
+         if (this.getHandle().connection == null) return;
+ 
+         this.getHandle().setGameMode(GameType.byId(mode.getValue()), org.bukkit.event.player.PlayerGameModeChangeEvent.Cause.PLUGIN, null); // Paper - Expand PlayerGameModeChangeEvent
+@@ -1862,16 +_,30 @@
+     }
+ 
+     private boolean addInvertedVisibility(@Nullable Plugin plugin, org.bukkit.entity.Entity entity) {
+-        Set<WeakReference<Plugin>> invertedPlugins = this.invertedVisibilityEntities.get(entity.getUniqueId());
+-        if (invertedPlugins != null) {
+-            // Some plugins are already inverting the entity. Just mark that this
+-            // plugin wants the entity inverted too and end.
+-            invertedPlugins.add(CraftPlayer.getPluginWeakReference(plugin));
+-            return false;
+-        }
+-        invertedPlugins = new HashSet<>();
+-        invertedPlugins.add(CraftPlayer.getPluginWeakReference(plugin));
+-        this.invertedVisibilityEntities.put(entity.getUniqueId(), invertedPlugins);
++        // Canvas start - fix folia visibility api
++        final UUID uuid = entity.getUniqueId();
++
++        it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>> set =
++            invertedVisibilityEntities.get(uuid);
++
++        if (set != null) {
++            set.add(CraftPlayer.getPluginWeakReference(plugin));
++            return false;
++        }
++
++        it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>> newSet =
++            new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>();
++
++        newSet.add(CraftPlayer.getPluginWeakReference(plugin));
++
++        it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>> existing =
++            invertedVisibilityEntities.putIfAbsent(uuid, newSet);
++
++        if (existing != null) {
++            existing.add(CraftPlayer.getPluginWeakReference(plugin));
++            return false;
++        }
++        // Canvas end - fix folia visibility api
+ 
+         return true;
+     }
+@@ -1887,7 +_,7 @@
+     private void unregisterEntity(Entity other) {
+         // Paper end
+         ChunkMap tracker = ((ServerLevel) this.getHandle().level()).getChunkSource().chunkMap;
+-        ChunkMap.TrackedEntity entry = tracker.entityMap.get(other.getId());
++        ChunkMap.TrackedEntity entry = other.moonrise$getTrackedEntity(); // Folia - region threading
+         if (entry != null) {
+             entry.removePlayer(this.getHandle());
+         }
+@@ -1944,16 +_,24 @@
+     }
+ 
+     private boolean removeInvertedVisibility(@Nullable Plugin plugin, org.bukkit.entity.Entity entity) {
+-        Set<WeakReference<Plugin>> invertedPlugins = this.invertedVisibilityEntities.get(entity.getUniqueId());
+-        if (invertedPlugins == null) {
+-            return false; // Entity isn't inverted
+-        }
+-        invertedPlugins.remove(CraftPlayer.getPluginWeakReference(plugin));
+-        if (!invertedPlugins.isEmpty()) {
+-            return false; // Some other plugins still want the entity inverted
+-        }
+-        this.invertedVisibilityEntities.remove(entity.getUniqueId());
+-
++        // Canvas start - fix folia visibility api
++        final UUID uuid = entity.getUniqueId();
++
++        it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>> set =
++            invertedVisibilityEntities.get(uuid);
++
++        if (set == null) {
++            return false;
++        }
++
++        set.remove(CraftPlayer.getPluginWeakReference(plugin));
++
++        if (!set.isEmpty()) {
++            return false;
++        }
++
++        invertedVisibilityEntities.remove(uuid, set);
++        // Canvas end - fix folia visibility api
+         return true;
+     }
+ 
+@@ -1976,7 +_,7 @@
+             if (original != null) otherPlayer.setUUID(original); // Paper - uuid override
+         }
+ 
+-        ChunkMap.TrackedEntity entry = tracker.entityMap.get(other.getId());
++        ChunkMap.TrackedEntity entry = other.moonrise$getTrackedEntity(); // Folia - region threading
+         if (entry != null && !entry.seenBy.contains(this.getHandle().connection)) {
+             entry.updatePlayer(this.getHandle());
+         }
+@@ -2060,6 +_,13 @@
+         this.invertedVisibilityEntities.remove(entity.getUUID());
+     }
+ 
++    // Canvas start - region threading
++    public boolean canSeeNMS(final Entity entity) {
++        return entity.visibleByDefault ^ (!invertedVisibilityEntities.isEmpty() &&
++            this.invertedVisibilityEntities.containsKey(entity.getUUID()));
++    }
++
++    // Canvas end - region threading
+     @Override
+     public boolean canSee(Player player) {
+         return this.canSee((org.bukkit.entity.Entity) player);
+@@ -2067,8 +_,14 @@
+ 
+     @Override
+     public boolean canSee(org.bukkit.entity.Entity entity) {
+-        return this.equals(entity) || entity.isVisibleByDefault() ^ this.invertedVisibilityEntities.containsKey(entity.getUniqueId()); // SPIGOT-7312: Can always see self
+-    }
++        return this.equals(entity) || entity.isVisibleByDefault() ^ (!invertedVisibilityEntities.isEmpty() && this.invertedVisibilityEntities.containsKey(entity.getUniqueId())); // SPIGOT-7312: Can always see self // Leaf - optimize canSee checks
++    }
++    // Leaf start - optimize canSee checks
++
++    public boolean canSeeChunkMapUpdatePlayer(org.bukkit.entity.Entity entity) {
++        return entity.isVisibleByDefault() ^ (!invertedVisibilityEntities.isEmpty() && this.invertedVisibilityEntities.containsKey(entity.getUniqueId())); // SPIGOT-7312: Can always see self // SparklyPaper - optimize canSee checks
++    }
++    // Leaf end - optimize canSee checks
+ 
+     public boolean canSeePlayer(UUID uuid) {
+         org.bukkit.entity.Entity entity = this.getServer().getPlayer(uuid);
+@@ -2547,6 +_,7 @@
+         if (!(scoreboard instanceof CraftScoreboard craftScoreboard)) {
+             throw new IllegalArgumentException("Cannot set player scoreboard to an unregistered Scoreboard");
+         }
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(getHandle(), "Cannot set player board async"); // Canvas - region threading
+ 
+         this.server.getScoreboardManager().setPlayerBoard(this, craftScoreboard);
+     }
+@@ -3047,8 +_,7 @@
+         @Override
+         public void respawn() {
+             if (CraftPlayer.this.getHealth() <= 0 && CraftPlayer.this.isOnline()) {
+-                CraftPlayer.this.server.getServer().getPlayerList().respawn(CraftPlayer.this.getHandle(), false, Entity.RemovalReason.KILLED, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason.PLUGIN);
+-                CraftPlayer.this.getHandle().connection.restartClientLoadTimerAfterRespawn();
++                CraftPlayer.this.getHandle().respawn(null, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason.PLUGIN); // Folia - region threading
+             }
+         }
+ 

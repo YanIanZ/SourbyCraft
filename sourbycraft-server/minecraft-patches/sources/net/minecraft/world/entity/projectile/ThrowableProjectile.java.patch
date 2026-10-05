@@ -1,0 +1,14 @@
+--- a/net/minecraft/world/entity/projectile/ThrowableProjectile.java
++++ b/net/minecraft/world/entity/projectile/ThrowableProjectile.java
+@@ -44,6 +_,11 @@
+ 
+     @Override
+     public void tick() {
++        // Folia start - region threading - make sure entities do not move into regions they do not own
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor((net.minecraft.server.level.ServerLevel)this.level(), this.position(), this.getDeltaMovement(), 1)) {
++            return;
++        }
++        // Folia end - region threading - make sure entities do not move into regions they do not own
+         this.handleFirstTickBubbleColumn();
+         this.applyGravity();
+         this.applyInertia();

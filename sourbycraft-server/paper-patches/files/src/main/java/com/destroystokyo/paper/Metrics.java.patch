@@ -1,54 +1,38 @@
 --- a/src/main/java/com/destroystokyo/paper/Metrics.java
 +++ b/src/main/java/com/destroystokyo/paper/Metrics.java
-@@ -93,20 +_,27 @@
-      * Starts the Scheduler which submits our data every 30 minutes.
-      */
-     private void startSubmitting() {
--        final Runnable submitTask = () -> {
--            if (!MinecraftServer.getServer().hasStopped()) {
--                submitData();
--            }
--        };
-+        // SourbyCraft - remove bStats phone-home: never schedule the submit task, so this server never
-+        // POSTs server-implementation telemetry to https://bstats.org/submitData/server-implementation.
-+        // The class + its public API are kept intact (nothing else needs to change) — only the two
-+        // methods that actually cause network I/O are neutered; see submitData() below for the second,
-+        // defense-in-depth guard in case some other path ever reaches it directly.
-+        if (false) {
-+            final Runnable submitTask = () -> {
-+                if (!MinecraftServer.getServer().hasStopped()) {
-+                    submitData();
+@@ -593,7 +_,7 @@
+             boolean logFailedRequests = config.getBoolean("logFailedRequests", false);
+             // Only start Metrics, if it's enabled in the config
+             if (config.getBoolean("enabled", true)) {
+-                Metrics metrics = new Metrics("Paper", serverUUID, logFailedRequests, Bukkit.getLogger());
++                Metrics metrics = new Metrics("Canvas", serverUUID, logFailedRequests, Bukkit.getLogger()); // Canvas - Rebrand
+ 
+                 metrics.addCustomChart(new Metrics.SimplePie("minecraft_version", () -> {
+                     String minecraftVersion = Bukkit.getVersion();
+@@ -606,12 +_,23 @@
+                 final String paperVersion;
+                 final String implVersion = org.bukkit.craftbukkit.Main.class.getPackage().getImplementationVersion();
+                 if (implVersion != null) {
+-                    final String buildOrHash = implVersion.substring(implVersion.lastIndexOf('-') + 1);
+-                    paperVersion = "git-Paper-%s-%s".formatted(Bukkit.getServer().getMinecraftVersion(), buildOrHash);
++                    // Canvas start - Rebrand - new versioning schem for bstats
++                    io.papermc.paper.ServerBuildInfo buildInfo = io.papermc.paper.ServerBuildInfo.buildInfo();
++                    final int num = buildInfo.buildNumber().orElse(-1);
++                    paperVersion = "Canvas-V3-" +
++                        buildInfo.minecraftVersionName() + "-" +
++                        (num != -1 ? num : "DEV");
++                    // Canvas end - Rebrand - new versioning schem for bstats
+                 } else {
+                     paperVersion = "unknown";
+                 }
+-                metrics.addCustomChart(new Metrics.SimplePie("paper_version", () -> paperVersion));
++                // Canvas start - Rebrand
++                metrics.addCustomChart(new Metrics.SimplePie("canvas_version", () -> paperVersion));
++                final io.papermc.paper.configuration.GlobalConfiguration paperGlobal = io.papermc.paper.configuration.GlobalConfiguration.get();
++                if (paperGlobal != null) {
++                    metrics.addCustomChart(new Metrics.SimplePie("scheduler_type", () -> paperGlobal.threadedRegions.scheduler.name()));
 +                }
-+            };
++                // Canvas end - Rebrand
  
--        // Many servers tend to restart at a fixed time at xx:00 which causes an uneven distribution of requests on the
--        // bStats backend. To circumvent this problem, we introduce some randomness into the initial and second delay.
--        // WARNING: You must not modify any part of this Metrics class, including the submit delay or frequency!
--        // WARNING: Modifying this code will get your plugin banned on bStats. Just don't do it!
--        long initialDelay = (long) (1000 * 60 * (3 + Math.random() * 3));
--        long secondDelay = (long) (1000 * 60 * (Math.random() * 30));
--        scheduler.schedule(submitTask, initialDelay, TimeUnit.MILLISECONDS);
--        scheduler.scheduleAtFixedRate(submitTask, initialDelay + secondDelay, 1000 * 60 * 30, TimeUnit.MILLISECONDS);
-+            // Many servers tend to restart at a fixed time at xx:00 which causes an uneven distribution of requests on the
-+            // bStats backend. To circumvent this problem, we introduce some randomness into the initial and second delay.
-+            // WARNING: You must not modify any part of this Metrics class, including the submit delay or frequency!
-+            // WARNING: Modifying this code will get your plugin banned on bStats. Just don't do it!
-+            long initialDelay = (long) (1000 * 60 * (3 + Math.random() * 3));
-+            long secondDelay = (long) (1000 * 60 * (Math.random() * 30));
-+            scheduler.schedule(submitTask, initialDelay, TimeUnit.MILLISECONDS);
-+            scheduler.scheduleAtFixedRate(submitTask, initialDelay + secondDelay, 1000 * 60 * 30, TimeUnit.MILLISECONDS);
-+        }
-     }
- 
-     /**
-@@ -160,6 +_,10 @@
-      * Collects the data and sends it afterwards.
-      */
-     private void submitData() {
-+        // SourbyCraft - remove bStats phone-home (defense in depth: startSubmitting() above already
-+        // never schedules a call here, but this guard means even a future/reflective caller can never
-+        // trigger an outbound https://bstats.org/submitData/server-implementation POST).
-+        if (true) return;
-         final JSONObject data = getServerData();
- 
-         JSONArray pluginData = new JSONArray();
+                 metrics.addCustomChart(new Metrics.DrilldownPie("java_version", () -> {
+                     Map<String, Map<String, Integer>> map = new HashMap<>();

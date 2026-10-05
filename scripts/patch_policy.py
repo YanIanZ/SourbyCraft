@@ -8,9 +8,11 @@ break at the point it is introduced and needs no build.
 import re
 from pathlib import Path
 
-PATCH_ROOTS = ("sourbycraft-server/minecraft-patches",
-               "sourbycraft-server/paper-patches",
-               "sourbycraft-server/canvas-patches")
+# SourbyCraft's own edits. minecraft-patches/sources and paper-patches/files are the engine
+# baseline inherited from Canvas/Folia when Paper became the only upstream; every SourbyCraft
+# change to that baseline is a feature patch, so these rules see all of them and nothing else.
+PATCH_ROOTS = ("sourbycraft-server/minecraft-patches/features",
+               "sourbycraft-server/paper-patches/features")
 
 # Classes whose single instance is reached by more than one region thread. ServerLevel is
 # subdivided into many regions by ServerLevel.regioniser and every region thread calls
@@ -114,6 +116,24 @@ def upstream_default_changes(root):
             elif name in removed and removed[name] != value.strip():
                 changes[f"{patch.name}:{name}"] = (removed[name], value.strip())
     return changes
+
+
+# The engine configuration classes came into the tree from Canvas, together with SourbyCraft's
+# deliberate default changes to them. There is no upstream patch to diff against any more, so
+# those defaults are read straight from the owned source and pinned by the test instead.
+SOURCE_FIELD_DEFAULT = re.compile(
+    r"^\s*(?:public|protected|private)\s+(?:static\s+)?(?:final\s+)?"
+    r"[\w.<>\[\]]+\s+(\w+)\s*=\s*(.+?);\s*(?://.*)?$")
+
+
+def source_field_defaults(root, relative):
+    """Field name -> initialiser for every field default declared in one source file."""
+    defaults = {}
+    for line in (Path(root) / relative).read_text(errors="replace").splitlines():
+        match = SOURCE_FIELD_DEFAULT.match(line)
+        if match:
+            defaults.setdefault(match.group(1), match.group(2).strip())
+    return defaults
 
 
 # Patch 0017 replaces `boundingBox.move(-blockX, -blockY, -blockZ)` with an inline AABB

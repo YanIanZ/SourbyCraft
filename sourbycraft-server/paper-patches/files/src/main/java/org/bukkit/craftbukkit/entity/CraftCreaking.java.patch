@@ -1,0 +1,10 @@
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftCreaking.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftCreaking.java
+@@ -19,6 +_,7 @@
+ 
+     @Override
+     public Creaking getHandle() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Accessing entity state off owning region's thread"); // Folia - region threading
+         return (Creaking) this.entity;
+     }
+ 

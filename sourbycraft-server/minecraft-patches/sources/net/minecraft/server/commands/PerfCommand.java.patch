@@ -1,0 +1,28 @@
+--- a/net/minecraft/server/commands/PerfCommand.java
++++ b/net/minecraft/server/commands/PerfCommand.java
+@@ -42,25 +_,10 @@
+     }
+ 
+     private static int startProfilingDedicatedServer(final CommandSourceStack source) throws CommandSyntaxException {
+-        MinecraftServer server = source.getServer();
+-        if (server.isRecordingMetrics()) {
+-            throw ERROR_ALREADY_RUNNING.create();
+-        }
+-
+-        Consumer<ProfileResults> onStopped = results -> whenStopped(source, results);
+-        Consumer<Path> onReportFinished = profilingLogs -> saveResults(source, profilingLogs, server);
+-        server.startRecordingMetrics(onStopped, onReportFinished);
+-        source.sendSuccess(() -> Component.translatable("commands.perf.started"), false);
+         return 0;
+     }
+ 
+     private static int stopProfilingDedicatedServer(final CommandSourceStack source) throws CommandSyntaxException {
+-        MinecraftServer server = source.getServer();
+-        if (!server.isRecordingMetrics()) {
+-            throw ERROR_NOT_RUNNING.create();
+-        }
+-
+-        server.finishRecordingMetrics();
+         return 0;
+     }
+ 

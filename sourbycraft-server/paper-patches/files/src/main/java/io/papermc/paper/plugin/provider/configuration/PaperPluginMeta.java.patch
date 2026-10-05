@@ -1,0 +1,25 @@
+--- a/src/main/java/io/papermc/paper/plugin/provider/configuration/PaperPluginMeta.java
++++ b/src/main/java/io/papermc/paper/plugin/provider/configuration/PaperPluginMeta.java
+@@ -64,6 +_,8 @@
+     private PermissionConfiguration permissionConfiguration = new PermissionConfiguration(PermissionDefault.OP, List.of());
+     @Required
+     private ApiVersion apiVersion;
++    private boolean foliaSupported = false; // Folia - folia supported flag
++    private boolean canvasSupported = false; // Canvas - canvas supported flag
+ 
+     private Map<PluginDependencyLifeCycle, Map<String, DependencyConfiguration>> dependencies = new EnumMap<>(PluginDependencyLifeCycle.class);
+ 
+@@ -251,6 +_,13 @@
+         return this.apiVersion.getVersionString();
+     }
+ 
++    // Folia start - folia supported flag
++    @Override
++    public boolean isFoliaSupported() {
++        return this.foliaSupported || this.canvasSupported; // Canvas - canvas supported flag
++    }
++
++    // Folia end - folia supported flag
+     @Override
+     public @NotNull List<String> getProvidedPlugins() {
+         return this.provides;

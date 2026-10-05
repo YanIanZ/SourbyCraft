@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/LightningStrikeTrigger.java
++++ b/net/minecraft/advancements/triggers/LightningStrikeTrigger.java
+@@ -21,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final LightningBolt lightning, final List<Entity> entitiesAround) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         List<LootContext> entitiesAroundContexts = entitiesAround.stream().map(v -> EntityPredicate.createContext(player, v)).collect(Collectors.toList());
+         LootContext lightningContext = EntityPredicate.createContext(player, lightning);
+         this.trigger(player, t -> t.matches(lightningContext, entitiesAroundContexts));

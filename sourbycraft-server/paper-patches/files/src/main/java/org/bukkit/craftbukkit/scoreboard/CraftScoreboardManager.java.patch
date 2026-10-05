@@ -1,0 +1,37 @@
+--- a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboardManager.java
++++ b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboardManager.java
+@@ -22,7 +_,7 @@
+ public final class CraftScoreboardManager implements ScoreboardManager {
+     private final CraftScoreboard mainScoreboard;
+     private final MinecraftServer server;
+-    private final Collection<CraftScoreboard> scoreboards = new WeakCollection<>();
++    private final Collection<CraftScoreboard> scoreboards = new io.canvasmc.canvas.util.WeakConcurrentCollection<>(); // Canvas - region threading
+ 
+     public CraftScoreboardManager(MinecraftServer server, net.minecraft.world.scores.Scoreboard scoreboard) {
+         this.mainScoreboard = new CraftScoreboard(scoreboard);
+@@ -38,7 +_,7 @@
+ 
+     @Override
+     public CraftScoreboard getNewScoreboard() {
+-        org.spigotmc.AsyncCatcher.catchOp("scoreboard creation"); // Spigot
++        this.server.getScoreboard().ensureMainThread("Cannot create new scoreboard async"); // Canvas - region threading
+         CraftScoreboard scoreboard = new CraftScoreboard(new ServerScoreboard(this.server));
+         if (io.papermc.paper.configuration.GlobalConfiguration.get().scoreboards.trackPluginScoreboards) {
+             scoreboard.registeredGlobally = true;
+@@ -48,7 +_,7 @@
+     }
+ 
+     public void registerScoreboardForVanilla(CraftScoreboard scoreboard) {
+-        org.spigotmc.AsyncCatcher.catchOp("scoreboard registration");
++        server.getScoreboard().ensureMainThread("Cannot register CraftScoreboard async"); // Canvas - region threading
+         this.scoreboards.add(scoreboard);
+     }
+ 
+@@ -58,6 +_,7 @@
+     }
+ 
+     public void setPlayerBoard(CraftPlayer player, CraftScoreboard scoreboard) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(player.getHandle(), "Cannot set player board async"); // Canvas - region threading
+         net.minecraft.world.scores.Scoreboard oldBoard = this.getPlayerBoard(player).getHandle();
+         net.minecraft.world.scores.Scoreboard newBoard = scoreboard.getHandle();
+         if (oldBoard == newBoard) {

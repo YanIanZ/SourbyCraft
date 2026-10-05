@@ -1,0 +1,60 @@
+--- a/net/minecraft/world/item/ItemStack.java
++++ b/net/minecraft/world/item/ItemStack.java
+@@ -380,11 +_,12 @@
+         DataComponentPatch previousPatch = this.components.asPatch();
+         int previousCount = this.getCount();
+         ServerLevel level = (ServerLevel) context.getLevel();
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = level.getCurrentWorldData(); // Folia - region threading
+         boolean isBonemeal = usedItem == Items.BONE_MEAL;
+ 
+         if (!(usedItem instanceof BucketItem)) {
+-            level.captureBlockStates = true;
+-            level.captureTreeGeneration = isBonemeal;
++            worldData.captureBlockStates = true; // Folia - region threading
++            worldData.captureTreeGeneration = isBonemeal; // Folia - region threading
+         }
+ 
+         List<org.bukkit.craftbukkit.block.CraftBlockState> capturedBlockStates;
+@@ -394,17 +_,17 @@
+         try {
+             result = usedItem.useOn(context);
+         } finally {
+-            level.captureBlockStates = false;
+-            level.captureTreeGeneration = false;
+-
+-            capturedBlockStates = new java.util.ArrayList<>(level.capturedBlockStates.values());
+-            level.capturedBlockStates.clear();
+-
+-            capturedBlockEntities = new java.util.ArrayList<>(level.capturedBlockEntities.values());
+-            level.capturedBlockEntities.clear();
+-
+-            treeType = net.minecraft.world.level.block.SaplingBlock.treeType;
+-            net.minecraft.world.level.block.SaplingBlock.treeType = null;
++            worldData.captureBlockStates = false; // Folia - region threading
++            worldData.captureTreeGeneration = false; // Folia - region threading
++
++            capturedBlockStates = new java.util.ArrayList<>(worldData.capturedBlockStates.values()); // Folia - region threading
++            worldData.capturedBlockStates.clear(); // Folia - region threading
++
++            capturedBlockEntities = new java.util.ArrayList<>(worldData.capturedBlockEntities.values()); // Folia - region threading
++            worldData.capturedBlockEntities.clear(); // Folia - region threading
++
++            treeType = net.minecraft.world.level.block.SaplingBlock.treeTypeRT.get(); // Folia - region threading
++            net.minecraft.world.level.block.SaplingBlock.treeTypeRT.set(null); // Folia - region threading
+         }
+ 
+         DataComponentPatch newPatch = this.components.asPatch();
+@@ -836,11 +_,11 @@
+     }
+ 
+     public static boolean isSameItem(final ItemStack a, final ItemStack b) {
+-        return a.is(b.getItem());
++        return a == b || a.is(b.getItem()); // Canvas - optimize matching checks
+     }
+ 
+     public static boolean isSameItemSameComponents(final ItemStack a, final ItemStack b) {
+-        return a.is(b.getItem()) && (a.isEmpty() && b.isEmpty() || Objects.equals(a.components, b.components));
++        return a == b || a.is(b.getItem()) && (a.isEmpty() && b.isEmpty() || Objects.equals(a.components, b.components)); // Canvas - optimize matching checks
+     }
+ 
+     public static boolean matchesIgnoringComponents(final ItemStack a, final ItemStack b, final Predicate<DataComponentType<?>> ignoredPredicate) {

@@ -1,0 +1,10 @@
+--- a/net/minecraft/world/entity/ai/behavior/SleepInBed.java
++++ b/net/minecraft/world/entity/ai/behavior/SleepInBed.java
+@@ -57,6 +_,7 @@
+             }
+         }
+ 
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(body.level(), target.pos())) return false; // Canvas - region threading
+         BlockState blockState = level.getBlockStateIfLoaded(target.pos()); // Paper - Prevent sync chunk loads when villagers try to find beds
+         if (blockState == null) return false; // Paper - Prevent sync chunk loads when villagers try to find beds
+         return target.pos().closerToCenterThan(body.position(), 2.0) && blockState.is(BlockTags.BEDS) && !blockState.getValue(BedBlock.OCCUPIED);

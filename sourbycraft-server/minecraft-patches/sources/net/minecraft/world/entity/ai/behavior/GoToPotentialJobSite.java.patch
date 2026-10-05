@@ -1,0 +1,17 @@
+--- a/net/minecraft/world/entity/ai/behavior/GoToPotentialJobSite.java
++++ b/net/minecraft/world/entity/ai/behavior/GoToPotentialJobSite.java
+@@ -45,12 +_,14 @@
+             BlockPos pos = globalPos.pos();
+             ServerLevel serverLevel = level.getServer().getLevel(globalPos.dimension());
+             if (serverLevel != null) {
++                io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(serverLevel, pos.getX() >> 4, pos.getZ() >> 4, () -> { // Folia - region threading
+                 PoiManager manager = serverLevel.getPoiManager();
+                 if (manager.exists(pos, p -> true)) {
+                     manager.release(pos);
+                 }
+ 
+                 level.debugSynchronizers().updatePoi(pos);
++                }); // Folia - region threading
+             }
+         });
+         body.getBrain().eraseMemory(MemoryModuleType.POTENTIAL_JOB_SITE);

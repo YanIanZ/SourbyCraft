@@ -1,0 +1,72 @@
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/scheduler/SchedulableTickFastQueue.java
+@@ -1,0 +_,69 @@
++package io.canvasmc.canvas.threadedregions.scheduler;
++
++import org.jspecify.annotations.Nullable;
++
++final class SchedulableTickFastQueue {
++    private static final int INITIAL_CAPACITY = 20;
++
++    private final Object lock = new Object();
++
++    // note: edf is the only one that should control removals, queueTime should never
++    //       be removed unless it's removed from EDF
++
++    private final FastHeapPriorityQueue<AffinitySchedulerThreadPool.ScheduledState> edf = new FastHeapPriorityQueue<>(
++        INITIAL_CAPACITY,
++        AffinitySchedulerThreadPool.TICK_COMPARATOR_BY_TIME,
++        AffinitySchedulerThreadPool.ScheduledState.class
++    );
++    private final FastHeapPriorityQueue<AffinitySchedulerThreadPool.ScheduledState> queueTime = new FastHeapPriorityQueue<>(
++        INITIAL_CAPACITY,
++        AffinitySchedulerThreadPool.TICK_COMPARATOR_BY_QUEUE_INSERTION,
++        AffinitySchedulerThreadPool.ScheduledState.class
++    );
++
++    public void insert(final AffinitySchedulerThreadPool.ScheduledState state) {
++        synchronized (lock) {
++            state.tick.lastQueueInsertion = System.nanoTime();
++            edf.offer(state);
++            queueTime.offer(state);
++        }
++    }
++
++    public boolean remove(final AffinitySchedulerThreadPool.ScheduledState state) {
++        synchronized (lock) {
++            final boolean removedFromEdf = edf.remove(state);
++            if (removedFromEdf) {
++                queueTime.remove(state);
++            }
++            return removedFromEdf;
++        }
++    }
++
++    public AffinitySchedulerThreadPool.@Nullable ScheduledState pollEdf() {
++        synchronized (lock) {
++            final AffinitySchedulerThreadPool.ScheduledState state = edf.poll();
++            if (state != null) {
++                queueTime.remove(state);
++            }
++            return state;
++        }
++    }
++
++    public AffinitySchedulerThreadPool.@Nullable ScheduledState peekEdf() {
++        synchronized (lock) {
++            return edf.peek();
++        }
++    }
++
++    public FastHeapPriorityQueue<AffinitySchedulerThreadPool.ScheduledState> snapshotQueue() {
++        synchronized (lock) {
++            return queueTime.copy();
++        }
++    }
++
++    public int size() {
++        synchronized (lock) {
++            return edf.size();
++        }
++    }
++}

@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/PickedUpItemTrigger.java
++++ b/net/minecraft/advancements/triggers/PickedUpItemTrigger.java
+@@ -21,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final ItemStack itemStack, final @Nullable Entity entity) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         LootContext context = EntityPredicate.createContext(player, entity);
+         this.trigger(player, t -> t.matches(player, itemStack, context));
+     }

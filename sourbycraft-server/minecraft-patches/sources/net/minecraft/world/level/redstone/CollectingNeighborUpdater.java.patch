@@ -1,0 +1,49 @@
+--- a/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
++++ b/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
+@@ -66,6 +_,7 @@
+     }
+ 
+     private void addAndRun(final BlockPos pos, final CollectingNeighborUpdater.NeighborUpdates update) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, pos, "Adding block without owning region"); // Folia - region threading
+         boolean runningAlready = this.count > 0;
+         boolean tooManyUpdates = this.maxChainedNeighborUpdates >= 0 && this.count >= this.maxChainedNeighborUpdates;
+         this.count++;
+@@ -148,7 +_,8 @@
+         public boolean runNext(final Level level) {
+             Direction direction = NeighborUpdater.UPDATE_ORDER[this.idx++];
+             BlockPos neighborPos = this.sourcePos.relative(direction);
+-            BlockState state = level.getBlockState(neighborPos);
++            BlockState state = !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, neighborPos, 25) ? null : level.getBlockStateIfLoaded(neighborPos); // Folia - block updates in unloaded chunks
++            if (state != null) { // Folia - block updates in unloaded chunks
+             Orientation orientation = null;
+             if (level.enabledFeatures().contains(FeatureFlags.REDSTONE_EXPERIMENTS)) {
+                 if (this.orientation == null) {
+@@ -161,6 +_,7 @@
+             }
+ 
+             NeighborUpdater.executeUpdate(level, state, neighborPos, this.sourceBlock, orientation, false, this.sourcePos); // Paper - Add source block to BlockPhysicsEvent
++            } // Folia - block updates in unloaded chunks
+             if (this.idx < NeighborUpdater.UPDATE_ORDER.length && NeighborUpdater.UPDATE_ORDER[this.idx] == this.skipDirection) {
+                 this.idx++;
+             }
+@@ -190,7 +_,9 @@
+     ) implements CollectingNeighborUpdater.NeighborUpdates {
+         @Override
+         public boolean runNext(final Level level) {
++            if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, this.pos, 25) && level.getChunkIfLoaded(this.pos) != null) { // Folia - block updates in unloaded chunks
+             NeighborUpdater.executeShapeUpdate(level, this.direction, this.pos, this.neighborPos, this.neighborState, this.updateFlags, this.updateLimit);
++            } // Folia - block updates in unloaded chunks
+             return false;
+         }
+ 
+@@ -203,8 +_,8 @@
+     private record SimpleNeighborUpdate(BlockPos pos, Block block, @Nullable Orientation orientation) implements CollectingNeighborUpdater.NeighborUpdates {
+         @Override
+         public boolean runNext(final Level level) {
+-            BlockState state = level.getBlockState(this.pos);
+-            NeighborUpdater.executeUpdate(level, state, this.pos, this.block, this.orientation, false);
++            BlockState state = !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, this.pos, 25) ? null : level.getBlockStateIfLoaded(this.pos); // Folia - block updates in unloaded chunks
++            if (state != null) NeighborUpdater.executeUpdate(level, state, this.pos, this.block, this.orientation, false); // Folia - block updates in unloaded chunks
+             return false;
+         }
+ 

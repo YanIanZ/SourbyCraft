@@ -1,0 +1,95 @@
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -237,6 +_,20 @@
+         // Paper start - initialize global and world-defaults configuration
+         this.paperConfigurations.initializeGlobalConfiguration(this.registryAccess());
+         this.paperConfigurations.initializeWorldDefaultsConfiguration(this.registryAccess());
++        // Canvas start - pre start server config hook
++        // we have this here as a per-file patch since we might add more here
++        io.canvasmc.canvas.GlobalConfiguration.PurpurContainers containers = io.canvasmc.canvas.GlobalConfiguration.getInstance().purpurContainers;
++        org.bukkit.event.inventory.InventoryType.BARREL.setDefaultSize(switch (containers.barrelRows) {
++            case 6 -> 54;
++            case 5 -> 45;
++            case 4 -> 36;
++            case 2 -> 18;
++            case 1 -> 9;
++            default -> 27;
++        });
++        org.bukkit.event.inventory.InventoryType.ENDER_CHEST.setDefaultSize(containers.enderChestSixRows ? 54 : 27);
++        net.minecraft.world.level.block.state.BlockBehaviour.BlockStateBase.canvas$initPathTypeCache();
++        // Canvas end - pre start server config hook
+         // Paper end - initialize global and world-defaults configuration
+         this.server.spark.enableEarlyIfRequested(); // Paper - spark
+         // Paper start - fix converting txt to json file; convert old users earlier after PlayerList creation but before file load/save
+@@ -400,11 +_,16 @@
+     }
+ 
+     @Override
+-    protected void tickServer(final BooleanSupplier haveTime) {
+-        super.tickServer(haveTime);
+-        if (this.jsonRpcServer != null) {
+-            this.jsonRpcServer.tick();
+-        }
++    // Folia start - region threading
++    public void tickServer(final long startTime, final long scheduledEnd, final long targetBuffer,
++                           final io.papermc.paper.threadedregions.TickRegions.TickRegionData region) {
++        super.tickServer(startTime, scheduledEnd, targetBuffer, region);
++    // Folia end - region threading
++        // Canvas start - region threading - moved to global tick
++        // if (this.jsonRpcServer != null) {
++        //     this.jsonRpcServer.tick();
++        // }
++        // Canvas end - region threading - moved to global tick
+     }
+ 
+     @Override
+@@ -527,7 +_,7 @@
+     @Override
+     protected void tickConnection() {
+         super.tickConnection();
+-        this.handleConsoleInputs();
++        // Folia - region threading
+     }
+ 
+     private static final java.util.concurrent.atomic.AtomicInteger ASYNC_DEBUG_CHUNKS_COUNT = new java.util.concurrent.atomic.AtomicInteger(); // Paper - rewrite chunk system
+@@ -890,7 +_,7 @@
+         if (command.isBlank()) return ""; // Paper - Do not process empty rcon commands
+ 
+         rconConsoleSource.prepareForCommand();
+-        this.executeBlocking(() -> {
++        Runnable sync = () -> { // Folia - region threading
+             CommandSourceStack wrapper = rconConsoleSource.createCommandSourceStack();
+             org.bukkit.event.server.RemoteServerCommandEvent event = new org.bukkit.event.server.RemoteServerCommandEvent(rconConsoleSource.getBukkitSender(wrapper), command);
+             this.server.getPluginManager().callEvent(event);
+@@ -898,7 +_,17 @@
+                 return;
+             }
+             this.getCommands().performPrefixedCommand(wrapper, event.getCommand());
+-        });
++        // Folia start - region threading
++        };
++        java.util.concurrent.CompletableFuture
++            .runAsync(sync, io.papermc.paper.threadedregions.RegionizedServer.getInstance()::addTask)
++            .whenComplete((_, thrown) -> {
++                if (thrown != null) {
++                    LOGGER.error("Error handling command for rcon: {}", command, thrown);
++                }
++            })
++            .join();
++        // Folia end - region threading
+         return rconConsoleSource.getCommandResponse();
+         // CraftBukkit end
+     }
+@@ -970,12 +_,6 @@
+     @Override
+     public Optional<MinecraftServer.ServerResourcePackInfo> getServerResourcePack() {
+         return this.settings.getProperties().serverResourcePackInfo;
+-    }
+-
+-    @Override
+-    protected void endMetricsRecordingTick() {
+-        super.endMetricsRecordingTick();
+-        this.isTickTimeLoggingEnabled = this.debugSubscribers().hasAnySubscriberFor(DebugSubscriptions.DEDICATED_SERVER_TICK_TIME);
+     }
+ 
+     @Override

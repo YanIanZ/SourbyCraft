@@ -65,7 +65,7 @@ these supply today's implementation of it. This is the set the ledger test pins.
 
 ## 2. Patch dependencies — `DIRECT_NMS_PATCH`
 
-### 2.1 `sourbycraft-server/minecraft-patches/features/` — 19 patches
+### 2.1 `sourbycraft-server/minecraft-patches/features/` — 22 patches
 
 Patches against the materialised Minecraft source. They exist because the behaviour is inside a
 vanilla class; none of them is an Aurora contract.
@@ -85,26 +85,40 @@ vanilla class; none of them is an Aurora contract.
 | 0016 refuse a cross-region block test | Region-safety fix (PRD §108) |
 | 0017 hoist query bounds out of the entity intersection loop, 0019 translate block collision boxes without allocating | Measured optimisations |
 | 0020 commit Aurora World Fabric stores at shutdown | One call in `MinecraftServer.stopServer` after the region-file I/O drain; no-op without AWF worlds |
+| 0021 do not register the `/canvas` command tree, 0022 count chunk-system storage traffic, 0023 greedy shapeless match only for plain ingredients | Formerly per-file source patches; feature patches since the 2026-10-05 migration so the policy scripts see them (see §2.2) |
 
 Patch 0006 calls `perf/AsyncPathValidity` for its two staleness checks, so the rule is tested in
 Sourby's own test suite.
 
-Per-file source patches (`minecraft-patches/sources/`):
+Patches 0021–0023, in detail:
 
 | Patch | Class | Reason |
 |---|---|---|
-| `net/minecraft/commands/Commands.java` | `DIRECT_NMS_PATCH` | Removes the `/canvas` command tree. |
-| `net/minecraft/world/level/chunk/storage/RegionFileStorage.java` | `DIRECT_NMS_PATCH` | Aurora World Fabric: reads, writes, scans, flush and close go to `AwfRegionStorage` for worlds in `aurora.awf.worlds`. Without a listed world or an existing store, `sourby$awf` is null and every path is upstream's. Depends on Paper's Moonrise `RegionDataController` contract (`ReadData`/`WriteData`), so a Paper rebase that changes it breaks this patch. |
+| 0021 `net/minecraft/commands/Commands.java` | `DIRECT_NMS_PATCH` | Removes the `/canvas` command tree. |
+| 0022 `net/minecraft/world/level/chunk/storage/RegionFileStorage.java` | `DIRECT_NMS_PATCH` | Aurora World Fabric: reads, writes, scans, flush and close go to `AwfRegionStorage` for worlds in `aurora.awf.worlds`. Without a listed world or an existing store, `sourby$awf` is null and every path is upstream's. Depends on Paper's Moonrise `RegionDataController` contract (`ReadData`/`WriteData`), so a Paper rebase that changes it breaks this patch. |
+| 0023 `net/minecraft/world/item/crafting/ShapelessRecipe.java` | `DIRECT_NMS_PATCH` | The inherited Pufferfish greedy matcher skips Paper's exact/predicate ingredient logic; it now runs only when every ingredient is plain. |
 
-### 2.2 `sourbycraft-server/canvas-patches/files/` — 5 patches
+### 2.2 Engine baseline (formerly Canvas/Folia)
 
-| Patch | Class | Reason |
-|---|---|---|
-| `spark/FoliaPlatformInfo.java` | `DIRECT_NMS_PATCH` | Platform identity and one canonical build version in Spark reports. |
-| `spark/FoliaSparkPlugin.java`, `spark/plugin/FoliaTickStatistics.java` | `DIRECT_NMS_PATCH` | Spark reads SourbyCraft's tick statistics rather than a parallel set, SourbyCraft's config provider, and Aurora runtime metadata (`SourbyMetadataProvider`). |
-| `GlobalConfiguration.java`, `WorldConfig.java` | `COMPATIBILITY_ONLY` | Upstream config shape, paired with `CanvasConfigBridge`. |
+Since 2026-10-05 Paper is the only upstream. What Canvas and Folia used to supply — region
+threading, Canvas's own features and configuration — is SourbyCraft-owned:
 
-### 2.3 `sourbycraft-server/paper-patches/files/` — 7 patches
+| Location | Content |
+|---|---|
+| `sourbycraft-server/minecraft-patches/sources/` (476 files) | Region threading and Canvas changes to Minecraft code, as one file patch per class |
+| `sourbycraft-server/paper-patches/files/` (234 files) | The same for Paper's server code |
+| `sourbyapi/paper-patches/files/` (16 files) | The same for Paper's API |
+| `sourbycraft-server/src/main/java/io/canvasmc/`, `me/lucko/` | Former `canvas-server` sources (engine config, region scheduler, Spark platform) |
+| `sourbyapi/src/main/java/io/canvasmc/` | Former `canvas-api` sources |
+
+The baseline is not an Aurora contract and the policy scripts do not scan it: every SourbyCraft
+change to Minecraft or Paper code is a feature patch (§2.1, §2.3), and changes to the former
+Canvas sources are ordinary source edits. The five former `canvas-patches` are now part of those
+sources: the Spark platform info, Spark plugin and tick statistics edits (`DIRECT_NMS_PATCH`:
+SourbyCraft identity and tick statistics in Spark), and the `GlobalConfiguration`/`WorldConfig`
+defaults (`COMPATIBILITY_ONLY`, pinned by `scripts/test_patch_policy.py`).
+
+### 2.3 `sourbycraft-server/paper-patches/features/` — 4 patches (7 files)
 
 | Patch | Class | Reason |
 |---|---|---|
@@ -119,8 +133,9 @@ Per-file source patches (`minecraft-patches/sources/`):
 
 | Dependency | Class | Reason |
 |---|---|---|
-| `io.canvasmc.weaver.patcher` (`build.gradle.kts`) | `REQUIRED_UPSTREAM_CONTRACT` | Canvas's own weaver toolchain sequences access transformers and base patches. Build-time only — nothing it produces is a runtime dependency on Canvas. |
-| `canvasRef` pin (`gradle.properties`) | `REQUIRED_UPSTREAM_CONTRACT` | Pins the upstream revision patches apply to. Currently `2a3bf65c`. |
+| `io.papermc.paperweight.patcher` / `.core` 2.0.0-beta.24 | `REQUIRED_UPSTREAM_CONTRACT` | Paper's own toolchain; applied through SourbyPatcher `paper-toolchain`. Build-time only. |
+| `paperRef` pin (`gradle.properties`) | `REQUIRED_UPSTREAM_CONTRACT` | Pins the only upstream revision patches apply to. Currently Paper `9240f586`. |
+| `https://maven.canvasmc.io/public/` (`build.gradle.kts` repositories) | `REMOVABLE` | Still resolves `io.canvasmc.httpclient:httpclient`, which §6 found unused; drop both together. |
 
 ---
 
@@ -128,10 +143,10 @@ Per-file source patches (`minecraft-patches/sources/`):
 
 | Item | Class | Reason |
 |---|---|---|
-| `SourbyPatcher canvas-toolchain` (private) | `REQUIRED_UPSTREAM_CONTRACT` | Official build adapter delegates nested patching to Weaver 2.4.5 and verifies pinned SourbyClip. Legacy Folia sources moved to private YanIanZ/SourbyPatcher; not reactivated. See [private toolchain](../development/PRIVATE-TOOLCHAIN.md). |
+| `SourbyPatcher paper-toolchain` 3.0.0 (private) | `REQUIRED_UPSTREAM_CONTRACT` | Official build adapter: applies paperweight with Paper as the only upstream and verifies pinned SourbyClip. `canvas-toolchain` (Weaver) is archived. See [private toolchain](../development/PRIVATE-TOOLCHAIN.md). |
 
-The maintainer moved the legacy sources out of the public tree. The new Canvas adapter is
-an active build dependency; the archived Folia implementation remains unused in the private repo.
+The maintainer moved the legacy sources out of the public tree. The Paper adapter is the active
+build dependency; the Canvas adapter and the Folia implementation remain archived in the private repo.
 
 ---
 
@@ -148,7 +163,7 @@ without redesigning anything above them — which is the claim, and now the test
 
 ## 6. Remote services at runtime
 
-Audited 2026-09-27 against the `canvasRef` pin (`6a600b89`): Canvas `canvas-server` sources and
+Audited 2026-09-27 against the then `canvasRef` pin (`6a600b89`; the migrated engine baseline is that code at Canvas `2a3bf65c`): Canvas `canvas-server` sources and
 every Canvas patch's added lines, plus SourbyCraft's own source and patches.
 
 | Candidate | Finding |

@@ -100,10 +100,10 @@ class CanvasPatchCouplingTest(unittest.TestCase):
     def test_ignores_the_file_header(self):
         self.assertEqual(self.check("+++ b/io/canvasmc/canvas/Thing.java"), [])
 
-    def test_canvas_patches_are_outside_the_measured_surface(self):
-        # canvas-patches/ exists only to modify Canvas and would be deleted with it.
-        self.assertIn("minecraft-patches", policy.INTEGRATION_PATCH_ROOT)
-        self.assertNotIn("canvas-patches", policy.INTEGRATION_PATCH_ROOT)
+    def test_the_engine_baseline_is_outside_the_measured_surface(self):
+        # minecraft-patches/sources is the inherited engine baseline (formerly Canvas/Folia);
+        # only SourbyCraft's own feature patches are integration points.
+        self.assertTrue(policy.INTEGRATION_PATCH_ROOT.endswith("minecraft-patches/features"))
 
 
 class ReachTest(unittest.TestCase):

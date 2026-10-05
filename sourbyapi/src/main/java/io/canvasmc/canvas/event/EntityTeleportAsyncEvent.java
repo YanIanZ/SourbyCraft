@@ -1,0 +1,123 @@
+package io.canvasmc.canvas.event;
+
+import org.bukkit.Location;
+import org.bukkit.entity.Entity;
+import org.bukkit.event.Cancellable;
+import org.bukkit.event.HandlerList;
+import org.bukkit.event.entity.EntityEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
+import org.jetbrains.annotations.ApiStatus;
+import org.jspecify.annotations.Nullable;
+
+/**
+ * Called when an entity is about to be teleported from one location to another.
+ * <br>
+ * This may be as a result of natural causes (Enderman, Shulker), pathfinding (Wolf), or commands (/teleport).
+ * <br>
+ * This <b>*can*</b> be a player!
+ */
+public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable {
+
+    private static final HandlerList HANDLER_LIST = new HandlerList();
+
+    private final Location from;
+    private final TeleportType type;
+    private final PlayerTeleportEvent.TeleportCause cause;
+    private Location to;
+    private boolean cancelled;
+
+    @ApiStatus.Internal
+    public EntityTeleportAsyncEvent(Entity entity, Location from, @Nullable Location to, PlayerTeleportEvent.TeleportCause cause, TeleportType type) {
+        super(entity);
+        this.from = from;
+        this.type = type;
+        this.to = (to != null) ? to : from;
+        this.cause = cause;
+    }
+
+    public static HandlerList getHandlerList() {
+        return HANDLER_LIST;
+    }
+
+    /**
+     * Gets the location that this entity moved from
+     *
+     * @return Location this entity moved from
+     */
+    public Location getFrom() {
+        return this.from;
+    }
+
+    /**
+     * Gets the location that this entity moved to
+     *
+     * @return Location the entity moved to
+     */
+    public Location getTo() {
+        return this.to;
+    }
+
+    /**
+     * Sets the location that this entity moved to
+     *
+     * @param to
+     *     New Location this entity moved to
+     */
+    public void setTo(Location to) {
+        this.to = to.clone();
+    }
+
+    /**
+     * Gets the cause of the entity teleport
+     *
+     * @return the teleport cause
+     */
+    public PlayerTeleportEvent.TeleportCause getCause() {
+        return cause;
+    }
+
+    /**
+     * Gets the type of teleport this is
+     *
+     * @return the teleport type
+     */
+    public TeleportType getType() {
+        return type;
+    }
+
+    @Override
+    public boolean isCancelled() {
+        return this.cancelled;
+    }
+
+    @Override
+    public void setCancelled(boolean cancel) {
+        this.cancelled = cancel;
+    }
+
+    @Override
+    public HandlerList getHandlers() {
+        return HANDLER_LIST;
+    }
+
+    /**
+     * The type of teleport being called
+     */
+    public enum TeleportType {
+        /**
+         * The teleport origin and destination is in the same region, calling a sync teleport
+         *
+         * @apiNote The teleport will be completed on the same tick it started on the same thread, since it's a sync
+         *     teleport
+         */
+        SAME_REGION,
+        /**
+         * The teleport origin and destination are in different regions, but the same world, calling an async teleport
+         */
+        CROSS_REGION,
+        /**
+         * The teleport origin and destination are in different worlds
+         */
+        CROSS_WORLD
+    }
+}

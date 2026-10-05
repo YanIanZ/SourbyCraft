@@ -1,0 +1,18 @@
+--- a/net/minecraft/server/PlayerAdvancements.java
++++ b/net/minecraft/server/PlayerAdvancements.java
+@@ -166,6 +_,7 @@
+     }
+ 
+     public boolean award(final AdvancementHolder holder, final String criterion) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.player, "Cannot award advancement async"); // Canvas - region threading
+         boolean result = false;
+         AdvancementProgress progress = this.getOrStartProgress(holder);
+         boolean wasDone = progress.isDone();
+@@ -208,6 +_,7 @@
+     }
+ 
+     public boolean revoke(final AdvancementHolder advancement, final String criterion) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.player, "Cannot revoke advancement async"); // Canvas - region threading
+         boolean result = false;
+         AdvancementProgress progress = this.getOrStartProgress(advancement);
+         boolean wasDone = progress.isDone();

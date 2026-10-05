@@ -1,0 +1,267 @@
+--- a/net/minecraft/world/scores/PlayerTeam.java
++++ b/net/minecraft/world/scores/PlayerTeam.java
+@@ -25,39 +_,76 @@
+     private static final byte BIT_SEE_INVISIBLES = 2;
+     private final Scoreboard scoreboard;
+     private final String name;
+-    private final Set<String> players = Sets.newHashSet();
+-    private Component displayName;
+-    private Component playerPrefix = CommonComponents.EMPTY;
+-    private Component playerSuffix = CommonComponents.EMPTY;
+-    private boolean allowFriendlyFire = true;
+-    private boolean seeFriendlyInvisibles = true;
+-    private Team.Visibility nameTagVisibility = Team.Visibility.ALWAYS;
+-    private Team.Visibility deathMessageVisibility = Team.Visibility.ALWAYS;
+-    private Optional<TeamColor> color = Optional.empty();
+-    private Team.CollisionRule collisionRule = Team.CollisionRule.ALWAYS;
++    // Canvas start - region threading
++    private final Set<String> players = new java.util.concurrent.CopyOnWriteArraySet<>();
++    private final io.canvasmc.canvas.util.LockedReference<io.canvasmc.canvas.threadedregions.scores.TeamData> teamData;
++    // note: displayNameStyle is final and not modified ever, so we can keep
++    //       this outside TeamData
+     private final Style displayNameStyle;
++    private final java.util.concurrent.atomic.AtomicBoolean isRegistered = new java.util.concurrent.atomic.AtomicBoolean(false);
++
++    public void ensureMainThread(final String reason) {
++        if (scoreboard != null && isRegistered.get()) {
++            this.scoreboard.ensureMainThread(reason);
++        }
++        // else, we don't care. if we aren't registered we don't need to run thread checks
++    }
++
++    public void registerCallback() {
++        isRegistered.set(true);
++    }
++
++    public void unregisterCallback() {
++        isRegistered.set(false);
++    }
++
++    private void setNameTagVisibilityRaw(final net.minecraft.world.scores.Team.Visibility visibility) {
++        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setNameTagVisibility(visibility));
++    }
++
++    private void setDeathMessageVisibilityRaw(final net.minecraft.world.scores.Team.Visibility visibility) {
++        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setDeathMessageVisibility(visibility));
++    }
++
++    private void setSeeFriendlyInvisiblesRaw(final boolean seeFriendlyInvisibles) {
++        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setSeeFriendlyInvisibles(seeFriendlyInvisibles));
++    }
++
++    private void setAllowFriendlyFireRaw(final boolean allowFriendlyFire) {
++        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setAllowFriendlyFire(allowFriendlyFire));
++    }
++
++    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
++    private void setColorRaw(final java.util.Optional<TeamColor> color) {
++        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setColor(color));
++    }
++
++    private void setCollisionRuleRaw(final net.minecraft.world.scores.Team.CollisionRule collisionRule) {
++        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setCollisionRule(collisionRule));
++    }
++
++    private void setPlayerSuffixRaw(final @org.jspecify.annotations.Nullable Component playerSuffix) {
++        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setPlayerSuffix(playerSuffix == null ? net.minecraft.network.chat.CommonComponents.EMPTY : playerSuffix));
++    }
++
++    private void setPlayerPrefixRaw(final Component playerPrefix) {
++        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setPlayerPrefix(playerPrefix == null ? net.minecraft.network.chat.CommonComponents.EMPTY : playerPrefix));
++    }
++
++    private void setDisplayNameRaw(final net.minecraft.network.chat.Component displayName) {
++        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setDisplayName(displayName));
++    }
++    // Canvas end - region threading
+ 
+     public PlayerTeam(final Scoreboard scoreboard, final String name) {
+         this.scoreboard = scoreboard;
+         this.name = name;
+-        this.displayName = Component.literal(name);
++        this.teamData = new io.canvasmc.canvas.util.LockedReference<>(new io.canvasmc.canvas.threadedregions.scores.TeamData(Component.literal(name))); // Canvas - region threading
+         this.displayNameStyle = Style.EMPTY.withInsertion(name).withHoverEvent(new HoverEvent.ShowText(Component.literal(name)));
+     }
+ 
+     public PlayerTeam.Packed pack() {
+-        return new PlayerTeam.Packed(
+-            this.name,
+-            Optional.of(this.displayName),
+-            this.color,
+-            this.allowFriendlyFire,
+-            this.seeFriendlyInvisibles,
+-            this.playerPrefix,
+-            this.playerSuffix,
+-            this.nameTagVisibility,
+-            this.deathMessageVisibility,
+-            this.collisionRule,
+-            List.copyOf(this.players)
+-        );
++        return this.teamData.getValue().pack(this.name, List.copyOf(this.players)); // Canvas - region threading
+     }
+ 
+     public Scoreboard getScoreboard() {
+@@ -70,43 +_,50 @@
+     }
+ 
+     public Component getDisplayName() {
+-        return this.displayName;
++        return this.teamData.getValue().getDisplayName(); // Canvas - region threading
+     }
+ 
+     private MutableComponent applyColor(final MutableComponent result) {
+-        this.color.ifPresent(teamColor -> result.withColor(teamColor.textColor()));
++        this.teamData.getValue().getColor().ifPresent(teamColor -> result.withColor(teamColor.textColor())); // Canvas - region threading
+         return result;
+     }
+ 
+     public MutableComponent getFormattedDisplayName() {
+-        return this.applyColor(ComponentUtils.wrapInSquareBrackets(this.displayName.copy().withStyle(this.displayNameStyle)));
++        return this.applyColor(ComponentUtils.wrapInSquareBrackets(getDisplayName().copy().withStyle(this.displayNameStyle))); // Canvas - region threading
+     }
+ 
+     public void setDisplayName(final Component displayName) {
++        this.ensureMainThread("Cannot set display name for team async"); // Canvas - region threading
+         if (displayName == null) {
+             throw new IllegalArgumentException("Name cannot be null");
+         }
+ 
+-        this.displayName = displayName;
++        setDisplayNameRaw(displayName); // Canvas - region threading
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     public void setPlayerPrefix(final @Nullable Component playerPrefix) {
+-        this.playerPrefix = playerPrefix == null ? CommonComponents.EMPTY : playerPrefix;
++        // Canvas start - region threading
++        this.ensureMainThread("Cannot set player prefix for team async");
++        setPlayerPrefixRaw(playerPrefix);
++        // Canvas end - region threading
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     public Component getPlayerPrefix() {
+-        return this.playerPrefix;
++        return this.teamData.getValue().getPlayerPrefix(); // Canvas - region threading
+     }
+ 
+     public void setPlayerSuffix(final @Nullable Component playerSuffix) {
+-        this.playerSuffix = playerSuffix == null ? CommonComponents.EMPTY : playerSuffix;
++        // Canvas start - region threading
++        this.ensureMainThread("Cannot set player suffix for team async");
++        setPlayerSuffixRaw(playerSuffix);
++        // Canvas end - region threading
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     public Component getPlayerSuffix() {
+-        return this.playerSuffix;
++        return this.teamData.getValue().getPlayerSuffix(); // Canvas - region threading
+     }
+ 
+     @Override
+@@ -116,7 +_,7 @@
+ 
+     @Override
+     public MutableComponent getFormattedName(final Component teamMemberName) {
+-        return this.applyColor(Component.empty().append(this.playerPrefix).append(teamMemberName).append(this.playerSuffix));
++        return this.applyColor(Component.empty().append(getPlayerPrefix()).append(teamMemberName).append(getPlayerSuffix())); // Canvas - region threading
+     }
+ 
+     public static MutableComponent formatNameForTeam(final @Nullable Team team, final Component name) {
+@@ -125,51 +_,66 @@
+ 
+     @Override
+     public boolean isAllowFriendlyFire() {
+-        return this.allowFriendlyFire;
++        return this.teamData.getValue().isAllowFriendlyFire(); // Canvas - region threading
+     }
+ 
+     public void setAllowFriendlyFire(final boolean allowFriendlyFire) {
+-        this.allowFriendlyFire = allowFriendlyFire;
++        // Canvas start - region threading
++        this.ensureMainThread("Cannot set friendly fire flag for team async");
++        setAllowFriendlyFireRaw(allowFriendlyFire);
++        // Canvas end - region threading
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     @Override
+     public boolean canSeeFriendlyInvisibles() {
+-        return this.seeFriendlyInvisibles;
++        return this.teamData.getValue().isSeeFriendlyInvisibles(); // Canvas - region threading
+     }
+ 
+     public void setSeeFriendlyInvisibles(final boolean seeFriendlyInvisibles) {
+-        this.seeFriendlyInvisibles = seeFriendlyInvisibles;
++        // Canvas start - region threading
++        this.ensureMainThread("Cannot set friendly invisibles flag for team async");
++        setSeeFriendlyInvisiblesRaw(seeFriendlyInvisibles);
++        // Canvas end - region threading
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     @Override
+     public Team.Visibility getNameTagVisibility() {
+-        return this.nameTagVisibility;
++        return this.teamData.getValue().getNameTagVisibility(); // Canvas - region threading
+     }
+ 
+     @Override
+     public Team.Visibility getDeathMessageVisibility() {
+-        return this.deathMessageVisibility;
++        return this.teamData.getValue().getDeathMessageVisibility(); // Canvas - region threading
+     }
+ 
+     public void setNameTagVisibility(final Team.Visibility visibility) {
+-        this.nameTagVisibility = visibility;
++        // Canvas start - region threading
++        this.ensureMainThread("Cannot set name tag visibility for team async");
++        setNameTagVisibilityRaw(visibility);
++        // Canvas end - region threading
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     public void setDeathMessageVisibility(final Team.Visibility visibility) {
+-        this.deathMessageVisibility = visibility;
++        // Canvas start - region threading
++        this.ensureMainThread("Cannot set death message visibility for team async");
++        setDeathMessageVisibilityRaw(visibility);
++        // Canvas end - region threading
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     @Override
+     public Team.CollisionRule getCollisionRule() {
+-        return this.collisionRule;
++        return this.teamData.getValue().getCollisionRule(); // Canvas - region threading
+     }
+ 
+     public void setCollisionRule(final Team.CollisionRule collisionRule) {
+-        this.collisionRule = collisionRule;
++        // Canvas start - region threading
++        this.ensureMainThread("Cannot set collision rule for team async");
++        setCollisionRuleRaw(collisionRule);
++        // Canvas end - region threading
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+@@ -192,13 +_,16 @@
+     }
+ 
+     public void setColor(final Optional<TeamColor> color) {
+-        this.color = color;
++        // Canvas start - region threading
++        this.ensureMainThread("Cannot set color for team async");
++        setColorRaw(color);
++        // Canvas end - region threading
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     @Override
+     public Optional<TeamColor> getColor() {
+-        return this.color;
++        return this.teamData.getValue().getColor(); // Canvas - region threading
+     }
+ 
+     @Retention(RetentionPolicy.CLASS)

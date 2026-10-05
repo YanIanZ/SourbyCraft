@@ -1,0 +1,23 @@
+--- a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftObjective.java
++++ b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftObjective.java
+@@ -86,6 +_,7 @@
+     @Override
+     public void setDisplaySlot(DisplaySlot slot) {
+         this.checkState();
++        this.checkMainThread("Cannot set display slot async"); // Canvas - region threading
+ 
+         Scoreboard board = this.getScoreboard().getHandle();
+ 
+@@ -201,6 +_,12 @@
+     void checkState() {
+         Preconditions.checkState(this.getScoreboard().getHandle().getObjective(this.objective.getName()) != null, "Unregistered scoreboard component");
+     }
++    // Canvas start - region threading
++
++    void checkMainThread(final String reason) {
++        this.objective.getScoreboard().ensureMainThread(reason);
++    }
++    // Canvas end - region threading
+ 
+     @Override
+     public int hashCode() {

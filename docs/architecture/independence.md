@@ -79,8 +79,8 @@ This is the long-term target, not a requirement to rewrite every subsystem immed
 
 | Dependency | Type | Why it exists | Public? | Target |
 | --- | --- | --- | --- | --- |
-| Canvas Weaver/upstream patch topology | Build-time | Materializes Paper → Canvas → SourbyCraft source stack | No | Isolate and keep reproducible; replace only when a Sourby-owned build path is proven |
-| Canvas region-threading implementation | Runtime engine | Region scheduler and region ownership foundation | Indirect | Wrap only where Sourby needs stable ownership boundaries; do not rewrite without evidence |
+| Paper upstream patch topology (paperweight via SourbyPatcher `paper-toolchain`) | Build-time | Materializes Paper → SourbyCraft. Canvas and Weaver were removed as upstream/toolchain on 2026-10-05 | No | Keep reproducible |
+| Region-threading engine (inherited from Canvas/Folia, SourbyCraft-owned since 2026-10-05) | Runtime engine | Region scheduler and region ownership foundation; engine baseline patches plus `io.canvasmc` sources | Indirect | Wrap only where Sourby needs stable ownership boundaries; do not rewrite without evidence |
 | Canvas Spark integration classes | Runtime integration | Region-aware Spark module/provider implementation | Partially | Move Sourby-specific metadata, metrics, and config behavior behind Sourby-owned integration points |
 | Canvas server/world config | Runtime configuration | Upstream engine settings | Yes today | Treat as compatibility surface; migrate new Sourby features to Sourby-owned config, avoid destructive conversion |
 | Paper/Bukkit API | Runtime/API | Plugin ecosystem compatibility | Yes | Preserve intentional compatibility |
@@ -101,7 +101,7 @@ The table above is qualitative. This is the counted version, produced by
 | --- | ---: | --- |
 | `io.canvasmc` reached from SourbyCraft-owned code | **2** | `GlobalConfiguration.reload()` and `WorldConfig.reload()`, both in `SourbyCraftConfig` |
 | `io.canvasmc` calls added by `minecraft-patches` | **0** | The integration patches add no live call into Canvas |
-| `io.canvasmc` files modified by `canvas-patches` | 5 | Excluded from the measure: these exist only to modify Canvas and would be deleted with it |
+| Engine baseline (`minecraft-patches/sources`, former Canvas sources) | — | Excluded from the measure: since the 2026-10-05 migration this is the SourbyCraft-owned engine Aurora integrates with, not a dependency of it |
 
 **SourbyCraft's own code barely touches Canvas.** The entire live coupling is two static
 config-reload calls. That is a materially better position than the ledger above suggests

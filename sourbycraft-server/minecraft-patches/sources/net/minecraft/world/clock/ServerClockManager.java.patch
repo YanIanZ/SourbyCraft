@@ -1,0 +1,63 @@
+--- a/net/minecraft/world/clock/ServerClockManager.java
++++ b/net/minecraft/world/clock/ServerClockManager.java
+@@ -57,6 +_,22 @@
+             ServerClockManager.ClockInstance instance = this.getInstance((Holder<WorldClock>)definition);
+             instance.loadFrom(state);
+         });
++        // Canvas start - region threading
++
++        // after init, technically Minecraft doesn't register anything else
++        // beyond that point except for during reload, which we disable
++
++        // as such, we set all of this to immutable collections to ensure
++        // that this does not change, making this thread-safe
++
++        // note: timelines are safe
++
++        this.clocks = com.google.common.collect.ImmutableMap.copyOf(this.clocks);
++
++        for (final ServerClockManager.ClockInstance value : this.clocks.values()) {
++            value.timeMarkers = com.google.common.collect.ImmutableMap.copyOf(value.timeMarkers);
++        }
++        // Canvas end - region threading
+     }
+ 
+     private void registerTimeMarker(final ResourceKey<ClockTimeMarker> timeMarkerId, final ClockTimeMarker timeMarker) {
+@@ -64,10 +_,12 @@
+     }
+ 
+     public PackedClockStates packState() {
++        io.canvasmc.canvas.util.TickGuard.ensureGlobalOrStartup("Cannot pack clocks async"); // Canvas - region threading
+         return new PackedClockStates(Util.mapValues(this.clocks, ServerClockManager.ClockInstance::packState));
+     }
+ 
+     public void tick() {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot tick clocks async"); // Canvas - region threading
+         boolean advanceTime = this.advanceTime(); // Paper - per-world time
+         if (advanceTime) {
+             this.clocks.values().forEach(ServerClockManager.ClockInstance::tick);
+@@ -126,6 +_,7 @@
+     }
+ 
+     private void modifyClock(final Holder<WorldClock> clock, final Consumer<? super ServerClockManager.ClockInstance> action) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify clock async"); // Canvas - region threading
+         ServerClockManager.ClockInstance instance = this.getInstance(clock);
+         action.accept(instance);
+         // Paper start - per-world time
+@@ -160,7 +_,7 @@
+     }
+ 
+     private long getGameTime() {
+-        return this.level != null ? this.level.getGameTime() : this.server.overworld().getGameTime(); // Paper - per-world time
++        return this.level != null ? this.level.getLevelData().getGameTime() : this.server.overworld().getLevelData().getGameTime(); // Paper - per-world time // Folia - region threading
+     }
+ 
+     // Paper start - per-world time; per-player time
+@@ -216,6 +_,7 @@
+         }
+ 
+         public void tick() {
++            io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot tick clock async"); // Canvas - region threading
+             if (!this.paused) {
+                 this.partialTick = this.partialTick + this.rate;
+                 int fullTicks = Mth.floor(this.partialTick);

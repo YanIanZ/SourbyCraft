@@ -1,0 +1,14 @@
+--- a/net/minecraft/world/entity/ai/navigation/GroundPathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/GroundPathNavigation.java
+@@ -42,6 +_,11 @@
+ 
+     @Override
+     public Path createPath(BlockPos pos, @org.jspecify.annotations.Nullable Entity entity, final int reachRange) { // Paper - EntityPathfindEvent
++        // Folia start - region threading
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor((net.minecraft.server.level.ServerLevel)this.level, pos)) {
++            return null;
++        }
++        // Folia end - region threading
+         LevelChunk chunk = this.level.getChunkSource().getChunkNow(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
+         if (chunk == null) {
+             return null;

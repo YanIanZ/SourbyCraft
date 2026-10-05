@@ -9,10 +9,11 @@ Two surfaces are measured and they are not the same thing:
 
 * **Source coupling** — `io.canvasmc` reached from SourbyCraft-owned code. This is what
   would have to be rewritten if Canvas were replaced.
-* **Patch coupling** — `io.canvasmc` symbols named by `minecraft-patches`, which are
-  integration points into the engine. `canvas-patches/` is deliberately excluded: those
-  patches exist only to modify Canvas and would be deleted with it, so counting them
-  would measure the wrong thing.
+* **Patch coupling** — `io.canvasmc` symbols named by the SourbyCraft feature patches
+  (`minecraft-patches/features`), which are integration points into the engine. The file
+  patches in `minecraft-patches/sources` are excluded on purpose: since the migration off
+  Canvas they are the inherited engine baseline (region threading included), the code the
+  integration points reach into, so counting them would measure the wrong thing.
 * **Scheduler coupling** — the Folia *internal* region scheduler reached from
   SourbyCraft-owned code and from the integration patches. This is the surface an Aurora
   execution contract would have to cover, and it is the one that matters for the
@@ -27,8 +28,9 @@ SOURCE_ROOTS = (
     "sourbyapi/src/main/java/dev/iyanz/sourbycraft",
 )
 
-# Patches that integrate with the engine. canvas-patches/ modifies Canvas itself.
-INTEGRATION_PATCH_ROOT = "sourbycraft-server/minecraft-patches"
+# Patches that integrate with the engine. minecraft-patches/sources is the inherited engine
+# baseline (formerly Canvas/Folia); SourbyCraft's own edits to it are feature patches.
+INTEGRATION_PATCH_ROOT = "sourbycraft-server/minecraft-patches/features"
 
 CANVAS_SYMBOL = re.compile(r"\bio\.canvasmc\.[A-Za-z0-9_.]+")
 COMMENT = re.compile(r"^\s*(\*|//|/\*)")

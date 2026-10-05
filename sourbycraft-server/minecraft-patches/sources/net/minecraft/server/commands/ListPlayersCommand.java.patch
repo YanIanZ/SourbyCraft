@@ -1,0 +1,17 @@
+--- a/net/minecraft/server/commands/ListPlayersCommand.java
++++ b/net/minecraft/server/commands/ListPlayersCommand.java
+@@ -31,6 +_,7 @@
+     }
+ 
+     private static int format(final CommandSourceStack source, final Function<ServerPlayer, Component> formatter) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         PlayerList playerList = source.getServer().getPlayerList();
+         // CraftBukkit start
+         List<ServerPlayer> playersTemp = playerList.getPlayers();
+@@ -43,5 +_,6 @@
+         Component listComponent = ComponentUtils.formatList(players, formatter);
+         source.sendSuccess(() -> Component.translatable("commands.list.players", players.size(), playerList.getMaxPlayers(), listComponent), false);
+         return players.size();
++        }, source); // Canvas - region threading
+     }
+ }

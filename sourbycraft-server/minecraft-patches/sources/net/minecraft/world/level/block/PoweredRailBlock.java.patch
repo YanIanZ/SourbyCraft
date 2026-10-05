@@ -1,0 +1,15 @@
+--- a/net/minecraft/world/level/block/PoweredRailBlock.java
++++ b/net/minecraft/world/level/block/PoweredRailBlock.java
+@@ -102,8 +_,10 @@
+     }
+ 
+     protected boolean isSameRailWithPower(final Level level, final BlockPos pos, final boolean forward, final int searchDepth, final RailShape dir) {
+-        BlockState state = level.getBlockState(pos);
+-        if (!state.is(this)) {
++        // Folia start - region threading - block updates in unloaded chunks
++        BlockState state = !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, pos, 25) ? null : level.getBlockStateIfLoaded(pos);
++        if (state == null || !state.is(this)) {
++        // Folia - region threading - block updates in unloaded chunks
+             return false;
+         }
+ 

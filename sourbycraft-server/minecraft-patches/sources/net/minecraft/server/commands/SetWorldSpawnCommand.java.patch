@@ -1,0 +1,17 @@
+--- a/net/minecraft/server/commands/SetWorldSpawnCommand.java
++++ b/net/minecraft/server/commands/SetWorldSpawnCommand.java
+@@ -32,6 +_,7 @@
+     }
+ 
+     private static int setSpawn(final CommandSourceStack source, final BlockPos pos, final Coordinates rotation) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         ServerLevel level = source.getLevel();
+         Vec2 rotationVector = rotation.getRotation(source);
+         float yaw = rotationVector.y;
+@@ -51,5 +_,6 @@
+             true
+         );
+         return Command.SINGLE_SUCCESS;
++        }, source); // Canvas - region threading
+     }
+ }

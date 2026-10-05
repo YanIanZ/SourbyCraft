@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: agent <agent@local>
+Date: Mon, 5 Oct 2026 15:01:39 +0700
+Subject: [PATCH] SourbyCraft - do not register the /canvas command tree
+
+
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index 19774a47830260d21751bc66eb1ac9bd551f61a7..61081f74741799da6f80267d369e736e92891632 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -299,7 +299,10 @@ public class Commands {
+             WhitelistCommand.register(this.dispatcher);
+         }
+ 
+-        io.canvasmc.canvas.commands.CanvasCommands.INSTANCE.build(this.dispatcher, context); // Canvas - Rebrand - register commands
++        // SourbyCraft - /canvas command removed: do not register the Canvas command tree (root
++        // /canvas + subcommands region-bar/region-tick/reload/etc.). This is the actual dispatcher
++        // registration; the CanvasCommands.register(...) population in GlobalConfiguration is also
++        // removed. (was: io.canvasmc.canvas.commands.CanvasCommands.INSTANCE.build(this.dispatcher, context);)
+         if (commandSelection.includeIntegrated) {
+             PublishCommand.register(this.dispatcher);
+             UnpublishCommand.register(this.dispatcher);

@@ -1,0 +1,15 @@
+--- a/net/minecraft/world/level/ServerLevelAccessor.java
++++ b/net/minecraft/world/level/ServerLevelAccessor.java
+@@ -8,6 +_,12 @@
+ public interface ServerLevelAccessor extends LevelAccessor {
+     ServerLevel getLevel();
+ 
++    // Folia start - region threading
++    default StructureManager structureManager() {
++        throw new UnsupportedOperationException("Must be overridden");
++    }
++
++    // Folia end - region threading
+     DifficultyInstance getCurrentDifficultyAt(BlockPos pos);
+ 
+     default void addFreshEntityWithPassengers(final Entity entity) {

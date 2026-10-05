@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/damagesource/DamageSource.java
++++ b/net/minecraft/world/damagesource/DamageSource.java
+@@ -176,7 +_,7 @@
+                 : Component.translatable(deathMsg, victim.getDisplayName());
+         } else {
+             Component name = this.causingEntity == null ? this.directEntity.getDisplayName() : this.causingEntity.getDisplayName();
+-            ItemStack held = this.causingEntity instanceof LivingEntity livingEntity ? livingEntity.getMainHandItem() : ItemStack.EMPTY;
++            ItemStack held = this.causingEntity instanceof LivingEntity livingEntity && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(livingEntity) ? livingEntity.getMainHandItem() : ItemStack.EMPTY; // Folia - region threading
+             return !held.isEmpty() && held.has(DataComponents.CUSTOM_NAME)
+                 ? Component.translatable(deathMsg + ".item", victim.getDisplayName(), name, held.getDisplayName())
+                 : Component.translatable(deathMsg, victim.getDisplayName(), name);

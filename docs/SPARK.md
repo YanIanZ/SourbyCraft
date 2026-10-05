@@ -61,20 +61,21 @@ pending; local serialization tests do not establish viewer behavior.
 ## Updating Spark
 
 Spark is not vendored. It arrives with the upstream server (`me.lucko:spark-paper`, a Paper
-dependency), so its version moves when `canvasRef` (and through it Paper) moves. SourbyCraft's
-coupling is three Canvas-side patch files plus one Sourby class:
+dependency), so its version moves when `paperRef` moves. SourbyCraft's coupling is three classes in
+the region-threading Spark platform (owned source since the migration off Canvas) plus one Sourby
+class:
 
 | File | What it does |
 | --- | --- |
-| `canvas-patches/files/.../spark/FoliaSparkPlugin.java.patch` | `createServerConfigProvider()` returns `SourbyServerConfigProvider` |
-| `canvas-patches/files/.../spark/FoliaPlatformInfo.java.patch` | Platform version reported as `BuildN (MC:26.2)` |
-| `canvas-patches/files/.../spark/plugin/FoliaTickStatistics.java.patch` | Tick statistics come from Sourby metrics |
+| `src/main/java/io/canvasmc/canvas/spark/FoliaSparkPlugin.java` | `createServerConfigProvider()` returns `SourbyServerConfigProvider` |
+| `src/main/java/io/canvasmc/canvas/spark/FoliaPlatformInfo.java` | Platform version reported as `BuildN (MC:26.2)` |
+| `src/main/java/io/canvasmc/canvas/spark/plugin/FoliaTickStatistics.java` | Tick statistics come from Sourby metrics |
 | `src/main/java/dev/iyanz/sourbycraft/spark/SourbyServerConfigProvider.java` | Config groups and secret filtering; extends Spark's `ServerConfigProvider` |
 
-Procedure, after bumping `canvasRef`:
+Procedure, after bumping `paperRef`:
 
-1. `./gradlew applyAllPatches`. If one of the three patches fails, re-apply its change on the new
-   upstream file. Keep the change minimal, and do not carry upstream edits into the patch.
+1. `./gradlew applyAllPatches`, then compile. The three Spark platform classes are owned source now,
+   so a Spark API change shows up as a compile error in them rather than a failed patch.
 2. Check that `ServerConfigProvider`, `ConfigParser` and `BASE_HIDDEN_PATHS` still have the
    shapes `SourbyServerConfigProvider` uses. Spark has changed them before. A compile error here
    is the expected signal.

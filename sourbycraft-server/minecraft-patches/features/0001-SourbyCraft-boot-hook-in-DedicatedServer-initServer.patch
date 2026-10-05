@@ -9,7 +9,7 @@ Replaces the archived Folia build's me.earthme.luminol.commands.CommandRegister
 post-config hook (Luminol is not part of the build).
 
 diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
-index c4d100e223cd4a20f147b19ea3e76007f8b3ead0..d6bce8fa3a38b5b98b68793e547ea4719fb028fe 100644
+index c4d100e223cd4a20f147b19ea3e76007f8b3ead0..7f7beff4a573d18ce5689690a674fa14d61ea8c6 100644
 --- a/net/minecraft/server/dedicated/DedicatedServer.java
 +++ b/net/minecraft/server/dedicated/DedicatedServer.java
 @@ -262,6 +262,13 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface

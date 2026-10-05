@@ -1,0 +1,723 @@
+--- /dev/null
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+@@ -1,0 +_,720 @@
++package io.papermc.paper.threadedregions;
++
++import ca.spottedleaf.common.time.Schedule;
++import ca.spottedleaf.common.time.TickData;
++import ca.spottedleaf.common.time.TickTime;
++import ca.spottedleaf.common.util.TimeUtil;
++import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
++import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
++import ca.spottedleaf.concurrentutil.scheduler.StealingScheduledThreadPool;
++import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
++import ca.spottedleaf.moonrise.common.util.TickThread;
++import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.GlobalConfiguration;
++import io.canvasmc.canvas.threadedregions.ScheduledHandleTickState;
++import io.canvasmc.canvas.threadedregions.SchedulerUtil;
++import io.canvasmc.canvas.util.Util;
++import io.papermc.paper.util.TraceUtil;
++import it.unimi.dsi.fastutil.ints.Int2IntLinkedOpenHashMap;
++import java.lang.management.ManagementFactory;
++import java.lang.management.ThreadMXBean;
++import java.nio.file.Path;
++import java.util.concurrent.ThreadFactory;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.concurrent.atomic.AtomicInteger;
++import java.util.function.BooleanSupplier;
++import java.util.function.Consumer;
++import net.minecraft.CrashReport;
++import net.minecraft.CrashReportCategory;
++import net.minecraft.ReportType;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.world.level.ChunkPos;
++import org.apache.commons.lang3.mutable.MutableInt;
++import org.jetbrains.annotations.Contract;
++import org.jetbrains.annotations.UnknownNullability;
++import org.jspecify.annotations.NonNull;
++import org.jspecify.annotations.Nullable;
++import org.slf4j.Logger;
++
++public final class TickRegionScheduler {
++
++    public static final Logger LOGGER = LogUtils.getClassLogger(); // Canvas - region threading
++    private static final ThreadMXBean THREAD_MX_BEAN = ManagementFactory.getThreadMXBean();
++    private static final boolean MEASURE_CPU_TIME;
++    static {
++        MEASURE_CPU_TIME = THREAD_MX_BEAN.isThreadCpuTimeSupported();
++        if (MEASURE_CPU_TIME) {
++            THREAD_MX_BEAN.setThreadCpuTimeEnabled(true);
++        } else {
++            LOGGER.warn("TickRegionScheduler CPU time measurement is not available");
++        }
++    }
++
++    // Canvas start - region threading
++    private static final float DEFAULT_TICK_RATE = GlobalConfiguration.getInstance().regionScheduler.defaultTickRate;
++    private static final long DEFAULT_TICK_TIME_NANOS = (long) (1_000_000_000 / DEFAULT_TICK_RATE);
++
++    private static volatile float CURRENT_TICK_RATE = DEFAULT_TICK_RATE;
++    private static volatile long CURRENT_TIME_BETWEEN_TICKS = DEFAULT_TICK_TIME_NANOS;
++
++    // note: used for setting new tick time nanos, not really for anything else, utility method
++    //       this is fine for decimal rates, as we round it so if anything, we are like 1 nanosecond off... which isn't bad
++    private static long tickTimeNanosFromRate(float rate) {
++        return Math.round(1_000_000_000 / rate);
++    }
++
++    public static void setTickRate(final float newRate) {
++        CURRENT_TICK_RATE = newRate;
++        CURRENT_TIME_BETWEEN_TICKS = tickTimeNanosFromRate(newRate);
++        ScheduledHandleTickState.sendStateToAllPlayers();
++    }
++
++    public static float getTickRate() {
++        return CURRENT_TICK_RATE;
++    }
++
++    public static long getTimeBetweenTicks() {
++        return CURRENT_TIME_BETWEEN_TICKS;
++    }
++
++    public static float getDefaultTickRate() {
++        return DEFAULT_TICK_RATE;
++    }
++
++    public static long getDefaultTickTimeNanos() {
++        return DEFAULT_TICK_TIME_NANOS;
++    }
++    // Canvas end - region threading
++    // Folia start - watchdog
++    public static final FoliaWatchdogThread WATCHDOG_THREAD = new FoliaWatchdogThread();
++    static {
++        WATCHDOG_THREAD.start();
++    }
++    // Folia end - watchdog
++
++    public final Scheduler scheduler;
++
++    public enum SchedulerType {
++        EDF,
++        AFFINITY, // Canvas - add AFFINITY scheduler
++        WORK_STEALING;
++    }
++
++    public TickRegionScheduler(final SchedulerType schedulerType, final int initialThreads) {
++        final ThreadFactory threadFactory = new ThreadFactory() {
++            private final AtomicInteger idGenerator = new AtomicInteger();
++            // on Linux, thread affinity is copied from the parent thread - but we do not want that, so we need
++            // to adjust the thread affinity of child threads
++            // the group allows the numa instance to accurately collect the child threads
++            private final ThreadGroup threadGroup = new ThreadGroup("Folia Region Scheduler ThreadGroup");
++
++            @NonNull
++            @Override
++            public Thread newThread(final @NonNull Runnable run) {
++                final Thread ret = new TickThreadRunner(this.threadGroup, run, "Folia Region Scheduler Thread #" + this.idGenerator.getAndIncrement());
++                ret.setUncaughtExceptionHandler(TickRegionScheduler.this::uncaughtException);
++                return ret;
++            }
++        };
++
++        this.scheduler = SchedulerUtil.decideScheduler(schedulerType,  initialThreads, threadFactory); // Canvas - region threading
++    }
++
++    public void start() {
++        SchedulerUtil.startScheduler(); // Canvas - region threading
++    }
++
++    public void setThreads(final int threads) {
++        if (this.scheduler instanceof StealingScheduledThreadPool stealingScheduledThreadPool) {
++            final Int2IntLinkedOpenHashMap threadAllocation;
++            final long stealThresholdNS = TimeUnit.MILLISECONDS.toNanos(3L);
++            final long taskTimeSliceNS = TimeUnit.MILLISECONDS.toNanos(2L);
++
++            if (!MoonriseConstants.NUMA_ENABLE) {
++                threadAllocation = new Int2IntLinkedOpenHashMap();
++                threadAllocation.put(0, threads);
++
++                LOGGER.info("Folia is using {} tick threads", threads);
++            } else {
++                final int nodes = stealingScheduledThreadPool.getNuma().getTotalNumaNodes();
++
++                final int threadsPerNode = Math.max(1, threads / nodes);
++
++                threadAllocation = new Int2IntLinkedOpenHashMap(nodes);
++                for (int i = 0; i < nodes; ++i) {
++                    threadAllocation.put(i, threadsPerNode);
++                }
++
++                LOGGER.info("Folia is using {} tick threads per NUMA node, with {} NUMA nodes detected", threadsPerNode, nodes);
++            }
++
++            stealingScheduledThreadPool.setThreadAllocation(threadAllocation, stealThresholdNS, taskTimeSliceNS);
++        }
++    }
++
++    public int getTotalThreadCount() {
++        return this.scheduler.getAliveThreads().length;
++    }
++
++    private static void setTickingRegion(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
++        final Thread currThread = Thread.currentThread();
++        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
++            throw new IllegalStateException("Must be tick thread runner");
++        }
++        if (region != null && tickThreadRunner.currentTickingRegion != null) {
++            throw new IllegalStateException("Trying to double set ticking region!");
++        }
++        if (region == null && tickThreadRunner.currentTickingRegion == null) {
++            throw new IllegalStateException("Trying to double unset ticking region!");
++        }
++        tickThreadRunner.currentTickingRegion = region;
++        if (region != null) {
++            tickThreadRunner.currentTickingWorldRegionizedData = region.regioniser.world.worldRegionData.get();
++        } else {
++            tickThreadRunner.currentTickingWorldRegionizedData = null;
++        }
++    }
++
++    private static void setTickTask(final SchedulableTick task) {
++        final Thread currThread = Thread.currentThread();
++        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
++            throw new IllegalStateException("Must be tick thread runner");
++        }
++        if (task != null && tickThreadRunner.currentTickingTask != null) {
++            throw new IllegalStateException("Trying to double set ticking task!");
++        }
++        if (task == null && tickThreadRunner.currentTickingTask == null) {
++            throw new IllegalStateException("Trying to double unset ticking task!");
++        }
++        tickThreadRunner.currentTickingTask = task;
++    }
++
++    /**
++     * Returns the current ticking region, or {@code null} if there is no ticking region. If this thread is not a
++     * TickThread, then returns {@code null}.
++     */
++    public static ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> getCurrentRegion() {
++        final Thread currThread = Thread.currentThread();
++        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
++            return RegionShutdownThread.getRegion();
++        }
++        return tickThreadRunner.currentTickingRegion;
++    }
++    // Canvas start - region threading
++
++    /**
++     * Returns if the current thread is a tick thread runner
++     */
++    public static boolean isTickRunner() {
++        final Thread currThread = Thread.currentThread();
++        return currThread instanceof TickThreadRunner;
++    }
++    // Canvas end - region threading
++
++    /**
++     * Returns the current ticking region's world regionized data, or {@code null} if there is no ticking region. This
++     * is a faster alternative to calling the {@link RegionizedData#get()} method. If this thread is not a TickThread,
++     * then returns {@code null}.
++     */
++    public static RegionizedWorldData getCurrentRegionizedWorldData() {
++        final Thread currThread = Thread.currentThread();
++        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
++            return RegionShutdownThread.getWorldData();
++        }
++        return tickThreadRunner.currentTickingWorldRegionizedData;
++    }
++
++    /**
++     * Returns the current ticking task, or {@code null} if there is no ticking region. If this thread is not a
++     * TickThread, then returns {@code null}.
++     *
++     * @implNote Can be null or nonnull depending on thread context. No guaranteed nullability definition, unknown.
++     */
++    @UnknownNullability
++    @Contract(pure = true)
++    public static SchedulableTick getCurrentTickingTask() {
++        final Thread currThread = Thread.currentThread();
++        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
++            return null;
++        }
++        return tickThreadRunner.currentTickingTask;
++    }
++
++    /**
++     * Schedules the given region
++     *
++     * @throws IllegalStateException
++     *     If the region is already scheduled or is ticking
++     */
++    public void scheduleRegion(final @NonNull RegionScheduleHandle region) {
++        region.scheduler = this;
++        this.scheduler.schedule(region);
++    }
++
++    /**
++     * Attempts to de-schedule the provided region. If the current region cannot be cancelled for its next tick or task
++     * execution, then it will be cancelled after.
++     */
++    public void descheduleRegion(final @NonNull RegionScheduleHandle region) {
++        // To avoid acquiring any of the locks the scheduler may be using, we
++        // simply cancel the next action.
++        region.markNonSchedulable();
++    }
++
++    public boolean halt(final boolean sync, final long maxWaitNS) {
++        this.scheduler.halt();
++        if (!sync) {
++            return this.scheduler.getAliveThreads().length == 0;
++        }
++
++        return this.scheduler.join(maxWaitNS == 0L ? 0L : Math.max(1L, TimeUnit.NANOSECONDS.toMillis(maxWaitNS)));
++    }
++
++    void dumpAliveThreadTraces(final String reason) {
++        for (final Thread thread : this.scheduler.getAliveThreads()) {
++            if (thread.isAlive()) {
++                TraceUtil.dumpTraceForThread(thread, reason);
++            }
++        }
++    }
++
++    public void setHasTasks(final RegionScheduleHandle region) {
++        this.scheduler.notifyTasks(region);
++    }
++    // Canvas start - region threading
++
++    private void generateCrashReport(
++        final Throwable thrown, final String title, final @Nullable Consumer<CrashReport> reportFiller
++    ) {
++        final CrashReport crashReport = CrashReport.forThrowable(thrown, title);
++        final MinecraftServer server = MinecraftServer.getServer();
++        final Path reportSavePath = server.getServerDirectory()
++            .resolve("crash-reports")
++            .resolve("crash-" + net.minecraft.util.Util.getFilenameFormattedDateTime() + "-server.txt");
++
++        if (reportFiller != null) {
++            reportFiller.accept(crashReport);
++        }
++        server.fillSystemReport(crashReport.getSystemReport());
++
++        if (crashReport.saveToFile(reportSavePath, ReportType.CRASH)) {
++            LOGGER.error("This crash report has been saved to: {}", reportSavePath.toAbsolutePath());
++        }
++        else {
++            LOGGER.error("Unable to save crash report to disk.");
++        }
++    }
++    // Canvas end - region threading
++
++    private void uncaughtException(final @NonNull Thread thread, final Throwable thrown) {
++        // Canvas start - region threading
++        generateCrashReport(thrown, "Uncaught scheduler exception", (report) -> {
++            final CrashReportCategory schedulerInfo = report.addCategory("Region Scheduler Info");
++
++            schedulerInfo.setDetail("initial_threads", SchedulerUtil.getSchedulerInfo().initialThreads());
++            schedulerInfo.setDetail("scheduler_type", SchedulerUtil.getSchedulerInfo().schedulerType());
++
++            final CrashReportCategory regionizerInfo = report.addCategory("Regionizer Info");
++            final MutableInt regionCount = new MutableInt(0);
++
++            for (final ServerLevel world : RegionizedServer.getInstance().worlds) {
++                world.regioniser.computeForAllRegions((region) -> {
++                    regionizerInfo.setDetail(Util.getLevelName(world) + "-region-" + regionCount.incrementAndGet(), region.toString());
++                });
++            }
++
++            if (regionCount.intValue() == 0) {
++                regionizerInfo.setDetail("regions", "no regions loaded");
++            }
++        });
++
++        LOGGER.error("Uncaught exception scheduler internal thread \"{}\"", thread.getName(), thrown);
++        // Canvas end - region threading
++
++        // prevent further ticks from occurring
++        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
++        this.scheduler.halt();
++
++        MinecraftServer.getServer().stopServer();
++    }
++
++    private void regionFailed(final @NonNull RegionScheduleHandle handle, final boolean executingTasks, final Throwable thrown) {
++        // when a region fails, we need to shut down the server gracefully
++
++        // Canvas start - region threading
++        generateCrashReport(thrown, "Region Failure", (report) -> {
++            final CrashReportCategory schedulerInfo = report.addCategory("Region Scheduler Info");
++
++            schedulerInfo.setDetail("initial_threads", SchedulerUtil.getSchedulerInfo().initialThreads());
++            schedulerInfo.setDetail("scheduler_type", SchedulerUtil.getSchedulerInfo().schedulerType());
++
++            final CrashReportCategory regionSpecificInfo = report.addCategory("Related Region Info");
++            final long current = System.nanoTime();
++
++            regionSpecificInfo.setDetail("current_tick", handle.currentTick);
++            regionSpecificInfo.setDetail("next_scheduled_start", Util.formatTargetTime(current, handle.scheduledStart));
++            regionSpecificInfo.setDetail("tick_manager", handle.tickManager.toString());
++            regionSpecificInfo.setDetail("id", handle.id);
++            regionSpecificInfo.setDetail("marked_non_schedulable", handle.isMarkedAsNonSchedulable());
++            regionSpecificInfo.setDetail("has_intermediate_tasks", handle.hasTasks());
++
++            if (handle instanceof TickRegions.ConcreteRegionTickHandle concrete) {
++                regionSpecificInfo.setDetail("region", concrete.region.region.toString());
++            }
++            else if (handle instanceof RegionizedServer.GlobalTickTickHandle) {
++                regionSpecificInfo.setDetail("is_global", true);
++            }
++
++            final CrashReportCategory regionizerInfo = report.addCategory("Regionizer Info");
++            final MutableInt regionCount = new MutableInt(0);
++
++            for (final ServerLevel world : RegionizedServer.getInstance().worlds) {
++                world.regioniser.computeForAllRegions((region) -> {
++                    regionizerInfo.setDetail(Util.getLevelName(world) + "-region-" + regionCount.incrementAndGet(), region.toString());
++                });
++            }
++
++            if (regionCount.intValue() == 0) {
++                regionizerInfo.setDetail("regions", "no regions loaded");
++            }
++        });
++        // Canvas end - region threading
++
++        // prevent further ticks from occurring
++        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
++        this.scheduler.halt();
++
++        final ChunkPos center = handle.region == null ? null : handle.region.region.getCenterChunk();
++        final ServerLevel world = handle.region == null ? null : handle.region.world;
++
++        LOGGER.error("Region #{} centered at chunk {} in world '{}' failed to {}:", handle.region == null ? -1L : handle.region.id, center, world == null ? "null" : world.getWorld().getName(), executingTasks ? "execute tasks" : "tick", thrown);
++
++        MinecraftServer.getServer().stopServer();
++    }
++
++    // By using our own thread object, we can use a field for the current region rather than a ThreadLocal.
++    // This is much faster than a thread local, since the thread local has to use a map lookup.
++    public static final class TickThreadRunner extends TickThread {
++
++        public ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> currentTickingRegion;
++        public RegionizedWorldData currentTickingWorldRegionizedData;
++        public SchedulableTick currentTickingTask;
++
++        public TickThreadRunner(final ThreadGroup group, final Runnable run, final String name) {
++            super(group, run, name);
++        }
++    }
++
++    public static abstract class RegionScheduleHandle extends SchedulableTick {
++
++        protected long currentTick;
++        protected long lastTickStart;
++
++        public final TickData tickTimes5s;
++        public final TickData tickTimes15s;
++        public final TickData tickTimes1m;
++        public final TickData tickTimes5m;
++        public final TickData tickTimes15m;
++        public TickTime currentTickData;
++        protected long intermediateTaskTime = 0L;
++        protected long intermediateTaskTimeCPU = 0L;
++        protected Thread currentTickingThread;
++
++        public final TickRegions.TickRegionData region;
++        private final AtomicBoolean cancelled = new AtomicBoolean();
++
++        protected final Schedule tickSchedule;
++
++        private TickRegionScheduler scheduler;
++        // Canvas start - region threading
++        private final ScheduledHandleTickState tickManager = new ScheduledHandleTickState(this);
++
++        public ScheduledHandleTickState getTickManager() {
++            return tickManager;
++        }
++        // Canvas end - region threading
++
++        public RegionScheduleHandle(final TickRegions.TickRegionData region, final long firstStart) {
++            this.currentTick = 0L;
++            this.lastTickStart = TimeUtil.DEADLINE_NOT_SET;
++            this.tickTimes5s = new TickData(TimeUnit.SECONDS.toNanos(5L));
++            this.tickTimes15s = new TickData(TimeUnit.SECONDS.toNanos(15L));
++            this.tickTimes1m = new TickData(TimeUnit.MINUTES.toNanos(1L));
++            this.tickTimes5m = new TickData(TimeUnit.MINUTES.toNanos(5L));
++            this.tickTimes15m = new TickData(TimeUnit.MINUTES.toNanos(15L));
++            this.region = region;
++
++            this.setScheduledStart(firstStart);
++            this.tickSchedule = new Schedule(firstStart == TimeUtil.DEADLINE_NOT_SET ? firstStart : firstStart - getTimeBetweenTicks()); // Canvas - region threading
++        }
++
++        /**
++         * Subclasses should call this instead of {@link #setScheduledStart(long)} so that the tick schedule and
++         * scheduled start remain synchronised
++         */
++        protected final void updateScheduledStart(final long to) {
++            this.setScheduledStart(to);
++            this.tickSchedule.setLastPeriod(to == TimeUtil.DEADLINE_NOT_SET ? to : to - getTimeBetweenTicks()); // Canvas - region threading
++        }
++
++        public final void markNonSchedulable() {
++            this.cancelled.set(true);
++        }
++
++        public final boolean isMarkedAsNonSchedulable() {
++            return this.cancelled.get();
++        }
++
++        protected abstract boolean tryMarkTicking();
++
++        protected abstract boolean markNotTicking();
++
++        protected abstract void tickRegion(final long tickCount, final long startTime, final long scheduledEnd);
++
++        protected abstract void runRegionTasks(final BooleanSupplier canContinue);
++
++        protected abstract boolean hasIntermediateTasks();
++
++        @Override
++        public final boolean hasTasks() {
++            return this.hasIntermediateTasks();
++        }
++
++        @Override
++        public final boolean runTasks(final BooleanSupplier canContinue) {
++            if (this.cancelled.get()) {
++                return false;
++            }
++
++            final long cpuStart = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
++            final long tickStart = System.nanoTime();
++
++            if (!this.tryMarkTicking()) {
++                if (!this.cancelled.get()) {
++                    throw new IllegalStateException("Scheduled region should be acquirable");
++                }
++                // region was killed
++                return false;
++            }
++
++            TickRegionScheduler.setTickTask(this);
++            if (this.region != null) {
++                TickRegionScheduler.setTickingRegion(this.region.region);
++            }
++
++            synchronized (this) {
++                this.currentTickingThread = Thread.currentThread();
++            }
++
++            final FoliaWatchdogThread.RunningTick runningTick = new FoliaWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()); // Folia - watchdog
++            WATCHDOG_THREAD.addTick(runningTick); // Folia - watchdog
++            try {
++                this.runRegionTasks(() -> {
++                    return !RegionScheduleHandle.this.cancelled.get() && canContinue.getAsBoolean();
++                });
++            } catch (final Throwable thrown) {
++                this.scheduler.regionFailed(this, true, thrown);
++                // don't release region for another tick
++                return false;
++            } finally {
++                WATCHDOG_THREAD.removeTick(runningTick); // Folia - watchdog
++                final long tickEnd = System.nanoTime();
++                final long cpuEnd = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
++
++                synchronized (this) {
++                    this.intermediateTaskTime += (tickEnd - tickStart);
++                    this.intermediateTaskTimeCPU += (cpuEnd - cpuStart);
++                }
++
++                TickRegionScheduler.setTickTask(null);
++                if (this.region != null) {
++                    TickRegionScheduler.setTickingRegion(null);
++                }
++            }
++
++            return this.markNotTicking() && !this.cancelled.get();
++        }
++
++        @Override
++        public final boolean runTick() {
++            // Remember, we are supposed use setScheduledStart if we return true here, otherwise
++            // the scheduler will try to schedule for the same time.
++            if (this.cancelled.get()) {
++                return false;
++            }
++
++            final long cpuStart = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
++            final long tickStart = System.nanoTime();
++            // Canvas start - region threading
++            final ScheduledHandleTickState tickState = getTickManager();
++            final long deadlineFuture = tickState.tickStart(tickStart);
++            // Canvas end - region threading
++
++            // use max(), don't assume that tickStart >= scheduledStart
++            final long tickCount = Math.max(1L, this.tickSchedule.getPeriodsAhead(deadlineFuture, tickStart)); // Canvas - region threading
++
++            if (!this.tryMarkTicking()) {
++                if (!this.cancelled.get()) {
++                    throw new IllegalStateException("Scheduled region should be acquirable");
++                }
++                // region was killed
++                return false;
++            }
++            if (this.cancelled.get()) {
++                this.markNotTicking();
++                // region should be killed
++                return false;
++            }
++
++            TickRegionScheduler.setTickTask(this);
++            if (this.region != null) {
++                TickRegionScheduler.setTickingRegion(this.region.region);
++            }
++            this.incrementTickCount();
++            final long lastTickStart = this.lastTickStart;
++            this.lastTickStart = tickStart;
++
++            final long scheduledStart = this.getScheduledStart();
++            final long scheduledEnd = scheduledStart + deadlineFuture; // Canvas - region threading
++
++            final long intermediateTaskTime;
++            final long intermediateTaskTimeCPU;
++
++            synchronized (this) {
++                intermediateTaskTime = this.intermediateTaskTime;
++                intermediateTaskTimeCPU = this.intermediateTaskTimeCPU;
++                this.intermediateTaskTime = 0L;
++                this.intermediateTaskTimeCPU = 0L;
++
++                this.currentTickData = new TickTime(
++                    lastTickStart, scheduledStart, tickStart, cpuStart,
++                    TimeUtil.DEADLINE_NOT_SET, TimeUtil.DEADLINE_NOT_SET,
++                    intermediateTaskTime, intermediateTaskTimeCPU,
++                    MEASURE_CPU_TIME
++                );
++                this.currentTickingThread = Thread.currentThread();
++            }
++
++            final FoliaWatchdogThread.RunningTick runningTick = new FoliaWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()); // Folia - region threading
++            WATCHDOG_THREAD.addTick(runningTick); // Folia - region threading
++            try {
++                // next start isn't updated until the end of this tick
++                this.tickRegion(tickCount, tickStart, scheduledEnd);
++            } catch (final Throwable thrown) {
++                this.scheduler.regionFailed(this, false, thrown);
++                // regionFailed will schedule a shutdown, so we should avoid letting this region tick further
++                return false;
++            } finally {
++                WATCHDOG_THREAD.removeTick(runningTick); // Folia - region threading
++                final long tickEnd = System.nanoTime();
++                final long cpuEnd = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
++
++                // in order to ensure all regions get their chance at scheduling, we have to ensure that regions
++                // that exceed the max tick time are not always prioritised over everything else. Thus, we use the greatest
++                // of the current time and "ideal" next tick start.
++                // Canvas start - region threading
++                this.tickSchedule.advanceBy(tickCount, deadlineFuture);
++                this.setScheduledStart(TimeUtil.getGreatestTime(tickEnd, this.tickSchedule.getDeadline(deadlineFuture)));
++                // Canvas end - region threading
++
++                final TickTime time = new TickTime(
++                    lastTickStart, scheduledStart, tickStart, cpuStart, tickEnd, cpuEnd,
++                    intermediateTaskTime, intermediateTaskTimeCPU,
++                    MEASURE_CPU_TIME
++                );
++
++                this.addTickTime(time);
++                tickState.tickEnd(tickEnd); // Canvas - region threading
++                TickRegionScheduler.setTickTask(null);
++                if (this.region != null) {
++                    TickRegionScheduler.setTickingRegion(null);
++                }
++            }
++
++            // Only AFTER updating the tickStart
++            return this.markNotTicking() && !this.cancelled.get();
++        }
++
++        /**
++         * Only safe to call if this tick data matches the current ticking region.
++         */
++        protected void addTickTime(final TickTime time) {
++            synchronized (this) {
++                this.currentTickData = null;
++                this.currentTickingThread = null;
++                this.tickTimes5s.addDataFrom(time);
++                this.tickTimes15s.addDataFrom(time);
++                this.tickTimes1m.addDataFrom(time);
++                this.tickTimes5m.addDataFrom(time);
++                this.tickTimes15m.addDataFrom(time);
++            }
++        }
++
++        @Nullable
++        private TickTime adjustCurrentTickData(final long tickEnd) {
++            final TickTime currentTickData = this.currentTickData;
++            if (currentTickData == null) {
++                return null;
++            }
++
++            final long cpuEnd = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getThreadCpuTime(this.currentTickingThread.threadId()) : 0L;
++
++            return new TickTime(
++                currentTickData.previousTickStart(), currentTickData.scheduledTickStart(),
++                currentTickData.tickStart(), currentTickData.tickStartCPU(),
++                tickEnd, cpuEnd, 0L, 0L, // TODO
++                MEASURE_CPU_TIME
++            );
++        }
++
++        public final TickData.TickReportData getTickReport5s(final long currTime) {
++            synchronized (this) {
++                return this.tickTimes5s.generateTickReport(this.adjustCurrentTickData(currTime), currTime, getTimeBetweenTicks()); // Canvas - region threading
++            }
++        }
++
++        public final TickData.TickReportData getTickReport15s(final long currTime) {
++            synchronized (this) {
++                return this.tickTimes15s.generateTickReport(this.adjustCurrentTickData(currTime), currTime, getTimeBetweenTicks()); // Canvas - region threading
++            }
++        }
++
++        public final TickData.TickReportData getTickReport1m(final long currTime) {
++            synchronized (this) {
++                return this.tickTimes1m.generateTickReport(this.adjustCurrentTickData(currTime), currTime, getTimeBetweenTicks()); // Canvas - region threading
++            }
++        }
++
++        public final TickData.TickReportData getTickReport5m(final long currTime) {
++            synchronized (this) {
++                return this.tickTimes5m.generateTickReport(this.adjustCurrentTickData(currTime), currTime, getTimeBetweenTicks()); // Canvas - region threading
++            }
++        }
++
++        public final TickData.TickReportData getTickReport15m(final long currTime) {
++            synchronized (this) {
++                return this.tickTimes15m.generateTickReport(this.adjustCurrentTickData(currTime), currTime, getTimeBetweenTicks()); // Canvas - region threading
++            }
++        }
++
++        /**
++         * Only safe to call if this tick data matches the current ticking region.
++         */
++        private void incrementTickCount() {
++            ++this.currentTick;
++        }
++
++        /**
++         * Only safe to call if this tick data matches the current ticking region.
++         */
++        public final long getCurrentTick() {
++            return this.currentTick;
++        }
++
++        protected final void setCurrentTick(final long value) {
++            this.currentTick = value;
++        }
++    }
++}

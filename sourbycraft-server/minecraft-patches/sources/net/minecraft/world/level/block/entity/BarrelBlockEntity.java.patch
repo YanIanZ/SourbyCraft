@@ -1,0 +1,56 @@
+--- a/net/minecraft/world/level/block/entity/BarrelBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BarrelBlockEntity.java
+@@ -59,7 +_,16 @@
+     }
+     // CraftBukkit end
+     private static final Component DEFAULT_NAME = Component.translatable("container.barrel");
+-    private NonNullList<ItemStack> items = NonNullList.withSize(27, ItemStack.EMPTY);
++    // Purpur start - Barrels and enderchests 6 rows
++    private NonNullList<ItemStack> items = NonNullList.withSize(switch (io.canvasmc.canvas.GlobalConfiguration.getInstance().purpurContainers.barrelRows) {
++        case 6 -> 54;
++        case 5 -> 45;
++        case 4 -> 36;
++        case 2 -> 18;
++        case 1 -> 9;
++        default -> 27;
++    }, ItemStack.EMPTY);
++    // Purpur end - Barrels and enderchests 6 rows
+     public final ContainerOpenersCounter openersCounter = new ContainerOpenersCounter() {
+         // Paper start - delay open/close callbacks
+         @Override
+@@ -118,7 +_,16 @@
+ 
+     @Override
+     public int getContainerSize() {
+-        return 27;
++        // Purpur start - Barrels and enderchests 6 rows
++        return switch (io.canvasmc.canvas.GlobalConfiguration.getInstance().purpurContainers.barrelRows) {
++            case 6 -> 54;
++            case 5 -> 45;
++            case 4 -> 36;
++            case 2 -> 18;
++            case 1 -> 9;
++            default -> 27;
++        };
++        // Purpur end - Barrels and enderchests 6 rows
+     }
+ 
+     @Override
+@@ -138,7 +_,16 @@
+ 
+     @Override
+     protected AbstractContainerMenu createMenu(final int containerId, final Inventory inventory) {
+-        return ChestMenu.threeRows(containerId, inventory, this);
++        // Purpur start - Barrels and enderchests 6 rows
++        return switch (io.canvasmc.canvas.GlobalConfiguration.getInstance().purpurContainers.barrelRows) {
++            case 6 -> ChestMenu.sixRows(containerId, inventory, this);
++            case 5 -> ChestMenu.fiveRows(containerId, inventory, this);
++            case 4 -> ChestMenu.fourRows(containerId, inventory, this);
++            case 2 -> ChestMenu.twoRows(containerId, inventory, this);
++            case 1 -> ChestMenu.oneRow(containerId, inventory, this);
++            default -> ChestMenu.threeRows(containerId, inventory, this);
++        };
++        // Purpur end - Barrels and enderchests 6 rows
+     }
+ 
+     @Override

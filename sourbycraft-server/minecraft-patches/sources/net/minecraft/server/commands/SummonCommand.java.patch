@@ -1,0 +1,18 @@
+--- a/net/minecraft/server/commands/SummonCommand.java
++++ b/net/minecraft/server/commands/SummonCommand.java
+@@ -98,11 +_,14 @@
+             throw ERROR_FAILED.create();
+         }
+ 
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPos(() -> { // Canvas - region threading
+         if (finalize && entity instanceof Mob mob) {
+             mob.finalizeSpawn(source.getLevel(), source.getLevel().getCurrentDifficultyAt(entity.blockPosition()), EntitySpawnReason.COMMAND, null);
+         }
++        level.tryAddFreshEntityWithPassengers(entity, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.COMMAND); // Folia - region threading
++        }, pos, level, source); // Canvas - region threading - tryAddFreshEntityWithPassengers has handling in EntityLookup for duplicate UUIDs, this is fine
+ 
+-        if (!level.tryAddFreshEntityWithPassengers(entity, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.COMMAND)) { // CraftBukkit - pass a spawn reason of "COMMAND"
++        if (false) { // CraftBukkit - pass a spawn reason of "COMMAND" // Folia - region threading
+             throw ERROR_DUPLICATE_UUID.create();
+         } else {
+             return entity;

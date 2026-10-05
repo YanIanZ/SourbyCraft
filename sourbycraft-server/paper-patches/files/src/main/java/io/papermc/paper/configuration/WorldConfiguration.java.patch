@@ -1,0 +1,10 @@
+--- a/src/main/java/io/papermc/paper/configuration/WorldConfiguration.java
++++ b/src/main/java/io/papermc/paper/configuration/WorldConfiguration.java
+@@ -526,6 +_,7 @@
+ 
+         @PostProcess
+         private void postProcess() {
++            this.preventMovingIntoUnloadedChunks = true; // Folia - region threading - force prevent moving into unloaded chunks
+             FeatureHooks.setPlayerChunkUnloadDelay(this.delayChunkUnloadsBy.ticks());
+         }
+     }

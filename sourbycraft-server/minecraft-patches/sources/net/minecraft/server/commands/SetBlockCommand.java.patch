@@ -1,0 +1,18 @@
+--- a/net/minecraft/server/commands/SetBlockCommand.java
++++ b/net/minecraft/server/commands/SetBlockCommand.java
+@@ -107,6 +_,7 @@
+         final boolean strict
+     ) throws CommandSyntaxException {
+         ServerLevel level = source.getLevel();
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPos(() -> { // Canvas - region threading
+         if (level.isDebug()) {
+             throw ERROR_FAILED.create();
+         }
+@@ -135,6 +_,7 @@
+ 
+         source.sendSuccess(() -> Component.translatable("commands.setblock.success", pos.getX(), pos.getY(), pos.getZ()), true);
+         return Command.SINGLE_SUCCESS;
++        }, pos, level, source); // Canvas - region threading
+     }
+ 
+     public enum Mode {

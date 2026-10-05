@@ -1,0 +1,16 @@
+--- a/src/test/java/io/papermc/paper/plugin/TestPluginMeta.java
++++ b/src/test/java/io/papermc/paper/plugin/TestPluginMeta.java
+@@ -20,6 +_,13 @@
+         this.identifier = identifier;
+     }
+ 
++    // Folia start - region threading
++    @Override
++    public boolean isFoliaSupported() {
++        return true;
++    }
++
++    // Folia end - region threading
+     @Override
+     public @NotNull String getName() {
+         return this.identifier;

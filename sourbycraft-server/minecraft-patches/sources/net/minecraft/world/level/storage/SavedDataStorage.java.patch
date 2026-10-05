@@ -1,0 +1,186 @@
+--- a/net/minecraft/world/level/storage/SavedDataStorage.java
++++ b/net/minecraft/world/level/storage/SavedDataStorage.java
+@@ -40,7 +_,7 @@
+ 
+ public class SavedDataStorage implements AutoCloseable {
+     private static final Logger LOGGER = LogUtils.getLogger();
+-    public final Map<SavedDataType<?>, Optional<SavedData>> cache = new HashMap<>();
++    public final Map<SavedDataType<?>, Optional<SavedData>> cache = new java.util.concurrent.ConcurrentHashMap<>(); // Folia - region threading
+     private final DataFixer fixerUpper;
+     private final HolderLookup.Provider registries;
+     private final Path dataFolder;
+@@ -62,25 +_,63 @@
+         }
+     }
+ 
++    // Folia start - region threading
++    public <T extends SavedData> @Nullable T read(SavedDataType<T> type, java.util.function.@Nullable Consumer<@Nullable T> onRead) {
++        // try lockless read first
++        Optional<SavedData> immediate = this.cache.get(type);
++        if (immediate != null) {
++            return (T)immediate.orElse(null);
++        } // else: fall back to slow path
++
++        return (T)this.cache.computeIfAbsent(type, (SavedDataType<?> key) -> {
++            SavedData onDisk = SavedDataStorage.this.readSavedData(key);
++            if (onRead != null) {
++                onRead.accept((T)onDisk);
++            }
++            return Optional.ofNullable(onDisk);
++        }).orElse(null);
++    }
++
++    // Folia end - region threading
+     public <T extends SavedData> T computeIfAbsent(final SavedDataType<T> type) {
+-        T data = this.get(type);
+-        if (data != null) {
+-            return data;
+-        }
+-
+-        T newData = (T)type.constructor().get();
+-        this.set(type, newData);
+-        return newData;
++        // Folia start - region threading
++        // try lockless read first
++        Optional<SavedData> immediate = this.cache.get(type);
++        if (immediate != null && immediate.isPresent()) {
++            return (T)immediate.orElse(null);
++        } // else: fall back to slow path
++
++        return (T)this.cache.compute(type, (SavedDataType<?> key, Optional<SavedData> valueInMap) -> {
++            if (valueInMap != null && valueInMap.isPresent()) {
++                return valueInMap;
++            }
++            if (valueInMap == null) {
++                SavedData onDisk = SavedDataStorage.this.readSavedData(key);
++                if (onDisk != null) {
++                    return Optional.of(onDisk);
++                }
++            }
++
++            SavedData newData = key.constructor().get();
++            newData.setDirty();
++
++            return Optional.of(newData);
++        }).orElse(null);
++        // Folia end - region threading
+     }
+ 
+     public <T extends SavedData> @Nullable T get(final SavedDataType<T> type) {
+-        Optional<SavedData> data = this.cache.get(type);
+-        if (data == null) {
+-            data = Optional.ofNullable(this.readSavedData(type));
+-            this.cache.put(type, data);
+-        }
++        // Folia start - region threading
++        // try lockless read first
++        Optional<SavedData> immediate = this.cache.get(type);
++        if (immediate != null) {
++            return (T)immediate.orElse(null);
++        } // else: fall back to slow path
+ 
+-        return (T)data.orElse(null);
++        return (T)this.cache.computeIfAbsent(type, (SavedDataType<?> key) -> {
++            return Optional.ofNullable(SavedDataStorage.this.readSavedData(key));
++        }).orElse(null);
++        // Folia end - region threading
+     }
+ 
+     private <T extends SavedData> @Nullable T readSavedData(final SavedDataType<T> type) {
+@@ -102,8 +_,9 @@
+     }
+ 
+     public <T extends SavedData> void set(final SavedDataType<T> type, final T data) {
++        data.setDirty(); // Folia - region threading - moved up
+         this.cache.put(type, Optional.of(data));
+-        data.setDirty();
++        // data.setDirty(); // Folia - region threading - move up
+     }
+ 
+     public CompoundTag readTagFromDisk(final Path dataFile, final DataFixTypes type, final int newVersion) throws IOException {
+@@ -143,6 +_,64 @@
+         return gzip;
+     }
+ 
++    // Folia start - region threading
++    // Canvas start - region threading
++
++    // completely change the old "saveMaps" function
++    // by using this we can be more specific on what
++    // we want to actually save
++
++    public final CompletableFuture<?> saveSpecific(final java.util.function.Supplier<List<Class<? extends SavedData>>> classTypesSupplier) {
++        final List<Class<? extends SavedData>> classTypes = classTypesSupplier.get();
++        if (classTypes.isEmpty()) {
++            return CompletableFuture.completedFuture(null);
++        }
++    // Canvas end - region threading
++        Map<SavedDataType<?>, CompoundTag> savedData = new HashMap<>();
++        RegistryOps<Tag> registryOps = this.registries.createSerializationContext(NbtOps.INSTANCE);
++        for (Map.Entry<SavedDataType<?>, Optional<SavedData>> entry : this.cache.entrySet()) {
++            SavedDataType<?> key = entry.getKey();
++            SavedData state = entry.getValue().orElse(null);
++
++            if (state == null || !state.isDirty()) {
++                continue;
++            }
++
++            // Canvas start - region threading
++            // check if the type passes, since we only want specific data to pass through
++            // similar to how Folia does the saveMaps function
++
++            boolean pass = false;
++            for (final Class<? extends SavedData> classType : classTypes) {
++                if (classType.isInstance(state)) {
++                    pass = true;
++                    break;
++                }
++            }
++            if (!pass) {
++            // Canvas end - region threading
++                continue;
++            }
++
++            state.setDirty(false);
++
++            savedData.put(key, this.encodeUnchecked(key, state, registryOps));
++        }
++
++        if (savedData.isEmpty()) {
++            return CompletableFuture.completedFuture(null);
++        } else {
++            this.pendingWriteFuture = this.pendingWriteFuture
++                .thenCompose(
++                    v -> CompletableFuture.allOf(
++                        savedData.entrySet().stream().map(entry -> CompletableFuture.runAsync(() -> tryWrite(entry.getKey(), entry.getValue()), Util.DIMENSION_DATA_IO_POOL)).toArray(CompletableFuture[]::new)
++                    )
++                );
++            return this.pendingWriteFuture;
++        }
++    }
++
++    // Folia end - region threading
+     public CompletableFuture<?> scheduleSave() {
+         if (this.closed) {
+             throw new IllegalStateException("Trying to schedule save when SavedDataStorage is already closed");
+@@ -189,8 +_,9 @@
+         Map<SavedDataType<?>, CompoundTag> tagsToSave = new Object2ObjectArrayMap<>();
+         RegistryOps<Tag> ops = this.registries.createSerializationContext(NbtOps.INSTANCE);
+         this.cache.forEach((type, optional) -> optional.filter(SavedData::isDirty).ifPresent(data -> {
++            data.setDirty(false); // Folia - region threading - moved up
+             tagsToSave.put(type, this.encodeUnchecked(type, data, ops));
+-            data.setDirty(false);
++            // data.setDirty(false); // Folia - region threading - move up
+         }));
+         return tagsToSave;
+     }
+@@ -198,7 +_,9 @@
+     private <T extends SavedData> CompoundTag encodeUnchecked(final SavedDataType<T> type, final SavedData data, final RegistryOps<Tag> ops) {
+         Codec<T> codec = type.codec();
+         CompoundTag tag = new CompoundTag();
++        synchronized (data) { // Folia - make map data thread-safe
+         tag.put("data", codec.encodeStart(ops, (T)data).getOrThrow());
++        } // Folia - make map data thread-safe
+         NbtUtils.addCurrentDataVersion(tag);
+         return tag;
+     }

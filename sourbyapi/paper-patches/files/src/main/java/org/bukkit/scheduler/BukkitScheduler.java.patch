@@ -1,0 +1,19 @@
+--- a/src/main/java/org/bukkit/scheduler/BukkitScheduler.java
++++ b/src/main/java/org/bukkit/scheduler/BukkitScheduler.java
+@@ -7,6 +_,16 @@
+ import org.bukkit.plugin.Plugin;
+ import org.jetbrains.annotations.NotNull;
+ 
++// Folia start - add new schedulers
++/**
++ * @deprecated Use one of {@link io.papermc.paper.threadedregions.scheduler.RegionScheduler},
++ *                        {@link io.papermc.paper.threadedregions.scheduler.AsyncScheduler},
++ *                        {@link io.papermc.paper.threadedregions.scheduler.EntityScheduler},
++ *                        or {@link io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler}
++ */
++// Folia end - add new schedulers
++@Deprecated
++@io.canvasmc.canvas.Unsupported // Canvas - region threading
+ public interface BukkitScheduler {
+ 
+     /**

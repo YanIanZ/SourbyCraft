@@ -1,0 +1,52 @@
+--- a/net/minecraft/world/entity/ai/goal/GoalSelector.java
++++ b/net/minecraft/world/entity/ai/goal/GoalSelector.java
+@@ -6,8 +_,6 @@
+ import java.util.Map;
+ import java.util.Set;
+ import java.util.function.Predicate;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ 
+ public class GoalSelector {
+     private static final WrappedGoal NO_GOAL = new WrappedGoal(Integer.MAX_VALUE, new Goal() {
+@@ -82,9 +_,6 @@
+     }
+ 
+     public void tick() {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("goalCleanup");
+-
+         for (WrappedGoal goal : this.availableGoals) {
+             if (goal.isRunning() && (goalContainsAnyFlags(goal, this.goalTypes) || !goal.canContinueToUse())) { // Paper - Perf: optimize goal types by removing streams
+                 goal.stop();
+@@ -92,8 +_,6 @@
+         }
+ 
+         this.lockedFlags.entrySet().removeIf(entry -> !entry.getValue().isRunning());
+-        profiler.pop();
+-        profiler.push("goalUpdate");
+ 
+         for (WrappedGoal goal : this.availableGoals) {
+             // Paper start
+@@ -113,21 +_,15 @@
+             }
+         }
+ 
+-        profiler.pop();
+         this.tickRunningGoals(true);
+     }
+ 
+     public void tickRunningGoals(final boolean forceTickAllRunningGoals) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("goalTick");
+-
+         for (WrappedGoal goal : this.availableGoals) {
+             if (goal.isRunning() && (forceTickAllRunningGoals || goal.requiresUpdateEveryTick())) {
+                 goal.tick();
+             }
+         }
+-
+-        profiler.pop();
+     }
+ 
+     public Set<WrappedGoal> getAvailableGoals() {

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/LightningBolt.java
++++ b/net/minecraft/world/entity/LightningBolt.java
+@@ -126,7 +_,7 @@
+                             entityx -> entityx.isAlive() && !this.hitEntities.contains(entityx)
+                         );
+ 
+-                    for (ServerPlayer player : ((ServerLevel)this.level()).getPlayers(playerx -> playerx.distanceTo(this) < 256.0F)) {
++                    for (ServerPlayer player : ((ServerLevel)this.level()).getLocalPlayers(playerx -> playerx.distanceTo(this) < 256.0F)) { // Canvas - region threading
+                         CriteriaTriggers.LIGHTNING_STRIKE.trigger(player, this, viewers);
+                     }
+                 }

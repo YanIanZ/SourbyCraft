@@ -1,0 +1,69 @@
+--- a/net/minecraft/server/commands/TriggerCommand.java
++++ b/net/minecraft/server/commands/TriggerCommand.java
+@@ -89,24 +_,54 @@
+     }
+ 
+     private static int addValue(final CommandSourceStack source, final ServerPlayer player, final Objective objective, final int amount) throws CommandSyntaxException {
+-        ScoreAccess score = getScore(source.getServer().getScoreboard(), player, objective);
+-        int newValue = score.add(amount);
+-        source.sendSuccess(() -> Component.translatable("commands.trigger.add.success", objective.getFormattedDisplayName(), amount), true);
+-        return newValue;
++        // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(player)
++            .executes((ServerPlayer entityPlayer) -> {
++                ScoreAccess score = getScore(source.getServer().getScoreboard(), entityPlayer, objective);
++                score.add(amount);
++                source.sendSuccess(() -> Component.translatable("commands.trigger.add.success", objective.getFormattedDisplayName(), amount), true);
++                return (_) -> null;
++            })
++            // no point in a completion statement, it's simple af we don't need it
++            .noCompletion()
++            .start(source);
++        return 1;
++        // Canvas end - region threading
+     }
+ 
+     private static int setValue(final CommandSourceStack source, final ServerPlayer player, final Objective objective, final int amount) throws CommandSyntaxException {
+-        ScoreAccess score = getScore(source.getServer().getScoreboard(), player, objective);
+-        score.set(amount);
+-        source.sendSuccess(() -> Component.translatable("commands.trigger.set.success", objective.getFormattedDisplayName(), amount), true);
+-        return amount;
++        // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(player)
++            .executes((ServerPlayer entityPlayer) -> {
++                ScoreAccess score = getScore(source.getServer().getScoreboard(), entityPlayer, objective);
++                score.set(amount);
++                source.sendSuccess(() -> Component.translatable("commands.trigger.set.success", objective.getFormattedDisplayName(), amount), true);
++                return (_) -> null;
++            })
++            // no point in a completion statement, it's simple af we don't need it
++            .noCompletion()
++            .start(source);
++        return 1;
++        // Canvas end - region threading
+     }
+ 
+     private static int simpleTrigger(final CommandSourceStack source, final ServerPlayer player, final Objective objective) throws CommandSyntaxException {
+-        ScoreAccess score = getScore(source.getServer().getScoreboard(), player, objective);
+-        int newValue = score.add(1);
+-        source.sendSuccess(() -> Component.translatable("commands.trigger.simple.success", objective.getFormattedDisplayName()), true);
+-        return newValue;
++        // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(player)
++            .executes((ServerPlayer entityPlayer) -> {
++                ScoreAccess score = getScore(source.getServer().getScoreboard(), entityPlayer, objective);
++                score.add(1);
++                source.sendSuccess(() -> Component.translatable("commands.trigger.simple.success", objective.getFormattedDisplayName()), true);
++                return (_) -> null;
++            })
++            // no point in a completion statement, it's simple af we don't need it
++            .noCompletion()
++            .start(source);
++        return 1;
++        // Canvas end - region threading
+     }
+ 
+     private static ScoreAccess getScore(final Scoreboard scoreboard, final ScoreHolder scoreHolder, final Objective objective) throws CommandSyntaxException {

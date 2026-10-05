@@ -1,0 +1,104 @@
+--- a/net/minecraft/server/bossevents/CustomBossEvent.java
++++ b/net/minecraft/server/bossevents/CustomBossEvent.java
+@@ -40,6 +_,7 @@
+         this.dirtyCallback = dirtyCallback;
+         this.customId = customId;
+         this.setProgress(0.0F);
++        getBukkitEntity(); // Canvas - init this early
+     }
+ 
+     public Identifier customId() {
+@@ -48,27 +_,33 @@
+ 
+     @Override
+     public void addPlayer(final ServerPlayer player) {
++        synchronized (playerLock) { // Canvas - region threading
+         super.addPlayer(player);
+         if (this.players.add(player.getUUID())) {
+             this.setDirty();
+         }
++        } // Canvas - region threading
+     }
+ 
+     @Override
+     public void removePlayer(final ServerPlayer player) {
++        synchronized (playerLock) { // Canvas - region threading
+         super.removePlayer(player);
+         if (this.players.remove(player.getUUID())) {
+             this.setDirty();
+         }
++        } // Canvas - region threading
+     }
+ 
+     @Override
+     public void removeAllPlayers() {
++        synchronized (playerLock) { // Canvas - region threading
+         super.removeAllPlayers();
+         if (!this.players.isEmpty()) {
+             this.players.clear();
+             this.setDirty();
+         }
++        } // Canvas - region threading
+     }
+ 
+     public int value() {
+@@ -80,15 +_,19 @@
+     }
+ 
+     public void setValue(final int value) {
++        synchronized (playerLock) { // Canvas - region threading
+         this.value = value;
+         this.setProgress(Mth.clamp((float)value / this.max, 0.0F, 1.0F));
+         this.setDirty();
++        } // Canvas - region threading
+     }
+ 
+     public void setMax(final int max) {
++        synchronized (playerLock) { // Canvas - region threading
+         this.max = max;
+         this.setProgress(Mth.clamp((float)this.value / max, 0.0F, 1.0F));
+         this.setDirty();
++        } // Canvas - region threading
+     }
+ 
+     public final Component getDisplayName() {
+@@ -104,6 +_,7 @@
+         Set<UUID> toRemove = Sets.newHashSet();
+         Set<ServerPlayer> toAdd = Sets.newHashSet();
+ 
++        synchronized (playerLock) { // Canvas - region threading
+         for (UUID uuid : this.players) {
+             boolean found = false;
+ 
+@@ -148,6 +_,7 @@
+         for (ServerPlayer player : toAdd) {
+             this.addPlayer(player);
+         }
++        } // Canvas - region threading
+ 
+         boolean playersChanged = !toRemove.isEmpty() || !toAdd.isEmpty();
+         if (playersChanged) {
+@@ -172,6 +_,7 @@
+     }
+ 
+     public CustomBossEvent.Packed pack() {
++        synchronized (playerLock) { // Canvas - region threading
+         return new CustomBossEvent.Packed(
+             this.getName(),
+             this.isVisible(),
+@@ -184,12 +_,15 @@
+             this.shouldCreateWorldFog(),
+             Set.copyOf(this.players)
+         );
++        } // Canvas - region threading
+     }
+ 
+     public void onPlayerConnect(final ServerPlayer player) {
++        synchronized (playerLock) { // Canvas - region threading
+         if (this.players.contains(player.getUUID())) {
+             this.addPlayer(player);
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void onPlayerDisconnect(final ServerPlayer player) {

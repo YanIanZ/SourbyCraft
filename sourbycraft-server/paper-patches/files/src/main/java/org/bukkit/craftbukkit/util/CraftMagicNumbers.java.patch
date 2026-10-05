@@ -1,11 +1,23 @@
 --- a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
 +++ b/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
-@@ -396,7 +_,7 @@
+@@ -286,6 +_,7 @@
+     }
+ 
+     private List<Advancement> loadAdvancements(final Map<Key, String> advancements, final boolean persist, final boolean lenient) {
++        // TODO - Canvas - come back to this, this looks safe but Im concerned about threading and synchronization of regions
+         final ServerAdvancementManager manager = MinecraftServer.getServer().getAdvancements();
+         for (final Key key : advancements.keySet()) {
+             final Identifier id = PaperAdventure.asVanilla(key);
+@@ -394,6 +_,12 @@
+             throw new InvalidPluginException("Unsupported API version " + descriptionFile.getAPIVersion());
          }
  
-         // Folia start - block plugins not marked as supported
--        if (!descriptionFile.isFoliaSupported()) {
-+        if (!descriptionFile.isFoliaSupported() && !dev.iyanz.sourbycraft.bridge.AuroraBridge.admitLegacy(descriptionFile.getName())) { // SourbyCraft - Aurora Bridge
-             throw new InvalidPluginException("Plugin " + descriptionFile.getFullName() + " is not marked as supporting regionized multithreading");
-         }
- 
++        // Folia start - block plugins not marked as supported
++        if (!descriptionFile.isFoliaSupported()) {
++            throw new InvalidPluginException("Plugin " + descriptionFile.getFullName() + " is not marked as supporting regionized multithreading");
++        }
++
++        // Folia end - block plugins not marked as supported
+         if (toCheck.isOlderThan(minimumVersion)) {
+             // Older than supported
+             throw new InvalidPluginException("Plugin API version " + descriptionFile.getAPIVersion() + " is lower than the minimum allowed version. Please update or replace it.");

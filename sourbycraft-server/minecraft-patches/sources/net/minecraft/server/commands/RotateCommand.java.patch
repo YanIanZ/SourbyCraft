@@ -1,0 +1,29 @@
+--- a/net/minecraft/server/commands/RotateCommand.java
++++ b/net/minecraft/server/commands/RotateCommand.java
+@@ -67,18 +_,24 @@
+         );
+     }
+ 
+-    private static int rotate(final CommandSourceStack source, final Entity entity, final Coordinates rotation) {
++    private static int rotate(final CommandSourceStack source, final Entity entityOld, final Coordinates rotation) { // Folia - region threading
+         Vec2 rot = rotation.getRotation(source);
++        entityOld.getBukkitEntity().taskScheduler.scheduleOrExecute((Entity entity) -> { // Folia - region threading
+         float relativeOrAbsoluteYRot = rotation.isYRelative() ? rot.y - entity.getYRot() : rot.y;
+         float relativeOrAbsoluteXRot = rotation.isXRelative() ? rot.x - entity.getXRot() : rot.x;
+         entity.forceSetRotation(relativeOrAbsoluteYRot, rotation.isYRelative(), relativeOrAbsoluteXRot, rotation.isXRelative());
+         source.sendSuccess(() -> Component.translatable("commands.rotate.success", entity.getDisplayName()), true);
++        }); // Folia - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ 
+-    private static int rotate(final CommandSourceStack source, final Entity entity, final LookAt facing) {
++    // Folia start - region threading
++    private static int rotate(final CommandSourceStack source, final Entity entityOld, final LookAt facing) {
++        entityOld.getBukkitEntity().taskScheduler.scheduleOrExecute((Entity entity) -> {
++    // Folia end - region threading
+         facing.perform(source, entity);
+         source.sendSuccess(() -> Component.translatable("commands.rotate.success", entity.getDisplayName()), true);
++        }); // Folia - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ }

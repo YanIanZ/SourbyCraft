@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/block/DaylightDetectorBlock.java
++++ b/net/minecraft/world/level/block/DaylightDetectorBlock.java
+@@ -111,7 +_,7 @@
+     }
+ 
+     private static void tickEntity(final Level level, final BlockPos blockPos, final BlockState blockState, final DaylightDetectorBlockEntity blockEntity) {
+-        if (level.getGameTime() % 20L == 0L) {
++        if (level.getRedstoneGameTime() % 20L == 0L) { // Folia - region threading
+             updateSignalStrength(blockState, level, blockPos);
+         }
+     }

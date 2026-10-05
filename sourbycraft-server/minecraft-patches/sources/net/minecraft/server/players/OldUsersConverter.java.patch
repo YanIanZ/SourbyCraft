@@ -1,0 +1,11 @@
+--- a/net/minecraft/server/players/OldUsersConverter.java
++++ b/net/minecraft/server/players/OldUsersConverter.java
+@@ -445,7 +_,7 @@
+     private static Date parseDate(final String dateString, final Date defaultValue) {
+         Date parsedDate;
+         try {
+-            parsedDate = BanListEntry.DATE_FORMAT.parse(dateString);
++            parsedDate = BanListEntry.DATE_FORMAT.get().parse(dateString); // Folia - region threading - SDF is not thread-safe
+         } catch (ParseException ignored) {
+             parsedDate = defaultValue;
+         }

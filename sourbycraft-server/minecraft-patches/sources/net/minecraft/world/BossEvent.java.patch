@@ -1,0 +1,257 @@
+--- a/net/minecraft/world/BossEvent.java
++++ b/net/minecraft/world/BossEvent.java
+@@ -8,21 +_,34 @@
+ 
+ public abstract class BossEvent {
+     private final UUID id;
+-    public Component name;
+-    protected float progress;
+-    public BossEvent.BossBarColor color;
+-    public BossEvent.BossBarOverlay overlay;
+-    protected boolean darkenScreen;
+-    protected boolean playBossMusic;
+-    protected boolean createWorldFog;
+-    public net.kyori.adventure.bossbar.BossBar adventure; // Paper
++    // Canvas start - region threading
++    public volatile net.kyori.adventure.bossbar.BossBar adventure; // Paper
++    public final io.canvasmc.canvas.util.LockedReference<VanillaBossData> vanillaBossData;
++
++    public record VanillaBossData(
++        Component name,
++        float progress,
++        BossBarColor color,
++        BossBarOverlay overlay,
++        boolean darkenScreen,
++        boolean playBossMusic,
++        boolean createWorldFog
++    ) {}
++    // Canvas end - region threading
+ 
+     public BossEvent(final UUID id, final Component name, final BossEvent.BossBarColor color, final BossEvent.BossBarOverlay overlay) {
+         this.id = id;
+-        this.name = name;
+-        this.color = color;
+-        this.overlay = overlay;
+-        this.progress = 1.0F;
++        // Canvas start - region threading
++        this.vanillaBossData = new io.canvasmc.canvas.util.LockedReference<>(new VanillaBossData(
++            name,
++            1.0F,
++            color,
++            overlay,
++            false,
++            false,
++            false
++        ));
++        // Canvas end - region threading
+     }
+ 
+     public UUID getId() {
+@@ -31,75 +_,193 @@
+ 
+     public Component getName() {
+         if (this.adventure != null) return io.papermc.paper.adventure.PaperAdventure.asVanilla(this.adventure.name()); // Paper
+-        return this.name;
++        return this.vanillaBossData.getValue().name(); // Canvas - region threading
+     }
+ 
+     public void setName(final Component name) {
+         if (this.adventure != null) this.adventure.name(io.papermc.paper.adventure.PaperAdventure.asAdventure(name)); // Paper
+-        this.name = name;
++    // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(name, previous.progress, previous.color, previous.overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++    }
++
++    public boolean compareAndSetName(final Component name) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (!com.google.common.base.Objects.equal(name, c.name)) {
++                changed.setTrue();
++                return new VanillaBossData(name, c.progress, c.color, c.overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    // Canvas end - region threading
+     }
+ 
+     public float getProgress() {
+         if (this.adventure != null) return this.adventure.progress(); // Paper
+-        return this.progress;
++        return this.vanillaBossData.getValue().progress(); // Canvas - region threading
+     }
+ 
+     public void setProgress(final float progress) {
+         if (this.adventure != null) this.adventure.progress(progress); // Paper
+-        this.progress = progress;
++    // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, progress, previous.color, previous.overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++    }
++
++    public boolean compareAndSetProgress(final float newProgress) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.progress != newProgress) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, newProgress, c.color, c.overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    // Canvas end - region threading
+     }
+ 
+     public BossEvent.BossBarColor getColor() {
+         if (this.adventure != null) return io.papermc.paper.adventure.PaperAdventure.asVanilla(this.adventure.color()); // Paper
+-        return this.color;
++        return this.vanillaBossData.getValue().color(); // Canvas - region threading
+     }
+ 
+     public void setColor(final BossEvent.BossBarColor color) {
+         if (this.adventure != null) this.adventure.color(io.papermc.paper.adventure.PaperAdventure.asAdventure(color)); // Paper
+-        this.color = color;
++    // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, color, previous.overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++    }
++
++    public boolean compareAndSetColor(final BossEvent.BossBarColor color) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.color != color) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, color, c.overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    // Canvas end - region threading
+     }
+ 
+     public BossEvent.BossBarOverlay getOverlay() {
+         if (this.adventure != null) return io.papermc.paper.adventure.PaperAdventure.asVanilla(this.adventure.overlay()); // Paper
+-        return this.overlay;
++        return this.vanillaBossData.getValue().overlay(); // Canvas - region threading
+     }
+ 
+     public void setOverlay(final BossEvent.BossBarOverlay overlay) {
+         if (this.adventure != null) this.adventure.overlay(io.papermc.paper.adventure.PaperAdventure.asAdventure(overlay)); // Paper
+-        this.overlay = overlay;
++    // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++    }
++
++    public boolean compareAndSetOverlay(final BossEvent.BossBarOverlay overlay) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.overlay != overlay) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    // Canvas end - region threading
+     }
+ 
+     public boolean shouldDarkenScreen() {
+         if (this.adventure != null) return this.adventure.hasFlag(net.kyori.adventure.bossbar.BossBar.Flag.DARKEN_SCREEN); // Paper
+-        return this.darkenScreen;
++        return this.vanillaBossData.getValue().darkenScreen(); // Canvas - region threading
+     }
+ 
+     public BossEvent setDarkenScreen(final boolean darkenScreen) {
+         if (this.adventure != null) io.papermc.paper.adventure.PaperAdventure.setFlag(this.adventure, net.kyori.adventure.bossbar.BossBar.Flag.DARKEN_SCREEN, darkenScreen); // Paper
+-        this.darkenScreen = darkenScreen;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, previous.overlay, darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
+         return this;
+     }
++    // Canvas start - region threading
++
++    public boolean compareAndSetDarkenScreen(final boolean darkenScreen) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.darkenScreen != darkenScreen) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, c.overlay, darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    }
++    // Canvas end - region threading
+ 
+     public boolean shouldPlayBossMusic() {
+         if (this.adventure != null) return this.adventure.hasFlag(net.kyori.adventure.bossbar.BossBar.Flag.PLAY_BOSS_MUSIC); // Paper
+-        return this.playBossMusic;
++        return this.vanillaBossData.getValue().playBossMusic(); // Canvas - region threading
+     }
+ 
+     public BossEvent setPlayBossMusic(final boolean playBossMusic) {
+         if (this.adventure != null) io.papermc.paper.adventure.PaperAdventure.setFlag(this.adventure, net.kyori.adventure.bossbar.BossBar.Flag.PLAY_BOSS_MUSIC, playBossMusic); // Paper
+-        this.playBossMusic = playBossMusic;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, previous.overlay, previous.darkenScreen, playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
+         return this;
+     }
++    // Canvas start - region threading
++
++    public boolean compareAndSetPlayBossMusic(final boolean playBossMusic) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.playBossMusic != playBossMusic) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, c.overlay, c.darkenScreen, playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    }
++    // Canvas end - region threading
+ 
+     public BossEvent setCreateWorldFog(final boolean createWorldFog) {
+         if (this.adventure != null) io.papermc.paper.adventure.PaperAdventure.setFlag(this.adventure, net.kyori.adventure.bossbar.BossBar.Flag.CREATE_WORLD_FOG, createWorldFog); // Paper
+-        this.createWorldFog = createWorldFog;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, previous.overlay, previous.darkenScreen, previous.playBossMusic, createWorldFog)
++        );
++        // Canvas end - region threading
+         return this;
+     }
+ 
+     public boolean shouldCreateWorldFog() {
+         if (this.adventure != null) return this.adventure.hasFlag(net.kyori.adventure.bossbar.BossBar.Flag.CREATE_WORLD_FOG); // Paper
+-        return this.createWorldFog;
++    // Canvas start - region threading
++        return this.vanillaBossData.getValue().createWorldFog();
++    }
++
++    public boolean compareAndSetCreateWorldFog(final boolean createWorldFog) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.createWorldFog != createWorldFog) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, c.overlay, c.darkenScreen, c.playBossMusic, createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    // Canvas end - region threading
+     }
+ 
+     public enum BossBarColor implements StringRepresentable {

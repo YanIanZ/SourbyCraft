@@ -1,0 +1,65 @@
+--- a/net/minecraft/world/level/block/NetherPortalBlock.java
++++ b/net/minecraft/world/level/block/NetherPortalBlock.java
+@@ -122,7 +_,10 @@
+         final boolean isPrecise
+     ) {
+         if (!new io.papermc.paper.event.entity.EntityInsideBlockEvent(entity.getBukkitEntity(), org.bukkit.craftbukkit.block.CraftBlock.at(level, pos)).callEvent()) { return; } // Paper - Add EntityInsideBlockEvent
+-        if (entity.canUsePortal(false)) {
++        // Canvas start - blacklist non player entities from portals configs
++        if (entity.canUsePortal(false) &&
++            (!io.canvasmc.canvas.GlobalConfiguration.getInstance().blacklistNonPlayerEntitiesFromEnteringNetherPortals || entity instanceof net.minecraft.server.level.ServerPlayer)) {
++        // Canvas end - blacklist non player entities from portals configs
+             // CraftBukkit start - Entity in portal
+             org.bukkit.event.entity.EntityPortalEnterEvent event = new org.bukkit.event.entity.EntityPortalEnterEvent(entity.getBukkitEntity(), org.bukkit.craftbukkit.util.CraftLocation.toBukkit(pos, level), org.bukkit.PortalType.NETHER); // Paper - add portal type
+             level.getCraftServer().getPluginManager().callEvent(event);
+@@ -181,6 +_,33 @@
+         // CraftBukkit end
+     }
+ 
++    // Folia start - region threading
++    @Override
++    public boolean portalAsync(ServerLevel sourceWorld, Entity portalTarget, BlockPos portalPos) {
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(portalTarget)) {
++            return false;
++        }
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(sourceWorld, portalPos)) {
++            return false;
++        }
++
++        return portalTarget.netherPortalLogicAsync(portalPos);
++    }
++
++    public static BlockUtil.FoundRectangle findPortalAround(ServerLevel world, BlockPos rough, WorldBorder worldBorder, int searchRadius) {
++        BlockPos found = world.getPortalForcer().findClosestPortalPosition(rough, worldBorder, searchRadius).orElse(null);
++        if (found == null) {
++            return null;
++        }
++
++        BlockState portalState = world.getBlockStateFromEmptyChunk(found);
++
++        return BlockUtil.getLargestRectangleAround(found, portalState.getValue(BlockStateProperties.HORIZONTAL_AXIS), 21, Direction.Axis.Y, 21, (pos) -> {
++            return world.getBlockStateFromEmptyChunk(pos) == portalState;
++        });
++    }
++
++    // Folia end - region threading
+     private @Nullable TeleportTransition getExitPortal(
+         final ServerLevel newLevel,
+         final Entity entity,
+@@ -195,14 +_,14 @@
+         TeleportTransition.PostTeleportTransition post;
+         if (exitPortalPos.isPresent()) {
+             BlockPos pos = exitPortalPos.get();
+-            BlockState portalState = newLevel.getBlockState(pos);
++            BlockState portalState = newLevel.getBlockStateFromEmptyChunk(pos); // Folia - region threading
+             exitPortal = BlockUtil.getLargestRectangleAround(
+                 pos,
+                 portalState.getValue(BlockStateProperties.HORIZONTAL_AXIS),
+                 21,
+                 Direction.Axis.Y,
+                 21,
+-                blockPos -> newLevel.getBlockState(blockPos) == portalState
++                blockPos -> newLevel.getBlockStateFromEmptyChunk(blockPos) == portalState // Folia - region threading
+             );
+             post = TeleportTransition.PLAY_PORTAL_SOUND.then(e -> e.placePortalTicket(pos));
+         } else if (result.canCreatePortal()) { // CraftBukkit

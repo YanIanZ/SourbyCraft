@@ -1,0 +1,10 @@
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftMannequin.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftMannequin.java
+@@ -31,6 +_,7 @@
+ 
+     @Override
+     public net.minecraft.world.entity.decoration.Mannequin getHandle() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Accessing entity state off owning region's thread"); // Folia - region threading
+         return (net.minecraft.world.entity.decoration.Mannequin) this.entity;
+     }
+ 

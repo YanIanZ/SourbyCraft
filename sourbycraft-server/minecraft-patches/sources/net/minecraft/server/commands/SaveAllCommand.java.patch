@@ -1,0 +1,113 @@
+--- a/net/minecraft/server/commands/SaveAllCommand.java
++++ b/net/minecraft/server/commands/SaveAllCommand.java
+@@ -24,12 +_,104 @@
+     private static int saveAll(final CommandSourceStack source, final boolean flush) throws CommandSyntaxException {
+         source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
+         MinecraftServer server = source.getServer();
+-        boolean success = server.saveEverything(true, flush, true);
+-        if (!success) {
+-            throw ERROR_FAILED.create();
+-        }
+-
+-        source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
++        triggerSaveEverything(source, server, flush); // Canvas - region threading
+         return Command.SINGLE_SUCCESS;
+     }
++    // Canvas start - region threading
++
++    public static void triggerSaveEverything(final CommandSourceStack source, final MinecraftServer server, final boolean flush) {
++        final io.papermc.paper.threadedregions.RegionizedServer regionizedServer = io.papermc.paper.threadedregions.RegionizedServer.getInstance();
++
++        regionizedServer.scheduleToOrExecute(() -> {
++
++            // we need to autosave all global data first. we can't just save
++            // everything though since that's dangerous and unsafe, so we use
++            // the autosave methods and trigger a forced and sync save so
++            // everything that IS safe to save is saved properly
++
++            regionizedServer.autosaveSafeGlobalData(true, true);
++
++            for (final net.minecraft.server.level.ServerLevel world : regionizedServer.worlds) {
++                regionizedServer.autosaveSafeWorldData(true, true, world);
++
++                final net.minecraft.world.level.dimension.end.EnderDragonFight dragonFight = world.getDragonFight();
++                if (dragonFight != null) {
++                    dragonFight.forceSaveAttemptOnNextTick = true;
++                }
++            }
++
++            source.sendSuccess(() -> Component.literal("Saved global data"), true);
++
++            // regions next
++            final java.util.concurrent.atomic.AtomicInteger count = new java.util.concurrent.atomic.AtomicInteger(0);
++            final java.util.concurrent.atomic.AtomicInteger total = new java.util.concurrent.atomic.AtomicInteger(0);
++
++            final org.apache.commons.lang3.mutable.MutableLong lastLogTime = new org.apache.commons.lang3.mutable.MutableLong(System.nanoTime());
++            final long startTime = System.nanoTime();
++
++            final Runnable callback = () -> {
++                synchronized (count) {
++                    final double currentPercentage = (double) (total.get() - count.decrementAndGet()) / total.get();
++                    final long now = System.nanoTime();
++
++                    if (currentPercentage < 1 && lastLogTime.longValue() + 1e+9 <= now) {
++                        MinecraftServer.LOGGER.info("Saving all regions ({}/{}, {}%)", total.get() - count.get(), total.get(), String.format("%.2f", currentPercentage * 100));
++                        lastLogTime.setValue(now);
++                    }
++                    else if (currentPercentage == 1) {
++                        // finished, send completion
++                        MinecraftServer.LOGGER.info("Saved {} regions in {}s", total.get(), String.format("%.2f", (now - startTime) / 1.0E9));
++                    }
++
++                    if (count.get() <= 0) {
++
++                        // copied from MinecraftServer#warnOnLowDiskSpace, this is run after saving is done
++                        if (server.storageSource.checkForLowDiskSpace()) {
++                            server.sendLowDiskSpaceWarning();
++                        }
++
++                        // now we have warned, so we can send success
++                        source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
++                    }
++                }
++            };
++
++            for (final net.minecraft.server.level.ServerLevel level : server.getAllLevels()) {
++                level.regioniser.computeForAllRegions((region) -> {
++
++                    // if has no alive sections, this region is basically dead
++                    // so we have no reason to actually save this
++
++                    // note: we are holding the read lock in this, so technically
++                    //       we can assume the region data is safe and won't change
++                    //       while we are iterating over regions in this world
++
++                    if (region.hasNoAliveSections() || region.isDead()) {
++                        return;
++                    }
++
++                    // increment counts
++                    count.incrementAndGet();
++                    total.incrementAndGet();
++
++                    // propagate the ticket
++                    region.getData().canvas$saveAllTicket.propagate(
++                        new io.canvasmc.canvas.util.ticket.SaveAllTicket(callback, (Throwable thrown) -> {
++                            source.sendFailure(Component.literal(ERROR_FAILED.create().getMessage()));
++                            MinecraftServer.LOGGER.error(ERROR_FAILED.create().getMessage(), thrown);
++                        }, flush)
++                    );
++                });
++            }
++
++            if (total.get() == 0) {
++                source.sendSuccess(() -> Component.literal("No regions to save"), true);
++                callback.run();
++            }
++            else {
++                source.sendSuccess(() -> Component.literal("Saving " + total.get() + " regions"), true);
++            }
++        });
++    }
++    // Canvas end - region threading
+ }

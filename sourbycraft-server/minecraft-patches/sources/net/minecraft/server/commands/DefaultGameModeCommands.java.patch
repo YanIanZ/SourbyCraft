@@ -1,0 +1,15 @@
+--- a/net/minecraft/server/commands/DefaultGameModeCommands.java
++++ b/net/minecraft/server/commands/DefaultGameModeCommands.java
+@@ -21,10 +_,12 @@
+     }
+ 
+     private static int setMode(final CommandSourceStack source, final GameType type) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         MinecraftServer server = source.getServer();
+         server.setDefaultGameType(type);
+         int count = server.enforceGameTypeForPlayers(server.getForcedGameType());
+         source.sendSuccess(() -> Component.translatable("commands.defaultgamemode.success", type.getLongDisplayName()), true);
+         return count;
++        }, source); // Canvas - region threading
+     }
+ }

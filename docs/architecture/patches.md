@@ -1,3 +1,9 @@
+> **2026-10-05:** Paper became the only upstream. The `canvas-patches/` below are now plain edits in
+> the owned sources under `sourbycraft-server/src/main/java/io/canvasmc/`, the per-file
+> `minecraft-patches/sources` and `paper-patches/files` entries are feature patches, and the former
+> Canvas/Folia changes are the engine baseline. See `dependency-ledger.md` §2. The inventory below is
+> kept as recorded.
+
 > Phase 46 follow-up (2026-09-14): patches 0009/0014 and the Mob portion of 0016 below are now
 > removed after the [reuse audit](reuse-audit.md); upstream per-call collections
 > are restored. Patch 0017 remains with updated context, and 0006 delegates

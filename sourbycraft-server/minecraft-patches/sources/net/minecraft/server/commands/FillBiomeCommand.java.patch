@@ -1,0 +1,50 @@
+--- a/net/minecraft/server/commands/FillBiomeCommand.java
++++ b/net/minecraft/server/commands/FillBiomeCommand.java
+@@ -107,6 +_,16 @@
+         return fill(level, rawFrom, rawTo, biome, b -> true, m -> {});
+     }
+ 
++    // Folia start - region threading
++    private static void sendMessage(Consumer<Supplier<Component>> src, Supplier<Either<Integer, CommandSyntaxException>> supplier) {
++        Either<Integer, CommandSyntaxException> either = supplier.get();
++        CommandSyntaxException ex = either == null ? null : either.right().orElse(null);
++        if (ex != null) {
++            src.accept(() -> (Component)ex.getRawMessage());
++        }
++    }
++
++    // Folia end - region threading
+     public static Either<Integer, CommandSyntaxException> fill(
+         final ServerLevel level,
+         final BlockPos rawFrom,
+@@ -123,6 +_,18 @@
+         if (volume > limit) {
+             return Either.right(ERROR_VOLUME_TOO_LARGE.create(limit, volume));
+         }
++        // Folia start - region threading
++        int buffer = 0; // no buffer, we do not touch neighbours
++        level.moonrise$loadChunksAsync(
++                (region.minX() - buffer) >> 4,
++                (region.maxX() + buffer) >> 4,
++                (region.minZ() - buffer) >> 4,
++                (region.maxZ() + buffer) >> 4,
++                net.minecraft.world.level.chunk.status.ChunkStatus.FULL,
++                ca.spottedleaf.concurrentutil.util.Priority.NORMAL,
++                (List<ChunkAccess> _chunks) -> {
++                    sendMessage(successMessageConsumer, () -> {
++        // Folia end - region threading
+ 
+         List<ChunkAccess> chunks = new ArrayList<>();
+ 
+@@ -158,6 +_,11 @@
+             )
+         );
+         return Either.left(changedCount.intValue());
++        // Folia start - region threading
++                }); // sendMessage
++                }); // loadChunksAsync
++        return Either.left(Integer.valueOf(0));
++        // Folia end - region threading
+     }
+ 
+     private static int fill(

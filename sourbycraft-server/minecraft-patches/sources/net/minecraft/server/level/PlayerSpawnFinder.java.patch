@@ -1,0 +1,50 @@
+--- a/net/minecraft/server/level/PlayerSpawnFinder.java
++++ b/net/minecraft/server/level/PlayerSpawnFinder.java
+@@ -116,9 +_,13 @@
+             int chunkX = SectionPos.blockToSectionCoord(candidateX);
+             int chunkZ = SectionPos.blockToSectionCoord(candidateZ);
+             ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level) // Paper - rewrite chunk system
+-                .moonrise$getChunkTaskScheduler().chunkHolderManager // Paper - rewrite chunk system
+-                .addTicketAndLoadWithRadius(TicketType.SPAWN_SEARCH, new ChunkPos(chunkX, chunkZ), 0, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, ca.spottedleaf.concurrentutil.util.Priority.HIGH) // Paper - rewrite chunk system
+-                .whenCompleteAsync((ignored, throwable) -> {
++                    // Folia start - region threading
++                    .moonrise$getChunkTaskScheduler().scheduleChunkLoad( // Paper - rewrite chunk system
++                            chunkX, chunkZ, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, true,
++                            ca.spottedleaf.concurrentutil.util.Priority.HIGHER,
++                            (final net.minecraft.world.level.chunk.ChunkAccess object) -> {
++                                Throwable throwable = null;
++                    // Folia end - region threading
+                     if (throwable == null) {
+                         try {
+                             Optional<Vec3> spawnPos = candidateChecker.get();
+@@ -141,13 +_,13 @@
+                         details.setDetail("Progress", () -> candidateIndex + " out of " + this.candidateCount);
+                         this.finishedFuture.completeExceptionally(new ReportedException(report));
+                     }
+-                }, this.level.getChunkSource().mainThreadProcessor); // Paper - rewrite chunk system
++                }); // Paper - rewrite chunk system // Folia - region threading
+         }
+     }
+ 
+     protected static @Nullable BlockPos getLevelRespawnPos(final ServerLevel level, final int x, final int z) {
+         boolean caveWorld = level.dimensionType().hasCeiling();
+-        LevelChunk chunk = level.getChunk(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z));
++        net.minecraft.world.level.chunk.ChunkAccess chunk = level.moonrise$getChunkTaskScheduler().syncLoadNonFull(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z), net.minecraft.world.level.chunk.status.ChunkStatus.SPAWN); // Folia - region threading
+         int topY = caveWorld ? level.getChunkSource().getGenerator().getSpawnHeight(level) : chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, x & 15, z & 15);
+         if (topY < level.getMinY()) {
+             return null;
+@@ -162,12 +_,12 @@
+ 
+         for (int y = topY + 1; y >= level.getMinY(); y--) {
+             pos.set(x, y, z);
+-            BlockState blockState = level.getBlockState(pos);
++            BlockState blockState = chunk.getBlockState(pos); // Folia - region threading
+             if (!blockState.getFluidState().isEmpty()) {
+                 break;
+             }
+ 
+-            if (Block.isFaceFull(blockState.getCollisionShape(level, pos), Direction.UP)) {
++            if (Block.isFaceFull(blockState.getCollisionShape(chunk, pos), Direction.UP)) { // Folia - region threading
+                 return pos.above().immutable();
+             }
+         }

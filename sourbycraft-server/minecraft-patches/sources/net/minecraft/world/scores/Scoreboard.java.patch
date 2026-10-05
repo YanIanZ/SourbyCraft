@@ -1,0 +1,517 @@
+--- a/net/minecraft/world/scores/Scoreboard.java
++++ b/net/minecraft/world/scores/Scoreboard.java
+@@ -30,17 +_,54 @@
+ public class Scoreboard {
+     public static final String HIDDEN_SCORE_PREFIX = "#";
+     private static final Logger LOGGER = LogUtils.getLogger();
+-    private final Object2ObjectMap<String, Objective> objectivesByName = new Object2ObjectOpenHashMap<>(16, 0.5F);
+-    private final Reference2ObjectMap<ObjectiveCriteria, List<Objective>> objectivesByCriteria = new Reference2ObjectOpenHashMap<>();
+-    private final Map<String, PlayerScores> playerScores = new Object2ObjectOpenHashMap<>(16, 0.5F);
+-    private final Map<DisplaySlot, Objective> displayObjectives = new EnumMap<>(DisplaySlot.class);
+-    private final Object2ObjectMap<String, PlayerTeam> teamsByName = new Object2ObjectOpenHashMap<>();
+-    private final Object2ObjectMap<String, PlayerTeam> teamsByPlayer = new Object2ObjectOpenHashMap<>();
++    // Canvas start - region threading
++    // by objective name
++    private final ca.spottedleaf.concurrentutil.map.SWMRHashTable<String, Objective> objectivesByName = new ca.spottedleaf.concurrentutil.map.SWMRHashTable<>(16, 0.5F);
++    // note - by score holder name: this needs to be read/written to async, must be fully thread-safe
++    //        it should also be noted that for players, this is their profile name, while for non player
++    //        entities the name is the string uuid
++    private final Map<String, PlayerScores> scoresByName = new java.util.concurrent.ConcurrentHashMap<>(16, 0.5F);
++    private final io.canvasmc.canvas.util.LockedReference<net.minecraft.world.scores.Scoreboard.Entry> teamReferences = new io.canvasmc.canvas.util.LockedReference<>(
++        new Entry(
++            new Object2ObjectOpenHashMap<>(),
++            new Object2ObjectOpenHashMap<>()
++        )
++    );
++    private final java.util.concurrent.atomic.AtomicReferenceArray<Objective> displayObjectives = new java.util.concurrent.atomic.AtomicReferenceArray<>(new Objective[DisplaySlot.values().length]);
++
++    private record Entry(
++        Object2ObjectOpenHashMap<String, net.minecraft.world.scores.PlayerTeam> teamsByName,
++        Object2ObjectMap<String, PlayerTeam> teamsByHolder
++    ) {}
++
++    public void ensureMainThread(final String reason) {
++        // if in startup, we don't care, and if we are in shutdown, we don't care
++        if (io.papermc.paper.threadedregions.TickRegions.hasStarted() && !io.papermc.paper.threadedregions.RegionShutdownThread.isShuttingDown()) {
++            io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread(reason);
++        }
++    }
++
++    protected void ensureStartup(final String reason) {
++        if (io.papermc.paper.threadedregions.TickRegions.hasStarted()) {
++            LOGGER.error(reason, new Throwable());
++            throw new IllegalStateException(reason);
++        }
++    }
++
++    private static void tryThreadCheckScoreHolder(final ScoreHolder scoreHolder, final String reason) {
++        // global tick can own players on disconnect, this must pass
++        if (scoreHolder instanceof Entity entity && (!(entity instanceof net.minecraft.server.level.ServerPlayer) || !io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread())) {
++            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(entity, reason);
++        }
++    }
++    // Canvas end - region threading
+ 
+     public @Nullable Objective getObjective(final @Nullable String name) {
++        if (name == null) return null; // Canvas - region threading - SWMRHashTable enforces nonnull keys
+         return this.objectivesByName.get(name);
+     }
+ 
++    // note: must be on global tick
+     public Objective addObjective(
+         final String name,
+         final ObjectiveCriteria criteria,
+@@ -53,19 +_,32 @@
+             throw new IllegalArgumentException("An objective with the name '" + name + "' already exists!");
+         }
+ 
++        ensureMainThread("Cannot add objective async"); // Canvas - region threading
+         Objective objective = new Objective(this, name, criteria, displayName, renderType, displayAutoUpdate, numberFormat);
+-        this.objectivesByCriteria.computeIfAbsent(criteria, k -> Lists.newArrayList()).add(objective);
++        // Canvas - region threading
+         this.objectivesByName.put(name, objective);
+         this.onObjectiveAdded(objective);
+         return objective;
+     }
+ 
+     public final void forAllObjectives(final ObjectiveCriteria criteria, final ScoreHolder name, final Consumer<ScoreAccess> operation) {
+-        this.objectivesByCriteria.getOrDefault(criteria, Collections.emptyList()).forEach(o -> operation.accept(this.getOrCreatePlayerScore(name, o, true)));
++        // Canvas start - region threading
++
++        // we can't thread check this because sometimes this happens asynchronously
++        // even internally. stats incrementing is also thread-safe in Vanilla, and
++        // this system is technically thread-safe now, so it's fine to run async
++
++        // this basically is just for each objective that has a certain criteria instance
++        for (final Objective objective : this.objectivesByName.values()) {
++            if (objective.getCriteria() == criteria) {
++                operation.accept(this.getOrCreatePlayerScore(name, objective, true));
++            }
++        }
++        // Canvas end - region threading
+     }
+ 
+     private PlayerScores getOrCreatePlayerInfo(final String name) {
+-        return this.playerScores.computeIfAbsent(name, k -> new PlayerScores());
++        return this.scoresByName.computeIfAbsent(name, k -> new PlayerScores()); // Canvas - region threading
+     }
+ 
+     public ScoreAccess getOrCreatePlayerScore(final ScoreHolder holder, final Objective objective) {
+@@ -78,13 +_,30 @@
+         final MutableBoolean requiresSync = new MutableBoolean();
+         final Score score = playerScore.getOrCreate(objective, newScore -> requiresSync.setTrue());
+         return new ScoreAccess() {
+-            @Override
+-            public int get() {
++            // Canvas start - region threading
++
++            // we can't thread check this because sometimes this happens asynchronously
++            // even internally. stats incrementing is also thread-safe in Vanilla, and
++            // this system is technically thread-safe now, so it's fine to run async
++
++            @Override
++            public synchronized int add(final int count) {
++                return ScoreAccess.super.add(count);
++            }
++
++            @Override
++            public synchronized int increment() {
++                return ScoreAccess.super.increment();
++            }
++            // Canvas end - region threading
++
++            @Override
++            public synchronized int get() { // Canvas - region threading
+                 return score.value();
+             }
+ 
+             @Override
+-            public void set(final int value) {
++            public synchronized void set(final int value) { // Canvas - region threading
+                 if (!canModify) {
+                     throw new IllegalStateException("Cannot modify read-only score");
+                 }
+@@ -109,12 +_,12 @@
+             }
+ 
+             @Override
+-            public @Nullable Component display() {
++            public synchronized @Nullable Component display() { // Canvas - region threading
+                 return score.display();
+             }
+ 
+             @Override
+-            public void display(final @Nullable Component display) {
++            public synchronized void display(final @Nullable Component display) { // Canvas - region threading
+                 if (requiresSync.isTrue() || !Objects.equals(display, score.display())) {
+                     score.display(display);
+                     this.sendScoreToPlayers();
+@@ -122,13 +_,13 @@
+             }
+ 
+             @Override
+-            public void numberFormatOverride(final @Nullable NumberFormat numberFormat) {
++            public synchronized void numberFormatOverride(final @Nullable NumberFormat numberFormat) { // Canvas - region threading
+                 score.numberFormat(numberFormat);
+                 this.sendScoreToPlayers();
+             }
+ 
+             @Override
+-            public boolean locked() {
++            public synchronized boolean locked() { // Canvas - region threading
+                 return score.isLocked();
+             }
+ 
+@@ -142,7 +_,7 @@
+                 this.setLocked(true);
+             }
+ 
+-            private void setLocked(final boolean locked) {
++            private synchronized void setLocked(final boolean locked) { // Canvas - region threading
+                 score.setLocked(locked);
+                 if (requiresSync.isTrue()) {
+                     this.sendScoreToPlayers();
+@@ -158,14 +_,26 @@
+         };
+     }
+ 
++    // note: no need for thread check, this is read only
+     public @Nullable ReadOnlyScoreInfo getPlayerScoreInfo(final ScoreHolder name, final Objective objective) {
+-        PlayerScores playerScore = this.playerScores.get(name.getScoreboardName());
+-        return playerScore != null ? playerScore.get(objective) : null;
++        // Canvas start - region threading
++        final PlayerScores playerScore = this.scoresByName.get(name.getScoreboardName());
++        if (playerScore == null) {
++            return null;
++        }
++
++        final Score score = playerScore.get(objective);
++
++        // we wrap with our own implementation because technically you can cast ReadOnlyScoreInfo to Score
++        // which then you can modify it with... no thanks!
++
++        return score != null ? new io.canvasmc.canvas.threadedregions.scores.ReadOnlyScore(score) : null;
++        // Canvas end - region threading
+     }
+ 
+     public Collection<PlayerScoreEntry> listPlayerScores(final Objective objective) {
+         List<PlayerScoreEntry> result = new ArrayList<>();
+-        this.playerScores.forEach((player, scores) -> {
++        this.scoresByName.forEach((player, scores) -> { // Canvas - region threading
+             Score score = scores.get(objective);
+             if (score != null) {
+                 result.add(new PlayerScoreEntry(player, score.value(), score.display(), score.numberFormat()));
+@@ -183,22 +_,28 @@
+     }
+ 
+     public Collection<ScoreHolder> getTrackedPlayers() {
+-        return this.playerScores.keySet().stream().map(ScoreHolder::forNameOnly).toList();
++        return this.scoresByName.keySet().stream().map(ScoreHolder::forNameOnly).toList(); // Canvas - region threading
+     }
+ 
+     public void resetAllPlayerScores(final ScoreHolder player) {
+-        PlayerScores removed = this.playerScores.remove(player.getScoreboardName());
++        // Canvas start - region threading
++        tryThreadCheckScoreHolder(player, "Cannot reset all scores for score holder async");
++        PlayerScores removed = this.scoresByName.remove(player.getScoreboardName());
++        // Canvas end - region threading
+         if (removed != null) {
+             this.onPlayerRemoved(player);
+         }
+     }
+ 
+     public void resetSinglePlayerScore(final ScoreHolder player, final Objective objective) {
+-        PlayerScores scores = this.playerScores.get(player.getScoreboardName());
++        // Canvas start - region threading
++        tryThreadCheckScoreHolder(player, "Cannot reset single score for score holder async");
++        PlayerScores scores = this.scoresByName.get(player.getScoreboardName());
++        // Canvas end - region threading
+         if (scores != null) {
+             boolean hasRemoved = scores.remove(objective);
+             if (!scores.hasScores()) {
+-                PlayerScores removedPlayer = this.playerScores.remove(player.getScoreboardName());
++                PlayerScores removedPlayer = this.scoresByName.remove(player.getScoreboardName()); // Canvas - region threading
+                 if (removedPlayer != null) {
+                     this.onPlayerRemoved(player);
+                 }
+@@ -209,83 +_,136 @@
+     }
+ 
+     public Object2IntMap<Objective> listPlayerScores(final ScoreHolder player) {
+-        PlayerScores scores = this.playerScores.get(player.getScoreboardName());
++        PlayerScores scores = this.scoresByName.get(player.getScoreboardName()); // Canvas - region threading
+         return scores != null ? scores.listScores() : Object2IntMaps.emptyMap();
+     }
+ 
++    // note: must be on global tick
+     public void removeObjective(final Objective objective) {
+-        this.objectivesByName.remove(objective.getName());
++        ensureMainThread("Cannot remove objective async"); // Canvas - region threading
+ 
+         for (DisplaySlot value : DisplaySlot.values()) {
+             if (this.getDisplayObjective(value) == objective) {
++                // this is fine, we can only modify this on the global tick, and we are on the global tick
++                // so we don't risk concurrent modification, only concurrent reads
+                 this.setDisplayObjective(value, null);
+             }
+         }
+ 
+-        List<Objective> objectives = this.objectivesByCriteria.get(objective.getCriteria());
+-        if (objectives != null) {
+-            objectives.remove(objective);
+-        }
+-
+-        for (PlayerScores playerScore : this.playerScores.values()) {
++        for (PlayerScores playerScore : this.scoresByName.values()) { // Canvas - region threading
+             playerScore.remove(objective);
+         }
+ 
++        this.objectivesByName.remove(objective.getName()); // Canvas - region threading
+         this.onObjectiveRemoved(objective);
+     }
+ 
+     public void setDisplayObjective(final DisplaySlot slot, final @Nullable Objective objective) {
+-        this.displayObjectives.put(slot, objective);
++        // Canvas start - region threading
++        ensureMainThread("Cannot modify display objective async");
++        this.displayObjectives.set(slot.ordinal(), objective);
++        // Canvas end - region threading
+     }
+ 
+     public @Nullable Objective getDisplayObjective(final DisplaySlot slot) {
+-        return this.displayObjectives.get(slot);
++        return this.displayObjectives.get(slot.ordinal()); // Canvas - region threading
+     }
+ 
+     public @Nullable PlayerTeam getPlayerTeam(final String name) {
+-        return this.teamsByName.get(name);
++        return this.teamReferences.getValue().teamsByName.get(name); // Canvas - region threading
+     }
+ 
++    // note: must be on global tick
+     public PlayerTeam addPlayerTeam(final String name) {
+-        PlayerTeam team = this.getPlayerTeam(name);
+-        if (team != null) {
+-            LOGGER.warn("Requested creation of existing team '{}'", name);
+-            return team;
+-        } else {
+-            team = new PlayerTeam(this, name);
+-            this.teamsByName.put(name, team);
+-            this.onTeamAdded(team);
+-            return team;
++        // Canvas start - region threading
++        ensureMainThread("Cannot add player team async");
++
++        final MutableBoolean isNew = new MutableBoolean(false);
++        PlayerTeam res = this.teamReferences.swapAndGet((current) -> {
++            if (current.teamsByName.containsKey(name)) {
++                LOGGER.warn("Requested creation of existing team '{}'", name);
++                return current;
++            }
++            var newTeamsByName = new Object2ObjectOpenHashMap<>(current.teamsByName);
++            var newTeamsByHolder = new Object2ObjectOpenHashMap<>(current.teamsByHolder);
++
++            newTeamsByName.put(name, new PlayerTeam(this, name));
++            isNew.setTrue();
++
++            return new Entry(newTeamsByName, newTeamsByHolder);
++        }).teamsByName.get(name);
++
++        if (isNew.isTrue()) {
++            this.onTeamAdded(res);
+         }
++
++        return res;
++        // Canvas end - region threading
+     }
+ 
++    // note: must be on global tick
+     public void removePlayerTeam(final PlayerTeam team) {
+-        this.teamsByName.remove(team.getName());
+-
+-        for (String player : team.getPlayers()) {
+-            this.teamsByPlayer.remove(player);
+-        }
++        // Canvas start - region threading
++        ensureMainThread("Cannot remove player team async");
++
++        this.teamReferences.swapValue((current) -> {
++            var newTeamsByName = new Object2ObjectOpenHashMap<>(current.teamsByName);
++            var newTeamsByHolder = new Object2ObjectOpenHashMap<>(current.teamsByHolder);
++
++            newTeamsByName.remove(team.getName());
++            for (final String scoreHolderName : team.getPlayers()) {
++                newTeamsByHolder.remove(scoreHolderName);
++            }
++
++            return new Entry(newTeamsByName, newTeamsByHolder);
++        });
+ 
+         this.onTeamRemoved(team);
++        // Canvas end - region threading
+     }
+ 
+     public boolean addPlayerToTeam(final String player, final PlayerTeam team) {
+-        if (this.getPlayersTeam(player) != null) {
+-            this.removePlayerFromTeam(player);
+-        }
+-
+-        this.teamsByPlayer.put(player, team);
+-        return team.getPlayers().add(player);
++        // Canvas start - region threading
++        final MutableBoolean added = new MutableBoolean(false);
++
++        this.teamReferences.swapValue((current) -> {
++            var newTeamsByHolder = new Object2ObjectOpenHashMap<>(current.teamsByHolder);
++            if (current.teamsByHolder.containsKey(player)) {
++                final PlayerTeam previous = newTeamsByHolder.remove(player);
++                previous.getPlayers().remove(player);
++            }
++
++            newTeamsByHolder.put(player, team);
++            added.setValue(team.getPlayers().add(player));
++
++            return new Entry(current.teamsByName, newTeamsByHolder);
++        });
++
++        return added.isTrue();
++        // Canvas end - region threading
+     }
+ 
+     public boolean removePlayerFromTeam(final String player) {
+-        PlayerTeam team = this.getPlayersTeam(player);
+-        if (team != null) {
+-            this.removePlayerFromTeam(player, team);
+-            return true;
+-        } else {
+-            return false;
+-        }
++        // Canvas start - region threading
++        final MutableBoolean wasInTeam = new MutableBoolean(false);
++
++        this.teamReferences.swapValue((current) -> {
++            // if not contained by holder map, not in team
++            if (!current.teamsByHolder.containsKey(player)) {
++                return current;
++            }
++
++            var newTeamsByHolder = new Object2ObjectOpenHashMap<>(current.teamsByHolder);
++            final PlayerTeam removedFrom = newTeamsByHolder.remove(player);
++            removedFrom.getPlayers().remove(player);
++
++            wasInTeam.setTrue();
++
++            return new Entry(current.teamsByName, newTeamsByHolder);
++        });
++
++        return wasInTeam.isTrue();
++        // Canvas end - region threading
+     }
+ 
+     public void removePlayerFromTeam(final String player, final PlayerTeam team) {
+@@ -293,20 +_,32 @@
+             throw new IllegalStateException("Player is either on another team or not on any team. Cannot remove from team '" + team.getName() + "'.");
+         }
+ 
+-        this.teamsByPlayer.remove(player);
+-        team.getPlayers().remove(player);
++        // Canvas start - region threading
++        this.teamReferences.swapValue((current) -> {
++            final PlayerTeam removingFrom = current.teamsByHolder.get(player);
++            if (removingFrom != team) {
++                throw new IllegalStateException("Player is either on another team or not on any team. Cannot remove from team '" + team.getName() + "'.");
++            }
++
++            var newTeamsByHolder = new Object2ObjectOpenHashMap<>(current.teamsByHolder);
++            newTeamsByHolder.remove(player);
++            removingFrom.getPlayers().remove(player);
++
++            return new Entry(current.teamsByName, newTeamsByHolder);
++        });
++        // Canvas end - region threading
+     }
+ 
+     public Collection<String> getTeamNames() {
+-        return this.teamsByName.keySet();
++        return this.teamReferences.getValue().teamsByName.keySet(); // Canvas - region threading
+     }
+ 
+     public Collection<PlayerTeam> getPlayerTeams() {
+-        return this.teamsByName.values();
++        return this.teamReferences.getValue().teamsByName.values(); // Canvas - region threading
+     }
+ 
+     public @Nullable PlayerTeam getPlayersTeam(final String name) {
+-        return this.teamsByPlayer.get(name);
++        return this.teamReferences.getValue().teamsByHolder.get(name); // Canvas - region threading
+     }
+ 
+     public void onObjectiveAdded(final Objective objective) {
+@@ -339,15 +_,16 @@
+     public void onTeamRemoved(final PlayerTeam team) {
+     }
+ 
++    // note: there are no internal usages of this
+     public void entityRemoved(final Entity entity) {
+-        if (!(entity instanceof Player) && !entity.isAlive()) {
+-            this.resetAllPlayerScores(entity);
+-            this.removePlayerFromTeam(entity.getScoreboardName());
+-        }
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     protected List<Scoreboard.PackedScore> packPlayerScores() {
+-        return this.playerScores
++        // Canvas start - region threading
++        ensureMainThread("Cannot pack player scores async");
++        return this.scoresByName
++        // Canvas end - region threading
+             .entrySet()
+             .stream()
+             .flatMap(
+@@ -363,7 +_,9 @@
+             .toList();
+     }
+ 
++    // note: called only at startup
+     protected void loadPlayerScore(final Scoreboard.PackedScore score) {
++        ensureStartup("Can only load player score at startup"); // Canvas - region threading
+         Objective objective = this.getObjective(score.objective);
+         if (objective == null) {
+             LOGGER.error("Unknown objective {} for name {}, ignoring", score.objective, score.owner);
+@@ -373,10 +_,13 @@
+     }
+ 
+     protected List<PlayerTeam.Packed> packPlayerTeams() {
++        ensureMainThread("Cannot pack player teams async"); // Canvas - region threading
+         return this.getPlayerTeams().stream().filter(p -> io.papermc.paper.configuration.GlobalConfiguration.get().scoreboards.saveEmptyScoreboardTeams || !p.getPlayers().isEmpty()).map(PlayerTeam::pack).toList(); // Paper - Don't save empty scoreboard teams to scoreboard.dat
+     }
+ 
++    // note: called only at startup
+     protected void loadPlayerTeam(final PlayerTeam.Packed packed) {
++        ensureStartup("Can only load player team at startup"); // Canvas - region threading
+         PlayerTeam team = this.addPlayerTeam(packed.name());
+         packed.displayName().ifPresent(team::setDisplayName);
+         team.setColor(packed.color());
+@@ -394,10 +_,13 @@
+     }
+ 
+     protected List<Objective.Packed> packObjectives() {
++        ensureMainThread("Cannot pack objectives async"); // Canvas - region threading
+         return this.getObjectives().stream().map(Objective::pack).toList();
+     }
+ 
++    // note: called only at startup
+     protected void loadObjective(final Objective.Packed objective) {
++        ensureStartup("Can only load objective at startup"); // Canvas - region threading
+         this.addObjective(
+             objective.name(),
+             objective.criteria(),
+@@ -409,6 +_,7 @@
+     }
+ 
+     protected Map<DisplaySlot, String> packDisplaySlots() {
++        ensureMainThread("Cannot pack display slots async"); // Canvas - region threading
+         Map<DisplaySlot, String> displaySlots = new EnumMap<>(DisplaySlot.class);
+ 
+         for (DisplaySlot slot : DisplaySlot.values()) {

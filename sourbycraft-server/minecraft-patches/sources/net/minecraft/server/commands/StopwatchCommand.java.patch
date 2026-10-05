@@ -1,0 +1,53 @@
+--- a/net/minecraft/server/commands/StopwatchCommand.java
++++ b/net/minecraft/server/commands/StopwatchCommand.java
+@@ -69,6 +_,7 @@
+     }
+ 
+     private static int createStopwatch(final CommandSourceStack source, final Identifier id) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         MinecraftServer server = source.getServer();
+         Stopwatches stopwatches = server.getStopwatches();
+         Stopwatch now = new Stopwatch(Stopwatches.currentTime());
+@@ -78,9 +_,11 @@
+ 
+         source.sendSuccess(() -> Component.translatable("commands.stopwatch.create.success", Component.translationArg(id)), true);
+         return Command.SINGLE_SUCCESS;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int queryStopwatch(final CommandSourceStack source, final Identifier id, final double scale) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         MinecraftServer server = source.getServer();
+         Stopwatches stopwatches = server.getStopwatches();
+         Stopwatch stopwatch = stopwatches.get(id);
+@@ -92,9 +_,11 @@
+         double elapsedSeconds = stopwatch.elapsedSeconds(currentTime);
+         source.sendSuccess(() -> Component.translatable("commands.stopwatch.query", Component.translationArg(id), elapsedSeconds), true);
+         return (int)(elapsedSeconds * scale);
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int restartStopwatch(final CommandSourceStack source, final Identifier id) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         MinecraftServer server = source.getServer();
+         Stopwatches stopwatches = server.getStopwatches();
+         if (!stopwatches.update(id, stopwatch -> new Stopwatch(Stopwatches.currentTime()))) {
+@@ -103,9 +_,11 @@
+ 
+         source.sendSuccess(() -> Component.translatable("commands.stopwatch.restart.success", Component.translationArg(id)), true);
+         return Command.SINGLE_SUCCESS;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int removeStopwatch(final CommandSourceStack source, final Identifier id) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         MinecraftServer server = source.getServer();
+         Stopwatches stopwatches = server.getStopwatches();
+         if (!stopwatches.remove(id)) {
+@@ -114,5 +_,6 @@
+ 
+         source.sendSuccess(() -> Component.translatable("commands.stopwatch.remove.success", Component.translationArg(id)), true);
+         return Command.SINGLE_SUCCESS;
++        }, source); // Canvas - region threading
+     }
+ }

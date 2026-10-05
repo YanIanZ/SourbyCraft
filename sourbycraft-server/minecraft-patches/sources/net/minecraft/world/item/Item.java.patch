@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/item/Item.java
++++ b/net/minecraft/world/item/Item.java
+@@ -731,7 +_,7 @@
+ 
+                 @Override
+                 public float tickRate() {
+-                    return level.tickRateManager().tickrate();
++                    return io.papermc.paper.threadedregions.TickRegionScheduler.getTickRate(); // Canvas - region threading
+                 }
+ 
+                 @Override

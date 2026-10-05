@@ -1,0 +1,49 @@
+--- a/net/minecraft/world/Stopwatches.java
++++ b/net/minecraft/world/Stopwatches.java
+@@ -21,12 +_,13 @@
+     public static final SavedDataType<Stopwatches> TYPE = new SavedDataType<>(
+         Identifier.withDefaultNamespace("stopwatches"), Stopwatches::new, CODEC, DataFixTypes.SAVED_DATA_STOPWATCHES
+     );
+-    private final Map<Identifier, Stopwatch> stopwatches = new Object2ObjectOpenHashMap<>();
++    private final Map<Identifier, Stopwatch> stopwatches = new ca.spottedleaf.concurrentutil.map.SWMRHashTable<>(); // Canvas - region threading
+ 
+     private Stopwatches() {
+     }
+ 
+     private static Stopwatches unpack(final Map<Identifier, Long> stopwatches) {
++        io.canvasmc.canvas.util.TickGuard.ensureGlobalOrStartup("Cannot unpack stopwatches async"); // Canvas - region threading
+         Stopwatches result = new Stopwatches();
+         long currentTime = currentTime();
+         stopwatches.forEach((id, accumulatedElapsedTime) -> result.stopwatches.put(id, new Stopwatch(currentTime, accumulatedElapsedTime)));
+@@ -34,6 +_,7 @@
+     }
+ 
+     private Map<Identifier, Long> pack() {
++        io.canvasmc.canvas.util.TickGuard.ensureGlobalOrStartup("Cannot pack stopwatches async"); // Canvas - region threading
+         long currentTime = currentTime();
+         Map<Identifier, Long> result = new TreeMap<>();
+         this.stopwatches.forEach((id, stopwatch) -> result.put(id, stopwatch.elapsedMilliseconds(currentTime)));
+@@ -45,6 +_,7 @@
+     }
+ 
+     public boolean add(final Identifier id, final Stopwatch stopwatch) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot add stopwatch async"); // Canvas - region threading
+         if (this.stopwatches.putIfAbsent(id, stopwatch) == null) {
+             this.setDirty();
+             return true;
+@@ -54,6 +_,7 @@
+     }
+ 
+     public boolean update(final Identifier id, final UnaryOperator<Stopwatch> update) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot update stopwatch async"); // Canvas - region threading
+         if (this.stopwatches.computeIfPresent(id, (key, value) -> update.apply(value)) != null) {
+             this.setDirty();
+             return true;
+@@ -63,6 +_,7 @@
+     }
+ 
+     public boolean remove(final Identifier id) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot remove stopwatch async"); // Canvas - region threading
+         boolean removed = this.stopwatches.remove(id) != null;
+         if (removed) {
+             this.setDirty();

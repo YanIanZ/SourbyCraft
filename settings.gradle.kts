@@ -1,9 +1,9 @@
 pluginManagement {
-    // Private SourbyPatcher delegates to Weaver's Canvas-compatible pipeline (PR #12).
+    // Private SourbyPatcher applies paperweight with Paper as the only upstream.
     val patcherVersion = providers.gradleProperty("patcherVersion").get()
     val localRepo = providers.systemProperty("maven.repo.local")
         .getOrElse(System.getProperty("user.home") + "/.m2/repository")
-    val patcherJar = file("$localRepo/dev/iyanz/sourbypatcher/canvas-toolchain/$patcherVersion/canvas-toolchain-$patcherVersion.jar")
+    val patcherJar = file("$localRepo/dev/iyanz/sourbypatcher/paper-toolchain/$patcherVersion/paper-toolchain-$patcherVersion.jar")
     check(patcherJar.isFile) {
         "Private SourbyPatcher missing. Publish the pinned private checkout to Maven Local; see docs/development/PRIVATE-TOOLCHAIN.md"
     }
@@ -19,15 +19,12 @@ pluginManagement {
             filter { includeGroupByRegex("dev\\.iyanz\\.sourbypatcher.*") }
         }
         maven("https://repo.papermc.io/repository/maven-public/")
-        maven("https://maven.canvasmc.io/public/")
-        maven("https://maven.canvasmc.io/releases")
-        maven { url = uri("${rootDir}/sourby-maven") }
     }
 
     plugins {
-        id("dev.iyanz.sourbypatcher.canvas") version patcherVersion
-        id("io.canvasmc.weaver.core") version "2.4.5"
-        id("io.canvasmc.weaver.dependency-bridge") version "2.4.5"
+        id("dev.iyanz.sourbypatcher.paper") version patcherVersion
+        // Same paperweight release as SourbyPatcher paper-toolchain (first with Gradle 9.8 support).
+        id("io.papermc.paperweight.core") version "2.0.0-beta.24"
     }
 }
 

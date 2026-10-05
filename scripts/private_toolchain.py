@@ -26,7 +26,7 @@ def verify(repository):
     config = properties()
     artifacts = {
         'SourbyClip': ('dev/iyanz/sourbyclip', 'sourbyclip', 'clipVersion', 'clipSha256'),
-        'SourbyPatcher': ('dev/iyanz/sourbypatcher/canvas-toolchain', 'canvas-toolchain', 'patcherVersion', 'patcherSha256'),
+        'SourbyPatcher': ('dev/iyanz/sourbypatcher/paper-toolchain', 'paper-toolchain', 'patcherVersion', 'patcherSha256'),
     }
     for name, (group, artifact, version_key, hash_key) in artifacts.items():
         version = config[version_key]
@@ -42,7 +42,7 @@ def publish(checkouts, repository):
     checkouts = Path(checkouts).resolve()
     repository = Path(repository).resolve()
     lock = json.loads((ROOT / 'build-data/private-toolchain.lock.json').read_text())
-    for name, relative in [('SourbyPatcher', 'canvas-toolchain'), ('SourbyClip', '.')]:
+    for name, relative in [('SourbyPatcher', 'paper-toolchain'), ('SourbyClip', '.')]:
         checkout = Path(checkouts) / name
         actual = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip()
         if actual != lock[name]['revision']:

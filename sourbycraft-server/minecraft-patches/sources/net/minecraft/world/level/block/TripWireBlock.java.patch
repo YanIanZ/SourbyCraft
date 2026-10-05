@@ -1,0 +1,10 @@
+--- a/net/minecraft/world/level/block/TripWireBlock.java
++++ b/net/minecraft/world/level/block/TripWireBlock.java
+@@ -131,6 +_,7 @@
+         for (Direction direction : new Direction[]{Direction.SOUTH, Direction.WEST}) {
+             for (int i = 1; i < 42; i++) {
+                 BlockPos testPos = pos.relative(direction, i);
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, testPos, 4)) break; // Folia - region threading
+                 BlockState block = level.getBlockState(testPos);
+                 if (block.is(this.hook)) {
+                     if (block.getValue(TripWireHookBlock.FACING) == direction.getOpposite()) {

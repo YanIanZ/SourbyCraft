@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/damagesource/FallLocation.java
++++ b/net/minecraft/world/damagesource/FallLocation.java
+@@ -34,7 +_,7 @@
+ 
+     public static @Nullable FallLocation getCurrentFallLocation(final LivingEntity mob) {
+         Optional<BlockPos> lastClimbablePos = mob.getLastClimbablePos();
+-        if (lastClimbablePos.isPresent()) {
++        if (lastClimbablePos.isPresent() && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor((net.minecraft.server.level.ServerLevel)mob.level(), lastClimbablePos.get())) { // Folia - region threading
+             BlockState blockState = mob.level().getBlockState(lastClimbablePos.get());
+             return blockToFallLocation(blockState);
+         } else {

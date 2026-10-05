@@ -1,0 +1,522 @@
+--- /dev/null
++++ b/io/papermc/paper/threadedregions/commands/CommandServerHealth.java
+@@ -1,0 +_,519 @@
++package io.papermc.paper.threadedregions.commands;
++
++import ca.spottedleaf.common.time.TickData;
++import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask;
++import io.papermc.paper.configuration.GlobalConfiguration;
++import io.papermc.paper.threadedregions.RegionizedServer;
++import io.papermc.paper.threadedregions.ThreadedRegionizer;
++import io.papermc.paper.threadedregions.TickRegionScheduler;
++import io.papermc.paper.threadedregions.TickRegions;
++import it.unimi.dsi.fastutil.doubles.DoubleArrayList;
++import it.unimi.dsi.fastutil.objects.ObjectObjectImmutablePair;
++import java.text.DecimalFormat;
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++import java.util.function.Supplier;
++import net.kyori.adventure.text.Component;
++import net.kyori.adventure.text.TextComponent;
++import net.kyori.adventure.text.event.ClickEvent;
++import net.kyori.adventure.text.event.HoverEvent;
++import net.kyori.adventure.text.format.NamedTextColor;
++import net.kyori.adventure.text.format.TextColor;
++import net.kyori.adventure.text.format.TextDecoration;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.world.level.ChunkPos;
++import org.bukkit.Bukkit;
++import org.bukkit.World;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import org.bukkit.craftbukkit.CraftWorld;
++import org.bukkit.entity.Entity;
++import org.bukkit.entity.Player;
++import org.jetbrains.annotations.Contract;
++import org.jspecify.annotations.NonNull;
++
++public final class CommandServerHealth extends Command {
++
++    private static final ThreadLocal<DecimalFormat> TWO_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
++        return new DecimalFormat("#,##0.00");
++    });
++    private static final ThreadLocal<DecimalFormat> ONE_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
++        return new DecimalFormat("#,##0.0");
++    });
++    private static final ThreadLocal<DecimalFormat> NO_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
++        return new DecimalFormat("#,##0");
++    });
++
++    private static final TextColor HEADER = TextColor.color(79, 164, 240);
++    private static final TextColor PRIMARY = TextColor.color(48, 145, 237);
++    private static final TextColor SECONDARY = TextColor.color(104, 177, 240);
++    private static final TextColor INFORMATION = TextColor.color(145, 198, 243);
++    private static final TextColor LIST = TextColor.color(33, 97, 188);
++
++    public CommandServerHealth() {
++        super("tps");
++        this.setUsage("/<command> [server/region] [lowest regions to display]");
++        this.setDescription("Reports information about server health.");
++        this.setPermission("bukkit.command.tps");
++    }
++
++    @NonNull
++    @Contract("_, _, _, _, _, _ -> new")
++    private static Component formatRegionInfo(final String prefix, final double util, final double mspt, final double tps,
++                                              final boolean newline, final TickRegionScheduler.@NonNull RegionScheduleHandle regionHandle) { // Canvas - region threading
++        return Component.text()
++            .append(Component.text(prefix, PRIMARY, TextDecoration.BOLD))
++            .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), regionHandle.getTickManager().isSprinting() ? CommandUtil.SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(util))) // Canvas - region threading
++            .append(Component.text("% util at ", PRIMARY))
++            .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), regionHandle.getTickManager().isSprinting() ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt))) // Canvas - region threading
++            .append(Component.text(" MSPT at ", PRIMARY))
++            .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), regionHandle.getTickManager().isSprinting() ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForTPS(tps))) // Canvas - region threading
++            .append(Component.text(" TPS" + (newline ? "\n" : ""), PRIMARY))
++            .build();
++    }
++
++    @Contract("_, _ -> new")
++    private static @NonNull Component formatRegionStats(final TickRegions.@NonNull RegionStats stats, final boolean newline) {
++        return Component.text()
++            .append(Component.text("Chunks: ", PRIMARY))
++            .append(Component.text(NO_DECIMAL_PLACES.get().format(stats.getChunkCount()), INFORMATION))
++            .append(Component.text(" Players: ", PRIMARY))
++            .append(Component.text(NO_DECIMAL_PLACES.get().format(stats.getPlayerCount()), INFORMATION))
++            .append(Component.text(" Entities: ", PRIMARY))
++            .append(Component.text(NO_DECIMAL_PLACES.get().format(stats.getEntityCount()) + (newline ? "\n" : ""), INFORMATION))
++            .build();
++    }
++
++    private static boolean executeRegion(final CommandSender sender, final String commandLabel, final String[] args) {
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
++            TickRegionScheduler.getCurrentRegion();
++        if (region == null) {
++            sender.sendMessage(Component.text("You are not in a region currently", NamedTextColor.RED));
++            return true;
++        }
++
++        final long currTime = System.nanoTime();
++
++        final TickData.TickReportData report15s = region.getData().getRegionSchedulingHandle().getTickReport15s(currTime);
++        final TickData.TickReportData report1m = region.getData().getRegionSchedulingHandle().getTickReport1m(currTime);
++
++        final ServerLevel world = region.regioniser.world;
++        final ChunkPos chunkCenter = region.getCenterChunk();
++        final int centerBlockX = ((chunkCenter.x() << 4) | 7);
++        final int centerBlockZ = ((chunkCenter.z() << 4) | 7);
++
++        final double util15s = report15s.utilisation();
++        final double tps15s = report15s.tpsData().segmentAll().average();
++        final double mspt15s = report15s.timePerTickData().segmentAll().average() / 1.0E6;
++
++        final double util1m = report1m.utilisation();
++        final double tps1m = report1m.tpsData().segmentAll().average();
++        final double mspt1m = report1m.timePerTickData().segmentAll().average() / 1.0E6;
++
++        final int yLoc = 80;
++        final String location = "[w:'" + world.getWorld().getName() + "'," + centerBlockX + "," + yLoc + "," + centerBlockZ + "]";
++
++        final Component line = Component.text()
++            .append(Component.text("Region around block ", PRIMARY))
++            .append(Component.text(location, INFORMATION))
++            .append(Component.text(":\n", PRIMARY))
++
++            .append(
++                formatRegionInfo("15s: ", util15s, mspt15s, tps15s, true, region.getData().getRegionSchedulingHandle()) // Canvas - region threading
++            )
++            .append(
++                formatRegionInfo("1m: ", util1m, mspt1m, tps1m, true, region.getData().getRegionSchedulingHandle()) // Canvas - region threading
++            )
++            .append(
++                formatRegionStats(region.getData().getRegionStats(), false)
++            )
++
++            .build();
++
++        sender.sendMessage(line);
++
++        return true;
++    }
++
++    private static boolean executeServer(final CommandSender sender, final String commandLabel, final String @NonNull [] args) {
++        final int lowestRegionsCount;
++        if (args.length < 2) {
++            lowestRegionsCount = 3;
++        } else {
++            try {
++                lowestRegionsCount = Integer.parseInt(args[1]);
++            } catch (final NumberFormatException _) {
++                sender.sendMessage(Component.text("Highest utilisation count '" + args[1] + "' must be an integer", NamedTextColor.RED));
++                return true;
++            }
++        }
++
++        final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions =
++            new ArrayList<>();
++
++        for (final World bukkitWorld : Bukkit.getWorlds()) {
++            final ServerLevel world = ((CraftWorld)bukkitWorld).getHandle();
++            world.regioniser.computeForAllRegions(regions::add);
++        }
++
++        final double minTps;
++        final double medianTps;
++        final double maxTps;
++        double totalUtil = 0.0;
++
++        final DoubleArrayList tpsByRegion = new DoubleArrayList();
++        final List<TickData.TickReportData> reportsByRegion = new ArrayList<>();
++        final int maxThreadCount = TickRegions.getScheduler().getTotalThreadCount();
++
++        final long currTime = System.nanoTime();
++        final TickData.TickReportData globalTickReport = RegionizedServer.getGlobalTickData().getTickReport15s(currTime);
++
++        for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
++            final TickData.TickReportData report = region.getData().getRegionSchedulingHandle().getTickReport15s(currTime);
++            tpsByRegion.add(report == null ? TickRegionScheduler.getTickRate() : report.tpsData().segmentAll().average()); // Canvas - region threading
++            reportsByRegion.add(report);
++            totalUtil += (report == null ? 0.0 : report.utilisation());
++        }
++
++        final double genRate = ChunkFullTask.genRate(currTime);
++        final double loadRate = ChunkFullTask.loadRate(currTime);
++
++        totalUtil += globalTickReport.utilisation();
++
++        tpsByRegion.sort(null);
++        if (!tpsByRegion.isEmpty()) {
++            minTps = tpsByRegion.getDouble(0);
++            maxTps = tpsByRegion.getDouble(tpsByRegion.size() - 1);
++
++            final int middle = tpsByRegion.size() >> 1;
++            if ((tpsByRegion.size() & 1) == 0) {
++                // even, average the two middle points
++                medianTps = (tpsByRegion.getDouble(middle - 1) + tpsByRegion.getDouble(middle)) / 2.0;
++            } else {
++                // odd, can just grab middle
++                medianTps = tpsByRegion.getDouble(middle);
++            }
++        } else {
++            // no regions = green
++            minTps = medianTps = maxTps = TickRegionScheduler.getTickRate(); // Canvas - region threading
++        }
++
++        final List<ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>>
++            regionsBelowThreshold = new ArrayList<>();
++
++        for (int i = 0, len = regions.size(); i < len; ++i) {
++            final TickData.TickReportData report = reportsByRegion.get(i);
++
++            regionsBelowThreshold.add(new ObjectObjectImmutablePair<>(regions.get(i), report));
++        }
++
++        regionsBelowThreshold.sort(CommandServerHealth::sortPair); // Canvas - expand TPS cmd
++
++        final TextComponent.Builder lowestRegionsBuilder = Component.text();
++
++        if (sender instanceof Player) {
++            lowestRegionsBuilder.append(Component.text(" Click to teleport\n", SECONDARY));
++        }
++        for (int i = 0, len = Math.min(lowestRegionsCount, regionsBelowThreshold.size()); i < len; ++i) {
++            final ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>
++                pair = regionsBelowThreshold.get(i);
++
++            final TickData.TickReportData report = pair.right();
++            final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
++                pair.left();
++
++            if (report == null) {
++                // skip regions with no data
++                continue;
++            }
++
++            final ServerLevel world = region.regioniser.world;
++            final ChunkPos chunkCenter = region.getCenterChunk();
++            if (chunkCenter == null) {
++                // region does not exist anymore
++                continue;
++            }
++            final int centerBlockX = ((chunkCenter.x() << 4) | 7);
++            final int centerBlockZ = ((chunkCenter.z() << 4) | 7);
++            final double util = report.utilisation();
++            final double tps = report.tpsData().segmentAll().average();
++            final double mspt = report.timePerTickData().segmentAll().average() / 1.0E6;
++
++            final int yLoc = 80;
++            final String location = "[w:'" + world.getWorld().getName() + "'," + centerBlockX + "," + yLoc + "," + centerBlockZ + "]";
++            final Component line = Component.text()
++                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                .append(Component.text("Region around block ", PRIMARY))
++                .append(Component.text(location, INFORMATION))
++                .append(Component.text(":\n", PRIMARY))
++
++                .append(Component.text("    ", PRIMARY))
++                .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), region.getData().getRegionSchedulingHandle().getTickManager().isSprinting() ? CommandUtil.SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(util))) // Canvas - region threading
++                .append(Component.text("% util at ", PRIMARY))
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), region.getData().getRegionSchedulingHandle().getTickManager().isSprinting() ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt))) // Canvas - region threading
++                .append(Component.text(" MSPT at ", PRIMARY))
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), region.getData().getRegionSchedulingHandle().getTickManager().isSprinting() ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForTPS(tps))) // Canvas - region threading
++                .append(Component.text(" TPS\n", PRIMARY))
++
++                .append(Component.text("    ", PRIMARY))
++                .append(formatRegionStats(region.getData().getRegionStats(), (i + 1) != len))
++                .build()
++
++                .clickEvent(ClickEvent.runCommand("/minecraft:execute as @s in " + world.getWorld().getKey() + " run minecraft:tp " + centerBlockX + ".5 " + yLoc + " " + centerBlockZ + ".5"))
++                .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, Component.text("Click to teleport to " + location, SECONDARY)));
++
++            lowestRegionsBuilder.append(line);
++        }
++
++        // Canvas start - expand TPS command
++        final Map<ServerLevel, List<ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>>>
++            world2Regions = new HashMap<>();
++
++        for (final ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData> pair : regionsBelowThreshold) {
++            final ServerLevel world = pair.left().regioniser.world;
++            world2Regions.putIfAbsent(world, new ArrayList<>());
++            world2Regions.get(world).add(pair);
++        }
++
++        final TextComponent.Builder worldsBuilder = Component.text();
++
++        worldsBuilder.append(Component.text(world2Regions.size() + "\n", INFORMATION));
++
++        for (final Map.Entry<ServerLevel, List<ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>>> entry : world2Regions.entrySet()) {
++            final List<ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>>
++                list = entry.getValue();
++            list.sort(CommandServerHealth::sortPair);
++            final ServerLevel world = entry.getKey();
++
++            final TextComponent.Builder worldBuilder = Component.text();
++
++            worldBuilder.append(Component.text("   ", LIST));
++            worldBuilder.append(Component.text(" - ", LIST));
++            worldBuilder.append(Component.text(world.dimension().identifier().getPath(), INFORMATION));
++            worldBuilder.append(Component.text(": ", PRIMARY));
++            worldBuilder.append(Component.text(list.size() + " region" + (list.size() != 1 ? "s" : ""), SECONDARY));
++            worldBuilder.append(Component.text(", ", PRIMARY));
++
++            double worldUtil = 0.0;
++            double combinedTpsVals = 0.0D;
++
++            for (final ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData> pair : list) {
++
++                final TickData.TickReportData report = pair.right();
++
++                final double util = report == null ? 0.0D : report.utilisation();
++                final double tps = report == null ? TickRegionScheduler.getTickRate() : report.tpsData().segmentAll().average();
++
++                worldUtil += util;
++                combinedTpsVals += tps;
++            }
++
++            double averagedTps = list.size() == 1 ? combinedTpsVals : combinedTpsVals / list.size();
++
++            worldBuilder.append(Component.text(TWO_DECIMAL_PLACES.get().format(averagedTps), CommandUtil.getColourForTPS(averagedTps)));
++            worldBuilder.append(Component.text(" average TPS", SECONDARY));
++            worldBuilder.append(Component.text(", ", PRIMARY));
++            worldBuilder.append(Component.text(ONE_DECIMAL_PLACES.get().format(worldUtil * 100.0), CommandUtil.getUtilisationColourRegion(worldUtil / (double)maxThreadCount)));
++            worldBuilder.append(Component.text("/", PRIMARY));
++            worldBuilder.append(Component.text(ONE_DECIMAL_PLACES.get().format(maxThreadCount * 100.0), INFORMATION));
++            worldBuilder.append(Component.text("% util\n", PRIMARY));
++
++            final String dimensionPath = world.dimension().identifier().getPath();
++            final String worldName = world.getWorld().getName();
++            final String worldKey = world.getWorld().getKey().toString();
++            final Component detailComponent = Component.text()
++                .append(Component.text("Highest ", HEADER, TextDecoration.BOLD))
++                .append(Component.text(" utilisation regions in ", HEADER, TextDecoration.BOLD))
++                .append(Component.text(dimensionPath + "\n", INFORMATION, TextDecoration.BOLD))
++                .append(buildHighestRegionDetails(worldName, worldKey, lowestRegionsCount, list))
++                .build();
++
++            worldsBuilder.append(worldBuilder.build()
++                .hoverEvent(HoverEvent.showText(Component.text("Click to view highest utilizing regions for \"" + dimensionPath + "\"", SECONDARY)))
++                .clickEvent(ClickEvent.callback((audience) -> audience.sendMessage(detailComponent)))
++            );
++        }
++
++        // Canvas end - expand TPS command
++        sender.sendMessage(
++            Component.text()
++                .append(Component.text("Server Health Report\n", HEADER, TextDecoration.BOLD))
++
++                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                .append(Component.text("Online Players: ", PRIMARY))
++                .append(Component.text(Bukkit.getOnlinePlayers().size() + "\n", INFORMATION))
++                // Canvas start - expand TPS cmd
++
++                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                .append(Component.text("Scheduler Type: ", PRIMARY))
++                .append(Component.text(GlobalConfiguration.get().threadedRegions.scheduler + "\n", INFORMATION))
++
++                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                .append(Component.text("Worlds: ", PRIMARY))
++                .append(worldsBuilder.build())
++
++                // Canvas end - expand TPS cmd
++
++                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                .append(Component.text("Total regions: ", PRIMARY))
++                .append(Component.text(regions.size() + "\n", INFORMATION))
++
++                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                .append(Component.text("Utilisation: ", PRIMARY))
++                .append(Component.text(ONE_DECIMAL_PLACES.get().format(totalUtil * 100.0), CommandUtil.getUtilisationColourRegion(totalUtil / (double)maxThreadCount)))
++                .append(Component.text("% / ", PRIMARY))
++                .append(Component.text(ONE_DECIMAL_PLACES.get().format(maxThreadCount * 100.0), INFORMATION))
++                .append(Component.text("%\n", PRIMARY))
++
++                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                .append(Component.text("Load rate: ", PRIMARY))
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(loadRate) + ", ", INFORMATION))
++                .append(Component.text("Gen rate: ", PRIMARY))
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(genRate) + "\n", INFORMATION))
++
++                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                // Canvas start - compact min/med/max tps
++                .append(Component.text("Min/Median/Max TPS: ", PRIMARY))
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(minTps), CommandUtil.getColourForTPS(minTps)))
++                .append(Component.text("/", LIST))
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(medianTps), CommandUtil.getColourForTPS(medianTps)))
++                .append(Component.text("/", LIST))
++                // Canvas end - compact min/med/max tps
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(maxTps) + "\n", CommandUtil.getColourForTPS(maxTps)))
++
++                .append(Component.text("Highest ", HEADER, TextDecoration.BOLD))
++                .append(Component.text(Integer.toString(lowestRegionsCount), INFORMATION, TextDecoration.BOLD))
++                .append(Component.text(" utilisation regions\n", HEADER, TextDecoration.BOLD))
++
++                .append(lowestRegionsBuilder.build())
++                .build()
++        );
++
++        return true;
++    }
++    // Canvas start - expand TPS cmd
++
++    @NonNull
++    private static Component buildHighestRegionDetails(
++        final String worldName,
++        final String worldKey,
++        final int lowestRegionsCount,
++        final @NonNull List<ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>> list
++    ) {
++        final TextComponent.Builder worldRegionsBuilder = Component.text();
++
++        for (int i = 0, len = Math.min(lowestRegionsCount, list.size()); i < len; ++i) {
++            final ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>
++                pair = list.get(i);
++
++            final TickData.TickReportData report = pair.right();
++            final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
++                pair.left();
++
++            if (report == null) {
++                // skip regions with no data
++                continue;
++            }
++
++            final ChunkPos chunkCenter = region.getCenterChunk();
++            if (chunkCenter == null) {
++                // region does not exist anymore
++                continue;
++            }
++            final int centerBlockX = ((chunkCenter.x() << 4) | 7);
++            final int centerBlockZ = ((chunkCenter.z() << 4) | 7);
++            final double util = report.utilisation();
++            final double tps = report.tpsData().segmentAll().average();
++            final double mspt = report.timePerTickData().segmentAll().average() / 1.0E6;
++            final boolean sprinting = region.getData().getRegionSchedulingHandle().getTickManager().isSprinting();
++
++            final int yLoc = 80;
++            final String location = "[w:'" + worldName + "'," + centerBlockX + "," + yLoc + "," + centerBlockZ + "]";
++            final Component line = Component.text()
++                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                .append(Component.text("Region around block ", PRIMARY))
++                .append(Component.text(location, INFORMATION))
++                .append(Component.text(":\n", PRIMARY))
++
++                .append(Component.text("    ", PRIMARY))
++                .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(util))) // Canvas - region threading
++                .append(Component.text("% util at ", PRIMARY))
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt))) // Canvas - region threading
++                .append(Component.text(" MSPT at ", PRIMARY))
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForTPS(tps))) // Canvas - region threading
++                .append(Component.text(" TPS\n", PRIMARY))
++
++                .append(Component.text("    ", PRIMARY))
++                .append(formatRegionStats(region.getData().getRegionStats(), (i + 1) != len))
++                .build()
++
++                .clickEvent(ClickEvent.runCommand("/minecraft:execute as @s in " + worldKey + " run minecraft:tp " + centerBlockX + ".5 " + yLoc + " " + centerBlockZ + ".5"))
++                .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, Component.text("Click to teleport to " + location, SECONDARY)));
++
++            worldRegionsBuilder.append(line);
++        }
++
++        return worldRegionsBuilder.build();
++    }
++
++    private static int sortPair(
++        final @NonNull ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData> p1,
++        final @NonNull ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData> p2
++    ) {
++        final TickData.TickReportData report1 = p1.right();
++        final TickData.TickReportData report2 = p2.right();
++        final double util1 = report1 == null ? 0.0 : report1.utilisation();
++        final double util2 = report2 == null ? 0.0 : report2.utilisation();
++
++        // we want the largest first
++        return Double.compare(util2, util1);
++    }
++    // Canas end - expand TPS cmd
++
++    @Override
++    public boolean execute(final @NonNull CommandSender sender, final @NonNull String commandLabel, final String @NonNull [] args) {
++        final String type;
++        if (args.length < 1) {
++            type = "server";
++        } else {
++            type = args[0];
++        }
++
++        return switch (type.toLowerCase(Locale.ROOT)) {
++            case "server" -> executeServer(sender, commandLabel, args);
++            case "region" -> {
++                if (!(sender instanceof Entity)) {
++                    sender.sendMessage(Component.text("Cannot see current region information as console", NamedTextColor.RED));
++                    yield true;
++                }
++                yield executeRegion(sender, commandLabel, args);
++            }
++            default -> {
++                sender.sendMessage(Component.text("Type '" + args[0] + "' must be one of: [server, region]", NamedTextColor.RED));
++                yield true;
++            }
++        };
++    }
++
++    @NonNull
++    @Override
++    public List<String> tabComplete(final @NonNull CommandSender sender, final @NonNull String alias, final String @NonNull [] args) throws IllegalArgumentException {
++        if (args.length == 0) {
++            if (sender instanceof Entity) {
++                return CommandUtil.getSortedList(List.of("server", "region"));
++            } else {
++                return CommandUtil.getSortedList(List.of("server"));
++            }
++        } else if (args.length == 1) {
++            if (sender instanceof Entity) {
++                return CommandUtil.getSortedList(List.of("server", "region"), args[0]);
++            } else {
++                return CommandUtil.getSortedList(List.of("server"), args[0]);
++            }
++        }
++        return new ArrayList<>();
++    }
++}

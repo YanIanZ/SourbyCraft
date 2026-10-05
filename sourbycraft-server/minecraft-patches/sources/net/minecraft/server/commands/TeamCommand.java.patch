@@ -1,0 +1,260 @@
+--- a/net/minecraft/server/commands/TeamCommand.java
++++ b/net/minecraft/server/commands/TeamCommand.java
+@@ -90,10 +_,7 @@
+                     Commands.literal("remove")
+                         .then(Commands.argument("team", TeamArgument.team()).executes(c -> deleteTeam(c.getSource(), TeamArgument.getTeam(c, "team"))))
+                 )
+-                .then(
+-                    Commands.literal("empty")
+-                        .then(Commands.argument("team", TeamArgument.team()).executes(c -> emptyTeam(c.getSource(), TeamArgument.getTeam(c, "team"))))
+-                )
++                // Canvas - region threading - TODO later, we need a way to schedule to the entity. while we can do this async, it's not a good idea
+                 .then(
+                     Commands.literal("join")
+                         .then(
+@@ -273,13 +_,36 @@
+         return members.iterator().next().getFeedbackDisplayName();
+     }
+ 
+-    private static int leaveTeam(final CommandSourceStack source, final Collection<ScoreHolder> members) {
++    private static int leaveTeam(final CommandSourceStack source, final Collection<ScoreHolder> members) throws CommandSyntaxException { // Canvas - region threading
+         Scoreboard scoreboard = source.getServer().getScoreboard();
+ 
++    // Canvas start - region threading
++        final java.util.List<net.minecraft.world.entity.Entity> entities = new java.util.ArrayList<>();
++        final java.util.List<ScoreHolder> returnForFeedback = new java.util.concurrent.CopyOnWriteArrayList<>();
+         for (ScoreHolder member : members) {
+-            scoreboard.removePlayerFromTeam(member.getScoreboardName());
++            if (member instanceof net.minecraft.world.entity.Entity entity) {
++                entities.add(entity);
++            }
++            else if (scoreboard.removePlayerFromTeam(member.getScoreboardName())) {
++                returnForFeedback.add(member);
++            }
+         }
+ 
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._void()
++            .with(entities)
++            .executes((net.minecraft.world.entity.Entity entity) -> {
++                if (scoreboard.removePlayerFromTeam(entity.getScoreboardName())) {
++                    returnForFeedback.add(entity);
++                }
++                return (_) -> null;
++            })
++            .onComplete((_,_, css) -> leaveCallback(css, returnForFeedback))
++            .start(source);
++        return 1;
++    }
++
++    private static int leaveCallback(final CommandSourceStack source, final Collection<ScoreHolder> members) {
++    // Canvas end - region threading
+         if (members.size() == 1) {
+             source.sendSuccess(() -> Component.translatable("commands.team.leave.success.single", getFirstMemberName(members)), true);
+         } else {
+@@ -289,13 +_,36 @@
+         return members.size();
+     }
+ 
+-    private static int joinTeam(final CommandSourceStack source, final PlayerTeam team, final Collection<ScoreHolder> members) {
++    private static int joinTeam(final CommandSourceStack source, final PlayerTeam team, final Collection<ScoreHolder> members) throws CommandSyntaxException { // Canvas - region threading
+         Scoreboard scoreboard = source.getServer().getScoreboard();
+ 
++    // Canvas start - region threading
++        final java.util.List<net.minecraft.world.entity.Entity> entities = new java.util.ArrayList<>();
++        final java.util.List<ScoreHolder> returnForFeedback = new java.util.concurrent.CopyOnWriteArrayList<>();
+         for (ScoreHolder member : members) {
+-            scoreboard.addPlayerToTeam(member.getScoreboardName(), team);
++            if (member instanceof net.minecraft.world.entity.Entity entity) {
++                entities.add(entity);
++            }
++            else if (scoreboard.addPlayerToTeam(member.getScoreboardName(), team)) {
++                returnForFeedback.add(member);
++            }
+         }
+ 
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._void()
++            .with(entities)
++            .executes((net.minecraft.world.entity.Entity entity) -> {
++                if (scoreboard.addPlayerToTeam(entity.getScoreboardName(), team)) {
++                    returnForFeedback.add(entity);
++                }
++                return (_) -> null;
++            })
++            .onComplete((_,_, css) -> joinCallback(css, returnForFeedback, team))
++            .start(source);
++        return 1;
++    }
++
++    private static int joinCallback(final CommandSourceStack source, final Collection<ScoreHolder> members, final PlayerTeam team) {
++    // Canvas end - region threading
+         if (members.size() == 1) {
+             source.sendSuccess(
+                 () -> Component.translatable("commands.team.join.success.single", getFirstMemberName(members), team.getFormattedDisplayName()), true
+@@ -308,6 +_,7 @@
+     }
+ 
+     private static int setNameTagVisibility(final CommandSourceStack source, final PlayerTeam team, final Team.Visibility visibility) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (team.getNameTagVisibility() == visibility) {
+             throw ERROR_TEAM_NAMETAG_VISIBLITY_UNCHANGED.create();
+         }
+@@ -317,9 +_,11 @@
+             () -> Component.translatable("commands.team.option.nametagVisibility.success", team.getFormattedDisplayName(), visibility.getDisplayName()), true
+         );
+         return 0;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setDeathMessageVisibility(final CommandSourceStack source, final PlayerTeam team, final Team.Visibility visibility) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (team.getDeathMessageVisibility() == visibility) {
+             throw ERROR_TEAM_DEATH_MESSAGE_VISIBLITY_UNCHANGED.create();
+         }
+@@ -330,9 +_,11 @@
+             true
+         );
+         return 0;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setCollision(final CommandSourceStack source, final PlayerTeam team, final Team.CollisionRule collision) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (team.getCollisionRule() == collision) {
+             throw ERROR_TEAM_COLLISION_UNCHANGED.create();
+         }
+@@ -342,9 +_,11 @@
+             () -> Component.translatable("commands.team.option.collisionRule.success", team.getFormattedDisplayName(), collision.getDisplayName()), true
+         );
+         return 0;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setFriendlySight(final CommandSourceStack source, final PlayerTeam team, final boolean allowed) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (team.canSeeFriendlyInvisibles() == allowed) {
+             if (allowed) {
+                 throw ERROR_TEAM_ALREADY_FRIENDLYINVISIBLES_ENABLED.create();
+@@ -359,9 +_,11 @@
+             );
+             return 0;
+         }
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setFriendlyFire(final CommandSourceStack source, final PlayerTeam team, final boolean allowed) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (team.isAllowFriendlyFire() == allowed) {
+             if (allowed) {
+                 throw ERROR_TEAM_ALREADY_FRIENDLYFIRE_ENABLED.create();
+@@ -375,9 +_,11 @@
+             );
+             return 0;
+         }
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setDisplayName(final CommandSourceStack source, final PlayerTeam team, final Component displayName) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         if (team.getDisplayName().equals(displayName)) {
+             throw ERROR_TEAM_ALREADY_NAME.create();
+         }
+@@ -385,9 +_,11 @@
+         team.setDisplayName(displayName);
+         source.sendSuccess(() -> Component.translatable("commands.team.option.name.success", team.getFormattedDisplayName()), true);
+         return 0;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setColor(final CommandSourceStack source, final PlayerTeam team, final TeamColor color) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         Optional<TeamColor> currentColor = team.getColor();
+         if (currentColor.isPresent() && currentColor.get().equals(color)) {
+             throw ERROR_TEAM_ALREADY_COLOR.create();
+@@ -396,9 +_,11 @@
+         team.setColor(Optional.of(color));
+         source.sendSuccess(() -> Component.translatable("commands.team.option.color.success", team.getFormattedDisplayName(), color.getSerializedName()), true);
+         return 0;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int clearColor(final CommandSourceStack source, final PlayerTeam team) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         Optional<TeamColor> currentColor = team.getColor();
+         if (currentColor.isEmpty()) {
+             throw ERROR_TEAM_ALREADY_COLOR.create();
+@@ -407,6 +_,7 @@
+         team.setColor(Optional.empty());
+         source.sendSuccess(() -> Component.translatable("commands.team.option.color.clear.success", team.getFormattedDisplayName()), true);
+         return 0;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int emptyTeam(final CommandSourceStack source, final PlayerTeam team) throws CommandSyntaxException {
+@@ -425,10 +_,12 @@
+     }
+ 
+     private static int deleteTeam(final CommandSourceStack source, final PlayerTeam team) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         Scoreboard scoreboard = source.getServer().getScoreboard();
+         scoreboard.removePlayerTeam(team);
+         source.sendSuccess(() -> Component.translatable("commands.team.remove.success", team.getFormattedDisplayName()), true);
+         return scoreboard.getPlayerTeams().size();
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int createTeam(final CommandSourceStack source, final String name) throws CommandSyntaxException {
+@@ -436,6 +_,7 @@
+     }
+ 
+     private static int createTeam(final CommandSourceStack source, final String name, final Component displayName) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         Scoreboard scoreboard = source.getServer().getScoreboard();
+         if (scoreboard.getPlayerTeam(name) != null) {
+             throw ERROR_TEAM_ALREADY_EXISTS.create();
+@@ -445,9 +_,11 @@
+         team.setDisplayName(displayName);
+         source.sendSuccess(() -> Component.translatable("commands.team.add.success", team.getFormattedDisplayName()), true);
+         return scoreboard.getPlayerTeams().size();
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int listMembers(final CommandSourceStack source, final PlayerTeam team) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         Collection<String> members = team.getPlayers();
+         if (members.isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.team.list.members.empty", team.getFormattedDisplayName()), false);
+@@ -461,9 +_,11 @@
+         }
+ 
+         return members.size();
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int listTeams(final CommandSourceStack source) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         Collection<PlayerTeam> teams = source.getServer().getScoreboard().getPlayerTeams();
+         if (teams.isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.team.list.teams.empty"), false);
+@@ -477,17 +_,22 @@
+         }
+ 
+         return teams.size();
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setPrefix(final CommandSourceStack source, final PlayerTeam team, final Component prefix) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         team.setPlayerPrefix(prefix);
+         source.sendSuccess(() -> Component.translatable("commands.team.option.prefix.success", prefix), false);
+         return Command.SINGLE_SUCCESS;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int setSuffix(final CommandSourceStack source, final PlayerTeam team, final Component suffix) {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         team.setPlayerSuffix(suffix);
+         source.sendSuccess(() -> Component.translatable("commands.team.option.suffix.success", suffix), false);
+         return Command.SINGLE_SUCCESS;
++        }, source); // Canvas - region threading
+     }
+ }

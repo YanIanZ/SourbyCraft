@@ -1,0 +1,134 @@
+--- a/net/minecraft/server/ServerScoreboard.java
++++ b/net/minecraft/server/ServerScoreboard.java
+@@ -26,8 +_,10 @@
+ 
+ public class ServerScoreboard extends Scoreboard {
+     private final MinecraftServer server;
+-    private final Set<Objective> trackedObjectives = Sets.newHashSet();
+-    private boolean dirty;
++    // Canvas start - region threading
++    private final Set<Objective> trackedObjectives = new java.util.concurrent.CopyOnWriteArraySet<>();
++    private final java.util.concurrent.atomic.AtomicBoolean dirty = new java.util.concurrent.atomic.AtomicBoolean(false);
++    // Canvas end - region threading
+ 
+     public ServerScoreboard(final MinecraftServer server) {
+         this.server = server;
+@@ -44,6 +_,7 @@
+     }
+ 
+     private ScoreboardSaveData.Packed store() {
++        ensureMainThread("Cannot pack display data async"); // Canvas - region threading
+         return new ScoreboardSaveData.Packed(this.packObjectives(), this.packPlayerScores(), this.packDisplaySlots(), this.packPlayerTeams());
+     }
+ 
+@@ -90,6 +_,7 @@
+ 
+     @Override
+     public void setDisplayObjective(final DisplaySlot slot, final @Nullable Objective objective) {
++        ensureMainThread("Cannot modify display objective async"); // Canvas - region threading
+         Objective old = this.getDisplayObjective(slot);
+         super.setDisplayObjective(slot, objective);
+         if (old != objective && old != null) {
+@@ -163,12 +_,14 @@
+ 
+     @Override
+     public void onObjectiveAdded(final Objective objective) {
++        ensureMainThread("Cannot add objective async"); // Canvas - region threading
+         super.onObjectiveAdded(objective);
+         this.setDirty();
+     }
+ 
+     @Override
+     public void onObjectiveChanged(final Objective objective) {
++        ensureMainThread("Cannot change objective async"); // Canvas - region threading
+         super.onObjectiveChanged(objective);
+         if (this.trackedObjectives.contains(objective)) {
+             this.broadcastAll(new ClientboundSetObjectivePacket(objective, ClientboundSetObjectivePacket.METHOD_CHANGE)); // CraftBukkit
+@@ -179,6 +_,7 @@
+ 
+     @Override
+     public void onObjectiveRemoved(final Objective objective) {
++        ensureMainThread("Cannot remove objective async"); // Canvas - region threading
+         super.onObjectiveRemoved(objective);
+         if (this.trackedObjectives.contains(objective)) {
+             this.stopTrackingObjective(objective);
+@@ -189,6 +_,10 @@
+ 
+     @Override
+     public void onTeamAdded(final PlayerTeam team) {
++        // Canvas start - region threading
++        ensureMainThread("Cannot add player team async");
++        team.registerCallback();
++        // Canvas end - region threading
+         super.onTeamAdded(team);
+         this.broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true)); // CraftBukkit
+         this.setDirty();
+@@ -196,6 +_,7 @@
+ 
+     @Override
+     public void onTeamChanged(final PlayerTeam team) {
++        team.ensureMainThread("Cannot change player team async"); // Canvas - region threading
+         super.onTeamChanged(team);
+         this.broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, false)); // CraftBukkit
+         this.updateTeamWaypoints(team);
+@@ -204,6 +_,10 @@
+ 
+     @Override
+     public void onTeamRemoved(final PlayerTeam team) {
++        // Canvas start - region threading
++        ensureMainThread("Cannot remove player team async");
++        team.unregisterCallback();
++        // Canvas end - region threading
+         super.onTeamRemoved(team);
+         this.broadcastAll(ClientboundSetPlayerTeamPacket.createRemovePacket(team)); // CraftBukkit
+         this.updateTeamWaypoints(team);
+@@ -211,12 +_,14 @@
+     }
+ 
+     protected void setDirty() {
+-        this.dirty = true;
++        this.dirty.set(true); // Canvas - region threading
+     }
+ 
+     public void storeToSaveDataIfDirty(final ScoreboardSaveData saveData) {
+-        if (this.dirty) {
+-            this.dirty = false;
++        // Canvas start - region threading
++        ensureMainThread("Cannot save display data async");
++        if (this.dirty.compareAndExchange(true, false)) {
++        // Canvas end - region threading
+             saveData.setData(this.store());
+         }
+     }
+@@ -269,6 +_,7 @@
+     }
+ 
+     public void stopTrackingObjective(final Objective objective) {
++        ensureMainThread("Cannot stop tracking objective async"); // Canvas - region threading
+         List<Packet<?>> packets = this.getStopTrackingPackets(objective);
+ 
+         for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
+@@ -293,19 +_,23 @@
+         return count;
+     }
+ 
++    // Canvas - note: only called on add/remove
+     private void updatePlayerWaypoint(final String player) {
+         ServerPlayer serverPlayer = this.server.getPlayerList().getPlayerByName(player);
+         if (serverPlayer != null) {
++            // Canvas - note: this is fine, remakeConnections schedules an update to all players
+             serverPlayer.level().getWaypointManager().remakeConnections(serverPlayer);
+         }
+     }
+ 
++    // Canvas - note: only called on team changed/remove
+     private void updateTeamWaypoints(final PlayerTeam team) {
+         for (ServerLevel level : this.server.getAllLevels()) {
+             team.getPlayers()
+                 .stream()
+                 .map(name -> this.server.getPlayerList().getPlayerByName(name))
+                 .filter(Objects::nonNull)
++                // Canvas - note: this is fine, remakeConnections schedules an update to all players
+                 .forEach(player -> level.getWaypointManager().remakeConnections(player));
+         }
+     }

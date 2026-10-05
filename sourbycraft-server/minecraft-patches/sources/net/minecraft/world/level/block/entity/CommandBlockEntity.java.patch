@@ -1,0 +1,16 @@
+--- a/net/minecraft/world/level/block/entity/CommandBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/CommandBlockEntity.java
+@@ -67,6 +_,13 @@
+             );
+         }
+ 
++        // Folia start - region threading
++        @Override
++        public void threadCheck() {
++            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel) CommandBlockEntity.this.level, CommandBlockEntity.this.worldPosition, "Asynchronous sendSystemMessage to a command block");
++        }
++
++        // Folia end - region threading
+         @Override
+         public boolean isValid() {
+             return !CommandBlockEntity.this.isRemoved();

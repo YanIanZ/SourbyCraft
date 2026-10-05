@@ -1,0 +1,67 @@
+--- a/net/minecraft/world/level/block/entity/BlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BlockEntity.java
+@@ -39,7 +_,7 @@
+ import org.slf4j.Logger;
+ 
+ public abstract class BlockEntity implements DebugValueSource, TypedInstance<BlockEntityType<?>> {
+-    static boolean ignoreBlockEntityUpdates; // Paper - Perf: Optimize Hoppers
++    static final ThreadLocal<Boolean> IGNORE_TILE_UPDATES = ThreadLocal.withInitial(() -> Boolean.FALSE); // Paper - Perf: Optimize Hoppers // Folia - region threading
+     // CraftBukkit start - data containers
+     private static final org.bukkit.craftbukkit.persistence.CraftPersistentDataTypeRegistry DATA_TYPE_REGISTRY = new org.bukkit.craftbukkit.persistence.CraftPersistentDataTypeRegistry();
+     public final org.bukkit.craftbukkit.persistence.CraftPersistentDataContainer persistentDataContainer;
+@@ -52,13 +_,21 @@
+     protected boolean remove;
+     private BlockState blockState;
+     private DataComponentMap components = DataComponentMap.EMPTY;
+-
++    public boolean canvas$isValid; // Canvas - optimize block entities
++
++    // Folia start - region threading
++    public void updateTicks(final long fromTickOffset, final long fromRedstoneTimeOffset) {
++
++    }
++
++    // Folia end - region threading
+     public BlockEntity(final BlockEntityType<?> type, final BlockPos worldPosition, final BlockState blockState) {
+         this.type = type;
+         this.worldPosition = worldPosition.immutable();
+         this.validateBlockState(blockState);
+         this.blockState = blockState;
+         this.persistentDataContainer = new org.bukkit.craftbukkit.persistence.CraftPersistentDataContainer(DATA_TYPE_REGISTRY); // Paper - always init
++        this.canvas$isValid = type.isValid(blockState); // Canvas - optimize block entities
+     }
+ 
+     private void validateBlockState(final BlockState blockState) {
+@@ -210,9 +_,14 @@
+ 
+     public void setChanged() {
+         if (this.level != null) {
+-            if (ignoreBlockEntityUpdates) return; // Paper - Perf: Optimize Hoppers
++            if (IGNORE_TILE_UPDATES.get().booleanValue()) return; // Paper - Perf: Optimize Hoppers // Folia - region threading
+             setChanged(this.level, this.worldPosition, this.blockState);
+         }
++        // Canvas start - block entity sleeping
++        if (this instanceof io.canvasmc.canvas.world.block.SleepingBlockEntity sleeping) {
++            sleeping.onChange();
++        }
++        // Canvas end - block entity sleeping
+     }
+ 
+     protected static void setChanged(final Level level, final BlockPos worldPosition, final BlockState blockState) {
+@@ -288,6 +_,7 @@
+     public void setBlockState(final BlockState blockState) {
+         this.validateBlockState(blockState);
+         this.blockState = blockState;
++        this.canvas$isValid = this.type.isValid(blockState); // Canvas - optimize block entities
+     }
+ 
+     protected void applyImplicitComponents(final DataComponentGetter components) {
+@@ -365,7 +_,7 @@
+ 
+     // CraftBukkit start - add method
+     public org.bukkit.inventory.@Nullable InventoryHolder getOwner() {
+-        return getOwner(true);
++        return getOwner(io.canvasmc.canvas.GlobalConfiguration.getInstance().tileEntitySnapshotCreation); // Canvas - don't use snapshots for acquiring blockstate
+     }
+ 
+     public org.bukkit.inventory.@Nullable InventoryHolder getOwner(boolean useSnapshot) {

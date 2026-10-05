@@ -1,0 +1,28 @@
+--- a/net/minecraft/server/commands/KillCommand.java
++++ b/net/minecraft/server/commands/KillCommand.java
+@@ -19,11 +_,21 @@
+         );
+     }
+ 
+-    private static int kill(final CommandSourceStack source, final Collection<? extends Entity> victims) {
+-        for (Entity entity : victims) {
+-            entity.kill(source.getLevel());
+-        }
++    // Canvas start - region threading
++    private static int kill(final CommandSourceStack source, final Collection<? extends Entity> victims) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._abstract(new io.canvasmc.canvas.util.CollectingList<Entity>())
++            .with(victims)
++            .executes((Entity victim) -> {
++                victim.kill(source.getLevel());
++                return (list) -> list.add(victim);
++            })
++            .onComplete((finalVictims, _, css) -> killCallback(css, finalVictims))
++            .start(source);
++        return 1;
++    }
+ 
++    private static int killCallback(final CommandSourceStack source, final io.canvasmc.canvas.util.CollectingList<? extends Entity> victims) {
++    // Canvas end - region threading
+         if (victims.size() == 1) {
+             source.sendSuccess(() -> Component.translatable("commands.kill.success.single", victims.iterator().next().getDisplayName()), true);
+         } else {

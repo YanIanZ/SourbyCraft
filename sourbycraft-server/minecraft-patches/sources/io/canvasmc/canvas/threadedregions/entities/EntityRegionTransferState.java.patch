@@ -1,0 +1,272 @@
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/entities/EntityRegionTransferState.java
+@@ -1,0 +_,269 @@
++package io.canvasmc.canvas.threadedregions.entities;
++
++import com.google.common.collect.ImmutableList;
++import io.canvasmc.canvas.util.ServerLocation;
++import io.canvasmc.canvas.util.Util;
++import io.papermc.paper.util.StackWalkerUtil;
++import java.util.List;
++import net.minecraft.server.level.ServerLevel;
++import org.bukkit.plugin.java.JavaPlugin;
++import org.jspecify.annotations.Nullable;
++
++public interface EntityRegionTransferState {
++
++    String getReason();
++
++    String getType();
++
++    List<StackTraceElement> getCallTrace();
++
++    String getExtra();
++
++    ServerLocation getOrigin();
++
++    ServerLevel getDestinationDimension();
++
++    void markFinishedRemoval();
++
++    boolean hasFinishedInitialRemoval();
++
++    abstract class AbstractTransferState implements EntityRegionTransferState {
++
++        @Nullable
++        protected final JavaPlugin firstPluginCaller;
++
++        private final String reason;
++        private final List<StackTraceElement> elements;
++
++        private volatile boolean finishedRemove;
++
++        public AbstractTransferState(final String reason) {
++            final ImmutableList.Builder<StackTraceElement> stackElements = ImmutableList.builder();
++            final StackWalker stackWalker = StackWalker.getInstance();
++
++            stackWalker.walk(frames -> {
++                // we should skip the constructor frame at least
++                frames.skip(1)
++                    .forEach(frame -> stackElements.add(frame.toStackTraceElement()));
++                return null;
++            });
++
++            this(reason, stackElements.build(), StackWalkerUtil.getFirstPluginCaller());
++        }
++
++        public AbstractTransferState(
++            final String reason,
++            final List<StackTraceElement> elements,
++            @Nullable
++            final JavaPlugin firstPluginCaller
++        ) {
++            this.reason = reason;
++            this.elements = elements;
++            this.firstPluginCaller = firstPluginCaller;
++        }
++
++        public abstract String getStateSpecificData();
++
++        @Override
++        public final String getReason() {
++            return reason;
++        }
++
++        @Override
++        public final List<StackTraceElement> getCallTrace() {
++            return elements;
++        }
++
++        @Override
++        public final String getExtra() {
++            return "{first_plugin_caller=[" + (firstPluginCaller == null ? "null" : firstPluginCaller.getName()) + "],state=[" + getStateSpecificData() + "]}";
++        }
++
++        @Override
++        public void markFinishedRemoval() {
++            this.finishedRemove = true;
++        }
++
++        @Override
++        public boolean hasFinishedInitialRemoval() {
++            return finishedRemove;
++        }
++
++        @Override
++        public String toString() {
++            final StringBuilder builder = new StringBuilder("\"" + getType() + "\":" + getExtra());
++            final List<StackTraceElement> callTrace = getCallTrace();
++
++            for (int i = 0; i < callTrace.size(); i++) {
++                if (i == 0) {
++                    builder.append("\n");
++                }
++
++                final StackTraceElement ste = callTrace.get(i);
++
++                builder.append("\t\tat ").append(ste);
++
++                if (i < callTrace.size() - 1) {
++                    builder.append("\n");
++                }
++            }
++
++            return builder.toString();
++        }
++    }
++
++    /**
++     * Set by the
++     * {@link org.bukkit.craftbukkit.entity.CraftEntity#teleportAsync(org.bukkit.Location,
++     * org.bukkit.event.player.PlayerTeleportEvent.TeleportCause, io.papermc.paper.entity.TeleportFlag...)} function
++     * <b>ONLY</b>
++     */
++    final class PluginTeleportAsyncState extends AbstractTransferState {
++
++        private final ServerLocation origin;
++        private final ServerLocation target;
++
++        // note: we don't need to construct a plugin ref, already done in super
++        public PluginTeleportAsyncState(
++            final String reason, final ServerLocation origin, final ServerLocation target
++        ) {
++            super(reason);
++
++            this.origin = origin;
++            this.target = target;
++        }
++
++        @Override
++        public String getStateSpecificData() {
++            return "origin=" + origin + ",target=" + target;
++        }
++
++        @Override
++        public String getType() {
++            return "api_teleport_call";
++        }
++
++        @Override
++        public ServerLocation getOrigin() {
++            return origin;
++        }
++
++        @Override
++        public ServerLevel getDestinationDimension() {
++            return target.level();
++        }
++    }
++
++    /**
++     * A generic teleport via
++     * {@link net.minecraft.world.entity.Entity#teleportAsync(net.minecraft.server.level.ServerLevel,
++     * net.minecraft.world.phys.Vec3, Float, Float, net.minecraft.world.phys.Vec3,
++     * org.bukkit.event.player.PlayerTeleportEvent.TeleportCause, long, java.util.function.Consumer, boolean)}
++     */
++    final class GenericTeleportTransferState extends AbstractTransferState {
++
++        private final ServerLocation origin;
++        private final ServerLocation target;
++
++        public GenericTeleportTransferState(
++            final String reason, final ServerLocation origin, final ServerLocation target
++        ) {
++            super(reason);
++            this.origin = origin;
++            this.target = target;
++        }
++
++        @Override
++        public String getStateSpecificData() {
++            return "origin=" + origin + ",target=" + target;
++        }
++
++        @Override
++        public String getType() {
++            return "generic_teleport";
++        }
++
++        @Override
++        public ServerLocation getOrigin() {
++            return origin;
++        }
++
++        @Override
++        public ServerLevel getDestinationDimension() {
++            return target.level();
++        }
++    }
++
++    /**
++     * For when the entity is still portaling but has now found a placement location
++     */
++    final class PortalFinishTransferState extends AbstractTransferState {
++
++        private final PortalStartTransferState firstState;
++        private final ServerLocation newTarget;
++
++        public PortalFinishTransferState(final PortalStartTransferState firstState, final ServerLocation newTarget) {
++            super(firstState.getReason(), firstState.getCallTrace(), firstState.firstPluginCaller);
++            this.firstState = firstState;
++            this.newTarget = newTarget;
++        }
++
++        @Override
++        public String getStateSpecificData() {
++            return "origin=" + firstState.origin + ",portaling_to=" + newTarget;
++        }
++
++        @Override
++        public String getType() {
++            return "portal_finish";
++        }
++
++        @Override
++        public ServerLocation getOrigin() {
++            return firstState.origin;
++        }
++
++        @Override
++        public ServerLevel getDestinationDimension() {
++            return newTarget.level();
++        }
++    }
++
++    /**
++     * For when the entity has started portaling but hasn't found a target location yet
++     */
++    final class PortalStartTransferState extends AbstractTransferState {
++
++        private final ServerLocation origin;
++        private final ServerLevel destination;
++
++        public PortalStartTransferState(
++            final String reason, final ServerLocation origin, final ServerLevel destination
++        ) {
++            super(reason);
++
++            this.origin = origin;
++            this.destination = destination;
++        }
++
++        @Override
++        public String getStateSpecificData() {
++            return "origin=" + origin + ",portaling_to=" + Util.getLevelName(destination);
++        }
++
++        @Override
++        public String getType() {
++            return "portal_start";
++        }
++
++        @Override
++        public ServerLocation getOrigin() {
++            return origin;
++        }
++
++        @Override
++        public ServerLevel getDestinationDimension() {
++            return destination;
++        }
++    }
++}

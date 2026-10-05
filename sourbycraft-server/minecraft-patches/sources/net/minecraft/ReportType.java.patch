@@ -1,0 +1,17 @@
+--- a/net/minecraft/ReportType.java
++++ b/net/minecraft/ReportType.java
+@@ -135,6 +_,14 @@
+         builder.append("// ");
+         builder.append(this.getErrorComment());
+         builder.append('\n');
++        // Canvas start - Rebrand
++        builder.append("---- ");
++        builder.append("DO NOT REPORT TO PAPER/FOLIA, REPORT TO ");
++        // use brand name so forks don't need to patch everywhere for this
++        builder.append(io.papermc.paper.ServerBuildInfo.buildInfo().brandName().toUpperCase());
++        builder.append(" INSTEAD");
++        builder.append(" ----\n");
++        // Canvas end - Rebrand
+ 
+         for (String extraComment : extraComments) {
+             builder.append("// ");

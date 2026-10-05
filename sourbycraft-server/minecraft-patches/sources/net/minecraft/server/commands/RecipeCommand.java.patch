@@ -1,0 +1,60 @@
+--- a/net/minecraft/server/commands/RecipeCommand.java
++++ b/net/minecraft/server/commands/RecipeCommand.java
+@@ -78,12 +_,22 @@
+     }
+ 
+     private static int giveRecipes(final CommandSourceStack source, final Collection<ServerPlayer> players, final Collection<RecipeHolder<?>> recipes) throws CommandSyntaxException {
+-        int success = 0;
+-
+-        for (ServerPlayer player : players) {
+-            success += player.awardRecipes(recipes);
+-        }
+-
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++            .with(players)
++            .executes((ServerPlayer entityPlayer) -> {
++                int addedRecipes = entityPlayer.awardRecipes(recipes);
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.addInt(addedRecipes);
++            })
++            .onComplete((success, selected, css) -> giveCallback(success, css, selected, recipes))
++            .start(source);
++        return 1;
++    }
++
++    private static int giveCallback(
++        final int success, final CommandSourceStack source, final Collection<? extends ServerPlayer> players, final Collection<RecipeHolder<?>> recipes
++    ) throws CommandSyntaxException {
++    // Canvas end - region threading
+         if (success == 0) {
+             throw ERROR_GIVE_FAILED.create();
+         }
+@@ -100,12 +_,22 @@
+     }
+ 
+     private static int takeRecipes(final CommandSourceStack source, final Collection<ServerPlayer> players, final Collection<RecipeHolder<?>> recipes) throws CommandSyntaxException {
+-        int success = 0;
+-
+-        for (ServerPlayer player : players) {
+-            success += player.resetRecipes(recipes);
+-        }
+-
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++            .with(players)
++            .executes((ServerPlayer entityPlayer) -> {
++                int removedRecipes = entityPlayer.resetRecipes(recipes);
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.addInt(removedRecipes);
++            })
++            .onComplete((success, selected, css) -> takeCallback(success, css, selected, recipes))
++            .start(source);
++        return 1;
++    }
++
++    private static int takeCallback(
++        final int success, final CommandSourceStack source, final Collection<? extends ServerPlayer> players, final Collection<RecipeHolder<?>> recipes
++    ) throws CommandSyntaxException {
++    // Canvas end - region threading
+         if (success == 0) {
+             throw ERROR_TAKE_FAILED.create();
+         }

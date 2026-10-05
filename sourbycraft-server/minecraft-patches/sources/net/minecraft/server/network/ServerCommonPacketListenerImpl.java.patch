@@ -1,0 +1,195 @@
+--- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+@@ -26,7 +_,6 @@
+ import net.minecraft.server.players.NameAndId;
+ import net.minecraft.util.Util;
+ import net.minecraft.util.VisibleForDebug;
+-import net.minecraft.util.profiling.Profiler;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -40,10 +_,11 @@
+     public final Connection connection; // Paper
+     private final boolean transferred;
+     //private long keepAliveTime; // Paper - improve keepalives
+-    //private boolean keepAlivePending; // Paper - improve keepalives
++    private boolean keepAlivePending; // Paper - improve keepalives // Purpur - Alternative Keepalive Handling
+     //private long keepAliveChallenge; // Paper - improve keepalives
+     private long closedListenerTime;
+     private boolean closed = false;
++    private it.unimi.dsi.fastutil.longs.LongList keepAlives = new it.unimi.dsi.fastutil.longs.LongArrayList(); // Purpur - Alternative Keepalive Handling
+     private volatile int latency; // Paper - improve keepalives - make volatile
+     private final io.papermc.paper.util.KeepAlive keepAlive; // Paper - improve keepalives
+     public volatile boolean suspendFlushingOnServerThread = false;
+@@ -104,6 +_,18 @@
+         // Paper start - improve keepalives
+         long now = System.nanoTime();
+         io.papermc.paper.util.KeepAlive.PendingKeepAlive pending = this.keepAlive.pendingKeepAlives.peek();
++        // Purpur start - Alternative Keepalive Handling
++        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.purpurAlternativeKeepalive) {
++            if (this.keepAlivePending && !keepAlives.isEmpty() && keepAlives.contains(packet.getId())) {
++                int ping = (int) (Util.getMillis() - packet.getId());
++                int updatedLatency = (this.latency * 3 + ping) / 4;
++                this.latency = updatedLatency;
++                this.keepAlivePending = false;
++                keepAlives.clear(); // we got a valid response, lets roll with it and forget the rest
++            }
++            return;
++        } else
++        // Purpur end - Alternative Keepalive Handling
+         if (pending != null && pending.challengeId() == packet.getId()) {
+             this.keepAlive.pendingKeepAlives.remove(pending);
+ 
+@@ -254,9 +_,25 @@
+     }
+ 
+     protected void keepConnectionAlive() {
+-        Profiler.get().push("keepAlive");
+         long now = Util.getMillis();
+         // Paper start - improve keepalives
++        // Purpur start - Alternative Keepalive Handling
++        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.purpurAlternativeKeepalive) {
++            if (this.checkIfClosed(now)) {
++                long currTime = System.nanoTime();
++                if ((currTime - this.keepAlive.lastKeepAliveTx) >= java.util.concurrent.TimeUnit.SECONDS.toNanos(1L)) { // 1 second
++                    this.keepAlive.lastKeepAliveTx = currTime;
++                    if (this.keepAlivePending && keepAlives.size() * 1000L >= KEEPALIVE_LIMIT) {
++                        this.disconnect(TIMEOUT_DISCONNECTION_MESSAGE, io.papermc.paper.connection.DisconnectionReason.TIMEOUT);
++                    } else if (this.checkIfClosed(now)) {
++                        this.keepAlivePending = true;
++                        this.keepAlives.add(now); // currentTime is ID
++                        this.send(new ClientboundKeepAlivePacket(now));
++                    }
++                }
++            }
++        } else
++        // Purpur end - Alternative Keepalive Handling
+         if (this.checkIfClosed(now)) {
+             long currTime = System.nanoTime();
+ 
+@@ -275,8 +_,6 @@
+                 // Paper end - improve keepalives
+             }
+         }
+-
+-        Profiler.get().pop();
+     }
+ 
+     private boolean checkIfClosed(final long now) {
+@@ -295,16 +_,62 @@
+         this.suspendFlushingOnServerThread = true;
+     }
+ 
++    // Canvas start - optimize flush calls with region threading
++    private int lastSentNonFlushPacketCount = 0;
++    private int sentNonFlushPacketCount = 0;
++
+     public void resumeFlushing() {
+         this.suspendFlushingOnServerThread = false;
+-        this.connection.flushChannel();
++        // this helps reduce flush calls when we have nothing to flush
++        if (lastSentNonFlushPacketCount != sentNonFlushPacketCount) {
++            connection.flushChannel();
++            lastSentNonFlushPacketCount = sentNonFlushPacketCount;
++        }
+     }
+-
+-    public void send(final Packet<?> packet) {
++    // Canvas end - optimize flush calls with region threading
++
++    public void send(Packet<?> packet) { // Canvas - mutable method param
++        // Canvas start - no chat reports
++        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().chat.disableChatReporting) {
++            Object self = this;
++            boolean cancel = false;
++
++            if (self instanceof ServerGamePacketListenerImpl listener
++                && packet instanceof net.minecraft.network.protocol.game.ClientboundPlayerChatPacket chat) {
++                packet = new net.minecraft.network.protocol.game.ClientboundSystemChatPacket(chat.chatType().decorate(
++                    chat.unsignedContent() != null ? chat.unsignedContent()
++                        : Component.literal(chat.body().content())
++                ), false);
++
++                cancel = true;
++                listener.send(packet);
++            }
++
++            if (cancel) {
++                return;
++            }
++        }
++        // Canvas end - no chat reports
+         this.send(packet, null);
+     }
+ 
+     public void send(final Packet<?> packet, final @Nullable ChannelFutureListener listener) {
++        // Canvas start - no chat reports
++        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().chat.disableChatReporting) {
++            Object self = this;
++            boolean cancel = false;
++
++            if (self instanceof ServerGamePacketListenerImpl listenerImpl
++                && packet instanceof net.minecraft.network.protocol.game.ClientboundPlayerChatPacket chat && listener != null) {
++                cancel = true;
++                listenerImpl.send(chat);
++            }
++
++            if (cancel) {
++                return;
++            }
++        }
++        // Canvas end - no chat reports
+         // CraftBukkit start
+         if (packet == null) {
+             return;
+@@ -316,7 +_,11 @@
+             this.close();
+         }
+ 
+-        boolean flush = !this.suspendFlushingOnServerThread || !this.server.isSameThread();
++        // Canvas start - region threading
++        boolean flush = !this.suspendFlushingOnServerThread ||
++            !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(connection.getPlayer());
++        if (!flush) sentNonFlushPacketCount++;
++        // Canvas end - region threading
+ 
+         try {
+             this.connection.send(packet, listener, flush);
+@@ -344,24 +_,19 @@
+         if (!this.connection.isConnected()) {
+             return;
+         }
+-        if (!this.cserver.isPrimaryThread()) {
+-            org.bukkit.craftbukkit.util.Waitable waitable = new org.bukkit.craftbukkit.util.Waitable() {
+-                @Override
+-                protected @Nullable Object evaluate() {
+-                    ServerCommonPacketListenerImpl.this.disconnect(details);
+-                    return null;
+-                }
+-            };
+-
+-            this.server.processQueue.add(waitable);
+-
+-            try {
+-                waitable.get();
+-            } catch (InterruptedException e) {
+-                Thread.currentThread().interrupt();
+-            } catch (java.util.concurrent.ExecutionException e) {
+-                throw new RuntimeException(e);
+-            }
++        // Folia start - region threading
++        boolean onMain;
++        if (this instanceof ServerGamePacketListenerImpl serverGamePacketListener) {
++            onMain = ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverGamePacketListener.player);
++        } else if (this instanceof ServerConfigurationPacketListenerImpl configurationPacketListener) {
++            net.minecraft.server.level.ServerPlayer player = configurationPacketListener.switchToMain;
++            onMain = player == null ? io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread() : ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player);
++        } else {
++            onMain = io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread();
++        }
++        if (!onMain) {
++            this.connection.disconnectSafely(details); // it HAS to be delayed/async to avoid deadlock if we try to wait for another region
++        // Folia end - region threading
+             return;
+         }
+ 

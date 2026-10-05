@@ -1,0 +1,26 @@
+--- a/net/minecraft/server/commands/ParticleCommand.java
++++ b/net/minecraft/server/commands/ParticleCommand.java
+@@ -149,9 +_,16 @@
+         final boolean force,
+         final Collection<ServerPlayer> players
+     ) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPos(() -> { // Canvas - region threading
+         int result = 0;
+ 
+         for (ServerPlayer player : players) {
++            // Canvas start - region threading
++            // if they aren't in the same region they can't see it anyway
++            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player)) {
++                continue;
++            }
++            // Canvas end - region threading
+             if (source.getLevel().sendParticles(player, particle, force, false, pos.x, pos.y, pos.z, count, delta.x, delta.y, delta.z, speed)) {
+                 result++;
+             }
+@@ -165,5 +_,6 @@
+             () -> Component.translatable("commands.particle.success", BuiltInRegistries.PARTICLE_TYPE.getKey(particle.getType()).toString()), true
+         );
+         return result;
++        }, pos, source.getLevel(), source); // Canvas - region threading
+     }
+ }

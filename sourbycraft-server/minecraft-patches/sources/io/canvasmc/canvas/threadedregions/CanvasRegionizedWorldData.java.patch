@@ -1,0 +1,105 @@
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/CanvasRegionizedWorldData.java
+@@ -1,0 +_,102 @@
++package io.canvasmc.canvas.threadedregions;
++
++import io.canvasmc.canvas.GlobalConfiguration;
++import io.canvasmc.canvas.region.RegionTickData;
++import io.canvasmc.canvas.world.RegionResourceBar;
++import io.canvasmc.canvas.world.RegionizedRamBar;
++import io.canvasmc.canvas.world.RegionizedTpsBar;
++import io.canvasmc.canvas.world.chunk.NatureSpawnChunkMap;
++import io.papermc.paper.threadedregions.RegionizedWorldData;
++import io.papermc.paper.threadedregions.ThreadedRegionizer;
++import io.papermc.paper.threadedregions.TickRegionScheduler;
++import io.papermc.paper.threadedregions.TickRegions;
++import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
++import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
++import it.unimi.dsi.fastutil.longs.LongSet;
++import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.util.RandomSource;
++import net.minecraft.world.level.material.FlowingFluid;
++import org.bukkit.craftbukkit.CraftWorld;
++import org.jspecify.annotations.NullMarked;
++import org.jspecify.annotations.Nullable;
++
++@SuppressWarnings("unused")
++public class CanvasRegionizedWorldData {
++    private static final RegionTickData.IRegionizedData<CanvasRegionizedWorldData> CANVAS_REGION_DATA = TickRegions.TickRegionData.createRegionizedDataApiHandle(
++        (regionTickData, world) -> new CanvasRegionizedWorldData((TickRegions.TickRegionData) regionTickData, ((CraftWorld) world).getHandle()),
++        new RegionTickData.IRegionizedData.IRegionizedCallback<>() {
++            @Override
++            public void merge(
++                final CanvasRegionizedWorldData from,
++                final CanvasRegionizedWorldData into,
++                final long fromTickOffset
++            ) {
++                // no-op currently
++            }
++
++            @Override
++            public void split(
++                final CanvasRegionizedWorldData from,
++                final int chunkToRegionShift,
++                final Long2ReferenceOpenHashMap<CanvasRegionizedWorldData> regionToData,
++                final ReferenceOpenHashSet<CanvasRegionizedWorldData> dataSet
++            ) {
++                // no-op currently
++            }
++        }
++    );
++
++    private final TickRegions.TickRegionData regionData;
++    private final ServerLevel level;
++    private final RegionizedWorldData worldData;
++
++    // natural spawn chunk optimizations from Leaf
++    public final NatureSpawnChunkMap natureSpawnChunkMap = new NatureSpawnChunkMap();
++    public final RandomSource simpleUnsafeLocalRandom = GlobalConfiguration.createFastRandom();
++
++    // tpsbar and rambar
++    public final RegionResourceBar tpsbar;
++    public final RegionResourceBar rambar;
++
++    // this is transient, from Leaf optimized flowing fluids
++    public LongSet slopeDistanceCacheVisited = new LongOpenHashSet(512);
++    public FlowingFluid.SlopeDistanceNodeDeque slopeDistanceCacheQueue = new FlowingFluid.SlopeDistanceNodeDeque();
++
++    public long projectilesLoadedTick = 0;
++    public long projectilesLoadedThisTick = 0;
++
++    private CanvasRegionizedWorldData(final TickRegions.TickRegionData regionData, final ServerLevel level) {
++        this.regionData = regionData;
++        this.level = level;
++
++        final RegionizedWorldData worldData = TickRegionScheduler.getCurrentRegionizedWorldData();
++
++        this.tpsbar = new RegionizedTpsBar();
++        this.rambar = new RegionizedRamBar();
++
++        this.worldData = worldData;
++    }
++
++    @Nullable
++    public static CanvasRegionizedWorldData getCurrentWorldData() {
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
++            region = TickRegionScheduler.getCurrentRegion();
++        if (region == null) {
++            return null;
++        }
++        return region.getData().getOrCreateFromIRegionizedData(CANVAS_REGION_DATA);
++    }
++
++    public ServerLevel getLevel() {
++        return level;
++    }
++
++    public RegionizedWorldData getFoliaWorldData() {
++        return worldData;
++    }
++
++    public TickRegions.TickRegionData getRegionData() {
++        return regionData;
++    }
++}

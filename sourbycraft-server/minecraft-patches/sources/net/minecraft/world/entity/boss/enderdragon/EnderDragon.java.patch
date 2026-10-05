@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
++++ b/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
+@@ -293,20 +_,36 @@
+                 this.tickPart(this.wing1, cc1 * 4.5F, 2.0, ss1 * 4.5F);
+                 this.tickPart(this.wing2, cc1 * -4.5F, 2.0, ss1 * -4.5F);
+                 if (this.level() instanceof ServerLevel serverLevel && this.hurtTime == 0) {
+-                    this.knockBack(
+-                        serverLevel,
+-                        serverLevel.getEntities(
+-                            this, this.wing1.getBoundingBox().inflate(4.0, 2.0, 4.0).move(0.0, -2.0, 0.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR
+-                        )
+-                    );
+-                    this.knockBack(
+-                        serverLevel,
+-                        serverLevel.getEntities(
+-                            this, this.wing2.getBoundingBox().inflate(4.0, 2.0, 4.0).move(0.0, -2.0, 0.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR
+-                        )
+-                    );
+-                    this.hurt(serverLevel, serverLevel.getEntities(this, this.head.getBoundingBox().inflate(1.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR));
+-                    this.hurt(serverLevel, serverLevel.getEntities(this, this.neck.getBoundingBox().inflate(1.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR));
++                    // Canvas start - region threading
++                    final AABB wing1AABB = this.wing1.getBoundingBox()
++                        .inflate(4.0, 2.0, 4.0)
++                        .move(0.0, -2.0, 0.0);
++                    final net.minecraft.world.phys.AABB wing2AABB = this.wing2.getBoundingBox()
++                        .inflate(4.0, 2.0, 4.0)
++                        .move(0.0, -2.0, 0.0);
++                    final net.minecraft.world.phys.AABB neckAABB = this.neck.getBoundingBox().inflate(1.0);
++                    final net.minecraft.world.phys.AABB headAABB = this.head.getBoundingBox().inflate(1.0);
++                    if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, wing1AABB)) this.knockBack(
++                    // Canvas end - region threading
++                        serverLevel,
++                        serverLevel.getEntities(
++                            this, wing1AABB, EntitySelector.NO_CREATIVE_OR_SPECTATOR // Canvas - region threading
++                        )
++                    );
++                    if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, wing2AABB)) this.knockBack( // Canvas - region threading
++                        serverLevel,
++                        serverLevel.getEntities(
++                            this, wing2AABB, EntitySelector.NO_CREATIVE_OR_SPECTATOR // Canvas - region threading
++                        )
++                    );
++                    // Canvas start - region threading
++                    if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, headAABB)) {
++                        this.hurt(serverLevel, serverLevel.getEntities(this, headAABB, EntitySelector.NO_CREATIVE_OR_SPECTATOR));
++                    }
++                    if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, neckAABB)) {
++                        this.hurt(serverLevel, serverLevel.getEntities(this, neckAABB, EntitySelector.NO_CREATIVE_OR_SPECTATOR));
++                    }
++                    // Canvas end - region threading
+                 }
+ 
+                 float ss2 = Mth.sin(this.getYRot() * Mth.DEG_TO_RAD - this.yRotA * 0.01F);

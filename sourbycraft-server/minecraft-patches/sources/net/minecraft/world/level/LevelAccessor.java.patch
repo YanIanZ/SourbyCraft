@@ -1,0 +1,31 @@
+--- a/net/minecraft/world/level/LevelAccessor.java
++++ b/net/minecraft/world/level/LevelAccessor.java
+@@ -26,19 +_,25 @@
+ public interface LevelAccessor extends CommonLevelAccessor, ScheduledTickAccess {
+     long nextSubTickCount();
+ 
++    // Folia start - region threading
++    default long getRedstoneGameTime() {
++        return this.getLevelData().getGameTime();
++    }
++
++    // Folia end - region threading
+     @Override
+     default <T> ScheduledTick<T> createTick(final BlockPos pos, final T type, final int tickDelay, final TickPriority priority) {
+-        return new ScheduledTick<>(type, pos, this.getGameTime() + tickDelay, priority, this.nextSubTickCount());
++        return new ScheduledTick<>(type, pos, this.getRedstoneGameTime() + tickDelay, priority, this.nextSubTickCount()); // Folia - region threading
+     }
+ 
+     @Override
+     default <T> ScheduledTick<T> createTick(final BlockPos pos, final T type, final int tickDelay) {
+-        return new ScheduledTick<>(type, pos, this.getGameTime() + tickDelay, this.nextSubTickCount());
++        return new ScheduledTick<>(type, pos, this.getRedstoneGameTime() + tickDelay, this.nextSubTickCount()); // Folia - region threading
+     }
+ 
+     LevelData getLevelData();
+ 
+-    default long getGameTime() {
++    default long getGameTime() { // Folia - region threading - make sure this is present
+         return this.getLevelData().getGameTime();
+     }
+ 

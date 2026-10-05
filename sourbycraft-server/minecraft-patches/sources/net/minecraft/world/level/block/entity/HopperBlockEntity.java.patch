@@ -1,0 +1,280 @@
+--- a/net/minecraft/world/level/block/entity/HopperBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/HopperBlockEntity.java
+@@ -36,7 +_,7 @@
+     private static final Component DEFAULT_NAME = Component.translatable("container.hopper");
+     private NonNullList<ItemStack> items = NonNullList.withSize(5, ItemStack.EMPTY);
+     public int cooldownTime = -1;
+-    private long tickedGameTime;
++    private long tickedGameTime = Long.MIN_VALUE; // Folia - region threading
+     private Direction facing;
+ 
+     // CraftBukkit start - add fields and methods
+@@ -73,6 +_,16 @@
+     }
+     // CraftBukkit end
+ 
++    // Folia start - region threading
++    @Override
++    public void updateTicks(final long fromTickOffset, final long fromRedstoneTimeOffset) {
++        super.updateTicks(fromTickOffset, fromRedstoneTimeOffset);
++        if (this.tickedGameTime != Long.MIN_VALUE) {
++            this.tickedGameTime += fromRedstoneTimeOffset;
++        }
++    }
++
++    // Folia end - region threading
+     public HopperBlockEntity(final BlockPos worldPosition, final BlockState blockState) {
+         super(BlockEntityTypes.HOPPER, worldPosition, blockState);
+         this.facing = blockState.getValue(HopperBlock.FACING);
+@@ -85,6 +_,7 @@
+         if (!this.tryLoadLootTable(input)) {
+             ContainerHelper.loadAllItems(input, this.items);
+         }
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
+ 
+         this.cooldownTime = input.getIntOr("TransferCooldown", -1);
+     }
+@@ -107,7 +_,11 @@
+     @Override
+     public ItemStack removeItem(final int slot, final int count) {
+         this.unpackLootTable(null);
+-        return ContainerHelper.removeItem(this.getItems(), slot, count);
++        // Canvas start - optimize hoppers
++        ItemStack retVal = ContainerHelper.removeItem(this.getItems(), slot, count);
++        canvas$recomputeFullState(this);
++        return retVal;
++        // Canvas end - optimize hoppers
+     }
+ 
+     @Override
+@@ -115,13 +_,24 @@
+         this.unpackLootTable(null);
+         this.getItems().set(slot, itemStack);
+         itemStack.limitSize(this.getMaxStackSize(itemStack));
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
+     }
+ 
+     @Override
+     public void setBlockState(final BlockState blockState) {
+         super.setBlockState(blockState);
+         this.facing = blockState.getValue(HopperBlock.FACING);
+-    }
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
++        // Canvas - TODO - optimize hoppers - cache is locked and run tick skip system through here?
++    }
++    // Canvas start - optimize hoppers
++
++    @Override
++    public void clearContent() {
++        super.clearContent();
++        canvas$recomputeFullState(this);
++    }
++    // Canvas end - optimize hoppers
+ 
+     @Override
+     protected Component getDefaultName() {
+@@ -130,7 +_,7 @@
+ 
+     public static void pushItemsTick(final Level level, final BlockPos pos, final BlockState state, final HopperBlockEntity entity) {
+         entity.cooldownTime--;
+-        entity.tickedGameTime = level.getGameTime();
++        entity.tickedGameTime = level.getRedstoneGameTime(); // Folia - region threading
+         if (!entity.isOnCooldown()) {
+             entity.setCooldown(0);
+             // Spigot start
+@@ -146,8 +_,17 @@
+     private static final int HOPPER_EMPTY = 0;
+     private static final int HOPPER_HAS_ITEMS = 1;
+     private static final int HOPPER_IS_FULL = 2;
+-
+-    private static int getFullState(final HopperBlockEntity hopper) {
++    // Canvas start - optimize hoppers
++    private int fullState = -1;
++
++    @Override
++    public void setChanged() {
++        super.setChanged();
++        canvas$recomputeFullState(this);
++    }
++
++    private static void canvas$recomputeFullState(final HopperBlockEntity hopper) {
++    // Canvas end - optimize hoppers
+         hopper.unpackLootTable(null);
+ 
+         final List<ItemStack> hopperItems = hopper.items;
+@@ -164,18 +_,20 @@
+ 
+             if (!full) {
+                 // can't be full
+-                return HOPPER_HAS_ITEMS;
++                hopper.fullState = HOPPER_HAS_ITEMS; // Canvas - optimize hoppers
++                return; // Canvas - optimize hoppers
+             }
+ 
+             empty = false;
+ 
+             if (stack.getCount() != stack.getMaxStackSize()) {
+                 // can't be full or empty
+-                return HOPPER_HAS_ITEMS;
++                hopper.fullState = HOPPER_HAS_ITEMS; // Canvas - optimize hoppers
++                return; // Canvas - optimize hoppers
+             }
+         }
+ 
+-        return empty ? HOPPER_EMPTY : (full ? HOPPER_IS_FULL : HOPPER_HAS_ITEMS);
++        hopper.fullState = empty ? HOPPER_EMPTY : (full ? HOPPER_IS_FULL : HOPPER_HAS_ITEMS); // Canvas - optimize hoppers
+     }
+     // Paper end - Perf: Optimize Hoppers
+ 
+@@ -188,7 +_,8 @@
+ 
+         if (!entity.isOnCooldown() && state.getValue(HopperBlock.ENABLED)) {
+             boolean changed = false;
+-            final int fullState = getFullState(entity); // Paper - Perf: Optimize Hoppers
++            if (entity.fullState == -1) canvas$recomputeFullState(entity); // Canvas - optimize hoppers
++            final int fullState = entity.fullState; // Paper - Perf: Optimize Hoppers // Canvas - optimize hoppers
+             if (fullState != HOPPER_EMPTY) { // Paper - Perf: Optimize Hoppers
+                 changed = ejectItems(level, pos, entity);
+             }
+@@ -218,12 +_,13 @@
+     }
+ 
+     // Paper start - Perf: Optimize Hoppers
+-    public static boolean skipHopperEvents;
+-    private static boolean skipPullModeEventFire;
+-    private static boolean skipPushModeEventFire;
++    // Folia - region threading - moved to regionized data
+ 
+     private static boolean hopperPush(final Level level, final Container destination, final Direction direction, final HopperBlockEntity hopper) {
+-        skipPushModeEventFire = skipHopperEvents;
++        // Folia start - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = level.getCurrentWorldData();
++        worldData.skipPushModeEventFire = worldData.skipHopperEvents;
++        // Folia end - region threading
+         boolean foundItem = false;
+         for (int i = 0; i < hopper.getContainerSize(); ++i) {
+             final ItemStack item = hopper.getItem(i);
+@@ -238,7 +_,7 @@
+ 
+                 // We only need to fire the event once to give protection plugins a chance to cancel this event
+                 // Because nothing uses getItem, every event call should end up the same result.
+-                if (!skipPushModeEventFire) {
++                if (!worldData.skipPushModeEventFire) { // Folia - region threading
+                     movedItem = callPushMoveEvent(destination, movedItem, hopper);
+                     if (movedItem == null) { // cancelled
+                         origItemStack.setCount(originalItemCount);
+@@ -268,13 +_,14 @@
+     }
+ 
+     private static boolean hopperPull(final Level level, final Hopper hopper, final Container container, ItemStack origItemStack, final int i) {
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = level.getCurrentWorldData(); // Folia - region threading
+         ItemStack movedItem = origItemStack;
+         final int originalItemCount = origItemStack.getCount();
+         final int movedItemCount = Math.min(level.spigotConfig.hopperAmount, originalItemCount);
+         container.setChanged(); // original logic always marks source inv as changed even if no move happens.
+         movedItem.setCount(movedItemCount);
+ 
+-        if (!skipPullModeEventFire) {
++        if (!worldData.skipPullModeEventFire) { // Folia - region threading
+             movedItem = callPullMoveEvent(hopper, container, movedItem);
+             if (movedItem == null) { // cancelled
+                 origItemStack.setCount(originalItemCount);
+@@ -294,9 +_,9 @@
+                 origItemStack.setCount(originalItemCount - movedItemCount + remainingItemCount);
+             }
+ 
+-            ignoreBlockEntityUpdates = true;
++            IGNORE_TILE_UPDATES.set(true); // Folia - region threading
+             container.setItem(i, origItemStack);
+-            ignoreBlockEntityUpdates = false;
++            IGNORE_TILE_UPDATES.set(false); // Folia - region threading
+             container.setChanged();
+             return true;
+         }
+@@ -311,6 +_,7 @@
+ 
+     @Nullable
+     private static ItemStack callPushMoveEvent(Container destination, ItemStack itemStack, HopperBlockEntity hopper) {
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData(); // Folia - region threading
+         final org.bukkit.inventory.Inventory destinationInventory = getInventory(destination);
+         final io.papermc.paper.event.inventory.PaperInventoryMoveItemEvent event = new io.papermc.paper.event.inventory.PaperInventoryMoveItemEvent(
+             hopper.getOwner(false).getInventory(),
+@@ -320,7 +_,7 @@
+         );
+         final boolean result = event.callEvent();
+         if (!event.calledGetItem && !event.calledSetItem) {
+-            skipPushModeEventFire = true;
++            worldData.skipPushModeEventFire = true; // Folia - region threading
+         }
+         if (!result) {
+             applyCooldown(hopper);
+@@ -336,6 +_,7 @@
+ 
+     @Nullable
+     private static ItemStack callPullMoveEvent(final Hopper hopper, final Container container, final ItemStack itemstack) {
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData(); // Folia - region threading
+         final org.bukkit.inventory.Inventory sourceInventory = getInventory(container);
+         final org.bukkit.inventory.Inventory destination = getInventory(hopper);
+ 
+@@ -343,7 +_,7 @@
+         final io.papermc.paper.event.inventory.PaperInventoryMoveItemEvent event = new io.papermc.paper.event.inventory.PaperInventoryMoveItemEvent(sourceInventory, org.bukkit.craftbukkit.inventory.CraftItemStack.asCraftMirror(itemstack), destination, false);
+         final boolean result = event.callEvent();
+         if (!event.calledGetItem && !event.calledSetItem) {
+-            skipPullModeEventFire = true;
++            worldData.skipPullModeEventFire = true; // Folia - region threading
+         }
+         if (!result) {
+             applyCooldown(hopper);
+@@ -476,12 +_,13 @@
+     }
+ 
+     public static boolean suckInItems(final Level level, final Hopper hopper) {
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData(); // Folia - region threading
+         BlockPos blockPos = BlockPos.containing(hopper.getLevelX(), hopper.getLevelY() + 1.0, hopper.getLevelZ());
+         BlockState blockState = level.getBlockState(blockPos);
+         Container container = getSourceContainer(level, hopper, blockPos, blockState);
+         if (container != null) {
+             Direction direction = Direction.DOWN;
+-            skipPullModeEventFire = skipHopperEvents; // Paper - Perf: Optimize Hoppers
++            worldData.skipPullModeEventFire = worldData.skipHopperEvents; // Paper - Perf: Optimize Hoppers // Folia - region threading
+ 
+             for (int slot : getSlots(container, direction)) {
+                 if (tryTakeInItemFromSlot(hopper, container, slot, direction, level)) { // Spigot
+@@ -585,9 +_,9 @@
+                     itemStack = itemStack.split(container.getMaxStackSize());
+                 }
+                 // Spigot end
+-                ignoreBlockEntityUpdates = true; // Paper - Perf: Optimize Hoppers
++                IGNORE_TILE_UPDATES.set(Boolean.TRUE); // Paper - Perf: Optimize Hoppers // Folia - region threading
+                 container.setItem(slot, itemStack);
+-                ignoreBlockEntityUpdates = false; // Paper - Perf: Optimize Hoppers
++                IGNORE_TILE_UPDATES.set(Boolean.FALSE); // Paper - Perf: Optimize Hoppers // Folia - region threading
+                 itemStack = leftover; // Paper - Make hoppers respect inventory max stack size
+                 success = true;
+             } else if (canMergeItems(current, itemStack)) {
+@@ -687,7 +_,7 @@
+         final boolean optimizeEntities
+     ) {
+         // Paper end - Perf: Optimize Hoppers
+-        Container result = getBlockContainer(level, pos, state);
++        Container result = state.hasBlockEntity() || state.getBlock() instanceof WorldlyContainerHolder ? getBlockContainer(level, pos, state) : null; // Canvas - optimize hoppers - if the block has no block entity, why check it
+         if (result == null && (!optimizeEntities || !level.paperConfig().hopper.ignoreOccludingBlocks || !state.getBukkitMaterial().isOccluding())) { // Paper - Perf: Optimize Hoppers
+             result = getEntityContainer(level, x, y, z);
+         }
+@@ -702,7 +_,7 @@
+             return worldlyContainerHolder.getContainer(state, level, pos);
+         } else if (state.hasBlockEntity() && level.getBlockEntity(pos) instanceof Container container) {
+             if (container instanceof ChestBlockEntity && block instanceof ChestBlock chestBlock) {
+-                container = ChestBlock.getContainer(chestBlock, state, level, pos, true);
++                container = ChestBlock.canvas$getContainerForHoppers(chestBlock, state, level, pos, true, container); // Canvas - optimize hoppers
+             }
+ 
+             return container;
+@@ -762,6 +_,7 @@
+     @Override
+     protected void setItems(final NonNullList<ItemStack> items) {
+         this.items = items;
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
+     }
+ 
+     public static void entityInside(final Level level, final BlockPos pos, final BlockState blockState, final Entity entity, final HopperBlockEntity hopper) {

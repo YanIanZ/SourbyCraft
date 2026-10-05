@@ -1,0 +1,11 @@
+--- a/src/main/java/org/spigotmc/WatchdogThread.java
++++ b/src/main/java/org/spigotmc/WatchdogThread.java
+@@ -156,7 +_,7 @@
+         }
+     }
+ 
+-    private static void dumpThread(ThreadInfo thread, Logger logger) {
++    public static void dumpThread(ThreadInfo thread, Logger logger) {
+         logger.log(Level.SEVERE, "------------------------------");
+ 
+         logger.log(Level.SEVERE, "Current Thread: " + thread.getThreadName());

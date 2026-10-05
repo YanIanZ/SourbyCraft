@@ -1,0 +1,123 @@
+--- a/net/minecraft/server/commands/EffectCommands.java
++++ b/net/minecraft/server/commands/EffectCommands.java
+@@ -159,7 +_,7 @@
+         final boolean particles
+     ) throws CommandSyntaxException {
+         MobEffect effect = effectHolder.value();
+-        int count = 0;
++        // Canvas - region threading
+         int duration;
+         if (seconds != null) {
+             if (effect.isInstantaneous()) {
+@@ -175,15 +_,31 @@
+             duration = 600;
+         }
+ 
+-        for (Entity entity : entities) {
+-            if (entity instanceof LivingEntity livingEntity) {
+-                MobEffectInstance instance = new MobEffectInstance(effectHolder, duration, amplifier, false, particles);
+-                if (livingEntity.addEffect(instance, source.getEntity(), org.bukkit.event.entity.EntityPotionEffectEvent.Cause.COMMAND)) { // CraftBukkit
+-                    count++;
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++            .with(entities)
++            .executes((Entity entity) -> {
++                if (entity instanceof LivingEntity livingEntity) {
++                    MobEffectInstance instance = new MobEffectInstance(effectHolder, duration, amplifier, false, particles);
++                    if (livingEntity.addEffect(instance, source.getEntity(), org.bukkit.event.entity.EntityPotionEffectEvent.Cause.COMMAND)) { // CraftBukkit
++                        return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                    }
+                 }
+-            }
+-        }
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++            })
++            .onComplete((count, selected, css) -> giveCallback(count, duration, selected, css, effect))
++            .start(source);
++        return 1;
++    }
+ 
++    private static int giveCallback(
++        final int count,
++        final int duration,
++        final Collection<? extends Entity> entities,
++        final CommandSourceStack source,
++        final MobEffect effect
++    ) throws CommandSyntaxException {
++    // Canvas end - region threading
+         if (count == 0) {
+             throw ERROR_GIVE_FAILED.create();
+         }
+@@ -205,14 +_,27 @@
+     }
+ 
+     private static int clearEffects(final CommandSourceStack source, final Collection<? extends Entity> entities) throws CommandSyntaxException {
+-        int count = 0;
+-
+-        for (Entity entity : entities) {
+-            if (entity instanceof LivingEntity livingEntity && livingEntity.removeAllEffects(org.bukkit.event.entity.EntityPotionEffectEvent.Cause.COMMAND)) { // CraftBukkit
+-                count++;
+-            }
+-        }
+-
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++            .with(entities)
++            .executes((Entity entity) -> {
++                if (entity instanceof LivingEntity livingEntity &&
++                    livingEntity.removeAllEffects(org.bukkit.event.entity.EntityPotionEffectEvent.Cause.COMMAND)) { // CraftBukkit
++                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                }
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++            })
++            .onComplete(EffectCommands::clearEverythingCallback)
++            .start(source);
++        return 1;
++    }
++
++    private static int clearEverythingCallback(
++        final int count,
++        final Collection<? extends Entity> entities,
++        final CommandSourceStack source
++    ) throws CommandSyntaxException {
++    // Canvas end - region threading
+         if (count == 0) {
+             throw ERROR_CLEAR_EVERYTHING_FAILED.create();
+         }
+@@ -230,14 +_,28 @@
+ 
+     private static int clearEffect(final CommandSourceStack source, final Collection<? extends Entity> entities, final Holder<MobEffect> effectHolder) throws CommandSyntaxException {
+         MobEffect effect = effectHolder.value();
+-        int count = 0;
+-
+-        for (Entity entity : entities) {
+-            if (entity instanceof LivingEntity livingEntity && livingEntity.removeEffect(effectHolder, org.bukkit.event.entity.EntityPotionEffectEvent.Cause.COMMAND)) { // CraftBukkit
+-                count++;
+-            }
+-        }
+-
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++            .with(entities)
++            .executes((entity) -> {
++                if (entity instanceof LivingEntity livingEntity &&
++                    livingEntity.removeEffect(effectHolder, org.bukkit.event.entity.EntityPotionEffectEvent.Cause.COMMAND)) { // CraftBukkit
++                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                }
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++            })
++            .onComplete((count, selected, css) -> clearCallback(count, selected, css, effect))
++            .start(source);
++        return 1;
++    }
++
++    private static int clearCallback(
++        final int count,
++        final Collection<? extends Entity> entities,
++        final CommandSourceStack source,
++        final MobEffect effect
++    ) throws CommandSyntaxException {
++    // Canvas end - region threading
+         if (count == 0) {
+             throw ERROR_CLEAR_SPECIFIC_FAILED.create();
+         }

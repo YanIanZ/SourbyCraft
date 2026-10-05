@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/raid/Raider.java
++++ b/net/minecraft/world/entity/raid/Raider.java
+@@ -90,7 +_,7 @@
+             Raid currentRaid = this.getCurrentRaid();
+             if (this.canJoinRaid()) {
+                 if (currentRaid == null) {
+-                    if (this.level().getGameTime() % 20L == 0L) {
++                    if (this.level().getRedstoneGameTime() % 20L == 0L) { // Folia - region threading
+                         Raid nearbyRaid = level.getRaidAt(this.blockPosition());
+                         if (nearbyRaid != null && Raids.canJoinRaid(this)) {
+                             nearbyRaid.joinRaid(level, nearbyRaid.getGroupsSpawned(), this, null, true);

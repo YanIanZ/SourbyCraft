@@ -1,0 +1,40 @@
+--- a/ca/spottedleaf/concurrentutil/executor/thread/BalancedPrioritisedThreadPool.java
++++ b/ca/spottedleaf/concurrentutil/executor/thread/BalancedPrioritisedThreadPool.java
+@@ -16,7 +_,7 @@
+ import java.util.concurrent.TimeUnit;
+ import java.util.concurrent.atomic.AtomicLong;
+ 
+-public final class BalancedPrioritisedThreadPool {
++public class BalancedPrioritisedThreadPool {
+ 
+     public static final long DEFAULT_GROUP_TIME_SLICE = (long)(15.0e6); // 15ms
+ 
+@@ -33,8 +_,8 @@
+     private final COWArrayList<WorkerThread> threads = new COWArrayList<>(WorkerThread.class);
+     private final COWArrayList<WorkerThread> aliveThreads = new COWArrayList<>(WorkerThread.class);
+ 
+-    private final long groupTimeSliceNS;
+-    private final ThreadFactory threadFactory;
++    protected final long groupTimeSliceNS;
++    public final ThreadFactory threadFactory;
+ 
+     private boolean shutdown;
+ 
+@@ -309,7 +_,7 @@
+         }
+     }
+ 
+-    public final class OrderedStreamGroup {
++    public final class OrderedStreamGroup implements io.canvasmc.canvas.world.chunk.StreamGroup { // Canvas - replace moonrise executor
+ 
+         private final AtomicLong subOrderGenerator;
+         private final boolean streamCompare;
+@@ -387,7 +_,7 @@
+             }
+         }
+ 
+-        public final class Queue implements PrioritisedExecutor {
++        public final class Queue implements io.canvasmc.canvas.world.chunk.ChunkSystemExecutor { // Canvas - replace moonrise executor
+ 
+             private final PrioritisedTaskQueue wrapped;
+             private volatile boolean halt;

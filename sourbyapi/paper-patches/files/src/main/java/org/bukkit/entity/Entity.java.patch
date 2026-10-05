@@ -1,0 +1,50 @@
+--- a/src/main/java/org/bukkit/entity/Entity.java
++++ b/src/main/java/org/bukkit/entity/Entity.java
+@@ -165,6 +_,7 @@
+      * @param teleportFlags Flags to be used in this teleportation
+      * @return <code>true</code> if the teleport was successful
+      */
++    @io.canvasmc.canvas.Unsupported // Canvas - region threading
+     default boolean teleport(@NotNull Location location, @NotNull io.papermc.paper.entity.TeleportFlag @NotNull... teleportFlags) {
+         return this.teleport(location, TeleportCause.PLUGIN, teleportFlags);
+     }
+@@ -182,6 +_,7 @@
+      * @param teleportFlags Flags to be used in this teleportation
+      * @return <code>true</code> if the teleport was successful
+      */
++    @io.canvasmc.canvas.Unsupported // Canvas - region threading
+     boolean teleport(@NotNull Location location, @NotNull TeleportCause cause, @NotNull io.papermc.paper.entity.TeleportFlag @NotNull... teleportFlags);
+ 
+     /**
+@@ -216,6 +_,7 @@
+      * @param location New location to teleport this entity to
+      * @return <code>true</code> if the teleport was successful
+      */
++    @io.canvasmc.canvas.Unsupported // Canvas - region threading
+     public boolean teleport(@NotNull Location location);
+ 
+     /**
+@@ -230,6 +_,7 @@
+      * @param cause The cause of this teleportation
+      * @return <code>true</code> if the teleport was successful
+      */
++    @io.canvasmc.canvas.Unsupported // Canvas - region threading
+     public boolean teleport(@NotNull Location location, @NotNull TeleportCause cause);
+ 
+     /**
+@@ -243,6 +_,7 @@
+      * @param destination Entity to teleport this entity to
+      * @return <code>true</code> if the teleport was successful
+      */
++    @io.canvasmc.canvas.Unsupported // Canvas - region threading
+     public boolean teleport(@NotNull Entity destination);
+ 
+     /**
+@@ -257,6 +_,7 @@
+      * @param cause The cause of this teleportation
+      * @return <code>true</code> if the teleport was successful
+      */
++    @io.canvasmc.canvas.Unsupported // Canvas - region threading
+     public boolean teleport(@NotNull Entity destination, @NotNull TeleportCause cause);
+ 
+     // Paper start

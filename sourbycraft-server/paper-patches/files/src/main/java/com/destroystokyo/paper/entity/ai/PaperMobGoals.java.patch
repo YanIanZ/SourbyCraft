@@ -1,0 +1,50 @@
+--- a/src/main/java/com/destroystokyo/paper/entity/ai/PaperMobGoals.java
++++ b/src/main/java/com/destroystokyo/paper/entity/ai/PaperMobGoals.java
+@@ -18,6 +_,7 @@
+     @Override
+     public <T extends Mob> void addGoal(T mob, int priority, Goal<T> goal) {
+         CraftMob craftMob = (CraftMob) mob;
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(craftMob.getHandle(), "Cannot add goal async"); // Canvas - region threading
+         net.minecraft.world.entity.ai.goal.Goal mojangGoal;
+ 
+         if (goal instanceof PaperGoal<?> paperGoal) {
+@@ -32,6 +_,7 @@
+     @Override
+     public <T extends Mob> void removeGoal(T mob, Goal<T> goal) {
+         CraftMob craftMob = (CraftMob) mob;
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(craftMob.getHandle(), "Cannot remove goal async"); // Canvas - region threading
+         if (goal instanceof PaperCustomGoal) {
+             getHandle(craftMob, goal.getTypes()).removeGoal((net.minecraft.world.entity.ai.goal.Goal) goal);
+         } else if (goal instanceof PaperGoal) {
+@@ -117,6 +_,7 @@
+     @Override
+     public <T extends Mob> Collection<Goal<T>> getAllGoals(T mob, GoalType type) {
+         CraftMob craftMob = (CraftMob) mob;
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(craftMob.getHandle(), "Cannot get all goals async"); // Canvas - region threading
+         Set<Goal<T>> goals = new HashSet<>();
+         for (WrappedGoal item : getHandle(craftMob, type).getAvailableGoals()) {
+             if (!item.getGoal().hasFlag(MobGoalHelper.paperToVanilla(type))) {
+@@ -136,6 +_,7 @@
+     @Override
+     public <T extends Mob> Collection<Goal<T>> getAllGoalsWithout(T mob, GoalType type) {
+         CraftMob craftMob = (CraftMob) mob;
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(craftMob.getHandle(), "Cannot get all goals async"); // Canvas - region threading
+         Set<Goal<T>> goals = new HashSet<>();
+         for (GoalType internalType : GoalType.values()) {
+             if (internalType == type) {
+@@ -169,6 +_,7 @@
+     @Override
+     public <T extends Mob> Collection<Goal<T>> getRunningGoals(T mob, GoalType type) {
+         CraftMob craftMob = (CraftMob) mob;
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(craftMob.getHandle(), "Cannot get running goals async"); // Canvas - region threading
+         Set<Goal<T>> goals = new HashSet<>();
+         getHandle(craftMob, type).getAvailableGoals()
+             .stream().filter(WrappedGoal::isRunning)
+@@ -187,6 +_,7 @@
+     @Override
+     public <T extends Mob> Collection<Goal<T>> getRunningGoalsWithout(T mob, GoalType type) {
+         CraftMob craftMob = (CraftMob) mob;
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(craftMob.getHandle(), "Cannot get running goals async"); // Canvas - region threading
+         Set<Goal<T>> goals = new HashSet<>();
+         for (GoalType internalType : GoalType.values()) {
+             if (internalType == type) {

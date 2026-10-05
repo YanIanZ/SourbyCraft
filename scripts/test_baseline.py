@@ -741,7 +741,7 @@ class BuildInputTest(unittest.TestCase):
                      "sourbyapi/src/main/java/x/Y.java",
                      "sourbyclip/java25/src/main/java/x/Y.java",
                      "Metal/src/main/java/x/Y.java",
-                     "build-data/canvas-dev-imports.txt",
+                     "build-data/dev-imports.txt",
                      "gradle.properties", "settings.gradle.kts", "build.gradle.kts"):
             with self.subTest(path=path):
                 self.assertTrue(run_baseline.affects_build(path))

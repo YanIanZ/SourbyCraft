@@ -21,8 +21,8 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
 - [!] **Lisensi:** repo memakai PolyForm Noncommercial, sementara jar yang didistribusikan berisi kode
   server Paper berlisensi GPLv3. Perlu keputusan apakah kombinasi ini memenuhi GPLv3
   (`docs/releases/26.2-build-47-aurora-nexus.md`). Ini juga menentukan bentuk migrasi penuh di P2.
-- [!] **Definisi "migrasi 100% ke Aurora":** pilih target (lihat bagian *Migrasi penuh* di P2)
-  sebelum pekerjaan migrasi dimulai.
+- [x] **Definisi "migrasi 100% ke Aurora":** owner memilih "lepas Canvas + Weaver", Paper tetap
+  upstream (2026-10-05). Lihat bagian *Migrasi penuh* di P2.
 
 ### Persistensi dan kepemilikan region
 - [ ] Tes persistensi restart penuh setelah perubahan performa (DEV-A, AURORA-J)
@@ -108,8 +108,12 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
 ## P2 — Menengah (independensi dan arsitektur)
 
 ### Migrasi penuh ke SourbyCraft (Aurora Engine) tanpa Canvas/Folia
-Saat ini build berjalan: vanilla → Paper (974 file patch, ~142 ribu baris) → Canvas (162 file
-patch, ~52 ribu baris) → SourbyCraft (34 patch), lewat Weaver. Batasan yang tidak bisa dihindari:
+Sejak 2026-10-05 build berjalan: vanilla → Paper (`paperRef` 9240f586) → SourbyCraft, lewat
+paperweight resmi (SourbyPatcher `paper-toolchain` 3.0.0). Seluruh perubahan yang dulu datang dari
+Canvas/Folia sekarang milik SourbyCraft: baseline engine di `minecraft-patches/sources` (476 file),
+`paper-patches/files` (234), `sourbyapi/paper-patches/files` (16), dan source `io.canvasmc` di
+`src/main/java`. Perubahan buatan Sourby ada di feature patch (`minecraft-patches/features` 22,
+`paper-patches/features` 4). Batasan yang tidak bisa dihindari:
 
 - Source Minecraft hasil decompile tidak boleh di-commit (EULA Mojang), jadi pipeline
   "decompile + apply patch" tetap dibutuhkan, dengan SourbyPatcher sebagai pemiliknya.
@@ -118,16 +122,31 @@ patch, ~52 ribu baris) → SourbyCraft (34 patch), lewat Weaver. Batasan yang ti
 - Kewajiban atribusi dan lisensi upstream tetap berlaku (lihat keputusan lisensi di P0).
 
 Tahapan yang diusulkan, dari yang paling kecil risikonya:
-- [ ] M-0: owner memilih target (lihat P0)
+- [x] M-0: owner memilih target: lepas Canvas + Weaver, Paper tetap upstream
 - [-] M-1 Identitas: nama publik SourbyCraft/Aurora sudah ada; sisa: laporan crash memakai
   BuildInfo, profiler identity
 - [ ] M-2 Isolasi (T9 di `AURORA-FULL-TRANSITION.md`): pindahkan body service Sourby keluar dari
   class upstream; pecah patch campuran 0006/0013 dan pindahkan class dari 0002/0005/0016; isolasi
   bridge Spark Canvas; dokumentasikan setiap dependensi keras Canvas di `independence.md`
-- [ ] M-3 Lepas Canvas sebagai upstream: serap patch Canvas yang dibutuhkan ke patch set
-  SourbyCraft, lalu ambil Paper langsung. Rename internal `io.canvasmc.*` yang bukan API plugin.
-  Mulai saat ini setiap update Canvas/Folia harus di-port sendiri.
-- [ ] M-4 Lepas Weaver: SourbyPatcher menjalankan pipeline sendiri (Weaver tidak lagi dibutuhkan)
+- [-] M-3 Lepas Canvas sebagai upstream — selesai 2026-10-05. Bukti: tree hasil pipeline baru
+  identik dengan pipeline lama (Minecraft 5.359 file, paper-server 1.549, paper-api 1.975; selisih
+  hanya newline akhir file di 48 file), 10.096 tes Java + 222 tes Python lulus, boot test CI lulus
+  lokal. Sisa sebelum `[x]`: tes persistensi restart (P0) dan run CI hijau. Mulai sekarang setiap
+  perbaikan dari Canvas/Folia harus di-port sendiri.
+- [-] M-4 Lepas Weaver — selesai 2026-10-05: SourbyPatcher `paper-toolchain` 3.0.0 menerapkan
+  paperweight 2.0.0-beta.24; jar reproducible dari clone bersih. Sisa: sama dengan M-3.
+- [ ] Rename package internal `io.canvasmc.*` yang bukan API plugin (perlu dipetakan dulu mana yang
+  dipakai plugin: `sourbyapi/src/main/java/io/canvasmc` adalah API)
+- [ ] Hapus dependency `io.canvasmc.httpclient` (tidak di-import siapa pun) beserta repo Maven
+  `maven.canvasmc.io` yang hanya dibutuhkan untuknya
+- [ ] Putuskan nama branch rilis `release/26.2-canvas` (dipakai workflow publikasi dan auto-updater)
+- [ ] Rencana migrasi nama file konfigurasi `config/canvas-server.yml` / `canvas-worlds.yml`
+  (sekarang sengaja tetap, agar konfigurasi server yang sudah ada tetap terbaca)
+- [ ] Pengaman agar baseline engine (`minecraft-patches/sources`, `paper-patches/files`) tidak
+  diedit diam-diam: perubahan Sourby wajib lewat feature patch supaya terlihat oleh policy
+- [ ] Pin SHA-256 SourbyPatcher hanya mencakup jar, tidak POM tempat versi paperweight ditentukan
+- [ ] Nomor feature patch punya celah (0018) dan akan dinomori ulang pada rebuild berikutnya;
+  perbarui rujukan nomor patch di docs/test saat itu terjadi
 - [ ] M-5 Opsional, paling berat: lepas Paper sebagai upstream (vanilla → SourbyCraft langsung).
   Artinya ~974 patch Paper menjadi milik SourbyCraft, dan setiap rilis Minecraft serta perbaikan
   keamanan Paper harus di-port sendiri.
@@ -154,8 +173,8 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [ ] Putuskan: adapter atau fork SourbySpark (hanya setelah kebutuhannya terbukti; review GPL jika fork)
 
 ### Toolchain privat (repo `YanIanZ/SourbyPatcher` dan `YanIanZ/SourbyClip`)
-- [ ] Update dependency di kedua repo (Patcher: JUnit 6.0.3, Gradle 9.4.1; Clip: Gradle 9.5.1),
-  lalu perbarui pin di SourbyCraft sesuai `AGENTS.md` masing-masing repo
+- [-] Update dependency di kedua repo: Patcher sudah Gradle 9.8.0 + JUnit 6.1.3 (`paper-toolchain`);
+  sisa Clip (Gradle 9.5.1), lalu perbarui pin di SourbyCraft sesuai `AGENTS.md` repo tersebut
 - [ ] Audit kepemilikan thread/executor di SourbyClip
 
 ---

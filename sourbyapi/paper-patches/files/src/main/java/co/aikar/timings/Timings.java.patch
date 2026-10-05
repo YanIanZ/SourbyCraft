@@ -1,0 +1,10 @@
+--- a/src/main/java/co/aikar/timings/Timings.java
++++ b/src/main/java/co/aikar/timings/Timings.java
+@@ -145,6 +_,7 @@
+      * @param enabled Should timings be reported
+      */
+     public static void setTimingsEnabled(boolean enabled) {
++        enabled = false; // Folia - region threading - disable timings
+         if (enabled && !warnedAboutDeprecationOnEnable) {
+             Bukkit.getLogger().severe(PlainTextComponentSerializer.plainText().serialize(deprecationMessage()));
+             warnedAboutDeprecationOnEnable = true;

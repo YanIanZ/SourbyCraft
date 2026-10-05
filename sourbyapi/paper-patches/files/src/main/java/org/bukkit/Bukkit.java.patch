@@ -1,0 +1,61 @@
+--- a/src/main/java/org/bukkit/Bukkit.java
++++ b/src/main/java/org/bukkit/Bukkit.java
+@@ -838,6 +_,7 @@
+      * @param save whether to save the chunks before unloading
+      * @return true if successful, false otherwise
+      */
++    @Deprecated(forRemoval = true) // Canvas - region threading
+     public static boolean unloadWorld(@NotNull String name, boolean save) {
+         return server.unloadWorld(name, save);
+     }
+@@ -852,6 +_,7 @@
+      * @param save whether to save the chunks before unloading
+      * @return true if successful, false otherwise
+      */
++    @Deprecated(forRemoval = true) // Canvas - region threading
+     public static boolean unloadWorld(@NotNull World world, boolean save) {
+         return server.unloadWorld(world, save);
+     }
+@@ -2989,6 +_,42 @@
+         return server.isGlobalTickThread();
+     }
+     // Paper end - Folia region threading API
++    // Folia start - region TPS API
++    /**
++     * Gets the TPS from the region which owns the specified location, or {@code null} if no region owns
++     * the specified location.
++     *
++     * @param location The location for which to get the TPS
++     * @return TPS (5s, 15s, 1m, 5m, 15m), or null if the region doesn't exist
++     */
++    public static double @Nullable [] getRegionTPS(@NotNull Location location) {
++        return server.getRegionTPS(location);
++    }
++
++    /**
++     * Gets the TPS from the region which owns the specified chunk, or {@code null} if no region owns
++     * the specified location.
++     *
++     * @param chunk - The specified chunk
++     * @return TPS (5s, 15s, 1m, 5m, 15m), or null if the region doesn't exist
++     */
++    public static double @Nullable [] getRegionTPS(@NotNull Chunk chunk) {
++        return server.getRegionTPS(chunk);
++    }
++
++    /**
++     * Gets the TPS from the region which owns the specified chunk, or {@code null} if no region owns
++     * the specified location.
++     *
++     * @param world - World containing the chunk
++     * @param chunkX - X-coordinate of the chunk
++     * @param chunkZ - Z-coordinate of the chunk
++     * @return TPS (5s, 15s, 1m, 5m, 15m), or null if the region doesn't exist
++     */
++    public static double @Nullable [] getRegionTPS(@NotNull World world, int chunkX, int chunkZ) {
++        return server.getRegionTPS(world, chunkX, chunkZ);
++    }
++    // Folia end - region TPS API
+ 
+     /**
+      * @deprecated All methods on this class have been deprecated, see the individual methods for replacements.

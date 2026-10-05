@@ -1,0 +1,134 @@
+--- a/net/minecraft/world/entity/raid/Raids.java
++++ b/net/minecraft/world/entity/raid/Raids.java
+@@ -34,18 +_,19 @@
+                 Raids.RaidWithId.CODEC
+                     .listOf()
+                     .optionalFieldOf("raids", List.of())
+-                    .forGetter(r -> r.raidMap.int2ObjectEntrySet().stream().map(Raids.RaidWithId::from).toList()),
+-                Codec.INT.fieldOf("next_id").forGetter(r -> r.nextId),
++                    .forGetter(r -> r.raidMap.entrySet().stream().map(Raids.RaidWithId::from).toList()), // Folia - make raids thread-safe
++                Codec.INT.fieldOf("next_id").forGetter(r -> r.nextAvailableID.get()), // Folia - make raids thread-safe
+                 Codec.INT.fieldOf("tick").forGetter(r -> r.tick)
+             )
+             .apply(i, Raids::new)
+     );
+     public static final SavedDataType<Raids> TYPE = new SavedDataType<>(RAID_FILE_ID, Raids::new, CODEC, DataFixTypes.SAVED_DATA_RAIDS);
+-    public final Int2ObjectMap<Raid> raidMap = new Int2ObjectOpenHashMap<>();
+-    private int nextId = 1;
++    public final ca.spottedleaf.concurrentutil.map.concurrent.ints.ConcurrentChainedInt2ReferenceHashTable<Raid> raidMap = new ca.spottedleaf.concurrentutil.map.concurrent.ints.ConcurrentChainedInt2ReferenceHashTable<>(); // Folia - make raids thread-safe
++    private final java.util.concurrent.atomic.AtomicInteger nextAvailableID = new java.util.concurrent.atomic.AtomicInteger(); // Folia - make raids thread-safe
+     private int tick;
+ 
+     public Raids() {
++        this.nextAvailableID.set(1); // Folia - make raids thread-safe
+         this.setDirty();
+     }
+ 
+@@ -55,7 +_,7 @@
+             raid.raid.idOrNegativeOne = raid.id; // Paper - expose id of raids while method is kept around as deprecated for removal
+         }
+ 
+-        this.nextId = nextId;
++        this.nextAvailableID.set(nextId); // Folia - make raids thread-safe
+         this.tick = tick;
+     }
+ 
+@@ -64,21 +_,32 @@
+     }
+ 
+     public OptionalInt getId(final Raid raid) {
+-        for (Entry<Raid> entry : this.raidMap.int2ObjectEntrySet()) {
++        for (ca.spottedleaf.concurrentutil.map.concurrent.ints.ConcurrentChainedInt2ReferenceHashTable.TableEntry<Raid> entry : this.raidMap.entrySet()) { // Folia - make raids thread-safe
+             if (entry.getValue() == raid) {
+-                return OptionalInt.of(entry.getIntKey());
++                return OptionalInt.of(entry.getKey()); // Folia - make raids thread-safe
+             }
+         }
+ 
+         return OptionalInt.empty();
+     }
+ 
++    // Folia start - make raids thread-safe
++    public void globalTick() {
++        this.tick++;
++    }
++
+     public void tick(final ServerLevel level) {
++    // Folia end - make raids thread-safe
+         this.tick++;
+         Iterator<Raid> raidIterator = this.raidMap.values().iterator();
+ 
+         while (raidIterator.hasNext()) {
+             Raid raid = raidIterator.next();
++            // Folia start - make raids thread-safe
++            if (!raid.ownsRaid(level)) {
++                continue;
++            }
++            // Folia end - make raids thread-safe
+             if (!level.getGameRules().get(GameRules.RAIDS)) {
+                 raid.stop();
+             }
+@@ -91,9 +_,7 @@
+             }
+         }
+ 
+-        if (this.tick % 200 == 0) {
+-            this.setDirty();
+-        }
++        // Folia - make raids thread-safe - move to globalTick()
+     }
+ 
+     public static boolean canJoinRaid(final Raider raider) {
+@@ -106,7 +_,7 @@
+         }
+ 
+         ServerLevel level = player.level();
+-        if (!level.getGameRules().get(GameRules.RAIDS)) {
++        if (!level.getGameRules().get(GameRules.RAIDS) || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player) || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, raidPosition.getX() >> 4, raidPosition.getZ() >> 4, 8) || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, player.chunkPosition().x(), player.chunkPosition().z(), 8)) { // Folia - region threading
+             return null;
+         }
+ 
+@@ -146,8 +_,8 @@
+             }
+ 
+             if (!raid.isStarted() && !this.raidMap.containsValue(raid)) {
+-                this.raidMap.put(this.getUniqueId(), raid);
+-                raid.idOrNegativeOne = this.nextId; // Paper - expose id of raids while method is kept around as deprecated for removal
++                int id = this.getUniqueId(); this.raidMap.put(id, raid); // Folia - region threading
++                raid.idOrNegativeOne = id; // Paper - expose id of raids while method is kept around as deprecated for removal // Folia - region threading
+             }
+             // CraftBukkit end
+             raid.absorbRaidOmen(player);
+@@ -167,14 +_,19 @@
+     }
+ 
+     private int getUniqueId() {
+-        return ++this.nextId;
++        return this.nextAvailableID.incrementAndGet(); // Folia - make raids thread-safe
+     }
+ 
+-    public @Nullable Raid getNearbyRaid(final BlockPos pos, final int maxDistSqr) {
++    public @Nullable Raid getNearbyRaid(final ServerLevel world, final BlockPos pos, final int maxDistSqr) { // Folia - make raids thread-safe - add ServerLevel param
+         Raid closest = null;
+         double closestDistanceSqr = maxDistSqr;
+ 
+         for (Raid raid : this.raidMap.values()) {
++            // Folia start - make raids thread-safe
++            if (!raid.ownsRaid(world)) {
++                continue;
++            }
++            // Folia end - make raids thread-safe
+             double distance = raid.getCenter().distSqr(pos);
+             if (raid.isActive() && distance < closestDistanceSqr) {
+                 closest = raid;
+@@ -196,8 +_,8 @@
+                 .apply(i, Raids.RaidWithId::new)
+         );
+ 
+-        public static Raids.RaidWithId from(final Entry<Raid> entry) {
+-            return new Raids.RaidWithId(entry.getIntKey(), entry.getValue());
++        public static Raids.RaidWithId from(final ca.spottedleaf.concurrentutil.map.concurrent.ints.ConcurrentChainedInt2ReferenceHashTable.TableEntry<Raid> entry) { // Folia - make raids thread-safe
++            return new Raids.RaidWithId(entry.getKey(), entry.getValue()); // Folia - make raids thread-safe
+         }
+     }
+ }

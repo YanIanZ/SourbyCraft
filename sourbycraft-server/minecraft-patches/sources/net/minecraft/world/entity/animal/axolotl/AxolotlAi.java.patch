@@ -1,0 +1,17 @@
+--- a/net/minecraft/world/entity/animal/axolotl/AxolotlAi.java
++++ b/net/minecraft/world/entity/animal/axolotl/AxolotlAi.java
+@@ -134,7 +_,13 @@
+         Optional<PositionTracker> lookTarget = body.getBrain().getMemory(MemoryModuleType.LOOK_TARGET);
+         if (lookTarget.isPresent()) {
+             BlockPos pos = lookTarget.get().currentBlockPosition();
+-            return level.isWaterAt(pos) == body.isInWater();
++            // Canvas start - region threading
++            net.minecraft.world.level.material.FluidState fluidIfLoaded = level.getFluidIfLoaded(pos);
++            if (fluidIfLoaded == null) {
++                return false;
++            }
++            return fluidIfLoaded.is(net.minecraft.tags.FluidTags.WATER) == body.isInWater();
++            // Canvas end - region threading
+         } else {
+             return false;
+         }

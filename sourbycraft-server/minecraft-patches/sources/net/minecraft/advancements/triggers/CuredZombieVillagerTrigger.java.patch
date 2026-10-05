@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/CuredZombieVillagerTrigger.java
++++ b/net/minecraft/advancements/triggers/CuredZombieVillagerTrigger.java
+@@ -19,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final Zombie zombie, final Villager villager) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         LootContext zombieContext = EntityPredicate.createContext(player, zombie);
+         LootContext villagerContext = EntityPredicate.createContext(player, villager);
+         this.trigger(player, t -> t.matches(zombieContext, villagerContext));

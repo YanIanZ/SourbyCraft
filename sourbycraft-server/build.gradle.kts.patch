@@ -1,6 +1,6 @@
---- a/canvas-server/build.gradle.kts
-+++ b/canvas-server/build.gradle.kts
-@@ -2,6 +_,10 @@
+--- a/paper-server/build.gradle.kts
++++ b/paper-server/build.gradle.kts
+@@ -2,6 +_,11 @@
  import io.papermc.paperweight.attribute.DevBundleOutput
  import io.papermc.paperweight.util.*
  import java.time.Instant
@@ -8,124 +8,109 @@
 +import java.time.ZonedDateTime // SourbyCraft - GMT+7 build time
 +import java.time.format.DateTimeFormatter // SourbyCraft - GMT+7 day-name Build-Time-Display
 +import java.util.Locale // SourbyCraft - GMT+7 day-name Build-Time-Display
- import io.papermc.paperweight.tasks.MergeAccessTransforms
++import io.papermc.paperweight.tasks.MergeAccessTransforms
  
  plugins {
-@@ -16,21 +_,49 @@
+     `java-library`
+@@ -15,13 +_,31 @@
  
  dependencies {
      mache("io.papermc:mache:26.2+build.1")
 -    paperclip("io.papermc:paperclip:3.0.4")
-+    // weaver-core keeps the stock "paperclip" Configuration name (PAPERCLIP_CONFIG = "paperclip";
-+    // sourbypatcher's OWN fork had renamed this constant to "sourbyclip" — weaver did not, so we
-+    // just point the standard `paperclip` configuration at our own artifact coordinates instead).
++    // SourbyCraft - the stock "paperclip" configuration points at our own launcher, SourbyClip.
 +    paperclip("dev.iyanz:sourbyclip:${providers.gradleProperty("clipVersion").get()}")
- }
- 
-+// SourbyCraft (Canvas upstream) - this must resolve against the "canvas" fork specifically (Canvas's
-+// own AT-merge plumbing, unchanged from CraftCanvasMC/Canvas), NOT paperweight.activeFork —
-+// activeFork is now "sourbycraft" (our nested fork), which has no canvas.at of its own and
-+// would silently drop Canvas's real AT baseline, breaking every canvas-server minecraft-patch
-+// hunk that depends on a symbol Canvas's own ATs make accessible.
- val mergeMinecraftATs by tasks.registering<MergeAccessTransforms> {
--    firstFile.set(paperweight.activeFork.flatMap { it.buildDataDir.file("${it.name}.at") })
--    secondFile.set(paperweight.activeFork.flatMap { it.buildDataDir.file("folia.at") })
-+    firstFile.set(paperweight.forks.named("canvas").flatMap { it.buildDataDir.file("${it.name}.at") })
-+    secondFile.set(paperweight.forks.named("canvas").flatMap { it.buildDataDir.file("folia.at") })
  }
  
  paperweight {
      minecraftVersion = providers.gradleProperty("mcVersion")
-     filterPatches = false
-+    // Keep the internal java-diff-utils applier project-wide: the Paper base, Canvas's diffpatch
-+    // sources/ file patches, and our own sourbycraft layers all apply cleanly under it (and the
-+    // Paper layer regresses under `git apply --3way`). Canvas's git-format base/ + features/ patches
-+    // are applied by their own git-am stages (SetupForkMinecraftSources / ApplyFeaturePatches), so
-+    // nothing here needs the git-apply file-patch path.
++    filterPatches = false
++    // SourbyCraft - file patches are codechicken-diffpatch format (`@@ -12,23 +_,23 @@`), which
++    // `git apply` cannot parse, so keep the internal java-diff-utils applier.
      gitFilePatches = false
  
-     val canvas = forks.register("canvas") {
-+        // SourbyCraft (Canvas upstream): this fork registration is Canvas's own
-+        // upstream-of-Paper declaration (unchanged from CraftCanvasMC/Canvas). rootDirectory is
-+        // repointed at the canvas upstream checkout so the nested "sourbycraft" fork below (which
-+        // resolves ITS paths relative to this fork's rootDirectory) lands in the right place —
-+        // mirrors exactly how the previous Folia base wired `forks.register("folia")`.
-+        rootDirectory = upstreamsDirectory().map { it.dir("canvas") }
-         additionalAts.set(mergeMinecraftATs.flatMap { it.outputFile })
-+        // Canvas is a THREE-STAGE fork (Minecraft patches split into base/ git-format foundational
-+        // patches → sources/ diffpatch file patches → features/ git-format patches). weaver's OWN
-+        // ForkConfig (unlike upstream paperweight, and unlike sourbypatcher's earlier hand-rolled
-+        // reconstruction of this — the thing that hit the git-am ordering wall on Path A) has
-+        // native base/ support (basePatchDir) applied FIRST (git am), creating the region-threading
-+        // files/context the sources/ file patches then modify — by construction, no extra wiring
-+        // needed here. The sources/ patches are codechicken-diffpatch format (`@@ -12,23 +_,23 @@`)
-+        // which `git apply` cannot parse, so gitFilePatches stays at the project-wide default
-+        // (false) for this fork.
-         upstream.patchDir("paperServer") {
-             upstreamPath = "paper-server"
-             excludes = setOf("src/minecraft", "patches", "build.gradle.kts")
-@@ -39,7 +_,26 @@
-         }
-     }
- 
--    activeFork = canvas
-+    // SourbyCraft's own fork nested on top of Canvas (which is itself nested on top of Paper).
-+    // Mirrors the previous `forks.register("sourbycraft") { forks = fork; ... }` Folia wiring
-+    // 1:1, substituting the Canvas upstream for the Folia upstream.
++    // SourbyCraft - Paper is the only upstream. Region threading and the other changes that
++    // used to come from Canvas/Folia are SourbyCraft's own minecraft-patches, paper-patches and
++    // sources (src/main/java/io/canvasmc keeps its package name for plugin compatibility).
 +    val sourbycraft = forks.register("sourbycraft") {
-+        forks = canvas
-+        upstream.patchRepo("paperServer") {
-+            upstreamRepo = canvas.patchedRepo("paperServer")
++        upstream.patchDir("paperServer") {
++            upstreamPath = "paper-server"
++            excludes = setOf("src/minecraft", "patches", "build.gradle.kts")
 +            patchesDir = rootDirectory.dir("sourbycraft-server/paper-patches")
 +            outputDir = rootDirectory.dir("paper-server")
-+        }
-+
-+        upstream.patchDir("canvasServer") {
-+            upstreamPath = "canvas-server"
-+            excludes = setOf("src/minecraft", "paper-patches", "minecraft-patches", "build.gradle.kts", "build.gradle.kts.patch")
-+            patchesDir = rootDirectory.dir("sourbycraft-server/canvas-patches")
-+            outputDir = rootDirectory.dir("canvas-server")
 +        }
 +    }
 +
 +    activeFork = sourbycraft
- 
++
      updatingMinecraft {
          // oldPaperCommit = "d4fe85375af18bfa88f44d7c1e6a61904ae550cc"
-@@ -110,14 +_,23 @@
-     main {
-         java { srcDir("../paper-server/src/main/java"); srcDir("../paper-server/src/generated/java") }
-         resources { srcDir("../paper-server/src/main/resources") }
-+        java { srcDir("../canvas-server/src/main/java") }
-+        resources { srcDir("../canvas-server/src/main/resources") }
      }
-     test {
-         java { srcDir("../paper-server/src/test/java") }
-         resources { srcDir("../paper-server/src/test/resources") }
-+        java { srcDir("../canvas-server/src/test/java") }
-+        resources { srcDir("../canvas-server/src/test/resources") }
+@@ -86,7 +_,24 @@
      }
  }
- val log4jPlugins = sourceSets.create("log4jPlugins") {
-     java { srcDir("../paper-server/src/log4jPlugins/java") }
+ 
+-val log4jPlugins = sourceSets.create("log4jPlugins")
++sourceSets {
++    main {
++        java { srcDir("../paper-server/src/main/java"); srcDir("../paper-server/src/generated/java") }
++        resources { srcDir("../paper-server/src/main/resources") }
++    }
++    test {
++        java { srcDir("../paper-server/src/test/java") }
++        resources { srcDir("../paper-server/src/test/resources") }
++    }
++}
++val log4jPlugins = sourceSets.create("log4jPlugins") {
++    java { srcDir("../paper-server/src/log4jPlugins/java") }
 +    // SourbyCraft - authored log4j2 pattern plugins (e.g. %scLogger, the branded logger-name
 +    // converter). Kept in the sourbycraft-server module (tracked in git) rather than the
 +    // regenerated paper-server working copy, so no patch churn. Compiled + shaded into the jar
 +    // alongside Paper's own log4j plugins; the annotation processor writes Log4j2Plugins.dat.
 +    java { srcDir("src/log4jPlugins/java") }
- }
++}
  configurations.named(log4jPlugins.compileClasspathConfigurationName) {
      extendsFrom(configurations.compileClasspath.get())
-@@ -141,7 +_,7 @@
+ }
+@@ -109,12 +_,14 @@
  }
  
  dependencies {
--    implementation(projects.canvasApi)
+-    implementation(project(":paper-api"))
 +    implementation(project(":sourbyapi"))
      implementation("ca.spottedleaf:leafpile:1.2.0")
-     implementation("org.jline:jline-terminal-ffm:3.29.0") // use ffm on java 22+
-     implementation("org.jline:jline-terminal-jni:3.29.0") // fall back to jni on java 21
-@@ -201,35 +_,62 @@
+-    implementation("org.jline:jline-terminal-ffm:3.27.1") // use ffm on java 22+
+-    implementation("org.jline:jline-terminal-jni:3.27.1") // fall back to jni on java 21
++    implementation("org.jline:jline-terminal-ffm:3.29.0") // use ffm on java 22+
++    implementation("org.jline:jline-terminal-jni:3.29.0") // fall back to jni on java 21
+     implementation("net.minecrell:terminalconsoleappender:1.3.0")
+     implementation("net.kyori:adventure-text-serializer-ansi")
++    implementation("net.openhft:affinity:2026.2")
++    implementation("io.canvasmc.httpclient:httpclient:1.0.1")
+ 
+     /*
+       Required to add the missing Log4j2Plugins.dat file from log4j-core
+@@ -138,7 +_,10 @@
+     // Deps that were previously in the API but have now been moved here for backwards compat, eventually to be removed
+     runtimeOnly("commons-lang:commons-lang:2.6")
+     runtimeOnly("org.xerial:sqlite-jdbc:3.49.1.0")
+-    runtimeOnly("com.mysql:mysql-connector-j:9.2.0")
++    runtimeOnly("com.mysql:mysql-connector-j:9.2.0") {
++        exclude("com.google.protobuf", "protobuf-java")
++    }
++    runtimeOnly("com.google.protobuf:protobuf-java:4.30.1")
+     runtimeOnly("com.lmax:disruptor:3.4.4")
+     implementation("com.googlecode.json-simple:json-simple:1.1.1") { // change to runtimeOnly once Timings is removed
+         isTransitive = false // includes junit
+@@ -148,7 +_,7 @@
+     testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.3")
+     testImplementation("org.junit.jupiter:junit-jupiter:6.0.3")
+     testImplementation("org.junit.platform:junit-platform-suite-engine:6.0.3")
+-    testImplementation("org.hamcrest:hamcrest:2.2")
++    testImplementation("org.hamcrest:hamcrest:3.0")
+     testImplementation("org.mockito:mockito-core:5.22.0")
+     mockitoAgent("org.mockito:mockito-core:5.22.0") { isTransitive = false } // Configure mockito agent that is needed in newer java versions
+     testImplementation("org.ow2.asm:asm-tree:9.9.1")
+@@ -164,23 +_,56 @@
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
@@ -137,13 +122,6 @@
 -        val implementationVersion = "$mcVersion-${build ?: "DEV"}-$gitHash"
          val date = git.exec(providers, "show", "-s", "--format=%ci", gitHash).get().trim()
          val gitBranch = git.exec(providers, "rev-parse", "--abbrev-ref", "HEAD").get().trim()
--        val canvasContributors = listOf(
--            "VeguiDev",
--            "BaconCat1",
--            "Euphillya",
--            "Jsinco",
--            "Biquaternions"
--        )
 +        // SourbyCraft - version suffix derived from the git branch, matching the previous
 +        // SourbyCraft convention (paper-26.2-pre-folia patches 0004/0006/0007): vN-DEV / vN-REL /
 +        // vN-EXP. Kept in lockstep with META-INF/sourbycraft-build.properties (writeBuildInfo /
@@ -177,17 +155,15 @@
 +            .format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy, HH:mm", Locale.ENGLISH))
          attributes(
              "Main-Class" to "org.bukkit.craftbukkit.Main",
--            "Implementation-Title" to "Canvas",
+-            "Implementation-Title" to "Paper",
 +            "Implementation-Title" to "SourbyCraft", // SourbyCraft - Rebrand
              "Implementation-Version" to implementationVersion,
              "Implementation-Vendor" to date,
--            "Specification-Title" to "Canvas",
+-            "Specification-Title" to "Paper",
 -            "Specification-Version" to project.version,
--            "Specification-Vendor" to "Canvas Team",
--            "Brand-Id" to "canvasmc:canvas",
--            "Brand-Name" to "Canvas",
--            "Brand-Vendor" to "Canvas Team",
--            "Brand-Website" to "https://canvasmc.io",
+-            "Specification-Vendor" to "Paper Team",
+-            "Brand-Id" to "papermc:paper",
+-            "Brand-Name" to "Paper",
 +            "Specification-Title" to "SourbyCraft", // SourbyCraft - Rebrand
 +            "Specification-Version" to implementationVersion, // SourbyCraft - Rebrand: match Impl-Version
 +            "Specification-Vendor" to "dev.iyanz", // SourbyCraft - Rebrand
@@ -198,15 +174,59 @@
 +            "Build-Time-Display" to buildTimeDisplay, // SourbyCraft - GMT+7 day-name boot-line timestamp
              "Git-Branch" to gitBranch,
              "Git-Commit" to gitHash,
--            "Contributors" to canvasContributors,
          )
-         for (tld in setOf("net", "com", "org")) {
-             attributes("$tld/bukkit", "Sealed" to true)
-@@ -378,26 +_,39 @@
-     mainClass.set(null as String?)
- }
+@@ -240,6 +_,10 @@
+         excludeTags("Slow")
+     }
  
--/* fill {
++    if (paperweight.updatingMinecraft.oldPaperCommit.isPresent) {
++        environment("CANVAS_TEST_STRICT", "true")
++    }
++
+     // Configure mockito agent that is needed in newer java versions
+     val provider = objects.newInstance<MockitoAgentProvider>()
+     provider.fileCollection.from(mockitoAgent)
+@@ -275,15 +_,16 @@
+         // TODO - JB runtime 25 has issues with spark rn
+         // vendor.set(JvmVendorSpec.JETBRAINS)
+     })
+-    jvmArgs(/*"-XX:+AllowEnhancedClassRedefinition", */"--enable-native-access=ALL-UNNAMED")
++    jvmArgs(/*"-XX:+AllowEnhancedClassRedefinition", */"--enable-native-access=ALL-UNNAMED", "--add-modules=jdk.incubator.vector")
+ 
+-    if (rootProject.childProjects["test-plugin"] != null) {
+-        val testPluginJar = rootProject.project(":test-plugin").tasks.jar.flatMap { it.archiveFile }
+-        inputs.file(testPluginJar)
+-        args("-add-plugin=${testPluginJar.get().asFile.absolutePath}")
++    for (entry in rootProject.childProjects) {
++        if (entry.key == "test-plugin" || entry.key.endsWith("-debug", true) || entry.key.endsWith("-plugin", true)) {
++            val testPluginJar = rootProject.project(":${entry.key}").tasks.jar.flatMap { it.archiveFile }
++            inputs.file(testPluginJar)
++            args("-add-plugin=${testPluginJar.get().asFile.absolutePath}")
++        }
+     }
+ 
+-    args("--nogui")
+     systemProperty("net.kyori.adventure.text.warnWhenLegacyFormattingDetected", true)
+     if (providers.gradleProperty("paper.runDisableWatchdog").getOrElse("false") == "true") {
+         systemProperty("disable.watchdog", true)
+@@ -293,8 +_,8 @@
+     systemProperty("paper.disableMigrationDelay", true)
+     systemProperty("paper.updatingMinecraft", providers.gradleProperty("updatingMinecraft").getOrElse("false").toBoolean())
+ 
+-    val memoryGb = providers.gradleProperty("paper.runMemoryGb").getOrElse("2")
+-    minHeapSize = "${memoryGb}G"
++    val memoryGb = providers.gradleProperty("paper.runMemoryGb").getOrElse("7")
++    // minHeapSize = "${memoryGb}G"
+     maxHeapSize = "${memoryGb}G"
+ 
+     doFirst {
+@@ -324,21 +_,4 @@
+     description = "Spin up a test server from the Mojang mapped Paperclip jar"
+     classpath(tasks.createPaperclipJar.flatMap { it.outputZip })
+     mainClass.set(null as String?)
+-}
+-
+-fill {
 -    project("paper")
 -    versionFamily(paperweight.minecraftVersion.map { it.split(".", "-").takeWhile { part -> part.toIntOrNull() != null }.take(2).joinToString(".") })
 -    version(paperweight.minecraftVersion)
@@ -221,41 +241,4 @@
 -            }
 -        }
 -    }
--} */
--
- val sortFoliaATs = tasks.register<SortATs>("sortFoliaATs") {
-     atFile.set(mergeMinecraftATs.flatMap { it.secondFile })
-     atFileOut.set(mergeMinecraftATs.flatMap { it.secondFile })
-+}
-+
-+// SourbyCraft - Canvas's base/ Minecraft patches USE several ca.spottedleaf.concurrentutil.*
-+// classes (SchedulableTick, etc.) without any patch actually creating/modifying those files, so
-+// the generic importCanvasLibraryFiles patch-scan (which only auto-imports a class when some
-+// patch's diff contains a matching "+++ b/<path>" line) never vendors them as editable source —
-+// they stay resolved from the plain "leafpile" library dependency, whose access modifiers don't
-+// match what canvas.at widens, so canvas-server code that reads e.g. SchedulableTick.state fails
-+// to compile ("is not public ... cannot be accessed from outside package"). Point the task at our
-+// own explicit import list (root build-data/canvas-dev-imports.txt) instead of the upstream
-+// checkout's empty one. See that file for the full rationale.
-+// afterEvaluate: the fork-setup wiring (setupFork -> CoreTasks, applied by the
-+// io.canvasmc.weaver.core plugin) configures importCanvasLibraryFiles's devImports itself
-+// from project.afterEvaluate, which runs AFTER plain top-level script statements — a top-level
-+// .configure{}/configureEach{} here would be clobbered right back to the upstream checkout's
-+// (empty) dev-imports.txt. Registering our own afterEvaluate later in script order runs after the
-+// plugin's, so it applies last and wins.
-+afterEvaluate {
-+    tasks.withType<io.papermc.paperweight.core.tasks.ImportLibraryFiles>().matching { it.name == "importCanvasLibraryFiles" }.configureEach {
-+        devImports.set(rootProject.layout.projectDirectory.file("build-data/canvas-dev-imports.txt"))
-+    }
-+}
-+
-+// SourbyCraft - sortFoliaATs rewrites mergeMinecraftATs' secondFile (folia.at) in place, but
-+// mergeMinecraftATs also reads that same file as an input; without this explicit edge Gradle
-+// can schedule them in either order (or flag the missing dependency as a validation error when
-+// both end up in the same task graph, e.g. under rebuildMinecraftFeaturePatches). sortFoliaATs
-+// must normalize the file before mergeMinecraftATs merges it.
-+mergeMinecraftATs.configure {
-+    dependsOn(sortFoliaATs)
  }
- 
- afterEvaluate {

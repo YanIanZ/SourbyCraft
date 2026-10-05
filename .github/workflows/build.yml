@@ -115,12 +115,8 @@ jobs:
           # Release number == build number from r6 onward: the auto-updater compares the tag's rN
           # against the running jar's own build Nf, so the two MUST be stamped from the same counter.
           #
-          # NOTE: the task is `slimServerJar` (registered in root build.gradle.kts:112) — not the
-          # `slimPaperclipJar` name this workflow used pre-Canvas rebase. The Folia line at
-          # release/26.2 had its own paperweight fork (`sourbypatcher/`) register a task under the
-          # old name; this Canvas line uses the private SourbyPatcher canvas-toolchain adapter
-          # (which delegates to weaver), and the slim-jar task was renamed to drop the paperclip
-          # assumption.
+          # The private SourbyPatcher paper-toolchain adapter applies paperweight with Paper as the
+          # only upstream; slimServerJar (root build.gradle.kts) strips libraries from its paperclip jar.
           ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.number }}
           mkdir -p release
           python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-${{ steps.relnum.outputs.channel }}.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}"

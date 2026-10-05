@@ -1,0 +1,72 @@
+--- a/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
++++ b/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
+@@ -30,30 +_,29 @@
+     private static final int SPAWN_CHANCE_INCREASE = 25;
+     private static final int SPAWN_ONE_IN_X_CHANCE = 10;
+     private static final int NUMBER_OF_SPAWN_ATTEMPTS = 10;
+-    private final RandomSource random = RandomSource.create();
++    private final RandomSource random = io.papermc.paper.threadedregions.util.ThreadLocalRandomSource.INSTANCE; // Canvas - region threading
+     private final SavedDataStorage savedDataStorage;
+-    private int tickDelay;
+-    private @Nullable WanderingTraderData traderData;
++    // Folia - moved to global data
+ 
+     public WanderingTraderSpawner(final SavedDataStorage savedDataStorage) {
+         this.savedDataStorage = savedDataStorage;
+-        this.tickDelay = Integer.MIN_VALUE; // Paper - Add Wandering Trader spawn rate config options
+-        this.traderData = null;
++        // Folia - moved to global data
+     }
+ 
+     @Override
+     public void tick(final ServerLevel level, final boolean spawnEnemies) {
++        WanderingTraderData data = this.getTraderData(); // Folia - moved up
+         // Paper start - Add Wandering Trader spawn rate config options
+-        if (this.tickDelay == Integer.MIN_VALUE) {
+-            this.tickDelay = level.paperConfig().entities.spawning.wanderingTrader.spawnMinuteLength;
+-            WanderingTraderData data = this.getTraderData();
++        if (data.tickDelay == Integer.MIN_VALUE) { // Folia - moved to WanderingTraderData
++            data.tickDelay = level.paperConfig().entities.spawning.wanderingTrader.spawnMinuteLength; // Folia - moved to WanderingTraderData
++            // Folia - move up
+             data.setSpawnDelay(level.paperConfig().entities.spawning.wanderingTrader.spawnDayLength);
+             data.setSpawnChance(level.paperConfig().entities.spawning.wanderingTrader.spawnChanceMin);
+         }
+         if (level.getGameRules().get(GameRules.SPAWN_WANDERING_TRADERS)) {
+-            if (this.tickDelay - 1 <= 0) { // Paper - Prevent tickDelay going below 0
+-                this.tickDelay = level.paperConfig().entities.spawning.wanderingTrader.spawnMinuteLength;
+-                WanderingTraderData data = this.getTraderData();
++            if (data.tickDelay - 1 <= 0) { // Paper - Prevent tickDelay going below 0 // Folia - moved to WanderingTraderData
++                data.tickDelay = level.paperConfig().entities.spawning.wanderingTrader.spawnMinuteLength; // Folia - moved to WanderingTraderData
++                // Folia - move up
+                 int spawnDelay = data.spawnDelay() - level.paperConfig().entities.spawning.wanderingTrader.spawnMinuteLength;
+                 data.setSpawnDelay(spawnDelay);
+                 if (spawnDelay <= 0) {
+@@ -68,20 +_,23 @@
+                         }
+                     }
+                 }
+-            } else { this.tickDelay--; } // Paper - Prevent tickDelay going below 0
++            } else { data.tickDelay--; } // Paper - Prevent tickDelay going below 0 // Folia - moved to WanderingTraderData
+         }
+     }
+ 
+     private WanderingTraderData getTraderData() {
+-        if (this.traderData == null) {
+-            this.traderData = this.savedDataStorage.computeIfAbsent(WanderingTraderData.TYPE);
++        // Folia start - region threading
++        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
++        if (worldData.wanderingTraderData == null) {
++            worldData.wanderingTraderData = new net.minecraft.world.level.saveddata.WanderingTraderData();
++        // Folia end - region threading
+         }
+ 
+-        return this.traderData;
++        return worldData.wanderingTraderData; // Folia - region threading
+     }
+ 
+     private boolean spawn(final ServerLevel level) {
+-        Player player = level.getRandomPlayer();
++        Player player = level.getRandomLocalPlayer(); // Folia - region threading
+         if (player == null) {
+             return true;
+         }

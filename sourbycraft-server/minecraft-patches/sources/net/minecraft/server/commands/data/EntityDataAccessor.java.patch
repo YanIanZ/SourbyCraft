@@ -1,0 +1,29 @@
+--- a/net/minecraft/server/commands/data/EntityDataAccessor.java
++++ b/net/minecraft/server/commands/data/EntityDataAccessor.java
+@@ -45,6 +_,26 @@
+     public EntityDataAccessor(final Entity entity) {
+         this.entity = entity;
+     }
++    // Canvas start - region threading
++    // note: this is only used by the data command
++
++    @Override
++    public void ensureTickThread(final String reason) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        if (!isTickThreadFor()) {
++            throw DataAccessor.CSE_TARGET_NOT_SAME_REGION.create();
++        }
++    }
++
++    @Override
++    public void scheduleOrExecute(final java.util.function.Consumer<DataAccessor> consumer) {
++        this.entity.getBukkitEntity().taskScheduler.scheduleOrExecute((_) -> consumer.accept(this));
++    }
++
++    @Override
++    public boolean isTickThreadFor() {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.entity);
++    }
++    // Canvas end - region threading
+ 
+     @Override
+     public void setData(final CompoundTag tag) throws CommandSyntaxException {

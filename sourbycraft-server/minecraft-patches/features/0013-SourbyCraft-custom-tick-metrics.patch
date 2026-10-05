@@ -105,7 +105,7 @@ index 099b4dbabeac184d009354f3e0af62d5945a7f17..b6425ee44f76e9fc41680164d1a1b6f4
              return null;
          }
 diff --git a/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java b/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
-index 0978987453a4c40fbc76de5be2440679b0368f11..34c870cb15f61058ce6a614c521e2bf6d6b5743a 100644
+index 64372f5a5688806646410d844104d941d4c39760..e09c5b4cbdc01c2418becc2bbde873fcd9101979 100644
 --- a/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
 +++ b/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
 @@ -191,6 +191,8 @@ public class WorldShutdownThread extends RegionShutdownThread {
@@ -118,7 +118,7 @@ index 0978987453a4c40fbc76de5be2440679b0368f11..34c870cb15f61058ce6a614c521e2bf6
          MinecraftServer.getServer().removeLevel(this.level);
          MinecraftServer.getServer().server.worlds.remove(this.level.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-index 6c3769f8babea5e89aa063f5aef3168ecab4bed5..1b2ebb474f7747a1b585e6cc4562d1b4f0b49ad6 100644
+index 4767004ce84f4ae5a8f51c87b949e09a7e877701..4f4aad24cd0b8bfdb8ac770ad74f8e3fde01a980 100644
 --- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 @@ -1,5 +1,6 @@
@@ -295,7 +295,7 @@ index d10da4e3954e3bfeacd075cd6d6ba27876ba7475..fe16ee5c3d8a2eb4bcf67a79687570a8
          // CraftBukkit end
          this.isSaving = true; // Canvas - region threading
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index 6b9c42f283bb9f0144c70c6321edbbb754d30240..690746101c38b7ff61db3c3198e8dd9615b32ad9 100644
+index 9add3072a5fbaecd04b680adbba2ea2ad5bf03d5..ce762028ee83ac27d68b398e5f5cba80ae89173d 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
 @@ -190,6 +190,8 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet

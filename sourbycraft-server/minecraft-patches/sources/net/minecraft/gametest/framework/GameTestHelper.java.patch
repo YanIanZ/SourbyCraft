@@ -1,0 +1,11 @@
+--- a/net/minecraft/gametest/framework/GameTestHelper.java
++++ b/net/minecraft/gametest/framework/GameTestHelper.java
+@@ -397,7 +_,7 @@
+         };
+         Connection connection = new Connection(PacketFlow.SERVERBOUND);
+         new EmbeddedChannel(connection);
+-        this.getLevel().getServer().getPlayerList().placeNewPlayer(connection, player, cookie);
++        if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
+         return player;
+     }
+ 

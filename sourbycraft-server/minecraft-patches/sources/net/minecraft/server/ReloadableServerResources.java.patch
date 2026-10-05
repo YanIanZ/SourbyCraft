@@ -1,0 +1,20 @@
+--- a/net/minecraft/server/ReloadableServerResources.java
++++ b/net/minecraft/server/ReloadableServerResources.java
+@@ -72,7 +_,7 @@
+     }
+ 
+     public List<PreparableReloadListener> listeners() {
+-        return List.of(this.recipes, this.functionLibrary, this.advancements);
++        return List.of(this.recipes, this.advancements); // Canvas - region threading
+     }
+ 
+     public static CompletableFuture<ReloadableServerResources> loadResources(
+@@ -115,7 +_,7 @@
+                                     backgroundExecutor,
+                                     mainThreadExecutor,
+                                     DATA_RELOAD_INITIAL_TASK,
+-                                    LOGGER.isDebugEnabled()
++                                    false
+                                 )
+                                 .done()
+                                 .thenApply(ignore -> result);

@@ -1,0 +1,22 @@
+--- a/net/minecraft/commands/execution/tasks/BuildContexts.java
++++ b/net/minecraft/commands/execution/tasks/BuildContexts.java
+@@ -44,9 +_,7 @@
+         ChainModifiers modifiers = initialModifiers;
+         List<T> currentSources = initialSources;
+         if (currentStage.getStage() != Stage.EXECUTE) {
+-            context.profiler().push(() -> "prepare " + this.commandInput);
+-
+-            try {
++            {
+                 int forkLimit = context.forkLimit();
+ 
+                 while (currentStage.getStage() != Stage.EXECUTE) {
+@@ -88,8 +_,6 @@
+ 
+                     currentStage = currentStage.nextStage();
+                 }
+-            } finally {
+-                context.profiler().pop();
+             }
+         }
+ 

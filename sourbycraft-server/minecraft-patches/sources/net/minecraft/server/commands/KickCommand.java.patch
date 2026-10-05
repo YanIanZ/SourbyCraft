@@ -1,0 +1,47 @@
+--- a/net/minecraft/server/commands/KickCommand.java
++++ b/net/minecraft/server/commands/KickCommand.java
+@@ -39,20 +_,29 @@
+             throw ERROR_SINGLEPLAYER.create();
+         }
+ 
+-        int count = 0;
+-
+-        for (ServerPlayer player : players) {
+-            if (!source.getServer().isSingleplayerOwner(player.nameAndId())) {
+-                player.connection.disconnect(reason, org.bukkit.event.player.PlayerKickEvent.Cause.KICKED); // Paper - kick event cause
+-                source.sendSuccess(() -> Component.translatable("commands.kick.success", player.getDisplayName(), reason), true);
+-                count++;
+-            }
+-        }
+-
+-        if (count == 0) {
+-            throw ERROR_KICKING_OWNER.create();
+-        } else {
+-            return count;
+-        }
++        // Canvas start - region threading
++
++        // note: while technically not required, since the disconnect function
++        //       we call has handling for if we aren't on the owning context,
++        //       but we rewrite this one anyway for the proper response ordering
++
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++            .with(players)
++            .executes((ServerPlayer entityPlayer) -> {
++                entityPlayer.connection.disconnect(reason, org.bukkit.event.player.PlayerKickEvent.Cause.KICKED); // Paper - kick event cause
++                source.sendSuccess(() -> Component.translatable("commands.kick.success", entityPlayer.getDisplayName(), reason), true);
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++            })
++            .onComplete((count, _,_) -> {
++                if (count == 0) {
++                    throw ERROR_KICKING_OWNER.create();
++                }
++                // else, the command feedback is handled in execution,
++                // so we don't really care about anything else
++                return count;
++            })
++            .start(source);
++        return 1;
++        // Canvas end - region threading
+     }
+ }

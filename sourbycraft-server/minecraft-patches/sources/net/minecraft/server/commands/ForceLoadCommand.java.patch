@@ -1,0 +1,53 @@
+--- a/net/minecraft/server/commands/ForceLoadCommand.java
++++ b/net/minecraft/server/commands/ForceLoadCommand.java
+@@ -87,6 +_,7 @@
+     }
+ 
+     private static int queryForceLoad(final CommandSourceStack source, final ColumnPos pos) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         ChunkPos chunkPos = pos.toChunkPos();
+         ServerLevel level = source.getLevel();
+         ResourceKey<Level> dimension = level.dimension();
+@@ -102,10 +_,12 @@
+         } else {
+             throw ERROR_NOT_TICKING.create(chunkPos, dimension.identifier());
+         }
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int listForceLoad(final CommandSourceStack source) {
+         ServerLevel level = source.getLevel();
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         ResourceKey<Level> dimension = level.dimension();
+         LongSet forcedChunks = level.getForceLoadedChunks();
+         int chunkCount = forcedChunks.size();
+@@ -126,18 +_,22 @@
+         }
+ 
+         return chunkCount;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int removeAll(final CommandSourceStack source) {
+         ServerLevel level = source.getLevel();
+         ResourceKey<Level> dimension = level.dimension();
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         LongSet forcedChunks = level.getForceLoadedChunks();
+         forcedChunks.forEach(chunk -> level.setChunkForced(ChunkPos.getX(chunk), ChunkPos.getZ(chunk), false));
+         source.sendSuccess(() -> Component.translatable("commands.forceload.removed.all", Component.translationArg(dimension.identifier())), true);
+         return 0;
++        }, source); // Canvas - region threading
+     }
+ 
+     private static int changeForceLoad(final CommandSourceStack source, final ColumnPos from, final ColumnPos to, final boolean add) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
+         int minX = Math.min(from.x(), to.x());
+         int minZ = Math.min(from.z(), to.z());
+         int maxX = Math.max(from.x(), to.x());
+@@ -203,5 +_,6 @@
+         } else {
+             throw BlockPosArgument.ERROR_OUT_OF_WORLD.create();
+         }
++        }, source); // Canvas - region threading
+     }
+ }

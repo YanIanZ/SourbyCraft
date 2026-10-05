@@ -1,0 +1,50 @@
+--- a/net/minecraft/server/players/BanListEntry.java
++++ b/net/minecraft/server/players/BanListEntry.java
+@@ -10,7 +_,7 @@
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class BanListEntry<T> extends StoredUserEntry<T> {
+-    public static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.ROOT);
++    public static final ThreadLocal<SimpleDateFormat> DATE_FORMAT = ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.ROOT)); // Folia - region threading - SDF is not thread-safe
+     public static final String EXPIRES_NEVER = "forever";
+     protected final Date created;
+     protected final String source;
+@@ -32,7 +_,7 @@
+ 
+         Date created;
+         try {
+-            created = object.has("created") ? DATE_FORMAT.parse(object.get("created").getAsString()) : new Date();
++            created = object.has("created") ? DATE_FORMAT.get().parse(object.get("created").getAsString()) : new Date(); // Folia - region threading - SDF is not thread-safe
+         } catch (ParseException ignored) {
+             created = new Date();
+         }
+@@ -42,7 +_,7 @@
+ 
+         Date expires;
+         try {
+-            expires = object.has("expires") ? DATE_FORMAT.parse(object.get("expires").getAsString()) : null;
++            expires = object.has("expires") ? DATE_FORMAT.get().parse(object.get("expires").getAsString()) : null; // Folia - region threading - SDF is not thread-safe
+         } catch (ParseException ignored) {
+             expires = null;
+         }
+@@ -81,9 +_,9 @@
+ 
+     @Override
+     protected void serialize(final JsonObject object) {
+-        object.addProperty("created", DATE_FORMAT.format(this.created));
++        object.addProperty("created", DATE_FORMAT.get().format(this.created)); // Folia - region threading - SDF is not thread-safe
+         object.addProperty("source", this.source);
+-        object.addProperty("expires", this.expires == null ? "forever" : DATE_FORMAT.format(this.expires));
++        object.addProperty("expires", this.expires == null ? "forever" : DATE_FORMAT.get().format(this.expires)); // Folia - region threading - SDF is not thread-safe
+         object.addProperty("reason", this.reason);
+     }
+ 
+@@ -112,7 +_,7 @@
+         Date expires = null;
+ 
+         try {
+-            expires = jsonobject.has("expires") ? BanListEntry.DATE_FORMAT.parse(jsonobject.get("expires").getAsString()) : null;
++            expires = jsonobject.has("expires") ? BanListEntry.DATE_FORMAT.get().parse(jsonobject.get("expires").getAsString()) : null; // Folia - region threading - SDF is not thread-safe
+         } catch (ParseException ex) {
+             // Guess we don't have a date
+         }

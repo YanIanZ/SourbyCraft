@@ -1,0 +1,33 @@
+--- a/net/minecraft/server/commands/ClearInventoryCommands.java
++++ b/net/minecraft/server/commands/ClearInventoryCommands.java
+@@ -62,14 +_,22 @@
+     private static int clearInventory(
+         final CommandSourceStack source, final Collection<ServerPlayer> players, final Predicate<ItemStack> predicate, final int maxCount
+     ) throws CommandSyntaxException {
+-        int count = 0;
+-
+-        for (ServerPlayer player : players) {
+-            count += player.getInventory().clearOrCountMatchingItems(predicate, maxCount, player.inventoryMenu.getCraftSlots());
+-            player.containerMenu.broadcastChanges();
+-            player.inventoryMenu.slotsChanged(player.getInventory());
+-        }
+-
++    // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++            .with(players)
++            .executes((ServerPlayer entityPlayer) -> {
++                int count = entityPlayer.getInventory().clearOrCountMatchingItems(predicate, maxCount, entityPlayer.inventoryMenu.getCraftSlots());
++                entityPlayer.containerMenu.broadcastChanges();
++                entityPlayer.inventoryMenu.slotsChanged(entityPlayer.getInventory());
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.addInt(count);
++            })
++            .onComplete((count, _, css) -> callback(count, players, maxCount, css))
++            .start(source);
++        return 1;
++    }
++
++    private static int callback(final int count, final Collection<ServerPlayer> players, final int maxCount, final CommandSourceStack source) throws CommandSyntaxException {
++    // Canvas end - region threading
+         if (count == 0) {
+             if (players.size() == 1) {
+                 throw ERROR_SINGLE.create(players.iterator().next().getName());

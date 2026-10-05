@@ -1,0 +1,10 @@
+--- a/net/minecraft/advancements/triggers/DefaultBlockInteractionTrigger.java
++++ b/net/minecraft/advancements/triggers/DefaultBlockInteractionTrigger.java
+@@ -24,6 +_,7 @@
+     }
+ 
+     public void trigger(final ServerPlayer player, final BlockPos pos) {
++        if (player.level().canvasConfig().disableCriterionTrigger) return; // Canvas - disable criterion trigger config
+         ServerLevel level = player.level();
+         BlockState state = level.getBlockState(pos);
+         LootParams params = new LootParams.Builder(level)

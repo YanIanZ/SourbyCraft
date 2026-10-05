@@ -1,0 +1,20 @@
+--- a/net/minecraft/server/commands/FetchProfileCommand.java
++++ b/net/minecraft/server/commands/FetchProfileCommand.java
+@@ -127,7 +_,7 @@
+                 () -> {
+                     Component nameComponent = Component.literal(name);
+                     Optional<GameProfile> result = resolver.fetchByName(name);
+-                    server.execute(
++                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask( // Folia - region threading
+                         () -> result.ifPresentOrElse(
+                             profile -> reportResolvedProfile(source, profile, "commands.fetchprofile.name.success", nameComponent),
+                             () -> source.sendFailure(Component.translatable("commands.fetchprofile.name.failure", nameComponent))
+@@ -146,7 +_,7 @@
+                 () -> {
+                     Component idComponent = Component.translationArg(id);
+                     Optional<GameProfile> result = resolver.fetchById(id);
+-                    server.execute(
++                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask( // Folia - region threading
+                         () -> result.ifPresentOrElse(
+                             profile -> reportResolvedProfile(source, profile, "commands.fetchprofile.id.success", idComponent),
+                             () -> source.sendFailure(Component.translatable("commands.fetchprofile.id.failure", idComponent))

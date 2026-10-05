@@ -78,7 +78,7 @@ index 45942481a972f2308eae80f6f0f8b886e47016ec..e50157aa7469c654b06dd7d697993b29
      protected PathFinder createPathFinder(final int maxVisitedNodes) {
          this.nodeEvaluator = new AmphibiousNodeEvaluator(false);
 diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 0b5fab274d9471472ffe81dead60e4d0906b0f31..40aec05434ecf0e5b61d95651410fbaf5727c5ae 100644
+index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2af7b34e81a35d38053ccb0b6484696e0d215e6f 100644
 --- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 +++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 @@ -100,6 +100,17 @@ public abstract class PathNavigation {

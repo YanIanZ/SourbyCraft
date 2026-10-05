@@ -426,12 +426,6 @@ paper-api-generator/
 /folia-api/build.gradle.kts
 /folia-api/
 /folia-server/
-# Canvas base (feat/canvas-engine)
-/canvas-server/build.gradle.kts
-/canvas-server/src/minecraft
-/canvas-api/build.gradle.kts
-/canvas-api/
-/canvas-server/
 docs/superpowers/*
 !docs/superpowers/specs/
 docs/superpowers/specs/*
@@ -489,7 +483,6 @@ Metal/.gradle/
 
 # Local patch parking lot — not tracked; put patches that need rebase/manual port here
 sourbycraft-server/minecraft-patches/features/.skipped/
-sourbycraft-server/canvas-patches/files/.skipped/
 sourbycraft-server/paper-patches/.skipped/
 sourbyapi/paper-patches/.skipped/
 

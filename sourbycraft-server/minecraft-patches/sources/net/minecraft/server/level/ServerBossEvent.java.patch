@@ -1,0 +1,145 @@
+--- a/net/minecraft/server/level/ServerBossEvent.java
++++ b/net/minecraft/server/level/ServerBossEvent.java
+@@ -15,7 +_,8 @@
+ public class ServerBossEvent extends BossEvent {
+     private final Set<ServerPlayer> players = Sets.newHashSet();
+     private final Set<ServerPlayer> unmodifiablePlayers = Collections.unmodifiableSet(this.players);
+-    private boolean visible = true;
++    protected final Object playerLock = new Object(); // Canvas - region threading
++    private final java.util.concurrent.atomic.AtomicBoolean visible = new java.util.concurrent.atomic.AtomicBoolean(true); // Canvas - region threading
+ 
+     public ServerBossEvent(final UUID id, final Component name, final BossEvent.BossBarColor color, final BossEvent.BossBarOverlay overlay) {
+         super(id, name, color, overlay);
+@@ -23,8 +_,7 @@
+ 
+     @Override
+     public void setProgress(final float progress) {
+-        if (progress != this.progress) {
+-            super.setProgress(progress);
++        if (compareAndSetProgress(progress)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateProgressPacket);
+         }
+@@ -32,8 +_,7 @@
+ 
+     @Override
+     public void setColor(final BossEvent.BossBarColor color) {
+-        if (color != this.color) {
+-            super.setColor(color);
++        if (compareAndSetColor(color)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateStylePacket);
+         }
+@@ -41,8 +_,7 @@
+ 
+     @Override
+     public void setOverlay(final BossEvent.BossBarOverlay overlay) {
+-        if (overlay != this.overlay) {
+-            super.setOverlay(overlay);
++        if (compareAndSetOverlay(overlay)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateStylePacket);
+         }
+@@ -50,8 +_,7 @@
+ 
+     @Override
+     public BossEvent setDarkenScreen(final boolean darkenScreen) {
+-        if (darkenScreen != this.darkenScreen) {
+-            super.setDarkenScreen(darkenScreen);
++        if (compareAndSetDarkenScreen(darkenScreen)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdatePropertiesPacket);
+         }
+@@ -61,8 +_,7 @@
+ 
+     @Override
+     public BossEvent setPlayBossMusic(final boolean playBossMusic) {
+-        if (playBossMusic != this.playBossMusic) {
+-            super.setPlayBossMusic(playBossMusic);
++        if (compareAndSetPlayBossMusic(playBossMusic)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdatePropertiesPacket);
+         }
+@@ -72,8 +_,7 @@
+ 
+     @Override
+     public BossEvent setCreateWorldFog(final boolean createWorldFog) {
+-        if (createWorldFog != this.createWorldFog) {
+-            super.setCreateWorldFog(createWorldFog);
++        if (compareAndSetCreateWorldFog(createWorldFog)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdatePropertiesPacket);
+         }
+@@ -83,56 +_,64 @@
+ 
+     @Override
+     public void setName(final Component name) {
+-        if (!Objects.equal(name, this.name)) {
+-            super.setName(name);
++        if (compareAndSetName(name)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateNamePacket);
+         }
+     }
+ 
+     public void broadcast(final Function<BossEvent, ClientboundBossEventPacket> factory) {
+-        if (this.visible) {
++        synchronized (playerLock) { // Canvas - region threading
++        if (this.visible.get()) { // Canvas - region threading
+             ClientboundBossEventPacket packet = factory.apply(this);
+ 
+             for (ServerPlayer player : this.players) {
+                 player.connection.send(packet);
+             }
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void addPlayer(final ServerPlayer player) {
+-        if (this.players.add(player) && this.visible) {
++        synchronized (playerLock) { // Canvas - region threading
++        if (this.players.add(player) && this.visible.get()) { // Canvas - region threading
+             player.connection.send(ClientboundBossEventPacket.createAddPacket(this));
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void removePlayer(final ServerPlayer player) {
+-        if (this.players.remove(player) && this.visible) {
++        synchronized (playerLock) { // Canvas - region threading
++        if (this.players.remove(player) && this.visible.get()) { // Canvas - region threading
+             player.connection.send(ClientboundBossEventPacket.createRemovePacket(this.getId()));
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void removeAllPlayers() {
++        synchronized (playerLock) { // Canvas - region threading
+         if (!this.players.isEmpty()) {
+             for (ServerPlayer player : Lists.newArrayList(this.players)) {
+                 this.removePlayer(player);
+             }
+         }
++        } // Canvas - region threading
+     }
+ 
+     public boolean isVisible() {
+-        return this.visible;
++        return this.visible.get(); // Canvas - region threading
+     }
+ 
+     public void setVisible(final boolean visible) {
+-        if (visible != this.visible) {
+-            this.visible = visible;
++        if (this.visible.compareAndSet(!visible, visible)) { // Canvas - region threading
+             this.setDirty();
+ 
++            synchronized (playerLock) { // Canvas - region threading
+             for (ServerPlayer player : this.players) {
+                 player.connection
+                     .send(visible ? ClientboundBossEventPacket.createAddPacket(this) : ClientboundBossEventPacket.createRemovePacket(this.getId()));
+             }
++            } // Canvas - region threading
+         }
+     }
+ 

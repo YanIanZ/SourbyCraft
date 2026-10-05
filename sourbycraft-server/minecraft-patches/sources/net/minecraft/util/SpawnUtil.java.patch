@@ -1,0 +1,11 @@
+--- a/net/minecraft/util/SpawnUtil.java
++++ b/net/minecraft/util/SpawnUtil.java
+@@ -81,7 +_,7 @@
+                         return Optional.of(mob);
+                     }
+ 
+-                    mob.discard(null); // CraftBukkit - add Bukkit remove cause
++                    // mob.discard(null); // CraftBukkit - add Bukkit remove cause // Folia - region threading
+                 }
+             }
+         }

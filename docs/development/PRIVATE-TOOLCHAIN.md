@@ -2,7 +2,7 @@
 
 Official server downloads are GitHub Releases. Maintainer builds require private checkouts:
 
-- `YanIanZ/SourbyPatcher`: active `canvas-toolchain` adapter 2.0.20 and archived Folia patcher.
+- `YanIanZ/SourbyPatcher`: active `paper-toolchain` 3.0.0; archived `canvas-toolchain` 2.0.x and Folia patcher.
 - `YanIanZ/SourbyClip`: launcher 3.0.26, protocol 1.
 
 The public repository no longer vendors these sources or SourbyClip Maven binaries.
@@ -26,8 +26,9 @@ pass `--maven-local PATH` to the script and `-Dmaven.repo.local=PATH` to Gradle.
 The root build resolves private coordinates exclusively there, with no remote Maven fallback.
 The standalone check `python3 scripts/private_toolchain.py` validates installed JAR hashes.
 
-SourbyPatcher's active plugin delegates patch sequencing to Weaver 2.4.5. This retains the
-working PR #12 Canvas integration; the old Folia implementation is not reactivated.
+SourbyPatcher's active plugin applies paperweight's patcher (2.0.0-beta.24) with Paper as the only
+upstream. Canvas and Weaver were dropped on 2026-10-05; the former Canvas/Folia changes are
+SourbyCraft's own patches and sources. `canvas-toolchain` is kept only to rebuild older revisions.
 Before patching or packaging, SourbyClip must match the approved SHA-256, version, main class,
 and protocol. Settings also verify the SourbyPatcher JAR hash before loading its plugin.
 This detects accidental or unapproved substitutions; it is not a DRM boundary.

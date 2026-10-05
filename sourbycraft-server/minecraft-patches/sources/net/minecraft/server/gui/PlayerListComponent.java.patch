@@ -1,0 +1,39 @@
+--- a/net/minecraft/server/gui/PlayerListComponent.java
++++ b/net/minecraft/server/gui/PlayerListComponent.java
+@@ -10,18 +_,26 @@
+ 
+     public PlayerListComponent(final MinecraftServer server) {
+         this.server = server;
+-        server.addTickable(this::tick);
++    // Canvas start - region threading
++        COMPONENT_REF.setValue(this);
+     }
+ 
+-    public void tick() {
+-        if (this.tickCount++ % 20 == 0) {
+-            Vector<String> players = new Vector<>();
+-
+-            for (int i = 0; i < this.server.getPlayerList().getPlayers().size(); i++) {
+-                players.add(this.server.getPlayerList().getPlayers().get(i).getGameProfile().name());
+-            }
+-
+-            this.setListData(players);
++    private static final io.canvasmc.canvas.util.CanonicalReference<PlayerListComponent> COMPONENT_REF = new io.canvasmc.canvas.util.CanonicalReference<>();
++    private static int TICK = 0;
++
++    public static void tick() {
++        // if the component ref isn't set, the gui was never enabled
++        if (!COMPONENT_REF.isSet() || (TICK++ % 20 != 0)) return;
++
++        final Vector<String> players = new java.util.Vector<>();
++
++        final java.util.List<net.minecraft.server.level.ServerPlayer> playerList = net.minecraft.server.MinecraftServer.getServer().getPlayerList().getPlayers();
++
++        for (final net.minecraft.server.level.ServerPlayer entityPlayer : playerList) {
++            players.add(entityPlayer.gameProfile.name());
+         }
++
++        COMPONENT_REF.value().setListData(players);
+     }
++    // Canvas end - region threading
+ }

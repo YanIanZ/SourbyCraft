@@ -1,0 +1,166 @@
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -34,8 +_,6 @@
+ import net.minecraft.util.debug.DebugPathInfo;
+ import net.minecraft.util.debug.DebugSubscriptions;
+ import net.minecraft.util.debug.DebugValueSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.Container;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.DifficultyInstance;
+@@ -251,8 +_,20 @@
+         return this.sensing;
+     }
+ 
++    // Folia start - region threading
++    public LivingEntity getTargetRaw() {
++        return this.target;
++    }
++
++    // Folia end - region threading
+     @Override
+     public @Nullable LivingEntity getTarget() {
++        // Folia start - region threading
++        if (this.target != null && (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.target) || this.target.isRemoved())) {
++            this.target = null;
++            return null;
++        }
++        // Folia end - region threading
+         return this.asValidTarget(this.target);
+     }
+ 
+@@ -261,6 +_,11 @@
+     }
+ 
+     protected @Nullable LivingEntity asValidTarget(final @Nullable LivingEntity target) {
++        // Folia start - region threading
++        if (target != null && (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(target) || target.isRemoved())) {
++            return null;
++        }
++        // Folia end - region threading
+         if (target instanceof Player player && (player.isCreative() || player.isSpectator())) {
+             return null;
+         } else {
+@@ -279,7 +_,7 @@
+ 
+     public boolean setTarget(@Nullable LivingEntity target, EntityTargetEvent.@Nullable TargetReason reason) {
+         LivingEntity currentTarget = this.getTargetUnchecked();
+-        if (Objects.equals(currentTarget, target)) {
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(target) || Objects.equals(currentTarget, target)) { // Canvas - fix Folia#386
+             return false;
+         }
+         LivingEntity originalTarget = target;
+@@ -343,14 +_,11 @@
+     @Override
+     public void baseTick() {
+         super.baseTick();
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("mobBaseTick");
+         if (this.isAlive() && this.random.nextInt(1000) < this.ambientSoundTime++) {
+             this.resetAmbientSoundTime();
+             this.playAmbientSound();
+         }
+-
+-        profiler.pop();
++        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc183990 && this.target != null && this.target.isDeadOrDying()) this.setTarget(null, org.bukkit.event.entity.EntityTargetEvent.TargetReason.TARGET_DIED); // Canvas - MC-183990
+     }
+ 
+     @Override
+@@ -529,8 +_,6 @@
+             this.burnUndead();
+         }
+ 
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("looting");
+         if (this.level() instanceof ServerLevel serverLevel
+             && this.canPickUpLoot()
+             && this.isAlive()
+@@ -550,8 +_,6 @@
+                 }
+             }
+         }
+-
+-        profiler.pop();
+     }
+ 
+     protected EquipmentSlot sunProtectionSlot() {
+@@ -818,42 +_,21 @@
+             return;
+         }
+         // Paper end - Allow nerfed mobs to jump and float
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("sensing");
+         this.sensing.tick();
+-        profiler.pop();
+         int idBasedTickCount = this.tickCount + this.getId();
+         if (idBasedTickCount % 2 != 0 && this.tickCount > 1) {
+-            profiler.push("targetSelector");
+             this.targetSelector.tickRunningGoals(false);
+-            profiler.pop();
+-            profiler.push("goalSelector");
+             this.goalSelector.tickRunningGoals(false);
+-            profiler.pop();
+         } else {
+-            profiler.push("targetSelector");
+             this.targetSelector.tick();
+-            profiler.pop();
+-            profiler.push("goalSelector");
+             this.goalSelector.tick();
+-            profiler.pop();
+         }
+ 
+-        profiler.push("navigation");
+         this.navigation.tick();
+-        profiler.pop();
+-        profiler.push("mob tick");
+         this.customServerAiStep((ServerLevel)this.level());
+-        profiler.pop();
+-        profiler.push("controls");
+-        profiler.push("move");
+         this.moveControl.tick();
+-        profiler.popPush("look");
+         this.lookControl.tick();
+-        profiler.popPush("jump");
+         this.jumpControl.tick();
+-        profiler.pop();
+-        profiler.pop();
+     }
+ 
+     protected void customServerAiStep(final ServerLevel level) {
+@@ -1638,6 +_,20 @@
+         }
+     }
+ 
++    // Folia start - moved from removeAfterChangingDimensions()
++    @Override
++    protected void postRemoveAfterChangingDimensions() {
++        super.postRemoveAfterChangingDimensions();
++
++        for (EquipmentSlot slot : EquipmentSlot.VALUES) {
++            ItemStack itemStack = this.getItemBySlot(slot);
++            if (!itemStack.isEmpty()) {
++                itemStack.setCount(0);
++            }
++        }
++    }
++
++    // Folia end - moved from removeAfterChangingDimensions()
+     @VisibleForTesting
+     public void removeFreeWill() {
+         this.removeAllGoals(goal -> true);
+@@ -1658,12 +_,8 @@
+     protected void removeAfterChangingDimensions() {
+         super.removeAfterChangingDimensions();
+ 
+-        for (EquipmentSlot slot : EquipmentSlot.VALUES) {
+-            ItemStack itemStack = this.getItemBySlot(slot);
+-            if (!itemStack.isEmpty()) {
+-                itemStack.setCount(0);
+-            }
+-        }
++        // Folia - move to postRemoveAfterChangingDimensions()
++        getNavigation().stop(); // Canvas - stop navigation on teleport
+     }
+ 
+     @Override

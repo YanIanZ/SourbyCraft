@@ -1,0 +1,266 @@
+--- a/net/minecraft/server/commands/LootCommand.java
++++ b/net/minecraft/server/commands/LootCommand.java
+@@ -207,8 +_,7 @@
+                                                     BlockPosArgument.getLoadedBlockPos(c, "targetPos"),
+                                                     SlotArgument.getSlot(c, "slot"),
+                                                     drops.size(),
+-                                                    drops,
+-                                                    callback
++                                                    drops // Canvas - region threading
+                                                 )
+                                             )
+                                             .then(
+@@ -219,8 +_,7 @@
+                                                         BlockPosArgument.getLoadedBlockPos(c, "targetPos"),
+                                                         IntegerArgumentType.getInteger(c, "slot"),
+                                                         IntegerArgumentType.getInteger(c, "count"),
+-                                                        drops,
+-                                                        callback
++                                                        drops // Canvas - region threading
+                                                     )
+                                                 )
+                                             )
+@@ -251,13 +_,14 @@
+                     .then(
+                         tail.construct(
+                             Commands.argument("targetPos", Vec3Argument.vec3()),
+-                            (c, drops, callback) -> dropInWorld(c.getSource(), Vec3Argument.getVec3(c, "targetPos"), drops, callback)
++                            (c, drops, callback) -> dropInWorld(c.getSource(), Vec3Argument.getVec3(c, "targetPos"), drops) // Canvas - region threading
+                         )
+                     )
+             );
+     }
+ 
+     private static Container getContainer(final CommandSourceStack source, final BlockPos pos) throws CommandSyntaxException {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(source.getLevel(), pos, "Cannot get container async"); // Canvas - region threading
+         if (source.getLevel().getBlockEntity(pos) instanceof Container container) {
+             return container;
+         } else {
+@@ -265,7 +_,10 @@
+         }
+     }
+ 
+-    private static int blockDistribute(final CommandSourceStack source, final BlockPos pos, final List<ItemStack> drops, final LootCommand.Callback callback) throws CommandSyntaxException {
++    // Canvas start - region threading
++    private static int blockDistribute(final CommandSourceStack source, final BlockPos pos, final List<ItemStack> drops, final CommandSourceStack callback) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPos(() -> {
++    // Canvas end - region threading
+         Container container = getContainer(source, pos);
+         List<ItemStack> usedItems = Lists.newArrayListWithCapacity(drops.size());
+ 
+@@ -276,8 +_,10 @@
+             }
+         }
+ 
+-        callback.accept(usedItems);
+-        return usedItems.size();
++        // Canvas start - region threading
++        source.sendSuccess(() -> Component.translatable("commands.drop.success.multiple", usedItems.size()), false);
++        }, pos, source.getLevel(), source);
++        // Canvas end - region threading
+     }
+ 
+     private static boolean distributeToContainer(final Container container, final ItemStack itemStack) {
+@@ -310,9 +_,9 @@
+         final BlockPos pos,
+         final int startSlot,
+         final int slotCount,
+-        final List<ItemStack> drops,
+-        final LootCommand.Callback callback
++        final List<ItemStack> drops // Canvas - region threading
+     ) throws CommandSyntaxException {
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPos(() -> { // Canvas - region threading
+         Container container = getContainer(source, pos);
+         int maxSlot = container.getContainerSize();
+         if (startSlot >= 0 && startSlot < maxSlot) {
+@@ -327,30 +_,37 @@
+                 }
+             }
+ 
+-            callback.accept(usedItems);
+-            return usedItems.size();
++            source.sendSuccess(() -> Component.translatable("commands.drop.success.multiple", usedItems.size()), false); // Canvas - region threading
+         } else {
+             throw ItemCommands.ERROR_TARGET_INAPPLICABLE_SLOT.create(startSlot);
+         }
++        }, pos, source.getLevel(), source); // Canvas - region threading
+     }
+ 
+     private static boolean canMergeItems(final ItemStack a, final ItemStack b) {
+         return a.getCount() <= a.getMaxStackSize() && ItemStack.isSameItemSameComponents(a, b);
+     }
+ 
+-    private static int playerGive(final Collection<ServerPlayer> players, final List<ItemStack> drops, final LootCommand.Callback callback) throws CommandSyntaxException {
+-        List<ItemStack> usedItems = Lists.newArrayListWithCapacity(drops.size());
+-
+-        for (ItemStack drop : drops) {
+-            for (ServerPlayer player : players) {
+-                if (player.getInventory().add(drop.copy())) {
+-                    usedItems.add(drop);
++    // Canvas start - region threading
++    private static int playerGive(final Collection<ServerPlayer> players, final List<ItemStack> drops, final CommandSourceStack source) throws CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++            .with(players)
++            .executes((ServerPlayer entityPlayer) -> {
++                int count = 0;
++                for (ItemStack drop : drops) {
++                    if (entityPlayer.getInventory().add(drop.copy())) {
++                        count++;
++                    }
+                 }
+-            }
+-        }
+-
+-        callback.accept(usedItems);
+-        return usedItems.size();
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.addInt(count);
++            })
++            .onComplete((count, _, css) -> {
++                css.sendSuccess(() -> Component.translatable("commands.drop.success.multiple", count), false);
++                return count;
++            })
++            .start(source);
++        return 1;
++    // Canvas end - region threading
+     }
+ 
+     private static void setSlots(final Entity entity, final List<ItemStack> itemsToSet, final int startSlot, final int count, final List<ItemStack> usedItems) {
+@@ -364,32 +_,46 @@
+     }
+ 
+     private static int entityReplace(
+-        final Collection<? extends Entity> entities, final int startSlot, final int count, final List<ItemStack> drops, final LootCommand.Callback callback
++        final Collection<? extends Entity> entities, final int startSlot, final int count, final List<ItemStack> drops, final CommandSourceStack source // Canvas - region threading
+     ) throws CommandSyntaxException {
+-        List<ItemStack> usedItems = Lists.newArrayListWithCapacity(drops.size());
+-
+-        for (Entity entity : entities) {
+-            if (entity instanceof ServerPlayer player) {
+-                setSlots(entity, drops, startSlot, count, usedItems);
+-                player.containerMenu.broadcastChanges();
+-            } else {
+-                setSlots(entity, drops, startSlot, count, usedItems);
+-            }
+-        }
+-
+-        callback.accept(usedItems);
+-        return usedItems.size();
++        // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++            .with(entities)
++            .executes((Entity entity) -> {
++                int toAdd = 0;
++                // Vanilla-copy of setSlots
++                for (int i = 0; i < count; i++) {
++                    ItemStack item = i < drops.size() ? drops.get(i) : ItemStack.EMPTY;
++                    SlotAccess slotAccess = entity.getSlot(startSlot + i);
++                    if (slotAccess != null && slotAccess.set(item.copy())) {
++                        toAdd++; // change this from adding to the usedItems set
++                    }
++                }
++                if (entity instanceof ServerPlayer player) {
++                    player.containerMenu.broadcastChanges();
++                }
++                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.addInt(toAdd);
++            })
++            .onComplete((finalCount, _, css) -> {
++                css.sendSuccess(() -> Component.translatable("commands.drop.success.multiple", finalCount), false);
++                return finalCount;
++            })
++            .start(source);
++        return 1;
++        // Canvas end - region threading
+     }
+ 
+-    private static int dropInWorld(final CommandSourceStack source, final Vec3 pos, final List<ItemStack> drops, final LootCommand.Callback callback) throws CommandSyntaxException {
++    private static int dropInWorld(final CommandSourceStack source, final Vec3 pos, final List<ItemStack> drops) throws CommandSyntaxException { // Canvas - region threading
+         ServerLevel level = source.getLevel();
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPos(() -> { // Canvas - region threading
+         drops.forEach(drop -> {
+             ItemEntity entity = new ItemEntity(level, pos.x, pos.y, pos.z, drop.copy());
+             entity.setDefaultPickUpDelay();
+             level.addFreshEntity(entity);
+         });
+-        callback.accept(drops);
++        callback(source, drops); // Canvas - region threading
+         return drops.size();
++        }, pos, level, source); // Canvas - region threading
+     }
+ 
+     private static void callback(final CommandSourceStack source, final List<ItemStack> drops) {
+@@ -431,6 +_,7 @@
+     ) throws CommandSyntaxException {
+         CommandSourceStack source = context.getSource();
+         ServerLevel level = source.getLevel();
++        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPos(() -> { // Canvas - region threading
+         BlockState blockState = level.getBlockState(pos);
+         BlockEntity blockEntity = level.getBlockEntity(pos);
+         Optional<ResourceKey<LootTable>> lootTable = blockState.getBlock().getLootTable();
+@@ -445,10 +_,18 @@
+             .withOptionalParameter(LootContextParams.THIS_ENTITY, source.getEntity())
+             .withParameter(LootContextParams.TOOL, tool);
+         List<ItemStack> drops = blockState.getDrops(lootParams);
+-        return output.accept(context, drops, usedItems -> callback(source, usedItems, lootTable.get()));
++        // Canvas start - region threading
++        output.accept(context, drops, context.getSource());
++        }, pos, source.getLevel(), context.getSource());
++        // Canvas end - region threading
+     }
+ 
+-    private static int dropKillLoot(final CommandContext<CommandSourceStack> context, final Entity target, final LootCommand.DropConsumer output) throws CommandSyntaxException {
++    // Canvas start - region threading
++    private static int dropKillLoot(final CommandContext<CommandSourceStack> context, final Entity selected, final LootCommand.DropConsumer output) throws CommandSyntaxException {
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._void()
++            .with(selected)
++            .executes((Entity target) -> {
++    // Canvas end - region threading
+         Optional<ResourceKey<LootTable>> lootTableId = target.getLootTable();
+         if (lootTableId.isEmpty()) {
+             throw ERROR_NO_ENTITY_LOOT_TABLE.create(target.getDisplayName());
+@@ -457,6 +_,12 @@
+         CommandSourceStack source = context.getSource();
+         LootParams.Builder builder = new LootParams.Builder(source.getLevel());
+         Entity killer = source.getEntity();
++        // Canvas start - region threading
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(killer)) {
++            source.sendFailure(Component.literal("Killer and target must be in same region to drop kill loot"));
++            return (_) -> null;
++        }
++        // Canvas end - region threading
+         if (killer instanceof Player player) {
+             builder.withParameter(LootContextParams.LAST_DAMAGE_PLAYER, player);
+         }
+@@ -469,7 +_,14 @@
+         LootParams lootParams = builder.create(LootContextParamSets.ENTITY);
+         LootTable lootTable = source.getServer().reloadableRegistries().getLootTable(lootTableId.get());
+         List<ItemStack> drops = lootTable.getRandomItems(lootParams);
+-        return output.accept(context, drops, usedItems -> callback(source, usedItems, lootTableId.get()));
++        // Canvas start - region threading
++        output.accept(context, drops, context.getSource());
++        return (_) -> null;
++            })
++            .noCompletion()
++            .start(context.getSource());
++        return 1;
++        // Canvas end - region threading
+     }
+ 
+     private static int dropChestLoot(final CommandContext<CommandSourceStack> context, final Holder<LootTable> lootTable, final LootCommand.DropConsumer output) throws CommandSyntaxException {
+@@ -502,7 +_,7 @@
+     ) throws CommandSyntaxException {
+         CommandSourceStack source = context.getSource();
+         List<ItemStack> drops = lootTable.value().getRandomItems(lootParams);
+-        return output.accept(context, drops, usedItems -> callback(source, usedItems));
++        return output.accept(context, drops, source); // Canvas - region threading
+     }
+ 
+     @FunctionalInterface
+@@ -512,7 +_,7 @@
+ 
+     @FunctionalInterface
+     private interface DropConsumer {
+-        int accept(CommandContext<CommandSourceStack> context, List<ItemStack> drops, LootCommand.Callback successCallback) throws CommandSyntaxException;
++        int accept(CommandContext<CommandSourceStack> context, List<ItemStack> drops, CommandSourceStack source) throws CommandSyntaxException; // Canvas - region threading
+     }
+ 
+     @FunctionalInterface

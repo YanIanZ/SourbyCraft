@@ -1,0 +1,39 @@
+--- a/net/minecraft/server/commands/GiveCommand.java
++++ b/net/minecraft/server/commands/GiveCommand.java
+@@ -54,7 +_,12 @@
+             return 0;
+         }
+ 
+-        for (ServerPlayer player : players) {
++        // Canvas start - region threading
++        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++            .with(players)
++            // we use "player" instead of "entityPlayer" to minimize diff against Vanilla
++            .executes((ServerPlayer player) -> {
++        // Canvas end - region threading
+             int remaining = count;
+ 
+             while (remaining > 0) {
+@@ -88,8 +_,21 @@
+                     }
+                 }
+             }
+-        }
++    // Canvas start - region threading
++            return (_) -> null;
++            })
++            .onComplete((_, selected, css) -> giveCallback(css, selected, prototypeItemStack, count))
++            .start(source);
++        return 1;
++    }
+ 
++    private static int giveCallback(
++        final CommandSourceStack source,
++        final Collection<? extends ServerPlayer> players,
++        final ItemStack prototypeItemStack,
++        final int count
++    ) {
++    // Canvas end - region threading
+         if (players.size() == 1) {
+             source.sendSuccess(
+                 () -> Component.translatable(
