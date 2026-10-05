@@ -21,7 +21,7 @@ passes.
 | no unbounded queue | **met** | `UnboundedQueueAuditTest`, 3 tests |
 | heap/threads/tasks stabilize after load | **partial** | certified 2h 10-player soak shows stable RSS, heap-after-GC and tick duration; thread/task stabilization still needs explicit gate evidence |
 | cached runtime boots offline (T8) | **corrected** | a *populated* runtime boots offline; a *fresh* one does not boot at all — [slim-jar bootstrap failure](slim-jar-bootstrap-failure.md) |
-| shutdown completes predictably | **partial** | unit tests, plus two clean console shutdowns and a live restart on the deployment server; not yet exercised *under load* |
+| shutdown completes predictably | **partial** | unit tests, clean console shutdowns and a live restart on the deployment server; under load (6 moving clients) only on a local fixture so far |
 
 ---
 
@@ -80,11 +80,12 @@ structurally valid and hold the wrong chunk.
 |---|---|
 | Local fixture, build 46c | **16 / 16 checks** |
 | Deployment server, live restart | **4 / 4** — 64/64 blocks, 24/24 entities, game time advanced, gamerule survived |
+| Local fixture, post-migration build (2026-10-05) | **104 / 104** — 4 consecutive restarts each reading back the previous boot's writes; probe player's inventory, XP level and position round-tripped on disk and through the server; last stop issued with 6 moving clients and the probe player online |
 
 Two limits are stated rather than hidden:
 
-- **Player data is structural only.** No client connects, so there is no player file to
-  round-trip; the check reports its own limitation in its result line.
+- **Player data** was structural only until 2026-10-05; a headless probe player now round-trips
+  inventory, experience level and position, both on disk and through the server.
 - **Region files in unused dimensions** reference up to one sector past EOF while the
   overworld's are exact, and the server reads all of them. The trailing sector is unpadded, not
   missing, so overruns under 4 KiB are reported benign and a whole missing sector still fails.

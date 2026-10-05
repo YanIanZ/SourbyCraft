@@ -25,7 +25,10 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
   upstream (2026-10-05). Lihat bagian *Migrasi penuh* di P2.
 
 ### Persistensi dan kepemilikan region
-- [ ] Tes persistensi restart penuh setelah perubahan performa (DEV-A, AURORA-J)
+- [-] Tes persistensi restart penuh setelah perubahan performa (DEV-A, AURORA-J). Lokal 2026-10-05,
+  build pasca-migrasi: `verify_persistence.py` 104/104 (4 restart berturut-turut, data pemain
+  round-trip di disk dan lewat server, shutdown dengan 6 klien bergerak + pemain online). Sisa:
+  run di server deployment (panel)
 - [ ] Tes restart/crash untuk setiap perubahan save async (DEV-G)
 - [ ] Review konkurensi penulisan region-file (DEV-G)
 - [ ] Bukti "tidak ada regresi kepemilikan region" dan "tidak ada regresi persistensi" (gate rilis)
