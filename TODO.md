@@ -25,10 +25,13 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
   upstream (2026-10-05). Lihat bagian *Migrasi penuh* di P2.
 
 ### Persistensi dan kepemilikan region
-- [-] Tes persistensi restart penuh setelah perubahan performa (DEV-A, AURORA-J). Lokal 2026-10-05,
-  build pasca-migrasi: `verify_persistence.py` 104/104 (4 restart berturut-turut, data pemain
-  round-trip di disk dan lewat server, shutdown dengan 6 klien bergerak + pemain online). Sisa:
-  run di server deployment (panel)
+- [x] Tes persistensi restart penuh setelah perubahan performa (DEV-A, AURORA-J), build
+  pasca-migrasi, 2026-10-05:
+  - lokal: `verify_persistence.py` 104/104 (4 restart berturut-turut, data pemain round-trip di
+    disk dan lewat server, shutdown dengan 6 klien bergerak + pemain online);
+  - deployment (Sourby Demo, panel.parama.cloud): `verify_persistence_panel.py` 20/20 (3 restart
+    panel nyata; blok, entity, game time; shutdown bersih; probe dibersihkan). Data pemain tidak
+    bisa diuji di sana karena `online-mode=true` menolak klien headless.
 - [ ] Tes restart/crash untuk setiap perubahan save async (DEV-G)
 - [ ] Review konkurensi penulisan region-file (DEV-G)
 - [ ] Bukti "tidak ada regresi kepemilikan region" dan "tidak ada regresi persistensi" (gate rilis)
@@ -57,8 +60,11 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
 ## P1 — Tinggi (bukti performa dan kualifikasi rilis)
 
 ### Pengujian panel (panel.parama.cloud)
-- [ ] Jalankan build terbaru di panel setelah akses diberikan: boot, plugin legacy lewat bridge,
-  alur pemain nyata (Vault/EssentialsX sudah enable dengan 0 pelanggaran bridge pada `9a15f51`)
+- [-] Jalankan build terbaru di panel: build pasca-migrasi (`2554782`) terpasang di Sourby Demo sejak
+  2026-10-05, boot tanpa ERROR, persistensi 20/20; jar sebelumnya disimpan sebagai
+  `SourbyCraft-slim.pre-migration-20261005.jar`. Vault/EssentialsX sudah enable dengan 0 pelanggaran
+  bridge pada `9a15f51`. Sisa: alur pemain nyata dengan plugin legacy lewat bridge (butuh pemain
+  sungguhan karena `online-mode=true`)
 
 ### Baseline tersertifikasi (DEV-B, AURORA-C, ROADMAP M8)
 - [ ] Baseline idle
@@ -131,14 +137,14 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [ ] M-2 Isolasi (T9 di `AURORA-FULL-TRANSITION.md`): pindahkan body service Sourby keluar dari
   class upstream; pecah patch campuran 0006/0013 dan pindahkan class dari 0002/0005/0016; isolasi
   bridge Spark Canvas; dokumentasikan setiap dependensi keras Canvas di `independence.md`
-- [-] M-3 Lepas Canvas sebagai upstream — selesai 2026-10-05. Bukti: tree hasil pipeline baru
+- [x] M-3 Lepas Canvas sebagai upstream — selesai 2026-10-05. Bukti: tree hasil pipeline baru
   identik dengan pipeline lama (Minecraft 5.359 file, paper-server 1.549, paper-api 1.975; selisih
   hanya newline akhir file di 48 file), 10.096 tes Java + 222 tes Python lulus, boot test CI lulus
-  lokal dan di CI (run 37282530676, hijau). Sisa sebelum `[x]`: tes persistensi restart (P0).
-  Mulai sekarang setiap
+  lokal dan di CI (run 37282530676, hijau), dan tes persistensi restart lulus lokal (104/104) serta
+  di server deployment (20/20). Mulai sekarang setiap
   perbaikan dari Canvas/Folia harus di-port sendiri.
-- [-] M-4 Lepas Weaver — selesai 2026-10-05: SourbyPatcher `paper-toolchain` 3.0.0 menerapkan
-  paperweight 2.0.0-beta.24; jar reproducible dari clone bersih. Sisa: sama dengan M-3.
+- [x] M-4 Lepas Weaver — selesai 2026-10-05: SourbyPatcher `paper-toolchain` 3.0.0 menerapkan
+  paperweight 2.0.0-beta.24; jar reproducible dari clone bersih; gate sama dengan M-3.
 - [x] Rename package internal `io.canvasmc.canvas.*` menjadi `dev.iyanz.aurora.engine.*` (2026-10-05).
   API plugin tetap `io.canvasmc.canvas` (`event`, `region`, `simd`, `Unsupported`,
   `WorldUnloadResult`, di `sourbyapi`). Plugin yang memakai class internal Canvas (bukan API)
