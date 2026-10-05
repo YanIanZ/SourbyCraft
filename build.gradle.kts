@@ -234,7 +234,7 @@ subprojects {
             // SourbyCraft - offline GeoIP for /ping (reads a local MaxMind-DB .mmdb; no player IP
             // leaves the server). Pulls maxmind-db + jackson (databind/core/annotations/jsr310)
             // transitively.
-            "implementation"("com.maxmind.geoip2:geoip2:5.1.0")
+            "implementation"("com.maxmind.geoip2:geoip2:5.2.0")
         }
     }
 

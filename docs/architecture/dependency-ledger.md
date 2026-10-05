@@ -120,7 +120,7 @@ Per-file source patches (`minecraft-patches/sources/`):
 | Dependency | Class | Reason |
 |---|---|---|
 | `io.canvasmc.weaver.patcher` (`build.gradle.kts`) | `REQUIRED_UPSTREAM_CONTRACT` | Canvas's own weaver toolchain sequences access transformers and base patches. Build-time only — nothing it produces is a runtime dependency on Canvas. |
-| `canvasRef` pin (`gradle.properties`) | `REQUIRED_UPSTREAM_CONTRACT` | Pins the upstream revision patches apply to. Currently `6a600b89`. |
+| `canvasRef` pin (`gradle.properties`) | `REQUIRED_UPSTREAM_CONTRACT` | Pins the upstream revision patches apply to. Currently `2a3bf65c`. |
 
 ---
 

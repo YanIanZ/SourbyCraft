@@ -9,14 +9,14 @@ repositories {
 }
 
 dependencies {
-    implementation("org.slf4j:slf4j-api:2.0.18")
-    implementation("it.unimi.dsi:fastutil:8.5.18")
+    implementation("org.slf4j:slf4j-api:2.0.20")
+    implementation("it.unimi.dsi:fastutil:8.5.19")
     implementation("net.java.dev.jna:jna:5.19.1")
-    implementation("at.yawk.lz4:lz4-java:1.11.0")
-    implementation("com.github.luben:zstd-jni:1.5.7-11")
-    implementation("org.yaml:snakeyaml:2.6")
+    implementation("at.yawk.lz4:lz4-java:1.12.0")
+    implementation("com.github.luben:zstd-jni:1.5.7-21")
+    implementation("org.yaml:snakeyaml:2.7")
 
-    testImplementation("org.junit.jupiter:junit-jupiter:6.1.0")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

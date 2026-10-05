@@ -102,7 +102,10 @@ class AsyncPathQueueTelemetryTest {
     @Test
     void saturationRefusesInsteadOfRunningOnSubmittingThread() throws Exception {
         AsyncPathProcessor.setEnabled(true);
-        final int workers = Math.max(1, AsyncPathProcessor.stats().poolSize());
+        // Mirrors ensureStarted()'s sizing. stats().poolSize() cannot be used: core threads are
+        // created lazily, so it reads 0 right after start, and on a host with more than one
+        // worker the unheld ones drain the queue before it can overflow.
+        final int workers = Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
         final CountDownLatch hold = new CountDownLatch(1);
         final CountDownLatch started = new CountDownLatch(workers);
 

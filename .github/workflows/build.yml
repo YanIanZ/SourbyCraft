@@ -20,15 +20,15 @@ jobs:
     if: "github.event_name != 'pull_request' && !contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'ci skip')"
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0        # paperweight needs git history for patch application
 
       - name: Validate gradle wrapper
-        uses: gradle/actions/wrapper-validation@v4
+        uses: gradle/actions/wrapper-validation@v6
 
       - name: Setup Java 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: 25
           distribution: temurin
@@ -50,7 +50,7 @@ jobs:
           PYTHON
 
       - name: Checkout private SourbyPatcher
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: YanIanZ/SourbyPatcher
           ref: ${{ steps.toolchain.outputs.patcher }}
@@ -59,7 +59,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout private SourbyClip
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: YanIanZ/SourbyClip
           ref: ${{ steps.toolchain.outputs.clip }}
@@ -614,7 +614,7 @@ jobs:
 
       - name: Upload boot diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SourbyCraft-boot-diagnostics
           path: |
@@ -641,7 +641,7 @@ jobs:
 
       - name: Upload verified slim jar for staging
         if: github.ref == 'refs/heads/26.2'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SourbyCraft-26.2-staging
           path: build/libs/SourbyCraft-slim.jar
