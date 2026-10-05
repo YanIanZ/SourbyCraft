@@ -131,7 +131,8 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [-] M-3 Lepas Canvas sebagai upstream — selesai 2026-10-05. Bukti: tree hasil pipeline baru
   identik dengan pipeline lama (Minecraft 5.359 file, paper-server 1.549, paper-api 1.975; selisih
   hanya newline akhir file di 48 file), 10.096 tes Java + 222 tes Python lulus, boot test CI lulus
-  lokal. Sisa sebelum `[x]`: tes persistensi restart (P0) dan run CI hijau. Mulai sekarang setiap
+  lokal dan di CI (run 37282530676, hijau). Sisa sebelum `[x]`: tes persistensi restart (P0).
+  Mulai sekarang setiap
   perbaikan dari Canvas/Folia harus di-port sendiri.
 - [-] M-4 Lepas Weaver — selesai 2026-10-05: SourbyPatcher `paper-toolchain` 3.0.0 menerapkan
   paperweight 2.0.0-beta.24; jar reproducible dari clone bersih. Sisa: sama dengan M-3.
