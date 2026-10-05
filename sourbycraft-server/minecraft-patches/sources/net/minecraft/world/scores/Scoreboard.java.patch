@@ -17,7 +17,7 @@
 +    //        it should also be noted that for players, this is their profile name, while for non player
 +    //        entities the name is the string uuid
 +    private final Map<String, PlayerScores> scoresByName = new java.util.concurrent.ConcurrentHashMap<>(16, 0.5F);
-+    private final io.canvasmc.canvas.util.LockedReference<net.minecraft.world.scores.Scoreboard.Entry> teamReferences = new io.canvasmc.canvas.util.LockedReference<>(
++    private final dev.iyanz.aurora.engine.util.LockedReference<net.minecraft.world.scores.Scoreboard.Entry> teamReferences = new dev.iyanz.aurora.engine.util.LockedReference<>(
 +        new Entry(
 +            new Object2ObjectOpenHashMap<>(),
 +            new Object2ObjectOpenHashMap<>()
@@ -190,7 +190,7 @@
 +        // we wrap with our own implementation because technically you can cast ReadOnlyScoreInfo to Score
 +        // which then you can modify it with... no thanks!
 +
-+        return score != null ? new io.canvasmc.canvas.threadedregions.scores.ReadOnlyScore(score) : null;
++        return score != null ? new dev.iyanz.aurora.engine.threadedregions.scores.ReadOnlyScore(score) : null;
 +        // Canvas end - region threading
      }
  

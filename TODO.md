@@ -136,8 +136,10 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
   perbaikan dari Canvas/Folia harus di-port sendiri.
 - [-] M-4 Lepas Weaver — selesai 2026-10-05: SourbyPatcher `paper-toolchain` 3.0.0 menerapkan
   paperweight 2.0.0-beta.24; jar reproducible dari clone bersih. Sisa: sama dengan M-3.
-- [ ] Rename package internal `io.canvasmc.*` yang bukan API plugin (perlu dipetakan dulu mana yang
-  dipakai plugin: `sourbyapi/src/main/java/io/canvasmc` adalah API)
+- [x] Rename package internal `io.canvasmc.canvas.*` menjadi `dev.iyanz.aurora.engine.*` (2026-10-05).
+  API plugin tetap `io.canvasmc.canvas` (`event`, `region`, `simd`, `Unsupported`,
+  `WorldUnloadResult`, di `sourbyapi`). Plugin yang memakai class internal Canvas (bukan API)
+  harus diperbarui.
 - [x] Hapus dependency `io.canvasmc.httpclient` beserta repo Maven `maven.canvasmc.io` (2026-10-05).
   Ternyata dipakai: `ClientV2` memanggil `canvasmc.io/api/v2` dari `/version` dan setelah config
   dimuat jika `Build-Number` terisi (tidak pernah di build CI). Panggilan itu ikut dihapus.

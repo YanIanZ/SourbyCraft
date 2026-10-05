@@ -152,7 +152,7 @@
  
      protected void addEntity(final Entity entity) {
 -        org.spigotmc.AsyncCatcher.catchOp("entity track"); // Spigot
-+        io.canvasmc.canvas.util.TickGuard.guard(entity, "Cannot add entity to tracking async"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(entity, "Cannot add entity to tracking async"); // Canvas - region guards
          // Paper start - ignore and warn about illegal addEntity calls instead of crashing server
 -        if (!entity.valid || entity.level() != this.level || this.entityMap.containsKey(entity.getId())) {
 +        if (!entity.valid || entity.level() != this.level || entity.moonrise$getTrackedEntity() != null) { // Folia - region threading
@@ -207,7 +207,7 @@
  
      protected void removeEntity(final Entity entity) {
 -        org.spigotmc.AsyncCatcher.catchOp("entity untrack"); // Spigot
-+        io.canvasmc.canvas.util.TickGuard.guard(entity, "Cannot remove entity from tracking async"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(entity, "Cannot remove entity from tracking async"); // Canvas - region guards
 +        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.level.getCurrentWorldData(); // Folia - region threading
          if (entity instanceof ServerPlayer player) {
              this.updatePlayerStatus(player, false);

@@ -19,7 +19,7 @@ index 6369b13e1fcdbdb25dd9d6e4d3bffdedbee4f739..d8cd5ce6588e09052b8b53b161d1b65f
          }
          // Folia end - block plugins not marked as supported
 diff --git a/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java b/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
-index 5b09eee406ffe038e9b22e0d49d3ec533f011025..c489d50411fa26e8894b56d8bb6e85164f54c21b 100644
+index 6ef0042a355c65262bdb89dcf151bd644653216d..c47a804d023a8917f69bd4e61d6b17b076924256 100644
 --- a/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
 +++ b/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
 @@ -27,7 +27,7 @@ class SpigotPluginProviderFactory implements PluginTypeFactory<SpigotPluginProvi

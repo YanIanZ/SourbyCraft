@@ -15,7 +15,7 @@
 +import java.util.UUID;
 +import java.util.concurrent.CompletableFuture;
 +import java.util.concurrent.TimeUnit;
-+import io.canvasmc.canvas.util.Util;
++import dev.iyanz.aurora.engine.util.Util;
 +import net.minecraft.network.Connection;
 +import net.minecraft.server.MinecraftServer;
 +import net.minecraft.server.level.ServerLevel;

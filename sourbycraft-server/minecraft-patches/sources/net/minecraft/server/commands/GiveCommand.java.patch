@@ -6,7 +6,7 @@
  
 -        for (ServerPlayer player : players) {
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
 +            .with(players)
 +            // we use "player" instead of "entityPlayer" to minimize diff against Vanilla
 +            .executes((ServerPlayer player) -> {

@@ -111,7 +111,7 @@ class UpstreamDefaultTest(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertEqual(transition, self.APPROVED[field])
 
-    ENGINE_CONFIG = "sourbycraft-server/src/main/java/io/canvasmc/canvas/"
+    ENGINE_CONFIG = "sourbycraft-server/src/main/java/dev/iyanz/aurora/engine/"
 
     # Engine configuration defaults SourbyCraft ships differently from Canvas, which these
     # classes came from. They were canvas-patches before Paper became the only upstream; now

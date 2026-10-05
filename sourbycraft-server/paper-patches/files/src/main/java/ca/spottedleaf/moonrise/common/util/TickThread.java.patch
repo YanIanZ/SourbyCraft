@@ -73,7 +73,7 @@
 +            ",has_vehicle=" + (entity.getVehicle() != null) +
 +            ",passenger_count=" + entity.getPassengers().size();
 +
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState transferState =
++        final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState transferState =
 +            entity.getRegionTransferState();
 +
 +        if (transferState != null) {

@@ -58,7 +58,7 @@ these supply today's implementation of it. This is the set the ledger test pins.
 
 | File | Dependency | Reason |
 |---|---|---|
-| `config/upstream/CanvasConfigBridge.java` | `io.canvasmc.canvas.GlobalConfiguration`, `WorldConfig` | Reloads upstream config so an existing deployment's `canvas-server.yml` keeps working. No Aurora behaviour reads it; it sits behind `config/upstream/UpstreamConfigBridge`. This is the **only** `io.canvasmc` reference in Aurora's own source. |
+| `config/upstream/CanvasConfigBridge.java` | `dev.iyanz.aurora.engine.GlobalConfiguration`, `WorldConfig` (formerly `io.canvasmc.canvas`) | Reloads the engine config so an existing deployment's `canvas-server.yml` keeps working. No Aurora behaviour reads it; it sits behind `config/upstream/UpstreamConfigBridge`. This is the **only** engine-config reference in Aurora's own source. |
 | `perf/NetworkMetrics.java` | `io.papermc.paper.network.ChannelInitializeListenerHolder`, Netty `ChannelPipeline` | The only hook for adding a handler to every connection's pipeline. Paper marks it unofficial. If it disappears, the `network counters` boot stage fails in isolation and `/perf network` reports nothing. It is not a threaded-regions internal, so the ledger test does not pin it; it is listed here by hand. |
 
 ---
@@ -108,8 +108,8 @@ threading, Canvas's own features and configuration — is SourbyCraft-owned:
 | `sourbycraft-server/minecraft-patches/sources/` (476 files) | Region threading and Canvas changes to Minecraft code, as one file patch per class |
 | `sourbycraft-server/paper-patches/files/` (234 files) | The same for Paper's server code |
 | `sourbyapi/paper-patches/files/` (16 files) | The same for Paper's API |
-| `sourbycraft-server/src/main/java/io/canvasmc/`, `me/lucko/` | Former `canvas-server` sources (engine config, region scheduler, Spark platform) |
-| `sourbyapi/src/main/java/io/canvasmc/` | Former `canvas-api` sources |
+| `sourbycraft-server/src/main/java/dev/iyanz/aurora/engine/`, `me/lucko/` | Former `canvas-server` sources (engine config, region scheduler, Spark platform); `io.canvasmc.canvas` internals renamed to `dev.iyanz.aurora.engine` on 2026-10-05 |
+| `sourbyapi/src/main/java/io/canvasmc/` | Former `canvas-api` sources: the plugin API, deliberately left at `io.canvasmc.canvas` |
 
 The baseline is not an Aurora contract and the policy scripts do not scan it: every SourbyCraft
 change to Minecraft or Paper code is a feature patch (§2.1, §2.3), and changes to the former

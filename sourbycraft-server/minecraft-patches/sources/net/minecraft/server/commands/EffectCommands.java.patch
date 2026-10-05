@@ -19,18 +19,18 @@
 -                if (livingEntity.addEffect(instance, source.getEntity(), org.bukkit.event.entity.EntityPotionEffectEvent.Cause.COMMAND)) { // CraftBukkit
 -                    count++;
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._int()
 +            .with(entities)
 +            .executes((Entity entity) -> {
 +                if (entity instanceof LivingEntity livingEntity) {
 +                    MobEffectInstance instance = new MobEffectInstance(effectHolder, duration, amplifier, false, particles);
 +                    if (livingEntity.addEffect(instance, source.getEntity(), org.bukkit.event.entity.EntityPotionEffectEvent.Cause.COMMAND)) { // CraftBukkit
-+                        return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                        return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.incrementInt();
 +                    }
                  }
 -            }
 -        }
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.nothing();
 +            })
 +            .onComplete((count, selected, css) -> giveCallback(count, duration, selected, css, effect))
 +            .start(source);
@@ -61,14 +61,14 @@
 -        }
 -
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._int()
 +            .with(entities)
 +            .executes((Entity entity) -> {
 +                if (entity instanceof LivingEntity livingEntity &&
 +                    livingEntity.removeAllEffects(org.bukkit.event.entity.EntityPotionEffectEvent.Cause.COMMAND)) { // CraftBukkit
-+                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                    return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.incrementInt();
 +                }
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.nothing();
 +            })
 +            .onComplete(EffectCommands::clearEverythingCallback)
 +            .start(source);
@@ -97,14 +97,14 @@
 -        }
 -
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._int()
 +            .with(entities)
 +            .executes((entity) -> {
 +                if (entity instanceof LivingEntity livingEntity &&
 +                    livingEntity.removeEffect(effectHolder, org.bukkit.event.entity.EntityPotionEffectEvent.Cause.COMMAND)) { // CraftBukkit
-+                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                    return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.incrementInt();
 +                }
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.nothing();
 +            })
 +            .onComplete((count, selected, css) -> clearCallback(count, selected, css, effect))
 +            .start(source);

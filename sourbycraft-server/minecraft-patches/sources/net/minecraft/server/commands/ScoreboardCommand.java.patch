@@ -24,7 +24,7 @@
 +            filtered.add(entity);
 +        }
 +
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._int()
 +            .with(filtered)
 +            .executes((net.minecraft.world.entity.Entity entity) -> {
 +                ScoreAccess score = scoreboard.getOrCreatePlayerScore(entity, targetObjective);
@@ -40,7 +40,7 @@
 +                    }
 +
 +                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(sourceEntity)) {
-+                        throw io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.CANNOT_DO_X_CROSS_REGION.create("perform score operation");
++                        throw dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.CANNOT_DO_X_CROSS_REGION.create("perform score operation");
 +                    }
 +
 +                    // we passed the checks, now we can apply
@@ -49,7 +49,7 @@
 +                    operation.apply(score, sourceScore);
 +                }
 +
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.addInt(score.get());
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.addInt(score.get());
 +            })
 +            .onComplete((result, processed, css) -> performOperationCallback(result, processed.stream().map(ScoreHolder.class::cast).toList(), targetObjective, css))
 +            .start(source);
@@ -95,15 +95,15 @@
 +            filtered.add(entity);
          }
 +
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._int()
 +            .with(filtered)
 +            .executes((net.minecraft.world.entity.Entity entity) -> {
 +                ScoreAccess score = scoreboard.getOrCreatePlayerScore(entity, objective);
 +                if (score.locked()) {
 +                    score.unlock();
-+                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                    return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.incrementInt();
 +                }
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.nothing();
 +            })
 +            .onComplete((count, processed, css) -> enableTriggerCallback(count, processed.stream().map(ScoreHolder.class::cast).toList(), css, objective))
 +            .start(source);
@@ -130,7 +130,7 @@
 -            scoreboard.resetAllPlayerScores(name);
 -        }
 -
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._abstract(new io.canvasmc.canvas.util.CollectingList<net.minecraft.world.entity.Entity>())
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._abstract(new dev.iyanz.aurora.engine.util.CollectingList<net.minecraft.world.entity.Entity>())
 +            .with(names.stream().map(SCORE_HOLDER2ENTITY))
 +            .executes((net.minecraft.world.entity.Entity entity) -> {
 +                scoreboard.resetAllPlayerScores(entity);
@@ -159,7 +159,7 @@
 -            scoreboard.resetSinglePlayerScore(name, objective);
 -        }
 -
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._abstract(new io.canvasmc.canvas.util.CollectingList<net.minecraft.world.entity.Entity>())
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._abstract(new dev.iyanz.aurora.engine.util.CollectingList<net.minecraft.world.entity.Entity>())
 +            .with(names.stream().map(SCORE_HOLDER2ENTITY))
 +            .executes((net.minecraft.world.entity.Entity entity) -> {
 +                scoreboard.resetSinglePlayerScore(entity, objective);
@@ -188,7 +188,7 @@
 -            scoreboard.getOrCreatePlayerScore(name, objective).set(value);
 -        }
 -
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._abstract(new io.canvasmc.canvas.util.CollectingList<net.minecraft.world.entity.Entity>())
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._abstract(new dev.iyanz.aurora.engine.util.CollectingList<net.minecraft.world.entity.Entity>())
 +            .with(names.stream().map(SCORE_HOLDER2ENTITY))
 +            .executes((net.minecraft.world.entity.Entity entity) -> {
 +                scoreboard.getOrCreatePlayerScore(entity, objective).set(value);
@@ -219,7 +219,7 @@
 -        }
 -
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._void()
 +            .with(names.stream().map(SCORE_HOLDER2ENTITY))
 +            .executes((net.minecraft.world.entity.Entity entity) -> {
 +                scoreboard.getOrCreatePlayerScore(entity, objective).display(display);
@@ -250,7 +250,7 @@
 -        }
 -
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._void()
 +            .with(names.stream().map(SCORE_HOLDER2ENTITY))
 +            .executes((net.minecraft.world.entity.Entity entity) -> {
 +                scoreboard.getOrCreatePlayerScore(entity, objective).numberFormatOverride(numberFormat);
@@ -284,12 +284,12 @@
 -            result += score.get();
 -        }
 -
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._int()
 +            .with(names.stream().map(SCORE_HOLDER2ENTITY))
 +            .executes((net.minecraft.world.entity.Entity entity) -> {
 +                ScoreAccess score = scoreboard.getOrCreatePlayerScore(entity, objective);
 +                score.set(score.get() + value);
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.addInt(score.get());
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.addInt(score.get());
 +            })
 +            .onComplete((result, filtered, css) -> addScoreCallback(result, css, filtered.stream().map(ScoreHolder.class::cast).toList(), objective, value))
 +            .start(source);
@@ -319,12 +319,12 @@
 -            result += score.get();
 -        }
 -
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._int()
 +            .with(names.stream().map(SCORE_HOLDER2ENTITY))
 +            .executes((net.minecraft.world.entity.Entity entity) -> {
 +                ScoreAccess score = scoreboard.getOrCreatePlayerScore(entity, objective);
 +                score.set(score.get() - value);
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.addInt(score.get());
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.addInt(score.get());
 +            })
 +            .onComplete((result, filtered, css) -> removeScoreCallback(result, css, filtered.stream().map(ScoreHolder.class::cast).toList(), objective, value))
 +            .start(source);
@@ -372,7 +372,7 @@
      }
  
      private static int clearDisplaySlot(final CommandSourceStack source, final DisplaySlot slot) throws CommandSyntaxException {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          Scoreboard scoreboard = source.getServer().getScoreboard();
          if (scoreboard.getDisplayObjective(slot) == null) {
              throw ERROR_DISPLAY_SLOT_ALREADY_EMPTY.create();
@@ -385,7 +385,7 @@
      }
  
      private static int setDisplaySlot(final CommandSourceStack source, final DisplaySlot slot, final Objective objective) throws CommandSyntaxException {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          Scoreboard scoreboard = source.getServer().getScoreboard();
          if (scoreboard.getDisplayObjective(slot) == objective) {
              throw ERROR_DISPLAY_SLOT_ALREADY_SET.create();
@@ -398,7 +398,7 @@
      }
  
      private static int setDisplayName(final CommandSourceStack source, final Objective objective, final Component displayName) {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          if (!objective.getDisplayName().equals(displayName)) {
              objective.setDisplayName(displayName);
              source.sendSuccess(
@@ -412,7 +412,7 @@
      }
  
      private static int setDisplayAutoUpdate(final CommandSourceStack source, final Objective objective, final boolean displayAutoUpdate) {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          if (objective.displayAutoUpdate() != displayAutoUpdate) {
              objective.setDisplayAutoUpdate(displayAutoUpdate);
              if (displayAutoUpdate) {
@@ -426,7 +426,7 @@
      }
  
      private static int setObjectiveFormat(final CommandSourceStack source, final Objective objective, final @Nullable NumberFormat numberFormat) {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          objective.setNumberFormat(numberFormat);
          if (numberFormat != null) {
              source.sendSuccess(() -> Component.translatable("commands.scoreboard.objectives.modify.objectiveFormat.set", objective.getName()), true);
@@ -439,7 +439,7 @@
      }
  
      private static int setRenderType(final CommandSourceStack source, final Objective objective, final ObjectiveCriteria.RenderType renderType) {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          if (objective.getRenderType() != renderType) {
              objective.setRenderType(renderType);
              source.sendSuccess(() -> Component.translatable("commands.scoreboard.objectives.modify.rendertype", objective.getFormattedDisplayName()), true);
@@ -450,7 +450,7 @@
      }
  
      private static int removeObjective(final CommandSourceStack source, final Objective objective) {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          Scoreboard scoreboard = source.getServer().getScoreboard();
          scoreboard.removeObjective(objective);
          source.sendSuccess(() -> Component.translatable("commands.scoreboard.objectives.remove.success", objective.getFormattedDisplayName()), true);
@@ -462,7 +462,7 @@
      }
  
      private static int addObjective(final CommandSourceStack source, final String name, final ObjectiveCriteria criteria, final Component displayName) throws CommandSyntaxException {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          Scoreboard scoreboard = source.getServer().getScoreboard();
          if (scoreboard.getObjective(name) != null) {
              throw ERROR_OBJECTIVE_ALREADY_EXISTS.create();

@@ -26,12 +26,12 @@ public final class CanvasConfigBridge implements UpstreamConfigBridge {
     public List<String> reload() {
         final List<String> failures = new ArrayList<>(2);
         try {
-            io.canvasmc.canvas.GlobalConfiguration.reload();
+            dev.iyanz.aurora.engine.GlobalConfiguration.reload();
         } catch (final Throwable failure) {
             failures.add("GlobalConfiguration.reload() failed: " + describe(failure));
         }
         try {
-            io.canvasmc.canvas.WorldConfig.reload();
+            dev.iyanz.aurora.engine.WorldConfig.reload();
         } catch (final Throwable failure) {
             failures.add("WorldConfig.reload() failed: " + describe(failure));
         }

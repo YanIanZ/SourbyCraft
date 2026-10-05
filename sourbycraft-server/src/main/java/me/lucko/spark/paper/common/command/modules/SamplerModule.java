@@ -21,9 +21,9 @@
 package me.lucko.spark.paper.common.command.modules;
 
 import com.google.common.collect.Iterables;
-import io.canvasmc.canvas.threadedregions.profiler.ByNameThreadGrouper;
-import io.canvasmc.canvas.threadedregions.profiler.RegionProfiler;
-import io.canvasmc.canvas.threadedregions.SchedulerUtil;
+import dev.iyanz.aurora.engine.threadedregions.profiler.ByNameThreadGrouper;
+import dev.iyanz.aurora.engine.threadedregions.profiler.RegionProfiler;
+import dev.iyanz.aurora.engine.threadedregions.SchedulerUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.logging.Level;
-import io.canvasmc.canvas.threadedregions.profiler.RegionScheduleHandlePinner;
+import dev.iyanz.aurora.engine.threadedregions.profiler.RegionScheduleHandlePinner;
 import me.lucko.spark.paper.common.SparkPlatform;
 import me.lucko.spark.paper.common.activitylog.Activity;
 import me.lucko.spark.paper.common.command.Arguments;

@@ -4,7 +4,7 @@
 +package io.papermc.paper.threadedregions;
 +
 +import com.mojang.logging.LogUtils;
-+import io.canvasmc.canvas.util.Util;
++import dev.iyanz.aurora.engine.util.Util;
 +import io.papermc.paper.ServerBuildInfo;
 +import io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle;
 +import java.lang.management.ManagementFactory;

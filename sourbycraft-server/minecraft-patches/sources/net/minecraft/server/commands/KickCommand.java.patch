@@ -25,12 +25,12 @@
 +        //       we call has handling for if we aren't on the owning context,
 +        //       but we rewrite this one anyway for the proper response ordering
 +
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
 +            .with(players)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                entityPlayer.connection.disconnect(reason, org.bukkit.event.player.PlayerKickEvent.Cause.KICKED); // Paper - kick event cause
 +                source.sendSuccess(() -> Component.translatable("commands.kick.success", entityPlayer.getDisplayName(), reason), true);
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.incrementInt();
 +            })
 +            .onComplete((count, _,_) -> {
 +                if (count == 0) {

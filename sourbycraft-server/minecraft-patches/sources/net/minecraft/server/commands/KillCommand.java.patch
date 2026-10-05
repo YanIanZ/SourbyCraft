@@ -10,7 +10,7 @@
 -        }
 +    // Canvas start - region threading
 +    private static int kill(final CommandSourceStack source, final Collection<? extends Entity> victims) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._abstract(new io.canvasmc.canvas.util.CollectingList<Entity>())
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._abstract(new dev.iyanz.aurora.engine.util.CollectingList<Entity>())
 +            .with(victims)
 +            .executes((Entity victim) -> {
 +                victim.kill(source.getLevel());
@@ -21,7 +21,7 @@
 +        return 1;
 +    }
  
-+    private static int killCallback(final CommandSourceStack source, final io.canvasmc.canvas.util.CollectingList<? extends Entity> victims) {
++    private static int killCallback(final CommandSourceStack source, final dev.iyanz.aurora.engine.util.CollectingList<? extends Entity> victims) {
 +    // Canvas end - region threading
          if (victims.size() == 1) {
              source.sendSuccess(() -> Component.translatable("commands.kill.success.single", victims.iterator().next().getDisplayName()), true);

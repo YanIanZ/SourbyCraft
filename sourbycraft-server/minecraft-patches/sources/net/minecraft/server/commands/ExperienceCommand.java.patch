@@ -10,7 +10,7 @@
 -        return result;
 +    // Canvas start - region threading
 +    private static int queryExperience(final CommandSourceStack source, final ServerPlayer target, final ExperienceCommand.Type type) throws CommandSyntaxException {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
 +            .with(target)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                int result = type.query.applyAsInt(entityPlayer);
@@ -29,7 +29,7 @@
          final CommandSourceStack source, final Collection<? extends ServerPlayer> players, final int amount, final ExperienceCommand.Type type
 +    // Canvas start - region threading
 +    ) throws CommandSyntaxException {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
 +            .with(players)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                type.add.accept(entityPlayer, amount);
@@ -67,13 +67,13 @@
 -        }
 -
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
 +            .with(players)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                if (type.set.test(entityPlayer, amount)) {
-+                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                    return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.incrementInt();
 +                }
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.nothing();
 +            })
 +            .onComplete((success, selected, css) -> setCallback(css, selected, amount, type, success))
 +            .start(source);

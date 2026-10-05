@@ -4,7 +4,7 @@
              throw ERROR_FAILED.create();
          }
  
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPos(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeAtPos(() -> { // Canvas - region threading
          if (finalize && entity instanceof Mob mob) {
              mob.finalizeSpawn(source.getLevel(), source.getLevel().getCurrentDifficultyAt(entity.blockPosition()), EntitySpawnReason.COMMAND, null);
          }

@@ -4,21 +4,21 @@
      }
  
      private static int getValue(final CommandSourceStack source, final CustomBossEvent bossBar) {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          source.sendSuccess(() -> Component.translatable("commands.bossbar.get.value", bossBar.getDisplayName(), bossBar.value()), true);
          return bossBar.value();
 +        }, source); // Canvas - region threading
      }
  
      private static int getMax(final CommandSourceStack source, final CustomBossEvent bossBar) {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          source.sendSuccess(() -> Component.translatable("commands.bossbar.get.max", bossBar.getDisplayName(), bossBar.max()), true);
          return bossBar.max();
 +        }, source); // Canvas - region threading
      }
  
      private static int getVisible(final CommandSourceStack source, final CustomBossEvent bossBar) {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          if (bossBar.isVisible()) {
              source.sendSuccess(() -> Component.translatable("commands.bossbar.get.visible.visible", bossBar.getDisplayName()), true);
              return 1;
@@ -30,7 +30,7 @@
      }
  
      private static int getPlayers(final CommandSourceStack source, final CustomBossEvent bossBar) {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          if (bossBar.getPlayers().isEmpty()) {
              source.sendSuccess(() -> Component.translatable("commands.bossbar.get.players.none", bossBar.getDisplayName()), true);
          } else {
@@ -42,7 +42,7 @@
      }
  
      private static int setVisible(final CommandSourceStack source, final CustomBossEvent bossBar, final boolean visible) throws CommandSyntaxException {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          if (bossBar.isVisible() == visible) {
              if (visible) {
                  throw ERROR_ALREADY_VISIBLE.create();
@@ -54,7 +54,7 @@
      }
  
      private static int setValue(final CommandSourceStack source, final CustomBossEvent bossBar, final int value) throws CommandSyntaxException {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          if (bossBar.value() == value) {
              throw ERROR_NO_VALUE_CHANGE.create();
          }
@@ -66,7 +66,7 @@
      }
  
      private static int setMax(final CommandSourceStack source, final CustomBossEvent bossBar, final int value) throws CommandSyntaxException {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          if (bossBar.max() == value) {
              throw ERROR_NO_MAX_CHANGE.create();
          }
@@ -78,7 +78,7 @@
      }
  
      private static int setColor(final CommandSourceStack source, final CustomBossEvent bossBar, final BossEvent.BossBarColor color) throws CommandSyntaxException {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          if (bossBar.getColor().equals(color)) {
              throw ERROR_NO_COLOR_CHANGE.create();
          }
@@ -90,7 +90,7 @@
      }
  
      private static int setStyle(final CommandSourceStack source, final CustomBossEvent bossBar, final BossEvent.BossBarOverlay style) throws CommandSyntaxException {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          if (bossBar.getOverlay().equals(style)) {
              throw ERROR_NO_STYLE_CHANGE.create();
          }
@@ -102,7 +102,7 @@
      }
  
      private static int setName(final CommandSourceStack source, final CustomBossEvent bossBar, final Component name) throws CommandSyntaxException {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          Component replaced = ComponentUtils.resolve(ResolutionContext.builder().withSource(source).withEntityOverride(null).build(), name);
          if (bossBar.getName().equals(replaced)) {
              throw ERROR_NO_NAME_CHANGE.create();
@@ -114,7 +114,7 @@
      }
  
      private static int setPlayers(final CommandSourceStack source, final CustomBossEvent bossBar, final Collection<ServerPlayer> targets) throws CommandSyntaxException {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          boolean changed = bossBar.setPlayers(targets);
          if (!changed) {
              throw ERROR_NO_PLAYER_CHANGE.create();
@@ -126,7 +126,7 @@
      }
  
      private static int listBars(final CommandSourceStack source) {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          Collection<CustomBossEvent> events = source.getServer().getCustomBossEvents().getEvents();
          if (events.isEmpty()) {
              source.sendSuccess(() -> Component.translatable("commands.bossbar.list.bars.none"), false);
@@ -138,7 +138,7 @@
      }
  
      private static int createBar(final CommandSourceStack source, final Identifier id, final Component name) throws CommandSyntaxException {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          CustomBossEvents events = source.getServer().getCustomBossEvents();
          if (events.get(id) != null) {
              throw ERROR_ALREADY_EXISTS.create(id.toString());
@@ -150,7 +150,7 @@
      }
  
      private static int removeBar(final CommandSourceStack source, final CustomBossEvent bossBar) {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          CustomBossEvents events = source.getServer().getCustomBossEvents();
          bossBar.removeAllPlayers();
          events.remove(bossBar);

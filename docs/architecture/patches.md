@@ -1,5 +1,5 @@
 > **2026-10-05:** Paper became the only upstream. The `canvas-patches/` below are now plain edits in
-> the owned sources under `sourbycraft-server/src/main/java/io/canvasmc/`, the per-file
+> the owned sources under `sourbycraft-server/src/main/java/dev/iyanz/aurora/engine/` (formerly `io/canvasmc/canvas`), the per-file
 > `minecraft-patches/sources` and `paper-patches/files` entries are feature patches, and the former
 > Canvas/Folia changes are the engine baseline. See `dependency-ledger.md` §2. The inventory below is
 > kept as recorded.

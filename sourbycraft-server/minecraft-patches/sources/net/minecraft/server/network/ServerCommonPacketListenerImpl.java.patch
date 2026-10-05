@@ -26,7 +26,7 @@
          long now = System.nanoTime();
          io.papermc.paper.util.KeepAlive.PendingKeepAlive pending = this.keepAlive.pendingKeepAlives.peek();
 +        // Purpur start - Alternative Keepalive Handling
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.purpurAlternativeKeepalive) {
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().networking.purpurAlternativeKeepalive) {
 +            if (this.keepAlivePending && !keepAlives.isEmpty() && keepAlives.contains(packet.getId())) {
 +                int ping = (int) (Util.getMillis() - packet.getId());
 +                int updatedLatency = (this.latency * 3 + ping) / 4;
@@ -48,7 +48,7 @@
          long now = Util.getMillis();
          // Paper start - improve keepalives
 +        // Purpur start - Alternative Keepalive Handling
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.purpurAlternativeKeepalive) {
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().networking.purpurAlternativeKeepalive) {
 +            if (this.checkIfClosed(now)) {
 +                long currTime = System.nanoTime();
 +                if ((currTime - this.keepAlive.lastKeepAliveTx) >= java.util.concurrent.TimeUnit.SECONDS.toNanos(1L)) { // 1 second
@@ -99,7 +99,7 @@
 +
 +    public void send(Packet<?> packet) { // Canvas - mutable method param
 +        // Canvas start - no chat reports
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().chat.disableChatReporting) {
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().chat.disableChatReporting) {
 +            Object self = this;
 +            boolean cancel = false;
 +
@@ -124,7 +124,7 @@
  
      public void send(final Packet<?> packet, final @Nullable ChannelFutureListener listener) {
 +        // Canvas start - no chat reports
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().chat.disableChatReporting) {
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().chat.disableChatReporting) {
 +            Object self = this;
 +            boolean cancel = false;
 +

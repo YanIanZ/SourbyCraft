@@ -7,7 +7,7 @@ Keep the previously published NMS overload for binary compatibility. Mob pickup
 uses upstream local query results again; this overload imposes no entity-held cache.
 
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index aa82f0d0db479b1283339896a5d57de9738fa76d..b6672fcd7b75cbf77d22043fc784470fb78e6b4d 100644
+index 29cd4bad197b49b58781c0b9d5e1cc9b293e13b9..7d22ec367e0d75aae81da472d4e7b551801fc9d0 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
 @@ -229,6 +229,19 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl

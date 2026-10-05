@@ -33,7 +33,7 @@ the async worker, so without it every off-region solve NPEs. The two are one
 feature and neither stands alone.
 
 diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
-index b52e11404b1d256d3ddf9c30b965efdd5688224c..7be67689665c5f548243518817bf1d8b3d69d0c0 100644
+index baee9c8e23027aac3217fe5af210c2b0413de990..ec9e3a5005c7f8ea2eed6817e55705359b2d9e50 100644
 --- a/net/minecraft/world/entity/Mob.java
 +++ b/net/minecraft/world/entity/Mob.java
 @@ -205,6 +205,19 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs

@@ -6,7 +6,7 @@ Subject: [PATCH] SourbyCraft - reuse BlockPos in
 
 
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index e9dfc516cbbc991412d4b6463572099ad3865954..9add3072a5fbaecd04b680adbba2ea2ad5bf03d5 100644
+index 838d1f7f91714d0993fd102c0b383c1f2e14e261..0737efe5954543f9ab2af2d965fa5f14d4f47119 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
 @@ -1061,6 +1061,28 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet

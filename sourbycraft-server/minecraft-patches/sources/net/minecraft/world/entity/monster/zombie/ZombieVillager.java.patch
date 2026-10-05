@@ -24,7 +24,7 @@
                  }
 +                // Canvas start - MC-200418
 +                if (
-+                    io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc200418
++                    dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().vanillaFixes.mc200418
 +                        && villager.isPassenger()
 +                        && villager.getVehicle() instanceof net.minecraft.world.entity.animal.chicken.Chicken
 +                        && villager.isBaby())

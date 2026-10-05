@@ -16,7 +16,7 @@ storage on the stopping thread. With no world in aurora.awf.worlds
 there is nothing open and it returns at once.
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index fe16ee5c3d8a2eb4bcf67a79687570a81858845e..6e259c2bc76c6fce18863c538e488ddd989fc3b6 100644
+index b89c0d0a7ab6b4e9e8adf13de734c92c8b81d9c5..a63312e01cc7875423e8850441522cf5a37d74a0 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -1130,6 +1130,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa

@@ -5,7 +5,7 @@
      private final CraftScoreboard mainScoreboard;
      private final MinecraftServer server;
 -    private final Collection<CraftScoreboard> scoreboards = new WeakCollection<>();
-+    private final Collection<CraftScoreboard> scoreboards = new io.canvasmc.canvas.util.WeakConcurrentCollection<>(); // Canvas - region threading
++    private final Collection<CraftScoreboard> scoreboards = new dev.iyanz.aurora.engine.util.WeakConcurrentCollection<>(); // Canvas - region threading
  
      public CraftScoreboardManager(MinecraftServer server, net.minecraft.world.scores.Scoreboard scoreboard) {
          this.mainScoreboard = new CraftScoreboard(scoreboard);

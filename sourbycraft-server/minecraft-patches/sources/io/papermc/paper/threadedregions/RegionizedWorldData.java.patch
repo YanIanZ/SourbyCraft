@@ -131,7 +131,7 @@
 +                // Canvas start - block entity sleeping
 +                final BlockEntity tileEntity;
 +                if (tileEntityWrapped instanceof net.minecraft.world.level.chunk.LevelChunk.RebindableTickingBlockEntityWrapper rebindable
-+                    && rebindable.ticker instanceof io.canvasmc.canvas.world.block.SleepingBlockEntity.SleepingTicker sleepingTicker) {
++                    && rebindable.ticker instanceof dev.iyanz.aurora.engine.world.block.SleepingBlockEntity.SleepingTicker sleepingTicker) {
 +                    tileEntity = sleepingTicker.getTileEntityForRegionOperation(); // ensure we still update the entity ticks
 +                } else tileEntity = tileEntityWrapped.getTileEntity();
 +                // Canvas end - block entity sleeping
@@ -269,7 +269,7 @@
 +                // Canvas start - block entity sleeping
 +                final BlockPos pos;
 +                if (tileEntity instanceof net.minecraft.world.level.chunk.LevelChunk.RebindableTickingBlockEntityWrapper rebindable
-+                    && rebindable.ticker instanceof io.canvasmc.canvas.world.block.SleepingBlockEntity.SleepingTicker sleepingTicker) {
++                    && rebindable.ticker instanceof dev.iyanz.aurora.engine.world.block.SleepingBlockEntity.SleepingTicker sleepingTicker) {
 +                    pos = sleepingTicker.getPosForRegionOperation(); // ensure non-null, since the sleeping ticker has getPos() return null, which will crash the server on split
 +                } else {
 +                    pos = tileEntity.getPos();
@@ -354,11 +354,11 @@
 +    // this is because I don't want to deal with an insane amount of diff constantly
 +    // because of canvas adding a ton of regionized data
 +
-+    private io.canvasmc.canvas.threadedregions.CanvasRegionizedWorldData canvasWorldData;
++    private dev.iyanz.aurora.engine.threadedregions.CanvasRegionizedWorldData canvasWorldData;
 +
-+    public io.canvasmc.canvas.threadedregions.CanvasRegionizedWorldData getCanvasWorldData() {
++    public dev.iyanz.aurora.engine.threadedregions.CanvasRegionizedWorldData getCanvasWorldData() {
 +        if (this.canvasWorldData == null) {
-+            this.canvasWorldData = io.canvasmc.canvas.threadedregions.CanvasRegionizedWorldData.getCurrentWorldData();
++            this.canvasWorldData = dev.iyanz.aurora.engine.threadedregions.CanvasRegionizedWorldData.getCurrentWorldData();
 +        }
 +        return canvasWorldData;
 +    }

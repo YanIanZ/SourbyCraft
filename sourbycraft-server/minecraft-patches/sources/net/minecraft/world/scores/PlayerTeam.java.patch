@@ -16,7 +16,7 @@
 -    private Team.CollisionRule collisionRule = Team.CollisionRule.ALWAYS;
 +    // Canvas start - region threading
 +    private final Set<String> players = new java.util.concurrent.CopyOnWriteArraySet<>();
-+    private final io.canvasmc.canvas.util.LockedReference<io.canvasmc.canvas.threadedregions.scores.TeamData> teamData;
++    private final dev.iyanz.aurora.engine.util.LockedReference<dev.iyanz.aurora.engine.threadedregions.scores.TeamData> teamData;
 +    // note: displayNameStyle is final and not modified ever, so we can keep
 +    //       this outside TeamData
      private final Style displayNameStyle;
@@ -38,40 +38,40 @@
 +    }
 +
 +    private void setNameTagVisibilityRaw(final net.minecraft.world.scores.Team.Visibility visibility) {
-+        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setNameTagVisibility(visibility));
++        this.teamData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.TeamData.copyOf(data).setNameTagVisibility(visibility));
 +    }
 +
 +    private void setDeathMessageVisibilityRaw(final net.minecraft.world.scores.Team.Visibility visibility) {
-+        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setDeathMessageVisibility(visibility));
++        this.teamData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.TeamData.copyOf(data).setDeathMessageVisibility(visibility));
 +    }
 +
 +    private void setSeeFriendlyInvisiblesRaw(final boolean seeFriendlyInvisibles) {
-+        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setSeeFriendlyInvisibles(seeFriendlyInvisibles));
++        this.teamData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.TeamData.copyOf(data).setSeeFriendlyInvisibles(seeFriendlyInvisibles));
 +    }
 +
 +    private void setAllowFriendlyFireRaw(final boolean allowFriendlyFire) {
-+        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setAllowFriendlyFire(allowFriendlyFire));
++        this.teamData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.TeamData.copyOf(data).setAllowFriendlyFire(allowFriendlyFire));
 +    }
 +
 +    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
 +    private void setColorRaw(final java.util.Optional<TeamColor> color) {
-+        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setColor(color));
++        this.teamData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.TeamData.copyOf(data).setColor(color));
 +    }
 +
 +    private void setCollisionRuleRaw(final net.minecraft.world.scores.Team.CollisionRule collisionRule) {
-+        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setCollisionRule(collisionRule));
++        this.teamData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.TeamData.copyOf(data).setCollisionRule(collisionRule));
 +    }
 +
 +    private void setPlayerSuffixRaw(final @org.jspecify.annotations.Nullable Component playerSuffix) {
-+        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setPlayerSuffix(playerSuffix == null ? net.minecraft.network.chat.CommonComponents.EMPTY : playerSuffix));
++        this.teamData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.TeamData.copyOf(data).setPlayerSuffix(playerSuffix == null ? net.minecraft.network.chat.CommonComponents.EMPTY : playerSuffix));
 +    }
 +
 +    private void setPlayerPrefixRaw(final Component playerPrefix) {
-+        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setPlayerPrefix(playerPrefix == null ? net.minecraft.network.chat.CommonComponents.EMPTY : playerPrefix));
++        this.teamData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.TeamData.copyOf(data).setPlayerPrefix(playerPrefix == null ? net.minecraft.network.chat.CommonComponents.EMPTY : playerPrefix));
 +    }
 +
 +    private void setDisplayNameRaw(final net.minecraft.network.chat.Component displayName) {
-+        this.teamData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.TeamData.copyOf(data).setDisplayName(displayName));
++        this.teamData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.TeamData.copyOf(data).setDisplayName(displayName));
 +    }
 +    // Canvas end - region threading
  
@@ -79,7 +79,7 @@
          this.scoreboard = scoreboard;
          this.name = name;
 -        this.displayName = Component.literal(name);
-+        this.teamData = new io.canvasmc.canvas.util.LockedReference<>(new io.canvasmc.canvas.threadedregions.scores.TeamData(Component.literal(name))); // Canvas - region threading
++        this.teamData = new dev.iyanz.aurora.engine.util.LockedReference<>(new dev.iyanz.aurora.engine.threadedregions.scores.TeamData(Component.literal(name))); // Canvas - region threading
          this.displayNameStyle = Style.EMPTY.withInsertion(name).withHoverEvent(new HoverEvent.ShowText(Component.literal(name)));
      }
  

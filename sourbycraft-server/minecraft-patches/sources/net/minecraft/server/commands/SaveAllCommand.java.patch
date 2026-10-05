@@ -92,7 +92,7 @@
 +
 +                    // propagate the ticket
 +                    region.getData().canvas$saveAllTicket.propagate(
-+                        new io.canvasmc.canvas.util.ticket.SaveAllTicket(callback, (Throwable thrown) -> {
++                        new dev.iyanz.aurora.engine.util.ticket.SaveAllTicket(callback, (Throwable thrown) -> {
 +                            source.sendFailure(Component.literal(ERROR_FAILED.create().getMessage()));
 +                            MinecraftServer.LOGGER.error(ERROR_FAILED.create().getMessage(), thrown);
 +                        }, flush)

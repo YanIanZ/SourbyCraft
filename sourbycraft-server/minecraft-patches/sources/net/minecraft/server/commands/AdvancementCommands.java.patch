@@ -17,13 +17,13 @@
 -        }
 -
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.
-+                <io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.NumericPair<Integer, Integer>, ServerPlayer>
-+                _abstract(new io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.NumericPair<>(0, 0))
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.
++                <dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.NumericPair<Integer, Integer>, ServerPlayer>
++                _abstract(new dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.NumericPair<>(0, 0))
 +            .with(players)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                int changedAdvancements = action.perform(entityPlayer, advancements, showAdvancements);
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.mapPairBoth(
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.mapPairBoth(
 +                    (advancementCount) -> advancementCount + changedAdvancements,
 +                    (playerCount) -> changedAdvancements > 0 ? playerCount + 1 : playerCount
 +                );
@@ -69,13 +69,13 @@
 -        }
 -
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
 +            .with(players)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                if (action.performCriterion(entityPlayer, holder, criterion)) {
-+                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                    return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.incrementInt();
 +                }
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.nothing();
 +            })
 +            .onComplete((playerCount, _, css) -> criterionCallback(
 +                playerCount, css,

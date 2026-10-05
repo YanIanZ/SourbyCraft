@@ -71,14 +71,14 @@
      }
      // Paper end - add paper world config
 +    // Canvas start - Rebrand - world config
-+    private io.canvasmc.canvas.WorldConfig canvasConfig;
++    private dev.iyanz.aurora.engine.WorldConfig canvasConfig;
 +
-+    public io.canvasmc.canvas.WorldConfig canvasConfig() {
++    public dev.iyanz.aurora.engine.WorldConfig canvasConfig() {
 +        return this.canvasConfig;
 +    }
 +
 +    public void reloadCanvasConfig() {
-+        this.canvasConfig = io.canvasmc.canvas.WorldConfig.buildForLevel((ServerLevel) this, dimension);
++        this.canvasConfig = dev.iyanz.aurora.engine.WorldConfig.buildForLevel((ServerLevel) this, dimension);
 +    }
 +    // Canvas end - Rebrand - world config
  
@@ -421,7 +421,7 @@
 +        // https://github.com/CraftCanvasMC/Canvas/pull/164
 +        // This is also a modified version of Luminol's approach to deal with this issue. See:
 +        // https://github.com/LuminolMC/Luminol/commit/41df3b26452fc9df6cfea1cc205503924cb364e4
-+        } catch (final io.canvasmc.canvas.threadedregions.entities.EntityMoveOutOfRegionException moore) {
++        } catch (final dev.iyanz.aurora.engine.threadedregions.entities.EntityMoveOutOfRegionException moore) {
 +            final Entity movingEntity = moore.entity();
 +            final Vec3 currentPosition = movingEntity.position();
 +            final Vec3 destinationPosition = currentPosition.add(moore.movement());

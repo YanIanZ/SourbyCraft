@@ -2,8 +2,8 @@ package dev.iyanz.sourbycraft.perf;
 
 import ca.spottedleaf.common.time.TickTime;
 import dev.iyanz.sourbycraft.api.metrics.MetricState;
-import io.canvasmc.canvas.spark.plugin.FoliaTickStatistics;
-import io.canvasmc.canvas.threadedregions.profiler.RegionProfiler;
+import dev.iyanz.aurora.engine.spark.plugin.FoliaTickStatistics;
+import dev.iyanz.aurora.engine.threadedregions.profiler.RegionProfiler;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import java.io.IOException;
 import java.io.InputStream;

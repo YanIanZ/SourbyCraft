@@ -5,7 +5,7 @@
      @Override
      public VersionFetcher getVersionFetcher() {
 -        return new PaperVersionFetcher();
-+        return new io.canvasmc.canvas.util.version.CanvasVersionFetcher(); // Canvas - Rebrand
++        return new dev.iyanz.aurora.engine.util.version.CanvasVersionFetcher(); // Canvas - Rebrand
      }
  
      @Override

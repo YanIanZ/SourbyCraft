@@ -5,7 +5,7 @@
  import org.jspecify.annotations.Nullable;
  
 -public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer, StackedContentsCompatible, RecipeCraftingHolder {
-+public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer, StackedContentsCompatible, RecipeCraftingHolder, io.canvasmc.canvas.world.block.SleepingBlockEntity { // Canvas - block entity sleeping
++public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer, StackedContentsCompatible, RecipeCraftingHolder, dev.iyanz.aurora.engine.world.block.SleepingBlockEntity { // Canvas - block entity sleeping
      protected static final int SLOT_INPUT = 0;
      protected static final int SLOT_FUEL = 1;
      protected static final int SLOT_RESULT = 2;

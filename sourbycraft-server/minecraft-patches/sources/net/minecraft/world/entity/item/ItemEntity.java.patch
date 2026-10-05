@@ -63,7 +63,7 @@
 +
 +    @Override
 +    public void thunderHit(final ServerLevel level, final net.minecraft.world.entity.LightningBolt lightning) {
-+        if (!io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc206922 || this.tickCount > 8) {
++        if (!dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().vanillaFixes.mc206922 || this.tickCount > 8) {
 +            super.thunderHit(level, lightning);
 +        }
 +    }

@@ -10,7 +10,7 @@
 -        }
 +    // Canvas start - region threading
 +    private static int showDialog(final CommandSourceStack sender, final Collection<ServerPlayer> targets, final Holder<Dialog> dialog) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
 +            .with(targets)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                entityPlayer.openDialog(dialog);
@@ -36,7 +36,7 @@
 -        }
 +    // Canvas start - region threading
 +    private static int clearDialog(final CommandSourceStack sender, final Collection<ServerPlayer> targets) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
 +            .with(targets)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                entityPlayer.connection.send(ClientboundClearDialogPacket.INSTANCE);

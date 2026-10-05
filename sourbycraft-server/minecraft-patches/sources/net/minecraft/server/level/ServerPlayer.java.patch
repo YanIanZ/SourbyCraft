@@ -73,8 +73,8 @@
      public boolean sentListPacket = false;
      public boolean suppressTrackerForLogin = false; // Paper - Fire PlayerJoinEvent when Player is actually ready
      // CraftBukkit end
-+    public final io.canvasmc.canvas.world.RegionResourceBar.DisplayManager canvas$tpsBarDisplay = io.canvasmc.canvas.world.RegionResourceBar.DisplayManager.createNew(this, net.kyori.adventure.bossbar.BossBar.Color.BLUE); // Canvas - tpsbar
-+    public final io.canvasmc.canvas.world.RegionResourceBar.DisplayManager canvas$ramBarDisplay = io.canvasmc.canvas.world.RegionResourceBar.DisplayManager.createNew(this, net.kyori.adventure.bossbar.BossBar.Color.GREEN); // Canvas - rambar
++    public final dev.iyanz.aurora.engine.world.RegionResourceBar.DisplayManager canvas$tpsBarDisplay = dev.iyanz.aurora.engine.world.RegionResourceBar.DisplayManager.createNew(this, net.kyori.adventure.bossbar.BossBar.Color.BLUE); // Canvas - tpsbar
++    public final dev.iyanz.aurora.engine.world.RegionResourceBar.DisplayManager canvas$ramBarDisplay = dev.iyanz.aurora.engine.world.RegionResourceBar.DisplayManager.createNew(this, net.kyori.adventure.bossbar.BossBar.Color.GREEN); // Canvas - rambar
 +    public final int canvas$infoBucketIndex; // Canvas - optimize playerlist tick
      public boolean isRealPlayer; // Paper
      public com.destroystokyo.paper.event.entity.@Nullable PlayerNaturallySpawnCreaturesEvent playerNaturallySpawnedEvent; // Paper - PlayerNaturallySpawnCreaturesEvent
@@ -253,8 +253,8 @@
          this.respawnConfig = input.read("respawn", ServerPlayer.RespawnConfig.CODEC).orElse(null);
          this.spawnExtraParticlesOnFall = input.getBooleanOr("spawn_extra_particles_on_fall", false);
          this.raidOmenPosition = input.read("raid_omen_position", BlockPos.CODEC).orElse(null);
-+        this.canvas$tpsBarDisplay.updateFromEntry(input.read("TpsBar", io.canvasmc.canvas.world.RegionResourceBar.Entry.CODEC).orElse(io.canvasmc.canvas.world.RegionResourceBar.Entry.FALLBACK)); // Canvas - tpsbar
-+        this.canvas$ramBarDisplay.updateFromEntry(input.read("RamBar", io.canvasmc.canvas.world.RegionResourceBar.Entry.CODEC).orElse(io.canvasmc.canvas.world.RegionResourceBar.Entry.FALLBACK)); // Canvas - rambar
++        this.canvas$tpsBarDisplay.updateFromEntry(input.read("TpsBar", dev.iyanz.aurora.engine.world.RegionResourceBar.Entry.CODEC).orElse(dev.iyanz.aurora.engine.world.RegionResourceBar.Entry.FALLBACK)); // Canvas - tpsbar
++        this.canvas$ramBarDisplay.updateFromEntry(input.read("RamBar", dev.iyanz.aurora.engine.world.RegionResourceBar.Entry.CODEC).orElse(dev.iyanz.aurora.engine.world.RegionResourceBar.Entry.FALLBACK)); // Canvas - rambar
          this.loadGameTypes(input); // Paper - Expand PlayerGameModeChangeEvent
          this.setShoulderEntityLeft(input.read("ShoulderEntityLeft", CompoundTag.CODEC).orElseGet(CompoundTag::new));
          this.setShoulderEntityRight(input.read("ShoulderEntityRight", CompoundTag.CODEC).orElseGet(CompoundTag::new));
@@ -262,8 +262,8 @@
              output.store("ShoulderEntityRight", CompoundTag.CODEC, this.getShoulderEntityRight());
          }
          this.getBukkitEntity().setExtraData(output); // CraftBukkit
-+        output.store("TpsBar", io.canvasmc.canvas.world.RegionResourceBar.Entry.CODEC, this.canvas$tpsBarDisplay.serializeDisplay()); // Canvas - tpsbar
-+        output.store("RamBar", io.canvasmc.canvas.world.RegionResourceBar.Entry.CODEC, this.canvas$ramBarDisplay.serializeDisplay()); // Canvas - rambar
++        output.store("TpsBar", dev.iyanz.aurora.engine.world.RegionResourceBar.Entry.CODEC, this.canvas$tpsBarDisplay.serializeDisplay()); // Canvas - tpsbar
++        output.store("RamBar", dev.iyanz.aurora.engine.world.RegionResourceBar.Entry.CODEC, this.canvas$ramBarDisplay.serializeDisplay()); // Canvas - rambar
      }
  
      private void saveParentVehicle(final ValueOutput playerOutput) {
@@ -348,7 +348,7 @@
      }
  
      public void initMenu(final AbstractContainerMenu container) {
-+        io.canvasmc.canvas.util.TickGuard.guard(this, "Cannot init menu async"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(this, "Cannot init menu async"); // Canvas - region guards
          container.addSlotListener(this.containerListener);
          container.setSynchronizer(this.containerSynchronizer);
      }
@@ -1019,7 +1019,7 @@
  
      @Override
      public OptionalInt openMenu(final @Nullable MenuProvider provider) {
-+        io.canvasmc.canvas.util.TickGuard.guard(this, "Cannot open menu async"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(this, "Cannot open menu async"); // Canvas - region guards
          if (provider == null) {
              return OptionalInt.empty();
          }
@@ -1027,7 +1027,7 @@
      }
      @Override
      public void closeContainer(org.bukkit.event.inventory.InventoryCloseEvent.Reason reason) {
-+        io.canvasmc.canvas.util.TickGuard.guard(this, "Cannot close container async"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(this, "Cannot close container async"); // Canvas - region guards
          org.bukkit.craftbukkit.event.CraftEventFactory.handleInventoryCloseEvent(this, reason); // CraftBukkit
          // Paper end - Inventory close reason
          this.connection.send(new ClientboundContainerClosePacket(this.containerMenu.containerId));

@@ -11,7 +11,7 @@
      }
  
      private static Stopwatches unpack(final Map<Identifier, Long> stopwatches) {
-+        io.canvasmc.canvas.util.TickGuard.ensureGlobalOrStartup("Cannot unpack stopwatches async"); // Canvas - region threading
++        dev.iyanz.aurora.engine.util.TickGuard.ensureGlobalOrStartup("Cannot unpack stopwatches async"); // Canvas - region threading
          Stopwatches result = new Stopwatches();
          long currentTime = currentTime();
          stopwatches.forEach((id, accumulatedElapsedTime) -> result.stopwatches.put(id, new Stopwatch(currentTime, accumulatedElapsedTime)));
@@ -19,7 +19,7 @@
      }
  
      private Map<Identifier, Long> pack() {
-+        io.canvasmc.canvas.util.TickGuard.ensureGlobalOrStartup("Cannot pack stopwatches async"); // Canvas - region threading
++        dev.iyanz.aurora.engine.util.TickGuard.ensureGlobalOrStartup("Cannot pack stopwatches async"); // Canvas - region threading
          long currentTime = currentTime();
          Map<Identifier, Long> result = new TreeMap<>();
          this.stopwatches.forEach((id, stopwatch) -> result.put(id, stopwatch.elapsedMilliseconds(currentTime)));

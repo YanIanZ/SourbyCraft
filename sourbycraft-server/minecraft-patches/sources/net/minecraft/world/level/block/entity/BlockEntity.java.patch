@@ -41,7 +41,7 @@
              setChanged(this.level, this.worldPosition, this.blockState);
          }
 +        // Canvas start - block entity sleeping
-+        if (this instanceof io.canvasmc.canvas.world.block.SleepingBlockEntity sleeping) {
++        if (this instanceof dev.iyanz.aurora.engine.world.block.SleepingBlockEntity sleeping) {
 +            sleeping.onChange();
 +        }
 +        // Canvas end - block entity sleeping
@@ -61,7 +61,7 @@
      // CraftBukkit start - add method
      public org.bukkit.inventory.@Nullable InventoryHolder getOwner() {
 -        return getOwner(true);
-+        return getOwner(io.canvasmc.canvas.GlobalConfiguration.getInstance().tileEntitySnapshotCreation); // Canvas - don't use snapshots for acquiring blockstate
++        return getOwner(dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().tileEntitySnapshotCreation); // Canvas - don't use snapshots for acquiring blockstate
      }
  
      public org.bukkit.inventory.@Nullable InventoryHolder getOwner(boolean useSnapshot) {

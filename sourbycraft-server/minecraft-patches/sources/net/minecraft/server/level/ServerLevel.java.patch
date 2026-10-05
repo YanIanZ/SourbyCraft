@@ -220,7 +220,7 @@
          this.sleepStatus = new SleepStatus();
          this.gameEventDispatcher = new GameEventDispatcher(this);
 -        this.waypointManager = new ServerWaypointManager(this); // Paper - optimize ServerWaypointManager with locator bar disabled
-+        this.waypointManager = new io.canvasmc.canvas.threadedregions.waypoints.RegionizedWaypointManager(this); // Paper - optimize ServerWaypointManager with locator bar disabled // Canvas - region threading
++        this.waypointManager = new dev.iyanz.aurora.engine.threadedregions.waypoints.RegionizedWaypointManager(this); // Paper - optimize ServerWaypointManager with locator bar disabled // Canvas - region threading
          this.environmentAttributes = EnvironmentAttributeSystem.builder().addDefaultLayers(this).build();
 -        this.updateSkyBrightness();
 +        // this.updateSkyBrightness(); // Folia - region threading - delay until first tick
@@ -260,8 +260,8 @@
 +    public final io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData taskQueueRegionData = new io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData(this);
 +    // Canvas start - region threading
 +    // note: *never* pop the unload ticket, EVER.
-+    public final io.canvasmc.canvas.util.ticket.TicketHolder<io.canvasmc.canvas.util.ticket.UnloadTicket>
-+        canvas$unloadTicket = new io.canvasmc.canvas.util.ticket.TicketHolder<>();
++    public final dev.iyanz.aurora.engine.util.ticket.TicketHolder<dev.iyanz.aurora.engine.util.ticket.UnloadTicket>
++        canvas$unloadTicket = new dev.iyanz.aurora.engine.util.ticket.TicketHolder<>();
 +    // this lock should be used whenever we need to check or modify the unload state of the world
 +    private final java.util.concurrent.locks.ReentrantLock canvas$worldStageLock = new java.util.concurrent.locks.ReentrantLock(true);
 +    public final java.util.concurrent.CopyOnWriteArrayList<String> canvas$joiningPlayers = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -357,7 +357,7 @@
 -        TickRateManager tickRateManager = this.tickRateManager();
 -        boolean runs = tickRateManager.runsNormally();
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.ScheduledHandleTickState handleTickState = regionizedWorldData.regionData.tickHandle.getTickManager();
++        dev.iyanz.aurora.engine.threadedregions.ScheduledHandleTickState handleTickState = regionizedWorldData.regionData.tickHandle.getTickManager();
 +        boolean runs = handleTickState.doesRunGameElements();
 +        // Canvas end - region threading
          if (runs) {
@@ -740,8 +740,8 @@
 +        BlockState heighestBlockState = this.getBlockState(belowPos);
 +        if (
 +            !(
-+                (heighestBlockState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.WATER) != 0 ||
-+                (heighestBlockState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.INTERACTS_WITH_PRECIPITATION) != 0
++                (heighestBlockState.tagFlag & dev.iyanz.aurora.engine.world.block.BlockTags.WATER) != 0 ||
++                (heighestBlockState.tagFlag & dev.iyanz.aurora.engine.world.block.BlockTags.INTERACTS_WITH_PRECIPITATION) != 0
 +            )
 +        ) {
 +            return;
@@ -1315,7 +1315,7 @@
 -        for (TickingBlockEntity ticker : this.blockEntityTickers) {
 +        if (false) { TickingBlockEntity ticker = null; // Folia - region threading
              BlockPos blockPos = ticker.getPos();
-+            if (ticker instanceof net.minecraft.world.level.chunk.LevelChunk.RebindableTickingBlockEntityWrapper rebindable && rebindable.ticker instanceof io.canvasmc.canvas.world.block.SleepingBlockEntity.SleepingTicker sleepingTicker) blockPos = sleepingTicker.getPosForRegionOperation(); // Canvas - block entity sleeping
++            if (ticker instanceof net.minecraft.world.level.chunk.LevelChunk.RebindableTickingBlockEntityWrapper rebindable && rebindable.ticker instanceof dev.iyanz.aurora.engine.world.block.SleepingBlockEntity.SleepingTicker sleepingTicker) blockPos = sleepingTicker.getPosForRegionOperation(); // Canvas - block entity sleeping
              csvOutput.writeRow(blockPos.getX(), blockPos.getY(), blockPos.getZ(), ticker.getType());
          }
      }

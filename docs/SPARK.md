@@ -67,9 +67,9 @@ class:
 
 | File | What it does |
 | --- | --- |
-| `src/main/java/io/canvasmc/canvas/spark/FoliaSparkPlugin.java` | `createServerConfigProvider()` returns `SourbyServerConfigProvider` |
-| `src/main/java/io/canvasmc/canvas/spark/FoliaPlatformInfo.java` | Platform version reported as `BuildN (MC:26.2)` |
-| `src/main/java/io/canvasmc/canvas/spark/plugin/FoliaTickStatistics.java` | Tick statistics come from Sourby metrics |
+| `src/main/java/dev/iyanz/aurora/engine/spark/FoliaSparkPlugin.java` | `createServerConfigProvider()` returns `SourbyServerConfigProvider` |
+| `src/main/java/dev/iyanz/aurora/engine/spark/FoliaPlatformInfo.java` | Platform version reported as `BuildN (MC:26.2)` |
+| `src/main/java/dev/iyanz/aurora/engine/spark/plugin/FoliaTickStatistics.java` | Tick statistics come from Sourby metrics |
 | `src/main/java/dev/iyanz/sourbycraft/spark/SourbyServerConfigProvider.java` | Config groups and secret filtering; extends Spark's `ServerConfigProvider` |
 
 Procedure, after bumping `paperRef`:

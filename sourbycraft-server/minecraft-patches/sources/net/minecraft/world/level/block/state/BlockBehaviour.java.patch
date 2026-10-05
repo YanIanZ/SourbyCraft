@@ -5,7 +5,7 @@
  
      protected void onPlace(final BlockState state, final Level level, final BlockPos pos, final BlockState oldState, final boolean movedByPiston) {
 -        org.spigotmc.AsyncCatcher.catchOp("block onPlace"); // Spigot
-+        io.canvasmc.canvas.util.TickGuard.guard(pos, level, "Cannot place block async"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(pos, level, "Cannot place block async"); // Canvas - region guards
      }
  
      protected void affectNeighborsAfterRemoval(final BlockState state, final ServerLevel level, final BlockPos pos, final boolean movedByPiston) {
@@ -19,7 +19,7 @@
 +        public int tagFlag; // caches blockstate flags
 +
 +        public void canvas$initCaches() {
-+            this.tagFlag = io.canvasmc.canvas.world.block.BlockTags.init(asState());
++            this.tagFlag = dev.iyanz.aurora.engine.world.block.BlockTags.init(asState());
 +            this.pathType = (byte) net.minecraft.world.level.pathfinder.WalkNodeEvaluator.canvas$getPathTypeFromBlockState(this.asState()).ordinal();
 +        }
 +

@@ -27,7 +27,7 @@
      }
  
      public PackedClockStates packState() {
-+        io.canvasmc.canvas.util.TickGuard.ensureGlobalOrStartup("Cannot pack clocks async"); // Canvas - region threading
++        dev.iyanz.aurora.engine.util.TickGuard.ensureGlobalOrStartup("Cannot pack clocks async"); // Canvas - region threading
          return new PackedClockStates(Util.mapValues(this.clocks, ServerClockManager.ClockInstance::packState));
      }
  

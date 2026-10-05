@@ -144,7 +144,7 @@ index 0000000000000000000000000000000000000000..f15f77aa9102513d316be78a18381384
 +    }
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index abcc8ae0a5ab4d089c6e888519b1b094a9ddcc4d..4636ad449bd95bd04b7f4ece3172670fde22d5b9 100644
+index 5c63dd102328f2e5f555c644988e5be162ce73f1..9cfcedd6fb759646ad54c7192806148be714b29e 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
 @@ -1,7 +1,6 @@

@@ -119,7 +119,7 @@ public class WorldStatisticsProvider {
             }
 
             long id;
-            if (chunk instanceof io.canvasmc.canvas.spark.plugin.AbstractFoliaChunkInfo<?> folia) {
+            if (chunk instanceof dev.iyanz.aurora.engine.spark.plugin.AbstractFoliaChunkInfo<?> folia) {
                 id = folia.getFoliaRegionId();
             } else {
                 id = Long.MIN_VALUE;

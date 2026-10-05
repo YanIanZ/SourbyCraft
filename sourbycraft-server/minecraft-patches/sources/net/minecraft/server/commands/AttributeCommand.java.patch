@@ -13,7 +13,7 @@
 -        );
 -        return (int)(result * scale);
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._double()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._double()
 +            .with(target)
 +            .executes((Entity entity) -> {
 +                LivingEntity livingEntity = getEntityWithAttribute(entity, attribute);
@@ -38,7 +38,7 @@
 -        );
 -        return (int)(result * scale);
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._double()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._double()
 +            .with(target)
 +            .executes((Entity entity) -> {
 +                LivingEntity livingEntity = getEntityWithAttribute(entity, attribute);
@@ -64,7 +64,7 @@
 -            throw ERROR_NO_SUCH_MODIFIER.create(target.getName(), getAttributeDescription(attribute), id);
 -        }
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._double()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._double()
 +            .with(target)
 +            .executes((Entity entity) -> {
 +                LivingEntity livingEntity = getEntityWithAttribute(entity, attribute);
@@ -107,7 +107,7 @@
 -            () -> Component.translatable("commands.attribute.base_value.set.success", getAttributeDescription(attribute), target.getName(), value), false
 -        );
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._void()
 +            .with(target)
 +            .executes((Entity entity) -> {
 +                getAttributeInstance(entity, attribute).setBaseValue(value);
@@ -130,7 +130,7 @@
 -            throw ERROR_NO_SUCH_ATTRIBUTE.create(target.getName(), getAttributeDescription(attribute));
 -        }
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._double()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._double()
 +            .with(target)
 +            .executes((Entity entity) -> {
 +                LivingEntity livingTarget = getLivingEntity(entity);
@@ -165,7 +165,7 @@
 -            throw ERROR_MODIFIER_ALREADY_PRESENT.create(target.getName(), getAttributeDescription(attribute), id);
 -        }
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._void()
 +            .with(target)
 +            .executes((Entity entity) -> {
 +                AttributeInstance attributeInstance = getAttributeInstance(entity, attribute);
@@ -212,7 +212,7 @@
 -            throw ERROR_NO_SUCH_MODIFIER.create(target.getName(), getAttributeDescription(attribute), id);
 -        }
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._boolean(false)
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._boolean(false)
 +            .with(target)
 +            .executes((Entity entity) -> {
 +                AttributeInstance attributeInstance = getAttributeInstance(entity, attribute);

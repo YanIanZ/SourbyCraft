@@ -1,0 +1,10 @@
+--- /dev/null
++++ b/dev/iyanz/aurora/engine/threadedregions/scores/package-info.java
+@@ -1,0 +_,7 @@
++/**
++ * This package is for classes related to the Canvas scoreboard system rewrite
++ */
++@NullMarked
++package dev.iyanz.aurora.engine.threadedregions.scores;
++
++import org.jspecify.annotations.NullMarked;

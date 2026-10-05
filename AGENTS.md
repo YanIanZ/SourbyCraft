@@ -1,6 +1,6 @@
 # AGENTS.md — SourbyCraft 26.2 Aurora
 
-Region-threaded Minecraft 26.2 server fork with the **Aurora** runtime/engine architecture. Paper is the only upstream (pinned by `paperRef`). Region threading and the other changes that used to come from Canvas/Folia are SourbyCraft-owned patches and sources since the 2026-10-05 migration; package names such as `io.canvasmc.*` and `io.papermc.paper.threadedregions.*` are kept for plugin compatibility and are not the product identity. Do not describe planned Aurora ownership as already independent. The active build/toolchain must be verified from the current branch before repeating historical Path-B or private-toolchain statements.
+Region-threaded Minecraft 26.2 server fork with the **Aurora** runtime/engine architecture. Paper is the only upstream (pinned by `paperRef`). Region threading and the other changes that used to come from Canvas/Folia are SourbyCraft-owned patches and sources since the 2026-10-05 migration; the engine internals live in `dev.iyanz.aurora.engine.*`; `io.canvasmc.canvas.*` remains only for the plugin API in `sourbyapi` (`event`, `region`, `simd`, `Unsupported`, `WorldUnloadResult`), and Folia's `io.papermc.paper.threadedregions.*` keeps its name. Neither is the product identity. Do not describe planned Aurora ownership as already independent. The active build/toolchain must be verified from the current branch before repeating historical Path-B or private-toolchain statements.
 
 ## Toolchain
 

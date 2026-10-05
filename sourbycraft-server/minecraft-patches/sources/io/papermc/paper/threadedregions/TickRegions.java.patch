@@ -13,10 +13,10 @@
 +import io.canvasmc.canvas.region.RegionThreadingTickManager;
 +import io.canvasmc.canvas.region.RegionTickData;
 +import io.canvasmc.canvas.region.WorldRegionizer;
-+import io.canvasmc.canvas.threadedregions.SchedulerUtil;
-+import io.canvasmc.canvas.threadedregions.ServerRegionTickManager;
-+import io.canvasmc.canvas.util.ticket.SaveAllTicket;
-+import io.canvasmc.canvas.util.ticket.TicketHolder;
++import dev.iyanz.aurora.engine.threadedregions.SchedulerUtil;
++import dev.iyanz.aurora.engine.threadedregions.ServerRegionTickManager;
++import dev.iyanz.aurora.engine.util.ticket.SaveAllTicket;
++import dev.iyanz.aurora.engine.util.ticket.TicketHolder;
 +import io.papermc.paper.configuration.GlobalConfiguration;
 +import it.unimi.dsi.fastutil.longs.Long2ReferenceMap;
 +import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
@@ -128,7 +128,7 @@
 +    @Override
 +    public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
 +        // nothing for now
-+        io.canvasmc.canvas.threadedregions.SchedulerUtil.getHandle().onRegionDestroy(region); // Canvas - region profiler
++        dev.iyanz.aurora.engine.threadedregions.SchedulerUtil.getHandle().onRegionDestroy(region); // Canvas - region profiler
 +        // Canvas start - region threading
 +        region.getData().canvas$saveAllTicket.consumeIfPresent((ticket) -> {
 +
@@ -158,7 +158,7 @@
 +
 +        scheduler.descheduleRegion(data.tickHandle);
 +        // we call inactive here, since unpinning needs to occur before copying, or else this will cause issues
-+        io.canvasmc.canvas.threadedregions.SchedulerUtil.getHandle().onRegionInactive(region); // Canvas - region profiler
++        dev.iyanz.aurora.engine.threadedregions.SchedulerUtil.getHandle().onRegionInactive(region); // Canvas - region profiler
 +        // old handle cannot be scheduled anymore, copy to a new handle
 +        data.tickHandle = data.tickHandle.copy();
 +    }

@@ -135,7 +135,7 @@
 +        Heightmap motionBlockingNoLeaves = this.heightmaps.get(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES);
 +        Heightmap oceanFloor = this.heightmaps.get(Heightmap.Types.OCEAN_FLOOR);
 +        Heightmap worldSurface = this.heightmaps.get(Heightmap.Types.WORLD_SURFACE);
-+        io.canvasmc.canvas.world.chunk.CombinedHeightmapUpdate.updateHeightmaps(motionBlocking, motionBlockingNoLeaves, oceanFloor, worldSurface, this, localX, y, localZ, state);
++        dev.iyanz.aurora.engine.world.chunk.CombinedHeightmapUpdate.updateHeightmaps(motionBlocking, motionBlockingNoLeaves, oceanFloor, worldSurface, this, localX, y, localZ, state);
 +        // Canvas end - optimize heightmap
          boolean isEmpty = section.hasOnlyAir();
          if (wasEmpty != isEmpty) {
@@ -245,10 +245,10 @@
          ChunkPos chunkPos = this.getPos();
  
 +        // Canvas start - optimize post process generation
-+        final io.canvasmc.canvas.GlobalConfiguration.ChunkSystem.FluidPostProcessingMode postProcessingMode =
-+            io.canvasmc.canvas.GlobalConfiguration.getInstance().chunkSystem.fluidPostProcessingAlgorithm;
++        final dev.iyanz.aurora.engine.GlobalConfiguration.ChunkSystem.FluidPostProcessingMode postProcessingMode =
++            dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().chunkSystem.fluidPostProcessingAlgorithm;
 +
-+        if (postProcessingMode.equals(io.canvasmc.canvas.GlobalConfiguration.ChunkSystem.FluidPostProcessingMode.FILTERED)) {
++        if (postProcessingMode.equals(dev.iyanz.aurora.engine.GlobalConfiguration.ChunkSystem.FluidPostProcessingMode.FILTERED)) {
 +            for (int i = 0; i < this.postProcessing.length; i++) {
 +                if (this.postProcessing[i] != null) {
 +                    for (it.unimi.dsi.fastutil.shorts.ShortListIterator iterator = this.postProcessing[i].iterator(); iterator.hasNext();) {
@@ -259,7 +259,7 @@
 +                        final FluidState fluidState = blockState.getFluidState();
 +
 +                        if (!fluidState.isEmpty() && fluidState.getType() instanceof net.minecraft.world.level.material.FlowingFluid) {
-+                            if (!io.canvasmc.canvas.util.FlowableFluidUtils.needsPostProcessing(this.level, blockPos, blockState, fluidState)) {
++                            if (!dev.iyanz.aurora.engine.util.FlowableFluidUtils.needsPostProcessing(this.level, blockPos, blockState, fluidState)) {
 +                                iterator.remove();
 +                            }
 +                        }
@@ -268,7 +268,7 @@
 +            }
 +        }
 +
-+        final boolean disabled = postProcessingMode.equals(io.canvasmc.canvas.GlobalConfiguration.ChunkSystem.FluidPostProcessingMode.DISABLED);
++        final boolean disabled = postProcessingMode.equals(dev.iyanz.aurora.engine.GlobalConfiguration.ChunkSystem.FluidPostProcessingMode.DISABLED);
 +        // Canvas end - optimize post process generation
          for (int sectionIndex = 0; sectionIndex < this.postProcessing.length; sectionIndex++) {
              ShortList postProcessingSection = this.postProcessing[sectionIndex];
@@ -305,7 +305,7 @@
                  if (existingTicker != null) {
                      existingTicker.rebind(actualTicker);
 +                    // Canvas start - block entity sleeping
-+                    if (blockEntity instanceof io.canvasmc.canvas.world.block.SleepingBlockEntity sleeping) {
++                    if (blockEntity instanceof dev.iyanz.aurora.engine.world.block.SleepingBlockEntity sleeping) {
 +                        sleeping.lithium$setTickWrapper(existingTicker);
 +                    }
 +                    // Canvas end - block entity sleeping
@@ -314,7 +314,7 @@
                      LevelChunk.RebindableTickingBlockEntityWrapper result = new LevelChunk.RebindableTickingBlockEntityWrapper(actualTicker);
                      this.level.addBlockEntityTicker(result);
 +                    // Canvas start - block entity sleeping
-+                    if (blockEntity instanceof io.canvasmc.canvas.world.block.SleepingBlockEntity sleeping) {
++                    if (blockEntity instanceof dev.iyanz.aurora.engine.world.block.SleepingBlockEntity sleeping) {
 +                        sleeping.lithium$setTickWrapper(result);
 +                    }
 +                    // Canvas end - block entity sleeping

@@ -19,8 +19,8 @@ class CanvasSourceCouplingTest(unittest.TestCase):
         # Reloading the engine's own configuration when the Sourby config is reloaded.
         # Section 5 of independence.md calls the Canvas config a compatibility surface;
         # a reload bridge is the narrowest possible form of that.
-        "io.canvasmc.canvas.GlobalConfiguration.reload",
-        "io.canvasmc.canvas.WorldConfig.reload",
+        "dev.iyanz.aurora.engine.GlobalConfiguration.reload",
+        "dev.iyanz.aurora.engine.WorldConfig.reload",
     }
 
     ADAPTER = ("sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/config/upstream/"
@@ -52,6 +52,10 @@ class CanvasSourceCouplingTest(unittest.TestCase):
             owned.mkdir(parents=True)
             (owned / "Fixture.java").write_text(body)
             return policy.canvas_source_sites(root)
+
+    def test_detects_a_renamed_engine_reference(self):
+        found = self.check_source("class A { void f() { dev.iyanz.aurora.engine.Thing.go(); } }")
+        self.assertEqual([site["symbol"] for site in found], ["dev.iyanz.aurora.engine.Thing.go"])
 
     def test_detects_a_new_canvas_reference(self):
         found = self.check_source("class A { void f() { io.canvasmc.canvas.Thing.go(); } }")

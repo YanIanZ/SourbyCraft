@@ -6,7 +6,7 @@
      private static final Logger LOGGER = LogUtils.getLogger();
 -    public static final int SEND_PLAYER_INFO_INTERVAL = 600;
 -    private static final SimpleDateFormat BAN_DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd 'at' HH:mm:ss z", Locale.ROOT);
-+    public static final int SEND_PLAYER_INFO_INTERVAL = io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.playerInfoSendInterval; // Canvas - optimize playerlist tick
++    public static final int SEND_PLAYER_INFO_INTERVAL = dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().networking.playerInfoSendInterval; // Canvas - optimize playerlist tick
 +    private static final ThreadLocal<SimpleDateFormat> BAN_DATE_FORMAT = ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd 'at' HH:mm:ss z", Locale.ROOT)); // Folia - region threading - SDF is not thread-safe
      private final MinecraftServer server;
      private final List<ServerPlayer> players = new java.util.concurrent.CopyOnWriteArrayList(); // CraftBukkit - ArrayList -> CopyOnWriteArrayList: Iterator safety
@@ -111,7 +111,7 @@
                  player.createCommonSpawnInfo(level),
                  this.server.usesAuthentication(),
 -                this.server.enforceSecureProfile()
-+                io.canvasmc.canvas.GlobalConfiguration.getInstance().chat.disableChatReporting || this.server.enforceSecureProfile() // Canvas - no chat reports
++                dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().chat.disableChatReporting || this.server.enforceSecureProfile() // Canvas - no chat reports
              )
          );
          player.getBukkitEntity().sendSupportedChannels(); // CraftBukkit
@@ -286,7 +286,7 @@
  
      public void tick() {
 +        // Canvas start - optimize playerlist tick
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.alternativePlayerListTick) {
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().networking.alternativePlayerListTick) {
 +            PlayerListBucket bucket = this.canvas$infoBuckets[this.sendAllPlayerInfoIn];
 +
 +            if (bucket != null) {
@@ -444,7 +444,7 @@
          } // Paper - Add sendOpLevel API
 +
 +        // Purpur start - Barrels and enderchests 6 rows
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().purpurContainers.enderChestSixRows && io.canvasmc.canvas.GlobalConfiguration.getInstance().purpurContainers.enderChestPermissionRows) {
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().purpurContainers.enderChestSixRows && dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().purpurContainers.enderChestPermissionRows) {
 +            org.bukkit.craftbukkit.entity.CraftHumanEntity bukkit = player.getBukkitEntity();
 +            if (bukkit.hasPermission("purpur.enderchest.rows.six")) {
 +                player.sixRowEnderchestSlotCount = 54;
@@ -590,7 +590,7 @@
      }
  
      public boolean verifyChatTrusted(final PlayerChatMessage message) {
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().chat.disableChatReporting) return true; // Canvas - no chat reports
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().chat.disableChatReporting) return true; // Canvas - no chat reports
          return message.hasSignature() && !message.hasExpiredServer(Instant.now());
      }
  
@@ -600,7 +600,7 @@
          for (ServerLevel level : this.server.getAllLevels()) {
 -            level.getChunkSource().setViewDistance(viewDistance);
 +            // Canvas start - per world distance
-+            io.canvasmc.canvas.world.PerWorldDistanceConfig distanceConfig = level.serverLevelData.canvas$distanceConfig;
++            dev.iyanz.aurora.engine.world.PerWorldDistanceConfig distanceConfig = level.serverLevelData.canvas$distanceConfig;
 +            if (!distanceConfig.isViewDistanceOverridden()) {
 +                level.getChunkSource().setViewDistance(viewDistance);
 +            }
@@ -614,7 +614,7 @@
          for (ServerLevel level : this.server.getAllLevels()) {
 -            level.getChunkSource().setSimulationDistance(simulationDistance);
 +            // Canvas start - per world distance
-+            io.canvasmc.canvas.world.PerWorldDistanceConfig distanceConfig = level.serverLevelData.canvas$distanceConfig;
++            dev.iyanz.aurora.engine.world.PerWorldDistanceConfig distanceConfig = level.serverLevelData.canvas$distanceConfig;
 +            if (!distanceConfig.isSimulationDistanceOverridden()) {
 +                level.getChunkSource().setSimulationDistance(simulationDistance);
 +            }

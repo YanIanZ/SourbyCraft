@@ -154,7 +154,7 @@
      ) {
          return !this.isSourceBlockOfThisType(testFluidState)
 -            && canHoldAnyFluid(testState)
-+            && (testState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.CAN_HOLD_ANY_FLUID) != 0 // Canvas - optimize fluid
++            && (testState.tagFlag & dev.iyanz.aurora.engine.world.block.BlockTags.CAN_HOLD_ANY_FLUID) != 0 // Canvas - optimize fluid
              && canPassThroughWall(direction, level, sourcePos, sourceState, testPos, testState);
      }
  
@@ -163,7 +163,7 @@
  
      private static boolean canHoldFluid(final BlockGetter level, final BlockPos pos, final BlockState state, final Fluid newFluid) {
 -        return canHoldAnyFluid(state) && canHoldSpecificFluid(level, pos, state, newFluid);
-+        return (state.tagFlag & io.canvasmc.canvas.world.block.BlockTags.CAN_HOLD_ANY_FLUID) != 0 && canHoldSpecificFluid(level, pos, state, newFluid); // Canvas - optimize fluid
++        return (state.tagFlag & dev.iyanz.aurora.engine.world.block.BlockTags.CAN_HOLD_ANY_FLUID) != 0 && canHoldSpecificFluid(level, pos, state, newFluid); // Canvas - optimize fluid
      }
  
      public static boolean canHoldSpecificFluid(final BlockGetter level, final BlockPos pos, final BlockState state, final Fluid newFluid) {

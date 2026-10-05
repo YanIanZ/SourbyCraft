@@ -4,7 +4,7 @@
          ConfiguredFeature<?, ?> feature = featureHolder.value();
          ChunkPos chunkPos = ChunkPos.containing(pos);
          checkLoaded(level, new ChunkPos(chunkPos.x() - 1, chunkPos.z() - 1), new ChunkPos(chunkPos.x() + 1, chunkPos.z() + 1));
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
          if (!feature.place(level, level.getChunkSource().getGenerator(), level.getRandom(), pos)) {
              throw ERROR_FEATURE_FAILED.create();
          }
@@ -19,7 +19,7 @@
          ServerLevel level = source.getLevel();
          ChunkPos chunk = ChunkPos.containing(pos);
          checkLoaded(level, chunk, chunk);
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
          if (!JigsawPlacement.generateJigsaw(level, pool, target, maxDepth, pos, false)) {
              throw ERROR_JIGSAW_FAILED.create();
          }
@@ -33,7 +33,7 @@
          ServerLevel level = source.getLevel();
          Structure structure = structureHolder.value();
          ChunkGenerator chunkGenerator = level.getChunkSource().getGenerator();
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
          StructureStart start = structure.generate(
              structureHolder,
              level.dimension(),
@@ -49,7 +49,7 @@
          final boolean strict
      ) throws CommandSyntaxException {
          ServerLevel level = source.getLevel();
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeAtPosWithRadius(() -> { // Canvas - region threading
          StructureTemplateManager manager = level.getStructureManager();
  
          Optional<StructureTemplate> maybeStructureTemplate;

@@ -8,7 +8,7 @@
 +import ca.spottedleaf.concurrentutil.completable.Completable;
 +import ca.spottedleaf.moonrise.common.util.TickThread;
 +import com.mojang.logging.LogUtils;
-+import io.canvasmc.canvas.threadedregions.entities.EnderPearls;
++import dev.iyanz.aurora.engine.threadedregions.entities.EnderPearls;
 +import io.papermc.paper.adventure.providers.ClickCallbackProviderImpl;
 +import io.papermc.paper.configuration.GlobalConfiguration;
 +import io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler;
@@ -339,10 +339,10 @@
 +        ensureGlobalTickThread("Cannot save global data async");
 +
 +        final MinecraftServer server = MinecraftServer.getServer();
-+        final io.canvasmc.canvas.GlobalConfiguration.Autosave autosaveConfig =
-+            io.canvasmc.canvas.GlobalConfiguration.getInstance().autosave;
++        final dev.iyanz.aurora.engine.GlobalConfiguration.Autosave autosaveConfig =
++            dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().autosave;
 +
-+        final long periodNanos = io.canvasmc.canvas.GlobalConfiguration.AUTOSAVE_SPAN.getValue().asNanoSpan();
++        final long periodNanos = dev.iyanz.aurora.engine.GlobalConfiguration.AUTOSAVE_SPAN.getValue().asNanoSpan();
 +        if (periodNanos <= 0 && !force) return;
 +        final long currTime = System.nanoTime();
 +        final long last = LAST_GLOBAL_AUTOSAVE.longValue();
@@ -403,10 +403,10 @@
 +    public void autosaveSafeWorldData(final boolean force, final boolean sync, final ServerLevel level) {
 +        ensureGlobalTickThread("Cannot save global world data async");
 +
-+        final io.canvasmc.canvas.GlobalConfiguration.Autosave autosaveConfig =
-+            io.canvasmc.canvas.GlobalConfiguration.getInstance().autosave;
++        final dev.iyanz.aurora.engine.GlobalConfiguration.Autosave autosaveConfig =
++            dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().autosave;
 +
-+        final long periodNanos = io.canvasmc.canvas.GlobalConfiguration.AUTOSAVE_SPAN.getValue().asNanoSpan();
++        final long periodNanos = dev.iyanz.aurora.engine.GlobalConfiguration.AUTOSAVE_SPAN.getValue().asNanoSpan();
 +        if (periodNanos <= 0 && !force) return;
 +        final long currTime = System.nanoTime();
 +        final long last = level.lastMapAutoSave;

@@ -5,12 +5,12 @@
  
      private static int mount(final CommandSourceStack source, final Entity target, final Entity vehicle) throws CommandSyntaxException {
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._void()
 +            .with(target)
 +            .executes((Entity entityTarget) -> {
 +                Entity entityVehicle = vehicle.getBukkitEntity().getHandleRaw();
 +                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(vehicle)) {
-+                    throw io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.CANNOT_DO_X_CROSS_REGION.create("mount entities");
++                    throw dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.CANNOT_DO_X_CROSS_REGION.create("mount entities");
 +                }
 +                mountAction(source, entityTarget, entityVehicle);
 +                return (_) -> null;
@@ -34,7 +34,7 @@
 -            throw ERROR_NOT_RIDING.create(target.getDisplayName());
 -        }
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._void()
 +            .with(target)
 +            .executes((Entity entityTarget) -> {
 +                Entity vehicle = entityTarget.getVehicle();

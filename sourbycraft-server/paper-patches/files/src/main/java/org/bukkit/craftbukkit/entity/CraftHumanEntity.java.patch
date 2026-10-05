@@ -12,8 +12,8 @@
      @Override
      public InventoryView openMerchant(Merchant merchant, boolean force) {
          Preconditions.checkNotNull(merchant, "merchant cannot be null");
-+        if (merchant instanceof CraftEntity merchantAsCraftEntity) io.canvasmc.canvas.util.TickGuard.guard(merchantAsCraftEntity.entity, "Cannot open merchant screen of merchant not in same region"); // Canvas - region guards
-+        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot open merchant screen async from target player"); // Canvas - region guards
++        if (merchant instanceof CraftEntity merchantAsCraftEntity) dev.iyanz.aurora.engine.util.TickGuard.guard(merchantAsCraftEntity.entity, "Cannot open merchant screen of merchant not in same region"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(this.entity, "Cannot open merchant screen async from target player"); // Canvas - region guards
  
          if (!force && merchant.isTrading()) {
              return null;
@@ -22,7 +22,7 @@
  
      private InventoryView openInventory(Location location, boolean force, Material material) {
 -        org.spigotmc.AsyncCatcher.catchOp("open" + material);
-+        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot open inventory async"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(this.entity, "Cannot open inventory async"); // Canvas - region guards
          if (location == null) {
              location = this.getLocation();
          }

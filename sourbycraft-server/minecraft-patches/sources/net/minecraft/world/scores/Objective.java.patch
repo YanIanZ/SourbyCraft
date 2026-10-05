@@ -10,7 +10,7 @@
 -    private boolean displayAutoUpdate;
 -    private @Nullable NumberFormat numberFormat;
 +    // Canvas start - region threading
-+    private final io.canvasmc.canvas.util.LockedReference<io.canvasmc.canvas.threadedregions.scores.ObjectiveData> objectiveData;
++    private final dev.iyanz.aurora.engine.util.LockedReference<dev.iyanz.aurora.engine.threadedregions.scores.ObjectiveData> objectiveData;
 +
 +    private void ensureMainThread(final String reason) {
 +        // some plugins, like fastboard, pass a null scoreboard object
@@ -32,7 +32,7 @@
 -        this.displayAutoUpdate = displayAutoUpdate;
 -        this.numberFormat = numberFormat;
 +        // Canvas start - region threading
-+        this.objectiveData = new io.canvasmc.canvas.util.LockedReference<>(new io.canvasmc.canvas.threadedregions.scores.ObjectiveData(
++        this.objectiveData = new dev.iyanz.aurora.engine.util.LockedReference<>(new dev.iyanz.aurora.engine.threadedregions.scores.ObjectiveData(
 +            createFormattedDisplayName(displayName), renderType, displayAutoUpdate, numberFormat, displayName
 +        ));
 +        // Canvas end - region threading
@@ -91,8 +91,8 @@
 +        // Canvas start - region threading
 +        ensureMainThread("Cannot set display name of objective async");
 +        this.objectiveData.swapValue((data) -> {
-+            final io.canvasmc.canvas.threadedregions.scores.ObjectiveData newData =
-+                io.canvasmc.canvas.threadedregions.scores.ObjectiveData.copyOf(data);
++            final dev.iyanz.aurora.engine.threadedregions.scores.ObjectiveData newData =
++                dev.iyanz.aurora.engine.threadedregions.scores.ObjectiveData.copyOf(data);
 +            newData.setDisplayName(name);
 +            newData.setFormattedDisplayName(createFormattedDisplayName(name));
 +            return newData;
@@ -110,7 +110,7 @@
 -        this.renderType = renderType;
 +        // Canvas start - region threading
 +        ensureMainThread("Cannot set render type of objective async");
-+        this.objectiveData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.ObjectiveData.copyOf(data).setRenderType(renderType));
++        this.objectiveData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.ObjectiveData.copyOf(data).setRenderType(renderType));
 +        // Canvas end - region threading
          this.scoreboard.onObjectiveChanged(this);
      }
@@ -119,7 +119,7 @@
 -        this.displayAutoUpdate = displayAutoUpdate;
 +        // Canvas start - region threading
 +        ensureMainThread("Cannot set display auto update flag of objective async");
-+        this.objectiveData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.ObjectiveData.copyOf(data).setDisplayAutoUpdate(displayAutoUpdate));
++        this.objectiveData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.ObjectiveData.copyOf(data).setDisplayAutoUpdate(displayAutoUpdate));
 +        // Canvas end - region threading
          this.scoreboard.onObjectiveChanged(this);
      }
@@ -128,7 +128,7 @@
 -        this.numberFormat = numberFormat;
 +        // Canvas start - region threading
 +        ensureMainThread("Cannot set number format of objective async");
-+        this.objectiveData.swapValue((data) -> io.canvasmc.canvas.threadedregions.scores.ObjectiveData.copyOf(data).setNumberFormat(numberFormat));
++        this.objectiveData.swapValue((data) -> dev.iyanz.aurora.engine.threadedregions.scores.ObjectiveData.copyOf(data).setNumberFormat(numberFormat));
 +        // Canvas end - region threading
          this.scoreboard.onObjectiveChanged(this);
      }

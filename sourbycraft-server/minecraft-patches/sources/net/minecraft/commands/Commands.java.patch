@@ -81,7 +81,7 @@
              WhitelistCommand.register(this.dispatcher);
          }
  
-+        io.canvasmc.canvas.commands.CanvasCommands.INSTANCE.build(this.dispatcher, context); // Canvas - Rebrand - register commands
++        dev.iyanz.aurora.engine.commands.CanvasCommands.INSTANCE.build(this.dispatcher, context); // Canvas - Rebrand - register commands
          if (commandSelection.includeIntegrated) {
              PublishCommand.register(this.dispatcher);
              UnpublishCommand.register(this.dispatcher);

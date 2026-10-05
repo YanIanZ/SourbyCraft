@@ -4,7 +4,7 @@
          }
  
          dispatcher.register(command.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)).executes(c -> {
-+            return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++            return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
              Difficulty difficultyx = c.getSource().getLevel().getDifficulty();
              c.getSource().sendSuccess(() -> Component.translatable("commands.difficulty.query", difficultyx.getDisplayName()), false);
              return difficultyx.getId();
@@ -13,7 +13,7 @@
      }
  
      public static int setDifficulty(final CommandSourceStack source, final Difficulty difficulty) throws CommandSyntaxException {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          MinecraftServer server = source.getServer();
          if (source.getLevel().getDifficulty() == difficulty) { // CraftBukkit
              throw ERROR_ALREADY_SAME_DIFFICULTY.create(difficulty.getDisplayName());

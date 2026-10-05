@@ -13,10 +13,10 @@
 +import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
 +import ca.spottedleaf.moonrise.common.util.TickThread;
 +import com.mojang.logging.LogUtils;
-+import io.canvasmc.canvas.GlobalConfiguration;
-+import io.canvasmc.canvas.threadedregions.ScheduledHandleTickState;
-+import io.canvasmc.canvas.threadedregions.SchedulerUtil;
-+import io.canvasmc.canvas.util.Util;
++import dev.iyanz.aurora.engine.GlobalConfiguration;
++import dev.iyanz.aurora.engine.threadedregions.ScheduledHandleTickState;
++import dev.iyanz.aurora.engine.threadedregions.SchedulerUtil;
++import dev.iyanz.aurora.engine.util.Util;
 +import io.papermc.paper.util.TraceUtil;
 +import it.unimi.dsi.fastutil.ints.Int2IntLinkedOpenHashMap;
 +import java.lang.management.ManagementFactory;

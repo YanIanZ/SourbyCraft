@@ -4,7 +4,7 @@
      }
  
      private static int setSpawn(final CommandSourceStack source, final BlockPos pos, final Coordinates rotation) {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          ServerLevel level = source.getLevel();
          Vec2 rotationVector = rotation.getRotation(source);
          float yaw = rotationVector.y;

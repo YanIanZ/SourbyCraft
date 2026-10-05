@@ -7,7 +7,7 @@
 -    private static int spectate(final CommandSourceStack source, final @Nullable Entity target, final ServerPlayer player) throws CommandSyntaxException {
 +    // Canvas start - region threading
 +    private static int spectate(final CommandSourceStack source, final @Nullable Entity target, final ServerPlayer spectator) throws CommandSyntaxException {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
 +            .with(spectator)
 +            .executes((ServerPlayer player) -> {
 +    // Canvas end - region threading

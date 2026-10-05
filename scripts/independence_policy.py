@@ -7,9 +7,10 @@ and so new coupling has to be added deliberately rather than drifting in.
 
 Two surfaces are measured and they are not the same thing:
 
-* **Source coupling** — `io.canvasmc` reached from SourbyCraft-owned code. This is what
-  would have to be rewritten if Canvas were replaced.
-* **Patch coupling** — `io.canvasmc` symbols named by the SourbyCraft feature patches
+* **Source coupling** — the region-threading engine (`dev.iyanz.aurora.engine`, formerly
+  `io.canvasmc.canvas`, plus the `io.canvasmc` plugin API) reached from SourbyCraft-owned code.
+  This is what would have to be rewritten if the engine were replaced.
+* **Patch coupling** — engine symbols named by the SourbyCraft feature patches
   (`minecraft-patches/features`), which are integration points into the engine. The file
   patches in `minecraft-patches/sources` are excluded on purpose: since the migration off
   Canvas they are the inherited engine baseline (region threading included), the code the
@@ -32,7 +33,9 @@ SOURCE_ROOTS = (
 # baseline (formerly Canvas/Folia); SourbyCraft's own edits to it are feature patches.
 INTEGRATION_PATCH_ROOT = "sourbycraft-server/minecraft-patches/features"
 
-CANVAS_SYMBOL = re.compile(r"\bio\.canvasmc\.[A-Za-z0-9_.]+")
+# The former Canvas engine: its internals moved to dev.iyanz.aurora.engine, its plugin API kept
+# io.canvasmc. dev.iyanz.aurora's other packages are SourbyCraft's own engine code, not counted.
+CANVAS_SYMBOL = re.compile(r"\b(?:io\.canvasmc|dev\.iyanz\.aurora\.engine)\.[A-Za-z0-9_.]+")
 COMMENT = re.compile(r"^\s*(\*|//|/\*)")
 
 # Internal region-scheduler types. `threadedregions.scheduler` is the public Folia API
@@ -46,7 +49,7 @@ PATCH_FILE_HEADER = re.compile(r"^\+\+\+ |^\+\+ [ab]/")
 
 
 def canvas_source_sites(root):
-    """Every `io.canvasmc` reference in SourbyCraft-owned code, excluding comments."""
+    """Every engine (`dev.iyanz.aurora.engine`, `io.canvasmc`) reference in SourbyCraft-owned code, excluding comments."""
     sites = []
     for source_root in SOURCE_ROOTS:
         base = Path(root) / source_root
@@ -63,7 +66,7 @@ def canvas_source_sites(root):
 
 
 def canvas_patch_symbols(root):
-    """`io.canvasmc` symbols the engine-integration patches name, as a sorted list."""
+    """Engine symbols the engine-integration patches name, as a sorted list."""
     base = Path(root) / INTEGRATION_PATCH_ROOT
     if not base.is_dir():
         return []

@@ -35,7 +35,7 @@ nothing else is permitted:
 |---|---|---|
 | `execution/region/RegionBackend` | `execution/region/FoliaRegionBackend` | `RegionizedServer`, `TickRegionScheduler` |
 | `execution/OwnerHandoff` | `execution/RegionOwnerHandoff` | `threadedregions.EntityScheduler` (internal) |
-| `config/upstream/UpstreamConfigBridge` | `config/upstream/CanvasConfigBridge` | `io.canvasmc.canvas.GlobalConfiguration`, `WorldConfig` |
+| `config/upstream/UpstreamConfigBridge` | `config/upstream/CanvasConfigBridge` | `dev.iyanz.aurora.engine.GlobalConfiguration`, `WorldConfig` |
 
 Aurora core depends on the interface. The implementation depends on upstream. The arrow never
 runs core → upstream.

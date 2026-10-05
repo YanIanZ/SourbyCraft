@@ -20,8 +20,8 @@
 -            // Paper end - Add PlayerSetSpawnEvent
 -        }
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<io.canvasmc.canvas.util.CollectingList<ServerPlayer>, ServerPlayer>
-+                _abstract(new io.canvasmc.canvas.util.CollectingList<>())
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<dev.iyanz.aurora.engine.util.CollectingList<ServerPlayer>, ServerPlayer>
++                _abstract(new dev.iyanz.aurora.engine.util.CollectingList<>())
 +            .with(targets)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                // Paper start - Add PlayerSetSpawnEvent

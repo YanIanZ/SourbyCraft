@@ -4,7 +4,7 @@
      }
  
      private static int setMode(final CommandSourceStack source, final GameType type) {
-+        return io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
++        return dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.executeOnGlobal(() -> { // Canvas - region threading
          MinecraftServer server = source.getServer();
          server.setDefaultGameType(type);
          int count = server.enforceGameTypeForPlayers(server.getForcedGameType());

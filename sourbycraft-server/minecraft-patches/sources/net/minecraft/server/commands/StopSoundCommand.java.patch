@@ -12,7 +12,7 @@
 -            player.connection.send(packet);
 -        }
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
 +            .with(targets)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                entityPlayer.connection.send(packet);

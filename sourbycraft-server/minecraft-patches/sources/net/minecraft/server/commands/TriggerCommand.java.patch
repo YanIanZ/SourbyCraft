@@ -9,7 +9,7 @@
 -        source.sendSuccess(() -> Component.translatable("commands.trigger.add.success", objective.getFormattedDisplayName(), amount), true);
 -        return newValue;
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
 +            .with(player)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                ScoreAccess score = getScore(source.getServer().getScoreboard(), entityPlayer, objective);
@@ -30,7 +30,7 @@
 -        source.sendSuccess(() -> Component.translatable("commands.trigger.set.success", objective.getFormattedDisplayName(), amount), true);
 -        return amount;
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
 +            .with(player)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                ScoreAccess score = getScore(source.getServer().getScoreboard(), entityPlayer, objective);
@@ -51,7 +51,7 @@
 -        source.sendSuccess(() -> Component.translatable("commands.trigger.simple.success", objective.getFormattedDisplayName()), true);
 -        return newValue;
 +        // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_void()
 +            .with(player)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                ScoreAccess score = getScore(source.getServer().getScoreboard(), entityPlayer, objective);

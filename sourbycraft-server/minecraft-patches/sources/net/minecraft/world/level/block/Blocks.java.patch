@@ -5,7 +5,7 @@
          final ResourceKey<Block> id, final Function<BlockBehaviour.Properties, Block> factory, final BlockBehaviour.Properties properties
      ) {
 +        // Canvas start - MC-223153
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc223153 && id.equals(BlockItemIds.RAW_COPPER_BLOCK.block())) {
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().vanillaFixes.mc223153 && id.equals(BlockItemIds.RAW_COPPER_BLOCK.block())) {
 +            Block block = factory.apply(properties.sound(SoundType.COPPER).setId(id));
 +            return Registry.register(BuiltInRegistries.BLOCK, id, block);
 +        }

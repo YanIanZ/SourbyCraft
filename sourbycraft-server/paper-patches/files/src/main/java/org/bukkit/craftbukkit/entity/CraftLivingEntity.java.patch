@@ -13,7 +13,7 @@
      @Override
      public boolean addPotionEffect(PotionEffect effect) {
 -        org.spigotmc.AsyncCatcher.catchOp("effect add"); // Paper
-+        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot add potion effect async"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(this.entity, "Cannot add potion effect async"); // Canvas - region guards
          return this.getHandle().addEffect(org.bukkit.craftbukkit.potion.CraftPotionUtil.fromBukkit(effect), EntityPotionEffectEvent.Cause.PLUGIN); // Paper - Don't ignore icon
      }
  

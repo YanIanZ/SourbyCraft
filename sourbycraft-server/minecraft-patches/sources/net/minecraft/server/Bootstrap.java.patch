@@ -4,7 +4,7 @@
                  throw new IllegalStateException("Unable to load registries");
              }
  
-+            io.canvasmc.canvas.GlobalConfiguration.init(); // Canvas - Rebrand - load global configuration
++            dev.iyanz.aurora.engine.GlobalConfiguration.init(); // Canvas - Rebrand - load global configuration
              FireBlock.bootStrap();
              ComposterBlock.bootStrap();
              if (EntityType.getKey(EntityTypes.PLAYER) == null) {

@@ -97,7 +97,7 @@
  
      @Override
      public World createWorld(WorldCreator creator) {
-+        io.canvasmc.canvas.util.TickGuard.ensureGlobalOrStartup("Cannot create worlds off global tick"); // Canvas - region threading
++        dev.iyanz.aurora.engine.util.TickGuard.ensureGlobalOrStartup("Cannot create worlds off global tick"); // Canvas - region threading
          Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
          //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
          Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
@@ -177,9 +177,9 @@
 +            }
 +
 +            // propagate the unload ticket for regions to start descheduling
-+            handle.canvas$unloadTicket.propagate(new io.canvasmc.canvas.util.ticket.UnloadTicket(callback, save));
++            handle.canvas$unloadTicket.propagate(new dev.iyanz.aurora.engine.util.ticket.UnloadTicket(callback, save));
 +
-+            final io.canvasmc.canvas.threadedregions.WorldShutdownThread worldShutdownThread = new io.canvasmc.canvas.threadedregions.WorldShutdownThread(
++            final dev.iyanz.aurora.engine.threadedregions.WorldShutdownThread worldShutdownThread = new dev.iyanz.aurora.engine.threadedregions.WorldShutdownThread(
 +                handle, () -> {
 +                    List<io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>>
 +                        regions = new ArrayList<>();
@@ -450,7 +450,7 @@
 +
 +    @Override
 +    public io.canvasmc.canvas.region.RegionThreadingTickManager getRegionThreadingTickRateManager() {
-+        return io.canvasmc.canvas.threadedregions.ServerRegionTickManager.API_INSTANCE;
++        return dev.iyanz.aurora.engine.threadedregions.ServerRegionTickManager.API_INSTANCE;
 +    }
 +    // Canvas end - region threading
  }

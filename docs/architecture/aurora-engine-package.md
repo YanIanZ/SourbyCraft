@@ -9,6 +9,7 @@ Aurora is the engine; SourbyCraft is what surrounds it. The console already says
 | Tree | Package | What belongs there |
 | --- | --- | --- |
 | `sourbycraft-server/src/minecraft/java` | `dev.iyanz.aurora.*` | engine code SourbyCraft wrote |
+| both trees | `dev.iyanz.aurora.engine.*` | the region-threading engine inherited from Canvas (formerly `io.canvasmc.canvas`, renamed 2026-10-05); its plugin API stays `io.canvasmc.canvas` in `sourbyapi` |
 | `sourbycraft-server/src/minecraft/java` | `net.minecraft.*`, `ca.spottedleaf.*` | upstream, and SourbyCraft's edits to it |
 | `sourbycraft-server/src/main/java` | `dev.iyanz.sourbycraft.*` | everything outside the engine |
 

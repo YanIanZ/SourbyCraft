@@ -14,7 +14,7 @@
 -    public net.kyori.adventure.bossbar.BossBar adventure; // Paper
 +    // Canvas start - region threading
 +    public volatile net.kyori.adventure.bossbar.BossBar adventure; // Paper
-+    public final io.canvasmc.canvas.util.LockedReference<VanillaBossData> vanillaBossData;
++    public final dev.iyanz.aurora.engine.util.LockedReference<VanillaBossData> vanillaBossData;
 +
 +    public record VanillaBossData(
 +        Component name,
@@ -34,7 +34,7 @@
 -        this.overlay = overlay;
 -        this.progress = 1.0F;
 +        // Canvas start - region threading
-+        this.vanillaBossData = new io.canvasmc.canvas.util.LockedReference<>(new VanillaBossData(
++        this.vanillaBossData = new dev.iyanz.aurora.engine.util.LockedReference<>(new VanillaBossData(
 +            name,
 +            1.0F,
 +            color,

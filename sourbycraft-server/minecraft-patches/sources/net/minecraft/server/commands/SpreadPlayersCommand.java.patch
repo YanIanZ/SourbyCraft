@@ -70,7 +70,7 @@
 -
 +        // Canvas start - region threading
 +        EXECUTOR.queue(() -> {
-+            RandomSource fasterRandom = io.canvasmc.canvas.GlobalConfiguration.createFastRandom();
++            RandomSource fasterRandom = dev.iyanz.aurora.engine.GlobalConfiguration.createFastRandom();
 +            // Note: createInitialPositions *is* thread-safe, and this can
 +            //      actually be quite an expensive method, so we use an optimized
 +            //      random source too to try and help out

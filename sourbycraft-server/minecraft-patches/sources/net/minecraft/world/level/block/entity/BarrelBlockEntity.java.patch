@@ -6,7 +6,7 @@
      private static final Component DEFAULT_NAME = Component.translatable("container.barrel");
 -    private NonNullList<ItemStack> items = NonNullList.withSize(27, ItemStack.EMPTY);
 +    // Purpur start - Barrels and enderchests 6 rows
-+    private NonNullList<ItemStack> items = NonNullList.withSize(switch (io.canvasmc.canvas.GlobalConfiguration.getInstance().purpurContainers.barrelRows) {
++    private NonNullList<ItemStack> items = NonNullList.withSize(switch (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().purpurContainers.barrelRows) {
 +        case 6 -> 54;
 +        case 5 -> 45;
 +        case 4 -> 36;
@@ -24,7 +24,7 @@
      public int getContainerSize() {
 -        return 27;
 +        // Purpur start - Barrels and enderchests 6 rows
-+        return switch (io.canvasmc.canvas.GlobalConfiguration.getInstance().purpurContainers.barrelRows) {
++        return switch (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().purpurContainers.barrelRows) {
 +            case 6 -> 54;
 +            case 5 -> 45;
 +            case 4 -> 36;
@@ -42,7 +42,7 @@
      protected AbstractContainerMenu createMenu(final int containerId, final Inventory inventory) {
 -        return ChestMenu.threeRows(containerId, inventory, this);
 +        // Purpur start - Barrels and enderchests 6 rows
-+        return switch (io.canvasmc.canvas.GlobalConfiguration.getInstance().purpurContainers.barrelRows) {
++        return switch (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().purpurContainers.barrelRows) {
 +            case 6 -> ChestMenu.sixRows(containerId, inventory, this);
 +            case 5 -> ChestMenu.fiveRows(containerId, inventory, this);
 +            case 4 -> ChestMenu.fourRows(containerId, inventory, this);

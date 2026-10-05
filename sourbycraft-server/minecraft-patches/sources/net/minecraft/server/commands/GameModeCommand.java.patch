@@ -21,7 +21,7 @@
 -        return count;
 +    // Canvas start - region threading
 +    private static int setMode(final CommandContext<CommandSourceStack> context, final Collection<ServerPlayer> players, final GameType type) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
 +            .with(players)
 +            .executes((ServerPlayer entityPlayer) -> {
 +
@@ -31,10 +31,10 @@
 +                // }
 +
 +                if (setGameMode(context.getSource(), entityPlayer, type)) {
-+                    return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.incrementInt();
++                    return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.incrementInt();
 +                }
 +
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.nothing();
 +            })
 +            .onComplete((count,_,_) -> count)
 +            .start(context.getSource());

@@ -69,7 +69,7 @@
              this.onChangedBlock(level, pos);
              double power = Math.max(0, Mth.floor(this.calculateFallPower(this.fallDistance)));
 -            if (power > 0.0 && !onState.isAir()) {
-+            if (power > 0.0 && !(onState.isAir() || (io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc30391 && (this instanceof net.minecraft.world.entity.animal.chicken.Chicken || this instanceof net.minecraft.world.entity.monster.Blaze || this instanceof WitherBoss)))) { // Canvas - MC-30391
++            if (power > 0.0 && !(onState.isAir() || (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().vanillaFixes.mc30391 && (this instanceof net.minecraft.world.entity.animal.chicken.Chicken || this instanceof net.minecraft.world.entity.monster.Blaze || this instanceof WitherBoss)))) { // Canvas - MC-30391
                  double x = this.getX();
                  double y = this.getY();
                  double z = this.getZ();
@@ -165,7 +165,7 @@
  
          super.remove(reason, eventCause); // CraftBukkit
          this.brain.clearMemories();
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc298464) this.combatTracker.resetCombatState(); // Canvas - fix MC-298464
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().vanillaFixes.mc298464) this.combatTracker.resetCombatState(); // Canvas - fix MC-298464
      }
  
      @Override
@@ -289,7 +289,7 @@
      public List<Runnable> postDeathEventTasks = new java.util.ArrayList<>(); // Paper - after death event and death (no revive as converted entity in killedEntity)
  
      public void die(final DamageSource source) {
-+        io.canvasmc.canvas.util.TickGuard.guard(this, "Cannot die async"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(this, "Cannot die async"); // Canvas - region guards
          if (!this.isRemoved() && !this.dead) {
              Entity sourceEntity = source.getEntity();
              LivingEntity killer = this.getKillCredit();
@@ -380,7 +380,7 @@
          }
  
 -        if (waterWalker > 0.0F) {
-+        if (waterWalker > 0.0F && (!io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.mc136249 || autoSpinAttackTicks == 0)) { // Canvas - MC-136249
++        if (waterWalker > 0.0F && (!dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().vanillaFixes.mc136249 || autoSpinAttackTicks == 0)) { // Canvas - MC-136249
              slowDown += (0.54600006F - slowDown) * waterWalker;
              speed += (this.getSpeed() - speed) * waterWalker;
          }
@@ -481,7 +481,7 @@
  
      protected void pushEntities() {
 +        // Canvas start - only players push config
-+        io.canvasmc.canvas.WorldConfig.Entities.EntityCollisionMode collisionMode = level().canvasConfig().entities.entityCollisionMode;
++        dev.iyanz.aurora.engine.WorldConfig.Entities.EntityCollisionMode collisionMode = level().canvasConfig().entities.entityCollisionMode;
 +        if (collisionMode.noCollisions()) {
 +            return;
 +        }

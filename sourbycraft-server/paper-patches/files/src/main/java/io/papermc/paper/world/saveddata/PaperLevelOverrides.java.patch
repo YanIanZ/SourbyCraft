@@ -6,7 +6,7 @@
          LEGACY_GAME_TYPE_CODEC.fieldOf("game_type").forGetter(levelOverrides -> levelOverrides.gameType),
 -        LevelSettings.DifficultySettings.CODEC.fieldOf("difficulty_settings").forGetter(levelOverrides -> levelOverrides.difficultySettings)
 +        LevelSettings.DifficultySettings.CODEC.fieldOf("difficulty_settings").forGetter(levelOverrides -> levelOverrides.difficultySettings),
-+        io.canvasmc.canvas.world.PerWorldDistanceConfig.CODEC.fieldOf("Canvas.Distance").forGetter(levelOverrides -> levelOverrides.canvas$distanceConfig) // Canvas - per world distance
++        dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.CODEC.fieldOf("Canvas.Distance").forGetter(levelOverrides -> levelOverrides.canvas$distanceConfig) // Canvas - per world distance
      ).apply(instance, PaperLevelOverrides::new));
      public static final SavedDataType<PaperLevelOverrides> TYPE = new SavedDataType<>(
          Identifier.fromNamespaceAndPath(Identifier.PAPER_NAMESPACE, "level_overrides"),
@@ -14,11 +14,11 @@
      private LevelSettings.DifficultySettings difficultySettings;
      private transient @Nullable PrimaryLevelData rootData;
      private transient ResourceKey<Level> dimension = Level.OVERWORLD;
-+    public final io.canvasmc.canvas.world.PerWorldDistanceConfig canvas$distanceConfig; // Canvas - per world distance
++    public final dev.iyanz.aurora.engine.world.PerWorldDistanceConfig canvas$distanceConfig; // Canvas - per world distance
  
      private PaperLevelOverrides() {
 -        this(RespawnData.DEFAULT, 0L, false, GameType.SURVIVAL, LevelSettings.DifficultySettings.DEFAULT);
-+        this(RespawnData.DEFAULT, 0L, false, GameType.SURVIVAL, LevelSettings.DifficultySettings.DEFAULT, io.canvasmc.canvas.world.PerWorldDistanceConfig.DEFAULT); // Canvas - per world distance
++        this(RespawnData.DEFAULT, 0L, false, GameType.SURVIVAL, LevelSettings.DifficultySettings.DEFAULT, dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.DEFAULT); // Canvas - per world distance
      }
  
      private PaperLevelOverrides(
@@ -28,7 +28,7 @@
          final GameType gameType,
 -        final LevelSettings.DifficultySettings difficultySettings
 +        final LevelSettings.DifficultySettings difficultySettings,
-+        final io.canvasmc.canvas.world.PerWorldDistanceConfig canvas$distanceConfig // Canvas - per world distance
++        final dev.iyanz.aurora.engine.world.PerWorldDistanceConfig canvas$distanceConfig // Canvas - per world distance
      ) {
          this.respawnData = respawnData.normalized();
          this.gameTime = gameTime;
@@ -45,7 +45,7 @@
              rootData.getGameType(),
 -            new LevelSettings.DifficultySettings(rootData.getDifficulty(), rootData.isHardcore(), rootData.isDifficultyLocked())
 +            new LevelSettings.DifficultySettings(rootData.getDifficulty(), rootData.isHardcore(), rootData.isDifficultyLocked()),
-+            io.canvasmc.canvas.world.PerWorldDistanceConfig.DEFAULT // Canvas - per world distance
++            dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.DEFAULT // Canvas - per world distance
          );
      }
  
@@ -55,7 +55,7 @@
              GameType.byId(levelData.get("GameType").asInt(GameType.SURVIVAL.getId())),
 -            levelData.get("difficulty_settings").read(LevelSettings.DifficultySettings.CODEC).result().orElse(LevelSettings.DifficultySettings.DEFAULT)
 +            levelData.get("difficulty_settings").read(LevelSettings.DifficultySettings.CODEC).result().orElse(LevelSettings.DifficultySettings.DEFAULT),
-+            levelData.get("Canvas.Distance").read(io.canvasmc.canvas.world.PerWorldDistanceConfig.CODEC).resultOrPartial(io.canvasmc.canvas.GlobalConfiguration.LOGGER::error).orElse(io.canvasmc.canvas.world.PerWorldDistanceConfig.DEFAULT) // Canvas - per world distance
++            levelData.get("Canvas.Distance").read(dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.CODEC).resultOrPartial(dev.iyanz.aurora.engine.GlobalConfiguration.LOGGER::error).orElse(dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.DEFAULT) // Canvas - per world distance
          );
      }
  

@@ -68,7 +68,7 @@
      public boolean isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
      private final Set<String> pluginsBlockingSleep = new java.util.HashSet<>(); // Paper - API to allow/disallow tick sleeping
      public static final long SERVER_INIT = System.nanoTime(); // Paper - Lag compensation
-+    public final io.canvasmc.canvas.threadedregions.entities.EnderPearls pearls; // Canvas - region threading
++    public final dev.iyanz.aurora.engine.threadedregions.entities.EnderPearls pearls; // Canvas - region threading
      // Paper start - improve tick loop
      public final ca.spottedleaf.common.time.TickData tickTimes1s  = new ca.spottedleaf.common.time.TickData(java.util.concurrent.TimeUnit.SECONDS.toNanos(1L));
      public final ca.spottedleaf.common.time.TickData tickTimes5s  = new ca.spottedleaf.common.time.TickData(java.util.concurrent.TimeUnit.SECONDS.toNanos(5L));
@@ -195,7 +195,7 @@
          this.clockManager = this.getDataStorage().computeIfAbsent(ServerClockManager.TYPE);
          this.clockManager.init(this);
          this.customBossEvents = this.savedDataStorage.computeIfAbsent(CustomBossEvents.TYPE);
-+        this.pearls = this.savedDataStorage.computeIfAbsent(io.canvasmc.canvas.threadedregions.entities.EnderPearls.TYPE); // Canvas - region threading
++        this.pearls = this.savedDataStorage.computeIfAbsent(dev.iyanz.aurora.engine.threadedregions.entities.EnderPearls.TYPE); // Canvas - region threading
          // Paper - per-level scheduledEvents
          // CraftBukkit start
          this.options = options;
@@ -637,7 +637,7 @@
          try {
              this.isSaving = true;
 -            if (playerSaveInterval > 0) {
-+            if (io.canvasmc.canvas.GlobalConfiguration.getInstance().autosave.autosavePlayers && playerSaveInterval > 0) { // Canvas - region threading
++            if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().autosave.autosavePlayers && playerSaveInterval > 0) { // Canvas - region threading
                  this.playerList.saveAll(playerSaveInterval);
              }
 -            if (fullSave) {
@@ -962,7 +962,7 @@
  
      public String getServerModName() {
 -        return io.papermc.paper.ServerBuildInfo.buildInfo().brandName(); // Paper
-+        return io.canvasmc.canvas.GlobalConfiguration.getInstance().serverModName; // Canvas - Use configurable server branding
++        return dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().serverModName; // Canvas - Use configurable server branding
      }
  
      public ServerClockManager clockManager() {
@@ -1021,7 +1021,7 @@
  
 +    // Canvas start - no chat reports
 +    public boolean canvas$ncrEnforceSecureProfile() {
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().chat.disableChatReporting) return false; // NCR doesn't require secure profile
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().chat.disableChatReporting) return false; // NCR doesn't require secure profile
 +        return this.enforceSecureProfile();
 +    }
 +

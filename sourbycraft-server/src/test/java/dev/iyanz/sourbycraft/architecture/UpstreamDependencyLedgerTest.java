@@ -40,6 +40,7 @@ public class UpstreamDependencyLedgerTest {
      */
     private static final Pattern INTERNAL = Pattern.compile(
         "io\\.canvasmc\\.[A-Za-z0-9_.]+"
+            + "|dev\\.iyanz\\.aurora\\.engine\\.[A-Za-z0-9_.]+"
             + "|io\\.papermc\\.paper\\.threadedregions\\.(?!scheduler\\.)[A-Za-z0-9_.]+"
             + "|ca\\.spottedleaf\\.[A-Za-z0-9_.]+");
 
@@ -77,10 +78,10 @@ public class UpstreamDependencyLedgerTest {
     private static List<Leak> leaks(final Path root) throws IOException {
         final List<Leak> found = new ArrayList<>();
         // Only Aurora's own source is under audit. Since the migration off Canvas, the region
-        // threading implementation (io/canvasmc, plus its spark overrides under me/lucko) is
-        // SourbyCraft-owned source in the same root; it is the thing Aurora must stay decoupled
-        // from, not a dependent of it.
-        try (Stream<Path> files = Files.walk(root.resolve("dev/iyanz"))) {
+        // threading implementation (dev/iyanz/aurora/engine, plus its spark overrides under
+        // me/lucko) is SourbyCraft-owned source in the same root; it is the thing Aurora must
+        // stay decoupled from, not a dependent of it.
+        try (Stream<Path> files = Files.walk(root.resolve("dev/iyanz/sourbycraft"))) {
             for (final Path file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
                 final String relative = root.relativize(file).toString().replace('\\', '/');
                 final Matcher matcher = INTERNAL.matcher(Files.readString(file));
@@ -210,7 +211,7 @@ public class UpstreamDependencyLedgerTest {
         // "core runtime can be reasoned about without reading Canvas service classes" is the T6
         // gate's last line. It holds only while Canvas has one doorway.
         final List<String> touching = leaks(sourceRoot()).stream()
-            .filter(leak -> leak.symbols().stream().anyMatch(s -> s.startsWith("io.canvasmc.")))
+            .filter(leak -> leak.symbols().stream().anyMatch(s -> s.startsWith("io.canvasmc.") || s.startsWith("dev.iyanz.aurora.engine.")))
             .map(Leak::file)
             .toList();
 

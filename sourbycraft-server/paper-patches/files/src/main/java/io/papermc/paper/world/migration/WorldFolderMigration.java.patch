@@ -4,7 +4,7 @@
              case VANILLA_MIGRATION -> VanillaWorldMigration.migrate(context);
              case NO_OP -> {}
          }
-+        io.canvasmc.canvas.util.migration.CanvasFileMigration.initMigration(context); // Canvas - 26.1+ file migration
++        dev.iyanz.aurora.engine.util.migration.CanvasFileMigration.initMigration(context); // Canvas - 26.1+ file migration
      }
  
      public static void migrateApiWorld(

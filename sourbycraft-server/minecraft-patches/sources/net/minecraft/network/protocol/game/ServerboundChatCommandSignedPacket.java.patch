@@ -8,7 +8,7 @@
 +
 +    @Override
 +    public ArgumentSignatures argumentSignatures() {
-+        return io.canvasmc.canvas.GlobalConfiguration.getInstance().chat.disableChatReporting ? ArgumentSignatures.EMPTY : argumentSignatures;
++        return dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().chat.disableChatReporting ? ArgumentSignatures.EMPTY : argumentSignatures;
 +    }
 +
 +    // Canvas end - no chat reports

@@ -110,14 +110,14 @@
 +        // we have to create this early so that the call-trace is
 +        // properly created, or else we risk losing the caller
 +
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState transferState =
-+            new io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState(
++        final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState transferState =
++            new dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState(
 +                "api-fronted teleport async call" + (
 +                    // include this bit of debug since this can be called async from the entity context
 +                    org.bukkit.Bukkit.isOwnedByCurrentRegion(this) ? " - synchronous" : " - to be scheduled"
 +                ),
-+                io.canvasmc.canvas.util.ServerLocation.fromBukkit(getLocation()),
-+                io.canvasmc.canvas.util.ServerLocation.fromBukkit(locationClone)
++                dev.iyanz.aurora.engine.util.ServerLocation.fromBukkit(getLocation()),
++                dev.iyanz.aurora.engine.util.ServerLocation.fromBukkit(locationClone)
 +            );
 +        // Canvas end - region threading
 +
@@ -155,9 +155,9 @@
 +    // copy-pasting this
 +
 +    private void setPluginTransferState(
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState setTo
++        final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState setTo
 +    ) {
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState previousTransferState = getHandleRaw().getRegionTransferState();
++        final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState previousTransferState = getHandleRaw().getRegionTransferState();
 +        if (previousTransferState != null) {
 +            throw new IllegalStateException("Cannot teleport async when another region handoff is present! Current: " + previousTransferState);
 +        }

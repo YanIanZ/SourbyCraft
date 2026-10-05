@@ -1,0 +1,10 @@
+--- /dev/null
++++ b/dev/iyanz/aurora/engine/commands/package-info.java
+@@ -1,0 +_,7 @@
++/**
++ * Package containing the backing system for Canvas' commands, part of the rebranding patch
++ */
++@NullMarked
++package dev.iyanz.aurora.engine.commands;
++
++import org.jspecify.annotations.NullMarked;

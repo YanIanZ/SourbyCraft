@@ -10,11 +10,11 @@
 -    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue compressionExecutor;
 -    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue saveExecutor;
 +    // Canvas start - replace moonrise executor
-+    public final io.canvasmc.canvas.world.chunk.ChunkSystemExecutor parallelGenExecutor;
-+    public final io.canvasmc.canvas.world.chunk.ChunkSystemExecutor loadExecutor;
-+    public final io.canvasmc.canvas.world.chunk.ChunkSystemExecutor compressionExecutor;
-+    public final io.canvasmc.canvas.world.chunk.ChunkSystemExecutor saveExecutor;
-+    public final io.canvasmc.canvas.world.chunk.ChunkSystemExecutor ioExecutor;
++    public final dev.iyanz.aurora.engine.world.chunk.ChunkSystemExecutor parallelGenExecutor;
++    public final dev.iyanz.aurora.engine.world.chunk.ChunkSystemExecutor loadExecutor;
++    public final dev.iyanz.aurora.engine.world.chunk.ChunkSystemExecutor compressionExecutor;
++    public final dev.iyanz.aurora.engine.world.chunk.ChunkSystemExecutor saveExecutor;
++    public final dev.iyanz.aurora.engine.world.chunk.ChunkSystemExecutor ioExecutor;
 +    // Canvas end - replace moonrise executor
  
 -    private final PrioritisedTaskQueue mainThreadExecutor = new PrioritisedTaskQueue();

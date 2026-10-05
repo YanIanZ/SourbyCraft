@@ -11,11 +11,11 @@
 -        }
 -
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
 +            .with(players)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                int addedRecipes = entityPlayer.awardRecipes(recipes);
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.addInt(addedRecipes);
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.addInt(addedRecipes);
 +            })
 +            .onComplete((success, selected, css) -> giveCallback(success, css, selected, recipes))
 +            .start(source);
@@ -40,11 +40,11 @@
 -        }
 -
 +    // Canvas start - region threading
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution.<ServerPlayer>_int()
 +            .with(players)
 +            .executes((ServerPlayer entityPlayer) -> {
 +                int removedRecipes = entityPlayer.resetRecipes(recipes);
-+                return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.addInt(removedRecipes);
++                return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.addInt(removedRecipes);
 +            })
 +            .onComplete((success, selected, css) -> takeCallback(success, css, selected, recipes))
 +            .start(source);

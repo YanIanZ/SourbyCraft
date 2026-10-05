@@ -44,7 +44,7 @@
                          this.damageStatsAndHearts(entity, oldLivingEntityHealth);
                          this.causeFoodExhaustion(this.level().spigotConfig.combatExhaustion, org.bukkit.event.entity.EntityExhaustionEvent.ExhaustionReason.ATTACK); // CraftBukkit - EntityExhaustionEvent // Spigot - Change to use configurable value
 +                        // Leaf start - Flush location while knockback
-+                        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.flushLocationWhileKnockback && this instanceof ServerPlayer attacker && entity instanceof ServerPlayer victim) {
++                        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().networking.flushLocationWhileKnockback && this instanceof ServerPlayer attacker && entity instanceof ServerPlayer victim) {
 +                            attacker.connection.connection.flushChannel();
 +                            victim.connection.connection.flushChannel();
 +                        }
@@ -67,7 +67,7 @@
              if (!cancelled) {
 -            serverPlayer.connection.send(new ClientboundSetEntityMotionPacket(entity));
 +                // Leaf start - Flush location while knockback
-+                if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.flushLocationWhileKnockback) {
++                if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().networking.flushLocationWhileKnockback) {
 +                    entity.needsSync = true;
 +                    net.minecraft.server.level.ChunkMap.TrackedEntity targetTrackedEntity = entity.moonrise$getTrackedEntity();
 +                    if (targetTrackedEntity != null) {
@@ -85,7 +85,7 @@
          this.damageStatsAndHearts(target, oldLivingEntityHealth);
          this.causeFoodExhaustion(this.level().spigotConfig.combatExhaustion, org.bukkit.event.entity.EntityExhaustionEvent.ExhaustionReason.ATTACK); // CraftBukkit - EntityExhaustionEvent // Spigot - Change to use configurable value
 +        // Leaf start - Flush location while knockback
-+        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.flushLocationWhileKnockback && this instanceof ServerPlayer attacker && target instanceof ServerPlayer victim) {
++        if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().networking.flushLocationWhileKnockback && this instanceof ServerPlayer attacker && target instanceof ServerPlayer victim) {
 +            attacker.connection.connection.flushChannel();
 +            victim.connection.connection.flushChannel();
 +        }

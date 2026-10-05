@@ -6,8 +6,8 @@
          Enchantment enchantment = enchantmentHolder.value();
 -        if (level > enchantment.getMaxLevel()) {
 -            throw ERROR_LEVEL_TOO_HIGH.create(level, enchantment.getMaxLevel());
-+        if (level > (io.canvasmc.canvas.GlobalConfiguration.getInstance().enchantCommand.uncapMaxLevel ? 255 : enchantment.getMaxLevel())) { // Canvas - enchant command configs
-+            throw ERROR_LEVEL_TOO_HIGH.create(level, (io.canvasmc.canvas.GlobalConfiguration.getInstance().enchantCommand.uncapMaxLevel ? 255 : enchantment.getMaxLevel())); // Canvas - enchant command configs
++        if (level > (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().enchantCommand.uncapMaxLevel ? 255 : enchantment.getMaxLevel())) { // Canvas - enchant command configs
++            throw ERROR_LEVEL_TOO_HIGH.create(level, (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().enchantCommand.uncapMaxLevel ? 255 : enchantment.getMaxLevel())); // Canvas - enchant command configs
          }
  
 -        int success = 0;
@@ -23,7 +23,7 @@
 +        // in the selection passes, it says all of them passed in the feedback?
 +        // we fix this now...
 +
-+        io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution._abstract(new io.canvasmc.canvas.util.CollectingList<Entity>())
++        dev.iyanz.aurora.engine.threadedregions.commands.AbstractCommandExecution._abstract(new dev.iyanz.aurora.engine.util.CollectingList<Entity>())
 +            .with(targets)
 +            .executes((Entity entity) -> {
 +        // Canvas end - region threading
@@ -33,8 +33,8 @@
 -                    if (enchantment.canEnchant(item)
 -                        && EnchantmentHelper.isEnchantmentCompatible(EnchantmentHelper.getEnchantmentsForCrafting(item).keySet(), enchantmentHolder)) {
 +                    // Canvas start - enchant command configs
-+                    if ((io.canvasmc.canvas.GlobalConfiguration.getInstance().enchantCommand.allowEnchantsOnUnsupportedItems || enchantment.canEnchant(item))
-+                        && (io.canvasmc.canvas.GlobalConfiguration.getInstance().enchantCommand.allowEnchantingWithIncompatibleEnchants || EnchantmentHelper.isEnchantmentCompatible(EnchantmentHelper.getEnchantmentsForCrafting(item).keySet(), enchantmentHolder))) {
++                    if ((dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().enchantCommand.allowEnchantsOnUnsupportedItems || enchantment.canEnchant(item))
++                        && (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().enchantCommand.allowEnchantingWithIncompatibleEnchants || EnchantmentHelper.isEnchantmentCompatible(EnchantmentHelper.getEnchantmentsForCrafting(item).keySet(), enchantmentHolder))) {
 +                    // Canvas end - enchant command configs
                          item.enchant(enchantmentHolder, level);
 -                        success++;
@@ -48,7 +48,7 @@
              }
 -        }
 +    // Canvas start - region threading
-+            return io.canvasmc.canvas.threadedregions.commands.ExecutionCallbacks.nothing();
++            return dev.iyanz.aurora.engine.threadedregions.commands.ExecutionCallbacks.nothing();
 +            })
 +            .onComplete((changed, _, css) -> enchantCallback(css, changed, enchantmentHolder, level))
 +            .start(source);
@@ -58,7 +58,7 @@
 -        if (success == 0) {
 +    private static int enchantCallback(
 +        final CommandSourceStack source,
-+        final io.canvasmc.canvas.util.CollectingList<Entity> targets,
++        final dev.iyanz.aurora.engine.util.CollectingList<Entity> targets,
 +        final Holder<Enchantment> enchantmentHolder,
 +        final int level
 +    ) throws CommandSyntaxException {

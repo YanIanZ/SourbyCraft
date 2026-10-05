@@ -34,18 +34,18 @@
 +
 +    // note: this is still placed for SAME-REGION teleports!
 +
-+    private io.canvasmc.canvas.threadedregions.entities.@Nullable EntityRegionTransferState regionTransferState;
++    private dev.iyanz.aurora.engine.threadedregions.entities.@Nullable EntityRegionTransferState regionTransferState;
 +    private final Object transferStateLock = new Object();
 +
 +    public void setRegionTransferState(
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState newState
++        final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState newState
 +    ) {
 +        synchronized (transferStateLock) {
 +            regionTransferState = newState;
 +        }
 +    }
 +
-+    public io.canvasmc.canvas.threadedregions.entities.@Nullable EntityRegionTransferState getRegionTransferState() {
++    public dev.iyanz.aurora.engine.threadedregions.entities.@Nullable EntityRegionTransferState getRegionTransferState() {
 +        synchronized (transferStateLock) {
 +            return regionTransferState;
 +        }
@@ -57,10 +57,10 @@
 +        }
 +    }
 +
-+    public void advancePortalTransferState(final io.canvasmc.canvas.util.ServerLocation newTarget) {
++    public void advancePortalTransferState(final dev.iyanz.aurora.engine.util.ServerLocation newTarget) {
 +        synchronized (transferStateLock) {
-+            if (regionTransferState instanceof io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PortalStartTransferState portalStartState) {
-+                regionTransferState = new io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PortalFinishTransferState(
++            if (regionTransferState instanceof dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState.PortalStartTransferState portalStartState) {
++                regionTransferState = new dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState.PortalFinishTransferState(
 +                    portalStartState, newTarget
 +                );
 +            }
@@ -220,7 +220,7 @@
 +                && !this.isVehicle()
 +                && !this.isPassenger()
 +                && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), pos, delta, 0)) {
-+                throw new io.canvasmc.canvas.threadedregions.entities.EntityMoveOutOfRegionException(this, moverType, delta);
++                throw new dev.iyanz.aurora.engine.threadedregions.entities.EntityMoveOutOfRegionException(this, moverType, delta);
 +            }
 +            // Canvas end - region threading
              this.setPos(this.getX() + delta.x, this.getY() + delta.y, this.getZ() + delta.z);
@@ -257,7 +257,7 @@
              delta = this.maybeBackOffFromEdge(delta, moverType);
 +            // Canvas start - region threading
 +            if (
-+                io.canvasmc.canvas.GlobalConfiguration.getInstance().regionScheduler.preventExcessiveVelocityMoveOutOfRegion &&
++                dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().regionScheduler.preventExcessiveVelocityMoveOutOfRegion &&
 +                delta.lengthSqr() >= (30.0D * 30.0D) &&
 +                !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level(), position(), delta, 16)
 +            ) {
@@ -282,7 +282,7 @@
 +                    && !this.isVehicle()
 +                    && !this.isPassenger()
 +                    && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), pos, movement, 0)) {
-+                    throw new io.canvasmc.canvas.threadedregions.entities.EntityMoveOutOfRegionException(this, moverType, movement);
++                    throw new dev.iyanz.aurora.engine.threadedregions.entities.EntityMoveOutOfRegionException(this, moverType, movement);
 +                }
 +                // Canvas end - region threading
                  this.addMovementThisTick(new Entity.Movement(pos, newPosition, delta));
@@ -372,7 +372,7 @@
                      boolean insideBlock = intersectShape == Shapes.block()
                          || this.collidedWithShapeMovingFrom(from, to, intersectShape.move(new Vec3(blockIntersection)).toAabbs());
 -                    boolean insideFluid = this.collidedWithFluid(state.getFluidState(), blockIntersection, from, to);
-+                    boolean insideFluid = (state.tagFlag & io.canvasmc.canvas.world.block.BlockTags.FLUID) != 0 && this.collidedWithFluid(state.getFluidState(), blockIntersection, from, to); // Canvas - optimize checkInsideBlocks
++                    boolean insideFluid = (state.tagFlag & dev.iyanz.aurora.engine.world.block.BlockTags.FLUID) != 0 && this.collidedWithFluid(state.getFluidState(), blockIntersection, from, to); // Canvas - optimize checkInsideBlocks
                      if ((insideBlock || insideFluid) && visitedBlocks.add(blockIntersection.asLong())) {
                          if (insideBlock) {
                              try {
@@ -818,7 +818,7 @@
 +        };
 +        // Canvas start - region threading
 +
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState regionTransferState = getRegionTransferState();
++        final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState regionTransferState = getRegionTransferState();
 +        if (regionTransferState != null) {
 +            regionTransferState.markFinishedRemoval();
 +        }
@@ -1084,8 +1084,8 @@
 +                // event was cancelled
 +
 +                // essentially, there shouldn't be a transfer state already here unless it's a plugin transfer state
-+                final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
-+                if (previousTransferState instanceof io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState) {
++                final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
++                if (previousTransferState instanceof dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState) {
 +                    clearRegionTransferState();
 +                }
 +                else if (previousTransferState != null) {
@@ -1108,26 +1108,26 @@
 +        }
 +
 +        // verify and set the transfer state
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
++        final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
 +        if (previousTransferState == null) {
 +            // no transfer state set currently, place one
 +            final String teleportReason = "teleporting " + (isSameRegion ? "sync-region" : "cross-region " + (
-+                destination == originWorld ? "[same-world," + io.canvasmc.canvas.util.Util.getLevelName(destination) + "]" :
-+                    "[cross-world," + io.canvasmc.canvas.util.Util.getLevelName(originWorld) + "->" + io.canvasmc.canvas.util.Util.getLevelName(destination) + "]"
++                destination == originWorld ? "[same-world," + dev.iyanz.aurora.engine.util.Util.getLevelName(destination) + "]" :
++                    "[cross-world," + dev.iyanz.aurora.engine.util.Util.getLevelName(originWorld) + "->" + dev.iyanz.aurora.engine.util.Util.getLevelName(destination) + "]"
 +            ));
 +
 +            // LOGGER.info("Teleporting entity {}, {}", this, teleportReason);
-+            setRegionTransferState(new io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.GenericTeleportTransferState(
++            setRegionTransferState(new dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState.GenericTeleportTransferState(
 +                teleportReason,
 +                // origin
-+                new io.canvasmc.canvas.util.ServerLocation(
++                new dev.iyanz.aurora.engine.util.ServerLocation(
 +                    originWorld,
 +                    currPos,
 +                    getYRot(),
 +                    getXRot()
 +                ),
 +                // target
-+                new io.canvasmc.canvas.util.ServerLocation(
++                new dev.iyanz.aurora.engine.util.ServerLocation(
 +                    destination,
 +                    pos,
 +                    yaw == null ? this.getYRot() : yaw,
@@ -1135,7 +1135,7 @@
 +                )
 +            ));
 +        }
-+        else if (!(previousTransferState instanceof io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState)) {
++        else if (!(previousTransferState instanceof dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState)) {
 +            throw new IllegalStateException("Transfer state was already set? Current: " + previousTransferState.getType());
 +        }
 +    // Canvas end - region threading
@@ -1210,7 +1210,7 @@
 +        for (EntityTreeNode node : fullPassengerTree) {
 +            node.root = node.root.transformForAsyncTeleport(destination, pos, yaw, pitch, velocity);
 +            // Canvas start - region threading
-+            if (io.canvasmc.canvas.GlobalConfiguration.getInstance().displayWorldLoadScreenForCrossRegionTransfers && node.root instanceof ServerPlayer entityPlayer) {
++            if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().displayWorldLoadScreenForCrossRegionTransfers && node.root instanceof ServerPlayer entityPlayer) {
 +                entityPlayer.sendRespawnClientbound(false);
 +                displayedScreen.setTrue();
 +            }
@@ -1600,15 +1600,15 @@
 +        // Canvas start - region threading
 +
 +        // we need to set the portal state now, specifically START state
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
++        final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
 +        if (previousTransferState == null) {
 +            // no state already set, perfect, set the start portal state
-+            final String portalReason = "portaling from " + io.canvasmc.canvas.util.Util.getLevelName(originWorld) + " -> " + io.canvasmc.canvas.util.Util.getLevelName(finalDestination);
++            final String portalReason = "portaling from " + dev.iyanz.aurora.engine.util.Util.getLevelName(originWorld) + " -> " + dev.iyanz.aurora.engine.util.Util.getLevelName(finalDestination);
 +
 +            // LOGGER.info("Portaling entity {}, {}", this, portalReason);
-+            setRegionTransferState(new io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PortalStartTransferState(
++            setRegionTransferState(new dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState.PortalStartTransferState(
 +                portalReason,
-+                new io.canvasmc.canvas.util.ServerLocation(
++                new dev.iyanz.aurora.engine.util.ServerLocation(
 +                    originWorld,
 +                    position(),
 +                    getYRot(),
@@ -1638,7 +1638,7 @@
 +            // set portal cooldown
 +            node.root.setPortalCooldown();
 +            // Canvas start - region threading
-+            if (io.canvasmc.canvas.GlobalConfiguration.getInstance().displayWorldLoadScreenForCrossRegionTransfers && node.root instanceof ServerPlayer entityPlayer) {
++            if (dev.iyanz.aurora.engine.GlobalConfiguration.getInstance().displayWorldLoadScreenForCrossRegionTransfers && node.root instanceof ServerPlayer entityPlayer) {
 +                entityPlayer.sendRespawnClientbound(false);
 +            }
 +            // Canvas end - region threading
@@ -1684,13 +1684,13 @@
 +
 +            // we need to advance the transfer state now from START -> FINISH
 +
-+            final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState existingTransferState = getRegionTransferState();
++            final dev.iyanz.aurora.engine.threadedregions.entities.EntityRegionTransferState existingTransferState = getRegionTransferState();
 +            if (existingTransferState == null) {
 +                throw new IllegalStateException("Existing transfer state was null?");
 +            }
 +
 +            // try to advance the state
-+            advancePortalTransferState(new io.canvasmc.canvas.util.ServerLocation(
++            advancePortalTransferState(new dev.iyanz.aurora.engine.util.ServerLocation(
 +                finalDestination,
 +                info.position(),
 +                info.yRot(),

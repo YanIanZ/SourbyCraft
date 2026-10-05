@@ -25,7 +25,7 @@
      }
  
 -    public final class OrderedStreamGroup {
-+    public final class OrderedStreamGroup implements io.canvasmc.canvas.world.chunk.StreamGroup { // Canvas - replace moonrise executor
++    public final class OrderedStreamGroup implements dev.iyanz.aurora.engine.world.chunk.StreamGroup { // Canvas - replace moonrise executor
  
          private final AtomicLong subOrderGenerator;
          private final boolean streamCompare;
@@ -34,7 +34,7 @@
          }
  
 -        public final class Queue implements PrioritisedExecutor {
-+        public final class Queue implements io.canvasmc.canvas.world.chunk.ChunkSystemExecutor { // Canvas - replace moonrise executor
++        public final class Queue implements dev.iyanz.aurora.engine.world.chunk.ChunkSystemExecutor { // Canvas - replace moonrise executor
  
              private final PrioritisedTaskQueue wrapped;
              private volatile boolean halt;

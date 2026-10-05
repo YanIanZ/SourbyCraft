@@ -13,18 +13,18 @@
 +    private final Map<Integer, Map<Activity, Set<BehaviorControl<? super E>>>> availableBehaviorsByPriority = new it.unimi.dsi.fastutil.objects.Object2ObjectRBTreeMap<>();
 +    public static final Map[] EMPTY_MAP_ARRAY = {};
 +    public static final Set[] EMPTY_SET_ARRAY = {};
-+    public static final io.canvasmc.canvas.util.map.BehaviorControlArraySet[] EMPTY_BEHAVIOR_ARRAY = {};
++    public static final dev.iyanz.aurora.engine.util.map.BehaviorControlArraySet[] EMPTY_BEHAVIOR_ARRAY = {};
 +    private Map<Activity, Set<BehaviorControl<? super E>>>[] availableBehaviorsByPriorityArray = EMPTY_MAP_ARRAY;
-+    private io.canvasmc.canvas.util.map.BehaviorControlArraySet<? super E>[] activeBehaviors = EMPTY_BEHAVIOR_ARRAY;
++    private dev.iyanz.aurora.engine.util.map.BehaviorControlArraySet<? super E>[] activeBehaviors = EMPTY_BEHAVIOR_ARRAY;
      private @Nullable EnvironmentAttribute<Activity> schedule;
 -    private final Map<Activity, Set<Pair<MemoryModuleType<?>, MemoryStatus>>> activityRequirements = Maps.newHashMap();
 -    private final Map<Activity, Set<MemoryModuleType<?>>> activityMemoriesToEraseWhenStopped = Maps.newHashMap();
 -    private Set<Activity> coreActivities = Sets.newHashSet();
 -    private final Set<Activity> activeActivities = Sets.newHashSet();
-+    private final Map<Activity, Set<Pair<MemoryModuleType<?>, MemoryStatus>>> activityRequirements = new io.canvasmc.canvas.util.map.ActivityArrayMap<>(EMPTY_SET_ARRAY);
-+    private final Map<Activity, Set<MemoryModuleType<?>>> activityMemoriesToEraseWhenStopped = new io.canvasmc.canvas.util.map.ActivityArrayMap<>(EMPTY_SET_ARRAY);
++    private final Map<Activity, Set<Pair<MemoryModuleType<?>, MemoryStatus>>> activityRequirements = new dev.iyanz.aurora.engine.util.map.ActivityArrayMap<>(EMPTY_SET_ARRAY);
++    private final Map<Activity, Set<MemoryModuleType<?>>> activityMemoriesToEraseWhenStopped = new dev.iyanz.aurora.engine.util.map.ActivityArrayMap<>(EMPTY_SET_ARRAY);
 +    private Set<Activity> coreActivities = Set.of();
-+    private final Set<Activity> activeActivities = new io.canvasmc.canvas.util.map.ActivityBitSet();
++    private final Set<Activity> activeActivities = new dev.iyanz.aurora.engine.util.map.ActivityBitSet();
 +    // Leaf end - Replace brain maps with optimized collection
      private Activity defaultActivity = Activity.IDLE;
      private long lastScheduleUpdate = -9999L;
@@ -119,8 +119,8 @@
              this.availableBehaviorsByPriority
 -                .computeIfAbsent(pair.getFirst(), key -> Maps.newHashMap())
 -                .computeIfAbsent(activity, key -> Sets.newLinkedHashSet())
-+                .computeIfAbsent(pair.getFirst(), integer -> new io.canvasmc.canvas.util.map.ActivityArrayMap<>((Set<BehaviorControl<? super E>>[]) EMPTY_SET_ARRAY)) // Leaf - Replace brain maps with optimized collection
-+                .computeIfAbsent(activity, activity1 -> new io.canvasmc.canvas.util.map.BehaviorControlArraySet<>()) // Leaf - Replace brain maps with optimized collection
++                .computeIfAbsent(pair.getFirst(), integer -> new dev.iyanz.aurora.engine.util.map.ActivityArrayMap<>((Set<BehaviorControl<? super E>>[]) EMPTY_SET_ARRAY)) // Leaf - Replace brain maps with optimized collection
++                .computeIfAbsent(activity, activity1 -> new dev.iyanz.aurora.engine.util.map.BehaviorControlArraySet<>()) // Leaf - Replace brain maps with optimized collection
                  .add(behavior);
          }
 +        if (this.activeBehaviors != EMPTY_BEHAVIOR_ARRAY) this.activeBehaviors = EMPTY_BEHAVIOR_ARRAY; // Leaf - Replace brain maps with optimized collection
@@ -164,9 +164,9 @@
 +            this.availableBehaviorsByPriorityArray = this.availableBehaviorsByPriority.values().toArray(EMPTY_MAP_ARRAY);
 +        }
 +        for (Map<Activity, Set<BehaviorControl<? super E>>> map : availableBehaviorsByPriorityArray) {
-+            var map1 = (io.canvasmc.canvas.util.map.ActivityArrayMap<Set<BehaviorControl<? super E>>>) map;
++            var map1 = (dev.iyanz.aurora.engine.util.map.ActivityArrayMap<Set<BehaviorControl<? super E>>>) map;
 +            for (int index = 0, size = map1.size(); index < size; index++) {
-+                var behaviorControls = (io.canvasmc.canvas.util.map.BehaviorControlArraySet<? super E>) map1.v[index];
++                var behaviorControls = (dev.iyanz.aurora.engine.util.map.BehaviorControlArraySet<? super E>) map1.v[index];
 +                var behaviorControlsRaw = behaviorControls.raw();
 +                for (int i = 0, size1 = behaviorControls.size(); i < size1; i++) {
 +                    BehaviorControl<? super E> behaviorControl = behaviorControlsRaw[i];
@@ -199,21 +199,21 @@
 +        if (this.availableBehaviorsByPriorityArray.length != this.availableBehaviorsByPriority.size()) {
 +            this.availableBehaviorsByPriorityArray = this.availableBehaviorsByPriority.values().toArray(EMPTY_MAP_ARRAY);
 +        }
-+        var aact = (io.canvasmc.canvas.util.map.ActivityBitSet) this.activeActivities;
++        var aact = (dev.iyanz.aurora.engine.util.map.ActivityBitSet) this.activeActivities;
 +        if (activeBehaviors == EMPTY_BEHAVIOR_ARRAY || aact.unsetDirty()) {
 +            var list = it.unimi.dsi.fastutil.objects.ReferenceArrayList.wrap(activeBehaviors);
 +            list.clear();
 +            int activeSet = aact.bitSet();
 +            for (Map<Activity, Set<BehaviorControl<? super E>>> map : availableBehaviorsByPriorityArray) {
-+                for (int index = 0; index < io.canvasmc.canvas.util.map.ActivityBitSet.ACTIVITY_SIZE; index++) {
++                for (int index = 0; index < dev.iyanz.aurora.engine.util.map.ActivityBitSet.ACTIVITY_SIZE; index++) {
 +                    if ((activeSet & (1 << index)) == 0) {
 +                        continue;
 +                    }
-+                    var ele = ((io.canvasmc.canvas.util.map.ActivityArrayMap<Set<BehaviorControl<? super E>>>) map).getValue(index);
++                    var ele = ((dev.iyanz.aurora.engine.util.map.ActivityArrayMap<Set<BehaviorControl<? super E>>>) map).getValue(index);
 +                    if (ele == null) {
 +                        continue;
 +                    }
-+                    list.add((io.canvasmc.canvas.util.map.BehaviorControlArraySet<? super E>) ele);
++                    list.add((dev.iyanz.aurora.engine.util.map.BehaviorControlArraySet<? super E>) ele);
 +                }
 +            }
 +            activeBehaviors = it.unimi.dsi.fastutil.objects.ObjectArrays.setLength(list.elements(), list.size());
@@ -245,9 +245,9 @@
 +            this.availableBehaviorsByPriorityArray = this.availableBehaviorsByPriority.values().toArray(new Map[0]);
 +        }
 +        for (Map<Activity, Set<BehaviorControl<? super E>>> map : availableBehaviorsByPriorityArray) {
-+            var map1 = (io.canvasmc.canvas.util.map.ActivityArrayMap<Set<BehaviorControl<? super E>>>) map;
++            var map1 = (dev.iyanz.aurora.engine.util.map.ActivityArrayMap<Set<BehaviorControl<? super E>>>) map;
 +            for (int index = 0, size = map1.size(); index < size; index++) {
-+                var behaviorControls = (io.canvasmc.canvas.util.map.BehaviorControlArraySet<? super E>) map1.v[index];
++                var behaviorControls = (dev.iyanz.aurora.engine.util.map.BehaviorControlArraySet<? super E>) map1.v[index];
 +                if (!behaviorControls.running()) {
 +                    continue;
 +                }

@@ -102,7 +102,7 @@
  
      @Override
      public Collection<EnderPearl> getEnderPearls() {
-+        io.canvasmc.canvas.util.TickGuard.guard(this.getHandle(), "Cannot get player ender pearls async"); // Canvas - region threading
++        dev.iyanz.aurora.engine.util.TickGuard.guard(this.getHandle(), "Cannot get player ender pearls async"); // Canvas - region threading
          return this.getHandle().getEnderPearls().stream().map((e) -> (EnderPearl) e.getBukkitEntity()).collect(Collectors.toList());
      }
  
@@ -110,7 +110,7 @@
      @Override
      public void setGameMode(GameMode mode) {
          Preconditions.checkArgument(mode != null, "GameMode cannot be null");
-+        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot set gamemode async"); // Canvas - region guards
++        dev.iyanz.aurora.engine.util.TickGuard.guard(this.entity, "Cannot set gamemode async"); // Canvas - region guards
          if (this.getHandle().connection == null) return;
  
          this.getHandle().setGameMode(GameType.byId(mode.getValue()), org.bukkit.event.player.PlayerGameModeChangeEvent.Cause.PLUGIN, null); // Paper - Expand PlayerGameModeChangeEvent
