@@ -52,7 +52,9 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
 
 ### SourbyClip (sekarang bisa dikerjakan di repo `YanIanZ/SourbyClip` dengan Codex)
 - [-] Audit timeout downloader, retry/failure, validasi SHA/cache, dan konkurensi di dalam
-  SourbyClip itu sendiri (bootstrap repo sudah diaudit, SourbyClip belum) (DEV-L, AURORA-I)
+  SourbyClip: kandidat lokal 3.1.1 sudah diperiksa dan diuji (29 tes Java; timeout connect/read,
+  staging SHA, mirror fallback, worker bounded). Whole-transfer deadline/size cap dan pin rilis
+  masih terbuka; bukti di `docs/architecture/bootstrap-download-audit.md` (DEV-L, AURORA-I)
 - [-] Kualifikasi cold-download dari remote (cold bootstrap pernah gagal cek hash Mojang dengan exit 0)
 
 ---
@@ -158,6 +160,8 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [ ] Pengaman agar baseline engine (`minecraft-patches/sources`, `paper-patches/files`) tidak
   diedit diam-diam: perubahan Sourby wajib lewat feature patch supaya terlihat oleh policy
 - [ ] Pin SHA-256 SourbyPatcher hanya mencakup jar, tidak POM tempat versi paperweight ditentukan
+  — kandidat lokal 3.1.0 memeriksa versi paperweight yang dimuat terhadap identitas di JAR;
+  hash POM/dependency penuh tetap belum diimplementasikan
 - [ ] Nomor feature patch punya celah (0018) dan akan dinomori ulang pada rebuild berikutnya;
   perbarui rujukan nomor patch di docs/test saat itu terjadi
 - [ ] M-5 Opsional, paling berat: lepas Paper sebagai upstream (vanilla → SourbyCraft langsung).
@@ -186,9 +190,13 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [ ] Putuskan: adapter atau fork SourbySpark (hanya setelah kebutuhannya terbukti; review GPL jika fork)
 
 ### Toolchain privat (repo `YanIanZ/SourbyPatcher` dan `YanIanZ/SourbyClip`)
-- [-] Update dependency di kedua repo: Patcher sudah Gradle 9.8.0 + JUnit 6.1.3 (`paper-toolchain`);
-  sisa Clip (Gradle 9.5.1), lalu perbarui pin di SourbyCraft sesuai `AGENTS.md` repo tersebut
-- [ ] Audit kepemilikan thread/executor di SourbyClip
+- [-] Update dependency di kedua repo: kandidat lokal Clip 3.1.1 dan Patcher 3.1.0 memakai
+  Gradle 9.8.0 + JUnit 6.1.3. Tes/build Temurin 25 dan integrasi diagnostik dengan override lulus;
+  push revisi privat dan pembaruan pin resmi masih terbuka (`docs/development/PRIVATE-TOOLCHAIN.md`)
+- [x] Audit kepemilikan thread/executor di sumber kandidat SourbyClip 3.1.1 (`5b6249c`):
+  worker download per batch ditutup sebelum filesystem/server, lookup dibatalkan/join dan
+  HttpClient ditutup. `BootstrapWorkersTest`, `IPUtilTest`, `LauncherProcessTest` lulus;
+  cakupan/batas audit di `docs/architecture/bootstrap-download-audit.md`; belum aktif di pin resmi
 
 ---
 

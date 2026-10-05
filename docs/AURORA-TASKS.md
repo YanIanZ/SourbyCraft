@@ -172,13 +172,13 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 
 ## I. SourbyClip / free-running requirement
 
-- [-] downloader timeout audit — bootstrap downloads: whole-transfer deadline added (a stalled body could hang boot); SourbyClip (private) not audited ([bootstrap-download-audit.md](architecture/bootstrap-download-audit.md))
+- [-] downloader timeout audit — historical utility whole-transfer deadline plus local SourbyClip 3.1.1 connect/read timeout tests; launcher whole-transfer deadline/size cap and pin rollout remain open ([bootstrap-download-audit.md](architecture/bootstrap-download-audit.md))
 - [-] retry/failure handling — 3 attempts with backoff, `.tmp` always cleaned; unit-tested
-- [-] SHA/cache validation audit — bootstrap downloads: verified before install, corrupt cache replaced, body cut off past the pinned size; SourbyClip not audited
-- [-] bounded concurrency audit — bootstrap downloads are sequential; SourbyClip not audited
+- [-] SHA/cache validation audit — historical utility checks plus local SourbyClip 3.1.1 staged original-JAR verification/cache preservation; remote qualification and official pin rollout pending
+- [-] bounded concurrency audit — local SourbyClip 3.1.1 source/worker lifecycle tested with bounded parallelism; source audit complete, whole-transfer bounds and pin rollout pending
 - [x] first-boot failure recovery test — unit tests plus CI step "Bootstrap failure recovery and offline boot": no network fails fast with a download error and no partial files, then online reaches Done (green in run 450)
 - [x] offline-after-success test — same CI step: third boot with no network reached Done from the cache without downloading (run 450). Mojang public-key lookup fails and is logged; with online-mode=true player auth would of course need the network
-- [ ] remote repository/fallback documentation — one URL per library, no mirrors exist to document
+- [x] remote repository/fallback documentation — [bootstrap-download-audit.md](architecture/bootstrap-download-audit.md): SourbyClip has Maven mirror fallback; the historical utility manifest's single-URL behavior is a separate surface
 - [x] verify core runtime needs no Canvas remote service/API — [dependency-ledger.md §6](architecture/dependency-ledger.md)
 
 ## J. Aurora release gate

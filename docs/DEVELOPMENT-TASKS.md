@@ -222,14 +222,14 @@ Only measured hot spots should produce new performance patches.
 
 # L. SourbyClip / bootstrap
 
-- [-] **P0** downloader timeout audit — bootstrap downloads fixed and tested (`architecture/bootstrap-download-audit.md`); SourbyClip (private) not audited
+- [-] **P0** downloader timeout audit — historical utility audit plus local SourbyClip 3.1.1 connect/read timeouts tested; whole-transfer deadline/size cap and official pin rollout still open (`architecture/bootstrap-download-audit.md`)
 - [-] **P0** retry/failure behavior audit — SPEC B16 launcher exit status and transfer loop shipped in repo bootstrap 3.0.22; process and local multi-chunk/cache probes pass; remote cold-download qualification remains pending (see `BOOTSTRAP.md`)
-- [-] **P0** SHA/cache validation audit — same scope
-- [-] **P1** concurrency/boundedness audit — bootstrap downloads are sequential and size-bounded; SourbyClip not audited
-- [ ] **P1** thread/executor ownership audit
+- [-] **P0** SHA/cache validation audit — local SourbyClip 3.1.1 original-JAR staging, failed-download preservation and offline/cache tests pass; remote qualification/pin rollout pending (`architecture/bootstrap-download-audit.md`)
+- [-] **P1** concurrency/boundedness audit — local SourbyClip 3.1.1 download worker capacity/lifecycle tests pass; whole-transfer size/deadline bounds and pin rollout remain open
+- [x] **P1** thread/executor ownership audit — local candidate source `5b6249c`: batch workers joined, location workers cancelled/joined, HTTP client closed; controlled lifecycle/process tests pass. Official pins still use the older launcher
 - [x] **P1** first-boot failure recovery test — CI run 450
 - [x] **P1** offline-after-success test — CI run 450
-- [ ] **P2** document required remote repositories and fallback order
+- [x] **P2** document required remote repositories and fallback order — `architecture/bootstrap-download-audit.md`, launcher cache/embedded/original/Maven order and historical utility scope kept explicit
 
 ---
 
