@@ -44,7 +44,6 @@ for (name in listOf("sourbyapi", "sourbycraft-server")) {
 
 optionalInclude("test-plugin")
 optionalInclude("legacy-test-plugin")
-optionalInclude("luminol-generator")
 
 fun optionalInclude(name: String, op: (ProjectDescriptor.() -> Unit)? = null) {
     val settingsFile = file("$name.settings.gradle.kts")

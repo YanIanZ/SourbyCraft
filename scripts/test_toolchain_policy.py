@@ -15,11 +15,9 @@ class DeclaredTargetTest(unittest.TestCase):
     so the exceptions are listed here with the reason rather than found by surprise.
     """
 
-    EXCEPTIONS = {
-        # Not shipped. The NMS-compat harness is driven only by a workflow_dispatch
-        # workflow that predates the 26.2 rebase and is marked stale in its own header.
-        "test-harness/sanity-harness-plugin/build.gradle.kts": [21],
-    }
+    # Empty since the pre-26.2 NMS-compat harness (Java 21) was removed. Record any future
+    # exception here with the reason it cannot move to the baseline.
+    EXCEPTIONS = {}
 
     def test_every_module_is_on_the_baseline_or_a_recorded_exception(self):
         targets = policy.declared_targets(REPO)
@@ -43,8 +41,7 @@ class DeclaredTargetTest(unittest.TestCase):
                 self.assertEqual(targets.get(path), [BASELINE])
 
     def test_the_policy_actually_found_the_build_scripts(self):
-        self.assertTrue({"build.gradle.kts", "sourbycraft-server/build.gradle.kts",
-                         "test-harness/sanity-harness-plugin/build.gradle.kts"}
+        self.assertTrue({"build.gradle.kts", "sourbycraft-server/build.gradle.kts"}
                         .issubset(policy.declared_targets(REPO)))
 
 

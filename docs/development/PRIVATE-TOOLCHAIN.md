@@ -67,6 +67,6 @@ The output directory must not exist. The check boots once without copied caches,
 then boots the same runtime with launcher offline mode. It writes a JSON report, separate logs
 and JFR recordings for both phases. Server/plugin network access is outside the offline flag's scope.
 
-The archived `nms-compat.yml` harness remains unported and is not a release gate. Its old
-public caches and offline build invocation must be redesigned before adding private checkouts;
-do not give that workflow private credentials in its current form.
+The pre-26.2 `nms-compat.yml` harness was removed (it was never ported and was not a release
+gate). A replacement must be designed around the private checkouts from the start; do not reuse
+its old public caches or offline build invocation with private credentials.

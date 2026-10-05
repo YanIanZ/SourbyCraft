@@ -443,11 +443,6 @@ graphify-out/
 .worktrees/
 sourbycraft-server/src/main/resources/GeoLite2-City.mmdb
 
-# NMS-compat test-harness jars (downloaded by scripts/download-test-plugins.sh)
-test-harness/test-plugins/*.jar
-test-harness/TestServer-mojmap/
-test-harness/TestServer-particle-smoke/
-test-harness/sanity-harness-plugin/build/
 
 # Build + release artifacts — published via GH releases, not tracked in repo
 release/

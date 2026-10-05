@@ -31,8 +31,7 @@ The CI workflow `.github/workflows/build.yml` (single `Build 26.2 jar` job, push
 - `:sourbycraft-server` — the server. Source-set merge in `build.gradle.kts.patch` adds `paper-server` + `canvas-server` to the main and test source sets, and `src/log4jPlugins/java` (own log4j2 pattern plugins, e.g. `%scLogger`).
 - `:Metal` — vendored Minecraft library-decode codegen. `src/` empty until `setup_metal.sh` runs.
 - SourbyPatcher and SourbyClip are **not in this repository**. They live in private repos (`YanIanZ/SourbyPatcher`, `YanIanZ/SourbyClip`), pinned by `build-data/private-toolchain.lock.json` and by `patcherSha256`/`clipSha256` in `gradle.properties`. SourbyClip (`dev.iyanz:sourbyclip:${clipVersion}`) is wired in `sourbycraft-server/build.gradle.kts.patch`.
-- `test-harness/` — NMS-compat smoke harness. Only used by `.github/workflows/nms-compat.yml`, which is **`workflow_dispatch` only** (predates 26.2 rebase, marked stale in the workflow header).
-- `test-plugin/`, `luminol-generator/` — opt-in projects; activated by uncommenting `include(":test-plugin")` in their `*.settings.gradle.kts`.
+- `test-plugin/`, `legacy-test-plugin/` — opt-in projects; included when `-PincludeTestPlugin=true` (CI passes it). The pre-26.2 NMS-compat `test-harness/` and its `nms-compat.yml` workflow were removed; history has them if a 26.2 harness is ever rebuilt.
 
 ## Patch application
 

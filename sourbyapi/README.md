@@ -45,8 +45,10 @@ version:  <releaseVersion>-<CHANNEL>   e.g. 26.2-REL on a release/* branch, 26.2
 
 `version` is computed at configuration time from the current git branch (see the root
 `settings.gradle.kts`), matching the same `REL`/`DEV`/`EXP` channel suffix reported by `/ver` and the
-auto-updater. CI (`jitpack.yml`) builds and `publishToMavenLocal`s this module for external
-consumption.
+auto-updater. No public Maven repository publishes this module: JitPack cannot build it because
+settings evaluation requires the private SourbyPatcher toolchain. External consumers build it with
+`./gradlew :sourbyapi:publishToMavenLocal` on a machine that has the pinned private toolchain
+(see `docs/development/PRIVATE-TOOLCHAIN.md`).
 
 The runtime `Bukkit.getBukkitVersion()` compatibility value is separate from this artifact
 coordinate: `apiVersioning.json` reports `<apiVersion>-R0.1-SNAPSHOT` (currently
@@ -63,7 +65,7 @@ dependencies {
 }
 ```
 
-**From an external plugin project**, depend on the published artifact:
+**From an external plugin project**, depend on the Maven Local artifact:
 
 ```kotlin
 dependencies {
