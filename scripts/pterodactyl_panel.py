@@ -90,6 +90,42 @@ def rename(source, target):
     call("PUT", "/files/rename", {"root": "/", "files": [{"from": source, "to": target}]})
 
 
+def list_dir(directory):
+    """Names in a panel directory."""
+    data = call("GET", "/files/list?directory=" + urllib.parse.quote(directory))
+    return [item["attributes"]["name"] for item in data["data"]]
+
+
+def create_folder(parent, name):
+    call("POST", "/files/create-folder", {"root": parent, "name": name})
+
+
+def upload(local_path, directory):
+    """Upload a local (binary) file into a panel directory, through the signed upload URL."""
+    url = call("GET", "/files/upload")["attributes"]["url"]
+    name = os.path.basename(local_path)
+    with open(local_path, "rb") as handle:
+        content = handle.read()
+    boundary = "----sourbycraft" + str(int(time.time() * 1000))
+    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{name}\"\r\n"
+            f"Content-Type: application/octet-stream\r\n\r\n").encode() + content + f"\r\n--{boundary}--\r\n".encode()
+    target = url + ("&" if "?" in url else "?") + "directory=" + urllib.parse.quote(directory)
+    for attempt in range(RETRIES):
+        request = urllib.request.Request(target, method="POST", data=body, headers={
+            "Content-Type": "multipart/form-data; boundary=" + boundary,
+            "User-Agent": "sourbycraft-panel-tools/1.0"})
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                response.read()
+            return
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            if attempt == RETRIES - 1:
+                raise
+            time.sleep(2 ** attempt)
+            url = call("GET", "/files/upload")["attributes"]["url"]
+            target = url + ("&" if "?" in url else "?") + "directory=" + urllib.parse.quote(directory)
+
+
 def log():
     return ANSI.sub("", read_file("/logs/latest.log"))
 
@@ -128,5 +164,17 @@ def stop(timeout=600):
 
 
 def start(timeout=900):
+    """Start and wait for running. A start sent while the node is still settling after a stop
+    is sometimes ignored (no process, no log); it is sent again while the server stays offline."""
+    deadline = time.monotonic() + timeout
     power("start")
-    return wait_state("running", timeout)
+    resend = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        current = state()
+        if current == "running":
+            return True
+        if current == "offline" and time.monotonic() >= resend:
+            power("start")
+            resend = time.monotonic() + 90
+        time.sleep(3)
+    return False

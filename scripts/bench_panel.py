@@ -139,6 +139,9 @@ def main():
     parser.add_argument("--seed", default="440044")
     parser.add_argument("--world", default="bench", help="level-name used while benching")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--edit", action="append", default=[], metavar="PATH=OLD=>NEW",
+                        help="Replace OLD with NEW in a server file for the bench run (restored afterwards). "
+                             "E.g. a plugin's spawn world when it names the operator's world.")
     parser.add_argument("--allow-online-players", action="store_true",
                         help="Bench even if real players are online (they will be disconnected)")
     args = parser.parse_args()
@@ -159,10 +162,16 @@ def main():
             raise SystemExit(f"{int(online)} player(s) online; refusing to restart under them")
 
     # Everything bench mode changes, saved locally before anything is touched.
+    edits = []
+    for spec in args.edit:
+        path, replacement = spec.split("=", 1)
+        old, new = replacement.split("=>", 1)
+        edits.append((path if path.startswith("/") else "/" + path, old, new))
     originals = {path: panel.read_file(path)
-                 for path in ("/server.properties", "/whitelist.json", "/ops.json", "/bukkit.yml")}
+                 for path in ("/server.properties", "/whitelist.json", "/ops.json", "/bukkit.yml")
+                 + tuple(path for path, _, _ in edits)}
     for path, text in originals.items():
-        (output / ("original-" + path.strip("/"))).write_text(text)
+        (output / ("original-" + path.strip("/").replace("/", "__"))).write_text(text)
     original_properties = originals["/server.properties"]
 
     record = {"workload": plan.name, "summary": plan.summary, "fidelity": list(plan.fidelity),
@@ -185,11 +194,44 @@ def main():
             "allow-flight": "true"}))
         panel.write_file("/whitelist.json", bench_whitelist(clients))
         panel.write_file("/bukkit.yml", without_throttle(originals["/bukkit.yml"]))
+        for path, old, new in edits:
+            if old not in originals[path]:
+                raise SystemExit(f"--edit: {old!r} not found in {path}")
+            panel.write_file(path, originals[path].replace(old, new))
+        record["edits"] = [{"path": path, "old": old, "new": new} for path, old, new in edits]
+        # The plugin set is whatever the panel has installed: recorded, and checked against the
+        # workload's declared set by name. A workload with plugins needs the bridge for the
+        # bridged ones; that is the server's own setting here, read back from the log.
+        installed = [entry["attributes"] for entry in panel.call("GET", "/files/list?directory=%2Fplugins")["data"]
+                     if entry["attributes"]["is_file"] and entry["attributes"]["name"].endswith(".jar")]
+        record["plugins_installed"] = [{"jar": a["name"], "size": a["size"]} for a in installed]
+        declared = [entry["name"] for entry in (plan.plugins or [])]
+        record["plugins_declared"] = declared
         if not panel.start():
             raise RuntimeError("server did not reach running in bench mode")
+        # `running` is the process state, and latest.log still holds the previous boot's "Done ("
+        # until it rotates, so the only reliable readiness signal is a command being answered.
+        ready_by = time.monotonic() + 300
+        while time.monotonic() < ready_by:
+            _, answered = panel.run("minecraft:list", r"players online", 15)
+            if answered:
+                break
+        else:
+            raise RuntimeError("server did not answer console commands within 300 s of starting")
         boot = panel.log()
         version = re.search(r"This server is running (.*)", boot)
         record["server_version"] = version.group(1).strip() if version else None
+        record["bridge_admitted"] = re.findall(r"Aurora Bridge admitted (\S+)", boot)
+        states, _ = panel.run("sourbycraft:plugins", r"╰", 30)
+        # One plugin per line: "  Native  Name"; the counts line ("Failed / Disabled: 0 / 0") must not match.
+        record["plugin_states"] = {name: state for state, name in
+                                   re.findall(r"(?m)^\s*(Native|Bridged|Failed|Disabled)\s{2,}(\S+)\s*$",
+                                              "\n".join(l.split("INFO]: ", 1)[-1] for l in states.splitlines()))}
+        missing = [name for name in declared
+                   if not any(name.lower().split("x")[0] in jar.lower() for jar in record["plugin_states"])]
+        if missing:
+            print(f"declared plugins not found by name on the panel: {missing}", flush=True)
+        record["plugins_declared_missing"] = missing
         cpu, _ = panel.run("perf cpu", r"Freshness", 20)
         record["available_processors"] = number(r"Available processors / live platform threads: (\d+)", cpu)
         memory, _ = panel.run("perf memory", r"Freshness", 20)
@@ -245,6 +287,14 @@ def main():
             time.sleep(max(0, min(args.sample_seconds, deadline - time.monotonic())))
         history, _ = panel.run("perf history", r"Freshness", 20)
         record["perf_history"] = history
+        # Plugin cost: the bridge's per-plugin body timing and the perf plugin view, raw.
+        plugin_perf, _ = panel.run("perf plugins", r"╰|Freshness", 20)
+        record["perf_plugins"] = plugin_perf
+        record["bridged_plugin_details"] = {}
+        for name, state in record.get("plugin_states", {}).items():
+            if state == "Bridged":
+                detail, _ = panel.run(f"plugins {name}", r"╰", 20)
+                record["bridged_plugin_details"][name] = detail
         record["clients_end"] = swarm.report()
         record["samples"] = samples
         record["summary_metrics"] = {key: summarise(samples, key) for key in (

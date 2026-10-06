@@ -13,8 +13,16 @@ upstream commits moved.
 
 ## Recording a bump
 
-In the same commit that moves `canvasRef`:
+Since the 2026-10-05 migration the pin is `paperRef` in `gradle.properties`; `canvasRef` no
+longer exists, and the column above keeps its old name only for the historical rows. The full
+procedure is [`UPGRADING-MINECRAFT.md`](../development/UPGRADING-MINECRAFT.md).
 
+In the same commit that moves `paperRef`:
+
+0. Run `python3 scripts/patch_surface.py --check-rebuild` first and do not start until it passes:
+   every patch file tracked by git, no duplicate numbers, and no patch file that a
+   `rebuild*Patches` run would delete for lack of a materialized commit (the 2026-10-06
+   incident).
 1. Run `./gradlew applyAllPatches` before any fix and list every patch file that fails or needs a
    rebuild (`rebuild*Patches`), including files deleted or parked in `.skipped/`.
 2. Add a row: date, commit, old → new ref, upstream commit count (`git rev-list --count old..new`
@@ -24,3 +32,7 @@ In the same commit that moves `canvasRef`:
 
 Build 47 added four Paper patch files (the bridge load gates and `CraftScheduler`) and extended the
 Spark patch. They have not yet been through a bump; the next row will show what they cost.
+
+2026-10-07: materialized order realigned to file order (Minecraft 0024–0027 re-applied on 0023);
+rebuild verified (`patch_surface.py --check-rebuild`: no change; `applyAllPatches` from the files
+gives the same trees). No `paperRef` move, so no row.

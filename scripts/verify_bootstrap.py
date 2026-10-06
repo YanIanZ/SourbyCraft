@@ -22,7 +22,7 @@ def verify(jar, output, port, timeout, java):
     config = output / 'sourbycraft_config'
     config.mkdir()
     (config / 'sourbycraft_global_config.toml').write_text(
-        '[viaversion]\nauto-provision=false\n[misc.auto_update]\nenabled=false\n')
+        '[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=false\n[misc.auto_update]\nenabled=false\n')
     report = {'jar': str(jar), 'sha256': digest(jar), 'phases': [], 'passed': False}
     try:
         for phase, extra in [('cold', []), ('offline', ['-Dsourbyclip.offline=true'])]:

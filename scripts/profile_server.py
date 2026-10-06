@@ -50,7 +50,7 @@ def main():
     config = output / "sourbycraft_config" / "sourbycraft_global_config.toml"
     config.parent.mkdir()
     config.write_text("# Isolated profiling fixture; disable external plugin/version changes.\n"
-                      "[viaversion]\nauto-provision=false\n"
+                      "[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=false\n"
                       "[misc.auto_update]\nenabled=false\n")
     config_before = sha256(config)
     if args.world:

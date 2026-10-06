@@ -44,10 +44,10 @@ KILL_DELAYS = (3, 8, 15)
 # run; if one starts passing it is reported as XPASS so the entry gets removed.
 KNOWN_LIMITATIONS = {
     "game time survived and advanced": (
-        "level.dat (which holds the world's game time and spawn) is written only at startup and "
-        "at a clean stop: region-threaded save-all saves chunks and the 'safe' global data but not "
-        "level.dat, so a crash rewinds game time to the last boot. Inherited from Folia/Canvas; "
-        "tracked in TODO.md P0"),
+        "Historical crash XFAIL: game time rewinds. Source review of the current 26.2 path "
+        "finds authoritative game time/spawn in PaperLevelOverrides (paper:level_overrides), "
+        "omitted from RegionizedServer.autosaveSafeWorldData's safe-data whitelist. "
+        "Fix and runtime confirmation pending; tracked in TODO.md P0"),
 }
 AWF_COMMIT_SECONDS = 5
 

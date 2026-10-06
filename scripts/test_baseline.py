@@ -230,7 +230,7 @@ class WorkloadTest(unittest.TestCase):
         self.assertEqual(set(workloads.NAMES),
                          {"idle", "players-10", "players-50", "players-100",
                           "entity-stress", "chunk-stress", "save-stress",
-                          "network-stress"})
+                          "network-stress", "plugins-10"})
 
     def test_save_stress_needs_no_clients_and_rewrites_what_it_loaded(self):
         # §16 lists save stress separately from chunk traversal: one writes chunks that keep
@@ -465,6 +465,85 @@ def scaled(factor, **overrides):
     for key in tick:
         tick[key] *= factor
     return candidate
+
+
+class PluginWorkloadTest(unittest.TestCase):
+    """compat-vs-performance §6 item 1: plugins and performance measured in one run."""
+
+    def test_the_plugin_set_parses_and_every_entry_is_complete(self):
+        entries = workloads.load_plugin_set()
+        self.assertEqual({entry["name"] for entry in entries},
+                         {"EssentialsX", "Vault", "SuperiorSkyblock2", "spark"})
+        for entry in entries:
+            with self.subTest(name=entry["name"]):
+                for key in ("name", "loading", "jar"):
+                    self.assertIn(key, entry)
+                self.assertIn(entry["loading"], workloads.PLUGIN_LOADING)
+                if entry["jar"] is None:
+                    self.assertTrue(entry.get("note"), "a missing jar must say why")
+        loading = {entry["name"]: entry["loading"] for entry in entries}
+        self.assertEqual(loading["EssentialsX"], "bridged")
+        self.assertEqual(loading["Vault"], "bridged")
+        self.assertEqual(loading["SuperiorSkyblock2"], "native")
+
+    def test_an_incomplete_entry_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plugins.json"
+            path.write_text(json.dumps({"plugins": [{"name": "X", "loading": "native"}]}))
+            with self.assertRaises(ValueError):
+                workloads.load_plugin_set(path)
+            path.write_text(json.dumps({"plugins": [{"name": "X", "loading": "maybe", "jar": None,
+                                                     "note": "n"}]}))
+            with self.assertRaises(ValueError):
+                workloads.load_plugin_set(path)
+
+    def test_plugins_10_is_players_10_plus_the_plugin_set(self):
+        plan, base = workloads.build("plugins-10"), workloads.build("players-10")
+        self.assertTrue(plan.requires_connected_players)
+        self.assertEqual(plan.setup, base.setup, "the plugins must be the only difference")
+        self.assertEqual(plan.fidelity[:len(base.fidelity)], base.fidelity)
+        added = " ".join(plan.fidelity[len(base.fidelity):])
+        self.assertIn("no player commands", added)
+        self.assertIn("no economy", added)
+        self.assertEqual([entry["name"] for entry in plan.plugins],
+                         [entry["name"] for entry in workloads.load_plugin_set()])
+        self.assertTrue(workloads.needs_bridge(plan))
+        self.assertFalse(workloads.needs_bridge(base))
+
+    def test_only_a_bridged_workload_enables_the_bridge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bridged = run_baseline.prepare(Path(directory) / "a", workloads.build("plugins-10"),
+                                           25585, 6144)
+            vanilla = run_baseline.prepare(Path(directory) / "b", workloads.build("players-10"),
+                                           25585, 6144)
+            self.assertIn('[aurora.bridge]\nmode="safe"', bridged.read_text())
+            self.assertNotIn("aurora.bridge", vanilla.read_text())
+
+    def test_the_plugins_directory_is_copied_and_fingerprinted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, run = Path(directory) / "source", Path(directory) / "run"
+            (source / "SuperiorSkyblock2" / "modules").mkdir(parents=True)
+            (source / "Vault.jar").write_bytes(b"vault")
+            (source / "SuperiorSkyblock2" / "modules" / "SSB-AuroraWorlds.jar").write_bytes(b"m")
+            (source / "notes.txt").write_text("not a jar")
+            run.mkdir()
+            installed = run_baseline.install_plugins(run, source)
+            self.assertEqual([entry["path"] for entry in installed],
+                             ["SuperiorSkyblock2/modules/SSB-AuroraWorlds.jar", "Vault.jar"])
+            self.assertEqual(installed[1]["sha256"], run_baseline.sha256(source / "Vault.jar"))
+            self.assertTrue((run / "plugins" / "notes.txt").is_file())
+
+    def test_a_different_plugin_set_is_provenance_drift(self):
+        candidate = json.loads(json.dumps(record()))
+        candidate["provenance"]["plugins"] = [{"path": "Vault.jar", "sha256": "c" * 64}]
+        drift = compare.provenance_drift(record(), candidate)
+        self.assertEqual(len(drift), 1)
+        self.assertIn("plugins", drift[0])
+        rebuilt = json.loads(json.dumps(candidate))
+        rebuilt["provenance"]["plugins"][0]["sha256"] = "d" * 64
+        self.assertTrue(compare.provenance_drift(candidate, rebuilt), "same name, new hash")
+        report = compare.render(record(), candidate, [], [], drift, 0.03)
+        self.assertIn("| Plugins | none | Vault.jar |", report)
 
 
 class CompareTest(unittest.TestCase):
@@ -848,6 +927,8 @@ class HeapGuardTest(unittest.TestCase):
             self.assertIn("online-mode=false", properties)
             self.assertIn(r"level-type=minecraft\:normal", properties)
             self.assertIn("auto-provision=false", config.read_text())
+            self.assertIn("[protocollib]\nauto-provision=false", config.read_text())
+            self.assertIn("[viaversion]\nauto-provision=false", config.read_text())
             self.assertEqual((target / "eula.txt").read_text(), "eula=true\n")
 
     def test_the_player_cap_covers_the_requested_clients(self):

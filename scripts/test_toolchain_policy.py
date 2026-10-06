@@ -78,6 +78,18 @@ class ExtractionTest(unittest.TestCase):
                 (nested / "build.gradle.kts").write_text("options.release = 8")
             self.assertEqual(policy.declared_targets(root), {})
 
+    def test_private_archives_are_skipped_but_workspace_target_is_checked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("snapshots/pin/upstream-build", "workspaces/pin/verified-upstream",
+                         "workspaces/pin/upstream-build"):
+                archive = root / ".private-intave" / name
+                archive.mkdir(parents=True)
+                (archive / "build.gradle.kts").write_text("options.release = 23")
+            active = root / ".private-intave/workspaces/pin/build.gradle.kts"
+            active.write_text("options.release = 25")
+            self.assertEqual(policy.declared_targets(root), {str(active.relative_to(root)): [25]})
+
 
 if __name__ == "__main__":
     unittest.main()

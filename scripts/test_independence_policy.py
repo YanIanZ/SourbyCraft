@@ -26,6 +26,7 @@ class CanvasSourceCouplingTest(unittest.TestCase):
         # UnloadResult so plugins never see it.
         "dev.iyanz.aurora.engine.util.ticket.SaveAllTicket",
         "io.canvasmc.canvas.WorldUnloadResult",
+        "io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent",
     }
 
     ADAPTER = ("sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/config/upstream/"

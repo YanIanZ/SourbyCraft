@@ -30,9 +30,17 @@ METRICS = {
     "Network round-trips": (("network", "round_trips_per_second"), False, "{:.1f}/s"),
 }
 
-# Provenance that must match for a comparison to mean anything.
+# Provenance that must match for a comparison to mean anything. The plugin list carries each
+# jar's SHA-256, so a rebuilt or swapped plugin is drift even when the file name is unchanged.
 PINNED = ("java_version", "platform", "machine", "cpu_count", "heap_mib", "jvm_args",
-          "jfr_settings", "warmup_seconds", "duration_seconds", "connected_players_asserted")
+          "jfr_settings", "warmup_seconds", "duration_seconds", "connected_players_asserted",
+          "plugins", "aurora_bridge_mode")
+
+
+def plugin_names(record):
+    """The plugin jars a run loaded, for the report; older records list bare names."""
+    return ", ".join(entry["path"] if isinstance(entry, dict) else str(entry)
+                     for entry in record["provenance"].get("plugins") or []) or "none"
 
 
 def dig(record, path):
@@ -111,9 +119,7 @@ def render(reference, candidate, rows, blocking, drift, threshold):
              f"| `{' '.join(candidate['provenance']['jvm_args'])}` |",
              f"| World | {reference['workload']['level_type']} "
              f"| {candidate['workload']['level_type']} |",
-             "| Plugins | "
-             f"{', '.join(reference['provenance']['plugins']) or 'none'} | "
-             f"{', '.join(candidate['provenance']['plugins']) or 'none'} |",
+             f"| Plugins | {plugin_names(reference)} | {plugin_names(candidate)} |",
              f"| Duration | {reference['provenance']['duration_seconds']}s "
              f"| {candidate['provenance']['duration_seconds']}s |",
              f"| Warmup | {reference['provenance']['warmup_seconds']}s "

@@ -18,11 +18,18 @@ COMPAT = re.compile(r"(?:source|target)Compatibility\s*=\s*JavaVersion\.VERSION_
 
 def build_scripts(root):
     root = Path(root)
+    def skipped(path):
+        parts = path.relative_to(root).parts
+        if any(part in SKIP_PARTS for part in parts):
+            return True
+        # Preserve upstream build scripts as provenance, while checking the executable workspace.
+        return (parts[0] == ".private-intave"
+                and any(part in ("snapshots", "upstream-build", "verified-upstream") for part in parts))
     for path in sorted(root.rglob("*.gradle.kts")):
-        if not any(part in SKIP_PARTS for part in path.relative_to(root).parts):
+        if not skipped(path):
             yield path
     for path in sorted(root.rglob("*.gradle")):
-        if not any(part in SKIP_PARTS for part in path.relative_to(root).parts):
+        if not skipped(path):
             yield path
 
 

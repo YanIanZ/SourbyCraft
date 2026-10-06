@@ -11,7 +11,9 @@ ClientInformation layout is taken from net.minecraft.server.level.ClientInformat
 in the materialized sources. A different Minecraft version will need the probe re-run.
 """
 import math
+import queue
 import random
+import re
 import socket
 import struct
 import threading
@@ -57,6 +59,18 @@ PLAY_KEEP_ALIVE_SERVERBOUND = 0x1C
 SERVERBOUND_MOVE_POS = 0x1E          # SERVERBOUND_MOVE_PLAYER_POS
 SERVERBOUND_MOVE_POS_ROT = 0x1F      # SERVERBOUND_MOVE_PLAYER_POS_ROT
 SERVERBOUND_ACCEPT_TELEPORT = 0x00   # SERVERBOUND_ACCEPT_TELEPORTATION
+# Index 7 of GameProtocols.SERVERBOUND_TEMPLATE, counted the way that gives keep_alive 0x1C and
+# move_player_pos 0x1E above. The body is one String: the command without its slash.
+SERVERBOUND_CHAT_COMMAND = 0x07
+# Index 121 of GameProtocols.CLIENTBOUND_TEMPLATE, counted the same way (keep_alive is 44 = 0x2C).
+CLIENTBOUND_SYSTEM_CHAT = 0x79
+# Chunk delivery, same counting (bundle at index 0, so template index + 1):
+# chunk_batch_finished is template index 10, level_chunk_with_light 44, forget_level_chunk 36.
+CLIENTBOUND_CHUNK_BATCH_FINISHED = 0x0B
+CLIENTBOUND_LEVEL_CHUNK_WITH_LIGHT = 0x2D
+CLIENTBOUND_FORGET_LEVEL_CHUNK = 0x25
+# Serverbound template index 11: chunk_batch_received(float desiredChunksPerTick).
+SERVERBOUND_CHUNK_BATCH_RECEIVED = 0x0B
 
 # The server's authoritative position. Without reading this a client invents coordinates,
 # the server rejects every one of them and snaps the player back, and the only thing that
@@ -126,7 +140,8 @@ class HeadlessClient(threading.Thread):
     deadline and the server times the client out.
     """
 
-    def __init__(self, host, port, name, view_distance=2, move=True, origin=None, roam=None):
+    def __init__(self, host, port, name, view_distance=2, move=True, origin=None, roam=None,
+                 ack_chunk_batches=False):
         super().__init__(name=f"client-{name}", daemon=True)
         self._host, self._port, self._name = host, port, name
         self._view_distance = view_distance
@@ -154,6 +169,21 @@ class HeadlessClient(threading.Thread):
         self.syncs = 0
         self.corrections = 0
         self.reached_play = threading.Event()
+        self._commands = queue.Queue()
+        self.commands_sent = 0
+        # Text of the system messages received (chat components flattened to their strings).
+        self.messages = []
+        # (monotonic time, chunk x, chunk z) of every level_chunk_with_light received.
+        self.chunks = []
+        self.forgotten = 0
+        # A real client acknowledges each chunk batch; the server holds further batches until it
+        # does. Off by default so load-generating swarms keep the workload they were measured with.
+        self._ack_chunk_batches = ack_chunk_batches
+        self.batches = 0
+
+    def command(self, text):
+        """Queue a command (without the slash); sent once the client is in play."""
+        self._commands.put(text.lstrip("/"))
 
     def _sync(self, connection, payload, threshold):
         """Adopt the server's position and confirm the teleport.
@@ -291,8 +321,34 @@ class HeadlessClient(threading.Thread):
                     if packet_id == CLIENTBOUND_PLAYER_POSITION:
                         self._sync(connection, payload, threshold)
                         continue
+                    if packet_id == CLIENTBOUND_LEVEL_CHUNK_WITH_LIGHT:
+                        self.chunks.append((time.monotonic(),) + struct.unpack(">ii", payload[:8]))
+                        continue
+                    if packet_id == CLIENTBOUND_FORGET_LEVEL_CHUNK:
+                        self.forgotten += 1
+                        continue
+                    if packet_id == CLIENTBOUND_CHUNK_BATCH_FINISHED:
+                        self.batches += 1
+                        if self._ack_chunk_batches:
+                            # Vanilla clients ask for up to 64 chunks a tick when they keep up.
+                            connection.sendall(_frame(SERVERBOUND_CHUNK_BATCH_RECEIVED, struct.pack(">f", 64.0), threshold))
+                        continue
+                    if packet_id == CLIENTBOUND_SYSTEM_CHAT:
+                        # A network-NBT component: keep the readable strings, in order.
+                        text = " ".join(part.decode("utf-8", "replace")
+                                        for part in re.findall(rb"[\x20-\x7e\xc2-\xf4][\x20-\x7e\x80-\xbf]{2,}", payload))
+                        self.messages.append(text)
                     if self._move and self._synced and time.monotonic() >= self._next_move:
                         self._step(connection, threshold)
+                    while self._synced:
+                        try:
+                            text = self._commands.get_nowait()
+                        except queue.Empty:
+                            break
+                        body = text.encode("utf-8")
+                        connection.sendall(_frame(SERVERBOUND_CHAT_COMMAND, write_varint(len(body)) + body,
+                                                  threshold))
+                        self.commands_sent += 1
                     if packet_id == PLAY_KEEP_ALIVE_CLIENTBOUND:
                         # The reply carries exactly the eight-byte id and nothing else; echoing
                         # the whole clientbound payload is rejected as "larger than I expected".

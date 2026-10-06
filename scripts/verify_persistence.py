@@ -94,7 +94,7 @@ def prepare(directory, port):
     config.mkdir(exist_ok=True)
     (config / "sourbycraft_global_config.toml").write_text(
         "# Isolated persistence fixture; no external plugin or version changes.\n"
-        "[viaversion]\nauto-provision=false\n"
+        "[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=false\n"
         "[misc.auto_update]\nenabled=false\n")
 
 

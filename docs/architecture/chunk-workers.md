@@ -101,6 +101,49 @@ variable under test, so the tooling reporting it as drift is the tooling working
   CPU is not.
 
 
+## Three workloads, three answers (2026-10-07)
+
+The A/B above is no longer the only chunk-worker measurement. Three documented findings
+compare six workers against two, each on a different workload, and they do not agree.
+[compat-vs-performance.md](compat-vs-performance.md) §4 lists the same three.
+
+| Source | Workload | Evidence state | Finding, 6 workers vs 2 |
+| --- | --- | --- | --- |
+| This file, *The measurement* | `players-10`: 10 bots, 300 s, fresh world; entities silently absent | certified (5.5% / 4.4% foreign CPU), later **superseded** by BASELINE.md because the workload contained no entities | MSPT p50 +24.3%, p99 −38.6%, max −36.6% |
+| [BASELINE.md](../BASELINE.md), *Chunk workers, re-measured on a workload that has entities in it* | `players-10` + 300 entities, fresh world | uncertified (2-worker side 10.4% foreign CPU) | worse at **every** percentile: p50 +56.2%, p99 +43.3%, max +39.4%; *"Leave the worker count alone."* The seeded re-run (*The chunk-worker A/B, seeded*) keeps the direction (p99 +5.3%) with deltas inside the noise (24.9% / 28.1% foreign CPU) |
+| Sourby Demo 2026-10-06 ([AGENT-COORDINATION.md](../../AGENT-COORDINATION.md), *new-terrain chunk delivery on Sourby Demo*) | 1 real-protocol client, view distance 10 (361 chunks), different fresh coordinates per spot, 8-core host, demo build 22:40 | **uncertified**: 3 spots per side, noise not measured | time until the full view was delivered: workers=2 → 22.7 / 17.8 / 18.2 s, workers at 1.92–2.00 cores with ~5.9 cores idle; workers=6 → 17.0 / 11.2 / 15.6 s, profiled run 12.4 / 11.5 s, workers at 4.5–5.5 cores |
+
+The Sourby Demo spark profile (<https://spark.lucko.me/C2D7rXIJGY>, wall clock, workers=6)
+shows the busy worker time is vanilla world generation: noise 23.2%, biomes 8.5%, surface
+8.5%, features 5.1% (structure_starts 2.3%, carvers 1.5%, light 0.7%; ~45% parked between
+teleports). No AWF or lock cost was visible in it.
+
+The rows do not measure the same thing. The first two measure region-thread tick time
+(MSPT) under a ten-client swarm, where extra workers manufacture region-thread work. The
+third measures how long one exploring player waits for terrain, where two workers left
+about six cores idle; the coordination record gives no MSPT for those runs. None of the
+three is wrong, and none answers the question for the others.
+
+**Which recommendation applies depends on which workload represents the product**
+("one player exploring new terrain" versus "ten settled players"). That is an owner
+decision, recorded as open in [TODO.md](../../TODO.md) P0 *Keputusan owner*; until it is
+taken this file makes no product-wide recommendation.
+
+Current state, so nobody has to infer it:
+
+* **Code default: unchanged.** Moonrise's formula above still gives 2 workers on 8 cores.
+* **Sourby Demo: `chunk-system.worker-threads: 6`** in `config/paper-global.yml`, set on
+  2026-10-06 by operator decision (user approval), RESTART_REQUIRED, applied with a
+  restart. This is one server's operator setting, not a default change and not evidence
+  for one.
+
+Interpretation rule, as in *What follows*: worker count is an operator trade, not a code
+change. Quote each row only for its own workload, metric and evidence state; do not carry
+the single-player delivery times over to a swarm, or the swarm's MSPT over to an exploring
+player. A shipped-default change needs a measurement on the workload the owner names as
+representative, with certification state, CPU accounting across lanes (DEVELOPMENT.md §6)
+and the same statistic on both sides.
+
 ## Contention, measured on the same recordings
 
 AURORA-INDEPENDENT-ENGINE Phase 0 asks for contention analysis beside the CPU and

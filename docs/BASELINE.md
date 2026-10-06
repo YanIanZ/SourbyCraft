@@ -41,7 +41,8 @@ heap.txt          heap summary taken at the end of the measurement window
 The runner changes no performance-related setting. It writes only `eula.txt`, a
 loopback-bound `server.properties`, and a utility TOML that disables auto-update and
 ViaVersion provisioning so a run cannot reach the network for anything but its own
-load. Heap size and collector are explicit arguments and are recorded in provenance.
+load. The one addition is `aurora.bridge.mode = "safe"`, written only for a workload that
+declares bridged plugins (`plugins-10`). Heap size and collector are explicit arguments and are recorded in provenance.
 
 ## Comparing
 
@@ -52,7 +53,8 @@ python3 scripts/compare_baseline.py \
 
 Exits non-zero if either input is uncertified, when a gated metric regresses past `--threshold` (default `0.03`), and
 also when the two runs differ in pinned provenance — Java version, platform, CPU
-count, heap, JVM flags, JFR settings, warmup, duration, asserted client count. Pass
+count, heap, JVM flags, JFR settings, warmup, duration, asserted client count, the
+plugin jars (path and SHA-256 each) and the bridge mode. Pass
 `--allow-provenance-drift` to allow descriptive comparison despite drift; the report
 still labels the gate blocked. This option never permits uncertified inputs.
 Narrow the gate to the metrics a change actually targets with repeated `--gate`.
@@ -86,6 +88,7 @@ python3 scripts/run_baseline.py build/libs/SourbyCraft-slim.jar \
 | --- | --- | --- |
 | `idle` | Fixed cost of runtime, telemetry and region scheduler | no |
 | `players-10/50/100` | Chunk residency and entity population of dispersed players | yes |
+| `plugins-10` | `players-10` plus the representative plugin set, loaded but not driven | yes |
 | `entity-stress` | Entity tick, collision, item merge and despawn | yes |
 | `chunk-stress` | Generation, load, integration, unload and save | no |
 | `network-stress` | Accept, decode, encode, flush, connection teardown | no |
@@ -97,6 +100,54 @@ traffic, their entity-tracking cost, or the chunk streaming they cause by moving
 
 Every plan states its own limits in `fidelity`, and those statements are copied into
 `baseline.json` so a number is never separated from what produced it.
+
+### The plugin workload
+
+`plugins-10` is `players-10` with the plugin set in `build-data/representative-plugins.json`
+loaded (compat-vs-performance §6 item 1): EssentialsX and Vault bridged, the SuperiorSkyblock2
+Folia port native with its SSB-AuroraWorlds module, spark bundled. Its setup commands are
+identical to `players-10`, so the plugins are the only difference. It adds their enable-time
+work, scheduled tasks and listeners firing on the workload's own events; it does **not** drive
+them — no player commands, no economy traffic, no islands, no spark session. Its `fidelity`
+says so in `baseline.json`.
+
+```sh
+python3 scripts/run_baseline.py build/libs/SourbyCraft-slim.jar \
+    --workload plugins-10 --plugins-dir build/baselines/plugin-set \
+    --output build/baselines/plugins-10 --world build/worlds/baseline-world \
+    --connected-players 10
+```
+
+`--plugins-dir` is copied to the run's `plugins/` before boot; jars below it (SSB's
+`SuperiorSkyblock2/modules/`) are included. The runner refuses `plugins-10` without it,
+refuses it with `--workload all` (which runs only the vanilla workloads), and never downloads a
+jar: the JSON lists machine-local paths, or `null` with a note. Spark needs no jar.
+
+**Status: one uncertified run on Sourby Demo (2026-10-06, `bench_panel.py`).** The local
+harness has not run it: this machine cannot host the clients and server together, so the run
+used the panel path with the demo's own plugin set (EssentialsX and Vault bridged in SAFE mode,
+SuperiorSkyblock2 2026.3 Folia port native, EconomyShopGUI, Via*, spark bundled). 10 real-protocol
+clients, 120 s warmup, 300 s window, 9 console samples, 8 cores, `chunk-system.worker-threads: 6`,
+`aurora.entity.async-pathfinding = true` on the demo. Not certified: console-sampled `/perf`,
+clients over the internet, panel node not known idle.
+
+| Metric (worst region, console-sampled) | median | min | max |
+| --- | ---: | ---: | ---: |
+| TPS | 20.0 | 19.2 | 20.0 |
+| average MSPT | 4.93 ms | 3.45 ms | 6.63 ms |
+| p95 / p99 MSPT | 7.43 / 12.7 ms | 6.21 / 10.6 | 8.88 / 18.1 |
+| recent maximum MSPT | 20.9 ms | 17.8 ms | 344.5 ms (one sample, with process CPU at 55%; cause not identified) |
+| active regions | 10 | 9 | 10 |
+| process CPU | 15.7 % | 11.7 % | 75.6 % |
+
+Bridge cost over the whole run (the per-plugin body timing added 2026-10-07): Essentials 18
+scheduler redirects, 0 violations, sync bodies on the global region **84.8 ms total, p99 0.62 ms**;
+Vault 3 redirects, 7.69 ms total, p99 5.15 ms. No bridged task ran on a region. With the
+workload's fidelity in mind — the plugins were loaded, not driven by player commands — this is a
+floor for bridged-plugin cost, not a representative one. Evidence: `bench.json` kept under
+`build/baselines/demo-plugins-10-20261006/` (not in git); the earlier `players-10` panel run read
+median 5.1 ms / p99 10.6 ms, so the plugin set did not move the median visibly at this load, which is
+a comparison between two uncertified runs and nothing more.
 
 ### The client gap
 

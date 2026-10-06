@@ -11,8 +11,11 @@ a run with zero connected players exercises the inactive entity path. Workloads 
 depend on that gate declare ``requires_connected_players`` and the runner refuses to
 certify their results unless the operator asserts that clients were attached.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import json
 import math
+from pathlib import Path
+from typing import Optional
 
 # Entities are placed on the generated surface rather than at a fixed height. A superflat
 # world has a known ground level but is representative of nothing: real terrain changes
@@ -77,7 +80,10 @@ class Plan:
     # How far connected clients may wander, or None to explore freely. A workload that measures
     # entities keeps its players beside them: clients flying outward generate terrain for the
     # whole run, and that generation then dominates the profile of what was being measured.
-    client_roam_blocks: int | None = None
+    client_roam_blocks: Optional[int] = None
+    # The declared plugin set, as ({"name", "loading"}, ...). Empty for a vanilla workload; a
+    # workload that declares plugins is refused unless the run is given a plugins directory.
+    plugins: tuple = ()
     parameters: dict = field(default_factory=dict)
 
 
@@ -266,6 +272,67 @@ def save_stress(radius=6, churn_columns=192, interval_seconds=15):
                     "churn_columns": churn_columns, "blocks_per_pass": churn_columns * 4 * 4 * 4})
 
 
+# The representative plugin set lives beside the other pinned build data, so the workload and
+# the document that names its plugins cannot disagree.
+REPRESENTATIVE_PLUGINS = Path(__file__).resolve().parent.parent / "build-data" / "representative-plugins.json"
+# native: declares folia-supported. bridged: loads through the Aurora Bridge, which only admits
+# it with aurora.bridge.mode = "safe". bundled: ships inside the server jar.
+PLUGIN_LOADING = ("native", "bridged", "bundled")
+
+
+def load_plugin_set(path=REPRESENTATIVE_PLUGINS):
+    """Read and validate the representative plugin set."""
+    data = json.loads(Path(path).read_text())
+    plugins = data.get("plugins")
+    if not plugins:
+        raise ValueError(f"{path} declares no plugins")
+    for entry in plugins:
+        missing = [key for key in ("name", "loading", "jar") if key not in entry]
+        if missing:
+            raise ValueError(f"{path}: plugin entry {entry.get('name')!r} lacks {missing}")
+        if entry["loading"] not in PLUGIN_LOADING:
+            raise ValueError(f"{path}: {entry['name']} loading {entry['loading']!r} is not one "
+                             f"of {PLUGIN_LOADING}")
+        if entry["jar"] is None and not entry.get("note"):
+            raise ValueError(f"{path}: {entry['name']} has no jar and no note saying why")
+    return plugins
+
+
+def needs_bridge(plan):
+    """Whether the run must enable the Aurora Bridge for this workload's plugins to load."""
+    return any(entry["loading"] == "bridged" for entry in plan.plugins)
+
+
+def plugin_players(count=10):
+    """players-N plus the representative plugin set, loaded but not driven.
+
+    This puts plugin load -- their scheduled tasks, listeners firing on the workload's own
+    entity and chunk events, bridged task routing -- into the same measurement as players-N,
+    so a compatibility change and its performance cost are seen in one run. It does not
+    exercise what the plugins exist for: nobody types a command, opens a shop or an island.
+    """
+    base = players(count)
+    declared = tuple({"name": entry["name"], "loading": entry["loading"]}
+                     for entry in load_plugin_set())
+    bridged = [entry["name"] for entry in declared if entry["loading"] == "bridged"]
+    return replace(
+        base, name=f"plugins-{count}",
+        summary=f"players-{count} with the representative plugin set loaded: "
+                + ", ".join(f"{entry['name']} ({entry['loading']})" for entry in declared) + ".",
+        fidelity=base.fidelity + (
+            "Adds the plugins' own background load: enable-time work, scheduled tasks, and "
+            "listeners firing on the entity and chunk events the players workload already causes.",
+            "Bridged plugins (" + ", ".join(bridged) + ") run through the Aurora Bridge with "
+            "aurora.bridge.mode = \"safe\"; their cost includes the bridge's routing.",
+            "Does not drive the plugins: no player commands, no economy or Vault traffic, no "
+            "island creation or SuperiorSkyblock2 world generation, no chat, no spark profiling "
+            "session. A plugin's cost under real use is not measured here.",
+            "The plugin jars are whatever --plugins-dir held; compare runs only when the "
+            "recorded plugin list and hashes match."),
+        plugins=declared,
+        parameters={**base.parameters, "plugins": [dict(entry) for entry in declared]})
+
+
 def network_stress(clients=64, rate_per_second=400):
     """Connection, handshake and status round-trips against the live Netty pipeline."""
     return Plan(
@@ -282,7 +349,8 @@ def network_stress(clients=64, rate_per_second=400):
 
 BUILDERS = {"idle": idle,
             "players-10": lambda: players(10), "players-50": lambda: players(50),
-            "players-100": lambda: players(100), "entity-stress": entity_stress,
+            "players-100": lambda: players(100), "plugins-10": lambda: plugin_players(10),
+            "entity-stress": entity_stress,
             "chunk-stress": chunk_stress, "save-stress": save_stress,
             "network-stress": network_stress}
 

@@ -271,6 +271,19 @@ def seed_cache(directory, source):
     return copied
 
 
+def install_plugins(directory, source):
+    """Copy a plugins directory into the run, and fingerprint every jar it now holds.
+
+    The list is recorded in provenance and pinned by compare_baseline, so two runs with
+    different plugin jars -- a rebuilt port, a swapped fork -- are reported as drift rather
+    than compared. Jars below plugins/ (a plugin's modules) are included by relative path.
+    """
+    target = directory / "plugins"
+    shutil.copytree(source.resolve(strict=True), target)
+    return [{"path": jar.relative_to(target).as_posix(), "sha256": sha256(jar)}
+            for jar in sorted(target.rglob("*.jar"))]
+
+
 def prepare(directory, plan, port, heap_mib, max_players=0):
     directory.mkdir(parents=True, exist_ok=False)
     (directory / "eula.txt").write_text("eula=true\n")
@@ -289,8 +302,14 @@ def prepare(directory, plan, port, heap_mib, max_players=0):
     config = directory / "sourbycraft_config" / "sourbycraft_global_config.toml"
     config.parent.mkdir()
     config.write_text("# Isolated baseline fixture; no external plugin or version changes.\n"
-                      "[viaversion]\nauto-provision=false\n"
+                      "[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=false\n"
                       "[misc.auto_update]\nenabled=false\n")
+    if baseline_workloads.needs_bridge(plan):
+        # A plugin without folia-supported is refused unless the bridge admits it, and the
+        # bridge reads its mode from this file before the plugin scan (RESTART_REQUIRED).
+        # Only a workload that declares bridged plugins gets it; every other run keeps "off".
+        with config.open("a") as toml:
+            toml.write('[aurora.bridge]\nmode="safe"\n')
     if heap_mib < plan.minimum_heap_mib:
         raise RuntimeError(f"{plan.name} needs at least {plan.minimum_heap_mib} MiB of heap; "
                            f"got {heap_mib}. Raise --heap-mib or the baseline is heap-bound.")
@@ -321,7 +340,8 @@ def capture(jar, plan, output, args, tools):
         # A pre-generated world keeps terrain identical across runs and keeps generation
         # out of the measurement window. Section 85 wants the world named in provenance.
         shutil.copytree(args.world.resolve(strict=True), output / "world")
-    command = [str(java), f"-Xms{args.heap_mib}M", f"-Xmx{args.heap_mib}M", f"-XX:+Use{args.gc}",
+    plugins = install_plugins(output, args.plugins_dir) if args.plugins_dir else []
+    command =[str(java), f"-Xms{args.heap_mib}M", f"-Xmx{args.heap_mib}M", f"-XX:+Use{args.gc}",
                "-Xlog:gc*:file=gc.log:time,uptime,level,tags"]
     # Extra -D properties, so a tuning question can be answered by measuring both sides
     # rather than by changing a default and hoping. They are recorded in provenance, and
@@ -352,7 +372,10 @@ def capture(jar, plan, output, args, tools):
             "connected_players_asserted": args.connected_players,
             "competing_servers_at_start": competitors,
             "seeded_cache_files": seeded,
-            "plugins": [], "world_source": str(args.world) if args.world else "generated fresh",
+            "plugins": plugins,
+            "plugins_source": str(args.plugins_dir) if args.plugins_dir else None,
+            "aurora_bridge_mode": "safe" if baseline_workloads.needs_bridge(plan) else None,
+            "world_source": str(args.world) if args.world else "generated fresh",
             "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")},
         "status": "running"}
     record_path = output / "baseline.json"
@@ -560,6 +583,10 @@ def main():
     parser.add_argument("--cache-from", type=Path,
                         help="Copy this run directory's bootstrap cache (or a cache/ directory) "
                              "into the new run, so it does not re-download on first boot.")
+    parser.add_argument("--plugins-dir", type=Path,
+                        help="Copy this directory into the run's plugins/ before boot; every "
+                             "jar's name and SHA-256 is recorded in provenance. Required by a "
+                             "workload that declares plugins (plugins-10).")
     parser.add_argument("--property", action="append", default=[], metavar="KEY=VALUE",
                         help="Extra -D system property for the server JVM; repeatable. "
                              "E.g. --property Paper.WorkerThreadCount=4")
@@ -573,7 +600,20 @@ def main():
         parser.error("duration must be positive and warmup cannot be negative")
     jar = args.jar.resolve(strict=True)
     tools = jdk_tools()
-    names = baseline_workloads.NAMES if args.workload == "all" else (args.workload,)
+    if args.plugins_dir and not args.plugins_dir.is_dir():
+        parser.error(f"--plugins-dir {args.plugins_dir} is not a directory")
+    if args.workload == "all":
+        # A plugins directory would change every vanilla workload it was copied into, so
+        # "all" means the vanilla set; a plugin workload is run on its own.
+        if args.plugins_dir:
+            parser.error("--plugins-dir applies to one workload; it cannot be used with all")
+        names = tuple(name for name in baseline_workloads.NAMES
+                      if not baseline_workloads.build(name).plugins)
+    else:
+        names = (args.workload,)
+        if baseline_workloads.build(args.workload).plugins and not args.plugins_dir:
+            parser.error(f"{args.workload} declares plugins; pass --plugins-dir, or the run "
+                         "would measure the workload without them")
     output = args.output.resolve()
     if output.exists():
         parser.error(f"{output} already exists; baselines are never written into an existing tree")
