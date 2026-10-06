@@ -276,11 +276,17 @@ def main():
 
         samples = []
         deadline = time.monotonic() + args.duration
+        clientless = 0
         while time.monotonic() < deadline:
             guard(panel.log())
             current = sample()
             current["clients_in_play"] = swarm.report()["in_play"]
             samples.append(current)
+            # Without clients the entity path is inactive and the samples measure nothing; stop and
+            # restore instead of holding the server in bench mode for the rest of the window.
+            clientless = clientless + 1 if clients and not current["clients_in_play"] else 0
+            if clientless >= 2:
+                raise BenchBreached("all clients disconnected (host asleep or network lost); bench aborted")
             print(f"  tps {current['worst_region_tps']} mspt {current['worst_avg_mspt']} "
                   f"p99 {current['p99_mspt']} regions {current['active_regions']} "
                   f"cpu {current['process_cpu_pct']}% clients {current['clients_in_play']}", flush=True)
