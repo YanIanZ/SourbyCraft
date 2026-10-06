@@ -24,7 +24,8 @@ public final class AuroraWorldsRuntime {
 
     public static synchronized void start(final Plugin owner) throws IOException {
         if (service != null) return;
-        final AuroraWorldsService created = new AuroraWorldsService(new AuroraWorldRegistry(AwfEngine.MANAGED_FILE));
+        final AuroraWorldsService created = new AuroraWorldsService(new AuroraWorldRegistry(AwfEngine.MANAGED_FILE),
+            new AuroraTemplates(AwfEngine.TEMPLATES));
         Bukkit.getServicesManager().register(AuroraWorlds.class, created, owner, ServicePriority.Normal);
         Bukkit.getPluginManager().registerEvents(new Listener() {
             @EventHandler

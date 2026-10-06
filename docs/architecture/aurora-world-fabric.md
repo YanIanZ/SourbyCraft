@@ -72,9 +72,9 @@ It is off unless configured and is not qualified; see "Engine integration" below
 
 ### Runtime worlds (`AuroraWorlds` API and `/awf`)
 
-Status: implemented on the FILE backend; verified by a local end-to-end run (below). Templates,
-copy-on-write clones, the Slime (SRF v13) converter and database backends are **planned, not
-implemented**.
+Status: worlds, named generators, templates and copy-on-write instances are implemented on the
+FILE backend and verified by local end-to-end runs (below). The Slime (SRF v13) converter and
+database backends are **planned, not implemented**.
 
 - **API.** `dev.iyanz.sourbycraft.api.world.AuroraWorlds` in `sourbyapi`, obtained from the
   services manager: `list`, `exists`, `isLoaded`, `create(WorldCreator, autoload)`, `load`,
@@ -98,8 +98,28 @@ implemented**.
 - **Autoload.** Worlds with `autoload` are loaded on the global tick after `ServerLoadEvent`
   (STARTUP), i.e. after the default worlds exist. Setting changes are persisted immediately and
   take effect at the next start (RESTART_REQUIRED for loading; LIVE for the file).
-- **Command.** `/awf list | info <n> | create <n> [normal|nether|end] [seed] [autoload] |
-  load <n> | save <n> | unload <n> [nosave] | delete <n> confirm | autoload <n> on|off`,
+- **Generators.** A generator is recorded by name so the world loads again with it: `void`
+  (built in: no terrain, structures or natural mobs; spawn 0.5, 64, 0.5), a plugin generator as
+  `Plugin` or `Plugin:id`, or none for the environment's own terrain. World types `flat`,
+  `amplified` and `large_biomes` are recorded the same way. A `WorldCreator` that carries a
+  generator object is refused, because that object cannot be found again at the next load.
+- **Templates.** `saveTemplate(world, template)` flattens an **unloaded** world's committed chunks
+  — for an instance, its own chunks over its template's — into `awf-templates/<t>/{region,
+  entities,poi}.awf` plus `template.json` (environment, seed, generator, world type). It is built
+  in a hidden folder in batches of 256 chunks and moved into place at the end, so a failure never
+  leaves a template instances could be made from. Nothing writes a template afterwards; it opens
+  as role `TEMPLATE` (no commits, no garbage collection). A loaded world is refused because it keeps
+  committing and a template must be one consistent moment. Templates need the FILE backend.
+- **Instances.** `createFromTemplate(template, name)` registers a world with role `INSTANCE` whose
+  stores take the template's stores as their read-only base: a chunk the instance never wrote is
+  read from the template; a written chunk is the instance's own; a deleted chunk shadows the
+  template and is generated again. All instances of a template share one opened template store
+  (and its chunk index) in memory and one copy on disk. A template cannot be deleted while any
+  world is an instance of it.
+- **Command.** `/awf list | info <n> | create <n> [normal|nether|end] [void|flat|amplified|
+  large_biomes] [generator=Plugin[:id]] [seed] [autoload] | create <n> from <template> [autoload] |
+  load <n> | save <n> | unload <n> [nosave] | delete <n> confirm | autoload <n> on|off |
+  template list | template save <world> <template> | template delete <template> confirm`,
   permission `sourbycraft.command.awf`.
 
 Verification (2026-10-06, local, macOS, JDK 25, 2 GiB heap, one server, no players): create →
@@ -108,6 +128,18 @@ stop → restart autoloads the world → block present → delete removes folder
 reserved name refused. 12/12 checks. This is a functional check, not a performance or
 concurrency qualification; unloading with players present and `unload … nosave` with dirty chunks
 were not exercised.
+
+Templates (2026-10-06, same setup): void world built → template save refused while loaded →
+unload → template saved → two instances created with autoload → instance 1 changes a template
+block, instance 2 still reads the template's → template delete refused while instances exist →
+clean stop → stores on disk, 0 `.mca` in instances → restart autoloads both → instance 1's change
+and instance 2's template content (both template blocks) present → instances deleted → template
+deleted. 17/17 checks. No disk-size or memory measurement was taken; the sharing claim above is
+by construction (one store opened per template), not a measured saving.
+
+A defect this found: `AwfRegionStorage.read` returned "not ours" for any chunk the world had not
+written, so instances never read their template and the engine fell through to (absent) region
+files. It now reads through the world's base first.
 
 ### Engine integration (RegionFileStorage)
 

@@ -30,14 +30,16 @@ class AuroraWorldRegistryTest {
     void entriesSurviveAReopenAndRemovalIsPersisted() throws IOException {
         final Path file = this.dir.resolve("aurora-worlds.json");
         final AuroraWorldRegistry first = new AuroraWorldRegistry(file);
-        first.put(new AuroraWorldRegistry.Entry("hub", "normal", 42L, null, true));
-        first.put(new AuroraWorldRegistry.Entry("arena", "nether", null, null, false));
+        first.put(new AuroraWorldRegistry.Entry("hub", "normal", 42L, null, null, null, true));
+        first.put(new AuroraWorldRegistry.Entry("arena", "nether", null, "void", "flat", "lobby", false));
 
         final AuroraWorldRegistry reopened = new AuroraWorldRegistry(file);
         assertEquals(2, reopened.all().size());
         assertTrue(reopened.get("hub").orElseThrow().autoload());
         assertEquals(42L, reopened.get("hub").orElseThrow().seed());
         assertEquals("nether", reopened.get("arena").orElseThrow().environment());
+        assertEquals("lobby", reopened.get("arena").orElseThrow().template());
+        assertEquals("void", reopened.get("arena").orElseThrow().generator());
 
         reopened.remove("arena");
         assertFalse(new AuroraWorldRegistry(file).contains("arena"));

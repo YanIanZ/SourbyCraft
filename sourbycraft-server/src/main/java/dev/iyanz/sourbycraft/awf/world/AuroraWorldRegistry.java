@@ -37,8 +37,28 @@ public final class AuroraWorldRegistry {
     private static final Set<String> RESERVED = Set.of("region", "entities", "poi", "data", "dimensions",
         "minecraft", "players", "datapacks", "playerdata", "advancements", "stats", "awf");
 
-    /** One managed world. */
-    public record Entry(String name, String environment, Long seed, String generator, boolean autoload) {}
+    /**
+     * One managed world, or a template's description of the worlds made from it.
+     *
+     * @param environment {@code normal}, {@code nether} or {@code the_end}
+     * @param seed the seed, or {@code null} for a random one at creation
+     * @param generator {@code void}, a plugin generator as {@code Plugin[:id]}, or {@code null}
+     *     for the environment's own terrain
+     * @param worldType {@code normal}, {@code flat}, {@code amplified} or {@code large_biomes}; or
+     *     {@code null} for normal
+     * @param template the template this world is a copy-on-write instance of, or {@code null}
+     */
+    public record Entry(String name, String environment, Long seed, String generator, String worldType,
+                        String template, boolean autoload) {
+
+        public Entry withAutoload(final boolean value) {
+            return new Entry(this.name, this.environment, this.seed, this.generator, this.worldType, this.template, value);
+        }
+
+        public Entry named(final String other, final String fromTemplate, final boolean value) {
+            return new Entry(other, this.environment, this.seed, this.generator, this.worldType, fromTemplate, value);
+        }
+    }
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 

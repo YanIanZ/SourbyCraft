@@ -234,7 +234,9 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [x] API dunia AWF runtime (`AuroraWorlds` di sourbyapi, `/awf`, registry
   `sourbycraft_config/aurora-worlds.json`, autoload) — backend FILE; E2E lokal 12/12 (2026-10-06).
   Belum diuji: unload saat ada pemain, `unload nosave` dengan chunk kotor.
-- [ ] AWF template + klon copy-on-write (dunia instance berbagi chunk template sampai diubah)
+- [x] AWF template + instance copy-on-write, generator `void`/plugin/tipe dunia bernama
+  (`/awf template …`, `/awf create <n> from <t>`) — E2E lokal 17/17 (2026-10-06). Belum diukur:
+  hemat disk/memori per instance.
 - [ ] Konverter Slime SRF v13 → AWF + `/awf import`
 - [ ] Backend database AWF (MongoDB/MySQL/Redis)
 - [ ] Executor yang sudah ada dipindahkan ke bawah Resource Governor (ditunda; masing-masing sudah

@@ -79,13 +79,16 @@ public final class AwfRegionStorage {
     }
 
     /**
-     * The chunk's NBT bytes if AWF owns it, {@link #DELETED} if AWF deleted it, or {@code null}
-     * when AWF has never touched it and the region file is authoritative.
+     * The chunk's NBT bytes if AWF owns it or the world's template has it, {@link #DELETED} if AWF
+     * deleted it, or {@code null} when neither has it and the region file is authoritative.
      */
     public byte[] read(final int chunkX, final int chunkZ) throws IOException {
         final ChunkKey key = new ChunkKey(chunkX, chunkZ);
         this.reads.incrementAndGet();
         if (!this.world.owns(key)) {
+            // An instance reads its template's chunk until it writes its own.
+            final Optional<byte[]> fromTemplate = this.world.read(key);
+            if (fromTemplate.isPresent()) return fromTemplate.get();
             this.baseFallthroughs.incrementAndGet();
             return null;
         }

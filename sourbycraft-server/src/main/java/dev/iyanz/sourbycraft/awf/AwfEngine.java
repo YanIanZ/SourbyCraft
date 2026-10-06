@@ -37,6 +37,13 @@ public final class AwfEngine {
      * beforehand off it and {@link #open} takes them from here.
      */
     private final Map<String, AwfStore> prepared = new ConcurrentHashMap<>();
+    /** Managed worlds that are copy-on-write instances of a template: world name to template name. */
+    private final Map<String, String> templateOf = new ConcurrentHashMap<>();
+    /**
+     * Opened template stores by storage id. A template never changes after it is saved, so every
+     * instance of it shares one read-only store and its chunk index.
+     */
+    private final Map<String, AwfStore> templateStores = new ConcurrentHashMap<>();
     private volatile boolean warnedMissingBackend;
 
     AwfEngine(final AwfSettings settings, final Executor storageLane, final LongSupplier nanoClock) {
@@ -91,7 +98,7 @@ public final class AwfEngine {
     private static void loadManaged(final AwfEngine engine) {
         try {
             for (final var entry : new dev.iyanz.sourbycraft.awf.world.AuroraWorldRegistry(MANAGED_FILE).all()) {
-                engine.managed.add(entry.name());
+                engine.manageWorld(entry.name(), entry.template());
             }
         } catch (final IOException failed) {
             // Their stores still open (an existing store always does); only a world created at
@@ -103,33 +110,80 @@ public final class AwfEngine {
 
     /** Makes a world an AWF world before its storages open. Called before the world is created. */
     public static void manage(final String worldName) {
-        global().managed.add(worldName);
+        manage(worldName, null);
+    }
+
+    /**
+     * As {@link #manage(String)}, for a world whose chunks fall through to a template's.
+     *
+     * @param template the template the world is an instance of, or {@code null}
+     */
+    public static void manage(final String worldName, final String template) {
+        global().manageWorld(worldName, template);
+    }
+
+    void manageWorld(final String worldName, final String template) {
+        if (template != null) this.templateOf.put(worldName, template);
+        else this.templateOf.remove(worldName);
+        this.managed.add(worldName);
     }
 
     /** Stops treating a world as managed. Called after the world is deleted. */
     public static void release(final String worldName) {
         global().managed.remove(worldName);
+        global().templateOf.remove(worldName);
+    }
+
+    /** Where templates are kept: one folder per template, holding one store per storage folder. */
+    public static final Path TEMPLATES = Path.of("awf-templates");
+
+    /** The storage id of one of a template's stores, for example {@code awf-templates/lobby/region}. */
+    static String templateStorageId(final String template, final String storageFolder) {
+        return storageId(TEMPLATES.resolve(template).resolve(storageFolder));
+    }
+
+    /** Forgets a template's opened stores. Called after the template is deleted. */
+    public static void forgetTemplate(final String template) {
+        final AwfEngine engine = global();
+        for (final String folder : STORAGE_FOLDERS) {
+            engine.templateStores.remove(templateStorageId(template, folder));
+        }
+    }
+
+    /** The name of the configured backend; templates are kept only on the FILE backend. */
+    public static String backendName() {
+        return global().settings.backend();
+    }
+
+    /** The configured number of committed generations each store keeps. */
+    public static int retainedGenerations() {
+        return global().settings.retainedGenerations();
     }
 
     /** The storage folders the engine opens in every dimension folder. */
-    private static final List<String> STORAGE_FOLDERS = List.of("region", "entities", "poi");
+    public static final List<String> STORAGE_FOLDERS = List.of("region", "entities", "poi");
 
     /**
      * Opens the AWF stores of a managed world's dimension folder before the world is created or
      * loaded. Must run off the region threads; the storages that open on the global tick then use
      * these stores instead of opening them there.
      */
-    public static void prepare(final Path dimensionFolder) throws IOException {
-        global().prepareStores(dimensionFolder);
+    public static void prepare(final Path dimensionFolder, final String template) throws IOException {
+        global().prepareStores(dimensionFolder, template);
     }
 
     void prepareStores(final Path dimensionFolder) throws IOException {
+        prepareStores(dimensionFolder, null);
+    }
+
+    void prepareStores(final Path dimensionFolder, final String template) throws IOException {
         final AwfBackend backend = this.backends.apply(this.settings.backend());
         if (backend == null) {
             throw new IOException("AWF backend '" + this.settings.backend() + "' (" + AwfSettings.BACKEND_KEY
                 + ") is not registered");
         }
         for (final String folder : STORAGE_FOLDERS) {
+            if (template != null) templateBase(backend, template, folder);
             final Path storageFolder = dimensionFolder.resolve(folder);
             final String id = storageId(storageFolder);
             if (this.storages.containsKey(storageFolder.toAbsolutePath().normalize().toString())
@@ -239,16 +293,44 @@ public final class AwfEngine {
                 + " than the chunks it holds");
         }
         final String name = regionFolder.toAbsolutePath().normalize().toString();
+        final String template = managedWorld ? templateFor(regionFolder) : null;
+        final ChunkSource base = template == null ? null
+            : templateBase(backend, template, regionFolder.getFileName().toString());
+        final WorldRole role = template == null ? WorldRole.VANILLA : WorldRole.INSTANCE;
         final AwfStore prepared = this.prepared.remove(id);
         final AwfStore store = prepared != null ? prepared
-            : backend.open(id, WorldRole.VANILLA, this.settings.retainedGenerations());
-        final AwfWorld world = new AwfWorld(name, WorldRole.VANILLA, null, store, this.settings.residentChunks());
+            : backend.open(id, role, this.settings.retainedGenerations());
+        final AwfWorld world = new AwfWorld(name, role, base, store, this.settings.residentChunks());
         final AwfRegionStorage storage = new AwfRegionStorage(name, world, this.settings, this.storageLane,
             this.nanoClock.getAsLong(), () -> this.storages.remove(name));
         if (this.storages.putIfAbsent(name, storage) != null) {
             throw new IOException("AWF storage " + name + " is already open");
         }
         return storage;
+    }
+
+    /** The template of the managed instance world this folder belongs to, or {@code null}. */
+    private String templateFor(final Path regionFolder) {
+        for (final Path element : regionFolder.toAbsolutePath().normalize()) {
+            final String template = this.templateOf.get(element.toString());
+            if (template != null && this.managed.contains(element.toString())) return template;
+        }
+        return null;
+    }
+
+    /**
+     * A template's store for one storage folder, opened read-only once and shared, or {@code null}
+     * when the template has nothing for that folder (a template without POI, say).
+     */
+    private AwfStore templateBase(final AwfBackend backend, final String template, final String storageFolder)
+        throws IOException {
+        final String id = templateStorageId(template, storageFolder);
+        final AwfStore cached = this.templateStores.get(id);
+        if (cached != null) return cached;
+        if (!backend.exists(id)) return null;
+        final AwfStore opened = backend.open(id, WorldRole.TEMPLATE, this.settings.retainedGenerations());
+        final AwfStore raced = this.templateStores.putIfAbsent(id, opened);
+        return raced != null ? raced : opened;
     }
 
     /**

@@ -87,6 +87,40 @@ class AwfRegionStorageTest {
     }
 
     @Test
+    void anInstanceReadsItsTemplateUntilItWritesAndNeverWritesTheTemplate() throws Exception {
+        // The engine looks for templates at awf-templates/<t>/region.awf under the server
+        // directory, which for a test run is the working directory; a unique name keeps runs apart.
+        final String template = "sky-" + System.nanoTime();
+        final Path templateStore = AwfRegionStorage.storeFor(AwfEngine.TEMPLATES.resolve(template).resolve("region"));
+        try {
+            AwfWorldStore.open(templateStore, WorldRole.VANILLA, 1).commit(
+                java.util.Map.of(new ChunkKey(0, 0), b("t0"), new ChunkKey(1, 0), b("t1")), Set.of(),
+                PersistenceMode.INCREMENTAL);
+            final Path dimension = this.dir.resolve("inst");
+            Files.createDirectories(dimension.resolve("region"));
+            final AwfEngine engine = engine(Set.of());
+            engine.manageWorld("inst", template);
+            engine.prepareStores(dimension, template);
+
+            final AwfRegionStorage storage = onRegionThread(() -> engine.open(dimension.resolve("region")));
+            assertArrayEquals(b("t0"), storage.read(0, 0), "an untouched chunk comes from the template");
+            storage.write(1, 0, b("mine"));
+            storage.close();
+
+            final AwfEngine restarted = engine(Set.of());
+            restarted.manageWorld("inst", template);
+            final AwfRegionStorage reopened = restarted.open(dimension.resolve("region"));
+            assertArrayEquals(b("mine"), reopened.read(1, 0), "the instance keeps its own change");
+            assertArrayEquals(b("t0"), reopened.read(0, 0));
+            assertArrayEquals(b("t1"), AwfWorldStore.open(templateStore, WorldRole.READ_ONLY, 1)
+                .read(new ChunkKey(1, 0)).orElseThrow(), "the template is never written");
+        } finally {
+            dev.iyanz.sourbycraft.awf.world.AuroraTemplates.deleteRecursively(templateStore.getParent());
+            Files.deleteIfExists(AwfEngine.TEMPLATES.toAbsolutePath());
+        }
+    }
+
+    @Test
     void listingMatchesAWholeFolderNameNotAPrefix() throws Exception {
         assertNull(engine(Set.of("world")).open(region("world_nether")));
         assertNotNull(engine(Set.of("world_nether")).open(region("world_nether")));
