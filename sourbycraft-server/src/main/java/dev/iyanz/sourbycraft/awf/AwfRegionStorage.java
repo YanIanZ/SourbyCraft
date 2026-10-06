@@ -160,7 +160,11 @@ public final class AwfRegionStorage {
                 this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts());
             }
         } finally {
-            this.onClose.run();
+            try {
+                this.world.closeStore();
+            } finally {
+                this.onClose.run();
+            }
         }
     }
 

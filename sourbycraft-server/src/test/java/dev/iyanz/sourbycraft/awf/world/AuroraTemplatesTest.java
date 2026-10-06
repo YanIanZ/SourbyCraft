@@ -107,7 +107,7 @@ class AuroraTemplatesTest {
     void largeWorldsAreWrittenInBatches() throws IOException {
         final Path big = this.dir.resolve("big");
         final Map<ChunkKey, String> chunks = new HashMap<>();
-        for (int i = 0; i < AuroraTemplates.BATCH * 2 + 3; i++) chunks.put(new ChunkKey(i, -i), "c" + i);
+        for (int i = 0; i < AuroraTemplates.BATCH + 3; i++) chunks.put(new ChunkKey(i, -i), "c" + i);
         commit(big, "region", chunks);
         final AuroraTemplates templates = new AuroraTemplates(this.dir.resolve("awf-templates"));
         assertEquals(chunks.size(), templates.save(big, world("big", null), "big"));

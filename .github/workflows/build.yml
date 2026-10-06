@@ -76,7 +76,13 @@ jobs:
       - name: Apply all patches (Paper -> Canvas -> SourbyCraft)
         run: ./gradlew applyAllPatches --no-daemon --stacktrace
 
+      - name: Install redis-server for the AWF Redis backend tests
+        run: sudo apt-get update -q && sudo apt-get install -y -q redis-server && redis-server --version
+
       - name: Test API and server; build metrics fixture
+        env:
+          # The Redis backend tests start their own redis-server; here they must run, not skip.
+          SOURBY_REQUIRE_REDIS: "1"
         run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test :test-plugin:jar :legacy-test-plugin:jar --no-daemon --stacktrace
 
       - name: Validate release identity and profiling scripts

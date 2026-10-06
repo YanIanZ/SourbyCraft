@@ -85,11 +85,38 @@ public final class AwfEngine {
                             + "s, " + settings.residentChunks() + " resident chunks per storage)");
                     }
                     loadManaged(current);
+                    if ("redis".equals(settings.backend()) && AwfBackend.named("redis") == null) {
+                        registerRedis();
+                    }
                     global = current;
                 }
             }
         }
         return current;
+    }
+
+    /**
+     * Registers the built-in Redis backend from {@code [aurora.awf.redis]}. A Redis that does not
+     * answer is reported, not hidden: the backend is still registered, so a world stored there
+     * fails to load instead of quietly opening from region files.
+     */
+    private static void registerRedis() {
+        final dev.iyanz.sourbycraft.awf.redis.RedisBackend redis;
+        try {
+            redis = new dev.iyanz.sourbycraft.awf.redis.RedisBackend(
+                dev.iyanz.sourbycraft.awf.redis.RedisSettings.readEarly(AURORA_FILE, UNIFIED_FILE));
+        } catch (final IllegalArgumentException invalid) {
+            SourbyLogger.error("Aurora World Fabric: the Redis backend is misconfigured: " + invalid.getMessage());
+            return;
+        }
+        AwfBackend.register(redis);
+        try {
+            redis.checkServer();
+            SourbyLogger.info("Aurora World Fabric: stores on " + redis.describe());
+        } catch (final IOException unreachable) {
+            SourbyLogger.error("Aurora World Fabric: Redis is not reachable (" + unreachable.getMessage()
+                + "); worlds stored there will fail to load until it is");
+        }
     }
 
     /** The registry file of worlds managed at runtime; read once when the engine starts. */
@@ -183,7 +210,7 @@ public final class AwfEngine {
                 + ") is not registered");
         }
         for (final String folder : STORAGE_FOLDERS) {
-            if (template != null) templateBase(backend, template, folder);
+            if (template != null) templateBase(template, folder);
             final Path storageFolder = dimensionFolder.resolve(folder);
             final String id = storageId(storageFolder);
             if (this.storages.containsKey(storageFolder.toAbsolutePath().normalize().toString())
@@ -295,7 +322,7 @@ public final class AwfEngine {
         final String name = regionFolder.toAbsolutePath().normalize().toString();
         final String template = managedWorld ? templateFor(regionFolder) : null;
         final ChunkSource base = template == null ? null
-            : templateBase(backend, template, regionFolder.getFileName().toString());
+            : templateBase(template, regionFolder.getFileName().toString());
         final WorldRole role = template == null ? WorldRole.VANILLA : WorldRole.INSTANCE;
         final AwfStore prepared = this.prepared.remove(id);
         final AwfStore store = prepared != null ? prepared
@@ -322,8 +349,9 @@ public final class AwfEngine {
      * A template's store for one storage folder, opened read-only once and shared, or {@code null}
      * when the template has nothing for that folder (a template without POI, say).
      */
-    private AwfStore templateBase(final AwfBackend backend, final String template, final String storageFolder)
-        throws IOException {
+    private AwfStore templateBase(final String template, final String storageFolder) throws IOException {
+        // Templates are files under awf-templates/ whatever backend the worlds use.
+        final AwfBackend backend = AwfBackend.FILE;
         final String id = templateStorageId(template, storageFolder);
         final AwfStore cached = this.templateStores.get(id);
         if (cached != null) return cached;
@@ -367,7 +395,41 @@ public final class AwfEngine {
      */
     public static int closeAll() {
         final AwfEngine current = global;
-        return current == null ? 0 : current.closeEvery();
+        if (current == null) return 0;
+        final int failed = current.closeEvery();
+        if (AwfBackend.named("redis") instanceof dev.iyanz.sourbycraft.awf.redis.RedisBackend redis) redis.shutdown();
+        return failed;
+    }
+
+    /** The configured backend. */
+    public static AwfBackend backend() throws IOException {
+        final AwfEngine engine = global();
+        final AwfBackend backend = engine.backends.apply(engine.settings.backend());
+        if (backend == null) {
+            throw new IOException("AWF backend '" + engine.settings.backend() + "' (" + AwfSettings.BACKEND_KEY
+                + ") is not registered");
+        }
+        return backend;
+    }
+
+    /** The storage id of one storage folder of a dimension folder. */
+    public static String storeId(final Path dimensionFolder, final String storageFolder) {
+        return storageId(dimensionFolder.resolve(storageFolder));
+    }
+
+    /** Whether any store of a dimension folder exists on the configured backend. */
+    public static boolean storesExist(final Path dimensionFolder) throws IOException {
+        final AwfBackend backend = backend();
+        for (final String folder : STORAGE_FOLDERS) {
+            if (backend.exists(storeId(dimensionFolder, folder))) return true;
+        }
+        return false;
+    }
+
+    /** Deletes every store of a dimension folder on the configured backend. */
+    public static void deleteStores(final Path dimensionFolder) throws IOException {
+        final AwfBackend backend = backend();
+        for (final String folder : STORAGE_FOLDERS) backend.delete(storeId(dimensionFolder, folder));
     }
 
     int closeEvery() {

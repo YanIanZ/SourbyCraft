@@ -73,8 +73,8 @@ It is off unless configured and is not qualified; see "Engine integration" below
 ### Runtime worlds (`AuroraWorlds` API and `/awf`)
 
 Status: worlds, named generators, templates, copy-on-write instances and the Slime importer are
-implemented on the FILE backend and verified by local end-to-end runs (below). Database backends
-are **planned, not implemented**.
+implemented and verified by local end-to-end runs (below), on the FILE backend and on the Redis
+backend (next section). MongoDB/MySQL backends are **planned, not implemented**.
 
 - **API.** `dev.iyanz.sourbycraft.api.world.AuroraWorlds` in `sourbyapi`, obtained from the
   services manager: `list`, `exists`, `isLoaded`, `create(WorldCreator, autoload)`, `load`,
@@ -109,7 +109,8 @@ are **planned, not implemented**.
   in a hidden folder in batches of 256 chunks and moved into place at the end, so a failure never
   leaves a template instances could be made from. Nothing writes a template afterwards; it opens
   as role `TEMPLATE` (no commits, no garbage collection). A loaded world is refused because it keeps
-  committing and a template must be one consistent moment. Templates need the FILE backend.
+  committing and a template must be one consistent moment. The world's stores may be on any
+  backend; the template itself is always written to disk under `awf-templates/`.
 - **Instances.** `createFromTemplate(template, name)` registers a world with role `INSTANCE` whose
   stores take the template's stores as their read-only base: a chunk the instance never wrote is
   read from the template; a written chunk is the instance's own; a deleted chunk shadows the
@@ -161,6 +162,108 @@ exception or chunk-load error in the logs. 17/17 checks. Entities were written t
 A defect this found: `AwfRegionStorage.read` returned "not ours" for any chunk the world had not
 written, so instances never read their template and the engine fell through to (absent) region
 files. It now reads through the world's base first.
+
+### Redis backend (`aurora.awf.backend = "redis"`)
+
+Status: implemented and tested against a real Redis (unit/integration tests start their own
+`redis-server`; CI installs one and requires them to run) and in a local server end-to-end run.
+Not qualified under player load or over a real network. MongoDB/MySQL backends are **not
+implemented**.
+
+- **What it is.** Every AWF store of every world in Redis instead of `<storage>.awf/`
+  directories, so several servers can share world storage. Selected by `aurora.awf.backend =
+  "redis"`; applies to every AWF world on the server (managed worlds and `aurora.awf.worlds`).
+  Templates stay on disk under `awf-templates/` on each server; instances on Redis read through
+  them. RESTART_REQUIRED, like every `aurora.awf` key.
+- **Client.** SourbyCraft's own RESP2 client (`awf/redis/RedisClient`), no new dependency: a
+  bounded connection pool, `AUTH` (password or ACL user), `SELECT`, TLS with host-name
+  verification (`rediss://`), a timeout on every connect, read and pool wait. A connection that
+  fails mid-reply is closed, never reused. Credentials are never logged.
+- **Layout.** Per store, four keys sharing one hash tag (one cluster slot):
+  `<prefix>{<storage id>}:chunks` (hash `x,z` → chunk bytes), `:deleted` (set),
+  `:gen` (counter), `:lock` (lease).
+- **Atomic commits.** One `#!lua` script per commit checks the lease, applies every change and
+  increments the generation; Redis runs it without interleaving and refuses it up front when out
+  of memory. A dropped connection leaves the commit applied or not; AWF commits the same chunks
+  again, which is idempotent.
+- **Durability.** With `wait-for-aof = true` (default) each commit waits for `WAITAOF 1 0`: it
+  returns once Redis has written it to its append-only file. Redis without AOF, or older than
+  7.2, is reported once in the log and commits are then acknowledged from Redis's memory —
+  as durable as that Redis's own persistence settings. Redis keeps no older generations, so
+  `retained-generations` does not apply.
+- **One writer per world (lease).** Opening a store for writing takes a lease
+  (`lease-seconds`, default 60) renewed every third of that. Another server opening the same world
+  is refused until the lease is released (unload, delete, clean stop) or expires. Every commit
+  checks the lease in its script. A lease that expired while this server stalled is taken back
+  only if nobody holds it and the generation is unchanged (nobody committed since); otherwise the
+  commit is refused and the chunks stay dirty. The lease names the server by a hash of
+  `HOSTNAME` (or `/etc/hostname`) and the server directory, so the same server restarting after a
+  crash takes its own lease back at once; any other server waits for expiry.
+- **Opening is lazy.** A store reads only chunk coordinates (`HSCAN … NOVALUES`, `HKEYS` before
+  Redis 7.4); chunk bytes are fetched one `HGET` at a time when the engine reads that chunk. Over
+  a real network every chunk read pays one round trip; there is no prefetch yet.
+- **Requirements.** Redis 7.0+ (`#!lua`), an eviction policy that cannot evict these keys
+  (`noeviction` or `volatile-*`; an `allkeys-*` policy is warned about at start), AOF for durable
+  commits.
+- **Config** (`[aurora.awf.redis]`): `uri` (or env `SOURBYCRAFT_AWF_REDIS_URI`; the file wins),
+  `key-prefix` (`sourbycraft:awf:`), `pool-size` (8), `timeout-ms` (5000), `lease-seconds` (60),
+  `wait-for-aof` (true).
+- **Not covered by the backend:** `aurora.awf.export` back to region files works through
+  `retire` (keys renamed `…:exported-<millis>`), but region files are written locally.
+
+Local end-to-end run (2026-10-06, macOS aarch64, Redis 8.10 on loopback with AOF, 2 GiB heap,
+no players): a Slime island imported into Redis (6 chunks in the hash), lease held while loaded and
+released on unload and at a clean stop, block placed and saved, no `.awf` directory and no `.mca`
+in the world folder, export to `.awf`, that file imported as a second world with the block present,
+Slime → `.awf` conversion imported as a nether world, restart with autoload, `kill -9` leaves the
+lease and the restarted server takes it back immediately with its last save intact, delete removes
+the Redis keys, no exception in the logs. 27/27 checks. An earlier run of the same script found a
+real defect: the process stalled ~43 s (cause not identified; not reproduced), the lease expired
+unclaimed, every later commit of that world was refused and its shutdown flush failed. The
+generation-guarded take-back above is the fix, with tests for both the commit and the renewal path.
+
+### `.awf` world files (version 2)
+
+`AwfWorldFile`: the portable world format, replacing `.slime` for moving worlds between servers.
+One file holds a world's `region`, `entities` and `poi` chunk streams plus metadata
+(`format=awf-world`, `environment`, `seed`, `generator`, `world-type`, `data-version`, `source`,
+`created`). Layout: `"AWFW" int(2)`, compressed chunks, then the index (metadata and, per stream,
+`x z offset stored raw codec crc32c`), then a trailer pointing at the index with its CRC32C.
+
+- Each chunk is compressed on its own — zstd where the server has zstd-jni (it does; the engine
+  ships it), deflate otherwise — so a reader decompresses only the chunks it reads and opening
+  reads the index alone. A Slime file is one compressed blob that has to be inflated and parsed
+  whole.
+- Written streaming (only the index in memory), to a temporary file that is forced and moved into
+  place; never a half-written file. Every chunk is checked against its CRC32C on read.
+- `/awf export <world> <file.awf>` (unloaded world; an instance is exported with its template's
+  chunks beneath it), `/awf import <file.awf> <name> [autoload]` (environment, seed and generator
+  from the file), `/awf convert <file.slime> <file.awf> [normal|nether|end]`. `/awf import`
+  recognises `.awf` and `.slime` by their first bytes.
+- `AwfFile` (version 1: one stream, SHA-256) stays as the immutable image the qualification tests
+  use.
+
+Measurements (2026-10-06; `AwfLoadBenchmarkTest`, run by hand with `AWF_BENCH_FILE`; macOS
+aarch64, 8 cores, JDK 25.0.2; median of 7 runs after a warm-up; one session, not certified, on a
+host shared with other work). Data: a generated vanilla-terrain world exported to `.awf` — 3,364
+region chunks, 73.2 MiB of chunk NBT, 11.1 MiB as a zstd `.awf` file. Opening the region store and
+reading every chunk:
+
+| Source | open | read all | per chunk |
+| --- | ---: | ---: | ---: |
+| `.awf` world file (zstd) | 1.4 ms | 70.0 ms | 20.8 µs |
+| FILE store (`region.awf/` directory) | 11.9 ms | 254.4 ms | 75.6 µs |
+| Redis store, loopback, AOF everysec | 2.5 ms | 96.2 ms | 28.6 µs |
+
+Writing all 3,364 chunks once: FILE 14.9 s (an fsync per chunk object), Redis 1.6 s (one commit,
+one `WAITAOF`). For one real island (6 chunks): reading every chunk from `.slime` (inflate +
+parse + convert to chunk NBT) 0.95 ms against 0.07 ms from the same island as `.awf`, but the
+`.awf` file was larger (12,118 vs 8,091 bytes): per-chunk compression loses what a whole-blob
+compression shares between chunks, which matters only for tiny worlds.
+
+What these numbers do not say: Redis was on the same machine; over a network each chunk read adds
+a round trip, so the Redis column does not transfer to a remote Redis. They are storage-level
+timings, not server world-load or tick times. No player load.
 
 ### Engine integration (RegionFileStorage)
 

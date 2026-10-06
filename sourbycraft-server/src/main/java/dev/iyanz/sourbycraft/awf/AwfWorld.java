@@ -90,6 +90,11 @@ public final class AwfWorld {
         return this.name;
     }
 
+    /** Closes the store after the last commit; see {@link AwfStore#close()}. */
+    void closeStore() throws IOException {
+        if (this.store != null) this.store.close();
+    }
+
     public WorldRole role() {
         return this.role;
     }

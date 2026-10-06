@@ -39,7 +39,31 @@ Existing `.mca` files become the read-only base. Chunks written from now on go t
    next start, the world is as of the **last commit**. Up to `commit-interval-seconds` of changes
    are expected to be lost; region files lose less. Report anything else.
 
-## 3. Leaving AWF
+## 3. Storing worlds in Redis
+
+```toml
+[aurora.awf]
+backend = "redis"
+
+[aurora.awf.redis]
+uri = "redis://:password@redis.internal:6379/0"   # or env SOURBYCRAFT_AWF_REDIS_URI
+key-prefix = "sourbycraft:awf:"                    # different per network that must not share
+lease-seconds = 60
+wait-for-aof = true                                # needs appendonly yes on Redis 7.2+
+```
+
+Redis needs `appendonly yes` for durable commits and `maxmemory-policy noeviction`. The start log
+says `Aurora World Fabric: stores on redis …` and whether commits wait for the AOF. `/awf list`
+and `/awf info <world>` show the storage. Only one server can have a world open; a second one
+gets `held by another server`. Details and limits: `docs/architecture/aurora-world-fabric.md`.
+
+## 4. Moving worlds: `.awf` files
+
+`/awf export <world> exports/<world>.awf` (unload it first), copy the file to another server,
+`/awf import exports/<world>.awf <name>`. Old Slime files: `/awf import <file.slime> <name>` or
+convert them once with `/awf convert <file.slime> <file.awf>`.
+
+## 5. Leaving AWF
 
 ```toml
 [aurora.awf]
@@ -54,7 +78,7 @@ is renamed to `<storage>.awf.exported-<millis>` (kept, not deleted). The log say
 AWF keeps using it and warns. The older region files underneath are never trusted again without
 an export.
 
-## 4. What to report
+## 6. What to report
 
 The `/perf awf` output, the log lines above, world size and player count, and whether any chunk
 was missing, reverted or regenerated after a restart.

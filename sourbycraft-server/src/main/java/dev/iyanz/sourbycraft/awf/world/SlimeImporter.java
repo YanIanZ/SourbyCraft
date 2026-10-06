@@ -1,9 +1,6 @@
 package dev.iyanz.sourbycraft.awf.world;
 
-import dev.iyanz.sourbycraft.awf.AwfWorldStore;
 import dev.iyanz.sourbycraft.awf.ChunkKey;
-import dev.iyanz.sourbycraft.awf.PersistenceMode;
-import dev.iyanz.sourbycraft.awf.WorldRole;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -14,7 +11,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 import net.minecraft.nbt.CompoundTag;
@@ -75,6 +71,23 @@ public final class SlimeImporter {
     /** What an import wrote. */
     public record Result(int chunks, int entityChunks, int poiChunks, int dataVersion) {}
 
+    /** A file converted to the engine's chunk, entity and POI NBT, by storage folder. */
+    public record Converted(Map<ChunkKey, byte[]> region, Map<ChunkKey, byte[]> entities, Map<ChunkKey, byte[]> poi,
+                            int dataVersion) {
+
+        public Result result() {
+            return new Result(this.region.size(), this.entities.size(), this.poi.size(), this.dataVersion);
+        }
+
+        public Map<String, Map<ChunkKey, byte[]>> byStorage() {
+            final Map<String, Map<ChunkKey, byte[]>> out = new java.util.LinkedHashMap<>();
+            out.put("region", this.region);
+            out.put("entities", this.entities);
+            out.put("poi", this.poi);
+            return out;
+        }
+    }
+
     private SlimeImporter() {}
 
     /**
@@ -85,6 +98,15 @@ public final class SlimeImporter {
      */
     public static Result importInto(final byte[] file, final Path dimensionFolder, final int minSection)
         throws IOException {
+        final Converted converted = convert(file, minSection);
+        final Map<String, dev.iyanz.sourbycraft.awf.ChunkSource> sources = new java.util.LinkedHashMap<>();
+        converted.byStorage().forEach((folder, chunks) -> sources.put(folder, AuroraWorldIo.of(chunks)));
+        AuroraWorldIo.writeWorld(dimensionFolder, sources);
+        return converted.result();
+    }
+
+    /** Parses a file and converts every chunk, without writing anything. */
+    public static Converted convert(final byte[] file, final int minSection) throws IOException {
         final SlimeFile parsed = read(file);
         final Map<ChunkKey, byte[]> region = new HashMap<>();
         final Map<ChunkKey, byte[]> entities = new HashMap<>();
@@ -97,17 +119,7 @@ public final class SlimeImporter {
             final CompoundTag poiTag = poiTag(chunk, parsed.dataVersion());
             if (poiTag != null) poi.put(key, encode(poiTag));
         }
-        commit(dimensionFolder, "region", region);
-        commit(dimensionFolder, "entities", entities);
-        commit(dimensionFolder, "poi", poi);
-        return new Result(region.size(), entities.size(), poi.size(), parsed.dataVersion());
-    }
-
-    private static void commit(final Path dimensionFolder, final String folder, final Map<ChunkKey, byte[]> chunks)
-        throws IOException {
-        if (chunks.isEmpty()) return;
-        AwfWorldStore.open(AuroraTemplates.store(dimensionFolder, folder), WorldRole.VANILLA, 1)
-            .commit(chunks, Set.of(), PersistenceMode.INCREMENTAL);
+        return new Converted(region, entities, poi, parsed.dataVersion());
     }
 
     static SlimeFile read(final byte[] file) throws IOException {
@@ -219,10 +231,7 @@ public final class SlimeImporter {
         return wrapper == null ? null : wrapper.getList("entities").orElse(null);
     }
 
-    /**
-     * A zstd blob. zstd-jni is one of the engine's runtime libraries but not on SourbyCraft's
-     * compile classpath, so it is called reflectively.
-     */
+    /** A zstd blob; zstd comes from the engine's runtime libraries. */
     private static byte[] unzstd(final DataInputStream in) throws IOException {
         final int compressedLength = in.readInt();
         final int length = in.readInt();
@@ -231,19 +240,10 @@ public final class SlimeImporter {
         }
         final byte[] compressed = new byte[compressedLength];
         in.readFully(compressed);
-        final byte[] out;
-        try {
-            final Class<?> zstd = Class.forName("com.github.luben.zstd.Zstd");
-            out = (byte[]) zstd.getMethod("decompress", byte[].class, int.class).invoke(null, compressed, length);
-        } catch (final ClassNotFoundException missing) {
-            throw new IOException("zstd is not available on this server, so Slime v12 files cannot be read", missing);
-        } catch (final java.lang.reflect.InvocationTargetException failed) {
-            throw new IOException("corrupt zstd blob: " + failed.getCause().getMessage(), failed.getCause());
-        } catch (final ReflectiveOperationException failed) {
-            throw new IOException("zstd could not be called", failed);
+        if (!dev.iyanz.sourbycraft.awf.Compression.zstdAvailable()) {
+            throw new IOException("zstd is not available on this server, so Slime v12 files cannot be read");
         }
-        if (out.length != length) throw new IOException("blob inflated to " + out.length + " of " + length + " bytes");
-        return out;
+        return dev.iyanz.sourbycraft.awf.Compression.unzstd(compressed, length);
     }
 
     private static ListTag ticks(final CompoundTag wrapper, final String key) {

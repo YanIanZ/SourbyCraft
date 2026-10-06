@@ -171,6 +171,11 @@ public final class AuroraWorldsService implements AuroraWorlds {
         }
         final WorldCreator creator;
         try {
+            if (AwfEngine.storesExist(folder(name))) {
+                // A network backend can hold a world this server has no folder for.
+                throw new IllegalStateException("AWF stores for " + name + " already exist on " + storage()
+                    + "; delete them or choose another name");
+            }
             creator = creator(entry);
             // Registered before the world exists, so its region storages attach to AWF as they open.
             this.registry.put(entry);
@@ -267,6 +272,73 @@ public final class AuroraWorldsService implements AuroraWorlds {
     }
 
     @Override
+    public CompletableFuture<World> importWorld(final Path file, final String name, final boolean autoload) {
+        final AuroraWorldRegistry.Entry entry;
+        try (dev.iyanz.sourbycraft.awf.AwfWorldFile awf = dev.iyanz.sourbycraft.awf.AwfWorldFile.open(file)) {
+            entry = AuroraWorldFiles.describe(awf, name, autoload);
+        } catch (final IOException failed) {
+            return CompletableFuture.failedFuture(failed);
+        }
+        return start(entry, () -> {
+            final long started = System.nanoTime();
+            try (dev.iyanz.sourbycraft.awf.AwfWorldFile awf = dev.iyanz.sourbycraft.awf.AwfWorldFile.open(file)) {
+                final var written = AuroraWorldFiles.importInto(awf, folder(name));
+                SourbyLogger.info("Aurora World Fabric: imported " + file.getFileName() + " as " + name + " " + written
+                    + " in " + (System.nanoTime() - started) / 1_000_000 + " ms");
+            }
+        });
+    }
+
+    @Override
+    public CompletableFuture<Void> exportWorld(final String world, final Path file) {
+        final AuroraWorldRegistry.Entry entry = this.registry.get(world).orElse(null);
+        if (entry == null) return CompletableFuture.failedFuture(new IllegalArgumentException("no AWF world named " + world));
+        if (Bukkit.getWorld(world) != null) {
+            return CompletableFuture.failedFuture(new IllegalStateException(world + " is loaded; unload it first,"
+                + " so the file is one consistent moment"));
+        }
+        if (Files.exists(file)) return CompletableFuture.failedFuture(new IllegalStateException(file + " already exists"));
+        return CompletableFuture.runAsync(() -> {
+            try {
+                final long started = System.nanoTime();
+                final AuroraWorldFiles.Written written = AuroraWorldFiles.export(AwfEngine.backend(), folder(world), entry,
+                    AwfEngine.TEMPLATES, file);
+                SourbyLogger.info("Aurora World Fabric: exported " + world + " to " + file + " " + written.chunks()
+                    + " (" + written.codec() + ", " + Files.size(file) + " bytes, "
+                    + (System.nanoTime() - started) / 1_000_000 + " ms)");
+            } catch (final IOException failed) {
+                throw new CompletionException(failed);
+            }
+        }, dev.iyanz.sourbycraft.util.VirtualExecutor.executor());
+    }
+
+    @Override
+    public CompletableFuture<Void> convertSlime(final Path slime, final Path awf, final World.Environment environment) {
+        if (!Files.isRegularFile(slime)) return CompletableFuture.failedFuture(new IllegalArgumentException("no such file: " + slime));
+        if (Files.exists(awf)) return CompletableFuture.failedFuture(new IllegalStateException(awf + " already exists"));
+        final String env = environment.name().toLowerCase(Locale.ROOT);
+        return CompletableFuture.runAsync(() -> {
+            try {
+                final AuroraWorldFiles.Written written = AuroraWorldFiles.convertSlime(Files.readAllBytes(slime), env,
+                    slime.getFileName().toString(), awf);
+                SourbyLogger.info("Aurora World Fabric: converted " + slime + " to " + awf + " " + written.chunks()
+                    + " (" + written.codec() + ", " + Files.size(slime) + " -> " + Files.size(awf) + " bytes)");
+            } catch (final IOException failed) {
+                throw new CompletionException(failed);
+            }
+        }, dev.iyanz.sourbycraft.util.VirtualExecutor.executor());
+    }
+
+    @Override
+    public String storage() {
+        try {
+            return AwfEngine.backend().describe();
+        } catch (final IOException unregistered) {
+            return unregistered.getMessage();
+        }
+    }
+
+    @Override
     public Set<String> templates() {
         try {
             return this.templates.list();
@@ -285,12 +357,9 @@ public final class AuroraWorldsService implements AuroraWorlds {
         }
         final var invalid = AuroraWorldRegistry.invalidName(template);
         if (invalid.isPresent()) return CompletableFuture.failedFuture(new IllegalArgumentException(invalid.get()));
-        if (!"file".equals(AwfEngine.backendName())) {
-            return CompletableFuture.failedFuture(new IllegalStateException("templates need the file backend"));
-        }
         return CompletableFuture.runAsync(() -> {
             try {
-                final int chunks = this.templates.save(folder(world), entry, template);
+                final int chunks = this.templates.save(AwfEngine.backend(), folder(world), entry, template);
                 SourbyLogger.info("Aurora World Fabric: saved " + world + " as template " + template
                     + " (" + chunks + " chunks)");
             } catch (final IOException failed) {
@@ -387,6 +456,7 @@ public final class AuroraWorldsService implements AuroraWorlds {
         }
         return CompletableFuture.runAsync(() -> {
             try {
+                AwfEngine.deleteStores(folder(name));
                 deleteRecursively(folder(name));
                 this.registry.remove(name);
                 AwfEngine.release(name);

@@ -239,7 +239,13 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
   hemat disk/memori per instance.
 - [x] Konverter Slime v12/v13 → AWF + `/awf import` — E2E lokal 17/17 dengan 3 file pulau asli
   (2026-10-06). Belum dicek: entitas hasil impor muncul di game; format AdvancedSlimePaper lain.
-- [ ] Backend database AWF (MongoDB/MySQL/Redis)
+- [x] Backend AWF `redis` (klien RESP sendiri, commit atomik Lua, lease satu penulis per dunia,
+  WAITAOF) + file dunia `.awf` v2 (zstd per chunk, CRC32C, indeks di akhir) untuk export/import/
+  convert dari `.slime` — tes integrasi Redis sungguhan (CI memasang redis-server) dan E2E lokal
+  27/27 (2026-10-06). Belum: uji beban pemain, Redis lewat jaringan nyata.
+- [ ] AWF Redis lewat jaringan: tiap baca chunk = satu round trip; prefetch/pipelining tetangga
+- [ ] AWF FILE: tulis massal lambat (fsync per objek chunk; 3.364 chunk = 14,9 s) — batch fsync
+- [ ] Backend database AWF MongoDB/MySQL
 - [ ] Executor yang sudah ada dipindahkan ke bawah Resource Governor (ditunda; masing-masing sudah
   punya batas sendiri)
 - [ ] Namespace config `aurora.performance`, `aurora.chunk`, `aurora.memory`, `aurora.ai`,

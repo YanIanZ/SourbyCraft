@@ -26,7 +26,8 @@ class BlockingIoBoundaryTest {
         "dev/iyanz/sourbycraft/command/SpeedtestCommand.java",
         "dev/iyanz/sourbycraft/util/GeoUtil.java",
         "dev/iyanz/sourbycraft/bootstrap/LibDownloader.java",
-        "dev/iyanz/sourbycraft/bootstrap/PluginProvisioner.java");
+        "dev/iyanz/sourbycraft/bootstrap/PluginProvisioner.java",
+        "dev/iyanz/sourbycraft/awf/redis/RedisClient.java");
 
     private static Path sourceRoot() {
         Path dir = Path.of("").toAbsolutePath();

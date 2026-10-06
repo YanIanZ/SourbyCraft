@@ -80,6 +80,24 @@ public interface AuroraWorlds {
     CompletableFuture<World> importSlime(java.nio.file.Path file, WorldCreator creator, @Nullable String generator,
                                          boolean autoload);
 
+    /**
+     * Imports an {@code .awf} world file as a new world and loads it, with the environment, seed
+     * and generator the file records.
+     */
+    CompletableFuture<World> importWorld(java.nio.file.Path file, String name, boolean autoload);
+
+    /**
+     * Exports an unloaded world to one {@code .awf} file: its chunks, entities and POI as the world
+     * reads them (an instance's own chunks over its template's) and how to create it again.
+     */
+    CompletableFuture<Void> exportWorld(String world, java.nio.file.Path file);
+
+    /** Converts a Slime file into an {@code .awf} file without creating a world. */
+    CompletableFuture<Void> convertSlime(java.nio.file.Path slime, java.nio.file.Path awf, World.Environment environment);
+
+    /** Where world data is stored, for display: the backend and, for a network backend, its address. */
+    String storage();
+
     /** The template a world is an instance of, if any. */
     Optional<String> template(String name);
 

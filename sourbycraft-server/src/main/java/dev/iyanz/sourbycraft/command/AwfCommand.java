@@ -24,7 +24,10 @@ import static net.kyori.adventure.text.Component.text;
  * /awf info &lt;name&gt;
  * /awf create &lt;name&gt; [normal|nether|end] [void|flat|amplified|large_biomes] [generator=Plugin[:id]] [seed] [autoload]
  * /awf create &lt;name&gt; from &lt;template&gt; [autoload]
+ * /awf import &lt;file.awf&gt; &lt;name&gt; [autoload]
  * /awf import &lt;file.slime&gt; &lt;name&gt; [normal|nether|end] [vanilla|generator=Plugin[:id]] [autoload]
+ * /awf export &lt;world&gt; &lt;file.awf&gt;
+ * /awf convert &lt;file.slime&gt; &lt;file.awf&gt; [normal|nether|end]
  * /awf template list
  * /awf template save &lt;world&gt; &lt;template&gt;
  * /awf template delete &lt;template&gt; confirm
@@ -39,12 +42,12 @@ import static net.kyori.adventure.text.Component.text;
 public class AwfCommand extends Command {
 
     private static final List<String> SUBCOMMANDS =
-        List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template", "import");
+        List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template", "import", "export", "convert");
 
     public AwfCommand(final String name) {
         super(name);
         this.description = "Manage Aurora World Fabric worlds";
-        this.usageMessage = "/awf <list|info|create|load|save|unload|delete|autoload|template|import>";
+        this.usageMessage = "/awf <list|info|create|load|save|unload|delete|autoload|template|import|export|convert>";
         this.setPermission("sourbycraft.command.awf");
     }
 
@@ -70,7 +73,21 @@ public class AwfCommand extends Command {
             return true;
         }
         if (sub.equals("import")) {
-            importSlime(s, worlds, args);
+            importFile(s, worlds, args);
+            return true;
+        }
+        if (sub.equals("convert")) {
+            convert(s, worlds, args);
+            return true;
+        }
+        if (sub.equals("export")) {
+            if (args.length < 3) {
+                usage(s);
+            } else {
+                final java.nio.file.Path file = withSuffix(args[2]);
+                report(s, "Exported " + args[1].toLowerCase(Locale.ROOT) + " to " + file,
+                    worlds.exportWorld(args[1].toLowerCase(Locale.ROOT), file));
+            }
             return true;
         }
         if (args.length < 2) {
@@ -125,6 +142,7 @@ public class AwfCommand extends Command {
             s.sendMessage(UiPanel.row(name, (worlds.isLoaded(name) ? "loaded" : "unloaded")
                 + (worlds.autoload(name) ? ", autoload" : "")));
         }
+        s.sendMessage(UiPanel.hint("Storage: " + worlds.storage()));
         s.sendMessage(UiPanel.footer());
     }
 
@@ -137,6 +155,7 @@ public class AwfCommand extends Command {
         s.sendMessage(UiPanel.row("State", worlds.isLoaded(name) ? "loaded" : "unloaded"));
         s.sendMessage(UiPanel.row("Autoload", worlds.autoload(name) ? "on" : "off"));
         s.sendMessage(UiPanel.row("Template", worlds.template(name).orElse("none")));
+        s.sendMessage(UiPanel.row("Storage", worlds.storage()));
         s.sendMessage(UiPanel.hint("Storage detail: /perf awf"));
         s.sendMessage(UiPanel.footer());
     }
@@ -182,14 +201,58 @@ public class AwfCommand extends Command {
         report(s, "Created " + name + (autoload ? " (autoload)" : ""), worlds.create(creator, generator, autoload));
     }
 
-    /** Imports a Slime file; chunks it does not hold are void unless told otherwise. */
-    private void importSlime(final CommandSender s, final AuroraWorldsService worlds, final String[] args) {
+    private static java.nio.file.Path withSuffix(final String path) {
+        return java.nio.file.Path.of(path.endsWith(dev.iyanz.sourbycraft.awf.AwfWorldFile.SUFFIX) ? path
+            : path + dev.iyanz.sourbycraft.awf.AwfWorldFile.SUFFIX);
+    }
+
+    /** Imports an .awf world file, or a Slime file, by what the file starts with. */
+    private void importFile(final CommandSender s, final AuroraWorldsService worlds, final String[] args) {
         if (args.length < 3) {
             usage(s);
             return;
         }
         final java.nio.file.Path file = java.nio.file.Path.of(args[1]);
         final String name = args[2].toLowerCase(Locale.ROOT);
+        byte[] head = new byte[0];
+        try (java.io.InputStream in = java.nio.file.Files.newInputStream(file)) {
+            head = in.readNBytes(4);
+        } catch (final java.io.IOException unreadable) {
+            // importSlime reports the missing file.
+        }
+        if (dev.iyanz.sourbycraft.awf.AwfWorldFile.looksLike(head)) {
+            final boolean autoload = args.length > 3 && args[3].equalsIgnoreCase("autoload");
+            report(s, "Imported " + file.getFileName() + " as " + name + (autoload ? " (autoload)" : ""),
+                worlds.importWorld(file, name, autoload));
+            return;
+        }
+        importSlime(s, worlds, file, name, args);
+    }
+
+    private void convert(final CommandSender s, final AuroraWorldsService worlds, final String[] args) {
+        if (args.length < 3) {
+            usage(s);
+            return;
+        }
+        World.Environment environment = World.Environment.NORMAL;
+        if (args.length > 3) {
+            switch (args[3].toLowerCase(Locale.ROOT)) {
+                case "normal" -> environment = World.Environment.NORMAL;
+                case "nether" -> environment = World.Environment.NETHER;
+                case "end" -> environment = World.Environment.THE_END;
+                default -> {
+                    s.sendMessage(text("Unknown environment " + args[3], SourbyCraftColors.DANGER));
+                    return;
+                }
+            }
+        }
+        final java.nio.file.Path target = withSuffix(args[2]);
+        report(s, "Converted " + args[1] + " to " + target, worlds.convertSlime(java.nio.file.Path.of(args[1]), target, environment));
+    }
+
+    /** Imports a Slime file; chunks it does not hold are void unless told otherwise. */
+    private void importSlime(final CommandSender s, final AuroraWorldsService worlds, final java.nio.file.Path file,
+                             final String name, final String[] args) {
         final WorldCreator creator = new WorldCreator(name);
         String generator = "void";
         boolean autoload = false;
@@ -276,8 +339,11 @@ public class AwfCommand extends Command {
         s.sendMessage(UiPanel.row("/awf create <name> [normal|nether|end] [void|flat|amplified|large_biomes]"
             + " [generator=Plugin[:id]] [seed] [autoload]", "new AWF world"));
         s.sendMessage(UiPanel.row("/awf create <name> from <template> [autoload]", "copy-on-write instance"));
+        s.sendMessage(UiPanel.row("/awf import <file.awf> <name> [autoload]", "new world from an .awf file"));
         s.sendMessage(UiPanel.row("/awf import <file.slime> <name> [normal|nether|end] [vanilla|generator=Plugin[:id]]"
-            + " [autoload]", "convert a Slime world"));
+            + " [autoload]", "new world from a Slime file"));
+        s.sendMessage(UiPanel.row("/awf export <world> <file.awf>", "unloaded world to one .awf file"));
+        s.sendMessage(UiPanel.row("/awf convert <file.slime> <file.awf> [normal|nether|end]", "Slime file to .awf"));
         s.sendMessage(UiPanel.row("/awf template list | save <world> <template> | delete <template> confirm", "templates"));
         s.sendMessage(UiPanel.row("/awf load | save <name>", "load, or save and commit"));
         s.sendMessage(UiPanel.row("/awf unload <name> [nosave]", "unload"));

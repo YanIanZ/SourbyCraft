@@ -40,4 +40,10 @@ public interface AwfStore extends ChunkSource {
      */
     CommitResult commit(Map<ChunkKey, byte[]> changed, Set<ChunkKey> removed, Set<ChunkKey> deleted,
                         PersistenceMode mode) throws IOException;
+
+    /**
+     * Releases what the store holds on its backend, such as a network backend's claim on the
+     * world. Called once, after the last commit. The FILE backend holds nothing.
+     */
+    default void close() throws IOException {}
 }

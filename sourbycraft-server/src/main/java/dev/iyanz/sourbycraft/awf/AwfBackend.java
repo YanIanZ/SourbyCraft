@@ -36,6 +36,16 @@ public interface AwfBackend {
      */
     String retire(String storageId) throws IOException;
 
+    /** Deletes a store and everything in it. Refused while it is open somewhere, where that can be known. */
+    default void delete(final String storageId) throws IOException {
+        throw new UnsupportedOperationException("the " + name() + " AWF backend cannot delete stores");
+    }
+
+    /** One line for operators: where stores live. */
+    default String describe() {
+        return name();
+    }
+
     /** The built-in FILE backend. */
     AwfBackend FILE = new FileBackend(java.nio.file.Path.of(""));
 
@@ -100,6 +110,22 @@ public interface AwfBackend {
             final java.nio.file.Path backup = dir.resolveSibling(dir.getFileName() + ".exported-" + System.currentTimeMillis());
             java.nio.file.Files.move(dir, backup, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
             return backup.toString();
+        }
+
+        @Override
+        public void delete(final String storageId) throws IOException {
+            final java.nio.file.Path dir = directory(storageId);
+            if (!java.nio.file.Files.exists(dir)) return;
+            try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(dir)) {
+                for (final java.nio.file.Path path : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                    java.nio.file.Files.delete(path);
+                }
+            }
+        }
+
+        @Override
+        public String describe() {
+            return "file (a <folder>.awf directory beside each storage folder)";
         }
     }
 }
