@@ -209,6 +209,9 @@ subprojects {
     }
 
     if (project.name == "sourbycraft-server") {
+        if (providers.gradleProperty("includePrivateIntave").map(String::toBoolean).getOrElse(false)) {
+            apply(from = rootProject.file("scripts/gradle/private-intave.gradle.kts"))
+        }
         dependencies {
             // SourbyCraft - unified TOML config (own nightconfig CommentedFileConfig, resolved
             // directly by SourbyCraftConfig). Added here instead of via build.gradle.kts.patch so an

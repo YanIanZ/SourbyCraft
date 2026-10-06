@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "upstream": "https://github.com/intave/intave",
+  "commit": "c67af7f4fca5d09f68e59f7996c6b15b2a560455",
+  "package": "dev.yanianz.intave",
+  "scope": "personal-server-only",
+  "java": 25,
+  "dependencies": [
+    {
+      "configuration": "implementation",
+      "coordinate": "ac.intave:samples:0.0.12"
+    },
+    {
+      "configuration": "implementation",
+      "coordinate": "ac.intave:cloud-protocol:0.0.11"
+    },
+    {
+      "configuration": "implementation",
+      "coordinate": "it.unimi.dsi:fastutil:8.5.12"
+    },
+    {
+      "configuration": "implementation",
+      "coordinate": "net.bytebuddy:byte-buddy:1.18.2"
+    },
+    {
+      "configuration": "implementation",
+      "coordinate": "org.bouncycastle:bcpkix-jdk18on:1.85"
+    },
+    {
+      "configuration": "implementation",
+      "coordinate": "com.github.luben:zstd-jni:1.5.7-12"
+    },
+    {
+      "configuration": "compileOnly",
+      "coordinate": "org.spigotmc:spigot-api:1.12.2-R0.1-SNAPSHOT"
+    },
+    {
+      "configuration": "compileOnly",
+      "coordinate": "dev.folia:folia-api:1.20.1-R0.1-SNAPSHOT"
+    },
+    {
+      "configuration": "compileOnly",
+      "coordinate": "org.spigotmc:spigot-api:1.21.1-R0.1-SNAPSHOT"
+    },
+    {
+      "configuration": "compileOnly",
+      "coordinate": "org.jetbrains:annotations:23.1.0"
+    },
+    {
+      "configuration": "compileOnly",
+      "coordinate": "org.geysermc.floodgate:api:2.0-SNAPSHOT"
+    },
+    {
+      "configuration": "compileOnly",
+      "coordinate": "com.github.retrooper:packetevents-spigot:2.13.0"
+    },
+    {
+      "configuration": "testImplementation",
+      "coordinate": "org.spigotmc:spigot-api:26.3-R0.1-SNAPSHOT"
+    },
+    {
+      "configuration": "testImplementation",
+      "coordinate": "net.dmulloy2:ProtocolLib:5.4.0"
+    },
+    {
+      "configuration": "testImplementation",
+      "coordinate": "io.netty:netty-all:4.2.15.Final"
+    },
+    {
+      "configuration": "testImplementation",
+      "coordinate": "org.junit.jupiter:junit-jupiter-api:5.10.2"
+    },
+    {
+      "configuration": "testRuntimeOnly",
+      "coordinate": "org.junit.jupiter:junit-jupiter-engine:5.10.2"
+    },
+    {
+      "configuration": "testRuntimeOnly",
+      "coordinate": "org.junit.platform:junit-platform-launcher:1.10.2"
+    }
+  ],
+  "gates": [
+    {
+      "id": "source",
+      "description": "Verify pinned source, tests, license and resource hashes"
+    },
+    {
+      "id": "dependencies",
+      "description": "Resolve exact dependencies and record checksums including transitives"
+    },
+    {
+      "id": "upstream-tests",
+      "description": "Compile relocated upstream baseline; run nonempty upstream fixture suite"
+    },
+    {
+      "id": "native-lifecycle",
+      "description": "Extract server-owned lifecycle; no JavaPlugin entrypoint or plugin loading"
+    },
+    {
+      "id": "native-packets",
+      "description": "Replace ProtocolLib manager/loader; preserve priority, feedback and cancellation"
+    },
+    {
+      "id": "owner-tick",
+      "description": "Replace global tickable reflection with per-player owner tick hook"
+    },
+    {
+      "id": "native-boot",
+      "description": "Boot SourbyCraft 26.2 without Intave/ProtocolLib plugin jars; prove checks active"
+    },
+    {
+      "id": "legal-replays",
+      "description": "Replay legal movement, combat, lag, velocity, vehicles and teleports"
+    },
+    {
+      "id": "illegal-replays",
+      "description": "Replay labelled violations; measure detection delay and false positives"
+    },
+    {
+      "id": "region-soak",
+      "description": "Soak multi-region ownership, migrations, joins/quits, clean shutdown and restart"
+    }
+  ],
+  "native_packet_api": {
+    "file": "ProtocolLib.jar",
+    "version": "5.5.0-SNAPSHOT-9404ce3",
+    "sha256": "4b991e5b390649b54b5b3f7613caa3bf97b25646ea6a0d0207f965c4d0741a94",
+    "mode": "embedded-access-library-only",
+    "runtime_verified": false
+  },
+  "dependency_sources": [
+    {
+      "coordinate": "ac.intave:samples:0.0.12",
+      "repository": "intave/samples",
+      "tag": "0.0.12",
+      "tag_object": "7b4fb9c8f208fa31f0fa8868a2fa1e7f7b882d30",
+      "commit": "c45161073429f5e46f5f7787e7b5370e26e65e2a"
+    },
+    {
+      "coordinate": "ac.intave:cloud-protocol:0.0.11",
+      "repository": "intave/cloud-protocol",
+      "tag": "0.0.11",
+      "tag_object": "bfde29e1fe8dc00a2b451259f1ee7e79224ed36a",
+      "commit": "1a7560fbb6907a2b58920c734eff96070db3e490"
+    }
+  ]
+}

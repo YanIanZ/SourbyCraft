@@ -1,0 +1,22 @@
+# PROPOSED native config. No SourbyCraft consumer exists yet; these values have no runtime effect.
+# RESTART_REQUIRED is the planned lifecycle. Reload support must be verified when implemented.
+[native]
+enabled = false
+mode = "observe"
+cloud = false
+
+[diagnostics]
+record_decisions = true
+record_player_names = false
+history_per_player = 64
+
+[mitigation]
+# Keep inactive until legal/illegal replay, owner migration and teleport feedback gates pass.
+setback = false
+kick = false
+ban = false
+
+[limits]
+# Proposed bounded budgets, not measured tuning values or implemented guarantees.
+feedback_history = 128
+decision_queue_per_player = 64

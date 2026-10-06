@@ -1,0 +1,39 @@
+{
+  "schema": "sourbycraft.representative-plugins/1",
+  "note": "The plugin set of the plugins-10 baseline workload (docs/architecture/compat-vs-performance.md section 6 item 1). loading: native = the jar declares folia-supported; bridged = it does not and loads through the Aurora Bridge, which needs aurora.bridge.mode = \"safe\"; bundled = ships inside the server jar. jar is a machine-local path checked on 2026-10-06 or null; nothing here was downloaded and no jar is vendored. run_baseline.py does not read these paths: the operator assembles a plugins directory and passes it with --plugins-dir, and the run records each jar's SHA-256.",
+  "plugins": [
+    {
+      "name": "EssentialsX",
+      "loading": "bridged",
+      "jar": "/Users/rheninxy/Downloads/EssentialsX-2.22.1-dev+25-cfb6f12.jar",
+      "sha256": "092d610f0b6a6d5005a4369c79d767fca89fe84ae97a6bc40329c54a00e6ff1f",
+      "note": "plugin.yml name Essentials, version 2.22.1-dev+25-cfb6f12; declares no folia-supported."
+    },
+    {
+      "name": "Vault",
+      "loading": "bridged",
+      "jar": "/Users/rheninxy/Downloads/Vault.jar",
+      "sha256": "a6b5ed97f43a5cf5bbaf00a7c8cd23c5afc9bd003f849875af8b36e6cf77d01d",
+      "note": "MilkBowl Vault 1.7.3-b131; declares no folia-supported. Do not substitute ~/Downloads/Vault-1.7.4.jar: that is the 1.7.3-CMI fork, which declares folia-supported and would load natively, not through the bridge."
+    },
+    {
+      "name": "SuperiorSkyblock2",
+      "loading": "native",
+      "jar": "/Users/rheninxy/Sourby/ssb/SSB2/target/SuperiorSkyblock2-2026.3.jar",
+      "note": "The Folia port, version 2026.3; declares folia-supported: true. Local build output, so its hash changes with every rebuild; the run's provenance records the hash actually used.",
+      "modules": [
+        {
+          "name": "SSB-AuroraWorlds",
+          "jar": "/Users/rheninxy/Sourby/SSB-AuroraWorlds/build/libs/SSB-AuroraWorlds.jar",
+          "note": "SuperiorSkyblock2 module (one Aurora World Fabric world per island and dimension); goes in SuperiorSkyblock2's modules directory, not in plugins/ itself. Local build output."
+        }
+      ]
+    },
+    {
+      "name": "spark",
+      "loading": "bundled",
+      "jar": null,
+      "note": "Bundled with the server (Paper's SparksFly); no jar is needed in plugins/. A spark jar placed there replaces the bundled copy, which changes the run, so leave it out."
+    }
+  ]
+}

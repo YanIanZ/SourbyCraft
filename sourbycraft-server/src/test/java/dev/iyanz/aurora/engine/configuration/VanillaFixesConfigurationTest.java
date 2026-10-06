@@ -26,7 +26,8 @@ import org.junit.jupiter.api.Test;
 class VanillaFixesConfigurationTest {
 
     private static final Gson GSON = new Gson();
-    private static final HttpClient HTTP = HttpClient.newHttpClient();
+    // Bounded: without a timeout a stalled connection hangs the whole test run.
+    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(20)).build();
     private static final URI MOJIRA_API = URI.create("https://bugs.mojang.com/api/jql-search-post");
     private static final boolean DEBUG = Boolean.parseBoolean(System.getenv("CANVAS_TEST_DEBUG"));
     private static final boolean STRICT = Boolean.parseBoolean(System.getenv("CANVAS_TEST_STRICT"));
@@ -95,6 +96,7 @@ class VanillaFixesConfigurationTest {
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body)))
+            .timeout(java.time.Duration.ofSeconds(60))
             .build();
 
         final HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());

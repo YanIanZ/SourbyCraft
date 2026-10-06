@@ -1,0 +1,58 @@
+
+  private net.minecraft.world.level.block.state.BlockState airState() {
+    if (getType() != Material.AIR)
+      throw new UnsupportedOperationException("An overridden block type needs its own native state adapter");
+    return net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+  }
+
+  private static UnsupportedOperationException unsupportedWorldOperation() {
+    return new UnsupportedOperationException("An intermediate AIR block has no mutable world state");
+  }
+
+  @Override public org.bukkit.block.data.BlockData getBlockData() {
+    return org.bukkit.craftbukkit.block.data.CraftBlockData.createData(airState());
+  }
+  @Override public void setBlockData(org.bukkit.block.data.BlockData data) { throw unsupportedWorldOperation(); }
+  @Override public void setBlockData(org.bukkit.block.data.BlockData data, boolean physics) { throw unsupportedWorldOperation(); }
+  @Override public BlockState getState(boolean snapshot) { return getState(); }
+  @Override public Biome getComputedBiome() { return getBiome(); }
+  @Override public boolean isBuildable() { return airState().isSolid(); }
+  @Override public boolean isBurnable() { return airState().ignitedByLava(); }
+  @Override public boolean isReplaceable() { return airState().canBeReplaced(); }
+  @Override public boolean isSolid() { return airState().blocksMotion(); }
+  @Override public boolean isCollidable() { return airState().getBlock().hasCollision; }
+  @Override public boolean isSuffocating() {
+    return airState().isSuffocating(net.minecraft.world.level.EmptyBlockGetter.INSTANCE, net.minecraft.core.BlockPos.ZERO);
+  }
+  @Override public boolean isPassable() { return getCollisionShape().getBoundingBoxes().isEmpty(); }
+  @Override public org.bukkit.util.BoundingBox getBoundingBox() { airState(); return new org.bukkit.util.BoundingBox(); }
+  @Override public org.bukkit.util.VoxelShape getCollisionShape() {
+    return new org.bukkit.craftbukkit.util.CraftVoxelShape(
+        airState().getCollisionShape(net.minecraft.world.level.EmptyBlockGetter.INSTANCE, net.minecraft.core.BlockPos.ZERO));
+  }
+  @Override public org.bukkit.util.RayTraceResult rayTrace(Location start, org.bukkit.util.Vector direction,
+      double distance, org.bukkit.FluidCollisionMode fluids) {
+    if (start == null || direction == null || fluids == null || !Double.isFinite(distance)
+        || direction.lengthSquared() == 0) throw new IllegalArgumentException("Invalid ray trace arguments");
+    start.checkFinite(); direction.checkFinite();
+    airState();
+    return null; // AIR has neither an outline nor a fluid hit.
+  }
+  @Override public boolean isValidTool(ItemStack tool) { airState(); return false; } // AIR drops no items.
+  @Override public boolean isPreferredTool(ItemStack tool) { return getBlockData().isPreferredTool(tool); }
+  @Override public float getBreakSpeed(org.bukkit.entity.Player player) { throw unsupportedWorldOperation(); }
+  @Override public boolean canPlace(org.bukkit.block.data.BlockData data) { throw unsupportedWorldOperation(); }
+  @Override public void tick() { throw unsupportedWorldOperation(); }
+  @Override public void fluidTick() { throw unsupportedWorldOperation(); }
+  @Override public void randomTick() { throw unsupportedWorldOperation(); }
+  @Override public boolean applyBoneMeal(BlockFace face) { airState(); return false; } // AIR is not fertilizable.
+  @Override public boolean breakNaturally(boolean effect, boolean experience) { airState(); return false; }
+  @Override public boolean breakNaturally(ItemStack tool, boolean effect, boolean experience) { airState(); return false; }
+  @Override public boolean breakNaturally(ItemStack tool, boolean effect, boolean experience, boolean force) { airState(); return false; }
+  @Override public Collection<ItemStack> getDrops(ItemStack tool, org.bukkit.entity.Entity entity) { airState(); return Collections.emptyList(); }
+  @Override public com.destroystokyo.paper.block.BlockSoundGroup getSoundGroup() {
+    return new com.destroystokyo.paper.block.CraftBlockSoundGroup(airState().getSoundType());
+  }
+  @Override public org.bukkit.SoundGroup getBlockSoundGroup() { return getBlockData().getSoundGroup(); }
+  @Override public String getTranslationKey() { return airState().getBlock().getDescriptionId(); }
+  @Override public String translationKey() { return getTranslationKey(); }

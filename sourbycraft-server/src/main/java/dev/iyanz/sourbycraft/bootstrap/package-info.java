@@ -1,17 +1,13 @@
 /**
- * Pre-server-classes bootstrap: everything that runs before (or in order to reach) the real
- * Paper/Canvas server classes.
+ * Bootstrap services and server-owned plugin provisioning.
  *
- * <p>{@link dev.iyanz.sourbycraft.bootstrap.SourbyBootstrap} is the slim jar's {@code main}: it
- * auto-accepts the EULA, finishes a fallback-staged auto-update swap, runs the Auto-CDS layer
- * ({@link dev.iyanz.sourbycraft.bootstrap.CdsEnvironment} classifies the deployment so it never
- * forks a double-committing child JVM inside a capped container/panel), downloads any manifest
- * libraries via {@link dev.iyanz.sourbycraft.bootstrap.LibDownloader} +
- * {@link dev.iyanz.sourbycraft.bootstrap.Sha256Verifier}
- * ({@link dev.iyanz.sourbycraft.bootstrap.BootstrapManifest} describes what to fetch), provisions
- * the built-in ViaVersion/ViaBackwards jars via
- * {@link dev.iyanz.sourbycraft.bootstrap.PluginProvisioner}, and finally delegates to the
- * paperclip. {@link dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin} is the synthetic
+ * <p>The current slim jar enters through SourbyClip, which loads verified libraries and the
+ * server. The SourbyPatcher feature patch in Minecraft Main then calls
+ * {@link dev.iyanz.sourbycraft.bootstrap.PluginProvisioner} before Paper scans plugins.
+ * ViaVersion/ViaBackwards and ProtocolLib use separate provisioning settings. The legacy
+ * {@link dev.iyanz.sourbycraft.bootstrap.SourbyBootstrap} remains a separate entrypoint;
+ * its CDS/EULA/manifest-download behavior must not be inferred to run in the current launcher.
+ * {@link dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin} is the synthetic
  * {@code Plugin} handle SourbyCraft's own listeners/tasks register against, since server-internal
  * code has no real plugin instance.
  */

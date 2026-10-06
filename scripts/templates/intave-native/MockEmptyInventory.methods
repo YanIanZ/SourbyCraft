@@ -1,0 +1,78 @@
+
+  private void checkSlot(int index) {
+    if (index < 0 || index >= getSize()) throw new ArrayIndexOutOfBoundsException(index);
+  }
+
+  private static void checkContents(ItemStack[] items, int capacity) {
+    if (items != null && items.length > capacity)
+      throw new IllegalArgumentException("Contents exceed inventory capacity: " + capacity);
+  }
+
+  private static boolean empty(ItemStack stack) {
+    return stack == null || stack.getAmount() <= 0 || stack.getType().isAir();
+  }
+
+  private int equipmentIndex(org.bukkit.inventory.EquipmentSlot slot) {
+    if (slot == null) throw new IllegalArgumentException("Equipment slot cannot be null");
+    return switch (slot) {
+      case HAND -> heldItemSlot;
+      case OFF_HAND -> 40;
+      case FEET -> 36;
+      case LEGS -> 37;
+      case CHEST -> 38;
+      case HEAD -> 39;
+      case BODY -> 41;
+      case SADDLE -> 42;
+    };
+  }
+
+  @Override public ItemStack getItem(org.bukkit.inventory.EquipmentSlot slot) {
+    return getItem(equipmentIndex(slot));
+  }
+
+  @Override public void setItem(org.bukkit.inventory.EquipmentSlot slot, ItemStack stack) {
+    setItem(equipmentIndex(slot), stack);
+  }
+
+  @Override public boolean isEmpty() {
+    for (int i = 0; i < getSize(); i++) if (!empty(getItem(i))) return false;
+    return true;
+  }
+
+  @Override public HashMap<Integer, ItemStack> removeItemAnySlot(ItemStack... items) {
+    return removeAcross(getSize(), items);
+  }
+
+  private HashMap<Integer, ItemStack> removeAcross(int slots, ItemStack... items) {
+    if (items == null) throw new IllegalArgumentException("Items cannot be null");
+    // Validate all requests before mutation; never silently claim an item was removed.
+    for (ItemStack item : items)
+      if (item == null) throw new IllegalArgumentException("Item cannot be null");
+    HashMap<Integer, ItemStack> remaining = new HashMap<>();
+    for (int request = 0; request < items.length; request++) {
+      ItemStack requested = items[request].clone();
+      int amount = requested.getAmount();
+      for (int i = 0; i < slots && amount > 0; i++) {
+        ItemStack present = getItem(i);
+        if (empty(present) || !present.isSimilar(requested)) continue;
+        int removed = Math.min(amount, present.getAmount());
+        amount -= removed;
+        if (removed == present.getAmount()) setItem(i, null);
+        else {
+          ItemStack remainder = present.clone();
+          remainder.setAmount(present.getAmount() - removed);
+          setItem(i, remainder);
+        }
+      }
+      if (amount > 0) {
+        requested.setAmount(amount);
+        remaining.put(request, requested);
+      }
+    }
+    return remaining;
+  }
+
+  @Override public int close() { return 0; } // Detached simulation inventory has no viewers.
+
+  @Override public HumanEntity getHolder(boolean useSnapshot) { return getHolder(); }
+

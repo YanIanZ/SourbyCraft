@@ -1,0 +1,19 @@
+{
+  "repository": "dmulloy2/ProtocolLib",
+  "release": "https://github.com/dmulloy2/ProtocolLib/releases/tag/dev-build",
+  "release_id": 238871921,
+  "release_updated_at": "2026-10-03T18:20:43Z",
+  "asset_id": 608298510,
+  "asset_name": "ProtocolLib.jar",
+  "asset_created_at": "2026-10-03T18:20:40Z",
+  "version": "5.5.0-SNAPSHOT",
+  "file_name": "ProtocolLib-5.5.0-dev-608298510.jar",
+  "download_url": "https://github.com/dmulloy2/ProtocolLib/releases/download/dev-build/ProtocolLib.jar",
+  "sha256": "3242a696fbb55a0622d6148d88206ccc392e1d94c5b78ddd423f43ebb82a768a",
+  "size_bytes": 10567071,
+  "digest_source": "https://api.github.com/repos/dmulloy2/ProtocolLib/releases/assets/608298510",
+  "verification": "Official GitHub asset metadata; artifact bytes must pass runtime SHA-256 and size checks.",
+  "artifact_bytes_downloaded_during_implementation": false,
+  "server_boot_verified": false,
+  "note": "Mutable development release. Changed upstream bytes are rejected until a reviewed pin update; no automatic latest-version selection."
+}

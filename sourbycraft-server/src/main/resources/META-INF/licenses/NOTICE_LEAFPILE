@@ -1,0 +1,21 @@
+Aurora EDF scheduler attribution
+
+AuroraEdfScheduler.java is derived from the EDFSchedulerThreadPool implementation
+in Tuinity/LeafPile v1.2.0, commit:
+8c9fa2c5b8ac063075977efc048f6ec0299f24da
+Original authors: Spottedleaf and Tuinity/LeafPile contributors.
+Source: https://github.com/Tuinity/LeafPile
+License: GNU GPL version 3; included as LICENSE_LEAFPILE.
+
+SourbyCraft changes: cancellation lifecycle, awaiting-task replacement links,
+deadline rearming, shutdown admission, immutable scheduler owner publication,
+and integration as an Aurora-owned EDF backend. The original waiting policy and
+underlying LeafPile utilities remain in use. This is a derived implementation,
+not an independently designed scheduler.
+
+Related upstream review: yunuservices, "Fix EDF scheduler cancellation and state
+visibility", Tuinity/LeafPile pull request #6, open when reviewed 2026-10-06:
+https://github.com/Tuinity/LeafPile/pull/6
+Reviewed head: 5348d20288bdad210750c5e5a66a67e1e0021cd2
+The local fix retains SourbyCraft's public SchedulableTick fields for compatibility
+and additionally repairs awaiting replacement links and deadline rearming.

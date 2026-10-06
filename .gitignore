@@ -495,3 +495,6 @@ __pycache__/
 
 # Private maintainer build-tool checkouts; never archive or cache in public CI.
 .private-toolchain/
+
+# Personal Intave source snapshots and builds; excluded from public distributions.
+/.private-intave/
