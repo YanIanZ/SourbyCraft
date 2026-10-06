@@ -1,0 +1,149 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 6 Oct 2026 12:00:00 +0700
+Subject: [PATCH] SourbyCraft - private native Intave lifecycle and ordered
+ packet bridge
+
+Start the opt-in private engine after plugins/worlds initialize, tick on the
+player owner region and stop after Aurora region ticks halt. Keep native
+feedback in Connection's existing ready/extra-packet queue; bypass only the
+native ProtocolLib subscriptions on its Netty write, restoring filter context
+in finally. The public build includes the lifecycle boundary only and defaults
+to disabled. Native source, compile and detection qualification are separate.
+
+diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
+index a189f5d3ca1b2ba65c3520ab4f71c0415830dd0d..3a077be157c3225d1fcf3566ef1df1b3f2b877d6 100644
+--- a/net/minecraft/network/Connection.java
++++ b/net/minecraft/network/Connection.java
+@@ -433,6 +433,15 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+     }
+ 
+     public void send(final Packet<?> packet, final @Nullable ChannelFutureListener listener, final boolean flush) {
++        this.send(packet, listener, flush, true);
++    }
++
++    // SourbyCraft - preserve the normal ready/extra-packet/send queue for native anticheat feedback.
++    public void sendNative(final Packet<?> packet, final boolean nativeFilters) {
++        this.send(packet, null, true, nativeFilters);
++    }
++
++    private void send(final Packet<?> packet, final @Nullable ChannelFutureListener listener, final boolean flush, final boolean nativeFilters) {
+         // Paper start - Optimize network: Handle oversized packets better
+         final boolean connected = this.isConnected();
+         if (!connected && !this.preparing) {
+@@ -443,21 +452,21 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+         if (false && connected && (InnerUtil.canSendImmediate(this, packet) // Folia - region threading - connection fixes
+             || (io.papermc.paper.util.MCUtil.isMainThread() && packet.isReady() && this.pendingActions.isEmpty()
+             && (packet.getExtraPackets() == null || packet.getExtraPackets().isEmpty())))) {
+-            this.sendPacket(packet, listener, flush);
++            this.sendPacket(packet, listener, flush, nativeFilters);
+         } else {
+             // Write the packets to the queue, then flush - antixray hooks there already
+             final java.util.List<Packet<?>> extraPackets = InnerUtil.buildExtraPackets(packet);
+             final boolean hasExtraPackets = extraPackets != null && !extraPackets.isEmpty();
+             if (!hasExtraPackets) {
+-                this.pendingActions.add(new PacketSendAction(packet, listener, flush));
++                this.pendingActions.add(new PacketSendAction(packet, listener, flush, nativeFilters));
+             } else {
+                 final java.util.List<PacketSendAction> actions = new java.util.ArrayList<>(1 + extraPackets.size());
+-                actions.add(new PacketSendAction(packet, null, false)); // Delay the future listener until the end of the extra packets
++                actions.add(new PacketSendAction(packet, null, false, nativeFilters)); // Delay the future listener until the end of the extra packets
+ 
+                 for (int i = 0, len = extraPackets.size(); i < len;) {
+                     final Packet<?> extraPacket = extraPackets.get(i);
+                     final boolean end = ++i == len;
+-                    actions.add(new PacketSendAction(extraPacket, end ? listener : null, end)); // Append listener to the end
++                    actions.add(new PacketSendAction(extraPacket, end ? listener : null, end, nativeFilters)); // Append listener to the end
+                 }
+ 
+                 this.pendingActions.addAll(actions);
+@@ -520,11 +529,23 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+     // Paper end - Add netty task scheduling helper
+ 
+     private void sendPacket(final Packet<?> packet, final @Nullable ChannelFutureListener listener, final boolean flush) {
++        this.sendPacket(packet, listener, flush, true);
++    }
++
++    private void sendPacket(final Packet<?> packet, final @Nullable ChannelFutureListener listener, final boolean flush, final boolean nativeFilters) {
+         this.sentPackets++;
+         if (this.channel.eventLoop().inEventLoop()) {
++            this.doSendNativePacket(packet, listener, flush, nativeFilters);
++        } else {
++            this.channel.eventLoop().execute(() -> this.doSendNativePacket(packet, listener, flush, nativeFilters));
++        }
++    }
++
++    private void doSendNativePacket(final Packet<?> packet, final @Nullable ChannelFutureListener listener, final boolean flush, final boolean nativeFilters) {
++        if (nativeFilters) {
+             this.doSendPacket(packet, listener, flush);
+         } else {
+-            this.channel.eventLoop().execute(() -> this.doSendPacket(packet, listener, flush));
++            dev.yanianz.intave.NativeIntave.withoutPacketFilters(() -> this.doSendPacket(packet, listener, flush));
+         }
+     }
+ 
+@@ -542,9 +563,12 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+             future = flush ? this.channel.writeAndFlush(packet) : this.channel.write(packet); // Paper - Optimize network
+             future.addListener(listener);
+         } else if (flush) {
+-            future = this.channel.writeAndFlush(packet, this.channel.voidPromise()); // Paper - Optimize network
++            // SourbyCraft - finish callbacks need a real future, including native feedback packets.
++            future = packet.hasFinishListener() ? this.channel.writeAndFlush(packet)
++                : this.channel.writeAndFlush(packet, this.channel.voidPromise());
+         } else {
+-            future = this.channel.write(packet, this.channel.voidPromise()); // Paper - Optimize network
++            future = packet.hasFinishListener() ? this.channel.write(packet)
++                : this.channel.write(packet, this.channel.voidPromise());
+         }
+ 
+         // Paper start - Optimize network
+@@ -1097,7 +1121,11 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+         private final Packet<?> packet;
+ 
+         private PacketSendAction(final Packet<?> packet, @Nullable final ChannelFutureListener channelFutureListener, final boolean flush) {
+-            super(connection -> connection.sendPacket(packet, channelFutureListener, flush));
++            this(packet, channelFutureListener, flush, true);
++        }
++
++        private PacketSendAction(final Packet<?> packet, @Nullable final ChannelFutureListener channelFutureListener, final boolean flush, final boolean nativeFilters) {
++            super(connection -> connection.sendPacket(packet, channelFutureListener, flush, nativeFilters));
+             this.packet = packet;
+         }
+     }
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index a63312e01cc7875423e8850441522cf5a37d74a0..c44f04cce89ad2b1c35970444db44b3ad690eb7d 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -660,9 +660,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         this.server.spark.enableAfterPlugins(this.server); // Paper - spark
+         io.papermc.paper.command.brigadier.PaperCommands.INSTANCE.setValid(); // Paper - reset invalid state for event fire below
+         io.papermc.paper.plugin.lifecycle.event.LifecycleEventRunner.INSTANCE.callReloadableRegistrarEvent(io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, io.papermc.paper.command.brigadier.PaperCommands.INSTANCE, org.bukkit.plugin.Plugin.class, io.papermc.paper.plugin.lifecycle.event.registrar.ReloadableRegistrarEvent.Cause.INITIAL); // Paper - call commands event for regular plugins
++        dev.yanianz.intave.NativeIntaveDiagnostics.register();
++        dev.yanianz.intave.NativeIntave.start(); // SourbyCraft - private native anticheat
+         this.server.getCommandMap().registerServerAliases(); // Paper - relocate initial CommandMap#registerServerAliases() call
+         ((org.bukkit.craftbukkit.help.SimpleHelpMap) this.server.getHelpMap()).initializeCommands();
+         this.server.getPluginManager().callEvent(new org.bukkit.event.server.ServerLoadEvent(org.bukkit.event.server.ServerLoadEvent.LoadType.STARTUP));
++        this.server.syncCommands(); // SourbyCraft - expose native diagnostics before clients join
+         this.connection.acceptConnections();
+     }
+     // Paper end - rework world loading process
+@@ -1063,6 +1066,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             this.server.spark.disable(); // Paper - spark
+             this.server.disablePlugins();
+             this.server.waitForAsyncTasksShutdown(); // Paper - Wait for Async Tasks during shutdown
++            dev.yanianz.intave.NativeIntave.close(); // SourbyCraft - shutdown thread owns cleanup
+             dev.iyanz.sourbycraft.core.SourbyCraftBootstrap.close();
+         }
+         // CraftBukkit end
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index 12ffd37286b5bd93ee5589d5e66413a218b7711f..e7426e65ef55b5b496d19407f19e990cc96e0722 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -390,6 +390,7 @@ public class ServerGamePacketListenerImpl
+                 this.disconnect(Component.translatable("multiplayer.disconnect.idling"), org.bukkit.event.player.PlayerKickEvent.Cause.IDLING); // Paper - kick event cause
+             }
+         }
++        dev.yanianz.intave.NativeIntave.ownerTick(this.player); // SourbyCraft - player owner region
+     }
+ 
+     private boolean tickPlayer() {

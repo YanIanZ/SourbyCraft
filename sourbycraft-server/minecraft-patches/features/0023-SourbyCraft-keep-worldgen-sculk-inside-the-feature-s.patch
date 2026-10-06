@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 6 Oct 2026 22:34:34 +0700
+Subject: [PATCH] SourbyCraft - keep worldgen sculk inside the feature's write
+ zone
+
+
+diff --git a/net/minecraft/world/level/block/SculkSpreader.java b/net/minecraft/world/level/block/SculkSpreader.java
+index d6d3cb088d5d6ded75e97eaffa2baffc50fa2e26..ef78377332477621d9c0534175fe4be803d9ff10 100644
+--- a/net/minecraft/world/level/block/SculkSpreader.java
++++ b/net/minecraft/world/level/block/SculkSpreader.java
+@@ -287,6 +287,12 @@ public class SculkSpreader {
+                                 this.charge = 0;
+                                 return;
+                             }
++                            // SourbyCraft start - keep worldgen sculk inside the chunks the feature may touch
++                            if (spreader.isWorldGeneration() && !isInsideWorldGenWriteZone(level, this.pos)) {
++                                this.charge = 0;
++                                return;
++                            }
++                            // SourbyCraft end - keep worldgen sculk inside the chunks the feature may touch
+ 
+                             currentState = level.getBlockState(transferPos);
+                         }
+@@ -316,6 +322,25 @@ public class SculkSpreader {
+             return Util.shuffledCopy(NON_CORNER_NEIGHBOURS, random);
+         }
+ 
++        // SourbyCraft start - keep worldgen sculk inside the chunks the feature may touch
++        /**
++         * A cursor 15 blocks from an origin near the edge of the generating chunk reads its neighbours
++         * two chunks away, outside the step's write radius, where another worker may be generating
++         * the same chunk (vanilla logs "Detected unsafe terrain read during worldgen"). A worldgen
++         * cursor stops before any block it would read leaves the write zone: the farthest read is
++         * {@code SculkBlock.canPlaceGrowth}, 4 blocks around the cursor.
++         */
++        private static final int WORLDGEN_READ_MARGIN = 4;
++
++        private static boolean isInsideWorldGenWriteZone(final LevelAccessor level, final BlockPos pos) {
++            if (!(level instanceof net.minecraft.server.level.WorldGenRegion region)) {
++                return true;
++            }
++            return region.isWithinWriteZone(pos.offset(-WORLDGEN_READ_MARGIN, 0, -WORLDGEN_READ_MARGIN))
++                && region.isWithinWriteZone(pos.offset(WORLDGEN_READ_MARGIN, 0, WORLDGEN_READ_MARGIN));
++        }
++        // SourbyCraft end - keep worldgen sculk inside the chunks the feature may touch
++
+         private static @Nullable BlockPos getValidMovementPos(final LevelAccessor level, final BlockPos pos, final RandomSource random) {
+             BlockPos.MutableBlockPos sculkPosition = pos.mutable();
+             BlockPos.MutableBlockPos neighbour = pos.mutable();

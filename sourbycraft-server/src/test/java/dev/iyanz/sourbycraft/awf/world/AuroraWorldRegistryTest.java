@@ -49,6 +49,41 @@ class AuroraWorldRegistryTest {
     }
 
     @Test
+    void propertiesSurviveAReopenAndOldEntriesReadAsNone() throws IOException {
+        final Path file = this.dir.resolve("aurora-worlds.json");
+        final dev.iyanz.sourbycraft.api.world.WorldProperties properties = dev.iyanz.sourbycraft.api.world.WorldProperties.NONE
+            .withSpawn(new dev.iyanz.sourbycraft.api.world.WorldProperties.Spawn(0.5, 101, 0.5, 90f))
+            .withDifficulty(org.bukkit.Difficulty.HARD)
+            .withPvp(false)
+            .withSpawning(false, true)
+            .withDefaultBiome("minecraft:plains")
+            .withSaveBounds(new dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds(-12, -12, 12, 12))
+            .withPruneEmptyChunks(false);
+        final AuroraWorldRegistry first = new AuroraWorldRegistry(file);
+        first.put(new AuroraWorldRegistry.Entry("isle", "normal", 1L, "void", null, null, false).withProperties(properties));
+        first.put(new AuroraWorldRegistry.Entry("plain", "normal", null, null, null, null, false));
+
+        final AuroraWorldRegistry reopened = new AuroraWorldRegistry(file);
+        assertEquals(properties, reopened.get("isle").orElseThrow().properties());
+        assertEquals(dev.iyanz.sourbycraft.api.world.WorldProperties.NONE, reopened.get("plain").orElseThrow().propertiesOrNone());
+        assertFalse(reopened.get("isle").orElseThrow().prunesEmptyChunks(), "the property overrides the void default");
+        assertFalse(reopened.get("plain").orElseThrow().prunesEmptyChunks(), "terrain worlds do not prune by default");
+        assertTrue(new AuroraWorldRegistry.Entry("v", "normal", null, "void", null, null, false).prunesEmptyChunks(),
+            "void worlds prune by default");
+        assertEquals(properties, reopened.get("isle").orElseThrow().named("copy", "isle", true).properties(),
+            "a world made from a template keeps its properties");
+    }
+
+    @Test
+    void anEntryWrittenBeforePropertiesExistedStillReads() throws IOException {
+        final Path file = this.dir.resolve("aurora-worlds.json");
+        Files.writeString(file, "[{\"name\":\"old\",\"environment\":\"normal\",\"generator\":\"void\",\"autoload\":true}]");
+        final AuroraWorldRegistry.Entry old = new AuroraWorldRegistry(file).get("old").orElseThrow();
+        assertEquals(dev.iyanz.sourbycraft.api.world.WorldProperties.NONE, old.propertiesOrNone());
+        assertTrue(old.prunesEmptyChunks());
+    }
+
+    @Test
     void aMalformedFileIsAnErrorNotAnEmptyList() throws IOException {
         final Path file = this.dir.resolve("aurora-worlds.json");
         Files.writeString(file, "{ not json");

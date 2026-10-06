@@ -29,12 +29,35 @@ import org.jspecify.annotations.Nullable;
  * in, an empty world spawning at 0.5, 64, 0.5), a plugin's generator as {@code Plugin} or
  * {@code Plugin:id}, or {@code null} for the environment's own terrain.</p>
  *
- * <p>Every operation completes on the global region thread or later; never block a region thread
- * on the returned futures. World and template names are lower-case {@code [a-z0-9_-]}, 1 to 48
+ * <p>Completion callbacks have no guaranteed thread. {@code create},
+ * {@code createFromTemplate}, the imports and {@code load} called <em>on</em> the global region
+ * thread do their work there and return a completed future, so a caller that needs the world at
+ * once (a world provider asked for an island's world, say) can join it there. Elsewhere, joining
+ * blocks that thread until the global tick has created the world; never do so on a region/entity
+ * thread. Conflicting lifecycle work fails with {@link WorldOperationBusyException}, and
+ * cancelling its future does not stop engine work. World and template names are lower-case {@code [a-z0-9_-]}, 1 to 48
  * characters.</p>
  */
 @NullMarked
 public interface AuroraWorlds {
+
+    /**
+     * Creates a persistent world or template clone from an immutable request. Existing creation
+     * methods remain available. Concurrent lifecycle operations on one world fail with
+     * {@link WorldOperationBusyException}; separate worlds and clones may proceed concurrently.
+     * Cancelling the returned future does not stop engine work or release its reservation early.
+     */
+    default CompletableFuture<World> create(final WorldRequest request) {
+        return switch (request) {
+            case WorldRequest.Persistent persistent -> {
+                final WorldCreator creator = WorldCreator.ofKey(org.bukkit.NamespacedKey.minecraft(persistent.name()))
+                    .environment(persistent.environment()).type(persistent.type());
+                if (persistent.seed() != null) creator.seed(persistent.seed());
+                yield create(creator, persistent.generator(), persistent.autoload());
+            }
+            case WorldRequest.TemplateClone clone -> createFromTemplate(clone.template(), clone.name(), clone.autoload());
+        };
+    }
 
     /** Every world this server manages through this API, loaded or not. */
     Set<String> list();
@@ -101,7 +124,10 @@ public interface AuroraWorlds {
     /** The template a world is an instance of, if any. */
     Optional<String> template(String name);
 
-    /** Loads a world created through this API. Completes with the world if it is already loaded. */
+    /**
+     * Loads a world created through this API. Completes with the world if it is already loaded
+     * and no conflicting lifecycle operation is in progress.
+     */
     CompletableFuture<World> load(String name);
 
     /**
@@ -111,8 +137,12 @@ public interface AuroraWorlds {
     CompletableFuture<Void> save(String name);
 
     /**
-     * Unloads a loaded world, optionally saving it first. Fails with the engine's reason when the
-     * world cannot be unloaded, for example while players are in it.
+     * Unloads a loaded world. Fails with the engine's reason when the world cannot be unloaded,
+     * for example while players are in it.
+     *
+     * @param save {@code true} commits the world's current chunks; {@code false} keeps the state
+     *     of its last commit and writes nothing (what changed since is lost) — the region-threaded
+     *     engine itself always saves on unload, so this is done by its AWF storages discarding
      */
     CompletableFuture<UnloadResult> unload(String name, boolean save);
 
@@ -127,6 +157,22 @@ public interface AuroraWorlds {
 
     /** Changes whether the world is loaded again when the server starts. */
     void setAutoload(String name, boolean autoload);
+
+    /**
+     * Copies an unloaded world into a new world and loads it, with the source's environment, seed,
+     * generator and properties. A copy-on-write instance stays an instance of the same template and
+     * copies only its own chunks, so cloning an island costs its changes, not the template.
+     */
+    CompletableFuture<World> cloneWorld(String source, String target, boolean autoload);
+
+    /** The world's properties; {@link WorldProperties#NONE} when it has none. */
+    WorldProperties properties(String name);
+
+    /**
+     * Replaces the world's properties. They are stored with the world, applied at once when it is
+     * loaded (on the global region thread) and again on every later load.
+     */
+    CompletableFuture<Void> setProperties(String name, WorldProperties properties);
 
     /** Every saved template. */
     Set<String> templates();

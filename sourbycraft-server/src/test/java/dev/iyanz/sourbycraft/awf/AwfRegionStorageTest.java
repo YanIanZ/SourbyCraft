@@ -121,6 +121,24 @@ class AwfRegionStorageTest {
     }
 
     @Test
+    void aDiscardedStorageKeepsItsLastCommitAndWritesNothing() throws Exception {
+        final Path folder = region("world");
+        final AwfRegionStorage first = engine(Set.of("world")).open(folder);
+        first.write(0, 0, b("committed"));
+        first.flush();
+        first.write(0, 0, b("dirty, never committed"));
+        first.discard();
+        first.write(0, 0, b("written during the unload"));
+        first.write(1, 0, b("new chunk during the unload"));
+        first.flush();
+        first.close();
+
+        final AwfRegionStorage reopened = engine(Set.of("world")).open(folder);
+        assertArrayEquals(b("committed"), reopened.read(0, 0));
+        assertNull(reopened.read(1, 0), "nothing written after the discard reached the store");
+    }
+
+    @Test
     void listingMatchesAWholeFolderNameNotAPrefix() throws Exception {
         assertNull(engine(Set.of("world")).open(region("world_nether")));
         assertNotNull(engine(Set.of("world_nether")).open(region("world_nether")));

@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 7 Oct 2026 01:26:29 +0700
+Subject: [PATCH] SourbyCraft - route entity-owned bridge callbacks
+
+Carry the callback's entity target into the bridge. A sync callback
+wrapped in EntityTask runs on the region owning the entity when due and
+is cancelled as a rejected operation if the entity is removed first.
+Explicit global and async requests do not consult it.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+index bd31b28d155c5a5a51b284ffc51384cfe0100085..673dc72cb29a18b6cb7d664614c91fb66112d525 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
++++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+@@ -563,6 +563,9 @@ public class CraftScheduler implements BukkitScheduler {
+             @Override public dev.iyanz.sourbycraft.execution.region.RegionAnchor targetRegion() {
+                 return dev.iyanz.sourbycraft.bridge.AuroraBridge.targetRegion(task.getOwner(), task.rTask);
+             }
++            @Override public Object targetEntity() {
++                return dev.iyanz.sourbycraft.bridge.AuroraBridge.targetEntity(task.getOwner(), task.rTask);
++            }
+             @Override public long period() { return task.getPeriod(); }
+             @Override public boolean cancelled() { return task.isCancelled(); }
+             @Override public void markCancelled() {

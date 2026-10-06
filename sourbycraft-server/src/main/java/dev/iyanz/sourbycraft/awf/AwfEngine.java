@@ -39,6 +39,10 @@ public final class AwfEngine {
     private final Map<String, AwfStore> prepared = new ConcurrentHashMap<>();
     /** Managed worlds that are copy-on-write instances of a template: world name to template name. */
     private final Map<String, String> templateOf = new ConcurrentHashMap<>();
+    /** Managed worlds whose empty new chunks are pruned (void worlds). */
+    private final java.util.Set<String> pruning = ConcurrentHashMap.newKeySet();
+    /** Managed worlds' save bounds. */
+    private final Map<String, dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds> bounds = new ConcurrentHashMap<>();
     /**
      * Opened template stores by storage id. A template never changes after it is saved, so every
      * instance of it shares one read-only store and its chunk index.
@@ -125,7 +129,10 @@ public final class AwfEngine {
     private static void loadManaged(final AwfEngine engine) {
         try {
             for (final var entry : new dev.iyanz.sourbycraft.awf.world.AuroraWorldRegistry(MANAGED_FILE).all()) {
-                engine.manageWorld(entry.name(), entry.template());
+                engine.manageWorld(entry.name(), entry.template(), entry.prunesEmptyChunks());
+                if (entry.propertiesOrNone().saveBounds() != null) {
+                    engine.bounds.put(entry.name(), entry.propertiesOrNone().saveBounds());
+                }
             }
         } catch (final IOException failed) {
             // Their stores still open (an existing store always does); only a world created at
@@ -146,19 +153,63 @@ public final class AwfEngine {
      * @param template the template the world is an instance of, or {@code null}
      */
     public static void manage(final String worldName, final String template) {
-        global().manageWorld(worldName, template);
+        global().manageWorld(worldName, template, false);
+    }
+
+    /**
+     * @param pruneEmpty whether empty chunks nothing has stored are pruned; only for worlds that
+     *     generate empty chunks (the void generator)
+     */
+    public static void manage(final String worldName, final String template, final boolean pruneEmpty) {
+        global().manageWorld(worldName, template, pruneEmpty);
     }
 
     void manageWorld(final String worldName, final String template) {
+        manageWorld(worldName, template, false);
+    }
+
+    void manageWorld(final String worldName, final String template, final boolean pruneEmpty) {
         if (template != null) this.templateOf.put(worldName, template);
         else this.templateOf.remove(worldName);
+        if (pruneEmpty) this.pruning.add(worldName);
+        else this.pruning.remove(worldName);
         this.managed.add(worldName);
+    }
+
+    /**
+     * Sets a managed world's pruning and save bounds, for storages opened later and for those open
+     * now. Called when the world's properties change.
+     */
+    public static void configure(final String worldName, final boolean pruneEmpty,
+                                 final dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds saveBounds) {
+        global().configureWorld(worldName, pruneEmpty, saveBounds);
+    }
+
+    void configureWorld(final String worldName, final boolean pruneEmpty,
+                        final dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds saveBounds) {
+        final AwfEngine engine = this;
+        if (pruneEmpty) engine.pruning.add(worldName);
+        else engine.pruning.remove(worldName);
+        if (saveBounds != null) engine.bounds.put(worldName, saveBounds);
+        else engine.bounds.remove(worldName);
+        for (final AwfRegionStorage storage : engine.storages.values()) {
+            final Path folder = Path.of(storage.name());
+            boolean mine = false;
+            for (final Path element : folder) {
+                if (element.toString().equals(worldName)) mine = true;
+            }
+            if (!mine) continue;
+            storage.pruneKind(pruneEmpty ? folder.getFileName().toString() : null);
+            storage.saveBounds(saveBounds);
+        }
     }
 
     /** Stops treating a world as managed. Called after the world is deleted. */
     public static void release(final String worldName) {
         global().managed.remove(worldName);
         global().templateOf.remove(worldName);
+        global().pruning.remove(worldName);
+        global().bounds.remove(worldName);
     }
 
     /** Where templates are kept: one folder per template, holding one store per storage folder. */
@@ -227,6 +278,13 @@ public final class AwfEngine {
         for (final String folder : STORAGE_FOLDERS) {
             engine.prepared.remove(storageId(dimensionFolder.resolve(folder)));
         }
+    }
+
+    /** Discards every open storage under {@code folder}; see {@link AwfRegionStorage#discard()}. */
+    public static int discardUnder(final Path folder) {
+        final java.util.List<AwfRegionStorage> found = storagesUnder(folder);
+        found.forEach(AwfRegionStorage::discard);
+        return found.size();
     }
 
     /** Every open storage whose folder lies under {@code folder}. */
@@ -330,10 +388,27 @@ public final class AwfEngine {
         final AwfWorld world = new AwfWorld(name, role, base, store, this.settings.residentChunks());
         final AwfRegionStorage storage = new AwfRegionStorage(name, world, this.settings, this.storageLane,
             this.nanoClock.getAsLong(), () -> this.storages.remove(name));
+        if (managedWorld && prunes(regionFolder)) storage.pruneEmpty(regionFolder.getFileName().toString());
+        if (managedWorld) storage.saveBounds(boundsFor(regionFolder));
         if (this.storages.putIfAbsent(name, storage) != null) {
             throw new IOException("AWF storage " + name + " is already open");
         }
         return storage;
+    }
+
+    private dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds boundsFor(final Path regionFolder) {
+        for (final Path element : regionFolder.toAbsolutePath().normalize()) {
+            final var found = this.bounds.get(element.toString());
+            if (found != null && this.managed.contains(element.toString())) return found;
+        }
+        return null;
+    }
+
+    private boolean prunes(final Path regionFolder) {
+        for (final Path element : regionFolder.toAbsolutePath().normalize()) {
+            if (this.pruning.contains(element.toString()) && this.managed.contains(element.toString())) return true;
+        }
+        return false;
     }
 
     /** The template of the managed instance world this folder belongs to, or {@code null}. */

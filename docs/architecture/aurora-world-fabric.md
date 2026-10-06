@@ -6,12 +6,17 @@ Aurora World Fabric (AWF) is SourbyCraft's native region-aware virtual-world, te
 AWF is not branded as ASP/SWM. AdvancedSlimePaper `dev/26.2` remains an upstream technical reference and API compatibility target. Directly reused upstream source must retain license/attribution required by its license.
 
 ## World roles
-`VANILLA`, `VIRTUAL`, `TEMPLATE`, `INSTANCE`, `READ_ONLY`, `TEMPORARY`.
+The storage library defines `VANILLA`, `VIRTUAL`, `TEMPLATE`, `INSTANCE`, `READ_ONLY`,
+`TEMPORARY`. The engine uses `VANILLA` and `INSTANCE` for managed runtime worlds. These roles
+are distinct from creation requests; `VIRTUAL`/`TEMPORARY` are not runtime creation modes
+provided by `AuroraWorlds`.
 
 ## Ownership
 Mutable chunk/world state is accessed and mutated by its owning Aurora region. Storage/serialization workers consume immutable snapshots only.
 
-Never block region owners on file/database I/O or use CountDownLatch-style sync bridges for world lifecycle work.
+Ordinary region/entity owners must not wait on lifecycle/storage futures. The existing
+global-thread creation/loading compatibility path still waits for I/O preparation, as described
+below; prefer asynchronous calls. No CountDownLatch-style world lifecycle bridge is introduced.
 
 ## Chunk pipeline
 Chunk request -> Aurora scheduler -> AWF index/store -> decode -> owner-region materialization.
@@ -32,16 +37,18 @@ Dirty region-owned state -> immutable snapshot -> Aurora STORAGE lane -> seriali
 Atomic commit sequence: snapshot -> temporary generation -> verify -> commit manifest. A crash before commit leaves the prior generation authoritative.
 
 ## Storage
-Initial backends: FILE, MongoDB, MySQL, Redis. Native async contracts return CompletionStage; legacy SlimeLoader APIs are adapters.
+Implemented backends: FILE and Redis. MongoDB/MySQL and a legacy SlimeLoader API adapter remain
+planned. The runtime service exposes CompletableFuture-based lifecycle methods.
 
 ## Required metrics
 Loaded worlds, resident/dirty chunks, save queue depth, oldest pending save, serialization/backend p50/p95/p99, retries/failures and bytes read/written.
 
 ## Implementation status (26.2 branch)
 
-`dev.iyanz.sourbycraft.awf` is a tested library with one engine integration: the FILE backend
-under `RegionFileStorage`, for worlds an operator lists in `aurora.awf.worlds` (default: none).
-It is off unless configured and is not qualified; see "Engine integration" below.
+`dev.iyanz.sourbycraft.awf` integrates FILE and Redis storage under `RegionFileStorage`,
+for worlds an operator lists in `aurora.awf.worlds` (default: none) and worlds created through
+`AuroraWorlds`. Ordinary worlds retain region files unless selected. Functional and local
+runtime evidence is described below; production qualification remains incomplete.
 
 - `AwfFile` (`.awf`): header, immutable metadata, chunk index, and deflated chunks, each with a
   SHA-256. Opening reads the index only; a chunk materialises when read. Corrupt or truncated
@@ -79,8 +86,10 @@ backend (next section). MongoDB/MySQL backends are **planned, not implemented**.
 - **API.** `dev.iyanz.sourbycraft.api.world.AuroraWorlds` in `sourbyapi`, obtained from the
   services manager: `list`, `exists`, `isLoaded`, `create(WorldCreator, autoload)`, `load`,
   `save`, `unload(name, save)` → `UnloadResult`, `delete`, `autoload`/`setAutoload`. Every call
-  returns a future that completes on the global region thread or later; never block a region
-  thread on it. Names are `[a-z0-9_-]{1,48}`; storage folder names (`region`, `poi`, `entities`,
+  returns a future; completion callbacks have no guaranteed thread. World creation/loading
+  runs on the global region, and callers on that thread retain the existing synchronous
+  compatibility path (waiting for store preparation). Elsewhere, never join a lifecycle future
+  on a region/entity thread. Names are `[a-z0-9_-]{1,48}`; storage folder names (`region`, `poi`, `entities`,
   `dimensions`, …) are refused because AWF matches worlds by path element.
 - **Registry.** `sourbycraft_config/aurora-worlds.json` lists the managed worlds (environment,
   seed, autoload). It is written through a temporary file and an atomic move. A world in it is an
@@ -353,11 +362,60 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
     were restored after the test. The first 529-chunk overworld commit took 105.5 seconds on
     this panel, a single unqualified observation requiring a separate latency investigation.
 
-Not implemented: MongoDB/MySQL/Redis backends (the SPI exists; no driver is on the classpath and
-none is added without a qualification plan); a SlimeLoader compatibility adapter (AWF stores
-chunk NBT, not the Slime world format, so an adapter would need a format converter); world-role use
-by the engine (every engine storage is `VANILLA`; templates and instances exist only in the
-library).
+Not implemented: MongoDB/MySQL backends and a SlimeLoader API compatibility adapter. Redis,
+Slime v12/v13 conversion, runtime templates and engine-backed copy-on-write instances are
+implemented as described above. Direct compatibility with arbitrary SWM/ASP plugin APIs is not
+implied by the converter or by Aurora Bridge admission.
+
+### Robustness fixes 2026-10-07
+
+Unit-tested only (AWF test classes: 151 run, 0 failures, 1 skipped benchmark). No server
+boot, soak or Redis-lease run covers them yet. They change correctness, not throughput, and
+no performance effect is claimed.
+
+- **Write vs close (TODO P0).** `AwfRegionStorage.write` holds a read lock from its
+  closed/discarding check until its bytes are in the world. `close`/`discard` take the write lock
+  to change state. A write admitted before close is in the final commit. A write after close
+  throws instead of being lost. Test: `AwfLifecycleFenceTest.aWriteAdmittedJustBeforeCloseIsCommittedByIt`.
+- **Discard fences queued commits (B78/A3).** `discard()` fences the `AwfWorld`. A commit that
+  `save()` queued but that had not started fails with `AwfWorld.FencedException` and commits
+  nothing. A commit already running finishes as one atomic commit. `closeStore()` waits for it
+  under the commit lock before it releases the store. After `close()`, the FILE store
+  (`AwfWorldStore`) refuses commits. Tests: `AwfLifecycleFenceTest.aCommitQueuedBeforeADiscardCommitsNothingWhenItRunsAfterIt`,
+  `aFencedWorldRefusesQueuedCommitsWithoutTouchingTheStore`, `aRunningCommitCompletesAndTheStoreClosesOnlyAfterIt`,
+  `aClosedFileStoreRefusesCommits`. Redis lease release after close is not re-tested here.
+- **Pruning keeps non-regenerable data (B77/A2).** `ChunkPruning` keeps a chunk in any of
+  these cases:
+  - a non-empty `ChunkBukkitValues`
+  - block or fluid ticks
+  - `PostProcessing` offsets
+  - a structure start (other than `INVALID`) or a structure reference
+  - a non-empty `UpgradeData`
+  - a top-level key it does not know
+  - a biome palette that is not exactly one `minecraft:the_void` or `minecraft:plains` (the
+    world's biome source is not known at that layer)
+
+  As a result, a void world without a single default biome of the_void or plains now keeps
+  these chunks instead of pruning them. Tests: `ChunkPruningTest.nonRegenerableDataKeepsAnOtherwiseEmptyChunk`,
+  `aVoidChunkWithOnlyPluginDataSurvivesUnloadAndReload`.
+- **`.awf` files carry WorldProperties (B79/A4).** Export writes a `properties` metadata key
+  (JSON), and import restores and validates it. A file without the key imports with no
+  properties, as before. Tests: `AuroraWorldFilesTest` (round trip with every field
+  non-default, legacy file, malformed refusal).
+- **Slime properties applied (B76/A1).** `SlimeImporter.worldData` maps typed ASP properties
+  where the mapping is unambiguous: spawn x/y/z(+yaw), difficulty, pvp, allowMonsters/Animals
+  and defaultBiome. `importSlime` reads only the file's header and extra data to set the new
+  world's `WorldProperties`, and `convertSlime` writes them into the `.awf` file. Anything else
+  is logged once per import or conversion as dropped, for example the world's `BukkitValues`,
+  `environment`, `dragonBattle` and values that do not fit. The world PDC itself is not restored
+  yet. Tests: `SlimeImporterTest.worldPropertiesMapFromTypedValuesAndTheRestIsReportedDropped`,
+  `theHeaderOnlyReaderSeesWhatAFullParseSees`, `slimeToAwfToImportKeepsTheProperties`. The service
+  wiring (`AuroraWorldsService.importSlimeInternal`) has no unit test because it needs a running
+  server.
+- **Not changed: B80/A5, B85.** `createAfter` still joins preparation on the global tick. The
+  `AuroraWorlds` contract promises a completed future to callers on the global region thread so
+  they can join it there. An asynchronous handoff would break that promise, and such callers
+  would deadlock. Fixing it needs a contract change first.
 
 ## Qualification
 Load/unload loops, COW isolation, crash during each persistence stage, backend timeout/disconnect, shutdown with pending saves, corrupt cache/blob recovery, and 1/50/250/1000-world workloads.
@@ -389,3 +447,42 @@ finding in TODO.md); it fails the same way on region files.
 
 Still open: backend timeout/disconnect (no network backend exists) and any measurement under
 sustained real chunk load.
+
+### Multi-plugin lifecycle admission and creation requests (2026-10-06)
+
+`AuroraWorlds.create(WorldRequest)` adds two immutable request types without replacing the
+existing API: `WorldRequest.persistent(name)` and `WorldRequest.fromTemplate(template, name)`.
+Both create persistent managed worlds. A clone inherits its template's environment, seed,
+generator and world type; it keeps its own changed chunks. `autoload` controls startup loading,
+not durability. Neither request is an ephemeral/discard-on-unload mode.
+
+The service reserves a world until its lifecycle operation actually finishes, including failed
+creation cleanup. Concurrent create/import/load/save/unload/delete/export/template-save and
+`setAutoload` calls on that world fail with `WorldOperationBusyException`, identifying the
+resource and active operation. This is admission, not an unbounded queue: a caller can chain
+operations after completion or retry deliberately. Different worlds can proceed concurrently
+within the existing executor budgets; no new executors or CPU workers are introduced.
+
+Template readers share admission, so clones of different worlds can start from one template
+concurrently. Saving/deleting a template requires exclusive admission; deletion still refuses
+registered instances. Export and conversion reserve their normalized output path against other
+service operations. These reservations cover this service instance, not arbitrary filesystem
+writers, direct Bukkit calls, other JVMs or alias paths through symlinks; the backend's existing
+writer lease remains responsible for cross-server storage ownership.
+
+Cancelling or manually completing a returned future cannot release its reservation while the
+underlying operation is running. A save records region failures but waits for every admitted
+region and the fan-out to finish before reporting failure, so a failing save cannot overlap a
+new unload/delete while other regions are still saving. Completion releases admission before callbacks run, allowing
+`save(name).thenCompose(ignored -> unload(name, true))`. Callback code must explicitly schedule
+region/entity mutations on their owners.
+
+Functional evidence is recorded with the delivery tasks in `SPEC.md`; throughput improvement,
+real-plugin gameplay compatibility and large-world soak qualification remain separate gates.
+Plugin development examples: [AWF plugin API](../guides/developing-awf.md).
+
+Functional verification (2026-10-06, Temurin 25.0.4.1): WorldRequestTest 3/3,
+WorldOperationGateTest 7/7 and WorldSaveBarrierTest 3/3 pass. The isolated full Gradle run
+passes API 525 tests (2 skipped) and server 10,147 tests (23 skipped), with zero failures/errors.
+The gate's simultaneous-plugin test and 100 shared-template readers are in-process simulations,
+not 100 running Minecraft worlds. Exact command/log/report provenance is in SPEC §155.

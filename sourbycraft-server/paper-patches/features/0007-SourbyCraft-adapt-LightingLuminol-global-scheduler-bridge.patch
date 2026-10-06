@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bacteriawa <A3167717663@hotmail.com>
+Date: Sat, 6 Jun 2026 22:24:08 +0800
+Subject: [PATCH] SourbyCraft - adapt LightingLuminol global scheduler bridge
+
+Adapted from LightingLuminol / Luminol (GNU GPL version 3):
+https://github.com/LuminolCustomArchive/LightingLuminol
+Upstream revision: 72d51c4d11b1ddfe70cde21f4736fdf660873cb3
+Original: lightingluminol-server/paper-patches/features/0003-Folia-scheduler-compatibility.patch
+Original author and date retained above. SourbyCraft adaptation adds native
+backend entry points, explicit global routing, bridge state notifications and
+pre-callback admission closure. Region/entity scheduler redirects are omitted
+to retain ownership and entity retirement behavior. SAFE remains opt-in.
+See docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md and packaged license notices.
+
+diff --git a/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java b/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
+index 455e8c24d98fcd0ae0a349737a0e709a05ed9170..dc8c9b2433ace53521ef7b06a57ff7947ca92b0a 100644
+--- a/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
++++ b/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
+@@ -228,6 +228,13 @@ class PaperPluginInstanceManager {
+ 
+         String pluginName = plugin.getPluginMeta().getDisplayName();
+ 
++        // SourbyCraft - close bridge admission before disable callbacks, including early bootstrap failures
++        try {
++            dev.iyanz.sourbycraft.bridge.AuroraBridge.disable(plugin);
++        } catch (Throwable ex) {
++            this.handlePluginException("Error occurred while closing bridge admission for " + pluginName, ex, plugin);
++        }
++
+         try {
+             plugin.getLogger().info("Disabling %s".formatted(pluginName));
+ 
+@@ -262,6 +269,14 @@ class PaperPluginInstanceManager {
+         // Folia - region threading
+ 
+         // Paper start - Folia schedulers
++        // SourbyCraft start - LightingLuminol Bukkit task cleanup (Bacteriawa, GPL v3)
++        try {
++            this.server.getScheduler().cancelTasks(plugin);
++        } catch (Throwable ex) {
++            this.handlePluginException("Error occurred (in the plugin loader) while cancelling Bukkit scheduler tasks for "
++                + pluginName + " (Is it up to date?)", ex, plugin);
++        }
++        // SourbyCraft end - LightingLuminol Bukkit task cleanup
+         try {
+             this.server.getGlobalRegionScheduler().cancelTasks(plugin);
+         } catch (Throwable ex) {
+diff --git a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+index 14ffbcb66006878eacf310547dad53718f8308eb..553d2832fdc23c098572b35040621c437c867763 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
++++ b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+@@ -54,6 +54,17 @@ public class FoliaGlobalRegionScheduler implements GlobalRegionScheduler {
+ 
+     @Override
+     public ScheduledTask runDelayed(final Plugin plugin, final Consumer<ScheduledTask> task, final long delayTicks) {
++        // SourbyCraft start - LightingLuminol global scheduler compatibility (GPL v3)
++        if (dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.shouldUseBukkitScheduler(plugin)) {
++            return dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.runDelayedOnBukkit(plugin, task, delayTicks);
++        }
++        return this.runDelayedNative(plugin, task, delayTicks);
++    }
++
++    /** Server-internal bridge backend; retains global ownership without scheduler recursion. */
++    @org.jetbrains.annotations.ApiStatus.Internal
++    public ScheduledTask runDelayedNative(final Plugin plugin, final Consumer<ScheduledTask> task, final long delayTicks) {
++        // SourbyCraft end - LightingLuminol global scheduler compatibility
+         Objects.requireNonNull(plugin, "Plugin may not be null");
+         Objects.requireNonNull(task, "Task may not be null");
+         if (delayTicks <= 0) {
+@@ -78,6 +89,17 @@ public class FoliaGlobalRegionScheduler implements GlobalRegionScheduler {
+ 
+     @Override
+     public ScheduledTask runAtFixedRate(final Plugin plugin, final Consumer<ScheduledTask> task, final long initialDelayTicks, final long periodTicks) {
++        // SourbyCraft start - LightingLuminol global scheduler compatibility (GPL v3)
++        if (dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.shouldUseBukkitScheduler(plugin)) {
++            return dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.runAtFixedRateOnBukkit(plugin, task, initialDelayTicks, periodTicks);
++        }
++        return this.runAtFixedRateNative(plugin, task, initialDelayTicks, periodTicks);
++    }
++
++    /** Server-internal bridge backend; retains global ownership without scheduler recursion. */
++    @org.jetbrains.annotations.ApiStatus.Internal
++    public ScheduledTask runAtFixedRateNative(final Plugin plugin, final Consumer<ScheduledTask> task, final long initialDelayTicks, final long periodTicks) {
++        // SourbyCraft end - LightingLuminol global scheduler compatibility
+         Objects.requireNonNull(plugin, "Plugin may not be null");
+         Objects.requireNonNull(task, "Task may not be null");
+         if (initialDelayTicks <= 0) {
+@@ -106,6 +128,7 @@ public class FoliaGlobalRegionScheduler implements GlobalRegionScheduler {
+     @Override
+     public void cancelTasks(final Plugin plugin) {
+         Objects.requireNonNull(plugin, "Plugin may not be null");
++        dev.iyanz.sourbycraft.bridge.AuroraBridge.cancelGlobal(plugin); // SourbyCraft - adapted LightingLuminol cancellation; release bridge indexes
+ 
+         final List<GlobalScheduledTask> toCancel = new ArrayList<>();
+         synchronized (this.stateLock) {
+diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+index db0bd34f892379f3fc9316e9456d8fb9a018b3d8..c431d15758685ab0db9310651b159bfd77cdaa06 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
++++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+@@ -548,9 +548,13 @@ public class CraftScheduler implements BukkitScheduler {
+         return new dev.iyanz.sourbycraft.bridge.BridgeRuntime.Task() {
+             @Override public int id() { return task.getTaskId(); }
+             @Override public boolean sync() { return task.isSync(); }
++            @Override public boolean global() { return task.rTask instanceof dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.GlobalCallback; }
+             @Override public long period() { return task.getPeriod(); }
+             @Override public boolean cancelled() { return task.isCancelled(); }
+-            @Override public void markCancelled() { task.cancel0(); }
++            @Override public void markCancelled() {
++                task.cancel0();
++                if (task.rTask instanceof dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.GlobalCallback callback) callback.bridgeCancelled();
++            }
+             @Override public Object handle() { return task; }
+             @Override public void run() {
+                 // CraftAsyncTask#run swallows and logs exceptions and keeps worker lists the bridge

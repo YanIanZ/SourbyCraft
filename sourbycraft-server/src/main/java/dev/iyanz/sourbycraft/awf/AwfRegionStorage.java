@@ -45,6 +45,28 @@ public final class AwfRegionStorage {
     private final Runnable onClose;
     private final AtomicLong lastCommitNanos;
     private final AtomicBoolean closed = new AtomicBoolean();
+    /**
+     * Makes {@link #write} and the close/discard transitions mutually exclusive. A write holds the
+     * read lock from its {@code closed}/{@code discarding} check until its bytes are in the world,
+     * so writes on many region threads still run side by side. {@link #close} and {@link #discard}
+     * take the write lock to flip their state, so a write admitted before close is in the world
+     * before close takes its final snapshot, and a write that comes after sees the new state.
+     */
+    private final java.util.concurrent.locks.ReentrantReadWriteLock transition =
+        new java.util.concurrent.locks.ReentrantReadWriteLock();
+    /** Runs inside {@link #write} once it is admitted; for tests that interleave close with it. */
+    private volatile Runnable admittedHook = () -> {};
+    /**
+     * Set when the world is being unloaded without saving: from then on writes are dropped and
+     * nothing more is committed, so the store keeps the state of its last commit.
+     */
+    private volatile boolean discarding;
+    /** The storage folder kind ({@code region}, ...) when empty new chunks are pruned, else null. */
+    private volatile String pruneKind;
+    private final AtomicLong pruned = new AtomicLong();
+    /** Chunks outside these are not stored; null for no bounds. */
+    private volatile dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds saveBounds;
+    private final AtomicLong outOfBounds = new AtomicLong();
     private final AtomicLong deletes = new AtomicLong();
     private final AtomicLong reads = new AtomicLong();
     private final AtomicLong baseFallthroughs = new AtomicLong();
@@ -101,7 +123,32 @@ public final class AwfRegionStorage {
      * copied. Never touches a region file and never blocks on the backend.
      */
     public void write(final int chunkX, final int chunkZ, final byte[] nbt) throws IOException {
-        if (this.closed.get()) throw new IOException("AWF storage " + this.name + " is closed");
+        this.transition.readLock().lock();
+        try {
+            if (this.discarding) return;
+            if (this.closed.get()) throw new IOException("AWF storage " + this.name + " is closed");
+            this.admittedHook.run();
+            admittedWrite(chunkX, chunkZ, nbt);
+        } finally {
+            this.transition.readLock().unlock();
+        }
+    }
+
+    private void admittedWrite(final int chunkX, final int chunkZ, final byte[] nbt) throws IOException {
+        final dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds bounds = this.saveBounds;
+        if (bounds != null && !bounds.contains(chunkX, chunkZ)) {
+            this.outOfBounds.incrementAndGet();
+            return;
+        }
+        final String prune = this.pruneKind;
+        if (prune != null && nbt != null) {
+            final ChunkKey key = new ChunkKey(chunkX, chunkZ);
+            // Only chunks nothing has ever stored: an emptied chunk must still shadow what it held.
+            if (!this.world.owns(key) && !this.world.baseHas(key) && ChunkPruning.isEmpty(prune, nbt)) {
+                this.pruned.incrementAndGet();
+                return;
+            }
+        }
         final ChunkKey key = new ChunkKey(chunkX, chunkZ);
         if (nbt == null) {
             this.world.delete(key);
@@ -122,18 +169,23 @@ public final class AwfRegionStorage {
      * @return whether a commit was started
      */
     public boolean maintain(final long nowNanos) {
-        if (this.closed.get() || this.world.dirtyCount() == 0 || this.world.pendingSaveCount() > 0) return false;
+        if (this.discarding || this.closed.get() || this.world.dirtyCount() == 0 || this.world.pendingSaveCount() > 0) return false;
         final long last = this.lastCommitNanos.get();
         if (nowNanos - last < this.settings.commitIntervalSeconds() * 1_000_000_000L) return false;
         if (!this.lastCommitNanos.compareAndSet(last, nowNanos)) return false;
         this.world.save(this.settings.persistence(), this.storageLane, this.settings.commitAttempts())
             .whenComplete((ok, failed) -> {
-                if (failed != null) {
+                if (failed != null && !(unwrap(failed) instanceof AwfWorld.FencedException)) {
                     dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF commit for " + this.name
                         + " failed; its chunks stay in memory and the next commit retries them", failed);
                 }
             });
         return true;
+    }
+
+    private static Throwable unwrap(final Throwable failed) {
+        return failed instanceof java.util.concurrent.CompletionException && failed.getCause() != null
+            ? failed.getCause() : failed;
     }
 
     /**
@@ -142,6 +194,7 @@ public final class AwfRegionStorage {
      * returns at once.
      */
     public void flush() throws IOException {
+        if (this.discarding || this.closed.get()) return;
         if (this.world.dirtyCount() == 0) return;
         if (ExecutionLane.of(Thread.currentThread().getName()) == ExecutionLane.REGION_TICK) {
             this.lastCommitNanos.set(Long.MIN_VALUE / 2);
@@ -154,9 +207,16 @@ public final class AwfRegionStorage {
 
     /** Flushes and forgets this storage. Called when the engine closes the region storage. */
     public void close() throws IOException {
-        if (!this.closed.compareAndSet(false, true)) return;
+        // Under the write lock: every write admitted before this point is in the world, and every
+        // later one sees closed and fails loudly, so the final commit below misses nothing.
+        this.transition.writeLock().lock();
         try {
-            if (this.world.dirtyCount() > 0) {
+            if (!this.closed.compareAndSet(false, true)) return;
+        } finally {
+            this.transition.writeLock().unlock();
+        }
+        try {
+            if (!this.discarding && this.world.dirtyCount() > 0) {
                 this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts());
             }
         } finally {
@@ -166,6 +226,69 @@ public final class AwfRegionStorage {
                 this.onClose.run();
             }
         }
+    }
+
+    /**
+     * Prunes empty chunks nothing has stored yet (see {@link ChunkPruning}). For worlds whose
+     * generator makes empty chunks, where regenerating one gives the same chunk.
+     */
+    public void pruneEmpty(final String storageFolder) {
+        this.pruneKind = storageFolder;
+    }
+
+    /** Stops storing chunks outside {@code bounds} (null: store everywhere). */
+    public void saveBounds(final dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds bounds) {
+        this.saveBounds = bounds;
+    }
+
+    /** Writes dropped for being outside the save bounds since this storage opened. */
+    public long outOfBounds() {
+        return this.outOfBounds.get();
+    }
+
+    /** Stops pruning (null) or prunes for the given storage folder kind. */
+    void pruneKind(final String storageFolder) {
+        this.pruneKind = storageFolder;
+    }
+
+    /** Empty chunks not stored since this storage opened. */
+    public long pruned() {
+        return this.pruned.get();
+    }
+
+    /** Chunks this storage holds itself (not from its template): committed or waiting to be. */
+    public int storedChunks() {
+        return this.world.ownedCount();
+    }
+
+    /**
+     * Stops committing: writes from now on are dropped and close commits nothing, so the store
+     * keeps its last committed state. Chunks written but not yet committed are discarded too.
+     * Used to unload a world without saving it; there is no way back for this storage.
+     */
+    public void discard() {
+        this.transition.writeLock().lock();
+        try {
+            this.discarding = true;
+            // Queued commits that have not started yet commit nothing; see AwfWorld#fence.
+            this.world.fence();
+        } finally {
+            this.transition.writeLock().unlock();
+        }
+    }
+
+    /** Sets the hook {@link #write} runs once admitted. Tests only. */
+    void admittedHook(final Runnable hook) {
+        this.admittedHook = hook;
+    }
+
+    /** Whether a close or discard is waiting for admitted writes to finish. Tests only. */
+    boolean transitionWaiting() {
+        return this.transition.hasQueuedThreads();
+    }
+
+    public boolean discarding() {
+        return this.discarding;
     }
 
     public boolean closed() {

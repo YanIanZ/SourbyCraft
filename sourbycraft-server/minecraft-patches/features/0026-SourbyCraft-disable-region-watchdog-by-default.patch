@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 6 Oct 2026 22:37:54 +0700
+Subject: [PATCH] SourbyCraft - disable region watchdog by default
+
+
+diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+index c6b9c0467f5098bb9e65c8d170f5dd7661cfb50c..2483551fbaebefd46e48be376ca4e644e2177fae 100644
+--- a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
++++ b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+@@ -20,6 +20,13 @@ import org.slf4j.Logger;
+ public final class FoliaWatchdogThread extends Thread {
+ 
+     private static final Logger LOGGER = LogUtils.getClassLogger();
++    // SourbyCraft - diagnostic watchdog is opt-in, fixed before scheduler startup.
++    private static final boolean ENABLED = Boolean.getBoolean("sourbycraft.region-watchdog.enabled");
++
++    public static boolean isEnabled() {
++        return ENABLED;
++    }
++
+     public static final String BREAK_LINE = "----------------------------------------------------------"; // Canvas - more detailed watchdog output
+ 
+     public static final class RunningTick {
+@@ -50,6 +57,7 @@ public final class FoliaWatchdogThread extends Thread {
+ 
+     @Override
+     public void run() {
++        if (!ENABLED) return; // SourbyCraft - also guard direct/manual starts
+         for (;;) {
+             try {
+                 Thread.sleep(1000L);
+@@ -134,12 +142,14 @@ public final class FoliaWatchdogThread extends Thread {
+     // Canvas end - more detailed watchdog output
+ 
+     public void addTick(final RunningTick tick) {
++        if (!ENABLED || tick == null) return; // SourbyCraft - no retained ticks while disabled
+         synchronized (this.ticks) {
+             this.ticks.add(tick);
+         }
+     }
+ 
+     public void removeTick(final RunningTick tick) {
++        if (!ENABLED || tick == null) return; // SourbyCraft - disabled ticks have no watchdog record
+         synchronized (this.ticks) {
+             this.ticks.remove(tick);
+         }
+diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+index c6fc3f6b882c9fce3cf79d53a8b961fbac7a6d8d..d9b53333108add6e6d873e1472e1dedb52beaf99 100644
+--- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+@@ -91,7 +91,9 @@ public final class TickRegionScheduler {
+     // Folia start - watchdog
+     public static final FoliaWatchdogThread WATCHDOG_THREAD = new FoliaWatchdogThread();
+     static {
+-        WATCHDOG_THREAD.start();
++        if (FoliaWatchdogThread.isEnabled()) { // SourbyCraft - diagnostic watchdog opt-in
++            WATCHDOG_THREAD.start();
++        }
+     }
+     // Folia end - watchdog
+ 
+@@ -510,7 +512,8 @@ public final class TickRegionScheduler {
+                 this.currentTickingThread = Thread.currentThread();
+             }
+ 
+-            final FoliaWatchdogThread.RunningTick runningTick = new FoliaWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()); // Folia - watchdog
++            final FoliaWatchdogThread.RunningTick runningTick = FoliaWatchdogThread.isEnabled()
++                ? new FoliaWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()) : null; // Folia - watchdog
+             WATCHDOG_THREAD.addTick(runningTick); // Folia - watchdog
+             try {
+                 this.runRegionTasks(() -> {
+@@ -599,7 +602,8 @@ public final class TickRegionScheduler {
+                 this.currentTickingThread = Thread.currentThread();
+             }
+ 
+-            final FoliaWatchdogThread.RunningTick runningTick = new FoliaWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()); // Folia - region threading
++            final FoliaWatchdogThread.RunningTick runningTick = FoliaWatchdogThread.isEnabled()
++                ? new FoliaWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()) : null; // Folia - region threading
+             WATCHDOG_THREAD.addTick(runningTick); // Folia - region threading
+             try {
+                 // next start isn't updated until the end of this tick

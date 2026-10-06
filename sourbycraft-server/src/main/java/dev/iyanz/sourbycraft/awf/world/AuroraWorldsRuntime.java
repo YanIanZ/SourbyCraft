@@ -35,6 +35,7 @@ public final class AuroraWorldsRuntime {
                 }
             }
         }, owner);
+        Bukkit.getPluginManager().registerEvents(created, owner);
         service = created;
     }
 }

@@ -103,13 +103,17 @@ class SlimeImporterTest {
     }
 
     private static byte[] file(final int flags) throws IOException {
+        return file(flags, new CompoundTag());
+    }
+
+    private static byte[] file(final int flags, final CompoundTag worldExtra) throws IOException {
         final ByteArrayOutputStream chunks = new ByteArrayOutputStream();
         final DataOutputStream chunkOut = new DataOutputStream(chunks);
         chunkOut.writeInt(2);
         chunk(chunkOut, 0, 0, flags, true);
         chunk(chunkOut, -1, 3, flags, false);
         final byte[] chunkData = chunks.toByteArray();
-        final byte[] extra = nbt(new CompoundTag());
+        final byte[] extra = nbt(worldExtra);
 
         final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         final DataOutputStream out = new DataOutputStream(bytes);
@@ -232,6 +236,153 @@ class SlimeImporterTest {
         assertEquals(3, chunk.getListOrEmpty("sections").getCompound(0).orElseThrow().getByteOr("Y", (byte) 99));
         assertEquals("minecraft:strider", stored(world, "entities", new ChunkKey(2, -5)).getListOrEmpty("Entities")
             .getCompound(0).orElseThrow().getStringOr("id", ""));
+    }
+
+    /** AdvancedSlimePaper's own v13: zstd blobs, entities in a compound, a flag this reader does not know. */
+    private static byte[] aspV13File() throws Exception {
+        final int unknownFlag = 8;
+        final ByteArrayOutputStream chunks = new ByteArrayOutputStream();
+        final DataOutputStream out = new DataOutputStream(chunks);
+        out.writeInt(1);
+        out.writeInt(4);
+        out.writeInt(7);
+        out.writeInt(24);
+        for (int s = 0; s < 24; s++) {
+            final boolean filled = s == 8;
+            out.writeByte(filled ? 1 | 2 : 0);          // block light, then sky light
+            if (filled) {
+                out.write(new byte[2048]);
+                out.write(new byte[2048]);
+            }
+            prefixed(out, filled ? nbt(named("palette", "obsidian")) : new byte[0]);
+            prefixed(out, filled ? nbt(named("palette", "plains")) : new byte[0]);
+        }
+        prefixed(out, nbt(new CompoundTag()));          // heightmaps
+        prefixed(out, nbt(named("0", "nether_portal")));  // POI (flag 1)
+        prefixed(out, new byte[] {1, 2, 3, 4, 5});      // the unknown flag's value
+        final CompoundTag tiles = new CompoundTag();
+        tiles.put("tileEntities", new ListTag());
+        prefixed(out, nbt(tiles));
+        final CompoundTag entities = new CompoundTag();
+        final ListTag entityList = new ListTag();
+        entityList.add(named("id", "minecraft:villager"));
+        entities.put("entities", entityList);
+        prefixed(out, nbt(entities));
+        prefixed(out, nbt(new CompoundTag()));          // chunk extra
+        final CompoundTag extra = new CompoundTag();
+        final CompoundTag properties = new CompoundTag();
+        properties.putString("environment", "normal");
+        properties.putInt("spawnX", 12);
+        properties.putString("difficulty", "hard");
+        extra.put("properties", properties);
+        final Class<?> zstd = Class.forName("com.github.luben.zstd.Zstd");
+        final java.lang.reflect.Method compress = zstd.getMethod("compress", byte[].class);
+        final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        final DataOutputStream file = new DataOutputStream(bytes);
+        file.write(new byte[] {(byte) 0xB1, 0x0B});
+        file.writeByte(0x0D);
+        file.writeInt(4790);
+        file.writeByte(1 | unknownFlag);
+        for (final byte[] blob : new byte[][] {chunks.toByteArray(), nbt(extra)}) {
+            final byte[] compressed = (byte[]) compress.invoke(null, (Object) blob);
+            file.writeInt(compressed.length);
+            file.writeInt(blob.length);
+            file.write(compressed);
+        }
+        return bytes.toByteArray();
+    }
+
+    @Test
+    void advancedSlimePapersOwnVersion13IsRead() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(dev.iyanz.sourbycraft.awf.Compression.zstdAvailable(),
+            "zstd-jni is not on the test classpath");
+        final byte[] file = aspV13File();
+        final SlimeImporter.SlimeFile parsed = SlimeImporter.read(file);
+        assertEquals("normal", parsed.properties().get("environment"));
+        assertEquals("12", parsed.properties().get("spawnX"));
+        assertEquals("hard", parsed.properties().get("difficulty"));
+        final Path world = this.dir.resolve("asp");
+        assertEquals(new SlimeImporter.Result(1, 1, 1, 4790), SlimeImporter.importInto(file, world, -4));
+        final CompoundTag chunk = stored(world, "region", new ChunkKey(4, 7));
+        assertEquals(4, chunk.getListOrEmpty("sections").getCompound(0).orElseThrow().getByteOr("Y", (byte) 99));
+        assertEquals("minecraft:villager", stored(world, "entities", new ChunkKey(4, 7)).getListOrEmpty("Entities")
+            .getCompound(0).orElseThrow().getStringOr("id", ""), "ASP keeps entities in a compound");
+    }
+
+    /** World extra data as AdvancedSlimePaper's SlimeProperties write it: typed NBT values. */
+    private static CompoundTag aspWorldExtra() {
+        final CompoundTag properties = new CompoundTag();
+        properties.putInt("spawnX", 12);
+        properties.putInt("spawnY", 80);
+        properties.putInt("spawnZ", -4);
+        properties.putFloat("spawnYaw", 90.0f);
+        properties.putString("difficulty", "hard");
+        properties.putByte("pvp", (byte) 0);
+        properties.putByte("allowMonsters", (byte) 0);
+        properties.putByte("allowAnimals", (byte) 1);
+        properties.putString("defaultBiome", "minecraft:the_void");
+        properties.putString("environment", "normal");
+        properties.putByte("dragonBattle", (byte) 0);
+        final CompoundTag extra = new CompoundTag();
+        extra.put("properties", properties);
+        extra.put("BukkitValues", named("myplugin:owner", "steve"));
+        return extra;
+    }
+
+    private static final dev.iyanz.sourbycraft.api.world.WorldProperties ASP_PROPERTIES =
+        dev.iyanz.sourbycraft.api.world.WorldProperties.NONE
+            .withSpawn(new dev.iyanz.sourbycraft.api.world.WorldProperties.Spawn(12, 80, -4, 90.0f))
+            .withDifficulty(org.bukkit.Difficulty.HARD)
+            .withPvp(false)
+            .withSpawning(false, true)
+            .withDefaultBiome("minecraft:the_void");
+
+    @Test
+    void worldPropertiesMapFromTypedValuesAndTheRestIsReportedDropped() {
+        final SlimeImporter.WorldData data = SlimeImporter.worldData(aspWorldExtra());
+        assertEquals(ASP_PROPERTIES, data.properties(), "a false byte stays false, not the server default");
+        assertEquals(java.util.List.of("extra.BukkitValues", "properties.dragonBattle", "properties.environment"),
+            data.dropped(), "the world's plugin data and unmapped properties are named, not silently lost");
+
+        final CompoundTag ambiguous = new CompoundTag();
+        final CompoundTag properties = new CompoundTag();
+        properties.putInt("spawnX", 1);
+        properties.putInt("spawnZ", 1);                    // no spawnY: no spawn
+        properties.putString("difficulty", "insane");
+        properties.putString("pvp", "maybe");
+        properties.putString("allowMonsters", "false");
+        properties.putString("defaultBiome", "plains");    // not a namespaced key
+        ambiguous.put("properties", properties);
+        final SlimeImporter.WorldData partial = SlimeImporter.worldData(ambiguous);
+        assertEquals(dev.iyanz.sourbycraft.api.world.WorldProperties.NONE.withSpawning(false, null), partial.properties());
+        assertEquals(java.util.List.of("properties.defaultBiome", "properties.difficulty", "properties.pvp",
+            "properties.spawnX", "properties.spawnZ"), partial.dropped());
+
+        final SlimeImporter.WorldData none = SlimeImporter.worldData(new CompoundTag());
+        assertEquals(dev.iyanz.sourbycraft.api.world.WorldProperties.NONE, none.properties());
+        assertTrue(none.dropped().isEmpty());
+    }
+
+    @Test
+    void theHeaderOnlyReaderSeesWhatAFullParseSees() throws IOException {
+        final byte[] bytes = file(1 | 2, aspWorldExtra());
+        final Path slime = this.dir.resolve("island.slime");
+        Files.write(slime, bytes);
+        final SlimeImporter.WorldData header = SlimeImporter.worldData(slime);
+        assertEquals(ASP_PROPERTIES, header.properties());
+        assertEquals(SlimeImporter.convert(bytes, -4).world(), header);
+        final Path plain = this.dir.resolve("plain.slime");
+        Files.write(plain, file(0));
+        assertEquals(dev.iyanz.sourbycraft.api.world.WorldProperties.NONE, SlimeImporter.worldData(plain).properties());
+    }
+
+    @Test
+    void slimeToAwfToImportKeepsTheProperties() throws IOException {
+        final Path awf = this.dir.resolve("island.awf");
+        AuroraWorldFiles.convertSlime(file(1, aspWorldExtra()), "normal", "island.slime", awf);
+        try (dev.iyanz.sourbycraft.awf.AwfWorldFile file = dev.iyanz.sourbycraft.awf.AwfWorldFile.open(awf)) {
+            assertEquals(ASP_PROPERTIES, AuroraWorldFiles.describe(file, "island", false).properties());
+        }
     }
 
     @Test

@@ -53,7 +53,7 @@ these supply today's implementation of it. This is the set the ledger test pins.
 | `perf/RegionTickMetrics.java` | `ca.spottedleaf.common.time.TickData`, `TickTime` | Aurora's region tick telemetry, reading upstream's tick accounting rather than duplicating it. |
 | `perf/RegionTickMetricsHolder.java` | `ca.spottedleaf.common.time.TickTime` | Generation ownership for the above. |
 | `perf/RegionIoQueue.java` | `ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO` (`getControllerFor`, `getTotalWorkingTasks`) | `perf/StorageBacklog` — `/perf storage` backlog: reads Moonrise's per-world I/O task counters instead of keeping a second count. |
-| `awf/world/AuroraWorldsService.java` | `io.papermc.paper.threadedregions.RegionizedServer` (global tick task queue), `dev.iyanz.aurora.engine.util.ticket.SaveAllTicket` (per-region save ticket), `io.canvasmc.canvas.WorldUnloadResult` (the engine's unload outcome) | `api/world/AuroraWorlds` — runtime AWF world lifecycle. World creation and unloading must run on the global tick, and a durable save has to wait for every region of the world to save before the AWF stores commit; the engine exposes neither as public API. The engine's unload outcome is mapped to the API's own `UnloadResult`, so plugins never see a Canvas type. |
+| `awf/world/AuroraWorldsService.java` | `io.papermc.paper.threadedregions.RegionizedServer` (global tick task queue), `dev.iyanz.aurora.engine.util.ticket.SaveAllTicket` (per-region save ticket), `io.canvasmc.canvas.WorldUnloadResult` (the engine's unload outcome), `io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent` (the point after which an unload is certain) | `api/world/AuroraWorlds` — runtime AWF world lifecycle. World creation and unloading must run on the global tick, and a durable save has to wait for every region of the world to save before the AWF stores commit; the engine exposes neither as public API. The engine's unload outcome is mapped to the API's own `UnloadResult`, so plugins never see a Canvas type. The engine ignores its unload save flag, so an unload without saving makes the world's AWF storages discard once the unload event has passed. |
 
 ### 1.3 `COMPATIBILITY_ONLY`
 
@@ -61,15 +61,18 @@ these supply today's implementation of it. This is the set the ledger test pins.
 |---|---|---|
 | `config/upstream/CanvasConfigBridge.java` | `dev.iyanz.aurora.engine.GlobalConfiguration`, `WorldConfig` (formerly `io.canvasmc.canvas`) | Reloads the engine config so an existing deployment's `canvas-server.yml` keeps working. No Aurora behaviour reads it; it sits behind `config/upstream/UpstreamConfigBridge`. This is the **only** engine-config reference in Aurora's own source. The only other engine doorway is `awf/world/AuroraWorldsService.java` (§1.2), for world lifecycle. |
 | `perf/NetworkMetrics.java` | `io.papermc.paper.network.ChannelInitializeListenerHolder`, Netty `ChannelPipeline` | The only hook for adding a handler to every connection's pipeline. Paper marks it unofficial. If it disappears, the `network counters` boot stage fails in isolation and `/perf network` reports nothing. It is not a threaded-regions internal, so the ledger test does not pin it; it is listed here by hand. |
+| `engine/threadedregions/scheduler/AuroraEdfScheduler.java` | LeafPile `Scheduler`, public SourbyCraft `SchedulableTick` fields/methods, `LinkedSortedSet`, `ConcurrentUtil`, `TimeUtil`, `LazyRunnable` | Source-owned derivative of LeafPile v1.2.0. Feature 0028 selects it for EDF and publishes task state through a compatible public volatile field. Existing EDF worker budget, parking and region thread factory retained. GPL/credits in `NOTICE_LEAFPILE`; source acceptance pending, not an independent scheduler. |
 
 ---
 
 ## 2. Patch dependencies — `DIRECT_NMS_PATCH`
 
-### 2.1 `sourbycraft-server/minecraft-patches/features/` — 22 patches
+### 2.1 `sourbycraft-server/minecraft-patches/features/` — historical inventory; current additions below
 
 Patches against the materialised Minecraft source. They exist because the behaviour is inside a
-vanilla class; none of them is an Aurora contract.
+vanilla or engine class; individual patches may connect an Aurora-owned backend.
+The table below is a historical inventory, not a current patch count. Feature 0028 adds
+the EDF backend selection and compatible task-state publication described above.
 
 | Patch | Keeps |
 |---|---|

@@ -49,14 +49,40 @@ public final class AuroraWorldRegistry {
      * @param template the template this world is a copy-on-write instance of, or {@code null}
      */
     public record Entry(String name, String environment, Long seed, String generator, String worldType,
-                        String template, boolean autoload) {
+                        String template, boolean autoload,
+                        dev.iyanz.sourbycraft.api.world.WorldProperties properties) {
 
-        public Entry withAutoload(final boolean value) {
-            return new Entry(this.name, this.environment, this.seed, this.generator, this.worldType, this.template, value);
+        /** An entry without properties. */
+        public Entry(final String name, final String environment, final Long seed, final String generator,
+                     final String worldType, final String template, final boolean autoload) {
+            this(name, environment, seed, generator, worldType, template, autoload, null);
         }
 
+        /** Never null: an entry written before properties existed reads as {@code NONE}. */
+        public dev.iyanz.sourbycraft.api.world.WorldProperties propertiesOrNone() {
+            return this.properties == null ? dev.iyanz.sourbycraft.api.world.WorldProperties.NONE : this.properties;
+        }
+
+        public Entry withAutoload(final boolean value) {
+            return new Entry(this.name, this.environment, this.seed, this.generator, this.worldType, this.template, value,
+                this.properties);
+        }
+
+        public Entry withProperties(final dev.iyanz.sourbycraft.api.world.WorldProperties value) {
+            return new Entry(this.name, this.environment, this.seed, this.generator, this.worldType, this.template,
+                this.autoload, value);
+        }
+
+        /** A new world described by this one (a template's description), keeping its properties. */
         public Entry named(final String other, final String fromTemplate, final boolean value) {
-            return new Entry(other, this.environment, this.seed, this.generator, this.worldType, fromTemplate, value);
+            return new Entry(other, this.environment, this.seed, this.generator, this.worldType, fromTemplate, value,
+                this.properties);
+        }
+
+        /** Whether empty never-stored chunks are pruned: the property, else on for void worlds. */
+        public boolean prunesEmptyChunks() {
+            final Boolean configured = propertiesOrNone().pruneEmptyChunks();
+            return configured != null ? configured : VoidGenerator.NAME.equals(this.generator);
         }
     }
 

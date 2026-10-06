@@ -90,9 +90,37 @@ public final class AwfWorld {
         return this.name;
     }
 
-    /** Closes the store after the last commit; see {@link AwfStore#close()}. */
+    /**
+     * Closes the store after the last commit; see {@link AwfStore#close()}. Fences the world first
+     * and waits for a commit that is already running, so the store (and a network backend's lease)
+     * is never released under a commit, and no commit starts on a closed store.
+     */
     void closeStore() throws IOException {
-        if (this.store != null) this.store.close();
+        synchronized (this.commitLock) {
+            this.fenced = true;
+            if (this.store != null) this.store.close();
+        }
+    }
+
+    /**
+     * Refuses every commit that has not started yet, also the ones already queued by
+     * {@link #save}: each fails with {@link FencedException} and commits nothing. A commit already
+     * running completes as one atomic commit. Never blocks; there is no way back.
+     */
+    void fence() {
+        this.fenced = true;
+    }
+
+    /** Whether {@link #fence} or {@link #closeStore} was called. */
+    boolean fenced() {
+        return this.fenced;
+    }
+
+    /** A commit refused because the world was fenced (discarded or closed) before it started. */
+    public static final class FencedException extends java.util.concurrent.CancellationException {
+        FencedException(final String message) {
+            super(message);
+        }
     }
 
     public WorldRole role() {
@@ -137,6 +165,20 @@ public final class AwfWorld {
         return keys;
     }
 
+    /** Chunks this world holds itself (not read from its base): committed or waiting to be. */
+    public int ownedCount() {
+        final Set<ChunkKey> keys = new TreeSet<>();
+        if (this.store != null) {
+            keys.addAll(this.store.keys());
+            keys.removeAll(this.store.deleted());
+        }
+        this.owned.forEach((key, bytes) -> {
+            if (bytes == DELETED) keys.remove(key);
+            else keys.add(key);
+        });
+        return keys.size();
+    }
+
     /** Takes ownership of a chunk's new bytes. Called by the chunk's owning region. */
     public void write(final ChunkKey key, final byte[] serialized) {
         if (!this.role.mutable()) {
@@ -164,6 +206,13 @@ public final class AwfWorld {
      * Whether this world has written or deleted a chunk rather than reading it through from the
      * base. A chunk it does not own is the base's business.
      */
+    /** Whether the base (a template, an image) has the chunk; never copies its key set. */
+    public boolean baseHas(final ChunkKey key) {
+        if (this.base == null) return false;
+        if (this.base instanceof AwfStore store) return store.has(key);
+        return this.base.keys().contains(key);
+    }
+
     public boolean owns(final ChunkKey key) {
         return this.owned.containsKey(key) || (this.store != null && this.store.has(key));
     }
@@ -244,9 +293,19 @@ public final class AwfWorld {
      * leave the store with the older bytes while the chunk was no longer dirty.
      */
     private final Object commitLock = new Object();
+    /**
+     * Set by {@link #fence} and {@link #closeStore}. Read under {@link #commitLock} before a commit
+     * takes its snapshot, so a commit either started before the fence (and completes) or commits
+     * nothing.
+     */
+    private volatile boolean fenced;
 
     private AwfStore.CommitResult commit(final PersistenceMode mode, final int maxAttempts) {
         synchronized (this.commitLock) {
+            if (this.fenced) {
+                throw new FencedException("AWF world " + this.name + " was discarded or closed; this commit was"
+                    + " refused before it took its snapshot");
+            }
             return commitInOrder(mode, maxAttempts);
         }
     }

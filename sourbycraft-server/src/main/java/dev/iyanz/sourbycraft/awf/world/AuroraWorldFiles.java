@@ -18,12 +18,19 @@ import java.util.Map;
  * Whole worlds as {@code .awf} files ({@link AwfWorldFile}): export, import, and conversion from
  * Slime files. The metadata keys are the format's contract with other readers:
  * {@code format=awf-world}, {@code environment}, and when set {@code seed}, {@code generator},
- * {@code world-type}, {@code data-version}; plus informational {@code source}, {@code created},
- * {@code created-by}.
+ * {@code world-type}, {@code data-version}, {@code properties}; plus informational {@code source},
+ * {@code created}, {@code created-by}.
+ *
+ * <p>{@code properties} is the registry's {@link dev.iyanz.sourbycraft.api.world.WorldProperties}
+ * as JSON, written when the world has any. A file without it (every file written before it was
+ * added) imports with no properties, exactly as before.</p>
  */
 public final class AuroraWorldFiles {
 
     public static final String FORMAT = "awf-world";
+    /** Metadata key of the world's properties, as JSON. */
+    static final String PROPERTIES = "properties";
+    private static final com.google.gson.Gson GSON = new com.google.gson.GsonBuilder().disableHtmlEscaping().create();
 
     /** What an export or a conversion wrote. */
     public record Written(Map<String, Integer> chunks, String codec) {
@@ -42,6 +49,9 @@ public final class AuroraWorldFiles {
         if (world.seed() != null) meta.put("seed", Long.toString(world.seed()));
         if (world.generator() != null) meta.put("generator", world.generator());
         if (world.worldType() != null) meta.put("world-type", world.worldType());
+        if (world.properties() != null && !world.properties().equals(dev.iyanz.sourbycraft.api.world.WorldProperties.NONE)) {
+            meta.put(PROPERTIES, GSON.toJson(world.properties()));
+        }
         meta.put("source", source);
         meta.put("created", Instant.now().toString());
         meta.put("created-by", "SourbyCraft Aurora World Fabric");
@@ -89,7 +99,29 @@ public final class AuroraWorldFiles {
             }
         }
         return new AuroraWorldRegistry.Entry(name, environment, seed, meta.get("generator"), meta.get("world-type"),
-            null, autoload);
+            null, autoload, properties(meta.get(PROPERTIES)));
+    }
+
+    /** The properties a file records, or {@code null} when it records none (an older file). */
+    static dev.iyanz.sourbycraft.api.world.WorldProperties properties(final String json) throws IOException {
+        if (json == null) return null;
+        try {
+            final dev.iyanz.sourbycraft.api.world.WorldProperties parsed =
+                GSON.fromJson(json, dev.iyanz.sourbycraft.api.world.WorldProperties.class);
+            if (parsed == null) throw new IOException("the file's properties are empty");
+            // Validated as the registry would use them: bounds and the void biome key.
+            if (parsed.saveBounds() != null) {
+                final var b = parsed.saveBounds();
+                new dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds(b.minChunkX(), b.minChunkZ(), b.maxChunkX(),
+                    b.maxChunkZ());
+            }
+            if (parsed.defaultBiome() != null && org.bukkit.NamespacedKey.fromString(parsed.defaultBiome()) == null) {
+                throw new IOException("default biome " + parsed.defaultBiome() + " is not a key");
+            }
+            return parsed;
+        } catch (final RuntimeException malformed) {          // JsonParseException, a refused record constructor
+            throw new IOException("the file's properties are not valid: " + malformed.getMessage(), malformed);
+        }
     }
 
     /** Writes a file's chunks into a new world's stores on the configured backend. */
@@ -115,8 +147,13 @@ public final class AuroraWorldFiles {
                 }
                 counts.put(stream.getKey(), stream.getValue().size());
             }
+            final dev.iyanz.sourbycraft.api.world.WorldProperties properties = converted.world().properties();
             final Map<String, String> meta = metadata(new AuroraWorldRegistry.Entry(source, environment, null,
-                "void", null, null, false), "slime " + source);
+                "void", null, null, false, properties), "slime " + source);
+            if (!converted.world().dropped().isEmpty()) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("Aurora World Fabric: converting " + source
+                    + " did not keep " + converted.world().dropped() + " (not representable in AWF yet)");
+            }
             meta.put("data-version", Integer.toString(converted.dataVersion()));
             writer.finish(meta);
             return new Written(counts, Compression.name(writer.codec()));

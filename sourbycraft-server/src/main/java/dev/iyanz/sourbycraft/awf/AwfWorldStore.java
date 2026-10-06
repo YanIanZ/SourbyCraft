@@ -45,6 +45,8 @@ public final class AwfWorldStore implements AwfStore {
     private final java.util.ArrayDeque<Set<String>> retainedNames = new java.util.ArrayDeque<>();
     /** Objects written by commits that failed before their generation committed. */
     private final Set<String> orphanCandidates = new HashSet<>();
+    /** Set by {@link #close}; guarded by this store's monitor. */
+    private boolean closed;
 
     private AwfWorldStore(final GenerationStore generations, final ObjectStore objects, final WorldRole role,
                           final int retainedGenerations, final SortedMap<ChunkKey, String> index) {
@@ -154,6 +156,7 @@ public final class AwfWorldStore implements AwfStore {
         if (mode == PersistenceMode.READ_ONLY || !this.role.acceptsCommits()) {
             throw new IllegalStateException("a " + this.role + " world in " + mode + " mode does not accept commits");
         }
+        if (this.closed) throw new IllegalStateException("this AWF store was closed; it accepts no more commits");
         final SortedMap<ChunkKey, String> next = new TreeMap<>(this.index);
         removed.forEach(next::remove);
         deleted.forEach(key -> next.put(key, TOMBSTONE));
@@ -218,6 +221,15 @@ public final class AwfWorldStore implements AwfStore {
         }
         this.orphanCandidates.clear();
         return new CommitResult(generation, next.size(), written, bytes, removedObjects);
+    }
+
+    /**
+     * Refuses every later commit; reads still work. Synchronized with {@link #commit}, so it
+     * returns only after a commit that is running has finished.
+     */
+    @Override
+    public synchronized void close() {
+        this.closed = true;
     }
 
     static byte[] encodeIndex(final SortedMap<ChunkKey, String> index) {

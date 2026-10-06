@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 7 Oct 2026 01:39:53 +0700
+Subject: [PATCH] SourbyCraft - record per-plugin onLoad and onEnable wall time
+
+Measure the wall time of each plugin's onLoad and of setEnabled(true),
+which runs onEnable, into SourbyCraft's PluginTimings registry. Calls
+that throw are recorded too. Read by /plugins <name> and /perf plugins.
+
+diff --git a/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java b/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
+index 3fe582f6e8f89e3879d03662904ee11401f9bb98..026479686dae0d32f4df60beea2f72c565f2578f 100644
+--- a/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
++++ b/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
+@@ -198,9 +198,12 @@ class PaperPluginInstanceManager {
+             } // Paper
+ 
+             dev.iyanz.sourbycraft.bridge.AuroraBridge.onPluginEnabled(plugin); // SourbyCraft - reopen bridge admission a previous disable closed
++            final long sourbyEnableStart = System.nanoTime(); // SourbyCraft - per-plugin onEnable wall time
+             try {
+                 jPlugin.setEnabled(true);
++                dev.iyanz.sourbycraft.startup.PluginTimings.recordEnable(plugin.getName(), System.nanoTime() - sourbyEnableStart); // SourbyCraft
+             } catch (Throwable ex) {
++                dev.iyanz.sourbycraft.startup.PluginTimings.recordEnable(plugin.getName(), System.nanoTime() - sourbyEnableStart); // SourbyCraft
+                 this.server.getLogger().log(Level.SEVERE, "Error occurred while enabling " + plugin.getPluginMeta().getDisplayName() + " (Is it up to date?)", ex);
+                 // Paper start - Disable plugins that fail to load
+                 this.server.getPluginManager().disablePlugin(jPlugin);
+diff --git a/src/main/java/io/papermc/paper/plugin/storage/ServerPluginProviderStorage.java b/src/main/java/io/papermc/paper/plugin/storage/ServerPluginProviderStorage.java
+index cb9b13522a976b82bcb71cef486f11f4172e3e99..37b0e426b86b62bbe92bc21162aefcea5dd006c0 100644
+--- a/src/main/java/io/papermc/paper/plugin/storage/ServerPluginProviderStorage.java
++++ b/src/main/java/io/papermc/paper/plugin/storage/ServerPluginProviderStorage.java
+@@ -54,6 +54,7 @@ public class ServerPluginProviderStorage extends ConfiguredProviderStorage<JavaP
+     // We need to call the load methods AFTER all plugins are constructed
+     @Override
+     public void processProvided(PluginProvider<JavaPlugin> provider, JavaPlugin provided) {
++        final long sourbyLoadStart = System.nanoTime(); // SourbyCraft - per-plugin onLoad wall time
+         try {
+             provided.getLogger().info(String.format("Loading server plugin %s", provided.getPluginMeta().getDisplayName()));
+             provided.onLoad();
+@@ -61,6 +62,7 @@ public class ServerPluginProviderStorage extends ConfiguredProviderStorage<JavaP
+             // Don't mark that provider as ERRORED, as this apparently still needs to run the onEnable logic.
+             provided.getSLF4JLogger().error("Error initializing plugin '%s' in folder '%s' (Is it up to date?)".formatted(provider.getFileName(), provider.getParentSource()), ex);
+         }
++        dev.iyanz.sourbycraft.startup.PluginTimings.recordLoad(provided.getName(), System.nanoTime() - sourbyLoadStart); // SourbyCraft
+     }
+ 
+     @Override

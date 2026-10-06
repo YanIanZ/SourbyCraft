@@ -42,7 +42,7 @@ import static net.kyori.adventure.text.Component.text;
 public class AwfCommand extends Command {
 
     private static final List<String> SUBCOMMANDS =
-        List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template", "import", "export", "convert");
+        List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template", "import", "export", "convert", "clone", "set");
 
     public AwfCommand(final String name) {
         super(name);
@@ -116,6 +116,16 @@ public class AwfCommand extends Command {
                     report(s, "Deleted " + name, worlds.delete(name));
                 }
             }
+            case "clone" -> {
+                if (args.length < 3) {
+                    usage(s);
+                } else {
+                    final String target = args[2].toLowerCase(Locale.ROOT);
+                    final boolean autoload = args.length > 3 && args[3].equalsIgnoreCase("autoload");
+                    report(s, "Cloned " + name + " to " + target, worlds.cloneWorld(name, target, autoload));
+                }
+            }
+            case "set" -> setProperty(s, worlds, name, args);
             case "autoload" -> {
                 if (args.length < 3 || !(args[2].equalsIgnoreCase("on") || args[2].equalsIgnoreCase("off"))) {
                     usage(s);
@@ -131,6 +141,51 @@ public class AwfCommand extends Command {
             default -> usage(s);
         }
         return true;
+    }
+
+    private static String orDefault(final Object value) {
+        return value == null ? "default" : String.valueOf(value).toLowerCase(Locale.ROOT);
+    }
+
+    private static Boolean onOff(final String value) {
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case "on", "true" -> Boolean.TRUE;
+            case "off", "false" -> Boolean.FALSE;
+            case "none", "default" -> null;
+            default -> throw new IllegalArgumentException("expected on, off or none, not " + value);
+        };
+    }
+
+    /** /awf set &lt;world&gt; &lt;key&gt; &lt;value...&gt; — one property at a time; "none" resets it. */
+    private void setProperty(final CommandSender s, final AuroraWorldsService worlds, final String name, final String[] args) {
+        if (args.length < 4) {
+            usage(s);
+            return;
+        }
+        final String key = args[2].toLowerCase(Locale.ROOT);
+        final boolean none = args[3].equalsIgnoreCase("none") || args[3].equalsIgnoreCase("default");
+        final dev.iyanz.sourbycraft.api.world.WorldProperties next;
+        try {
+            final dev.iyanz.sourbycraft.api.world.WorldProperties p = worlds.properties(name);
+            next = switch (key) {
+                case "spawn" -> p.withSpawn(none ? null : new dev.iyanz.sourbycraft.api.world.WorldProperties.Spawn(
+                    Double.parseDouble(args[3]), Double.parseDouble(args[4]), Double.parseDouble(args[5]),
+                    args.length > 6 ? Float.parseFloat(args[6]) : 0f));
+                case "difficulty" -> p.withDifficulty(none ? null : org.bukkit.Difficulty.valueOf(args[3].toUpperCase(Locale.ROOT)));
+                case "pvp" -> p.withPvp(onOff(args[3]));
+                case "monsters" -> p.withSpawning(onOff(args[3]), p.allowAnimals());
+                case "animals" -> p.withSpawning(p.allowMonsters(), onOff(args[3]));
+                case "biome" -> p.withDefaultBiome(none ? null : args[3].toLowerCase(Locale.ROOT));
+                case "bounds" -> p.withSaveBounds(none ? null : new dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds(
+                    Integer.parseInt(args[3]), Integer.parseInt(args[4]), Integer.parseInt(args[5]), Integer.parseInt(args[6])));
+                case "prune" -> p.withPruneEmptyChunks(onOff(args[3]));
+                default -> throw new IllegalArgumentException("unknown property " + key);
+            };
+        } catch (final RuntimeException bad) {
+            fail(s, bad instanceof ArrayIndexOutOfBoundsException ? new IllegalArgumentException("missing values for " + key) : bad);
+            return;
+        }
+        report(s, "Set " + key + " of " + name, worlds.setProperties(name, next));
     }
 
     private static void list(final CommandSender s, final AuroraWorldsService worlds) {
@@ -156,6 +211,21 @@ public class AwfCommand extends Command {
         s.sendMessage(UiPanel.row("Autoload", worlds.autoload(name) ? "on" : "off"));
         s.sendMessage(UiPanel.row("Template", worlds.template(name).orElse("none")));
         s.sendMessage(UiPanel.row("Storage", worlds.storage()));
+        final dev.iyanz.sourbycraft.api.world.WorldProperties p = worlds.properties(name);
+        s.sendMessage(UiPanel.row("Spawn", p.spawn() == null ? "default" : p.spawn().x() + ", " + p.spawn().y() + ", "
+            + p.spawn().z() + " yaw " + p.spawn().yaw()));
+        s.sendMessage(UiPanel.row("Difficulty / PvP", orDefault(p.difficulty()) + " / " + orDefault(p.pvp())));
+        s.sendMessage(UiPanel.row("Monsters / animals", orDefault(p.allowMonsters()) + " / " + orDefault(p.allowAnimals())));
+        s.sendMessage(UiPanel.row("Void biome", orDefault(p.defaultBiome())));
+        s.sendMessage(UiPanel.row("Save bounds", p.saveBounds() == null ? "none" : p.saveBounds().minChunkX() + ","
+            + p.saveBounds().minChunkZ() + " to " + p.saveBounds().maxChunkX() + "," + p.saveBounds().maxChunkZ() + " (chunks)"));
+        s.sendMessage(UiPanel.row("Prune empty chunks", p.pruneEmptyChunks() == null ? "default" : (p.pruneEmptyChunks() ? "on" : "off")));
+        for (final dev.iyanz.sourbycraft.awf.AwfRegionStorage storage : worlds.storages(name)) {
+            s.sendMessage(UiPanel.row("Stored " + java.nio.file.Path.of(storage.name()).getFileName(),
+                storage.storedChunks() + " chunks; since load " + storage.pruned() + " empty pruned, "
+                    + storage.outOfBounds() + " outside bounds"));
+        }
+        s.sendMessage(UiPanel.hint("Change: /awf set " + name + " <spawn|difficulty|pvp|monsters|animals|biome|bounds|prune> <value|none>"));
         s.sendMessage(UiPanel.hint("Storage detail: /perf awf"));
         s.sendMessage(UiPanel.footer());
     }
@@ -337,7 +407,7 @@ public class AwfCommand extends Command {
         s.sendMessage(UiPanel.header("Aurora World Fabric"));
         s.sendMessage(UiPanel.row("/awf list", "managed worlds"));
         s.sendMessage(UiPanel.row("/awf create <name> [normal|nether|end] [void|flat|amplified|large_biomes]"
-            + " [generator=Plugin[:id]] [seed] [autoload]", "new AWF world"));
+            + " [generator=Plugin[:id]|generator=void:<biome>] [seed] [autoload]", "new AWF world"));
         s.sendMessage(UiPanel.row("/awf create <name> from <template> [autoload]", "copy-on-write instance"));
         s.sendMessage(UiPanel.row("/awf import <file.awf> <name> [autoload]", "new world from an .awf file"));
         s.sendMessage(UiPanel.row("/awf import <file.slime> <name> [normal|nether|end] [vanilla|generator=Plugin[:id]]"
@@ -349,6 +419,8 @@ public class AwfCommand extends Command {
         s.sendMessage(UiPanel.row("/awf unload <name> [nosave]", "unload"));
         s.sendMessage(UiPanel.row("/awf delete <name> confirm", "delete permanently"));
         s.sendMessage(UiPanel.row("/awf autoload <name> on|off", "load at startup"));
+        s.sendMessage(UiPanel.row("/awf clone <world> <new> [autoload]", "copy an unloaded world (an instance keeps its template)"));
+        s.sendMessage(UiPanel.row("/awf set <world> <spawn|difficulty|pvp|monsters|animals|biome|bounds|prune> <value|none>", "world properties"));
         s.sendMessage(UiPanel.footer());
     }
 
