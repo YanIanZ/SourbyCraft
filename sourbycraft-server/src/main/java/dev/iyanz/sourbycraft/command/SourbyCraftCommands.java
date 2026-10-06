@@ -54,6 +54,7 @@ public final class SourbyCraftCommands {
         OURS.put("mspt", new MsptCommand("mspt"));
         OURS.put("ram", new PerfCommand("ram"));
         OURS.put("perf", new PerfCommand("perf"));
+        OURS.put("awf", new AwfCommand("awf"));
         OURS.put("tpsbar", new HudBarCommand("tpsbar", true));
         OURS.put("rambar", new HudBarCommand("rambar", false));
         OURS.put("perfbar", new PerfBarCommand());

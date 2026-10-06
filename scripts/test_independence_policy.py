@@ -21,16 +21,22 @@ class CanvasSourceCouplingTest(unittest.TestCase):
         # a reload bridge is the narrowest possible form of that.
         "dev.iyanz.aurora.engine.GlobalConfiguration.reload",
         "dev.iyanz.aurora.engine.WorldConfig.reload",
+        # Runtime AWF world lifecycle (dependency-ledger.md section 1.2): a durable save waits for
+        # each region's save ticket, and the engine's unload outcome is mapped to the API's own
+        # UnloadResult so plugins never see it.
+        "dev.iyanz.aurora.engine.util.ticket.SaveAllTicket",
+        "io.canvasmc.canvas.WorldUnloadResult",
     }
 
     ADAPTER = ("sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/config/upstream/"
                "CanvasConfigBridge.java")
+    WORLDS = "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java"
 
     def test_canvas_is_named_only_inside_its_bridge(self):
         # Same rule as the region backend: replacing the implementation should be an edit to a
         # known file, not a search. The reload path above it names no engine at all.
         files = {site["file"] for site in policy.canvas_source_sites(REPO)}
-        self.assertEqual(files, {self.ADAPTER},
+        self.assertEqual(files, {self.ADAPTER, self.WORLDS},
                          "Canvas is named outside its bridge; route it through UpstreamConfigBridge")
 
     def test_sourby_code_reaches_canvas_only_where_recorded(self):
@@ -144,12 +150,14 @@ class SchedulerCouplingTest(unittest.TestCase):
 
     def test_the_backend_is_named_only_inside_the_adapters(self):
         # The point of the contracts is that replacing the backend is an edit to a known set of
-        # files, not a search. Two adapters: one answers "how is the engine ticking", the other
-        # "hand this to whoever owns that entity".
+        # files, not a search. Three adapters: one answers "how is the engine ticking", one
+        # "hand this to whoever owns that entity", and the AuroraWorlds service runs world
+        # creation, unloading and per-region saves on the global tick, as the engine requires.
         files = {site["file"] for site in policy.scheduler_sites(REPO)}
         self.assertEqual(files, {
             "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/execution/RegionOwnerHandoff.java",
             "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/execution/region/FoliaRegionBackend.java",
+            "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java",
         }, "the region backend is named outside the adapters; route it through a contract")
 
     def test_sourby_code_reaches_the_scheduler_only_where_recorded(self):

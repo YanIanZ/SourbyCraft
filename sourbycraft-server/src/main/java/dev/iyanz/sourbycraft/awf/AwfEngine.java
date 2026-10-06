@@ -29,6 +29,14 @@ public final class AwfEngine {
     private final LongSupplier nanoClock;
     private final java.util.function.Function<String, AwfBackend> backends;
     private final Map<String, AwfRegionStorage> storages = new ConcurrentHashMap<>();
+    /** Worlds managed through the AuroraWorlds API: AWF worlds without being listed in the config. */
+    private final java.util.Set<String> managed = ConcurrentHashMap.newKeySet();
+    /**
+     * Stores opened ahead of a runtime world's creation, by storage id. The engine creates worlds
+     * on the global tick, a region thread where store I/O is refused, so the stores are opened
+     * beforehand off it and {@link #open} takes them from here.
+     */
+    private final Map<String, AwfStore> prepared = new ConcurrentHashMap<>();
     private volatile boolean warnedMissingBackend;
 
     AwfEngine(final AwfSettings settings, final Executor storageLane, final LongSupplier nanoClock) {
@@ -69,11 +77,87 @@ public final class AwfEngine {
                             + settings.persistence() + ", commit every " + settings.commitIntervalSeconds()
                             + "s, " + settings.residentChunks() + " resident chunks per storage)");
                     }
+                    loadManaged(current);
                     global = current;
                 }
             }
         }
         return current;
+    }
+
+    /** The registry file of worlds managed at runtime; read once when the engine starts. */
+    public static final Path MANAGED_FILE = Path.of("sourbycraft_config", "aurora-worlds.json");
+
+    private static void loadManaged(final AwfEngine engine) {
+        try {
+            for (final var entry : new dev.iyanz.sourbycraft.awf.world.AuroraWorldRegistry(MANAGED_FILE).all()) {
+                engine.managed.add(entry.name());
+            }
+        } catch (final IOException failed) {
+            // Their stores still open (an existing store always does); only a world created at
+            // runtime and never committed would lose its AWF attachment, and the API refuses to
+            // work with a registry it cannot read.
+            SourbyLogger.warn("Aurora World Fabric could not read " + MANAGED_FILE + ": " + failed.getMessage());
+        }
+    }
+
+    /** Makes a world an AWF world before its storages open. Called before the world is created. */
+    public static void manage(final String worldName) {
+        global().managed.add(worldName);
+    }
+
+    /** Stops treating a world as managed. Called after the world is deleted. */
+    public static void release(final String worldName) {
+        global().managed.remove(worldName);
+    }
+
+    /** The storage folders the engine opens in every dimension folder. */
+    private static final List<String> STORAGE_FOLDERS = List.of("region", "entities", "poi");
+
+    /**
+     * Opens the AWF stores of a managed world's dimension folder before the world is created or
+     * loaded. Must run off the region threads; the storages that open on the global tick then use
+     * these stores instead of opening them there.
+     */
+    public static void prepare(final Path dimensionFolder) throws IOException {
+        global().prepareStores(dimensionFolder);
+    }
+
+    void prepareStores(final Path dimensionFolder) throws IOException {
+        final AwfBackend backend = this.backends.apply(this.settings.backend());
+        if (backend == null) {
+            throw new IOException("AWF backend '" + this.settings.backend() + "' (" + AwfSettings.BACKEND_KEY
+                + ") is not registered");
+        }
+        for (final String folder : STORAGE_FOLDERS) {
+            final Path storageFolder = dimensionFolder.resolve(folder);
+            final String id = storageId(storageFolder);
+            if (this.storages.containsKey(storageFolder.toAbsolutePath().normalize().toString())
+                || this.prepared.containsKey(id)) {
+                continue;
+            }
+            this.prepared.put(id, backend.open(id, WorldRole.VANILLA, this.settings.retainedGenerations()));
+        }
+    }
+
+    /** Drops stores {@link #prepare} opened for a world that was then not created. */
+    public static void unprepare(final Path dimensionFolder) {
+        final AwfEngine engine = global();
+        for (final String folder : STORAGE_FOLDERS) {
+            engine.prepared.remove(storageId(dimensionFolder.resolve(folder)));
+        }
+    }
+
+    /** Every open storage whose folder lies under {@code folder}. */
+    public static java.util.List<AwfRegionStorage> storagesUnder(final Path folder) {
+        final AwfEngine current = global;
+        if (current == null) return java.util.List.of();
+        final Path root = folder.toAbsolutePath().normalize();
+        final java.util.List<AwfRegionStorage> found = new java.util.ArrayList<>();
+        for (final AwfRegionStorage storage : current.storages.values()) {
+            if (Path.of(storage.name()).startsWith(root)) found.add(storage);
+        }
+        return found;
     }
 
     /** The instance if a storage was ever attached; {@code null} otherwise. Never creates one. */
@@ -117,7 +201,8 @@ public final class AwfEngine {
     }
 
     AwfRegionStorage open(final Path regionFolder, final RegionSink exportSink) throws IOException {
-        final boolean listed = AwfRegionStorage.listed(regionFolder, this.settings.worlds());
+        final boolean managedWorld = AwfRegionStorage.listed(regionFolder, this.managed);
+        final boolean listed = managedWorld || AwfRegionStorage.listed(regionFolder, this.settings.worlds());
         final boolean exporting = AwfRegionStorage.listed(regionFolder, this.settings.export());
         final AwfBackend backend = this.backends.apply(this.settings.backend());
         if (backend == null) {
@@ -154,7 +239,9 @@ public final class AwfEngine {
                 + " than the chunks it holds");
         }
         final String name = regionFolder.toAbsolutePath().normalize().toString();
-        final AwfStore store = backend.open(id, WorldRole.VANILLA, this.settings.retainedGenerations());
+        final AwfStore prepared = this.prepared.remove(id);
+        final AwfStore store = prepared != null ? prepared
+            : backend.open(id, WorldRole.VANILLA, this.settings.retainedGenerations());
         final AwfWorld world = new AwfWorld(name, WorldRole.VANILLA, null, store, this.settings.residentChunks());
         final AwfRegionStorage storage = new AwfRegionStorage(name, world, this.settings, this.storageLane,
             this.nanoClock.getAsLong(), () -> this.storages.remove(name));

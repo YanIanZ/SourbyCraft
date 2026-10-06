@@ -93,6 +93,15 @@ public final class SourbyCraftBootstrap {
             SourbyCraftConfig.init();
         });
 
+        // AuroraWorlds API: before plugins enable, so they can look it up in onEnable.
+        stage("aurora worlds", () -> {
+            try {
+                dev.iyanz.sourbycraft.awf.world.AuroraWorldsRuntime.start(owner);
+            } catch (final java.io.IOException failed) {
+                throw new java.io.UncheckedIOException(failed);
+            }
+        });
+
         // ORDERING: must precede CraftServer#enablePlugins, where Via reads its config in
         // onEnable. Writes the shipped default ViaVersion/ViaBackwards config only when absent.
         stage("plugin provisioning", () -> {
@@ -160,7 +169,7 @@ public final class SourbyCraftBootstrap {
     }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
-    private static final int TOTAL_STAGES = 13;
+    private static final int TOTAL_STAGES = 14;
     private static int stageCount;
     private static int failureCount;
     private static final java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> progress = new java.util.ArrayList<>();

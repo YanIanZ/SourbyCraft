@@ -455,6 +455,9 @@ usercache.json
 world*/
 # Minecraft source patches live under net/minecraft/world/; that is source, not a server world.
 !/sourbycraft-server/minecraft-patches/sources/net/minecraft/world/
+# Java packages named world are source too.
+!/sourbyapi/src/**/world/
+!/sourbycraft-server/src/**/world/
 logs/
 crash-reports/
 *.log

@@ -53,12 +53,13 @@ these supply today's implementation of it. This is the set the ledger test pins.
 | `perf/RegionTickMetrics.java` | `ca.spottedleaf.common.time.TickData`, `TickTime` | Aurora's region tick telemetry, reading upstream's tick accounting rather than duplicating it. |
 | `perf/RegionTickMetricsHolder.java` | `ca.spottedleaf.common.time.TickTime` | Generation ownership for the above. |
 | `perf/RegionIoQueue.java` | `ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO` (`getControllerFor`, `getTotalWorkingTasks`) | `perf/StorageBacklog` — `/perf storage` backlog: reads Moonrise's per-world I/O task counters instead of keeping a second count. |
+| `awf/world/AuroraWorldsService.java` | `io.papermc.paper.threadedregions.RegionizedServer` (global tick task queue), `dev.iyanz.aurora.engine.util.ticket.SaveAllTicket` (per-region save ticket), `io.canvasmc.canvas.WorldUnloadResult` (the engine's unload outcome) | `api/world/AuroraWorlds` — runtime AWF world lifecycle. World creation and unloading must run on the global tick, and a durable save has to wait for every region of the world to save before the AWF stores commit; the engine exposes neither as public API. The engine's unload outcome is mapped to the API's own `UnloadResult`, so plugins never see a Canvas type. |
 
 ### 1.3 `COMPATIBILITY_ONLY`
 
 | File | Dependency | Reason |
 |---|---|---|
-| `config/upstream/CanvasConfigBridge.java` | `dev.iyanz.aurora.engine.GlobalConfiguration`, `WorldConfig` (formerly `io.canvasmc.canvas`) | Reloads the engine config so an existing deployment's `canvas-server.yml` keeps working. No Aurora behaviour reads it; it sits behind `config/upstream/UpstreamConfigBridge`. This is the **only** engine-config reference in Aurora's own source. |
+| `config/upstream/CanvasConfigBridge.java` | `dev.iyanz.aurora.engine.GlobalConfiguration`, `WorldConfig` (formerly `io.canvasmc.canvas`) | Reloads the engine config so an existing deployment's `canvas-server.yml` keeps working. No Aurora behaviour reads it; it sits behind `config/upstream/UpstreamConfigBridge`. This is the **only** engine-config reference in Aurora's own source. The only other engine doorway is `awf/world/AuroraWorldsService.java` (§1.2), for world lifecycle. |
 | `perf/NetworkMetrics.java` | `io.papermc.paper.network.ChannelInitializeListenerHolder`, Netty `ChannelPipeline` | The only hook for adding a handler to every connection's pipeline. Paper marks it unofficial. If it disappears, the `network counters` boot stage fails in isolation and `/perf network` reports nothing. It is not a threaded-regions internal, so the ledger test does not pin it; it is listed here by hand. |
 
 ---

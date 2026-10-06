@@ -51,7 +51,8 @@ public class UpstreamDependencyLedgerTest {
         "dev/iyanz/sourbycraft/perf/RegionTickMetrics.java",
         "dev/iyanz/sourbycraft/perf/RegionTickMetricsHolder.java",
         "dev/iyanz/sourbycraft/perf/RegionIoQueue.java",
-        "dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java");
+        "dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java",
+        "dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java");
 
     private static final String LEDGER = "docs/architecture/dependency-ledger.md";
 
@@ -215,8 +216,11 @@ public class UpstreamDependencyLedgerTest {
             .map(Leak::file)
             .toList();
 
-        assertEquals(List.of("dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java"),
-            touching, "Canvas should be reachable only through the upstream config bridge");
+        // Two doorways: the config bridge, and the world-lifecycle adapter behind AuroraWorlds
+        // (dependency-ledger.md section 1.2), which needs the engine's unload outcome.
+        assertEquals(java.util.Set.of("dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java",
+                "dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java"),
+            new java.util.HashSet<>(touching), "Canvas should be reachable only through its recorded doorways");
     }
 
     @Test

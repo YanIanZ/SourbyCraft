@@ -55,6 +55,37 @@ class AwfRegionStorageTest {
         assertTrue(Files.notExists(AwfRegionStorage.storeFor(region("world"))), "nothing is created");
     }
 
+    /** Runs {@code task} on a thread named like a region thread, where store I/O is refused. */
+    private static <T> T onRegionThread(final java.util.concurrent.Callable<T> task) throws Exception {
+        final java.util.concurrent.FutureTask<T> future = new java.util.concurrent.FutureTask<>(task);
+        final Thread thread = new Thread(future, "Folia Region Scheduler Thread #9");
+        thread.start();
+        thread.join();
+        try {
+            return future.get();
+        } catch (final java.util.concurrent.ExecutionException failed) {
+            throw (Exception) failed.getCause();
+        }
+    }
+
+    @Test
+    void storesPreparedOffTheRegionThreadsLetAWorldOpenOnOne() throws Exception {
+        final Path dimension = this.dir.resolve("isl");
+        Files.createDirectories(dimension.resolve("region"));
+        final AwfEngine unprepared = engine(Set.of("isl"));
+        assertThrows(IllegalStateException.class, () -> onRegionThread(() -> unprepared.open(dimension.resolve("region"))),
+            "the global tick is a region thread: opening a store there is refused");
+
+        final AwfEngine engine = engine(Set.of("isl"));
+        engine.prepareStores(dimension);
+        final AwfRegionStorage storage = onRegionThread(() -> engine.open(dimension.resolve("region")));
+        assertNotNull(storage);
+        storage.write(0, 0, b("a"));
+        storage.close();
+        assertArrayEquals(b("a"), engine(Set.of("isl")).open(dimension.resolve("region")).read(0, 0),
+            "the prepared store is the world's real store");
+    }
+
     @Test
     void listingMatchesAWholeFolderNameNotAPrefix() throws Exception {
         assertNull(engine(Set.of("world")).open(region("world_nether")));

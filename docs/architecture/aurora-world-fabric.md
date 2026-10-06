@@ -70,6 +70,45 @@ It is off unless configured and is not qualified; see "Engine integration" below
 - Deletions are recorded as tombstones in the chunk index. A deleted chunk reads as absent and
   shadows the base across restarts, instead of reappearing from it.
 
+### Runtime worlds (`AuroraWorlds` API and `/awf`)
+
+Status: implemented on the FILE backend; verified by a local end-to-end run (below). Templates,
+copy-on-write clones, the Slime (SRF v13) converter and database backends are **planned, not
+implemented**.
+
+- **API.** `dev.iyanz.sourbycraft.api.world.AuroraWorlds` in `sourbyapi`, obtained from the
+  services manager: `list`, `exists`, `isLoaded`, `create(WorldCreator, autoload)`, `load`,
+  `save`, `unload(name, save)` → `UnloadResult`, `delete`, `autoload`/`setAutoload`. Every call
+  returns a future that completes on the global region thread or later; never block a region
+  thread on it. Names are `[a-z0-9_-]{1,48}`; storage folder names (`region`, `poi`, `entities`,
+  `dimensions`, …) are refused because AWF matches worlds by path element.
+- **Registry.** `sourbycraft_config/aurora-worlds.json` lists the managed worlds (environment,
+  seed, autoload). It is written through a temporary file and an atomic move. A world in it is an
+  AWF world without being listed in `aurora.awf.worlds`, so a world created at runtime stays in
+  AWF across restarts. A malformed file stops the stage instead of being read as empty.
+- **Where data lives.** `world/dimensions/minecraft/<name>/{region,entities,poi}.awf`. No region
+  file is written while the world is attached.
+- **Thread rules.** The engine creates and unloads worlds on the global tick, which runs on a
+  region scheduler thread where AWF refuses blocking store I/O. `create` and `load` therefore
+  open the world's three stores first on the I/O lane (`AwfEngine.prepare`); the storages that
+  open on the global tick take those stores. `save` sends a save ticket to every region of the
+  world, waits for all of them, then commits the stores off the region threads, so a completed
+  `save` is durable. `unload` uses the engine's asynchronous unload; `Bukkit.unloadWorld` is not
+  supported on this engine. `delete` requires the world to be unloaded.
+- **Autoload.** Worlds with `autoload` are loaded on the global tick after `ServerLoadEvent`
+  (STARTUP), i.e. after the default worlds exist. Setting changes are persisted immediately and
+  take effect at the next start (RESTART_REQUIRED for loading; LIVE for the file).
+- **Command.** `/awf list | info <n> | create <n> [normal|nether|end] [seed] [autoload] |
+  load <n> | save <n> | unload <n> [nosave] | delete <n> confirm | autoload <n> on|off`,
+  permission `sourbycraft.command.awf`.
+
+Verification (2026-10-06, local, macOS, JDK 25, 2 GiB heap, one server, no players): create →
+setblock → `/awf save` → unload → stores present and 0 `.mca` → load → block present → clean
+stop → restart autoloads the world → block present → delete removes folder and entry →
+reserved name refused. 12/12 checks. This is a functional check, not a performance or
+concurrency qualification; unloading with players present and `unload … nosave` with dirty chunks
+were not exercised.
+
 ### Engine integration (RegionFileStorage)
 
 Operator guide: [testing AWF](../guides/testing-awf.md).
