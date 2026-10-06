@@ -81,19 +81,21 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   `verify_crash.py` — region file 49/49, AWF 53/53; tiga `kill -9` (3/8/15 detik) saat penyimpanan
   berjalan dengan 4 klien bergerak; checkpoint yang sudah di-flush/commit selalu utuh, tidak ada
   korupsi. Satu keterbatasan diketahui (lihat item berikut)
-- [-] **Metadata game time/spawn dunia belum masuk save-all/autosave**: bukti crash historis
+- [x] **Metadata game time/spawn dunia belum masuk save-all/autosave** (DIPERBAIKI 2026-10-07, commit
+  `44593a50`; demo: game time 1.792.900 ≥ 1.792.548 setelah `save-all flush` → SIGKILL → boot): bukti crash historis
   `verify_crash.py` XFAIL. Review source 26.2 (2026-10-06): metadata aktif ada di
   `PaperLevelOverrides` (`paper:level_overrides`), yang tidak masuk whitelist
   `RegionizedServer.autosaveSafeWorldData`; judul lama yang hanya menyalahkan `level.dat`
   tidak menggambarkan jalur load sekarang. Jangan memanggil bulk save SavedData dari global
   tick karena sebagian data dimiliki region.
-  Diperbaiki 2026-10-07 (feature patch MC 0028, belum di-commit di root): whitelist itu kini
+  Diperbaiki 2026-10-07 (feature patch MC 0028, commit `44593a50`): whitelist itu kini
   menambah `WorldMetadataAutosave.GLOBAL_OWNED_TYPES` (hanya `PaperLevelOverrides`) untuk
   autosave global tick dan `save-all`; encode di global tick, tulis di
   `DIMENSION_DATA_IO_POOL`; SavedData milik region tetap di luar. Bukti: `WorldMetadataAutosaveTest`
   2/2; slim jar lokal (flat, tanpa pemain): `save-all flush` di game time 651, SIGKILL di 942,
   restart 681; autosave saja (span 20 s): SIGKILL di 1709, restart 1479; stop bersih exit 0, tanpa
-  baris korupsi. Sisa: ulang `verify_crash_panel.py` di demo (dengan pemain), world border,
+  baris korupsi; `verify_crash_panel.py` di demo 2026-10-07: game time PASS, 64/64 blok, entitas utuh.
+  Sisa: run dengan pemain nyata, world border,
   world PDC dan `level.dat` belum masuk. Detail: `docs/architecture/engine-storage.md` §6.
 - [ ] AWF create masih menunggu generasi spawn pada global tick: report Spark pengguna
   `https://spark.lucko.me/RyP3FlAYME` mencatat 4.650 ms sampel inclusive pada

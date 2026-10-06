@@ -36,7 +36,11 @@ if players() != 0: raise SystemExit("players online; refusing")
 try:
     vp.forceload()
     n = vp.fill("minecraft:diamond_block"); record("probe blocks written", n == vp.SIDE * vp.SIDE, f"{n}")
-    panel.run(f"kill @e[tag={vp.TAG}]", r"Killed|No entity", 20)
+    # Entities of a freshly force-loaded chunk appear a few ticks after its blocks; a kill that runs
+    # before that matches nothing and the previous run's probes double the count.
+    for _ in range(10):
+        panel.run(f"kill @e[tag={vp.TAG}]", r"Killed|No entity", 20); time.sleep(2)
+        if vp.probe_count() == 0: break
     summon(24); time.sleep(2); record("probe entities written", vp.probe_count() == 24, vp.probe_count())
     out, _ = panel.run("save-all flush", r"Saved the game", 120); record("save-all flush acknowledged", "Saved the game" in out)
     t0 = vp.gametime(); time.sleep(3)

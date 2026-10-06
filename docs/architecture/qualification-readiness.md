@@ -80,6 +80,7 @@ structurally valid and hold the wrong chunk.
 |---|---|
 | Local fixture, build 46c | **16 / 16 checks** |
 | Deployment server, live restart | **4 / 4** — 64/64 blocks, 24/24 entities, game time advanced, gamerule survived |
+| Crash (`verify_crash_panel.py`), Sourby Demo, tree with feature 0028 (2026-10-07) | game time **survives** a SIGKILL after `save-all flush` (1,792,900 ≥ 1,792,548); no corruption; 64/64 blocks; 48/48 entities (harness double-count, all survived) |
 | Crash (`verify_crash_panel.py`), Sourby Demo, Build 47 candidate tree (2026-10-07) | **14 / 15** — two panel SIGKILLs (after flush, mid-write): clean boots, no corruption, 64/64 blocks and 24/24 entities of the last checkpoint; the known game-time rewind remains (XFAIL) |
 | Deployment server (Sourby Demo), Build 47 candidate tree `beb7f40e` (2026-10-07) | **20 / 20** — `verify_persistence_panel.py`, 3 real panel restarts; clean shutdowns, no boot errors, 64/64 blocks, 24/24 entities, game time advancing |
 | Deployment server (Sourby Demo), post-migration build (2026-10-05) | **20 / 20** — `verify_persistence_panel.py`: 3 real panel stop/start cycles, each reading back 64 blocks, 24 entities and an advancing game time written by the previous boot; clean shutdowns, no boot errors; probe placed at y=300 and removed afterwards. No player check: the server is online-mode |
