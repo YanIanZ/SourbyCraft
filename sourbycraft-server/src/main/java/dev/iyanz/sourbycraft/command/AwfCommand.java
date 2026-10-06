@@ -24,6 +24,7 @@ import static net.kyori.adventure.text.Component.text;
  * /awf info &lt;name&gt;
  * /awf create &lt;name&gt; [normal|nether|end] [void|flat|amplified|large_biomes] [generator=Plugin[:id]] [seed] [autoload]
  * /awf create &lt;name&gt; from &lt;template&gt; [autoload]
+ * /awf import &lt;file.slime&gt; &lt;name&gt; [normal|nether|end] [vanilla|generator=Plugin[:id]] [autoload]
  * /awf template list
  * /awf template save &lt;world&gt; &lt;template&gt;
  * /awf template delete &lt;template&gt; confirm
@@ -38,12 +39,12 @@ import static net.kyori.adventure.text.Component.text;
 public class AwfCommand extends Command {
 
     private static final List<String> SUBCOMMANDS =
-        List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template");
+        List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template", "import");
 
     public AwfCommand(final String name) {
         super(name);
         this.description = "Manage Aurora World Fabric worlds";
-        this.usageMessage = "/awf <list|info|create|load|save|unload|delete|autoload|template>";
+        this.usageMessage = "/awf <list|info|create|load|save|unload|delete|autoload|template|import>";
         this.setPermission("sourbycraft.command.awf");
     }
 
@@ -66,6 +67,10 @@ public class AwfCommand extends Command {
         }
         if (sub.equals("template")) {
             template(s, worlds, args);
+            return true;
+        }
+        if (sub.equals("import")) {
+            importSlime(s, worlds, args);
             return true;
         }
         if (args.length < 2) {
@@ -177,6 +182,39 @@ public class AwfCommand extends Command {
         report(s, "Created " + name + (autoload ? " (autoload)" : ""), worlds.create(creator, generator, autoload));
     }
 
+    /** Imports a Slime file; chunks it does not hold are void unless told otherwise. */
+    private void importSlime(final CommandSender s, final AuroraWorldsService worlds, final String[] args) {
+        if (args.length < 3) {
+            usage(s);
+            return;
+        }
+        final java.nio.file.Path file = java.nio.file.Path.of(args[1]);
+        final String name = args[2].toLowerCase(Locale.ROOT);
+        final WorldCreator creator = new WorldCreator(name);
+        String generator = "void";
+        boolean autoload = false;
+        for (int i = 3; i < args.length; i++) {
+            final String arg = args[i].toLowerCase(Locale.ROOT);
+            if (arg.startsWith("generator=")) {
+                generator = args[i].substring("generator=".length());
+                continue;
+            }
+            switch (arg) {
+                case "normal" -> creator.environment(World.Environment.NORMAL);
+                case "nether" -> creator.environment(World.Environment.NETHER);
+                case "end" -> creator.environment(World.Environment.THE_END);
+                case "vanilla" -> generator = null;
+                case "autoload" -> autoload = true;
+                default -> {
+                    s.sendMessage(text("Unknown option " + args[i], SourbyCraftColors.DANGER));
+                    return;
+                }
+            }
+        }
+        report(s, "Imported " + file.getFileName() + " as " + name + (autoload ? " (autoload)" : ""),
+            worlds.importSlime(file, creator, generator, autoload));
+    }
+
     private void template(final CommandSender s, final AuroraWorldsService worlds, final String[] args) {
         final String action = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "list";
         switch (action) {
@@ -238,6 +276,8 @@ public class AwfCommand extends Command {
         s.sendMessage(UiPanel.row("/awf create <name> [normal|nether|end] [void|flat|amplified|large_biomes]"
             + " [generator=Plugin[:id]] [seed] [autoload]", "new AWF world"));
         s.sendMessage(UiPanel.row("/awf create <name> from <template> [autoload]", "copy-on-write instance"));
+        s.sendMessage(UiPanel.row("/awf import <file.slime> <name> [normal|nether|end] [vanilla|generator=Plugin[:id]]"
+            + " [autoload]", "convert a Slime world"));
         s.sendMessage(UiPanel.row("/awf template list | save <world> <template> | delete <template> confirm", "templates"));
         s.sendMessage(UiPanel.row("/awf load | save <name>", "load, or save and commit"));
         s.sendMessage(UiPanel.row("/awf unload <name> [nosave]", "unload"));

@@ -67,6 +67,19 @@ public interface AuroraWorlds {
      */
     CompletableFuture<World> createFromTemplate(String template, String name, boolean autoload);
 
+    /**
+     * Imports a Slime world file, as SourbyCraft's former Slime world manager wrote it (format
+     * versions 12 and 13), as a new AWF world and loads it. The file is read, not changed. Light is recomputed on first load; the chunks'
+     * data version is kept, so older chunks are upgraded by the server's data fixers.
+     *
+     * @param file the {@code .slime} file
+     * @param creator name, environment and seed of the new world; its generator must be unset
+     * @param generator what generates chunks the file does not hold: {@code void} (usual for Slime
+     *     worlds), {@code Plugin[:id]}, or {@code null} for the environment's own terrain
+     */
+    CompletableFuture<World> importSlime(java.nio.file.Path file, WorldCreator creator, @Nullable String generator,
+                                         boolean autoload);
+
     /** The template a world is an instance of, if any. */
     Optional<String> template(String name);
 

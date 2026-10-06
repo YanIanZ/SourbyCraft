@@ -72,9 +72,9 @@ It is off unless configured and is not qualified; see "Engine integration" below
 
 ### Runtime worlds (`AuroraWorlds` API and `/awf`)
 
-Status: worlds, named generators, templates and copy-on-write instances are implemented on the
-FILE backend and verified by local end-to-end runs (below). The Slime (SRF v13) converter and
-database backends are **planned, not implemented**.
+Status: worlds, named generators, templates, copy-on-write instances and the Slime importer are
+implemented on the FILE backend and verified by local end-to-end runs (below). Database backends
+are **planned, not implemented**.
 
 - **API.** `dev.iyanz.sourbycraft.api.world.AuroraWorlds` in `sourbyapi`, obtained from the
   services manager: `list`, `exists`, `isLoaded`, `create(WorldCreator, autoload)`, `load`,
@@ -116,6 +116,19 @@ database backends are **planned, not implemented**.
   template and is generated again. All instances of a template share one opened template store
   (and its chunk index) in memory and one copy on disk. A template cannot be deleted while any
   world is an instance of it.
+- **Slime import.** `importSlime(file, creator, generator, autoload)` converts a `.slime` file as
+  SourbyCraft's former Slime world manager wrote it — format **v12** (zstd, light as two booleans
+  per section, entities wrapped in a compound) and **v13** (zlib, a POI/tick flags byte) — into
+  the new world's stores, then loads it. Each chunk becomes the engine's own chunk NBT with status
+  `full`; entities and POI go to their own stores; block entities, ticks (v13) and
+  `ChunkBukkitValues` are kept. Light is **not** imported (the old writer recorded it against the
+  wrong section heights), so chunks are lit on first load. The chunks keep their data version, so
+  the data fixers upgrade older ones. Sections start at -4 for `normal` and 0 for `nether`/`end`.
+  The default generator for chunks the file does not hold is `void`. AdvancedSlimePaper files are
+  not supported unless they use one of these two layouts. zstd comes from the engine's runtime
+  libraries and is called reflectively. The source file is only read.
+- **Command.** `/awf import <file> <name> [normal|nether|end] [vanilla|generator=Plugin[:id]]
+  [autoload]` — the file path is relative to the server directory.
 - **Command.** `/awf list | info <n> | create <n> [normal|nether|end] [void|flat|amplified|
   large_biomes] [generator=Plugin[:id]] [seed] [autoload] | create <n> from <template> [autoload] |
   load <n> | save <n> | unload <n> [nosave] | delete <n> confirm | autoload <n> on|off |
@@ -136,6 +149,14 @@ clean stop → stores on disk, 0 `.mca` in instances → restart autoloads both 
 and instance 2's template content (both template blocks) present → instances deleted → template
 deleted. 17/17 checks. No disk-size or memory measurement was taken; the sharing claim above is
 by construction (one store opened per template), not a measured saving.
+
+Slime import (2026-10-06, same setup): three real SuperiorSkyblock island files — one v13
+overworld (4 chunks, data version 4790), one v12 overworld and one v12 nether (6 chunks each, data
+version 4189) — imported with autoload; a known block of each island (grass, andesite,
+netherrack, located beforehand by decoding the files) found in the expected section; missing file
+and existing name refused; clean stop, 0 `.mca`; after restart the same blocks found again; no
+exception or chunk-load error in the logs. 17/17 checks. Entities were written to the entity store
+(4 entity chunks in total) but their presence in game was not checked.
 
 A defect this found: `AwfRegionStorage.read` returned "not ours" for any chunk the world had not
 written, so instances never read their template and the engine fell through to (absent) region

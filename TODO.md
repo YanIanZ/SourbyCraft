@@ -237,7 +237,8 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [x] AWF template + instance copy-on-write, generator `void`/plugin/tipe dunia bernama
   (`/awf template …`, `/awf create <n> from <t>`) — E2E lokal 17/17 (2026-10-06). Belum diukur:
   hemat disk/memori per instance.
-- [ ] Konverter Slime SRF v13 → AWF + `/awf import`
+- [x] Konverter Slime v12/v13 → AWF + `/awf import` — E2E lokal 17/17 dengan 3 file pulau asli
+  (2026-10-06). Belum dicek: entitas hasil impor muncul di game; format AdvancedSlimePaper lain.
 - [ ] Backend database AWF (MongoDB/MySQL/Redis)
 - [ ] Executor yang sudah ada dipindahkan ke bawah Resource Governor (ditunda; masing-masing sudah
   punya batas sendiri)

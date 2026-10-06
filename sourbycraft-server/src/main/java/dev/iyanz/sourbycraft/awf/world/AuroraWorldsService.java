@@ -87,18 +87,49 @@ public final class AuroraWorldsService implements AuroraWorlds {
 
     @Override
     public CompletableFuture<World> create(final WorldCreator creator, final String generator, final boolean autoload) {
+        final AuroraWorldRegistry.Entry entry;
+        try {
+            entry = describe(creator, generator, autoload);
+        } catch (final IllegalArgumentException refused) {
+            return CompletableFuture.failedFuture(refused);
+        }
+        return start(entry, null);
+    }
+
+    @Override
+    public CompletableFuture<World> importSlime(final Path file, final WorldCreator creator, final String generator,
+                                                final boolean autoload) {
+        final AuroraWorldRegistry.Entry entry;
+        try {
+            entry = describe(creator, generator, autoload);
+        } catch (final IllegalArgumentException refused) {
+            return CompletableFuture.failedFuture(refused);
+        }
+        if (!Files.isRegularFile(file)) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("no such file: " + file));
+        }
+        final int minSection = creator.environment() == World.Environment.NORMAL ? -4 : 0;
+        return start(entry, () -> {
+            final SlimeImporter.Result result = SlimeImporter.importInto(Files.readAllBytes(file), folder(entry.name()), minSection);
+            SourbyLogger.info("Aurora World Fabric: imported " + file.getFileName() + " as " + entry.name() + " ("
+                + result.chunks() + " chunks, " + result.entityChunks() + " with entities, " + result.poiChunks()
+                + " with POI, data version " + result.dataVersion() + ")");
+        });
+    }
+
+    /** A new world's entry, from a creator without a generator object. */
+    private static AuroraWorldRegistry.Entry describe(final WorldCreator creator, final String generator,
+                                                      final boolean autoload) {
         if (creator.generator() != null) {
-            return CompletableFuture.failedFuture(new IllegalArgumentException("name the generator instead of"
-                + " setting one on the creator (void, or Plugin[:id]), so the world can be loaded again with it"));
+            throw new IllegalArgumentException("name the generator instead of setting one on the creator"
+                + " (void, or Plugin[:id]), so the world can be loaded again with it");
         }
         if (!creator.key().equals(NamespacedKey.minecraft(creator.name()))) {
-            return CompletableFuture.failedFuture(new IllegalArgumentException(
-                "AWF worlds use the key minecraft:" + creator.name() + ", not " + creator.key()));
+            throw new IllegalArgumentException("AWF worlds use the key minecraft:" + creator.name() + ", not " + creator.key());
         }
         final String environment = creator.environment().name().toLowerCase(Locale.ROOT);
         final String type = creator.type() == WorldType.NORMAL ? null : creator.type().name().toLowerCase(Locale.ROOT);
-        return start(new AuroraWorldRegistry.Entry(creator.name(), environment, creator.seed(), generator, type,
-            null, autoload));
+        return new AuroraWorldRegistry.Entry(creator.name(), environment, creator.seed(), generator, type, null, autoload);
     }
 
     @Override
@@ -112,7 +143,7 @@ public final class AuroraWorldsService implements AuroraWorlds {
         if (description == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("no template named " + template));
         }
-        return start(description.named(name, template, autoload));
+        return start(description.named(name, template, autoload), null);
     }
 
     @Override
@@ -120,8 +151,18 @@ public final class AuroraWorldsService implements AuroraWorlds {
         return this.registry.get(name).map(AuroraWorldRegistry.Entry::template);
     }
 
-    /** Registers a new world and creates it. The entry is removed again if creation fails. */
-    private CompletableFuture<World> start(final AuroraWorldRegistry.Entry entry) {
+    /** Blocking work run off the region threads before a new world's stores open. */
+    private interface IoStep {
+        void run() throws IOException;
+    }
+
+    /**
+     * Registers a new world and creates it. The entry, and anything {@code before} wrote into the
+     * world's folder, are removed again if creation fails.
+     *
+     * @param before run off the region threads before the stores open, or {@code null}
+     */
+    private CompletableFuture<World> start(final AuroraWorldRegistry.Entry entry, final IoStep before) {
         final String name = entry.name();
         final var invalid = AuroraWorldRegistry.invalidName(name);
         if (invalid.isPresent()) return CompletableFuture.failedFuture(new IllegalArgumentException(invalid.get()));
@@ -137,13 +178,28 @@ public final class AuroraWorldsService implements AuroraWorlds {
         } catch (final IOException | RuntimeException failed) {
             return CompletableFuture.failedFuture(failed);
         }
-        return prepared(entry).thenCompose(ignored -> onGlobal(() -> {
+        final CompletableFuture<Void> ready = before == null ? prepared(entry)
+            : CompletableFuture.runAsync(() -> {
+                try {
+                    before.run();
+                } catch (final IOException failed) {
+                    throw new CompletionException(failed);
+                }
+            }, dev.iyanz.sourbycraft.util.VirtualExecutor.executor()).thenCompose(ignored -> prepared(entry));
+        return ready.thenCompose(ignored -> onGlobal(() -> {
             final World world = Bukkit.createWorld(creator);
             if (world == null) throw new IllegalStateException("the server refused to create " + name);
             return world;
         })).whenComplete((world, failed) -> {
             if (failed != null) {
                 AwfEngine.unprepare(folder(name));
+                if (before != null && Bukkit.getWorld(name) == null) {
+                    try {
+                        deleteRecursively(folder(name));
+                    } catch (final IOException ignored) {
+                        // Reported by the original failure; the folder blocks the name until removed.
+                    }
+                }
                 try {
                     this.registry.remove(name);
                 } catch (final IOException ignored) {
