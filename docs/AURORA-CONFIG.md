@@ -1,5 +1,9 @@
 # Aurora configuration — effective 26.2 contract
 
+> **Role:** effective Aurora configuration contract — keys, defaults, LIVE/RESTART_REQUIRED, boot order. **Status:** Active; checked against `config/AuroraConfig.java` and `awf/AwfSettings.java` on 2026-10-07 (two bridge task-limit keys are not listed yet).
+>
+> Entry point: [docs/architecture/AURORA.md](architecture/AURORA.md).
+
 This document describes **what branch `26.2` actually consumes now**. It is not a future-layout proposal.
 
 ## Implemented Aurora settings
@@ -8,6 +12,7 @@ This document describes **what branch `26.2` actually consumes now**. It is not 
 | --- | --- | --- | --- |
 | `aurora.entity.async-pathfinding` | boolean / `false` | LIVE | `AsyncPathProcessor` admission |
 | `aurora.diagnostics.lane-sampling` | boolean / `true` | LIVE | execution-lane CPU attribution |
+| `aurora.diagnostics.chunk-generation-metrics` | boolean / `false` | RESTART_REQUIRED | generic chunk-generation stage timing behind `/perf chunks`; read once from the TOML at class init (before configuration loads); also on when `-Dsourbycraft.chunk-generation-metrics.enabled=true`; an invalid value is reported and stays off |
 | `aurora.cpu.cores` | integer / `0` (AUTO) | RESTART_REQUIRED | early region-scheduler CPU budget |
 | `aurora.bridge.mode` | `off` / `safe`, default `off` | RESTART_REQUIRED | plugin loader admission via `AuroraBridge` (read from the TOML files directly, before `SourbyCraftBootstrap`) |
 | `aurora.bridge.quarantine-after` | integer ≥ 1 / `3` | LIVE | Aurora Bridge quarantine threshold |

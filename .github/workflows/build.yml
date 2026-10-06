@@ -73,7 +73,7 @@ jobs:
       - name: Setup Metal (vendored — gen sources)
         run: bash scripts/setup_metal.sh
 
-      - name: Apply all patches (Paper -> Canvas -> SourbyCraft)
+      - name: Apply all patches (Paper -> SourbyCraft)
         run: ./gradlew applyAllPatches --no-daemon --stacktrace
 
       - name: Install redis-server for the AWF Redis backend tests
@@ -87,6 +87,9 @@ jobs:
 
       - name: Validate release identity and profiling scripts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Check patch surface
+        run: python3 scripts/patch_surface.py --check
 
       - name: Verify packaged bootstrap download and cache behavior
         run: |
@@ -156,6 +159,9 @@ jobs:
           echo "eula=true" > eula.txt
           # keep the console-log short and offline so CI runs deterministically
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:normal\nspawn-protection=0\n' > server.properties
+          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test)
+          mkdir -p sourbycraft_config
+          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
           echo "Booting $jar ..."
           mkfifo stdin.pipe
           java -Xmx2G -XX:+UseG1GC -XX:StartFlightRecording=settings=profile,filename=boot.jfr,dumponexit=true -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
@@ -309,6 +315,9 @@ jobs:
           me=$(id -un)
           echo "eula=true" > eula.txt
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\n' > server.properties
+          # no plugin provisioning or auto-update during CI boots (provisioning has its own probe test)
+          mkdir -p sourbycraft_config
+          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
 
           offline() {
             # A private network namespace with only loopback: every outbound connection fails.
@@ -377,6 +386,7 @@ jobs:
           echo "eula=true" > eula.txt
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
           printf '[aurora.bridge]\nmode = "safe"\n' > sourbycraft_config/aurora.toml
+          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
           mkfifo stdin.pipe
           java -Xmx2G -XX:+UseG1GC -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
           PID=$!
@@ -487,7 +497,19 @@ jobs:
               && grep -q 'LEGACY_BRIDGE_ASYNC_OK' server.log \
               && grep -q 'LEGACY_BRIDGE_TIMER_OK' server.log \
               && grep -Eq 'LEGACY_BRIDGE_WORLD_ACCESS_(ALLOWED|REFUSED)' server.log \
-              && grep -Eq 'LEGACY_BRIDGE_REGION_SYNC_(OK|REFUSED)' server.log; then
+              && grep -Eq 'LEGACY_BRIDGE_REGION_SYNC_(OK|REFUSED)' server.log \
+              && grep -q 'LEGACY_GLOBAL_EXECUTE_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_RUN_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_DELAYED_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_FROM_REGION_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_REPEATER_SELF_CANCEL_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_REPEATER_STOPPED_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_ONESHOT_STATES_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_IDLE_CANCEL_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_CANCEL_TASKS_OK' server.log \
+              && grep -q 'LEGACY_REGION_TASK_OK' server.log \
+              && grep -q 'LEGACY_ENTITY_TASK_OK' server.log \
+              && grep -q 'LEGACY_ENTITY_RETIRED_OK' server.log; then
               settled=1
               break
             fi
@@ -495,6 +517,11 @@ jobs:
           done
           if [ "$settled" -ne 1 ]; then
             fail_after_launch "Bridged scheduler markers did not all appear within 30s."
+          fi
+          # The fixture logs <MARKER>_WRONG when a scheduler call ends in the wrong state.
+          if grep -q '_WRONG' server.log; then
+            grep '_WRONG' server.log
+            fail_after_launch "A bridged scheduler call ended in the wrong state (see _WRONG above)."
           fi
 
           if ! printf 'plugins LegacyBridgeTest\nperf governor\nperf plugins\nperf history\nstop\n' >&3; then
@@ -522,8 +549,26 @@ jobs:
           grep -q 'LEGACY_BRIDGE_PENDING_OK' server.log || { echo "getPendingTasks did not list a bridged task"; exit 1; }
           grep -q 'LEGACY_BRIDGE_REGION_SYNC_OK' server.log \
             || { echo "a sync task scheduled from a region did not run on that region"; exit 1; }
+          grep -q 'LEGACY_REGION_TASK_OK' server.log \
+            || { echo "a RegionTask scheduled from onEnable did not run on the region owning its chunk"; exit 1; }
+          grep -q 'LEGACY_ENTITY_TASK_OK' server.log \
+            || { echo "an EntityTask did not run on the region owning its entity"; exit 1; }
+          grep -q 'LEGACY_ENTITY_RETIRED_OK' server.log \
+            || { echo "an EntityTask whose entity was removed was not retired without running"; exit 1; }
           if grep -q 'LEGACY_BRIDGE_TIMER_RAN_AFTER_CANCEL' server.log; then
             echo "a cancelled bridged timer kept running"; exit 1
+          fi
+          grep -q 'LEGACY_DISABLE_GLOBAL_SUBMIT_OK' server.log \
+            || { echo "a global task submitted from onDisable was not refused"; exit 1; }
+          grep -q 'LEGACY_DISABLE_BUKKIT_SUBMIT_OK' server.log \
+            || { echo "a Bukkit task submitted from onDisable was not refused"; exit 1; }
+          if grep -q '_WRONG' server.log; then
+            grep '_WRONG' server.log; echo "a bridged scheduler call ended in the wrong state"; exit 1
+          fi
+          # Every plugin's Bukkit tasks are cancelled on disable; for a native plugin that must not
+          # reach the region-threading base's refused legacy path (patch 0009).
+          if grep -q 'while cancelling Bukkit scheduler tasks' server.log; then
+            grep -A2 'while cancelling Bukkit scheduler tasks' server.log; exit 1
           fi
           echo "Legacy plugin loaded through the Aurora Bridge; sync, async, timer-cancel and world-access paths ran; clean exit."
 
@@ -541,6 +586,7 @@ jobs:
           echo "eula=true" > eula.txt
           printf 'online-mode=false\nmax-players=1\nlevel-type=minecraft\\:flat\nspawn-protection=0\n' > server.properties
           printf '[aurora.awf]\nworlds = ["world"]\ncommit-interval-seconds = 5\n' > sourbycraft_config/aurora.toml
+          printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
 
           boot() {
             # $2 runs right after Done; $3 runs 10 s later, then stop.

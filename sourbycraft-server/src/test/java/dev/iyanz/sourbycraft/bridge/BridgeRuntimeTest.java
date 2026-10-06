@@ -39,6 +39,28 @@ class BridgeRuntimeTest {
             return add("region", body, delay, period);
         }
 
+        final List<Object> entities = new ArrayList<>();
+        final List<Runnable> retirements = new ArrayList<>();
+        /** Simulates an entity already removed at scheduling time: Folia returns no task. */
+        boolean entityAlreadyRemoved;
+
+        @Override
+        public BridgeRuntime.Handle entity(final Object owner, final Object entity, final Runnable body,
+                                           final long delay, final long period, final Runnable retired) {
+            this.entities.add(entity);
+            this.retirements.add(retired);
+            if (this.entityAlreadyRemoved) {
+                retired.run();
+                return () -> {};
+            }
+            return add("entity", body, delay, period);
+        }
+
+        /** Folia's retire path: the entity was removed before the job's body ran. */
+        void retire(final int index) {
+            this.retirements.get(index).run();
+        }
+
         private BridgeRuntime.Handle add(final String lane, final Runnable body, final long delay, final long period) {
             final Job job = new Job(lane, body, delay, period, new AtomicBoolean());
             this.jobs.add(job);
@@ -210,6 +232,8 @@ class BridgeRuntimeTest {
             @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p) { return global(o, b, d, p); }
             @Override public BridgeRuntime.Handle region(Object o, dev.iyanz.sourbycraft.execution.region.RegionAnchor a,
                                                          Runnable b, long d, long p) { return global(o, b, d, p); }
+            @Override public BridgeRuntime.Handle entity(Object o, Object e, Runnable b, long d, long p,
+                                                         Runnable r) { return global(o, b, d, p); }
         };
         holder[0] = new BridgeRuntime(BridgeMode.SAFE, () -> 3, cancelling, new BridgeTelemetry(), (m, t) -> {});
         holder[0].admit("Legacy");
@@ -325,5 +349,226 @@ class BridgeRuntimeTest {
         assertEquals(java.util.List.of(serverTask), bridge.pendingHandles());
         executor.fire(0);
         assertTrue(bridge.pendingHandles().isEmpty(), "a finished one-shot is no longer pending");
+    }
+    @Test
+    void schedulerAdmissionFailureLeavesNoPendingTask() {
+        final BridgeRuntime.Executor rejecting = new BridgeRuntime.Executor() {
+            @Override public BridgeRuntime.Handle global(Object o, Runnable b, long d, long p) {
+                throw new java.util.concurrent.RejectedExecutionException("stopping");
+            }
+            @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p) { return global(o, b, d, p); }
+            @Override public BridgeRuntime.Handle region(Object o, dev.iyanz.sourbycraft.execution.region.RegionAnchor a,
+                                                         Runnable b, long d, long p) { return global(o, b, d, p); }
+            @Override public BridgeRuntime.Handle entity(Object o, Object e, Runnable b, long d, long p,
+                                                         Runnable r) { return global(o, b, d, p); }
+        };
+        final BridgeRuntime bridge = new BridgeRuntime(BridgeMode.SAFE, () -> 3, rejecting,
+            new BridgeTelemetry(), (m, t) -> this.warnings.add(m));
+        bridge.admit("A");
+        final FakeTask task = new FakeTask(20, true, 0, () -> {});
+        assertFalse(bridge.submit("A", null, task, 0));
+        assertTrue(task.cancelled());
+        assertFalse(bridge.knows(20));
+        assertEquals(0, bridge.pending("A"));
+        assertEquals(1, bridge.telemetry().stats("A").rejectedOperations());
+        assertEquals(0, bridge.telemetry().stats("A").fatalViolations());
+        assertNotNull(bridge.telemetry().stats("A").lastFailure());
+    }
+
+    @Test
+    void ioSaturationCancelsTheTaskAndItsLateTimerHandle() {
+        final AtomicBoolean timerCancelled = new AtomicBoolean();
+        final BridgeRuntime.Executor saturated = new BridgeRuntime.Executor() {
+            @Override public BridgeRuntime.Handle global(Object o, Runnable b, long d, long p) { throw new AssertionError(); }
+            @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p) { throw new AssertionError(); }
+            @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p, Runnable rejected) {
+                rejected.run();
+                return () -> timerCancelled.set(true);
+            }
+            @Override public BridgeRuntime.Handle region(Object o, dev.iyanz.sourbycraft.execution.region.RegionAnchor a,
+                                                         Runnable b, long d, long p) { throw new AssertionError(); }
+            @Override public BridgeRuntime.Handle entity(Object o, Object e, Runnable b, long d, long p,
+                                                         Runnable r) { throw new AssertionError(); }
+        };
+        final BridgeRuntime bridge = new BridgeRuntime(BridgeMode.SAFE, () -> 3, saturated, new BridgeTelemetry(), (m, t) -> {});
+        bridge.admit("A");
+        final FakeTask task = new FakeTask(21, false, 0, () -> failIfRun());
+        assertFalse(bridge.submit("A", null, task, 0));
+        assertTrue(timerCancelled.get());
+        assertTrue(task.cancelled());
+        assertFalse(bridge.knows(21));
+        assertEquals(0, bridge.pending("A"));
+        assertEquals(1, bridge.telemetry().stats("A").rejectedOperations());
+    }
+
+    private static void failIfRun() {
+        throw new AssertionError("rejected task must not run");
+    }
+
+    @Test
+    void disableRacingSchedulerAdmissionClosesOnlyThatPluginsTasks() {
+        final BridgeRuntime[] bridge = new BridgeRuntime[1];
+        final AtomicBoolean timerCancelled = new AtomicBoolean();
+        final BridgeRuntime.Executor disabling = new BridgeRuntime.Executor() {
+            @Override public BridgeRuntime.Handle global(Object o, Runnable b, long d, long p) {
+                bridge[0].disable("A");
+                return () -> timerCancelled.set(true);
+            }
+            @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p) { return global(o, b, d, p); }
+            @Override public BridgeRuntime.Handle region(Object o, dev.iyanz.sourbycraft.execution.region.RegionAnchor a,
+                                                         Runnable b, long d, long p) { return global(o, b, d, p); }
+            @Override public BridgeRuntime.Handle entity(Object o, Object e, Runnable b, long d, long p,
+                                                         Runnable r) { return global(o, b, d, p); }
+        };
+        bridge[0] = new BridgeRuntime(BridgeMode.SAFE, () -> 3, disabling, new BridgeTelemetry(), (m, t) -> {});
+        bridge[0].admit("A");
+        bridge[0].admit("B");
+        assertFalse(bridge[0].submit("A", null, new FakeTask(22, true, 1, () -> {}), 0));
+        assertTrue(timerCancelled.get());
+        assertFalse(bridge[0].submit("A", null, new FakeTask(23, true, 1, () -> {}), 0));
+        assertTrue(bridge[0].submit("B", null, new FakeTask(24, true, 1, () -> {}), 0));
+        assertEquals(0, bridge[0].pending("A"));
+        assertEquals(1, bridge[0].pending("B"));
+    }
+
+    @Test
+    void manyPluginsKeepIndependentIndexesThroughCompletionAndCancellation() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 3);
+        for (int i = 0; i < 100; i++) {
+            final String name = "Plugin" + i;
+            bridge.admit(name);
+            bridge.submit(name, null, new FakeTask(i * 2, true, 0, () -> {}), 0);
+            bridge.submit(name, null, new FakeTask(i * 2 + 1, false, 10, () -> {}), 0);
+        }
+        assertEquals(2, bridge.cancelAll("Plugin50"));
+        for (int i = 0; i < 100; i++) {
+            if (i == 50) continue;
+            assertEquals(2, bridge.pending("Plugin" + i));
+            this.executor.fire(i * 2);
+            assertEquals(1, bridge.pending("Plugin" + i));
+            assertEquals(1, bridge.cancelAll("Plugin" + i));
+        }
+        assertTrue(bridge.pendingHandles().isEmpty());
+    }
+
+    @Test
+    void duplicateTaskIdsNeverReplaceAnotherPluginsTask() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 3);
+        bridge.admit("A");
+        bridge.admit("B");
+        final FakeTask original = new FakeTask(25, true, 1, () -> {});
+        assertTrue(bridge.submit("A", null, original, 0));
+        assertFalse(bridge.submit("B", null, new FakeTask(25, true, 1, () -> {}), 0));
+        assertEquals(1, bridge.pending("A"));
+        assertEquals(0, bridge.pending("B"));
+        this.executor.fire(0);
+        assertEquals(1, original.runs.get());
+    }
+
+    @Test
+    void runningRemainsTrueUntilEveryOverlappingInvocationFinishes() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 3);
+        bridge.admit("A");
+        final AtomicInteger depth = new AtomicInteger();
+        final FakeTask timer = new FakeTask(26, false, 1, () -> {
+            if (depth.incrementAndGet() == 1) {
+                this.executor.fire(0);
+                assertTrue(bridge.running(26), "outer invocation still runs after the inner one finishes");
+                bridge.cancel(26);
+                assertTrue(bridge.running(26), "cancellation does not finish an active body");
+            }
+            depth.decrementAndGet();
+        });
+        bridge.submit("A", null, timer, 0);
+        this.executor.fire(0);
+        assertFalse(bridge.running(26));
+        assertFalse(bridge.knows(26));
+        assertEquals(0, bridge.pending("A"));
+        assertTrue(this.warnings.isEmpty());
+    }
+
+    private static void sleep(final long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (final InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(interrupted);
+        }
+    }
+
+    private static final long TWENTY_MS = 20_000_000L;
+
+    @Test
+    void aRegionBodyIsTimedInTheRegionLaneOnly() {
+        final FakeExecutor executor = new FakeExecutor();
+        final BridgeRuntime bridge = routed(executor, () -> HERE,
+            dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.CALLER_REGION);
+        assertTrue(bridge.submit("Legacy", null, new FakeTask(1, true, 0, () -> sleep(20)), 0));
+        assertEquals(0, bridge.telemetry().stats("Legacy").bodyTimes().region().count(), "queued, not yet run");
+        executor.fire(0);
+        final BridgeTelemetry.BodyTimes times = bridge.telemetry().stats("Legacy").bodyTimes();
+        assertEquals(1, times.region().count());
+        assertTrue(times.region().totalNanos() >= TWENTY_MS, "total " + times.region().totalNanos());
+        assertTrue(times.region().maxNanos() >= TWENTY_MS);
+        assertTrue(times.region().p99Nanos() >= TWENTY_MS);
+        assertEquals(0, times.global().count());
+        assertEquals(0, times.async().count());
+    }
+
+    @Test
+    void globalAndAsyncBodiesAreTimedInTheirOwnLanes() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 3);
+        bridge.admit("Legacy");
+        bridge.submit("Legacy", null, new FakeTask(1, true, -1, () -> sleep(20)), 0);
+        bridge.submit("Legacy", null, new FakeTask(2, false, -1, () -> sleep(20)), 0);
+        this.executor.fire(0);
+        BridgeTelemetry.BodyTimes times = bridge.telemetry().stats("Legacy").bodyTimes();
+        assertEquals(1, times.global().count());
+        assertTrue(times.global().p50Nanos() >= TWENTY_MS);
+        assertEquals(0, times.async().count());
+        assertEquals(0, times.region().count());
+        this.executor.fire(1);
+        times = bridge.telemetry().stats("Legacy").bodyTimes();
+        assertEquals(1, times.global().count());
+        assertEquals(1, times.async().count());
+        assertTrue(times.async().totalNanos() >= TWENTY_MS);
+        assertEquals(0, times.region().count());
+    }
+
+    @Test
+    void aThrowingBodyIsStillTimed() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 3);
+        bridge.admit("Legacy");
+        bridge.submit("Legacy", null, new FakeTask(1, true, -1, () -> {
+            sleep(20);
+            throw new NullPointerException("bug");
+        }), 0);
+        this.executor.fire(0);
+        final BridgeTelemetry.PluginStats stats = bridge.telemetry().stats("Legacy");
+        assertEquals(1, stats.bodyTimes().global().count());
+        assertTrue(stats.bodyTimes().global().maxNanos() >= TWENTY_MS);
+        assertNotNull(stats.lastFailure());
+    }
+
+    @Test
+    void theRecentWindowStaysBounded() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 3);
+        bridge.admit("Legacy");
+        bridge.submit("Legacy", null, new FakeTask(1, true, 1, () -> {}), 0);
+        final int runs = BridgeTelemetry.BODY_WINDOW + 44;
+        for (int i = 0; i < runs; i++) this.executor.fire(0);
+        final BridgeTelemetry.BodyTime global = bridge.telemetry().stats("Legacy").bodyTimes().global();
+        assertEquals(runs, global.count());
+        assertEquals(BridgeTelemetry.BODY_WINDOW, global.samples());
+        assertTrue(global.p50Nanos() <= global.p99Nanos() && global.p99Nanos() <= global.maxNanos());
+    }
+
+    @Test
+    void noBodyMeansZeroTimes() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 3);
+        bridge.admit("Legacy");
+        final BridgeTelemetry.BodyTime region = bridge.telemetry().stats("Legacy").bodyTimes().region();
+        assertEquals(new BridgeTelemetry.BodyTime(0, 0, 0, 0, 0, 0), region);
+        assertEquals(0.0, region.meanMillis());
     }
 }

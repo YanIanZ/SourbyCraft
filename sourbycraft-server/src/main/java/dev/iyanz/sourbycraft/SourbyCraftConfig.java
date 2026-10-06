@@ -78,7 +78,7 @@ public final class SourbyCraftConfig {
         if (!beforeAurora.scheduler().equals(afterAurora.scheduler())) keys.add("aurora.scheduler.*");
         for (String key : List.of("ui.console-style", "branding.gc-advisor.enabled",
                 "sourbycraft.max-players", "sourbycraft.maxplayers.bypass-enabled",
-                "viaversion.auto-provision", "messages.motd", "misc.auto_update.check_interval_minutes")) {
+                "viaversion.auto-provision", "protocollib.auto-provision", "messages.motd", "misc.auto_update.check_interval_minutes")) {
             if (!java.util.Objects.equals(before.values().get(key), after.values().get(key))) keys.add(key);
         }
         return List.copyOf(keys);
@@ -303,6 +303,10 @@ public final class SourbyCraftConfig {
         seed(f, changed, AuroraConfig.LANE_SAMPLING_KEY, true,
             "Aurora execution-lane CPU attribution (LIVE), behind /perf lanes. Walks every thread once a "
             + "second. Sampling has a cost that depends on the workload. false stops the sampling; the lanes view then reports it as disabled.");
+        seed(f, changed, AuroraConfig.CHUNK_GENERATION_METRICS_KEY, false,
+            "Generic chunk-generation stage timing behind /perf chunks (RESTART_REQUIRED). Read once at "
+            + "startup; the JVM property -Dsourbycraft.chunk-generation-metrics.enabled=true also turns it on. "
+            + "Times every non-empty generation stage, so it is off by default.");
         seed(f, changed, AuroraConfig.BRIDGE_MODE_KEY, "off",
             "Aurora Compatibility Bridge (RESTART_REQUIRED). off = plugins without folia-supported/canvas-supported "
             + "are refused, as before. safe = they load, their Bukkit scheduler tasks are routed through "
@@ -315,6 +319,13 @@ public final class SourbyCraftConfig {
             "Where a bridged plugin's Bukkit sync task runs (LIVE). caller-region = on the region that was "
             + "ticking when it was scheduled (from a command or event), else the global region. global = always "
             + "the global region, where world access is refused. Ownership checks apply either way.");
+        seed(f, changed, AuroraConfig.BRIDGE_MAX_PENDING_KEY, 0,
+            "Maximum pending bridged tasks per plugin (LIVE). 0 = unlimited, otherwise 1..100000. "
+            + "New submissions above the limit are cancelled and diagnosed; existing tasks drain normally.");
+        seed(f, changed, AuroraConfig.BRIDGE_MAX_RUNNING_ASYNC_KEY, 0,
+            "Maximum simultaneously running bridged async callbacks per plugin (LIVE). 0 = unlimited, "
+            + "otherwise 1..100000. Over-limit callbacks cancel their task/timer and are diagnosed; "
+            + "running bodies drain normally. This is rejection, not a queue or a fairness guarantee.");
         seed(f, changed, AuroraConfig.BRIDGE_IO_THREADS_KEY, 0,
             "Resource Governor: threads for bridged plugins' async tasks (RESTART_REQUIRED). 0 = max(2, processors / 4).");
         seed(f, changed, AuroraConfig.BRIDGE_IO_QUEUE_KEY, 256,
@@ -507,6 +518,8 @@ public final class SourbyCraftConfig {
 
         seed(f, changed, "viaversion.auto-provision", true,
             "RESTART_REQUIRED. Provision verified ViaVersion/ViaBackwards jars and default configs before plugin loading. false = manage Via yourself.");
+        seed(f, changed, "protocollib.auto-provision", true,
+            "RESTART_REQUIRED. Install the pinned official ProtocolLib plugin before the plugin scan. Existing operator jars/configs are preserved. false disables managed installation; private native Intave skips this external plugin to keep its packet backend isolated.");
 
         dev.iyanz.sourbycraft.lang.SourbyMessages.seedDefaults(f, changed);
         dev.iyanz.sourbycraft.update.AutoUpdateSettings.seedDefaults(f, changed);

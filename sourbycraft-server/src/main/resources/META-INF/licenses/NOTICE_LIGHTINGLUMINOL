@@ -1,0 +1,37 @@
+LightingLuminol / Luminol scheduler compatibility attribution
+
+Source: https://github.com/LuminolCustomArchive/LightingLuminol
+Revision: 72d51c4d11b1ddfe70cde21f4736fdf660873cb3
+Branch at import: ver/26.1.2
+Original patch author: Bacteriawa <A3167717663@hotmail.com>
+Original patch date: 2026-06-06
+Credits: LightingLuminol and Luminol contributors, and their Folia/Paper upstreams.
+
+Derived source:
+  lightingluminol-server/src/main/java/meow/bacteriawa/lightingluminol/core/FoliaSchedulerCompatibility.java
+  lightingluminol-server/paper-patches/features/0003-Folia-scheduler-compatibility.patch
+
+SourbyCraft adaptation locations:
+  dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility
+  sourbycraft-server/paper-patches/features/0007-SourbyCraft-adapt-LightingLuminol-global-scheduler-bridge.patch
+
+Adaptations: route only explicitly global scheduler requests through the existing
+SAFE bridge; keep region/entity scheduling native; share the bridge's per-plugin
+indexes, exception classification and quarantine; notify the ScheduledTask adapter
+of bridge cancellation; use native global backend entry points to avoid recursion;
+close admission before plugin-disable callbacks and restore Bukkit task cleanup.
+
+The imported/derived code retains GNU General Public License version 3 as stated
+by the upstream project. Bacteriawa is not listed among upstream's MIT-exempt
+authors. SourbyCraft's root project license does not replace this upstream license.
+
+The following upstream license files are included verbatim alongside this notice:
+  LICENSE_LIGHTINGLUMINOL      <- upstream LICENSE.md
+  LICENSE_LIGHTINGLUMINOL_GPL  <- upstream licenses/GPL.md
+  LICENSE_LIGHTINGLUMINOL_MIT  <- upstream licenses/MIT.md
+The relative links in the verbatim LICENSE.md refer to those upstream file paths;
+the packaged names above are their local equivalents. Retaining the MIT text does
+not claim that these Bacteriawa-derived changes are MIT-licensed.
+
+Port scope and validation handoff:
+  docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md

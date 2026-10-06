@@ -129,6 +129,8 @@ public class PluginsCommand extends Command {
             sender.sendMessage(text("  State: ", SourbyCraftColors.LABEL).append(text(state.display(), colorOf(state))));
             sender.sendMessage(UiPanel.row("Enabled", plugin.isEnabled() ? "yes" : "no"));
             sender.sendMessage(UiPanel.row("Declares region support", plugin.getPluginMeta().isFoliaSupported() ? "yes" : "no"));
+            sender.sendMessage(UiPanel.row("Startup (wall time)",
+                dev.iyanz.sourbycraft.startup.PluginTimings.GLOBAL.of(plugin.getName()).describe()));
             var stats = AuroraBridge.stats(plugin);
             if (stats == null) sender.sendMessage(UiPanel.row("Bridge telemetry", "not available for this plugin"));
             else {
@@ -136,6 +138,17 @@ public class PluginsCommand extends Command {
                 sender.sendMessage(UiPanel.row("Scheduler redirects / owner handoffs", stats.schedulerRedirects() + " / " + stats.ownerHandoffs()));
                 sender.sendMessage(UiPanel.row("Rejected / fatal operations", stats.rejectedOperations() + " / " + stats.fatalViolations()));
                 sender.sendMessage(UiPanel.row("Quarantined", stats.quarantined() ? "yes" : "no"));
+                var load = AuroraBridge.taskLoad(plugin);
+                if (load != null) {
+                    sender.sendMessage(UiPanel.row("Pending tasks / limit", load.pending() + " / "
+                        + (load.pendingLimit() == 0 ? "unlimited" : Integer.toString(load.pendingLimit()))));
+                    sender.sendMessage(UiPanel.row("Running async / limit", load.runningAsync() + " / "
+                        + (load.runningAsyncLimit() == 0 ? "unlimited" : Integer.toString(load.runningAsyncLimit()))));
+                }
+                var bodies = stats.bodyTimes();
+                sender.sendMessage(UiPanel.row("Sync body time (region / global)",
+                    bodyTime(bodies.region()) + " / " + bodyTime(bodies.global())));
+                sender.sendMessage(UiPanel.row("Async body time", bodyTime(bodies.async())));
                 sender.sendMessage(UiPanel.row("Startup cache", stats.startupCacheState()));
                 sender.sendMessage(UiPanel.row("Last failure", stats.lastFailure() == null ? "none" : stats.lastFailure()));
             }
@@ -143,6 +156,13 @@ public class PluginsCommand extends Command {
         sender.sendMessage(UiPanel.actions(List.of("/plugins", "/plugins filter failed")));
         sender.sendMessage(UiPanel.footer());
         return true;
+    }
+
+    /** Body wall time on the running thread, without queue wait: count, mean, p50, p99, max. */
+    static String bodyTime(dev.iyanz.sourbycraft.bridge.BridgeTelemetry.BodyTime time) {
+        if (time.count() == 0) return "none yet";
+        return time.count() + " runs, mean " + TpsCommand.ms(time.meanMillis()) + ", p50 " + TpsCommand.ms(time.p50Millis())
+            + ", p99 " + TpsCommand.ms(time.p99Millis()) + ", max " + TpsCommand.ms(time.maxMillis());
     }
 
     static List<Component> render(List<Row> all, Request request, int requestedSize) {

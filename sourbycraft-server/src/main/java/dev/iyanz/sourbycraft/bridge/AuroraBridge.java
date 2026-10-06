@@ -23,7 +23,7 @@ import org.bukkit.plugin.Plugin;
  * {@code CraftScheduler} patches call, and what {@code /plugins} reads.
  *
  * <p>Plugin providers are built during Paper's bootstrap, before {@code SourbyCraftBootstrap}
- * loads configuration, so the bridge reads its own two keys straight from the TOML files on first
+ * loads configuration, so the bridge reads its own keys straight from the TOML files on first
  * use, read-only. {@code aurora.bridge.mode} is therefore fixed for the run (RESTART_REQUIRED);
  * {@code aurora.bridge.quarantine-after} follows later reloads (LIVE).</p>
  */
@@ -34,6 +34,8 @@ public final class AuroraBridge {
     private static volatile BridgeRuntime runtime;
     private static volatile int earlyQuarantineAfter = AuroraConfig.Bridge.DEFAULT.quarantineAfter();
     private static volatile AuroraConfig.SyncRoute earlySyncRoute = AuroraConfig.Bridge.DEFAULT.syncRoute();
+    private static volatile int earlyMaxPendingTasks = AuroraConfig.Bridge.DEFAULT.maxPendingTasksPerPlugin();
+    private static volatile int earlyMaxRunningAsyncTasks = AuroraConfig.Bridge.DEFAULT.maxRunningAsyncTasksPerPlugin();
 
     private AuroraBridge() {}
 
@@ -46,11 +48,14 @@ public final class AuroraBridge {
                     final AuroraConfig.Bridge settings = readEarly(AURORA_FILE, UNIFIED_FILE);
                     earlyQuarantineAfter = settings.quarantineAfter();
                     earlySyncRoute = settings.syncRoute();
+                    earlyMaxPendingTasks = settings.maxPendingTasksPerPlugin();
+                    earlyMaxRunningAsyncTasks = settings.maxRunningAsyncTasksPerPlugin();
                     final dev.iyanz.sourbycraft.execution.region.CurrentRegion regions =
                         new dev.iyanz.sourbycraft.execution.region.FoliaRegionBackend();
                     current = new BridgeRuntime(settings.mode(), AuroraBridge::quarantineAfter,
                         new FoliaExecutor(), new BridgeTelemetry(),
-                        SourbyLogger::warn, regions::anchor, AuroraBridge::syncRoute);
+                        SourbyLogger::warn, regions::anchor, AuroraBridge::syncRoute,
+                        AuroraBridge::maxPendingTasks, AuroraBridge::maxRunningAsyncTasks);
                     runtime = current;
                 }
             }
@@ -78,6 +83,24 @@ public final class AuroraBridge {
         }
     }
 
+    private static int maxPendingTasks() {
+        try {
+            final AuroraConfig loaded = dev.iyanz.sourbycraft.SourbyCraftConfig.aurora();
+            return loaded == AuroraConfig.DEFAULT ? earlyMaxPendingTasks : loaded.bridge().maxPendingTasksPerPlugin();
+        } catch (final Throwable unavailable) {
+            return earlyMaxPendingTasks;
+        }
+    }
+
+    private static int maxRunningAsyncTasks() {
+        try {
+            final AuroraConfig loaded = dev.iyanz.sourbycraft.SourbyCraftConfig.aurora();
+            return loaded == AuroraConfig.DEFAULT ? earlyMaxRunningAsyncTasks : loaded.bridge().maxRunningAsyncTasksPerPlugin();
+        } catch (final Throwable unavailable) {
+            return earlyMaxRunningAsyncTasks;
+        }
+    }
+
     /**
      * Reads the bridge keys without the config system: Aurora's file over the unified file, the
      * same precedence {@code SourbyCraftConfig} applies. Missing or unreadable files mean defaults.
@@ -89,7 +112,8 @@ public final class AuroraBridge {
             try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
                 final var config = new com.electronwill.nightconfig.toml.TomlParser().parse(reader);
                 for (final String key : List.of(AuroraConfig.BRIDGE_MODE_KEY, AuroraConfig.BRIDGE_QUARANTINE_KEY,
-                    AuroraConfig.BRIDGE_SYNC_ROUTE_KEY)) {
+                    AuroraConfig.BRIDGE_SYNC_ROUTE_KEY, AuroraConfig.BRIDGE_MAX_PENDING_KEY,
+                    AuroraConfig.BRIDGE_MAX_RUNNING_ASYNC_KEY)) {
                     final Object value = config.get(key);
                     if (value != null) values.put(key, value);
                 }
@@ -122,6 +146,31 @@ public final class AuroraBridge {
     public static boolean isRunning(final int taskId) {
         final BridgeRuntime current = runtime;
         return current != null && current.running(taskId);
+    }
+
+    /** Bukkit worker snapshots use the actual governed-lane thread and original plugin/task ID. */
+    public static java.util.List<org.bukkit.scheduler.BukkitWorker> activeWorkers() {
+        final BridgeRuntime current = runtime;
+        if (current == null) return java.util.List.of();
+        final var workers = new java.util.ArrayList<org.bukkit.scheduler.BukkitWorker>();
+        for (final BridgeRuntime.AsyncWorker worker : current.activeWorkers()) {
+            workers.add(new org.bukkit.scheduler.BukkitWorker() {
+                @Override public int getTaskId() { return worker.taskId(); }
+                @Override public Plugin getOwner() { return (Plugin)worker.owner(); }
+                @Override public Thread getThread() { return worker.thread(); }
+            });
+        }
+        return java.util.List.copyOf(workers);
+    }
+
+    /** Current load and LIVE limits, without allocating or starting a bridge runtime. */
+    public record TaskLoad(int pending, int runningAsync, int pendingLimit, int runningAsyncLimit) {}
+
+    public static TaskLoad taskLoad(final Plugin plugin) {
+        final BridgeRuntime current = runtime;
+        if (plugin == null || current == null || !current.isBridged(plugin.getName())) return null;
+        return new TaskLoad(current.pending(plugin.getName()), current.runningAsync(plugin.getName()),
+            maxPendingTasks(), maxRunningAsyncTasks());
     }
 
     /**
@@ -158,6 +207,21 @@ public final class AuroraBridge {
         runtime().submit(plugin.getName(), plugin, task, delayTicks);
     }
 
+    /** Resolves an explicit callback location or the fingerprinted SuperiorSkyblock spawn callback. */
+    public static dev.iyanz.sourbycraft.execution.region.RegionAnchor targetRegion(final Plugin plugin,
+                                                                                final Object callback) {
+        if (callback instanceof dev.iyanz.sourbycraft.api.scheduler.RegionTask regionTask) {
+            return new dev.iyanz.sourbycraft.execution.region.RegionAnchor(regionTask.world(),
+                regionTask.chunkX(), regionTask.chunkZ());
+        }
+        return SuperiorSpawnTaskOwner.resolve(plugin, callback);
+    }
+
+    /** Resolves an explicit entity target ({@code EntityTask}); {@code null} when the callback names none. */
+    public static Object targetEntity(final Plugin plugin, final Object callback) {
+        return callback instanceof dev.iyanz.sourbycraft.api.scheduler.EntityTask entityTask ? entityTask.entity() : null;
+    }
+
     /** Cancels a task if the bridge scheduled it. */
     public static boolean cancel(final int taskId) {
         final BridgeRuntime current = runtime;
@@ -169,6 +233,34 @@ public final class AuroraBridge {
         if (!handles(plugin)) return false;
         runtime.cancelAll(plugin.getName());
         return true;
+    }
+
+    /** GlobalRegionScheduler cancellation also releases the bridge's task indexes. */
+    public static void cancelGlobal(final Plugin plugin) {
+        final BridgeRuntime current = runtime;
+        if (plugin != null && current != null) current.cancelGlobal(plugin.getName());
+    }
+
+    /** Closes admission even before the bridge's disable listener has been registered. */
+    public static void disable(final Plugin plugin) {
+        final BridgeRuntime current = runtime;
+        if (plugin != null && current != null) current.disable(plugin.getName());
+    }
+
+    /**
+     * Paper {@code PaperPluginInstanceManager#enablePlugin} (feature patch 0012), before the
+     * plugin's {@code onEnable}: re-opens admission that a previous disable closed, so a plugin
+     * enabled again as the same instance can schedule. No-op for native plugins and before the
+     * bridge exists; never creates the runtime and never throws into the loader.
+     */
+    public static void onPluginEnabled(final Plugin plugin) {
+        final BridgeRuntime current = runtime;
+        if (plugin == null || current == null) return;
+        try {
+            current.reopen(plugin.getName());
+        } catch (final RuntimeException unexpected) {
+            SourbyLogger.warn("Aurora Bridge could not reopen admission for " + plugin.getName() + ": " + unexpected);
+        }
     }
 
     /** Evidence for {@link CompatibilityClassifier}: bridged, not quarantined. */
@@ -215,12 +307,12 @@ public final class AuroraBridge {
         Bukkit.getPluginManager().registerEvents(new Listener() {
             @EventHandler(priority = EventPriority.MONITOR)
             public void onDisable(final PluginDisableEvent event) {
-                cancelAll(event.getPlugin());
+                disable(event.getPlugin());
             }
         }, owner);
     }
 
-    /** Runs routed work on the Folia global region and async schedulers. */
+    /** Runs routed work on the Folia global region, region, entity and async schedulers. */
     static final class FoliaExecutor implements BridgeRuntime.Executor {
         private static final long MILLIS_PER_TICK = 50L;
 
@@ -228,11 +320,13 @@ public final class AuroraBridge {
         public BridgeRuntime.Handle global(final Object owner, final Runnable body, final long delayTicks,
                                            final long periodTicks) {
             final Plugin plugin = (Plugin)owner;
-            final var scheduler = Bukkit.getGlobalRegionScheduler();
+            // The public global scheduler routes legacy requests back through Bukkit. These
+            // native entry points preserve global ownership without re-entering the bridge.
+            final var scheduler = (io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler)
+                Bukkit.getGlobalRegionScheduler();
             final var task = periodTicks > 0
-                ? scheduler.runAtFixedRate(plugin, t -> body.run(), Math.max(1L, delayTicks), periodTicks)
-                : delayTicks > 0 ? scheduler.runDelayed(plugin, t -> body.run(), delayTicks)
-                : scheduler.run(plugin, t -> body.run());
+                ? scheduler.runAtFixedRateNative(plugin, t -> body.run(), Math.max(1L, delayTicks), periodTicks)
+                : scheduler.runDelayedNative(plugin, t -> body.run(), Math.max(1L, delayTicks));
             return task::cancel;
         }
 
@@ -252,8 +346,32 @@ public final class AuroraBridge {
         }
 
         @Override
+        public BridgeRuntime.Handle entity(final Object owner, final Object target, final Runnable body,
+                                           final long delayTicks, final long periodTicks, final Runnable retired) {
+            final Plugin plugin = (Plugin)owner;
+            final org.bukkit.entity.Entity entity = (org.bukkit.entity.Entity)target;
+            final var scheduler = entity.getScheduler();
+            final var task = periodTicks > 0
+                ? scheduler.runAtFixedRate(plugin, t -> body.run(), retired, Math.max(1L, delayTicks), periodTicks)
+                : delayTicks > 0 ? scheduler.runDelayed(plugin, t -> body.run(), retired, delayTicks)
+                : scheduler.run(plugin, t -> body.run(), retired);
+            if (task == null) {
+                // Folia returns null without calling retired when the entity is already removed.
+                retired.run();
+                return () -> {};
+            }
+            return task::cancel;
+        }
+
+        @Override
         public BridgeRuntime.Handle async(final Object owner, final Runnable body, final long delayTicks,
                                           final long periodTicks) {
+            return async(owner, body, delayTicks, periodTicks, () -> {});
+        }
+
+        @Override
+        public BridgeRuntime.Handle async(final Object owner, final Runnable body, final long delayTicks,
+                                          final long periodTicks, final Runnable rejected) {
             final Plugin plugin = (Plugin)owner;
             final var scheduler = Bukkit.getAsyncScheduler();
             // Folia's async scheduler only times the work; the Resource Governor's bounded
@@ -263,7 +381,7 @@ public final class AuroraBridge {
                     dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL
                         .lane(dev.iyanz.sourbycraft.execution.ResourceGovernor.Lane.BRIDGE_IO).execute(body);
                 } catch (final java.util.concurrent.RejectedExecutionException full) {
-                    runtime().telemetry().rejected(plugin.getName());
+                    rejected.run();
                 }
             };
             final var task = periodTicks > 0

@@ -9,10 +9,13 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     public static final String ASYNC_PATH_KEY = "aurora.entity.async-pathfinding";
     public static final String LEGACY_ASYNC_PATH_KEY = "perf.ai.async-pathfinding";
     public static final String LANE_SAMPLING_KEY = "aurora.diagnostics.lane-sampling";
+    public static final String CHUNK_GENERATION_METRICS_KEY = "aurora.diagnostics.chunk-generation-metrics";
     public static final String CPU_CORES_KEY = "aurora.cpu.cores";
     public static final String BRIDGE_MODE_KEY = "aurora.bridge.mode";
     public static final String BRIDGE_QUARANTINE_KEY = "aurora.bridge.quarantine-after";
     public static final String BRIDGE_SYNC_ROUTE_KEY = "aurora.bridge.sync-route";
+    public static final String BRIDGE_MAX_PENDING_KEY = "aurora.bridge.max-pending-tasks-per-plugin";
+    public static final String BRIDGE_MAX_RUNNING_ASYNC_KEY = "aurora.bridge.max-running-async-tasks-per-plugin";
     public static final String BRIDGE_IO_THREADS_KEY = "aurora.scheduler.bridge-io-threads";
     public static final String BRIDGE_IO_QUEUE_KEY = "aurora.scheduler.bridge-io-queue";
     public static final String STORAGE_THREADS_KEY = "aurora.scheduler.storage-threads";
@@ -23,6 +26,10 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
             Scheduler.DEFAULT, Network.DEFAULT);
     public static final Setting ASYNC_PATH = new Setting(ASYNC_PATH_KEY, Lifecycle.LIVE);
     public static final Setting LANE_SAMPLING = new Setting(LANE_SAMPLING_KEY, Lifecycle.LIVE);
+    // ChunkGenerationMetrics.ENABLED is a static final read once at class init, which the chunk
+    // system triggers before configuration loads; a reload cannot reach it.
+    public static final Setting CHUNK_GENERATION_METRICS =
+        new Setting(CHUNK_GENERATION_METRICS_KEY, Lifecycle.RESTART_REQUIRED);
     // The region scheduler is sized during GlobalConfiguration load, long before a reload can
     // reach it, so this cannot honestly be advertised as live.
     public static final Setting CPU_CORES = new Setting(CPU_CORES_KEY, Lifecycle.RESTART_REQUIRED);
@@ -31,6 +38,8 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     public static final Setting BRIDGE_QUARANTINE = new Setting(BRIDGE_QUARANTINE_KEY, Lifecycle.LIVE);
     // Read when each task is scheduled.
     public static final Setting BRIDGE_SYNC_ROUTE = new Setting(BRIDGE_SYNC_ROUTE_KEY, Lifecycle.LIVE);
+    public static final Setting BRIDGE_MAX_PENDING = new Setting(BRIDGE_MAX_PENDING_KEY, Lifecycle.LIVE);
+    public static final Setting BRIDGE_MAX_RUNNING_ASYNC = new Setting(BRIDGE_MAX_RUNNING_ASYNC_KEY, Lifecycle.LIVE);
     // Governed lanes are created once with their budget and never resized.
     public static final Setting SCHEDULER_BUDGETS = new Setting("aurora.scheduler.*", Lifecycle.RESTART_REQUIRED);
     public static final Setting NETWORK_COUNTERS = new Setting(NETWORK_COUNTERS_KEY, Lifecycle.LIVE);
@@ -98,9 +107,17 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
      * @param mode whether legacy plugins are admitted
      * @param quarantineAfter fatal violations after which a bridged plugin is quarantined
      * @param syncRoute where a legacy "sync" task runs
+     * @param maxPendingTasksPerPlugin pending task limit; 0 preserves unlimited admission
+     * @param maxRunningAsyncTasksPerPlugin running async callback limit; 0 preserves overlap
      */
-    public record Bridge(BridgeMode mode, int quarantineAfter, SyncRoute syncRoute) {
-        public static final Bridge DEFAULT = new Bridge(BridgeMode.OFF, 3, SyncRoute.CALLER_REGION);
+    public record Bridge(BridgeMode mode, int quarantineAfter, SyncRoute syncRoute,
+                         int maxPendingTasksPerPlugin, int maxRunningAsyncTasksPerPlugin) {
+        public static final Bridge DEFAULT = new Bridge(BridgeMode.OFF, 3, SyncRoute.CALLER_REGION, 0, 0);
+
+        /** Existing callers retain the unlimited task/async admission contract. */
+        public Bridge(final BridgeMode mode, final int quarantineAfter, final SyncRoute syncRoute) {
+            this(mode, quarantineAfter, syncRoute, 0, 0);
+        }
 
         /** With the default sync route. */
         public Bridge(final BridgeMode mode, final int quarantineAfter) {
@@ -112,6 +129,10 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
             Objects.requireNonNull(syncRoute, "syncRoute");
             if (quarantineAfter < 1) {
                 throw new IllegalArgumentException("quarantineAfter must be at least 1: " + quarantineAfter);
+            }
+            if (maxPendingTasksPerPlugin < 0 || maxPendingTasksPerPlugin > 100_000
+                || maxRunningAsyncTasksPerPlugin < 0 || maxRunningAsyncTasksPerPlugin > 100_000) {
+                throw new IllegalArgumentException("bridge task limits must be in 0..100000");
             }
         }
     }
@@ -180,7 +201,12 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
      * under load — but it is not free: on an idle server the telemetry lane costs more than the
      * region lane, so a host running many idle worlds has a reason to turn it off.</p>
      */
-    public record Diagnostics(boolean laneSampling) {}
+    public record Diagnostics(boolean laneSampling, boolean chunkGenerationMetrics) {
+        /** Without the chunk-generation switch, which then stays off (its default). */
+        public Diagnostics(final boolean laneSampling) {
+            this(laneSampling, false);
+        }
+    }
     public enum Lifecycle { LIVE, RESTART_REQUIRED, IMMUTABLE_FOR_RUN }
     public record Setting(String key, Lifecycle lifecycle) {}
 
@@ -224,6 +250,18 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
                 laneSampling = enabled;
             } else {
                 invalid.add(LANE_SAMPLING_KEY);
+            }
+        }
+
+        // Off on a typo: it is an opt-in measurement with a per-stage cost, so an unreadable value
+        // must not switch it on.
+        boolean chunkGenerationMetrics = DEFAULT.diagnostics().chunkGenerationMetrics();
+        final Object chunkValue = values.get(CHUNK_GENERATION_METRICS_KEY);
+        if (chunkValue != null) {
+            if (chunkValue instanceof Boolean enabled) {
+                chunkGenerationMetrics = enabled;
+            } else {
+                invalid.add(CHUNK_GENERATION_METRICS_KEY);
             }
         }
 
@@ -272,6 +310,8 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
             }
         }
 
+        final int maxPendingTasks = intSetting(values, BRIDGE_MAX_PENDING_KEY, 0, 0, invalid);
+        final int maxRunningAsyncTasks = intSetting(values, BRIDGE_MAX_RUNNING_ASYNC_KEY, 0, 0, invalid);
         final int bridgeIoThreads = intSetting(values, BRIDGE_IO_THREADS_KEY, Scheduler.DEFAULT.bridgeIoThreads(), 0, invalid);
         final int bridgeIoQueue = intSetting(values, BRIDGE_IO_QUEUE_KEY, Scheduler.DEFAULT.bridgeIoQueue(), 1, invalid);
         final int storageThreads = intSetting(values, STORAGE_THREADS_KEY, Scheduler.DEFAULT.storageThreads(), 0, invalid);
@@ -289,8 +329,8 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         // Each key falls back on its own. A typo in one setting must not silently revert another
         // the operator set deliberately -- only a malformed namespace container, handled above,
         // discards everything, because then nothing underneath it can be trusted.
-        return new Parsed(new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling),
-            new Cpu(cores), new Bridge(bridgeMode, quarantineAfter, syncRoute),
+        return new Parsed(new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling, chunkGenerationMetrics),
+            new Cpu(cores), new Bridge(bridgeMode, quarantineAfter, syncRoute, maxPendingTasks, maxRunningAsyncTasks),
             new Scheduler(bridgeIoThreads, bridgeIoQueue, storageThreads, storageQueue), new Network(networkCounters)),
             List.copyOf(invalid), deprecated);
     }
@@ -315,6 +355,8 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         if (diagnostics.laneSampling() != previous.diagnostics.laneSampling()) changed++;
         if (bridge.quarantineAfter() != previous.bridge.quarantineAfter()) changed++;
         if (bridge.syncRoute() != previous.bridge.syncRoute()) changed++;
+        if (bridge.maxPendingTasksPerPlugin() != previous.bridge.maxPendingTasksPerPlugin()) changed++;
+        if (bridge.maxRunningAsyncTasksPerPlugin() != previous.bridge.maxRunningAsyncTasksPerPlugin()) changed++;
         if (network.counters() != previous.network.counters()) changed++;
         return changed;
     }
@@ -331,6 +373,10 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         }
         if (bridge.mode() != previous.bridge.mode()) {
             restart.add(BRIDGE_MODE_KEY + " (" + previous.bridge.mode() + " -> " + bridge.mode() + ")");
+        }
+        if (diagnostics.chunkGenerationMetrics() != previous.diagnostics.chunkGenerationMetrics()) {
+            restart.add(CHUNK_GENERATION_METRICS_KEY + " (" + previous.diagnostics.chunkGenerationMetrics()
+                + " -> " + diagnostics.chunkGenerationMetrics() + ")");
         }
         if (!scheduler.equals(previous.scheduler)) {
             restart.add("aurora.scheduler budgets");

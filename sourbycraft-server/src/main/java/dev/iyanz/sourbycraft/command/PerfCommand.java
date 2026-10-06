@@ -116,6 +116,9 @@ public final class PerfCommand extends Command {
         if (view.equals("chunks") || view.equals("entities")) {
             renderPopulation(lines, view.equals("chunks"));
         }
+        if (view.equals("chunks")) {
+            renderChunkGeneration(lines);
+        }
         if (view.equals("plugins")) {
             renderPlugins(lines);
         }
@@ -259,6 +262,29 @@ public final class PerfCommand extends Command {
         add(lines, chunks ? "Total loaded chunks" : "Total entities", total + " (each region's own count, up to one tick old)");
     }
 
+    static void renderChunkGeneration(final List<Component> lines) {
+        lines.add(UiPanel.section("World generation stages"));
+        if (!dev.iyanz.sourbycraft.perf.ChunkGenerationMetrics.ENABLED) {
+            add(lines, "Generation timing", "disabled; set aurora.diagnostics.chunk-generation-metrics = true in "
+                + "sourbycraft_config/aurora.toml (or -Dsourbycraft.chunk-generation-metrics.enabled=true) and restart");
+            return;
+        }
+        final var stages = dev.iyanz.sourbycraft.perf.ChunkGenerationMetrics.GLOBAL.snapshot();
+        if (stages.isEmpty()) {
+            add(lines, "Generation timing", "no completed non-empty generic generation stage measured");
+            return;
+        }
+        for (final var stage : stages) {
+            add(lines, stage.name() + " queue p95 / p99",
+                TpsCommand.ms(stage.queue().p95()) + " / " + TpsCommand.ms(stage.queue().p99()));
+            add(lines, stage.name() + " run p95 / p99",
+                TpsCommand.ms(stage.execution().p95()) + " / " + TpsCommand.ms(stage.execution().p99())
+                    + " (" + stage.execution().samples() + " recent samples; " + stage.completedRuns() + " runs)");
+        }
+        add(lines, "Timing scope", "process-wide wall time; run includes future waits/callbacks; failed runs included");
+        add(lines, "Coverage", "completed generic generation stages only; light, full integration and cancelled queued tasks excluded");
+    }
+
     private static void renderPlugins(final List<Component> lines) {
         final var plugins = org.bukkit.Bukkit.getPluginManager().getPlugins();
         final java.util.Map<dev.iyanz.sourbycraft.bridge.CompatibilityState, Integer> counts =
@@ -271,10 +297,34 @@ public final class PerfCommand extends Command {
         }
         add(lines, "Plugins by state", summary.toString());
         add(lines, "Aurora Bridge mode", String.valueOf(dev.iyanz.sourbycraft.bridge.AuroraBridge.runtimeMode()).toLowerCase(Locale.ROOT));
+        renderSlowestStartups(lines, dev.iyanz.sourbycraft.startup.PluginTimings.GLOBAL);
         for (final var stats : dev.iyanz.sourbycraft.bridge.AuroraBridge.allStats()) {
             add(lines, stats.plugin() + " redirects / handoffs / rejected / violations",
                 stats.schedulerRedirects() + " / " + stats.ownerHandoffs() + " / " + stats.rejectedOperations()
                     + " / " + stats.fatalViolations() + (stats.quarantined() ? " (quarantined)" : ""));
+            final var region = stats.bodyTimes().region();
+            final var global = stats.bodyTimes().global();
+            add(lines, stats.plugin() + " sync body total / p99 (region; global)", region.count() + global.count() == 0
+                ? "none yet"
+                : TpsCommand.ms(region.totalMillis()) + " / " + TpsCommand.ms(region.p99Millis()) + "; "
+                    + TpsCommand.ms(global.totalMillis()) + " / " + TpsCommand.ms(global.p99Millis()));
+        }
+    }
+
+    /** The five slowest plugins by onLoad + onEnable wall time, this run. */
+    static void renderSlowestStartups(final List<Component> lines, final dev.iyanz.sourbycraft.startup.PluginTimings timings) {
+        final var slowest = timings.slowest(5);
+        if (slowest.isEmpty()) {
+            add(lines, "Slowest plugin startup", "none recorded");
+            return;
+        }
+        for (int i = 0; i < slowest.size(); i++) {
+            final var timing = slowest.get(i);
+            add(lines, "Slowest startup #" + (i + 1) + " " + timing.plugin(), timing.describe());
+        }
+        if (timings.dropped() > 0) {
+            add(lines, "Startup timings not kept", timings.dropped() + " plugin name(s) past the "
+                + dev.iyanz.sourbycraft.startup.PluginTimings.MAX_PLUGINS + " limit");
         }
     }
 
