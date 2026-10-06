@@ -1,9 +1,15 @@
 # Intave native — build pribadi SourbyCraft
 
-Audit 2026-10-06. **NATIVE_CODE_INTEGRATED_UNVERIFIED**: port sumber dan hook server tersedia;
-compile engine lengkap, build Gradle, boot native dan efektivitas deteksi belum terverifikasi.
-JAR SourbyCraft yang sudah ada belum dibangun ulang dengan engine ini. Tidak ada klaim
-anticheat sudah aktif, qualified, atau memiliki tingkat deteksi tertentu.
+Verifikasi 2026-10-07. **NATIVE_ACTIVE_SELFTEST_PASSED_DETECTION_UNVERIFIED**: profile privat
+dicompile dan di-boot lokal tanpa pemain; controller mencapai `ACTIVE` (hook terinisialisasi) dan
+self-test startup Intave selesai (`All integration tests completed successfully.`, 59 metode,
+7 di antaranya no-op karena gate versi). Tes upstream: 694 lulus, 27 gagal, 4 skipped dari 721.
+Pembacaan blok di luar region kini diizinkan **hanya** sebagai pembacaan racy chunk yang sudah
+loaded (keputusan owner). Efektivitas deteksi dan perilaku dengan pemain nyata belum
+terverifikasi. Tidak ada klaim anticheat qualified, aman dipakai, atau memiliki tingkat deteksi
+tertentu. Detail: [Verifikasi 2026-10-07](#verifikasi-2026-10-07). Ledger port
+(`native-port.json`) tetap berstatus `NATIVE_CODE_INTEGRATED_UNVERIFIED`; status itu adalah
+kontrak tooling, bukan status runtime.
 
 Owner memilih penggunaan server pribadi tanpa distribusi. Source Intave berada di direktori
 Git-ignored `.private-intave/`; profile tidak masuk build publik/CI secara default.
@@ -91,7 +97,7 @@ memerlukan layanan upstream dan kredensialnya, bukan otomatis tersedia dari sour
 
 | Surface | Consumer/status | Perubahan |
 | --- | --- | --- |
-| `-PincludePrivateIntave=true` | Gradle profile server; tipe DSL diperiksa, eksekusi Gradle belum terverifikasi | BUILD_REQUIRED |
+| `-PincludePrivateIntave=true` | Gradle profile server; compile, test dan `slimServerJar` dijalankan lokal 2026-10-07 | BUILD_REQUIRED |
 | `-Dsourbycraft.intave.enabled=true` | Controller saat boot; default false | RESTART_REQUIRED |
 | `-Dsourbycraft.intave.cloud=true` | Engine boot; default false; tetap mengikuti konfigurasi cloud upstream | RESTART_REQUIRED |
 | `sourbycraft_config/intave/` | ConfigurationService engine upstream | Native reload belum terverifikasi; validasi lewat restart |
@@ -162,7 +168,7 @@ python3 scripts/private_intave_workspace.py doctor --gradle-cache .private-intav
 compile/test standalone ditolak: source native perlu source set server. Profile memasukkan source
 test privat dan paket test secara eksplisit, karena include server biasa hanya TestSuite. Task
 test/JAR memverifikasi seluruh 22 blob resource/replay inventory awal, termasuk JNI, sebelum berjalan.
-Kini dua JNI Linux telah dipulihkan dengan hash yang sama; 20 blob masih belum tersedia.
+Per 2026-10-07 seluruh 22 blob tersedia (20 diambil `fetch-fixtures` dengan verifikasi Git blob).
 Tes upstream asli tetap disimpan di `verified-upstream/`; baseline terpisah dan adaptasi native
 masih harus diverifikasi dengan jumlah test aktual, tanpa menganggap source test berarti tes lulus.
 Jangan membuat fixture kosong atau memakai API JAR lama sebagai
@@ -171,7 +177,8 @@ substitusi dependency terbaru untuk melewati gate.
 Profile memverifikasi source/library hashes sebelum compile/resource/JAR tasks, mempertahankan
 lisensi di `META-INF/licenses/intave`, dan menambah manifest `SourbyCraft-Private-Intave` dengan
 commit penuh. Output build berada di `build/libs/` lokal, bukan artifact rilis publik. `release=pre`
-dan identitas Build 47 tidak diubah. Tidak ada build pribadi yang sudah dihasilkan pada audit ini.
+dan identitas Build 47 tidak diubah. Audit 2026-10-06 belum menghasilkan build pribadi; build
+lokal pertama tercatat di [Verifikasi 2026-10-07](#verifikasi-2026-10-07).
 
 Setelah semua gate build dan correctness tersedia, boot di server uji pribadi tanpa JAR
 Intave/ProtocolLib di `plugins/`:
@@ -218,15 +225,11 @@ belum tersedia dan provider native menolak ProtocolLib plugin yang bertabrakan.
   mempertahankan nama internal dan mendelegasikan native 26.2. Lookup variant tak dikenal
   melempar error, bukan memilih zero. Properti gerak/solid memakai default BlockState native;
   ini bukan bukti semua simulasi fluid/blok sudah benar.
-- `NativeBlockView` memeriksa owner pada setiap lookup, termasuk neighbor yang diminta shape,
-  dan mengambil full chunk yang sudah loaded tanpa load/join. Chunk yang tidak tersedia ditolak;
-  hanya posisi sah di luar build height mengembalikan AIR. Block-entity query ditolak bila
-  membutuhkan snapshot karena bahkan LevelChunk CHECK bisa mendeserialisasi/membuat entity.
-  `VolatileBlockAccess` mempertahankan hasil cache yang tersedia, tetapi cache miss/world reads
-  memakai guard; emergency map/fallback AIR/shape kosong/variant zero dihapus. **Callback Netty
-  yang membutuhkan world langsung akan ditolak bila tidak memiliki region**. Routing/snapshot
-  dan audit ownership/cache/subclass non-AIR tetap pekerjaan yang belum selesai, sehingga
-  perubahan guard ini tidak membuat anticheat siap produksi.
+- *(Audit 2026-10-06, digantikan 2026-10-07 — lihat [Kebijakan pembacaan blok](#kebijakan-pembacaan-blok-2026-10-07).)*
+  `NativeBlockView` dulu memeriksa owner region pada setiap lookup dan menolak chunk yang tidak
+  tersedia. Guard itu membuat self-test `BSD::GRASS-ASYNC` gagal, sehingga diganti dengan
+  pembacaan racy chunk loaded. Block-entity query tetap ditolak karena LevelChunk CHECK bisa
+  mendeserialisasi/membuat entity. Emergency map/fallback block tetap dihapus.
 - `Fluids.setup()` native memakai resolver mapped langsung, tanpa Patchy classloader rewrite
   untuk resolver ini, dan kegagalan indeks kini melempar exception. `v18b2FluidResolver` hanya
   mempertahankan nama internal dengan delegasi native 26.2; build ini tidak mendukung server
@@ -299,3 +302,157 @@ full engine/server compile, nonempty fixture suite, boot tanpa plugin, legal/ill
 ViaVersion translation, velocity/vehicle/teleport/respawn, jitter/burst, region merge/split,
 join/quit/migration, clean shutdown/restart serta CPU/allocation/queue measurement dengan workload,
 hardware dan config tercatat. Tidak ada hasil false-positive atau tingkat efektivitas saat ini.
+
+## Verifikasi 2026-10-07
+
+Dijalankan lokal oleh agent `intave-native` (macOS arm64, Apple M2 8c/8t, Temurin/OpenJDK 25.0.2,
+Gradle wrapper dengan cache default `~/.gradle`, bukan `.private-intave/gradle-cache` karena disk
+hanya ±1 GB; dependency privat di-resolve dari Maven Central/opencollab/codemc). JAR privat
+hanya disimpan di scratchpad lokal dan tidak diunggah. `build/libs/` dibangun ulang dengan
+profile publik setelahnya (40.686.361 byte, tanpa `ac/intave`, Byte Buddy atau BouncyCastle).
+
+**Profile publik (tanpa engine).** `NativeIntave.start()` membaca `Boolean.getBoolean` sekali;
+default `DISABLED` tanpa `Class.forName`, tanpa log. `ownerTick` hanya membaca `AtomicReference`
+lalu kembali; `close()` tanpa engine tidak menulis log. `doSendNativePacket` dengan filter aktif
+langsung memanggil `doSendPacket`; tidak ada paket vanilla yang meng-override
+`hasFinishListener()`, jadi jalur void promise publik tidak berubah. `syncCommands()` saat startup
+mengiterasi daftar pemain yang masih kosong. Output compile publik hanya berisi 6 class
+`NativeIntave*`. Tidak perlu perubahan pada patch 0024.
+
+**Perbaikan build/port** (semua lewat profile Gradle atau transformasi
+`integrate_private_intave.py` + `--refresh-port`, bukan edit tangan pada sumber hasil port):
+
+1. 23 JAR Spigot/NMS lama di `libs/` sebelumnya masuk `compileOnly` dan membayangi API 26.2,
+   DFU dan `net.minecraft` (101+ error compile server). Kini ditambahkan di **akhir** classpath
+   `compileJava`/`compileTestJava`, sehingga hanya tipe lama yang tidak ada di 26.2 diambil dari sana.
+2. Filter dependency `org.geysermc:` tidak pernah cocok dengan `org.geysermc.floodgate:api`;
+   diperbaiki sehingga Floodgate API masuk `compileOnly`.
+3. Tes upstream `ReplayPotionRegistry`: override yang tidak ada lagi di `PotionEffectType` 26.2
+   dihapus, empat member abstrak 26.2 ditambahkan.
+4. ASM vendored Intave (setara ASM ±9.3, batas `V19`) menolak class Java 25 (major 69) saat Patchy
+   membaca ulang class engine: batas pembacaan dinaikkan ke `V25` dan konstanta V20–V25 ditambahkan.
+   Ini bukan upgrade ASM; format class javac 25 tidak menambah tag constant pool/atribut wajib.
+5. `Caller` mengatribusikan class `dev.yanianz.intave.*` ke "Intave" dan `com.comphenix.protocol.*`
+   ke "ProtocolLib", karena class server tidak punya `JavaPlugin`; tanpa ini guard resource
+   terenkripsi menolak Intave sendiri (`Unable to access resource file ... is it corrupted?`).
+   Plugin eksternal tetap diatribusikan lewat `getProvidingPlugin`.
+6. Self-test `BlockAccessTests` melewati konstanta `LEGACY_*` (bukan tipe blok 26.2; Bukkit
+   mengonversi `LEGACY_AIR` menjadi `AIR`, sehingga tes berhenti sebelum memeriksa `BlockAccess`).
+7. Controller menulis satu log INFO `Native engine cleanup completed` hanya bila engine ada.
+
+`--verify-reproducibility`: **182 hash port direproduksi** dari arsip asli; workspace tidak berubah.
+`doctor`: 0 perubahan source/library tak tercatat, **0 fixture hilang**.
+
+**Compile.** `./gradlew :sourbycraft-server:compileJava -PincludePrivateIntave=true` lulus:
+1.189 source engine/generated + server, 1.575 class di `dev/yanianz`. Ini bukti compile, bukan
+bukti bahwa class adapter versi lama aman di-link saat runtime.
+
+**Tes Gradle** (init script include `**/yanianz/**`, `**/intave/**`):
+
+- Profile publik: `NativeIntaveControllerTest` 14 + `NativeIntaveConnectionTest` 5 = **19/19 lulus**.
+  Cakupan: jalur statis publik DISABLED tanpa konstruksi, UNAVAILABLE tanpa provider,
+  STARTING→ACTIVE hanya setelah inisialisasi + ready, FAILED (start/not-ready/kegagalan saat
+  ready), FAILED menolak callback dan menghentikan admission engine, tick owner hanya untuk region
+  pemilik dengan predicate region palsu (tick asing → FAILED), STOPPED terminal, kegagalan cleanup
+  tidak diulang, drain callback owner, **batas tunggu shutdown 5 detik** (FAILED, resource ditahan),
+  konteks filter thread-local; `Connection` asli + EmbeddedChannel: urutan antrean/readiness/extras,
+  filter=true, write gagal, pembatalan queue, jalur void promise tanpa finish listener.
+  Pemeriksaan region nyata (`TickThread.isTickThreadFor`) di provider tidak diuji unit.
+- Profile privat: 19/19 server-owned lulus; **tes upstream 144 kelas / 721 tes: 615 lulus,
+  102 gagal, 4 skipped**. Penyebab: 75 `NativeBlockView` mensyaratkan `CraftWorld` sedangkan
+  harness upstream memakai World palsu; 19 registry Bukkit/Paper belum di-bootstrap di JVM tes;
+  2 `Bukkit.getServer()` null; 3 path resource relatif terhadap cwd; 3 material 26.3
+  (`SHELF_MUSHROOM`, `STRAW_BED`, `POPLAR_HANGING_SIGN`) yang tidak ada di 26.2. Mayoritas kegagalan
+  ada di simulasi movement/physics, sehingga **replay fisika belum memvalidasi jalur native**.
+  Upstream menargetkan API 26.3; kode engine yang mereferensikan konten 26.3 bisa gagal saat runtime.
+
+**Boot lokal** (`java -Xmx2G -Dsourbycraft.intave.enabled=true -jar … --nogui`, `online-mode=false`,
+port 25599, world normal baru, tanpa plugin; auto-update dan auto-provision Via/ProtocolLib off):
+
+- `Done (` setelah 16,2 s. `ProtocolLib plugin auto-install skipped: the private native build
+  reserves its packet API.`
+- `[Intave Native] Native lifecycle and packet hooks initialized; effectiveness unverified`;
+  `/intave-native status` → `Intave native: ACTIVE`; `/intave native` → `ACTIVE — …`; `/sys` dan
+  `/version` normal (Build 47 — Aurora Nexus).
+- Self-test startup Intave: BlockAccess, BlockVariant, Door/Trapdoor/FenceGate dan tes drill awal
+  lulus, lalu **`Self-test BSD::GRASS-ASYNC failed`**: `Thread failed main thread check: Native Intave
+  block read outside owner region` (thread `ForkJoinPool.commonPool`). Runner berhenti pada kegagalan
+  pertama; BlockShapePipeline, EntitySize, Feedback, Reader, Fluid dan ReferenceExistence **tidak
+  dijalankan**. Upstream secara eksplisit mensyaratkan pembacaan blok di luar thread server untuk
+  26.2; port native menolaknya demi region ownership. Ini konflik arsitektur yang membutuhkan
+  keputusan owner (pembacaan tanpa owner pada chunk loaded vs routing/snapshot), bukan perbaikan port.
+  Upstream sendiri menyarankan tidak memakai build yang gagal self-test.
+  *Diselesaikan dengan keputusan owner: lihat [Kebijakan pembacaan blok](#kebijakan-pembacaan-blok-2026-10-07).*
+- `stop`: `Stopping Intave` → `Intave offline` → `[Intave Native] Native engine cleanup completed`,
+  semua world tersimpan, exit 0.
+
+Boot iterasi sebelumnya berakhir `FAILED` dengan alasan tercatat (ASM major 69; guard resource),
+dan controller menolak callback tanpa crash server: jalur kegagalan terverifikasi dalam boot nyata.
+
+**Belum terverifikasi:** efektivitas deteksi (butuh client nyata dan cheat yang diketahui; tidak
+bisa dibuktikan dengan boot kosong), false positive, pemain bergabung/keluar, tick owner dengan
+pemain nyata, paket native ke client, ViaVersion, region merge/split, soak, pembacaan blok dari
+thread Netty saat bermain, CPU/alokasi, dan replay legal/ilegal. JNI classloader macOS tersedia
+tetapi pemakaiannya tidak diaudit.
+
+### Kebijakan pembacaan blok 2026-10-07
+
+Keputusan owner (mode otonom, disampaikan koordinator): Intave boleh **membaca** blok di luar
+region pemilik hanya untuk chunk yang sudah loaded. Ini adalah **pembacaan palette racy yang
+ditoleransi** pada section yang sudah loaded, kelas akses yang sama dengan
+`Level#getBlockStateIfLoaded` Paper untuk pemanggil async. Ini **bukan** pelonggaran region
+ownership untuk mutasi.
+
+Implementasi berada di template port `scripts/templates/intave-native/NativeBlockView.java`
+(kode milik server, dikompilasi hanya di profile privat):
+
+- Lookup hanya `ServerChunkCache#getChunkAtIfLoadedImmediately` (map full chunk konkuren) lalu
+  `LevelChunk#getBlockState`. Tidak ada ticket, load, generate atau penjadwalan. Cabang
+  tree-capture Paper dilewati karena memakai world data region-lokal.
+- Chunk yang tidak loaded = "unknown" (`stateIfLoaded` null), dipetakan seperti upstream ketika
+  chunk tidak ada: tipe AIR, variant 0, collision shape kosong (`VolatileBlockAccess`,
+  `v20ShapeDrill`). Race unload tidak melempar exception di thread Netty, sehingga tidak
+  menonaktifkan engine.
+- Tetap ditolak: semua write (view read-only), block entity, entity/inventory pemain
+  (`v20BlockAccessor.owner` tetap `TickThread.ensureTickThread` pada pemain), dan pembacaan yang
+  akan memuat/membuat chunk.
+- Seam World palsu: `World` yang bukan `CraftWorld` dijawab lewat Bukkit API-nya sendiri, tanpa
+  batas build height. Semua World produksi adalah `CraftWorld`; seam ini hanya untuk harness
+  tes upstream.
+
+Perbaikan self-test tambahan (26.2/region threading): `PR::native-scoreboard` membuat scoreboard
+Bukkit, yang di region threading hanya boleh di global tick thread, sedangkan runner self-test
+berjalan di region. Hanya body tes itu yang kini dijalankan lewat `GlobalRegionScheduler` dengan
+tunggu terbatas 5 detik; asersinya tidak diubah. Kode produksi Intave tidak membuat scoreboard
+(hanya membaca paketnya).
+
+**Tes.** `NativeBlockViewTest` (template tes privat, 4 tes) lulus: chunk tidak loaded → null/AIR,
+fluid kosong, tanpa block entity, dan Mockito memverifikasi hanya `getChunkAtIfLoadedImmediately`
+dipanggil (`verifyNoMoreInteractions`, tidak ada getChunk/ticket/load); chunk loaded membaca state
+section; di luar build height = AIR tanpa lookup; block entity selalu ditolak. Server-owned di
+profile privat: **23/23 lulus**. Upstream: **721 tes: 694 lulus, 27 gagal, 4 skipped** (sebelumnya
+102 gagal). Ke-75 kegagalan `CraftWorld` lulus lewat seam World palsu. Sisa 27: 19 registry
+Bukkit/Paper belum di-bootstrap di JVM tes (kelas upstream tidak memakai ekstensi environment
+Paper), 2 `Bukkit.getServer()` null, 3 path resource relatif cwd, 3 material 26.3. Memperbaiki
+semuanya perlu mengubah harness tes upstream secara luas atau konten 26.3, sehingga tidak dikerjakan
+di sini. `--verify-reproducibility`: 183 hash. Suite Python 327 OK.
+
+**Boot lokal** (setup sama dengan di atas): `Done (` 17,7 s; `All integration tests completed
+successfully.`; `/intave-native status` → `ACTIVE`; `stop` → `Intave offline` →
+`Native engine cleanup completed`, exit 0. Self-test (59 metode; runner berhenti pada kegagalan
+pertama dan hanya mencatat kegagalan, jadi selesai = semua lulus):
+BA::A; BV::A; DI::A–G; TDI::A–C; FGI::A–B; BSD::A–G, IRON-BARS-26.3, GRASS, GRASS-MOVE,
+GRASS-ASYNC; BSP::A; ES::native-registry; FBK::createFeedbackPacket; PR::recorded-packet-actions,
+recorded-abilities, legacy-entity-use, player-time, world-weather, native-scoreboard,
+player-info-null-profile, entity-velocity-native, silent-explosion, block-ack-routing,
+attachment-reader, mount-reader, vehicle-movement, position-rotation-converter,
+fresh-player-teleport, player-teleport-packet-state, partial-player-movement,
+vehicle-invalid-movement, player-movement, native-protocol, 263-items, 263-relative, 263-stepped,
+263-sync, native-dig, A (berparameter); FLD::BASIC, level; RE::A–C. **No-op di 26.2** karena gate
+versi pada pernyataan pertama: DI::F, DI::G, BSD::IRON-BARS-26.3, ES::native-registry,
+PR::legacy-entity-use, PR::263-stepped, PR::263-sync. Gate yang lebih dalam di body tidak diaudit.
+
+**Tetap belum terverifikasi:** efektivitas deteksi (butuh client nyata dan cheat yang diketahui),
+false positive, join/quit dan tick dengan pemain nyata, race pembacaan racy saat chunk di-unload
+atau dimodifikasi bersamaan, ViaVersion, region merge/split, soak, CPU/alokasi.
+

@@ -18,7 +18,7 @@ import org.bukkit.craftbukkit.util.CraftMagicNumbers;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
-/** Native 26.2 adapter. World reads reject unowned/unloaded chunks instead of fabricating AIR. */
+/** Native 26.2 adapter. Block reads are racy reads of loaded chunks (unloaded = AIR); player access stays owner-checked. */
 public final class v20BlockAccessor implements BlockAccessor {
     private BlockState state(Block block) {
         return new NativeBlockView(block.getWorld()).getBlockState(new BlockPos(block.getX(), block.getY(), block.getZ()));
@@ -50,12 +50,10 @@ public final class v20BlockAccessor implements BlockAccessor {
         ServerPlayer handle = owner(world, player);
         BlockPos target = new BlockPos(pos.getX(), pos.getY(), pos.getZ());
         NativeBlockView view = new NativeBlockView(world);
-        view.getBlockState(target); // Validate ownership/loading even if destroy progress does not consult the view.
         return simulatedState(world, player, pos).getDestroyProgress(handle, view, target);
     }
     @Override public boolean replacementPlace(World world, Player player, BlockPosition pos) {
         ServerPlayer handle = owner(world, player);
-        new NativeBlockView(world).getBlockState(new BlockPos(pos.getX(), pos.getY(), pos.getZ()));
         User user = UserRepository.userOf(player);
         BlockState state = simulatedState(world, player, pos);
         return state.canBeReplaced() && state.getBlock().asItem() != handle.getInventory().getItem(user.meta().inventory().handSlot()).getItem();

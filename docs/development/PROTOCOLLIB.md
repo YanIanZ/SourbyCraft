@@ -56,6 +56,8 @@ internalnya; coexistence dengan plugin ProtocolLib belum diimplementasikan/dival
 eksternal juga dilewati ketika engine native disabled tetapi build masih membundel API tersebut.
 JAR manual tetap dipertahankan, tetapi provider Intave native menolak backend yang bertabrakan.
 Status build dan efektivitas Intave tetap mengikuti [dokumen native](../architecture/intave-native-integration.md).
+Boot lokal build privat 2026-10-07 mencatat `ProtocolLib plugin auto-install skipped: the private
+native build reserves its packet API.`; library ProtocolLib embedded dimuat tanpa plugin.
 
 Verifikasi:
 

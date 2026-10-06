@@ -155,14 +155,18 @@ dependencies {
             val artifact = create(coordinate) as org.gradle.api.artifacts.ExternalModuleDependency
             if (coordinate.startsWith("ac.intave:")) artifact.isTransitive = false
             add("implementation", artifact)
-        } else if (coordinate.startsWith("org.geysermc:") || coordinate.startsWith("com.github.retrooper:")) {
+        } else if (coordinate.startsWith("org.geysermc.floodgate:") || coordinate.startsWith("com.github.retrooper:")) {
             add("compileOnly", coordinate)
         }
     }
-    // Old NMS APIs are compile compatibility only. Runtime remains SourbyCraft's own 26.2 server/API.
-    add("compileOnly", files(fileTree(privateRoot.dir("libs")) { include("*.jar") }.files.sorted()))
-    add("testCompileOnly", files(fileTree(privateRoot.dir("libs")) { include("*.jar") }.files.sorted()))
     add("testImplementation", files(protocolJar))
+}
+// Old NMS/Spigot jars are compile compatibility only and also contain org.bukkit, DFU and
+// net.minecraft classes. Appended after the 26.2 server/API classpath so javac resolves only
+// otherwise-missing legacy types from them. Runtime remains SourbyCraft's own 26.2 server/API.
+val legacyCompileJars = files(fileTree(privateRoot.dir("libs")) { include("*.jar") }.files.sorted())
+for (task in listOf("compileJava", "compileTestJava")) {
+    tasks.named<JavaCompile>(task) { classpath = classpath.plus(legacyCompileJars) }
 }
 extensions.configure<SourceSetContainer> {
     named("main") {

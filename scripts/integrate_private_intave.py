@@ -53,6 +53,34 @@ def replace_code(source: str, replacements: dict[str, str]) -> str:
     return "".join(pieces)
 
 
+def exactly_once(source: str, old: str, new: str, what: str) -> str:
+    if source.count(old) != 1:
+        raise ValueError(f"Pinned {what} differs from native migration")
+    return source.replace(old, new)
+
+
+REPLAY_POTION_REGISTRY = "src/test/java/dev/yanianz/intave/check/movement/physics/recording/ReplayPotionRegistry.java"
+
+
+def modernize_replay_potion(source: str) -> str:
+    """26.2 PotionEffectType: Keyed key helpers are final/absent, attribute and category members are abstract."""
+    removed = ("    @Override public NamespacedKey getKeyOrThrow() { return key; }\n",
+               "    @Override public NamespacedKey getKeyOrNull() { return key; }\n",
+               "    @Override public boolean isRegistered() { return true; }\n")
+    for line in removed:
+        if source.count(line) != 1:
+            raise ValueError("Pinned replay potion registry differs from native migration")
+        source = source.replace(line, "")
+    marker = "    @Override public double getDurationModifier() { return 1.0D; }\n"
+    if source.count(marker) != 1:
+        raise ValueError("Pinned replay potion registry differs from native migration")
+    return source.replace(marker, marker
+        + "    @Override public java.util.Map<org.bukkit.attribute.Attribute, org.bukkit.attribute.AttributeModifier> getEffectAttributes() { return java.util.Map.of(); }\n"
+        + "    @Override public double getAttributeModifierAmount(org.bukkit.attribute.Attribute attribute, int effectAmplifier) { return 0.0D; }\n"
+        + "    @Override public PotionEffectType.Category getEffectCategory() { return PotionEffectType.Category.NEUTRAL; }\n"
+        + "    @Override public String translationKey() { return getTranslationKey(); }\n")
+
+
 def plan_native_port(workspace: Path, plan: dict) -> tuple[dict[Path, str], dict]:
     """Render the entire transformation before changing any source file."""
     main = workspace / "src/main/java"
@@ -119,6 +147,45 @@ def plan_native_port(workspace: Path, plan: dict) -> tuple[dict[Path, str], dict
             # Modern Bukkit also declares Input; the simulation uses Intave's own value type.
             changed = changed.replace("import dev.yanianz.intave.share.*;",
                                       "import dev.yanianz.intave.share.*;\nimport dev.yanianz.intave.share.Input;")
+        if relative == "dev/yanianz/intave/library/asm/ClassReader.java":
+            # Patchy re-reads the server's own Java 25 classes (major 69) at runtime.
+            changed = exactly_once(changed, "readShort(classFileOffset + 6) > Opcodes.V19)",
+                                   "readShort(classFileOffset + 6) > Opcodes.V25)", "vendored ASM version gate")
+        if relative == "dev/yanianz/intave/library/asm/Opcodes.java":
+            changed = exactly_once(changed, "  int V19 = 0 << 16 | 63;\n", "  int V19 = 0 << 16 | 63;\n"
+                + "".join(f"  int V{version} = 0 << 16 | {version + 44};\n" for version in range(20, 26)),
+                "vendored ASM class versions")
+        if relative == "dev/yanianz/intave/klass/trace/Caller.java":
+            # Native engine/packet-library classes live in the server classloader, so
+            # JavaPlugin.getProvidingPlugin cannot attribute them; external plugins still resolve normally.
+            changed = exactly_once(changed, "  private static String loadPluginFrom(String className) {\n    try {\n",
+                "  private static String loadPluginFrom(String className) {\n"
+                "    if (className.startsWith(\"dev.yanianz.intave.\")) return \"Intave\";\n"
+                "    if (className.startsWith(\"com.comphenix.protocol.\")) return \"ProtocolLib\";\n    try {\n",
+                "caller attribution")
+        if relative == "dev/yanianz/intave/block/access/BlockAccessTests.java":
+            # LEGACY_* enum constants are not 26.2 block types; Bukkit converts them on setType.
+            changed = exactly_once(changed, "      if (value.isBlock() && !blacklistedMaterials.contains(value)) {",
+                "      if (value.isBlock() && !value.isLegacy() && !blacklistedMaterials.contains(value)) {",
+                "block access self-test")
+        if relative == "dev/yanianz/intave/packet/reader/ReaderTests.java":
+            # Region threading: scoreboard mutation is owned by the global tick thread, while the
+            # self-test runner ticks on a region. Run only this test's body there (bounded wait).
+            changed = exactly_once(changed,
+                "  public void testNativeScoreboardPackets() throws ReflectiveOperationException {\n",
+                "  public void testNativeScoreboardPackets() throws Throwable {\n"
+                "    java.util.concurrent.CompletableFuture<Void> done = new java.util.concurrent.CompletableFuture<>();\n"
+                "    Bukkit.getGlobalRegionScheduler().execute(dev.yanianz.intave.IntaveEngine.singletonInstance(), () -> {\n"
+                "      try { nativeScoreboardPackets(); done.complete(null); }\n"
+                "      catch (Throwable failure) { done.completeExceptionally(failure); }\n"
+                "    });\n"
+                "    try { done.get(5, java.util.concurrent.TimeUnit.SECONDS); }\n"
+                "    catch (java.util.concurrent.ExecutionException failure) { throw failure.getCause(); }\n"
+                "  }\n\n"
+                "  private void nativeScoreboardPackets() throws ReflectiveOperationException {\n",
+                "native scoreboard self-test")
+        if path.relative_to(workspace).as_posix() == REPLAY_POTION_REGISTRY:
+            changed = modernize_replay_potion(changed)
         if path.relative_to(workspace).as_posix() == "src/main/java/dev/yanianz/intave/test/MockEmptyInventory.java":
             changed = modernize_inventory(changed, replace_method)
         if path.relative_to(workspace).as_posix() == "src/main/java/dev/yanianz/intave/block/access/FakeFallbackBlock.java":
@@ -179,28 +246,31 @@ def plan_native_port(workspace: Path, plan: dict) -> tuple[dict[Path, str], dict
     volatile = main / "dev/yanianz/intave/block/access/VolatileBlockAccess.java"
     if volatile.is_file():
         source = source_text(volatile)
+        # Owner-authorised 2026-10-07: tolerated racy reads of already loaded chunks (Paper's
+        # getBlockStateIfLoaded class of access), upstream absent-chunk semantics, never a load.
         source = replace_method(source, "  public static Block blockAccess(World blockAccess, int x, int y, int z)",
             "  public static Block blockAccess(World blockAccess, int x, int y, int z) {\n"
-            "    new dev.yanianz.intave.integration.NativeBlockView(blockAccess).getBlockState(new net.minecraft.core.BlockPos(x, y, z));\n"
+            "    // A CraftBlock is a coordinate handle; reads go through NativeBlockView (unloaded = AIR).\n"
             "    return blockAccess.getBlockAt(x, y, z);\n  }")
         source = replace_method(source, "  private static Block fallbackBlock(World world)", "")
         field = "  private static final Map<World, Block> EMERGENCY_FALLBACK_BLOCKS = GarbageCollector.watch(new HashMap<>());"
         if source.count(field) != 1:
             raise ValueError("Pinned emergency fallback map differs from native migration")
         source = source.replace(field, "")
-        for marker, query, coordinates, world in (
+        for marker, query, coordinates, world, absent in (
             ("  public static @NotNull Material typeAccess(User user, World blockAccess, int blockX, int blockY, int blockZ)",
-             "type", "blockX, blockY, blockZ", "blockAccess"),
+             "type", "blockX, blockY, blockZ", "blockAccess", "Material.AIR"),
             ("  public static int variantIndexAccess(User user, World blockAccess, int blockX, int blockY, int blockZ)",
-             "variantIndex", "blockX, blockY, blockZ", "blockAccess"),
+             "variantIndex", "blockX, blockY, blockZ", "blockAccess", "0"),
             ("  public static BlockShape collisionShapeAccess(User user, int x, int y, int z)",
-             "collisionShape", "x, y, z", "user.player().getWorld()"),
+             "collisionShape", "x, y, z", "user.player().getWorld()", "BlockShapes.emptyShape()"),
         ):
+            x, _, z = coordinates.split(", ")
             source = replace_method(source, marker, marker + " {\n"
                 "    BlockState cached = user.blockCache().peekStateAt(" + coordinates + ");\n"
                 "    if (cached != null) return cached." + query + "();\n"
-                "    new dev.yanianz.intave.integration.NativeBlockView(" + world + ").getBlockState(new net.minecraft.core.BlockPos(" + coordinates + "));\n"
-                "    return user.blockCache()." + query + "At(" + coordinates + ");\n  }")
+                "    if (isInLoadedChunk(" + world + ", " + x + ", " + z + ")) return user.blockCache()." + query + "At(" + coordinates + ");\n"
+                "    return " + absent + ";\n  }")
         source = replace_method(source, "  public static boolean isInLoadedChunk(World world, int x, int z)",
             "  public static boolean isInLoadedChunk(World world, int x, int z) {\n"
             "    return new dev.yanianz.intave.integration.NativeBlockView(world).isLoaded(x, z);\n  }")
@@ -262,6 +332,11 @@ def plan_native_port(workspace: Path, plan: dict) -> tuple[dict[Path, str], dict
             # Preserve any upstream preamble/license, including future pin changes.
             text = original[:original.index("package ")] + text
         updates[target] = text
+    # Server-owned adapter tests; compiled only in the private profile with the adapters they test.
+    for template in (ROOT / "scripts/templates/intave-native-tests").glob("*.java"):
+        text = template.read_text()
+        package = re.search(r"^package ([\w.]+);", text, re.MULTILINE).group(1)
+        updates[workspace / "src/test/java" / package.replace(".", "/") / template.name] = text
     generated = workspace / "generated/main/java/dev/yanianz/intave/IntaveBuildConfig.java"
     if not generated.is_file():
         raise ValueError("Missing generated build identity; baseline preserved")

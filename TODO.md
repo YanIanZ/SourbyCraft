@@ -264,20 +264,19 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   compiler adapter/Connection terhadap artifact lokal 26.2 lulus; 4 probe antrean paket nyata
   lulus setelah perbaikan finish future; static typecheck wiring Gradle lulus. Bukti dan cakupan:
   `docs/architecture/intave-native-integration.md`.
-- [-] Verifikasi engine Intave lengkap: `NATIVE_CODE_INTEGRATED_UNVERIFIED`, anticheat belum
-  dibuktikan aktif. 147 source API tag resmi dicompile; 177 hash port direproduksi; dua JNI Linux
-  exact dipulihkan, 20 resource masih kurang. Artifact Maven/transitif belum resolved;
-  DNS/network dan socket Gradle dibatasi lingkungan. Inventory/fallback AIR dan pemetaan fluid
-  modern serta indeks/properti/geometri mapped lolos probe item/block state nyata;
-  startup indeks fluid lengkap belum diuji. Adapter chunk/shape kini memakai NMS mapped,
-  guard owner tiap lookup/neighbor dan tidak memuat chunk atau memakai fallback state yang keliru.
-  Nama API Bukkit lama dan refresh port transaksional sudah diperbaiki; diagnostic 1.191 engine
-  + 147 API masih gagal pada dependency BC/Byte Buddy/Floodgate, tanpa error adapter yang terlihat.
-  Sisa kode: audit ownership/cache dunia/subclass block non-AIR dan routing/snapshot Netty;
-  guard menolak pembacaan world di thread yang tidak memiliki region. Sisa gate:
-  resolve transitif, compile engine/eksekusi Gradle, seluruh fixture suite,
-  boot privat tanpa plugin, replay/false-positive tests, region soak dan shutdown qualification.
-  Tidak ada klaim efektivitas. Bukti/batasan: `docs/architecture/intave-native-integration.md`.
+- [-] Verifikasi engine Intave lengkap: `NATIVE_ACTIVE_SELFTEST_PASSED_DETECTION_UNVERIFIED` (2026-10-07).
+  Profile privat dicompile (1.189 source engine), `slimServerJar` privat dibangun, boot lokal
+  mencapai `ACTIVE`, self-test Intave selesai (59 metode, 7 no-op karena gate versi) dan shutdown
+  bersih (`Native engine cleanup completed`, exit 0). Keputusan owner: pembacaan blok off-region
+  hanya racy read chunk yang sudah loaded (tanpa load/ticket; unloaded = AIR/0/shape kosong);
+  write, block entity dan akses entity tetap ditolak. Perbaikan port: urutan classpath NMS lama,
+  filter Floodgate, ASM vendored ke Java 25, atribusi caller native, self-test legacy material dan
+  scoreboard via global scheduler, tes potion; 183 hash direproduksi, 0 fixture hilang. Tes:
+  server-owned 23/23 (privat), 19/19 (publik); upstream 721: 694 lulus, 27 gagal (registry tes,
+  server null, path cwd, material 26.3), 4 skipped. Sisa gate: efektivitas deteksi (butuh client
+  nyata + cheat diketahui), false positive, join/quit, race pembacaan racy, ViaVersion, region soak,
+  CPU/alokasi. Tidak ada klaim efektivitas. Bukti/batasan:
+  `docs/architecture/intave-native-integration.md#kebijakan-pembacaan-blok-2026-10-07`.
 
 ### Migrasi penuh ke SourbyCraft (Aurora Engine) tanpa Canvas/Folia
 Sejak 2026-10-05 build berjalan: vanilla → Paper (`paperRef` 9240f586) → SourbyCraft, lewat

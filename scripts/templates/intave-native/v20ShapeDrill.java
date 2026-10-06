@@ -11,12 +11,13 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 
-/** Mapped geometry; neighbor lookups pass through the same owner-checked non-loading view. */
+/** Mapped geometry over NativeBlockView: tolerated racy reads of loaded chunks only, never a load. */
 public final class v20ShapeDrill extends AbstractShapeDrill {
     private BlockShape shape(World world, Material type, int variant, int x, int y, int z, boolean collision) {
         NativeBlockView view = new NativeBlockView(world);
+        // Upstream semantics: no shape when the chunk is absent; never load it.
+        if (!view.isLoaded(x, z)) return BlockShapes.emptyShape();
         BlockPos pos = new BlockPos(x, y, z);
-        view.getBlockState(pos);
         var state = NativeBlockStates.require(BlockVariantRegister.rawVariantOf(type, variant));
         var shape = collision ? state.getCollisionShape(view, pos) : state.getShape(view, pos);
         var boxes = NativeBlockStates.boxes(shape, x, y, z).stream()

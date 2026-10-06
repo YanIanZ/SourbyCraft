@@ -140,6 +140,7 @@ public final class NativeIntave {
         public synchronized void close() {
             if (this.status().state() == State.STOPPED || this.cleanupAttempted) return;
             this.attempted = true;
+            boolean hadEngine = this.engine != null;
             this.status.set(new Status(State.STOPPING, "Closing private native engine"));
             String admissionFailure = stopAdmission();
             String failure;
@@ -159,6 +160,7 @@ public final class NativeIntave {
             if (admissionFailure != null) failure = admissionFailure;
             this.status.set(new Status(failure == null ? State.STOPPED : State.FAILED,
                 failure == null ? "Native engine cleanup completed" : "Cleanup failed: " + failure));
+            if (hadEngine && failure == null) LOGGER.info(this.status().detail());
         }
 
         private String stopAdmission() {
