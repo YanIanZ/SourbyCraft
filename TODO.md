@@ -23,14 +23,16 @@ Hal yang memblokir `release=true`. Status per gate dan buktinya:
 Head ter-commit `1fe984ed` lulus CI run 485 (2026-10-06); tree kandidat rilis (Paper 0005–0011,
 Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah jalan di CI.
 - [!] Keputusan lisensi owner (PolyForm Noncommercial vs GPLv3 Paper; lihat *Keputusan owner*).
-- [ ] Commit tree kandidat rilis, lalu satu run CI hijau: compile, suite Java + Python, boot,
+- [x] Commit tree kandidat rilis, lalu satu run CI hijau: compile, suite Java + Python, boot,
   shutdown, termasuk marker fixture yang belum pernah jalan (`LEGACY_GLOBAL_*`,
   `LEGACY_REGION_TASK_OK`, `LEGACY_ENTITY_TASK_OK`, `LEGACY_ENTITY_RETIRED_OK`,
   `LEGACY_DISABLE_*`) dan langkah baru `patch_surface.py --check`. Boot CI ini juga yang pertama
   dengan feature patch 0024/0025 (Intave privat, auto-provision plugin sebelum plugin scan).
-- [ ] Regenerasi patch bersih: urutan commit materialized = urutan file (0024/0025 ↔ 0026/0027
+  SELESAI: push `beb7f40e` 2026-10-07, CI run 37515867230 success 33/33 langkah, 20 jenis marker OK.
+- [x] Regenerasi patch bersih: urutan commit materialized = urutan file (0024/0025 ↔ 0026/0027
   menurut `patch_surface.py --check-rebuild`, 2026-10-07), `rebuild*Patches` tanpa diff isi,
-  8 file feature patch yang masih untracked di-commit.
+  8 file feature patch yang masih untracked di-commit. SELESAI 2026-10-07: reorder tanpa diff isi,
+  rebuild tanpa perubahan konten, `applyAllPatches` dari file lulus lokal dan di CI 37515867230.
 - [!] Patch 0028 (`AuroraEdfScheduler`) DITAHAN dan diparkir (keputusan owner 2026-10-07): rilis
   tanpa 0028 kecuali owner memutuskan lain.
 - [ ] Pasangan referensi tersertifikasi (`idle` + `chunk-stress`) di mesin tenang; tanpa itu gate
