@@ -1,12 +1,18 @@
 # Aurora Task Matrix
 
+> **Role:** Aurora task checklist with evidence links. **Status:** Active checklist; priorities live in [TODO.md](../TODO.md). Two baseline/soak ticks in §C disagree with [BASELINE.md](BASELINE.md) — see *Open contradictions* in the entry point.
+>
+> Entry point: [docs/architecture/AURORA.md](architecture/AURORA.md).
+
 This checklist supplements `docs/DEVELOPMENT-TASKS.md`. It does not replace existing unfinished tasks; it groups the next work around Aurora configuration ownership, deep Minecraft optimization, stability, and independence.
 
-Current focus (2026-09-15): Phase 2 of [Aurora Independent Engine](architecture/AURORA-INDEPENDENT-ENGINE.md),
-starting with [execution contract extraction](architecture/execution-contract.md).
-Preserve completed config/baseline work; isolate current backend dependencies before introducing
-new execution machinery. The first candidate is owner-bound async result delivery, with explicit
-owner identity, rejection, retirement, and stale-result validation. Custom Spark viewer work is deferred.
+Current focus (2026-10-06): persistence and plugin ownership gates in [TODO.md](../TODO.md),
+plus the user's new-terrain generation stutter report. Optional generic generation-stage timing
+is written, with build/runtime acceptance assigned to Claude; see
+[CHUNK-GENERATION-STUTTER.md](development/CHUNK-GENERATION-STUTTER.md).
+Paper is the only upstream; former Canvas/Folia engine sources are SourbyCraft-owned.
+[Execution contracts](architecture/execution-contract.md) are partially implemented;
+an independent Aurora scheduler remains unfinished. Custom Spark viewer work is deferred.
 
 Status:
 
@@ -73,7 +79,7 @@ No task in this group is considered complete without before/after evidence.
 Started 2026-09-21: [Entity/AI validation](architecture/aurora-task-d-validation.md).
 Existing collision/query/tracker profiles are exploratory, not certified baselines.
 The tracker range-hoisting candidate crosses plugin callbacks and has been withdrawn;
-collision candidate 0019 passes arithmetic checks and ownership review; live integration remains open.
+collision candidate 0019 (feature patch 0018 after renumbering) passes arithmetic checks and ownership review; live integration remains open.
 
 ### Entity / AI
 
@@ -94,7 +100,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 
 - [ ] profile chunk holder lookup
 - [ ] profile ticket processing
-- [ ] measure generation latency
+- [-] measure generation latency — optional queue/run timing for generic stages in `/perf chunks`, feature patch 0027; sources written, not built or measured; dedicated lighting and full integration remain outside coverage
 - [ ] measure load/integration latency
 - [ ] measure save latency/backlog
 - [ ] profile region-file I/O
@@ -116,6 +122,10 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 
 ## E. Scheduler / concurrency
 
+- [-] EDF lifecycle upgrade — LeafPile-derived `AuroraEdfScheduler`, feature 0028; six unexecuted
+  regressions, build/boot/ownership/shutdown acceptance assigned to Claude; no independent
+  scheduler or speed claim ([source/profile handoff](development/AURORA-EDF-UPGRADE.md))
+
 - [x] inventory all Sourby-owned executors — [executor-inventory.md](architecture/executor-inventory.md)
 - [x] audit implicit common-pool usage — [executor-inventory.md](architecture/executor-inventory.md)
 - [-] async pathfinding shutdown/cancellation work
@@ -125,7 +135,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] sync-vs-async path benchmark
 - [ ] mob behavior compatibility soak
 - [x] collect worker queue depth/latency where useful — `/perf async` (queue depth, wait), `/perf governor` (governed lanes)
-- [x] verify no external I/O blocks region execution — static audit [region-io-audit.md](architecture/region-io-audit.md), pinned by `BlockingIoBoundaryTest` (SourbyCraft code only)
+- [-] verify no external I/O blocks region execution — static audit [region-io-audit.md](architecture/region-io-audit.md), pinned by `BlockingIoBoundaryTest` (network-file inventory only; Redis reads and global world-creation waits still require runtime-path review)
 
 ## F. Memory / GC
 
@@ -134,7 +144,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] allocation MB/s validation against JFR
 - [ ] RSS/cgroup validation
 - [ ] top allocated classes workflow
-- [x] cache ownership/bounds inventory — [cache-inventory.md](architecture/cache-inventory.md); `AwfWorld.owned` is the one unbounded collection
+- [x] cache ownership/bounds inventory — [cache-inventory.md](architecture/cache-inventory.md); `AwfWorld.owned` evicts clean chunks at the configured resident limit; dirty chunks stay pinned and can exceed it; limit 0 is unbounded
 - [ ] player-disconnect retention test
 - [ ] chunk-unload retention test
 - [ ] world-unload retention test
@@ -144,7 +154,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 
 - [x] route Spark tick stats through Sourby metrics
 - [x] report SourbyCraft profiler identity
-- [x] report Spark platform version as `Build44 (MC:26.2)` instead of the upstream `26.2-DEV-<git>` string
+- [x] report Spark platform version through current SourbyCraft build metadata; `Build44` was a historical example, not the current build identity
 - [x] provide Sourby config group
 - [ ] verify Spark web-viewer config rendering
 - [x] add cheap Sourby runtime metadata — `SourbyMetadataProvider` via `createExtraMetadataProvider` ([SPARK.md](SPARK.md#aurora-runtime-metadata)); viewer rendering still unverified
@@ -157,7 +167,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 
 ## H. Independence
 
-- [x] inventory direct Canvas accesses from `dev.iyanz.sourbycraft.*` — one file, `CanvasConfigBridge` ([dependency-ledger.md](architecture/dependency-ledger.md), pinned by `UpstreamDependencyLedgerTest`)
+- [x] inventory engine accesses from `dev.iyanz.sourbycraft.*` — `CanvasConfigBridge` retains its compatibility name and references Aurora engine config; world lifecycle also has engine dependencies ([dependency-ledger.md](architecture/dependency-ledger.md), pinned by `UpstreamDependencyLedgerTest`)
 - [x] classify direct accesses as required contract / accidental coupling / removable — ledger classifications
 - [x] define minimal region access contract — `execution/region/RegionBackend` ([compat-boundary.md](architecture/compat-boundary.md))
 - [x] define minimal scheduler access contract — `execution/OwnerHandoff` ([execution-contract.md](architecture/execution-contract.md))
@@ -165,7 +175,7 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [ ] move large Sourby service bodies out of upstream classes
 - [x] retain direct NMS algorithm patches when external indirection would be worse — policy in [compat-boundary.md §1.2](architecture/compat-boundary.md) and ledger §2.1; applied to patch 0006 (rules extracted to `AsyncPathValidity`, algorithm left in place)
 - [x] active build-path dependency inventory — ledger §3–4 and AGENTS.md CI description
-- [x] determine whether active CI still requires legacy `sourbypatcher` — no: CI requires the private SourbyPatcher `canvas-toolchain` adapter; the legacy Folia patcher is not used
+- [x] determine whether active CI still requires legacy `sourbypatcher` — no: CI requires the private SourbyPatcher `paper-toolchain` adapter; the legacy Folia patcher is not used
 - [ ] clean-checkout reproducibility
 - [ ] cached/offline boot validation
 - [x] track rebase conflict count — [rebase-log.md](architecture/rebase-log.md) (last bump: 7 patch files needed intervention); recorded per bump from now on
@@ -182,6 +192,10 @@ collision candidate 0019 passes arithmetic checks and ownership review; live int
 - [x] verify core runtime needs no Canvas remote service/API — [dependency-ledger.md §6](architecture/dependency-ledger.md)
 
 ## J. Aurora release gate
+
+The checked gates below cite historical commits/runs. They do not validate the current
+working-tree changes (bridge, AWF, watchdog or generation metrics); those remain pending
+Claude's build/tests/boot and the required release-specific evidence.
 
 - [x] patch regeneration clean — CI run 437 (`994025aa`, 2026-09-26): `applyAllPatches` including the Build 47 Paper patches
 - [x] Java tests pass — CI run 437 (`994025aa`, 2026-09-26): `:sourbyapi:test :sourbycraft-server:test :test-plugin:test` (9480 tests, 7 skipped) and 219 Python tests

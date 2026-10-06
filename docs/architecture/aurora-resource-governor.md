@@ -1,5 +1,9 @@
 # Aurora Resource Governor
 
+> **Role:** Resource Governor specification. **Status:** Active; feature is PARTIAL (two governed lanes, no CPU arbitration). Budget and STORAGE-lane sentences corrected against code on 2026-10-07.
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 Build 47 pillar "Aurora Execution Fabric and Resource Governor". This document is the
 specification the release doc refers to. Before it existed the pillar had a name and no contract.
 
@@ -17,7 +21,9 @@ Upstream sizes those; `/perf lanes` attributes their CPU.
 ## Contract
 
 1. **Static budgets.** Each governed lane has a fixed thread count and a fixed queue capacity. The
-   budget comes from code defaults today. Nothing watches load and resizes a lane, because the
+   budget comes from `aurora.scheduler.*` (`bridge-io-threads`, `bridge-io-queue`,
+   `storage-threads`, `storage-queue`; RESTART_REQUIRED), whose defaults are the code defaults
+   below. Nothing watches load and resizes a lane, because the
    Aurora no-auto-tuning rule forbids it.
 2. **Reject, never caller-runs.** Work beyond threads plus queue throws
    `RejectedExecutionException`. Running overflow on the submitting thread would put it on a
@@ -35,14 +41,15 @@ Upstream sizes those; `/perf lanes` attributes their CPU.
 | Lane | Budget | Thread prefix → `ExecutionLane` | Used by |
 | --- | --- | --- | --- |
 | `BRIDGE_IO` | max(2, cores/4) threads, queue 256 | `SourbyCraft-BridgeIO-` → `PLUGIN_ASYNC` | Aurora Bridge: async tasks of bridged legacy plugins. Folia's async scheduler only times them. A rejection counts as the plugin's rejected operation. |
-| `STORAGE` | 1 thread, queue 64 | `SourbyCraft-Storage-` → `WORLD_IO` | Aurora World Fabric commits (`AwfWorld#save`). Idle until AWF is wired into world saving. |
+| `STORAGE` | 1 thread, queue 64 | `SourbyCraft-Storage-` → `WORLD_IO` | Aurora World Fabric commits (`AwfWorld#save`, submitted by `awf/AwfEngine`). Idle when no world uses AWF. |
 
 `cores` is the JVM's available-processor count, read once when the lane is created.
 
 ## Not in scope yet
 
-- Operator-configurable budgets. When they are added, they are RESTART_REQUIRED, because a lane
-  is created once and never resized.
+- ~~Operator-configurable budgets~~ — implemented as `aurora.scheduler.*`, RESTART_REQUIRED
+  because a lane is created once and never resized (`config/AuroraConfig.Scheduler`; corrected
+  2026-10-07).
 - Moving existing executors under the governor: `AsyncPathProcessor`, `BoundedIoExecutor` and
   the startup-index pool. Each already has its own bound, documented in
   [executor-inventory.md](executor-inventory.md).

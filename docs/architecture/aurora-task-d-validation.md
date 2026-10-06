@@ -1,5 +1,9 @@
 # Aurora Task D — Entity/AI validation
 
+> **Role:** Entity/AI Task D validation record. **Status:** Historical (2026-09-21). Patch numbers have shifted since: the collision candidate called 0019 here is feature patch 0018 today. Current Entity/AI ownership: [engine-entity-ai.md](engine-entity-ai.md).
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 Started 2026-09-21 on `26.2`. Scope: validate the existing entity-query, tracker,
 and block-collision candidates before adding another NMS optimization.
 
@@ -39,6 +43,9 @@ It covers both list and region broadcasts and the empty-list case. This models t
 callback boundary; it is not a live Bukkit-plugin integration test.
 
 ## Collision candidate 0019: ownership and arithmetic
+
+(Now feature patch 0018: the series was renumbered after the tracker candidate was withdrawn;
+note added 2026-10-07.)
 
 The six translated bounds are method-local primitives derived from an immutable
 AABB and the current block coordinates. No entity/world scratch field, shared

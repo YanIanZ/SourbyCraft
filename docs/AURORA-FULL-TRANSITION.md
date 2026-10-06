@@ -1,5 +1,9 @@
 # Aurora Engine — Full Transition Completion Plan
 
+> **Role:** transition plan with gates T0–T11; the T-numbers are the ones other documents cite (T5, T7, T10). **Status:** Plan. Its T1–T4 status paragraphs are snapshots, partly stale (dated notes added 2026-10-07); the verified current state is in the entry point.
+>
+> Entry point: [docs/architecture/AURORA.md](architecture/AURORA.md).
+
 ## SourbyCraft 26.2
 
 **Document type:** Architecture transition execution plan  
@@ -28,7 +32,7 @@ The transition is complete when:
 
 > SourbyCraft owns the runtime contract, execution model, configuration model, observability model, lifecycle, performance policy, compatibility boundary, and engine integration points required to run Minecraft as Aurora.
 
-Paper, Folia, and Canvas may still be used as upstream source inputs where practical, but they must no longer be the architectural authority of the running server.
+Current branch (2026-10-06): Paper is the only upstream source input. Former Canvas/Folia engine changes are locally owned patches and sources; Folia package names and the retained Canvas plugin API remain compatibility surfaces. Independent execution/scheduler ownership is still a target, not a completed migration.
 
 ---
 
@@ -59,16 +63,17 @@ However, several critical areas still depend directly on Canvas/Folia implementa
 
 Examples include:
 
-- direct Canvas configuration reload calls,
-- Canvas/Folia scheduler assumptions,
-- Spark integration patched through Canvas classes,
-- build metadata still carrying Canvas-era identity,
-- runtime comments and package documentation still describing SourbyCraft as a utility layer,
-- no first-class Aurora execution contract,
-- no Aurora-owned scheduler boundary,
-- no Aurora compatibility layer that isolates upstream APIs,
-- no independent Entity/Chunk/Network/Storage engine contracts,
-- no complete dependency ledger proving which Canvas/Folia internals remain required.
+- engine config reload through the retained `CanvasConfigBridge` compatibility class,
+- region dispatch still uses the locally owned Folia-named implementation; feature 0028 selects a LeafPile-derived Aurora EDF pool, with acceptance pending,
+- Spark integration still requires patches to platform integration classes,
+- execution contracts and owner handoff are present but do not constitute an independent scheduler,
+- compatibility boundaries exist but still require direct engine/NMS dependencies,
+- independent Entity/Chunk/Network/Storage engine contracts remain unfinished,
+- the [dependency ledger](architecture/dependency-ledger.md) exists and must stay synchronized with runtime changes.
+
+The latest prioritized work is in [TODO.md](../TODO.md). New-terrain stutter investigation
+and its unexecuted acceptance handoff are documented in
+[CHUNK-GENERATION-STUTTER.md](development/CHUNK-GENERATION-STUTTER.md).
 
 Therefore the current state is:
 
@@ -437,6 +442,11 @@ legacy fallback. The other eight namespaces this section lists are deliberately 
 above — *do not generate empty sections purely for branding* — is the same rule the config file
 itself follows, and a namespace with no behaviour behind it is a promise the server cannot keep.
 
+> Note 2026-10-07 (code check): this status is a snapshot. [AURORA-CONFIG.md](AURORA-CONFIG.md)
+> now lists 19 implemented keys (`aurora.cpu`, `aurora.bridge`, `aurora.scheduler`,
+> `aurora.network`, `aurora.awf` besides the two above), and `awf/world/AuroraWorldsService.java`
+> also names engine/Canvas types, pinned by `scripts/test_independence_policy.py`.
+
 ---
 
 # 9. T3 — Aurora Execution Model
@@ -552,6 +562,10 @@ mob on a stale path, and rejecting it would fall back to the same region-thread 
 recorded here because the failure is invisible until tick times move, and because it is the
 argument for sizing the pool against the workload rather than leaving it at cores/4.
 
+> Note 2026-10-07 (code check): superseded. `perf/AsyncPathProcessor` now uses `AbortPolicy`: a
+> saturated queue refuses the solve and the mob keeps its current path; nothing runs on the region
+> thread. `PathStats.refused` is the saturation signal and `inline` is a legacy count.
+
 ### Deliberately not built
 
 `AuroraTaskClass` and the seven work categories. Five of the seven have real consumers today —
@@ -622,6 +636,10 @@ CPU starvation as "owed but not scheduled", which is the metric that says the sc
 tick and could not. `/perf lanes` adds where the machine's time actually went. Shutdown is tested
 per executor: the path pool refuses and disposes, the I/O executor rejects without blocking its
 caller and cannot be lazily resurrected, and blocking I/O is interruptible.
+
+> Note 2026-10-07 (code check): the file set has since grown. The policy test pins the region
+> backend to `RegionOwnerHandoff`, `FoliaRegionBackend` and `awf/world/AuroraWorldsService`, and
+> Canvas/engine-config names to `CanvasConfigBridge` and `AuroraWorldsService`.
 
 ### No AuroraScheduler wrapper
 

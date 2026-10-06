@@ -1,5 +1,9 @@
 # Aurora Instant Startup
 
+> **Role:** Aurora Instant Startup specification and implementation status. **Status:** Active; feature is PARTIAL (no transform/AWF-index caching, no cold/warm measurement).
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 Aurora Instant Startup removes repeated deterministic work from warm restarts without skipping plugin or world lifecycle semantics.
 
 ## Cacheable

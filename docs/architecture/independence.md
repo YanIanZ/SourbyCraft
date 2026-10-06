@@ -1,5 +1,9 @@
 # SourbyCraft Independence Architecture
 
+> **Role:** independence levels, rules and build work items. **Status:** Active for levels and rules; the §2 table is qualitative and partly predates the 2026-10-05 migration. The enforced ledger is [dependency-ledger.md](dependency-ledger.md); §2.1 counts corrected on 2026-10-07.
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 ## Scope
 
 This document tracks the technical path from the current Paper/Canvas-derived implementation to an independently owned SourbyCraft runtime.
@@ -99,12 +103,12 @@ The table above is qualitative. This is the counted version, produced by
 
 | Surface | Count | What it is |
 | --- | ---: | --- |
-| `io.canvasmc` reached from SourbyCraft-owned code | **2** | `GlobalConfiguration.reload()` and `WorldConfig.reload()`, both in `SourbyCraftConfig` |
+| Engine/Canvas symbols reached from SourbyCraft-owned code | **5** | `GlobalConfiguration.reload()` and `WorldConfig.reload()` in `config/upstream/CanvasConfigBridge`; `SaveAllTicket`, `WorldUnloadResult` and `WorldUnloadAsyncEvent` in `awf/world/AuroraWorldsService` (recounted 2026-10-07; was 2, both in `SourbyCraftConfig`) |
 | `io.canvasmc` calls added by `minecraft-patches` | **0** | The integration patches add no live call into Canvas |
 | Engine baseline (`minecraft-patches/sources`, former Canvas sources) | — | Excluded from the measure: since the 2026-10-05 migration this is the SourbyCraft-owned engine Aurora integrates with, not a dependency of it |
 
 **SourbyCraft's own code barely touches Canvas.** The entire live coupling is two static
-config-reload calls. That is a materially better position than the ledger above suggests
+config-reload calls and the AWF world-lifecycle doorway in `AuroraWorldsService` (2026-10-07). That is a materially better position than the ledger above suggests
 on its own, and it means replacing Canvas would not require rewriting SourbyCraft code.
 
 What SourbyCraft *is* coupled to is the region-threading contract, which Canvas inherits
@@ -112,11 +116,11 @@ from the Folia lineage rather than originating:
 
 | Namespace | Sites | Used for |
 | --- | ---: | --- |
-| `io.papermc.paper.threadedregions` | 4 | `RegionizedServer` and `TickRegionScheduler` in `PerformanceCollector`, `ScheduledTask` in `HudBars`, `EntityScheduler` in `AsyncPathCompletion` |
+| `io.papermc.paper.threadedregions` (internal) | 11 | in three adapter files only: `RegionizedServer`/`TickRegionScheduler` in `execution/region/FoliaRegionBackend`, `EntityScheduler` in `execution/RegionOwnerHandoff`, `RegionizedServer` in `awf/world/AuroraWorldsService` (recounted 2026-10-07; was 4 sites in `PerformanceCollector`, `HudBars`, `AsyncPathCompletion`) |
 | `ca.spottedleaf.common.time` | 2 | `TickData` and `TickTime` in `RegionTickMetrics` and its holder |
 
 So the real independence question is not "how do we stop depending on Canvas" — that
-dependency is already two calls wide — but "what region-threading contract do we depend
+dependency is already two files wide — but "what region-threading contract do we depend
 on, and is it stable across engines". That is section 7's minimal scheduler contract, and
 it is where the effort belongs.
 

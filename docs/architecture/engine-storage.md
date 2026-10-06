@@ -1,14 +1,21 @@
 # Aurora Storage Engine — Ownership
 
+> **Role:** T5 ownership document for Storage. **Status:** Active; AWF-wiring sentences corrected on 2026-10-07. AWF itself is documented in [aurora-world-fabric.md](aurora-world-fabric.md).
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 T5 deliverable for §11.6 of `docs/AURORA-FULL-TRANSITION.md`.
 
 ## Summary
 
 **Aurora owns no world-persistence policy for the running server today.** The AWF library
 (`dev.iyanz.sourbycraft.awf`, see [aurora-world-fabric.md](aurora-world-fabric.md)) implements
-atomic, verified persistence and its metrics, but the engine's chunk save path does not use it.
-The Resource Governor's `STORAGE` lane (`SourbyCraft-Storage-`, attributed to `WORLD_IO`) exists
-for AWF commits and is idle until AWF is wired in. It measures the world I/O lane, and it owns
+atomic, verified persistence and its metrics. Since feature patches 0019 and 0021 the engine's
+chunk, entity and POI storage goes through AWF for worlds an operator lists in `aurora.awf.worlds`
+or manages with `/awf` (EXPERIMENTAL, default off); every other world keeps the region-file path.
+The Resource Governor's `STORAGE` lane (`SourbyCraft-Storage-`, attributed to `WORLD_IO`) runs
+those AWF commits and is idle when no world uses AWF. (Corrected 2026-10-07; this summary
+previously said the save path did not use AWF.) It measures the world I/O lane, and it owns
 one executor that is explicitly *not* world persistence. The distinction matters enough to be
 the first thing this document says, because the thread-name prefix invites the opposite
 conclusion.
@@ -25,8 +32,10 @@ reads) cannot block a region thread. It carries no world data. The `WORLD_IO` la
 its threads alongside upstream's I/O workers only because they share the lane's purpose —
 *reading and writing data off the tick* — not because Aurora handles persistence.
 
-**No direct NMS patch touches storage.** None of the 16 feature patches touch region files,
-chunk serialization, or the save queue.
+**Two feature patches touch storage, both for AWF:** 0019 commits AWF stores at shutdown
+(`MinecraftServer`) and 0021 counts chunk-system storage traffic and routes AWF worlds in
+`RegionFileStorage`. No patch changes chunk serialization or the save queue. (Corrected
+2026-10-07 from "none of the 16 feature patches".)
 
 ## 2. Metrics
 

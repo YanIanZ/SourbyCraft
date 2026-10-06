@@ -1,5 +1,9 @@
 # Aurora Engine — Engine System & Patch Innovation Architecture
 
+> **Role:** engine design guide — Path A/B/C, patch innovation pipeline, per-domain metric lists. **Status:** Plan/design guidance, not a description of what exists. §23's AuroraScheduler adapter is superseded by [AURORA-FULL-TRANSITION.md](../AURORA-FULL-TRANSITION.md) T4 (*No AuroraScheduler wrapper*) and [execution-contract.md](execution-contract.md).
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 ## SourbyCraft 26.2
 
 **Branch:** `26.2`  

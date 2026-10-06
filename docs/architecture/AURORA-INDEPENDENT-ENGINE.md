@@ -1,5 +1,9 @@
 # Aurora Independent Engine Architecture
 
+> **Role:** independence design argument (execution domains, hybrid scheduling, snapshot work, replacement policy). **Status:** Proposal — not current architecture. Its §38 Phase 0/Phase 2 status notes and §31 Canvas relationship are stale; the current statements are in [execution-contract.md](execution-contract.md), [dependency-ledger.md](dependency-ledger.md) and the entry point's *Current state*.
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 ## SourbyCraft 26.2 — Beyond Folia Constraints
 
 **Project:** SourbyCraft  

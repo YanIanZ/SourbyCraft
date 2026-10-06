@@ -13,7 +13,7 @@ connections fails the build until it is added here with its thread context.
 | `update/ViaAutoUpdate.java` | ViaVersion release check | Called from `SourbyUpdater`'s async check |
 | `command/SpeedtestCommand.java` | Speed test | `VirtualExecutor` (bounded virtual threads); the reply hops back to the sender's owner |
 | `util/GeoUtil.java` | GeoIP lookup for `/ping` (local `.mmdb`) | `VirtualExecutor`, from `PingCommand` |
-| `bootstrap/LibDownloader.java`, `bootstrap/PluginProvisioner.java` | Library and plugin provisioning | Before the server starts (bootstrap), not on any region thread |
+| `bootstrap/LibDownloader.java`, `bootstrap/PluginProvisioner.java` | Library and plugin provisioning, including ProtocolLib | Plugin JAR/config work runs on the startup path before Paper's plugin scan / plugin enable, before region threads start; library fetch is bootstrap-only |
 | `awf/redis/RedisClient.java` | The `redis` AWF backend (`aurora.awf.backend = "redis"`) | Store opening: the I/O lane (`AwfEngine.prepare`) for runtime worlds, the main thread at boot. Commits: the storage lane, refused on a region thread like FILE commits. Chunk reads: wherever the engine reads a region file for that chunk — the same exposure the FILE backend's reads have. Lease renewal: its own daemon thread. Every socket read is bounded by `timeout-ms`. |
 
 ## File I/O
@@ -31,7 +31,12 @@ connections fails the build until it is added here with its thread context.
 
 ## Result
 
-No SourbyCraft code performs network I/O on a region tick thread. The only disk I/O that can
-happen on one is an AWF chunk read standing in for the engine's own region-file read (worlds in
-`aurora.awf.worlds` only). The one command-thread read is `/spec`'s cgroup pseudo-file. This is a static
-audit: it does not prove that upstream code, or plugins, stay off region threads.
+This inventory does not prove that region execution is free of network or disk waits.
+A cold AWF read uses the engine caller's thread; with Redis that operation can include network
+I/O. The caller context must be checked at each active engine path. `createAfter` also has a
+global-thread `ready.join()` path recorded as OPEN in the
+[ASP port review](../development/ASP-26.2-AWF-PORT-REVIEW.md); global tick waiting is a separate
+blocking boundary from a region tick. `/spec` reads a cgroup pseudo-file on its command thread.
+`BlockingIoBoundaryTest` pins a source inventory, not a proof of safe runtime scheduling.
+Runtime qualification remains pending; plugins and generated engine paths are not covered by
+that source test.

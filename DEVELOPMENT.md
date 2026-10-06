@@ -81,6 +81,14 @@ Forbidden examples include:
 
 Diagnostics may warn and recommend. The operator decides.
 
+**Ruling (owner, 2026-10-07): sizing a pool or thread count once at boot from the machine's
+processor count is not automatic performance configuration.** The forbidden class is behaviour that
+changes a setting *in response to load or runtime state*. Boot-time derivation (region tick threads
+when `threads: -1`, the `BRIDGE_IO` lane at max(2, processors/4), the async-path pool at
+max(1, processors/4), Paper's own chunk-worker default) is fixed for the process's lifetime, is
+reported at startup, and is overridable by an explicit setting. A value that moves while the server
+runs remains forbidden.
+
 ## 2.3 Region ownership is authoritative
 
 Any code touching entities, chunks, worlds, inventories, players, block entities, or region-local scheduler state must respect region ownership.

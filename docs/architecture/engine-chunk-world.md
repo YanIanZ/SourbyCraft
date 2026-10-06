@@ -1,5 +1,9 @@
 # Aurora Chunk & World Engine — Ownership
 
+> **Role:** T5 ownership document for Chunk and World. **Status:** Active; its patch table predates feature patches 0017, 0018 and 0027.
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 T5 deliverable for §11.3 (Chunk) and §11.4 (World) of `docs/AURORA-FULL-TRANSITION.md`.
 
 Ownership, metrics and implementation boundary for the two domains that decide what a loaded

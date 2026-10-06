@@ -63,6 +63,7 @@ Off by default. Enable with `-Dcherry.enable.mixin=true`. Plugin authors drop a 
 First boot needs internet once:
 - `SourbyLoader`/`SourbyClip` fetches the externalized libraries into the paperclip cache.
 - `ViaVersion` + `ViaBackwards` jars auto-provisioned into `plugins/` (SHA-256-verified, https-only) **before** the plugin manager scans. Toggle: `[viaversion] auto-provision` in the global TOML (default `true`). Idempotent — never re-downloads verified jars, never overwrites user config.
+- ProtocolLib uses independent `[protocollib] auto-provision` (default `true`, RESTART_REQUIRED), official asset pin in `build-data/protocollib-pin.json`. Feature patch 0025 calls provisioning from the active SourbyClip-loaded server before Paper's plugin scan; `--plugins` selects the JAR/config folder. Clip offline mode forbids plugin downloads. A private native Intave build (even when its engine is disabled) or the native enable flag skips the external ProtocolLib plugin to retain packet API isolation; coexistence is not verified. See `docs/development/PROTOCOLLIB.md`.
 
 If the boot host has no internet, `SourbyLoader` prints the exact URLs + target paths. Offline-immutable; subsequent boots run fully offline.
 

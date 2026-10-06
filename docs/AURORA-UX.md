@@ -1,5 +1,9 @@
 # Aurora UX — SourbyCraft operator experience
 
+> **Role:** operator console and command surface. **Status:** Active; describes implemented UI only and makes no performance claim.
+>
+> Entry point: [docs/architecture/AURORA.md](architecture/AURORA.md).
+
 This document describes the terminal and command UI implemented on branch `26.2`.
 Build identity remains SourbyCraft `Build N` with its codename, backed by Aurora Engine.
 The UI does not establish performance improvement or feature qualification.
@@ -9,7 +13,8 @@ The UI does not establish performance improvement or feature qualification.
 The new banner separates release, Minecraft/channel, Java, JVM-visible processors and
 maximum heap into labelled rows. Long build identities are preserved.
 
-Aurora prints a `START` line before each of its 13 bootstrap service stages, followed by a
+Aurora prints a `START` line before each of its 14 bootstrap service stages (`TOTAL_STAGES` in
+`core/SourbyCraftBootstrap`; the sample below was captured when there were 13), followed by a
 16-cell progress gauge, stage result and monotonic elapsed time. Each completion is logged
 immediately; a blocked stage therefore leaves its name visible. Output is append-only, with
 no cursor movement, artificial waits or guessed time remaining.

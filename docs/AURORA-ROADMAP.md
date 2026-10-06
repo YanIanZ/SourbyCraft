@@ -1,5 +1,9 @@
 # Aurora Engine — Full Development Roadmap
 
+> **Role:** milestone roadmap M0–M28. **Status:** Plan, not a schedule. §3 *Current Baseline* is a stale snapshot (it lists the execution contract, compatibility layer and storage engine as not started); the verified current state is in the entry point's *Current state* table.
+>
+> Entry point: [docs/architecture/AURORA.md](architecture/AURORA.md).
+
 ## SourbyCraft 26.2
 
 **Branch:** `26.2`  
@@ -131,7 +135,7 @@ Create a reliable baseline of the current 26.2 engine before changing runtime ow
 
 - [x] capture current branch head — per release in `releases/26.2-build-47-aurora-nexus.md` (CI run/commit per gate)
 - [x] record Java/JVM version — Java 25 (Temurin) in AGENTS.md, CI and Dockerfile
-- [x] record upstream Canvas revision — `canvasRef` in `gradle.properties`; Paper ref via Canvas; `architecture/rebase-log.md`
+- [x] record upstream revision — Paper only, pinned by `paperRef` in `gradle.properties`; private tools pinned separately in `build-data/private-toolchain.lock.json`; former Canvas/Folia baseline owned locally since 2026-10-05; `architecture/rebase-log.md`
 - [x] record build number — `sourbyBuild` in `gradle.properties`; verified by `scripts/verify_build_identity.py` in CI
 - [x] record patch count — `architecture/dependency-ledger.md` §2
 - [x] record direct Canvas references — `dependency-ledger.md` §1, enforced by `UpstreamDependencyLedgerTest`

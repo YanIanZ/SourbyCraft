@@ -49,9 +49,9 @@ The architecture direction is:
         / NMS           compatibility       retained internals
 ```
 
-Canvas remains an upstream implementation source where required. It is **not** the SourbyCraft product architecture.
+Since 2026-10-05 Paper is the only upstream: the region-threading changes that came from Canvas/Folia are SourbyCraft-owned patches and sources. Canvas survives only as the plugin API package `io.canvasmc.canvas.*` and the `config/canvas-*.yml` file names. It is **not** the SourbyCraft product architecture.
 
-Read the architecture contract: **[Aurora Architecture](docs/architecture/AURORA.md)**.
+Start at **[Aurora Architecture](docs/architecture/AURORA.md)** — the entry point for every Aurora document: a document map, the current state verified against code, open contradictions between documents, and the architecture contract.
 
 ---
 
@@ -93,7 +93,7 @@ The `26.2` branch already includes or is actively refining:
 - patch/threading architecture audits
 - removal of unsafe cross-region scratch-buffer optimizations
 - direct Minecraft/NMS performance patches where ownership is proven safe
-- Aurora execution contracts, with the region backend confined to two adapter files
+- Aurora execution contracts, with the region backend confined to three pinned adapter files (`RegionOwnerHandoff`, `FoliaRegionBackend`, `awf/world/AuroraWorldsService`)
 - the Aurora region system: region identity, topology and lifecycle, backend-free
 - execution lanes with per-lane CPU attribution, surfaced by `/perf lanes`
 - an Aurora engine package inside the Minecraft tree, `dev.iyanz.aurora`
@@ -132,11 +132,12 @@ A single workload, machine, percentile or profiler sample must never be generali
 | Async pathfinding | **EXPERIMENTAL**, default-off |
 | Two-hour stability soak | **CERTIFIED evidence exists** |
 | Certified performance regression reference pair | **INCOMPLETE** |
-| Network throughput / storage backlog telemetry | **PARTIAL** — wire bytes/packets per direction (`/perf network`); no vanilla save-queue metrics |
+| Network throughput / storage backlog telemetry | **PARTIAL** — wire bytes/packets per direction (`/perf network`); per-world pending chunk-system I/O (`/perf storage`); no vanilla save-latency percentiles. Whether `/perf storage` satisfies the T10 "storage backlog" metric is undecided |
 | Aurora Resource Governor / unified execution fabric | **PARTIAL** — fixed-budget governed lanes (`/perf governor`); existing executors not yet governed |
-| Aurora Compatibility Bridge | **IMPLEMENTED, UNQUALIFIED** — `aurora.bridge.mode = off` by default |
-| Aurora World Fabric | **EXPERIMENTAL, OFF BY DEFAULT** — FILE backend under region storage for worlds in `aurora.awf.worlds` (`/perf awf`); unqualified, a crash loses writes since the last commit; no database backends |
+| Aurora Compatibility Bridge | **IMPLEMENTED, UNQUALIFIED** — `aurora.bridge.mode = off` by default. Unit-tested (bridge package 61/61, 2026-10-07) and booted with a synthetic legacy plugin in CI (runs 440–485); Vault/EssentialsX enabled through it on Sourby Demo, and one uncertified `plugins-10` bench (2026-10-06). The 2026-10-07 additions (`RegionTask`/`EntityTask` owner routing, per-plugin limits, body timing, LightingLuminol global-scheduler port) are uncommitted and have not run in CI. No player-workflow or soak qualification; a native port is the route to full compatibility |
+| Aurora World Fabric | **EXPERIMENTAL, OFF BY DEFAULT** — FILE and Redis backends under region storage for worlds in `aurora.awf.worlds` or managed by `/awf` (`/perf awf`); templates, copy-on-write instances, Slime import, `.awf` files; crash test 53/53 is MEASURED (2026-10-05); unqualified, a crash loses writes since the last commit; no MongoDB/MySQL backends |
 | Fully independent Aurora scheduler | **RESEARCH / PLANNED**, not current runtime |
+| Build 47 — Aurora Nexus release | **NOT READY for `release=true`** — `release=pre`; every mandatory gate is PARTIAL, OPEN or NOT RUN for the release-candidate tree ([audit 2026-10-07](docs/releases/26.2-build-47-aurora-nexus.md#release-readiness-audited-2026-10-07)) |
 
 ### Aurora engine, and where it lives
 
@@ -473,6 +474,8 @@ Historical/release branches may still exist for older Folia/Canvas work, but new
 ## Credits & license
 
 SourbyCraft uses and derives work from upstream Minecraft server projects including **[Paper](https://github.com/PaperMC/Paper)**, Folia-derived region-threading work and **[CanvasMC](https://github.com/CraftCanvasMC/Canvas)**. Upstream attribution, copyright notices and license obligations remain preserved.
+
+The plugin bridge includes an adaptation of **Luminol / [LightingLuminol](https://github.com/LuminolCustomArchive/LightingLuminol)** scheduler compatibility work by **Bacteriawa** and contributors. Original attribution and GPL v3 license texts are retained; [port scope, provenance and pending Claude testing](docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md) are documented separately.
 
 Cherry incorporates work inspired by/derived from projects including **[LeavesMC](https://github.com/LeavesMC)** and **[CraftCanvasMC/Horizon](https://github.com/CraftCanvasMC/Horizon)** where applicable. Profiling integration uses **[spark](https://spark.lucko.me)**.
 

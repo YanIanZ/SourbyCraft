@@ -1,5 +1,9 @@
 # Aurora execution contract extraction
 
+> **Role:** execution contract and measured region-backend coupling. **Status:** Active; the current statement of scheduler isolation (supersedes the Phase 2 notes in [AURORA-INDEPENDENT-ENGINE.md](AURORA-INDEPENDENT-ENGINE.md) §38). Adapter-file count corrected on 2026-10-07.
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 Phase 2 of [AURORA-INDEPENDENT-ENGINE.md](AURORA-INDEPENDENT-ENGINE.md).
 This document extracts the current dependencies and specifies the first migration slice.
 It does not introduce a scheduler, worker pool, or replacement backend.
@@ -45,8 +49,9 @@ gameplay mutated by a thread that does not own it. It is also why "world load on
 on another" is not something a region system can offer — a region thread runs the entire tick for
 what it owns, plugin handlers included.
 
-With this in place the backend is named in exactly two files, `RegionOwnerHandoff` and
-`FoliaRegionBackend`, and `perf` no longer names it at all. The independence tests pin the file
+With this in place the backend is named in exactly three files, `RegionOwnerHandoff`,
+`FoliaRegionBackend` and `awf/world/AuroraWorldsService` (AWF world lifecycle on the global tick,
+added later; corrected 2026-10-07 from "two"), and `perf` no longer names it at all. The independence tests pin the file
 set, not just the symbols, so replacing the backend stays an edit to a known list rather than a
 search.
 
@@ -62,7 +67,9 @@ coupling. Depending on a published contract is the goal. What matters is the int
 Counted by `scripts/independence_policy.py` and pinned by `scripts/test_independence_policy.py`,
 so this list is designed against a fixed set and new coupling has to be added deliberately.
 
-Five sites in SourbyCraft-owned code, across eighty files:
+Five sites in SourbyCraft-owned code, across eighty files, when this slice was written. Recount on
+2026-10-07 (`independence_policy.scheduler_sites`): 11 sites in three files — the two below plus
+`awf/world/AuroraWorldsService.java` (`RegionizedServer`).
 
 | Where | Symbol | Why |
 | --- | --- | --- |
@@ -80,7 +87,9 @@ Two further patches (`0002`, `0013`) *edit* `TickRegionScheduler.java` and `Tick
 rather than call into them — a thread-count default and the tick metrics hook. Those are engine
 modifications, not call-site coupling, and a contract does not remove them.
 
-Canvas coupling is two sites, both config reload bridges in `SourbyCraftConfig.java`.
+Canvas coupling was two sites, both config reload bridges in `SourbyCraftConfig.java`. On 2026-10-07
+it is five sites in two files: the two reloads, now in `config/upstream/CanvasConfigBridge.java`,
+and three world-lifecycle references in `awf/world/AuroraWorldsService.java`.
 
 ### What the count does and does not settle
 

@@ -1,5 +1,9 @@
 # Aurora Entity & AI Engine — Ownership
 
+> **Role:** T5 ownership document for Entity and AI. **Status:** Active; async-path overload wording corrected against code on 2026-10-07.
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 T5 deliverable for §11.1 (Entity) and §11.2 (AI) of `docs/AURORA-FULL-TRANSITION.md`.
 
 The T5 gate asks each domain for three things: **ownership**, **metrics**, and an
@@ -28,7 +32,7 @@ admitted, where it runs, who owns the data it touches, and what it costs.
 
 | Service | Owns | Where |
 |---|---|---|
-| `perf/AsyncPathProcessor` | Admission policy for off-thread pathfinding: pool sizing, bounded queue, inline degradation, refusal after shutdown | `dev.iyanz.sourbycraft.perf` |
+| `perf/AsyncPathProcessor` | Admission policy for off-thread pathfinding: pool sizing, bounded queue, refusal on saturation and after shutdown (inline only before the pool starts) | `dev.iyanz.sourbycraft.perf` |
 | `execution/ExecutionLane` + `LaneCpuSampler` | Which lane entity/AI work is attributed to, and its CPU cost | `dev.iyanz.sourbycraft.execution` |
 | `execution/OwnerHandoff` → `RegionOwnerHandoff` | Moving work to the thread that owns an entity | `dev.iyanz.sourbycraft.execution` |
 | `config/AuroraConfig.Entity` | The operator-facing switch (`aurora.entity.async-pathfinding`), its lifecycle class and its default | `dev.iyanz.sourbycraft.config` |
@@ -58,14 +62,18 @@ The gate asks for metrics, not for a promise of them.
 |---|---|---|
 | Solves admitted / outstanding | `AsyncPathProcessor.PathStats` | `/perf async` |
 | Solve time mean / slowest | `PathStats.meanMillis` / `slowestMillis` | `/perf async` |
-| Solves run on the caller (pool saturated) | `PathStats.inline` | `/perf async` |
+| Solves refused (queue saturated, pool stopped, or shutdown) | `PathStats.refused` | `/perf async` |
+| Legacy caller-run count (should stay zero) | `PathStats.inline` | `/perf async` |
 | Solves refused after shutdown | `PathStats.refused` | `/perf async` |
 | Per-lane CPU attribution | `LaneCpuSampler` / `LanePortions` | `/perf lanes` |
 | Region tick cost | `RegionTickMetrics` | `/tps`, `/perf` |
 
-The **inline** count is the one that judges this domain. An inline solve ran on a region thread
-*after* paying to build the snapshot, so it costs more than not offloading at all. A rising
-inline count means the pool is undersized and the feature is losing.
+The **refused** count is the one that judges this domain. Since the overload policy changed to
+`AbortPolicy`, a saturated pool refuses the solve and the mob keeps its current path; it no longer
+runs A* on the region thread after paying for the snapshot. A rising refused count means the pool
+is undersized for the workload. (Corrected 2026-10-07: this paragraph previously described the
+earlier caller-runs policy and the `inline` count, which `perf/AsyncPathProcessor` now keeps only
+for telemetry compatibility.)
 
 ---
 

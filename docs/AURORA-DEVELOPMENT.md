@@ -1,5 +1,9 @@
 # Aurora Development Continuation
 
+> **Role:** the continuation brief that opened the Aurora phase. **Status:** Historical — its immediate tasks (config model, key migration, typed snapshots) are done. Current state: [AURORA.md](architecture/AURORA.md) *Current state*; open work: [TODO.md](../TODO.md) and [AURORA-TASKS.md](AURORA-TASKS.md).
+>
+> Entry point: [docs/architecture/AURORA.md](architecture/AURORA.md).
+
 ## Purpose
 
 This document extends the existing `PRD.md`, `SPEC.md`, `PLAN.md`, `DEVELOPMENT.md`, and `docs/DEVELOPMENT-TASKS.md` without replacing their completed work.

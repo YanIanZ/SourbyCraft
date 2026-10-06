@@ -1,5 +1,9 @@
 # Where Aurora's engine code lives
 
+> **Role:** where engine code lives (`dev.iyanz.aurora.*` versus `dev.iyanz.sourbycraft.*`). **Status:** Active.
+>
+> Entry point: [docs/architecture/AURORA.md](AURORA.md).
+
 Aurora is the engine; SourbyCraft is what surrounds it. The console already says so — a line from
 `net.minecraft`, `io.papermc.paper` or `io.canvasmc` prints as **Aurora Engine**, a line from
 `dev.iyanz.sourbycraft` prints as **SourbyCraft**. The source tree now says so too.

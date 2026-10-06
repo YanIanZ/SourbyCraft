@@ -4,7 +4,7 @@ Roadmap items *"inventory all Sourby-owned executors"* and *"audit implicit comm
 (`docs/AURORA-TASKS.md`). Measured over `sourbycraft-server/src/main/java` on 2026-09-20.
 
 This exists because "the multithreading needs an overhaul" is a reasonable thing to suspect and
-a bad thing to act on unchecked. Here is every thread Aurora creates.
+a bad thing to act on unchecked. The historical service inventory below predates the current engine integration and does not count every thread in the running server.
 
 ## 1. Every Sourby-owned executor
 
@@ -21,7 +21,13 @@ a bad thing to act on unchecked. Here is every thread Aurora creates.
 Two shutdown hooks exist (`bootstrap/SourbyBootstrap`, `update/UpdateApplier`); neither is a
 running thread.
 
-**At rest Aurora owns two threads.** Everything else is opt-in or idle-capable.
+The historical two-thread statement referred to service samplers, not the running server's
+region pool or every engine/library worker. The current EDF selection is wired to the
+LeafPile-derived `engine/threadedregions/scheduler/AuroraEdfScheduler` (feature 0028,
+source acceptance pending). Its thread count is the existing boot-computed `initialThreads`;
+it replaces the original EDF pool and adds no second executor or CPU capacity. A runner has
+one assigned task; remaining handles queue in the original uncapped priority queue.
+See [EDF scope/acceptance](../development/AURORA-EDF-UPGRADE.md).
 
 ## 2. Implicit common-pool usage: none
 
