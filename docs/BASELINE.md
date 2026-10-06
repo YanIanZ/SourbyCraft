@@ -149,6 +149,35 @@ floor for bridged-plugin cost, not a representative one. Evidence: `bench.json` 
 median 5.1 ms / p99 10.6 ms, so the plugin set did not move the median visibly at this load, which is
 a comparison between two uncertified runs and nothing more.
 
+### A two-hour `plugins-10` soak on Sourby Demo (2026-10-07)
+
+Run with `bench_panel.py --workload plugins-10 --duration 7200 --sample-seconds 60` on the
+committed candidate tree (`beb7f40e`, jar 40,685,016 B), 10 real-protocol clients roaming, the
+demo's plugin set (EssentialsX and Vault bridged, SuperiorSkyblock2 native, EconomyShopGUI, Via*),
+`chunk-system.worker-threads: 6`. **Uncertified**, and **cut short at ~100 of 120 minutes**: a
+first attempt lost every client when the laptop slept (`pmset` `sleep 1`); the second, under
+`caffeinate`, lost them to a local network drop at 95 min and the new client-loss guard restored
+the server. 100 console samples with 10 clients:
+
+| Metric (worst region, console-sampled) | median | min | max |
+| --- | ---: | ---: | ---: |
+| TPS | 20.0 | 13.77 | 20.0 |
+| average MSPT | 10.0 ms | 4.02 | 34.0 |
+| p99 MSPT | 21.7 ms | 8.88 | 184.6 |
+| active regions | 6 | 3 | 10 |
+| process CPU | 18.3 % | 4.8 | 78.7 |
+
+Two samples fell below TPS 18 (minute 12: 14.86; minute 72: 13.77). Active regions went
+10 → 8 → 7 → 9 → 6 → 6 → **3** → 5 → 4 → 4 by ten-minute marks: the roaming clients connected
+the forceloaded sites and the regions merged (121 retained region generations). The median worst
+MSPT doubled from 7.5 ms in the first hour to 14.6 ms after the merge while the region lane used
+0.58 of 8 cores — one region, one thread, exactly as [region parallelism](architecture/region-parallelism.md)
+§2 describes, now observed on a long run. No error, exception or bridge violation in the log; no
+client-side rejection beyond the known `moved wrongly` of one flying client. Heap was not
+sampled as a series here, so this says nothing about leaks; the certified 2 h soak of 2026-09-15
+remains the memory reference. Evidence: `build/baselines/demo-soak-plugins-10-20261007/`
+(local, ignored).
+
 ### The client gap
 
 Entity activation range is computed around connected players. With zero players

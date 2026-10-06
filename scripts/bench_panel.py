@@ -282,6 +282,7 @@ def main():
             current = sample()
             current["clients_in_play"] = swarm.report()["in_play"]
             samples.append(current)
+            record["samples"] = samples      # kept even when the run aborts below
             # Without clients the entity path is inactive and the samples measure nothing; stop and
             # restore instead of holding the server in bench mode for the rest of the window.
             clientless = clientless + 1 if clients and not current["clients_in_play"] else 0
@@ -316,6 +317,11 @@ def main():
         restored = all(panel.read_file(path) == text for path, text in originals.items())
         running = panel.start()
         record["restored"] = {"properties_identical": restored, "running": running}
+        if "samples" in record and "summary_metrics" not in record:
+            record["summary_metrics"] = {key: summarise(record["samples"], key) for key in (
+                "worst_region_tps", "worst_avg_mspt", "p95_mspt", "p99_mspt", "recent_max_mspt",
+                "active_regions", "process_cpu_pct", "system_cpu_pct", "clients_in_play")}
+            record["aborted"] = True
         record["finished"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         (output / "bench.json").write_text(json.dumps(record, indent=2) + "\n")
         print(f"restored: {record['restored']}  report: {output / 'bench.json'}", flush=True)
