@@ -71,6 +71,11 @@ CI hijau terbaru: run 38445246566 pada `d97fe247` (2026-10-14). Tree kandidat ri
 - [ ] Alur pemain nyata dengan plugin bridged (EssentialsX/Vault) di Sourby Demo.
 
 ### Audit sistem 2026-10-14
+**Lanjutkan dari sini:** [`docs/development/HANDOFF-2026-10-14.md`](docs/development/HANDOFF-2026-10-14.md) —
+status per gelombang. Gelombang AWF sudah di-push (`ebb9c1fb`: AWF-1..6, 8..10). Gelombang engine/bridge
+(ENG-*) ada di working tree lokal, BELUM dites dan BELUM di-commit (agent terhenti 2026-10-14);
+gelombang security dan observability belum dimulai.
+
 Laporan: [`docs/audits/2026-10-14-system-audit.md`](docs/audits/2026-10-14-system-audit.md)
 (read-only, `d97fe247`; nomor baris di laporan per commit itu). Temuan HIGH di sini; MEDIUM di P1,
 LOW di P2, proposal di P3. Keputusan owner 2026-10-14: SEC-1 bangun ulang guard; SEC-2/3 updater

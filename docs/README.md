@@ -81,6 +81,7 @@ Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](d
 [testing-legacy-plugins.md](guides/testing-legacy-plugins.md)
 
 ### Audits (`audits/`)
+Handoff of the audit fix work: [development/HANDOFF-2026-10-14.md](development/HANDOFF-2026-10-14.md).
 [2026-10-14 system audit](audits/2026-10-14-system-audit.md) (AWF, region engine/bridge,
 boot/distribution/security, observability/tooling: findings AWF-/ENG-/SEC-/OBS-n with proposed
 patches, plus proposals; a dated snapshot — fix status is tracked in [TODO.md](../TODO.md)
