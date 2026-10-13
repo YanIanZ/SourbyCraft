@@ -2677,7 +2677,7 @@ uncommitted and has never run in CI. The EDF patch (parked 0028) is HELD (B84).
 | unit/integration | PARTIAL — CI for committed head; RC tree local: Gradle 10,152/10,152 (2026-10-06, after 0007), bridge 61/61, AWF 151 run/0 failed, Python 327/327 (2026-10-07) |
 | patch regeneration | NOT RUN — renumbering 0024/0025 ↔ 0026/0027 predicted; 8 feature patches untracked |
 | plugin compatibility | PARTIAL — synthetic CI fixture; Vault/EssentialsX on Sourby Demo; uncertified `plugins-10`; new fixture markers never run |
-| region ownership | OPEN — `/say` and console-after-`Done` NPEs reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`, B88; local boot only, no CI yet); 0025 (watchdog) untested |
+| region ownership | OPEN — `/say` and console-after-`Done` NPEs reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`, B88; local boot + CI run 38427215968 (head `4275912f`, 2026-10-13)); 0025 (watchdog) untested |
 | world load/unload/save | PARTIAL — persistence 104/104 local, 20/20 demo (2026-10-05); AWF CI boots on committed head; B80/B85 open |
 | crash recovery | PARTIAL — 49/49 region, 53/53 AWF (2026-10-05); not rerun on RC tree; game-time XFAIL |
 | cache corruption | PARTIAL — unit tests only |

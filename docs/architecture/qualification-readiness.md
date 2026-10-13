@@ -16,7 +16,7 @@ passes.
 |---|---|---|
 | representative benchmark exists | **partial** | 9 of 11 workloads (§2). Updated 2026-10-07: the plugin-heavy `plugins-10` is defined (`build-data/representative-plugins.json`; EssentialsX and Vault bridged, the SuperiorSkyblock2 Folia port native, spark) and was **measured** once, uncertified, on Sourby Demo (2026-10-06; `docs/BASELINE.md` *The plugin workload*). Its fidelity: plugins loaded, not driven by player commands. AI stress still missing |
 | no unexplained >3% regression in affected workloads | **blocked** | needs a certified comparable before/after reference pair; a certified soak is not a regression pair. Still blocked on 2026-10-07: the newer observations are **measured**, not certified — Demo `players-10` (2026-10-05), Demo `plugins-10` (2026-10-06), and one exploring player's chunk delivery with 2 vs 6 workers (Demo, 2026-10-06: full view in 18–23 s vs 11–17 s; `chunk-workers.md`). None is a reference pair, and the chunk-worker result answers a different workload from the swarm A/B |
-| no known region ownership bug | **fixed locally, CI pending** | §5. Both sightings (`/say`, console command ~2 s after `Done` on an AWF reboot) were one startup bug, reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`); not yet in a CI run. Not in the current build: the held EDF backend (parked EDF patch, `minecraft-patches/parked/`, 2026-10-07) whose ownership acceptance is pending |
+| no known region ownership bug | **none open** | §5. Both sightings (`/say`, console command ~2 s after `Done` on an AWF reboot) were one startup bug, reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`); not yet in a CI run. Not in the current build: the held EDF backend (parked EDF patch, `minecraft-patches/parked/`, 2026-10-07) whose ownership acceptance is pending |
 | no known persistence bug | **one known limitation** | Chunk, entity and player data: no bug found — 104/104 local and 20/20 on Sourby Demo (2026-10-05, post-migration build), crash 49/49 region files and 53/53 AWF (§4). Known XFAIL: world game time/spawn metadata (`PaperLevelOverrides`) is not written by autosave, so a crash rewinds game time to the last boot (TODO P0). No run on the Build 47 release-candidate tree of 2026-10-07 |
 | no unbounded queue | **met** | `UnboundedQueueAuditTest`, 3 tests |
 | heap/threads/tasks stabilize after load | **partial** | certified 2h 10-player soak (2026-09-15, commit `1c883a55`, before Build 47) shows stable RSS, heap-after-GC and tick duration; thread/task stabilization still needs explicit gate evidence; no soak of the Build 47 tree or with plugins |
@@ -101,7 +101,7 @@ Two limits are stated rather than hidden:
 
 None open in source. The one recorded here was reproduced and fixed on 2026-10-13 (Minecraft feature
 patch 0028 `rebind-early-console-command-sources`, numbered 0029 before the same-day renumbering;
-SPEC B88). Local boot evidence only; no CI run has included it yet.
+SPEC B88). Verified locally and in CI run 38427215968 (head `4275912f`, 2026-10-13), whose boot step runs the early console probe.
 
 `/say` from the console threw, once, during a config reload on the deployment server, and a console
 command threw the same way ~2 s after `Done` on an AWF reboot:
