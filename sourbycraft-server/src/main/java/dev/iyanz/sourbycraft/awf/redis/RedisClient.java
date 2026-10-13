@@ -36,7 +36,7 @@ import javax.net.ssl.SSLSocketFactory;
  * progress (a frozen Redis stops reading once the TCP buffers are full, and a large commit would
  * otherwise block forever, holding the world's commit lock).</p>
  */
-public final class RedisClient implements AutoCloseable {
+public class RedisClient implements AutoCloseable {
 
     /** An error reply, such as {@code ERR unknown command}. */
     public static final class RedisError extends IOException {

@@ -397,4 +397,44 @@ class SlimeImporterTest {
         assertThrows(IOException.class, () -> SlimeImporter.importInto(truncated, world, -4));
         assertFalse(Files.exists(world));
     }
+
+    /** A v13 header whose chunk blob claims {@code length} decompressed bytes, with nothing after it. */
+    private static byte[] header(final int compressedLength, final int length) throws IOException {
+        final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        final DataOutputStream out = new DataOutputStream(bytes);
+        out.write(new byte[] {(byte) 0xB1, 0x0B});
+        out.writeByte(0x0D);
+        out.writeInt(DATA_VERSION);
+        out.writeByte(0);
+        out.writeInt(compressedLength);
+        out.writeInt(length);
+        return bytes.toByteArray();
+    }
+
+    @Test
+    void aBlobOverTheLimitIsRefusedBeforeAllocation() throws Exception {
+        final String previous = System.getProperty(SlimeImporter.MAX_BYTES_PROPERTY);
+        try {
+            assertEquals(256L * 1024 * 1024, SlimeImporter.DEFAULT_MAX_BYTES);
+            // A header claiming 2 GiB decompressed, or a 2 GiB compressed blob: refused at once,
+            // without the 2 GiB allocation the old 1 GiB-or-less check still allowed.
+            final IOException huge = assertThrows(IOException.class,
+                () -> SlimeImporter.read(header(16, Integer.MAX_VALUE)));
+            assertTrue(huge.getMessage().contains("limit"), huge.getMessage());
+            assertThrows(IOException.class, () -> SlimeImporter.read(header(Integer.MAX_VALUE, 16)));
+            assertThrows(IOException.class, () -> SlimeImporter.read(header(1 << 20, 16)),
+                "a compressed length longer than the file is refused before allocating it");
+
+            System.setProperty(SlimeImporter.MAX_BYTES_PROPERTY, "64");
+            final byte[] good = file(0);
+            assertThrows(IOException.class, () -> SlimeImporter.convert(good, -4), "a lowered limit applies");
+            final Path onDisk = this.dir.resolve("big.slime");
+            Files.write(onDisk, new byte[65]);
+            assertThrows(IOException.class, () -> SlimeImporter.readFile(onDisk), "a file over the limit is not read");
+        } finally {
+            if (previous == null) System.clearProperty(SlimeImporter.MAX_BYTES_PROPERTY);
+            else System.setProperty(SlimeImporter.MAX_BYTES_PROPERTY, previous);
+        }
+        assertEquals(2, SlimeImporter.convert(file(0), -4).region().size(), "the default limit reads normal files");
+    }
 }

@@ -48,6 +48,14 @@ public final class PerformanceCollector implements AutoCloseable {
     private final LongSupplier epochClock;
     private final DoubleSupplier targetTpsSource;
     private final BiConsumer<String, Throwable> errorLogger;
+    /**
+     * Once-a-second storage upkeep: starts due Aurora World Fabric commits and watches world
+     * operations. Runs on every pass before metrics are collected, so a late, slow or failing
+     * collection under load never stops periodic AWF commits.
+     */
+    private final Runnable maintenance;
+    private long lastMaintenanceErrorNanos;
+    private boolean loggedMaintenanceError;
     private final WindowAccumulator[] accumulators = new WindowAccumulator[WINDOWS.length];
     private final long[] pooledHistograms = new long[WINDOWS.length * HISTOGRAM_BINS];
     private final Thread worker;
@@ -97,6 +105,17 @@ public final class PerformanceCollector implements AutoCloseable {
                          final LongSupplier nanoClock, final LongSupplier epochClock,
                          final DoubleSupplier targetTpsSource,
                          final BiConsumer<String, Throwable> errorLogger) {
+        this(provider, generations, globalSource, runtimeSource, nanoClock, epochClock, targetTpsSource, errorLogger,
+            PerformanceCollector::maintainStorage);
+    }
+
+    PerformanceCollector(final SourbyMetricsProvider provider, final GenerationSource generations,
+                         final GlobalSource globalSource, final Supplier<ImmutableRuntimeMetrics> runtimeSource,
+                         final LongSupplier nanoClock, final LongSupplier epochClock,
+                         final DoubleSupplier targetTpsSource,
+                         final BiConsumer<String, Throwable> errorLogger,
+                         final Runnable maintenance) {
+        this.maintenance = Objects.requireNonNull(maintenance, "maintenance");
         this.provider = Objects.requireNonNull(provider, "provider");
         this.generations = Objects.requireNonNull(generations, "generations");
         this.globalSource = Objects.requireNonNull(globalSource, "globalSource");
@@ -137,9 +156,30 @@ public final class PerformanceCollector implements AutoCloseable {
         return this.worker;
     }
 
+    /** The default {@link #maintenance}: each step on its own, so one failing never skips the other. */
+    static void maintainStorage() {
+        try {
+            // Starts due Aurora World Fabric commits on the storage lane; never blocks.
+            dev.iyanz.sourbycraft.awf.AwfEngine.maintainAll();
+        } finally {
+            dev.iyanz.sourbycraft.awf.world.AuroraWorldsRuntime.watchOperations();
+        }
+    }
+
     void collect(final long nowNanos, final long nowEpochMillis, final long latenessNanos) {
         if (this.closed) {
             return;
+        }
+        // First and outside the collection's own try: the collection below returns early when it
+        // ran late or slow, which is exactly when the server is under load and commits matter.
+        try {
+            this.maintenance.run();
+        } catch (final Throwable failure) {
+            if (!this.loggedMaintenanceError || nowNanos - this.lastMaintenanceErrorNanos >= ERROR_LOG_INTERVAL_NANOS) {
+                this.loggedMaintenanceError = true;
+                this.lastMaintenanceErrorNanos = nowNanos;
+                this.errorLogger.accept("Storage maintenance (AWF commits) failed this second; retrying next second", failure);
+            }
         }
         final ImmutablePerformanceSnapshot previous = (ImmutablePerformanceSnapshot)this.provider.snapshot();
         final long scanStarted = this.nanoClock.getAsLong();
@@ -208,8 +248,6 @@ public final class PerformanceCollector implements AutoCloseable {
                 next.runtime().heapMaxBytes()));
             this.slowestRegion = this.slowestCandidate;
             NetworkCounters.GLOBAL.sample(nowNanos);
-            // Starts due Aurora World Fabric commits on the storage lane; never blocks.
-            dev.iyanz.sourbycraft.awf.AwfEngine.maintainAll();
             final LaneCpuSampler.LaneLoads reading = this.lanes.sample();
             this.lanePortions = LanePortions.of(reading, runtime.availableProcessors());
             LaneLoadEvent.record(reading);

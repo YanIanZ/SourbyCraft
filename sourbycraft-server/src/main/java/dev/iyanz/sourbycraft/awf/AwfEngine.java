@@ -194,11 +194,7 @@ public final class AwfEngine {
         else engine.bounds.remove(worldName);
         for (final AwfRegionStorage storage : engine.storages.values()) {
             final Path folder = Path.of(storage.name());
-            boolean mine = false;
-            for (final Path element : folder) {
-                if (element.toString().equals(worldName)) mine = true;
-            }
-            if (!mine) continue;
+            if (!AwfRegionStorage.worldNames(folder).contains(worldName)) continue;
             storage.pruneKind(pruneEmpty ? folder.getFileName().toString() : null);
             storage.saveBounds(saveBounds);
         }
@@ -217,7 +213,9 @@ public final class AwfEngine {
 
     /** The storage id of one of a template's stores, for example {@code awf-templates/lobby/region}. */
     static String templateStorageId(final String template, final String storageFolder) {
-        return storageId(TEMPLATES.resolve(template).resolve(storageFolder));
+        // A template name read from the registry never resolves outside awf-templates/.
+        return storageId(dev.iyanz.sourbycraft.awf.world.AuroraTemplates.resolveInside(TEMPLATES, template)
+            .resolve(storageFolder));
     }
 
     /** Forgets a template's opened stores. Called after the template is deleted. */
@@ -272,11 +270,30 @@ public final class AwfEngine {
         }
     }
 
-    /** Drops stores {@link #prepare} opened for a world that was then not created. */
+    /**
+     * Closes and drops stores {@link #prepare} opened for a world that was then not created.
+     * Closing releases what the store holds on its backend (Redis: the world's lease), which a
+     * dropped store would otherwise keep until the server stops, refusing the world's deletion and
+     * every other server's open of it in the meantime.
+     */
     public static void unprepare(final Path dimensionFolder) {
-        final AwfEngine engine = global();
+        global().unprepareStores(dimensionFolder);
+    }
+
+    void unprepareStores(final Path dimensionFolder) {
         for (final String folder : STORAGE_FOLDERS) {
-            engine.prepared.remove(storageId(dimensionFolder.resolve(folder)));
+            final String id = storageId(dimensionFolder.resolve(folder));
+            closeQuietly(this.prepared.remove(id), id);
+        }
+    }
+
+    /** Closes a store this engine opened but will not use, logging rather than throwing. */
+    private static void closeQuietly(final AwfStore store, final String id) {
+        if (store == null) return;
+        try {
+            store.close();
+        } catch (final IOException | RuntimeException failed) {
+            SourbyLogger.warn("Aurora World Fabric could not release unused store " + id + ": " + failed.getMessage());
         }
     }
 
@@ -378,6 +395,11 @@ public final class AwfEngine {
                 + " than the chunks it holds");
         }
         final String name = regionFolder.toAbsolutePath().normalize().toString();
+        // Checked before a store is opened: a second open of a store this server already holds
+        // would take its Redis lease over from the open storage, then hand it back by closing.
+        if (this.storages.containsKey(name)) {
+            throw new IOException("AWF storage " + name + " is already open");
+        }
         final String template = managedWorld ? templateFor(regionFolder) : null;
         final ChunkSource base = template == null ? null
             : templateBase(template, regionFolder.getFileName().toString());
@@ -385,37 +407,43 @@ public final class AwfEngine {
         final AwfStore prepared = this.prepared.remove(id);
         final AwfStore store = prepared != null ? prepared
             : backend.open(id, role, this.settings.retainedGenerations());
-        final AwfWorld world = new AwfWorld(name, role, base, store, this.settings.residentChunks());
-        final AwfRegionStorage storage = new AwfRegionStorage(name, world, this.settings, this.storageLane,
-            this.nanoClock.getAsLong(), () -> this.storages.remove(name));
-        if (managedWorld && prunes(regionFolder)) storage.pruneEmpty(regionFolder.getFileName().toString());
-        if (managedWorld) storage.saveBounds(boundsFor(regionFolder));
-        if (this.storages.putIfAbsent(name, storage) != null) {
-            throw new IOException("AWF storage " + name + " is already open");
+        try {
+            final AwfWorld world = new AwfWorld(name, role, base, store, this.settings.residentChunks());
+            final AwfRegionStorage storage = new AwfRegionStorage(name, world, this.settings, this.storageLane,
+                this.nanoClock.getAsLong(), () -> this.storages.remove(name));
+            if (managedWorld && prunes(regionFolder)) storage.pruneEmpty(regionFolder.getFileName().toString());
+            if (managedWorld) storage.saveBounds(boundsFor(regionFolder));
+            if (this.storages.putIfAbsent(name, storage) != null) {
+                throw new IOException("AWF storage " + name + " is already open");
+            }
+            return storage;
+        } catch (final IOException | RuntimeException failed) {
+            // Nothing will ever close a store whose storage was not registered.
+            closeQuietly(store, id);
+            throw failed;
         }
-        return storage;
     }
 
     private dev.iyanz.sourbycraft.api.world.WorldProperties.Bounds boundsFor(final Path regionFolder) {
-        for (final Path element : regionFolder.toAbsolutePath().normalize()) {
-            final var found = this.bounds.get(element.toString());
-            if (found != null && this.managed.contains(element.toString())) return found;
+        for (final String name : AwfRegionStorage.worldNames(regionFolder)) {
+            final var found = this.bounds.get(name);
+            if (found != null && this.managed.contains(name)) return found;
         }
         return null;
     }
 
     private boolean prunes(final Path regionFolder) {
-        for (final Path element : regionFolder.toAbsolutePath().normalize()) {
-            if (this.pruning.contains(element.toString()) && this.managed.contains(element.toString())) return true;
+        for (final String name : AwfRegionStorage.worldNames(regionFolder)) {
+            if (this.pruning.contains(name) && this.managed.contains(name)) return true;
         }
         return false;
     }
 
     /** The template of the managed instance world this folder belongs to, or {@code null}. */
     private String templateFor(final Path regionFolder) {
-        for (final Path element : regionFolder.toAbsolutePath().normalize()) {
-            final String template = this.templateOf.get(element.toString());
-            if (template != null && this.managed.contains(element.toString())) return template;
+        for (final String name : AwfRegionStorage.worldNames(regionFolder)) {
+            final String template = this.templateOf.get(name);
+            if (template != null && this.managed.contains(name)) return template;
         }
         return null;
     }
@@ -445,17 +473,21 @@ public final class AwfEngine {
      * check the result before removing it.</p>
      */
     ExportResult export(final AwfBackend backend, final String id, final RegionSink sink) throws IOException {
-        final AwfStore store = backend.open(id, WorldRole.READ_ONLY, this.settings.retainedGenerations());
         int chunks = 0;
-        for (final ChunkKey key : store.keys()) {
-            final byte[] bytes = store.read(key).orElseThrow(() -> new IOException("index lists " + key + " but it has no bytes"));
-            sink.write(key.x(), key.z(), bytes);
-            chunks++;
-        }
         int deletions = 0;
-        for (final ChunkKey key : store.deleted()) {
-            sink.write(key.x(), key.z(), null);
-            deletions++;
+        final AwfStore store = backend.open(id, WorldRole.READ_ONLY, this.settings.retainedGenerations());
+        try {
+            for (final ChunkKey key : store.keys()) {
+                final byte[] bytes = store.read(key).orElseThrow(() -> new IOException("index lists " + key + " but it has no bytes"));
+                sink.write(key.x(), key.z(), bytes);
+                chunks++;
+            }
+            for (final ChunkKey key : store.deleted()) {
+                sink.write(key.x(), key.z(), null);
+                deletions++;
+            }
+        } finally {
+            store.close();
         }
         sink.flush();
         return new ExportResult(chunks, deletions, backend.retire(id));

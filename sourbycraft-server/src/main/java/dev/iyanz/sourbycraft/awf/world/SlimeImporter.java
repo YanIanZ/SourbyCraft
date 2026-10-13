@@ -58,8 +58,47 @@ public final class SlimeImporter {
     private static final int FLAG_POI = 1;
     private static final int FLAG_BLOCK_TICKS = 2;
     private static final int FLAG_FLUID_TICKS = 4;
-    /** Uncompressed blob sizes above this are refused rather than allocated. */
-    private static final int MAX_BLOB = 1 << 30;
+    /**
+     * JVM property: the largest Slime file, decompressed blob or NBT value an import accepts, in
+     * bytes (default {@value #DEFAULT_MAX_BYTES}, 256 MiB). Read at each import, so it applies to
+     * the next one. Larger sizes are refused before anything of that size is allocated: a crafted
+     * header must not be able to exhaust the heap.
+     */
+    public static final String MAX_BYTES_PROPERTY = "sourbycraft.awf.slime.max-bytes";
+    static final long DEFAULT_MAX_BYTES = 256L * 1024 * 1024;
+
+    /** The configured limit, clamped to what one Java array can hold. */
+    static int maxBytes() {
+        final long configured = Long.getLong(MAX_BYTES_PROPERTY, DEFAULT_MAX_BYTES);
+        return (int) Math.max(1L, Math.min(configured, Integer.MAX_VALUE - 8L));
+    }
+
+    /**
+     * Reads a whole Slime file, refusing one over {@link #maxBytes()} before reading it.
+     */
+    public static byte[] readFile(final Path file) throws IOException {
+        final long size = java.nio.file.Files.size(file);
+        final int limit = maxBytes();
+        if (size > limit) {
+            throw new IOException("Slime file " + file.getFileName() + " is " + size + " bytes, over the " + limit
+                + "-byte limit (-D" + MAX_BYTES_PROPERTY + ")");
+        }
+        return java.nio.file.Files.readAllBytes(file);
+    }
+
+    /** An NBT accounter bounded by the limit, in place of an unlimited one. */
+    private static NbtAccounter accounter() {
+        return NbtAccounter.create(maxBytes());
+    }
+
+    /** Refuses a negative length or one over the limit, before anything of that size is allocated. */
+    private static void checkLength(final String what, final long length) throws IOException {
+        final int limit = maxBytes();
+        if (length < 0 || length > limit) {
+            throw new IOException(what + " of " + length + " bytes is not valid or over the " + limit
+                + "-byte limit (-D" + MAX_BYTES_PROPERTY + ")");
+        }
+    }
 
     /** One chunk as the file holds it. */
     record SlimeChunk(int x, int z, List<Section> sections, CompoundTag heightmaps, CompoundTag poi,
@@ -273,7 +312,7 @@ public final class SlimeImporter {
     private static ListTag entities(final DataInputStream in) throws IOException {
         final byte[] bytes = lengthPrefixed(in);
         if (bytes == null) return null;
-        final Tag tag = NbtIo.readUnnamedTag(new DataInputStream(new ByteArrayInputStream(bytes)), NbtAccounter.unlimitedHeap());
+        final Tag tag = nbt(() -> NbtIo.readUnnamedTag(new DataInputStream(new ByteArrayInputStream(bytes)), accounter()));
         if (tag instanceof ListTag list) return list;
         if (tag instanceof CompoundTag compound) return compound.getList("entities").orElse(null);
         return null;
@@ -286,8 +325,10 @@ public final class SlimeImporter {
 
     private static byte[] blob(final DataInputStream in, final int compressedLength) throws IOException {
         final int length = in.readInt();
-        if (compressedLength < 0 || length < 0 || length > MAX_BLOB) {
-            throw new IOException("blob lengths " + compressedLength + "/" + length + " are not valid");
+        checkLength("compressed blob", compressedLength);
+        checkLength("blob", length);
+        if (compressedLength > in.available()) {
+            throw new IOException("compressed blob of " + compressedLength + " bytes is longer than the file");
         }
         final byte[] compressed = new byte[compressedLength];
         in.readFully(compressed);
@@ -314,9 +355,9 @@ public final class SlimeImporter {
         final byte[] extra = blob(in, compressedLength);
         if (extra.length == 0) return new CompoundTag();
         if (extra.length >= 2 && (extra[0] & 0xFF) == 0x1F && (extra[1] & 0xFF) == 0x8B) {
-            return NbtIo.readCompressed(new ByteArrayInputStream(extra), NbtAccounter.unlimitedHeap());
+            return nbt(() -> NbtIo.readCompressed(new ByteArrayInputStream(extra), accounter()));
         }
-        return NbtIo.read(new DataInputStream(new ByteArrayInputStream(extra)));
+        return nbt(() -> NbtIo.read(new DataInputStream(new ByteArrayInputStream(extra)), accounter()));
     }
 
     /**
@@ -337,9 +378,8 @@ public final class SlimeImporter {
             if (version == V13) in.readByte();             // flags
             final int compressedLength = in.readInt();
             final int length = in.readInt();
-            if (compressedLength < 0 || length < 0 || length > MAX_BLOB) {
-                throw new IOException("blob lengths " + compressedLength + "/" + length + " are not valid");
-            }
+            checkLength("compressed blob", compressedLength);
+            checkLength("blob", length);
             in.skipNBytes(compressedLength);
             return worldData(worldExtra(in));
         } catch (final java.io.EOFException truncated) {
@@ -442,13 +482,28 @@ public final class SlimeImporter {
 
     private static CompoundTag compound(final DataInputStream in) throws IOException {
         final byte[] bytes = lengthPrefixed(in);
-        return bytes == null ? null : NbtIo.read(new DataInputStream(new ByteArrayInputStream(bytes)));
+        return bytes == null ? null : nbt(() -> NbtIo.read(new DataInputStream(new ByteArrayInputStream(bytes)), accounter()));
+    }
+
+    private interface NbtRead<T> {
+        T read() throws IOException;
+    }
+
+    /** Runs an NBT read, reporting a value over the accounter's limit as the I/O error it is. */
+    private static <T> T nbt(final NbtRead<T> read) throws IOException {
+        try {
+            return read.read();
+        } catch (final net.minecraft.nbt.NbtAccounterException overLimit) {
+            throw new IOException("NBT value over the " + maxBytes() + "-byte limit (-D" + MAX_BYTES_PROPERTY + "): "
+                + overLimit.getMessage(), overLimit);
+        }
     }
 
     private static byte[] lengthPrefixed(final DataInputStream in) throws IOException {
         final int length = in.readInt();
         if (length <= 0) return null;
-        if (length > MAX_BLOB) throw new IOException("NBT value of " + length + " bytes");
+        checkLength("NBT value", length);
+        if (length > in.available()) throw new IOException("NBT value of " + length + " bytes is longer than its blob");
         final byte[] bytes = new byte[length];
         in.readFully(bytes);
         return bytes;

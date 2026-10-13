@@ -130,4 +130,27 @@ class AuroraTemplatesTest {
             assertEquals(0, left.count(), "no hidden partial or deleting folder remains");
         }
     }
+
+    @Test
+    void aNameWithParentReferencesIsRefused() throws IOException {
+        final Path root = this.dir.resolve("awf-templates");
+        final AuroraTemplates templates = new AuroraTemplates(root);
+        // A real folder outside the templates root, with what a template folder holds.
+        final Path victim = this.dir.resolve("victim");
+        Files.createDirectories(victim);
+        Files.writeString(victim.resolve(AuroraTemplates.METADATA), "{}");
+        Files.createDirectories(root);
+
+        for (final String name : new String[] {"../victim", "..", "a/../../victim", "/tmp", "Victim", "x/y", ""}) {
+            assertFalse(templates.exists(name), name);
+            assertThrows(IllegalArgumentException.class, () -> templates.read(name), name);
+            assertThrows(IllegalArgumentException.class, () -> templates.delete(name), name);
+            assertThrows(IllegalArgumentException.class,
+                () -> templates.save(this.dir.resolve("world"), world("w", null), name), name);
+        }
+        assertTrue(Files.isRegularFile(victim.resolve(AuroraTemplates.METADATA)), "nothing outside the root was deleted");
+        assertThrows(IllegalArgumentException.class, () -> AuroraTemplates.resolveInside(root, "../victim"));
+        assertThrows(IllegalArgumentException.class, () -> AuroraWorldIo.openTemplate(root, "../victim", "region"));
+        assertEquals(root.resolve("lobby"), AuroraTemplates.resolveInside(root, "lobby"));
+    }
 }

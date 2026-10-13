@@ -4,8 +4,11 @@ package dev.iyanz.sourbycraft.awf;
  * The roles an Aurora World Fabric world can have, from
  * {@code docs/architecture/aurora-world-fabric.md}.
  *
- * <p>Only the vocabulary and its write rules exist so far; no world is created, loaded or
- * registered with a role yet.</p>
+ * <p>In use: {@link #VANILLA} for every world storage AWF opens for writing, {@link #INSTANCE}
+ * for a managed world that is a copy-on-write instance of a template, {@link #TEMPLATE} for the
+ * shared read-only template stores, and {@link #READ_ONLY} for stores opened only to be read
+ * (export, template save, {@code .awf} export). {@link #VIRTUAL} and {@link #TEMPORARY} are
+ * vocabulary only: nothing opens a store with them yet.</p>
  */
 public enum WorldRole {
     /** An ordinary vanilla-format world. */

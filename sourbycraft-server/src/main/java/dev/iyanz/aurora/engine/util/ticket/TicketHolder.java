@@ -27,17 +27,20 @@ public class TicketHolder<T extends Record> {
     }
 
     /**
-     * Fetches and clears the current ticket
+     * Fetches and clears the current ticket, atomically with respect to {@link #propagate}: a
+     * ticket propagated concurrently is either returned here or left in the holder, never cleared
+     * unseen (which used to lose a save ticket, so its {@code save-all} or world save never
+     * finished).
      *
      * @return the active ticket
      */
     @Nullable
     public T pop() {
-        final T ticket = this.ticket;
         synchronized (this) {
+            final T ticket = this.ticket;
             this.ticket = null;
+            return ticket;
         }
-        return ticket;
     }
 
     /**
@@ -77,20 +80,28 @@ public class TicketHolder<T extends Record> {
     }
 
     /**
-     * Pushes a ticket object to the holder
+     * Pushes a ticket object to the holder. When a ticket is already present (a second
+     * {@code save-all} before the region ticked, say) and it is a {@link CoalescingTicket}, the two
+     * are merged into one ticket that runs both callbacks.
      *
      * @param ticket
      *     the new ticket
      *
      * @throws IllegalStateException
-     *     when a ticket is already present
+     *     when a ticket that cannot coalesce is already present
      */
+    @SuppressWarnings("unchecked")
     public void propagate(final T ticket) {
+        Objects.requireNonNull(ticket, "ticket");
         synchronized (this) {
-            if (this.ticket != null) {
+            final T present = this.ticket;
+            if (present == null) {
+                this.ticket = ticket;
+            } else if (present instanceof CoalescingTicket<?> coalescing) {
+                this.ticket = (T) ((CoalescingTicket) coalescing).coalesce(ticket);
+            } else {
                 throw new IllegalStateException("Ticket already propagated");
             }
-            this.ticket = ticket;
         }
     }
 

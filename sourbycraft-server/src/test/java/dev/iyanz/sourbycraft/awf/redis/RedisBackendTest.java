@@ -362,4 +362,69 @@ class RedisBackendTest {
         assertThrows(IllegalStateException.class, () -> store.commit(Map.of(new ChunkKey(0, 0), b("x")), Set.of(),
             Set.of(), PersistenceMode.INCREMENTAL));
     }
+
+    /** A client that answers from memory and takes {@code delayMillis} per renewal round trip. */
+    private static RedisClient delayingClient(final long delayMillis, final java.util.concurrent.atomic.AtomicInteger renewalTrips,
+                                              final java.util.concurrent.atomic.AtomicInteger renewals) {
+        return new RedisClient(RedisClient.Endpoint.parse("redis://127.0.0.1:1"), 1, 1000) {
+            @Override
+            public List<Object> pipeline(final List<Object[]> commands) throws IOException {
+                final List<Object> replies = new java.util.ArrayList<>();
+                boolean renewal = false;
+                for (final Object[] command : commands) {
+                    final String name = (String) command[0];
+                    if ("EVAL".equals(name) && RedisBackend.RENEW_SCRIPT.equals(command[1])) {
+                        renewal = true;
+                        renewals.incrementAndGet();
+                        replies.add(1L);
+                    } else if ("EVAL".equals(name) && RedisBackend.ACQUIRE_SCRIPT.equals(command[1])) {
+                        replies.add("OK");
+                    } else if ("EVAL".equals(name)) {
+                        replies.add(1L);
+                    } else if ("HSCAN".equals(name)) {
+                        replies.add(List.of(b("0"), List.of()));
+                    } else if ("SMEMBERS".equals(name)) {
+                        replies.add(List.of());
+                    } else {
+                        replies.add(null);
+                    }
+                }
+                if (renewal) {
+                    renewalTrips.incrementAndGet();
+                    try {
+                        Thread.sleep(delayMillis);
+                    } catch (final InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return replies;
+            }
+        };
+    }
+
+    @Test
+    void leaseRenewalIsOneRoundTripPerPassWhateverTheNumberOfStores() throws Exception {
+        final var trips = new java.util.concurrent.atomic.AtomicInteger();
+        final var renewals = new java.util.concurrent.atomic.AtomicInteger();
+        final RedisSettings settings = new RedisSettings("redis://127.0.0.1:1", "stub:", 1, 1000, 30, false);
+        final RedisBackend backend = new RedisBackend(settings, delayingClient(200, trips, renewals), "stub");
+        this.backends.add(backend);
+        final int stores = 25;
+        for (int i = 0; i < stores; i++) backend.open("w" + i + "/region", WorldRole.VANILLA, 1);
+
+        final long elapsed = backend.renewAll();
+        assertEquals(1, trips.get(), "one pipelined round trip, not one per store");
+        assertEquals(stores, renewals.get(), "every store renewed");
+        assertTrue(elapsed < java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(200L * stores / 2),
+            "serial renewal would have taken " + (200 * stores) + " ms; took "
+                + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(elapsed) + " ms");
+    }
+
+    @Test
+    void aRenewalPassOverHalfThePeriodIsSlow() {
+        final RedisSettings settings = new RedisSettings("redis://127.0.0.1:1", "x:", 1, 1000, 30, false);
+        assertEquals(10_000L, RedisBackend.renewalPeriodMillis(settings));
+        assertFalse(RedisBackend.slowPass(java.util.concurrent.TimeUnit.SECONDS.toNanos(4), 10_000L));
+        assertTrue(RedisBackend.slowPass(java.util.concurrent.TimeUnit.SECONDS.toNanos(6), 10_000L));
+    }
 }

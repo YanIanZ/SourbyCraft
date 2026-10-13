@@ -119,13 +119,47 @@ public final class AwfRegionStorage {
         return absolute.resolveSibling(absolute.getFileName() + STORE_SUFFIX);
     }
 
-    /** Whether a folder lies inside one of the listed worlds: some path element equals its name. */
+    /** Whether a storage folder belongs to one of the listed worlds; see {@link #worldNames}. */
     static boolean listed(final Path regionFolder, final java.util.Set<String> worlds) {
         if (worlds.isEmpty()) return false;
-        for (final Path element : regionFolder.toAbsolutePath().normalize()) {
-            if (worlds.contains(element.toString())) return true;
+        for (final String name : worldNames(regionFolder)) {
+            if (worlds.contains(name)) return true;
         }
         return false;
+    }
+
+    /**
+     * The world names a storage folder ({@code region}, {@code entities}, {@code poi}) belongs to,
+     * read from the folder's own end of the path, never from the directories the server lives in:
+     * <ul>
+     *   <li>{@code <level>/dimensions/<namespace>/<name>/<storage>} (every dimension on 26.2):
+     *       the dimension's {@code <name>} and the level folder {@code <level>};</li>
+     *   <li>any other layout inside the server directory: the first element of the path
+     *       relative to it ({@code world/region} → {@code world});</li>
+     *   <li>any other layout outside it: the storage folder's parent and grandparent
+     *       ({@code <world>/region}, {@code <world>/DIM-1/region}).</li>
+     * </ul>
+     * Matching any path element instead let a managed world named like an ancestor directory of
+     * the server ({@code home} for {@code /home/mc/server}) claim every world's storage.
+     */
+    static java.util.Set<String> worldNames(final Path regionFolder) {
+        final Path folder = regionFolder.toAbsolutePath().normalize();
+        final int n = folder.getNameCount();
+        final java.util.Set<String> names = new java.util.LinkedHashSet<>(4);
+        if (n >= 5 && folder.getName(n - 4).toString().equals("dimensions")) {
+            names.add(folder.getName(n - 2).toString());
+            names.add(folder.getName(n - 5).toString());
+            return names;
+        }
+        final Path cwd = Path.of("").toAbsolutePath().normalize();
+        if (folder.startsWith(cwd) && !folder.equals(cwd)) {
+            final Path relative = cwd.relativize(folder);
+            if (relative.getNameCount() >= 2) names.add(relative.getName(0).toString());
+            return names;
+        }
+        if (n >= 2) names.add(folder.getName(n - 2).toString());
+        if (n >= 3) names.add(folder.getName(n - 3).toString());
+        return names;
     }
 
     public String name() {

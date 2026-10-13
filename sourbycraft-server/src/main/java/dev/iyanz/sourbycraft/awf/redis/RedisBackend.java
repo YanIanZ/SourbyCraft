@@ -102,7 +102,7 @@ public final class RedisBackend implements AwfBackend {
             thread.setDaemon(true);
             return thread;
         });
-        final long period = Math.max(1000L, settings.leaseSeconds() * 1000L / 3);
+        final long period = renewalPeriodMillis(settings);
         this.renewals.scheduleAtFixedRate(this::renewAll, period, period, TimeUnit.MILLISECONDS);
     }
 
@@ -255,30 +255,69 @@ public final class RedisBackend implements AwfBackend {
      * Renews every open store's lease. A store whose lease was lost stays registered: if the lease
      * later becomes free and no other server committed since, renewal (or the store's next commit)
      * takes it back; while another server holds it or has committed, every commit is refused.
+     *
+     * <p>All renewals of a pass go out as one pipeline, one round trip whatever the number of open
+     * stores: renewing them one by one, a slow Redis (each call up to {@code timeout-ms}) could make
+     * a pass with many stores outlast the lease itself. A pass slower than half the renewal period
+     * is logged, since a few of those in a row are how a lease is lost.</p>
+     *
+     * @return how long the pass took, in nanoseconds
      */
-    void renewAll() {
-        for (final RedisStore store : this.leased.values()) {
-            try {
-                final Object renewed = this.client.call("EVAL", RENEW_SCRIPT, "3", store.lockKey, store.genKey,
-                    store.writerKey, store.token(), Long.toString(this.settings.leaseSeconds() * 1000L),
-                    Long.toString(store.knownGeneration()));
-                if (renewed instanceof Long n && n == 2) {
-                    this.lost.remove(store.token());
-                    SourbyLogger.warn("Aurora World Fabric: the Redis lease on " + store.id() + " had lapsed (this"
-                        + " server stalled or Redis was unreachable for longer than lease-seconds, or another holder"
-                        + " released it); nobody else held it or committed since, so it was taken back");
-                } else if (renewed instanceof Long n && n == 1) {
-                    this.lost.remove(store.token());
-                } else if (this.lost.add(store.token())) {
-                    SourbyLogger.error("Aurora World Fabric lost its Redis lease on " + store.id() + ": another server"
-                        + " holds it or has committed to the world since. Commits to it are refused and its unsaved"
-                        + " chunks stay in memory; this server takes the lease back only if it becomes free with no"
-                        + " other server's commit since");
-                }
-            } catch (final IOException | RuntimeException failed) {
-                SourbyLogger.warn("Aurora World Fabric could not renew its Redis lease on " + store.id() + ": "
-                    + failed.getMessage());
-            }
+    long renewAll() {
+        final long started = System.nanoTime();
+        final List<RedisStore> stores = List.copyOf(this.leased.values());
+        if (stores.isEmpty()) return 0L;
+        final String leaseMillis = Long.toString(this.settings.leaseSeconds() * 1000L);
+        final List<Object[]> commands = new ArrayList<>(stores.size());
+        for (final RedisStore store : stores) {
+            commands.add(new Object[] {"EVAL", RENEW_SCRIPT, "3", store.lockKey, store.genKey, store.writerKey,
+                store.token(), leaseMillis, Long.toString(store.knownGeneration())});
+        }
+        List<Object> replies = null;
+        try {
+            replies = this.client.pipeline(commands);
+        } catch (final IOException | RuntimeException failed) {
+            SourbyLogger.warn("Aurora World Fabric could not renew its Redis leases on " + stores.size()
+                + " store(s): " + failed.getMessage());
+        }
+        if (replies != null) {
+            for (int i = 0; i < stores.size(); i++) renewed(stores.get(i), replies.get(i));
+        }
+        final long elapsed = System.nanoTime() - started;
+        if (slowPass(elapsed, renewalPeriodMillis(this.settings))) {
+            SourbyLogger.warn("Aurora World Fabric: renewing " + stores.size() + " Redis lease(s) took "
+                + TimeUnit.NANOSECONDS.toMillis(elapsed) + " ms, over half the " + renewalPeriodMillis(this.settings)
+                + " ms renewal period; the leases expire after " + this.settings.leaseSeconds() + " s");
+        }
+        return elapsed;
+    }
+
+    /** The renewal period: a third of the lease, at least a second. */
+    static long renewalPeriodMillis(final RedisSettings settings) {
+        return Math.max(1000L, settings.leaseSeconds() * 1000L / 3);
+    }
+
+    /** Whether a renewal pass took more than half the renewal period. */
+    static boolean slowPass(final long elapsedNanos, final long periodMillis) {
+        return elapsedNanos > TimeUnit.MILLISECONDS.toNanos(periodMillis) / 2;
+    }
+
+    private void renewed(final RedisStore store, final Object renewed) {
+        if (renewed instanceof RedisClient.RedisError error) {
+            SourbyLogger.warn("Aurora World Fabric could not renew its Redis lease on " + store.id() + ": "
+                + error.getMessage());
+        } else if (renewed instanceof Long n && n == 2) {
+            this.lost.remove(store.token());
+            SourbyLogger.warn("Aurora World Fabric: the Redis lease on " + store.id() + " had lapsed (this"
+                + " server stalled or Redis was unreachable for longer than lease-seconds, or another holder"
+                + " released it); nobody else held it or committed since, so it was taken back");
+        } else if (renewed instanceof Long n && n == 1) {
+            this.lost.remove(store.token());
+        } else if (this.lost.add(store.token())) {
+            SourbyLogger.error("Aurora World Fabric lost its Redis lease on " + store.id() + ": another server"
+                + " holds it or has committed to the world since. Commits to it are refused and its unsaved"
+                + " chunks stay in memory; this server takes the lease back only if it becomes free with no"
+                + " other server's commit since");
         }
     }
 

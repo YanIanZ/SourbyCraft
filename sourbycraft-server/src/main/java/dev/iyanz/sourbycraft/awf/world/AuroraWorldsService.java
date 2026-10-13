@@ -56,6 +56,17 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         this.templates = templates;
     }
 
+    /**
+     * Logs world operations that have held their world (or template) for over
+     * {@link WorldOperationGate#OVERDUE_NANOS}, once each. Called once a second.
+     */
+    public void watchOperations() {
+        for (final String stuck : this.operations.overdue(WorldOperationGate.OVERDUE_NANOS)) {
+            SourbyLogger.warn("Aurora World Fabric: operation " + stuck + " has not finished; its world stays"
+                + " locked against other operations until it does (or until restart)");
+        }
+    }
+
     private List<WorldOperationGate.Resource> worldResources(final String name) {
         final java.util.ArrayList<WorldOperationGate.Resource> resources = new java.util.ArrayList<>();
         resources.add(new WorldOperationGate.Resource("world:" + name, false));
@@ -295,7 +306,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
             : entry.withProperties(fileWorld.properties());
         final int minSection = creator.environment() == World.Environment.NORMAL ? -4 : 0;
         return start(withFile, () -> {
-            final SlimeImporter.Result result = SlimeImporter.importInto(Files.readAllBytes(file), folder(entry.name()), minSection);
+            final SlimeImporter.Result result = SlimeImporter.importInto(SlimeImporter.readFile(file), folder(entry.name()), minSection);
             SourbyLogger.info("Aurora World Fabric: imported " + file.getFileName() + " as " + entry.name() + " ("
                 + result.chunks() + " chunks, " + result.entityChunks() + " with entities, " + result.poiChunks()
                 + " with POI, data version " + result.dataVersion() + ")");
@@ -335,7 +346,16 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         return biome == null ? entry : entry.withProperties(WorldProperties.NONE.withDefaultBiome(biome));
     }
 
+    /** A refusal for a template name that is not a valid name (and could leave the templates folder). */
+    private static Optional<CompletableFuture<Void>> invalidTemplate(final String template) {
+        return AuroraWorldRegistry.invalidName(template)
+            .map(reason -> CompletableFuture.failedFuture(new IllegalArgumentException("not a template name: " + reason)));
+    }
+
     private CompletableFuture<World> createFromTemplateInternal(final String template, final String name, final boolean autoload) {
+        if (AuroraWorldRegistry.invalidName(template).isPresent()) {
+            return invalidTemplate(template).orElseThrow().thenApply(ignored -> null);
+        }
         final AuroraWorldRegistry.Entry description;
         try {
             description = this.templates.read(template).orElse(null);
@@ -552,7 +572,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         final String env = environment.name().toLowerCase(Locale.ROOT);
         return CompletableFuture.runAsync(() -> {
             try {
-                final AuroraWorldFiles.Written written = AuroraWorldFiles.convertSlime(Files.readAllBytes(slime), env,
+                final AuroraWorldFiles.Written written = AuroraWorldFiles.convertSlime(SlimeImporter.readFile(slime), env,
                     slime.getFileName().toString(), awf);
                 SourbyLogger.info("Aurora World Fabric: converted " + slime + " to " + awf + " " + written.chunks()
                     + " (" + written.codec() + ", " + Files.size(slime) + " -> " + Files.size(awf) + " bytes)");
@@ -601,6 +621,8 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     }
 
     private CompletableFuture<Void> deleteTemplateInternal(final String template) {
+        final var invalid = invalidTemplate(template);
+        if (invalid.isPresent()) return invalid.get();
         if (!this.templates.exists(template)) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("no template named " + template));
         }

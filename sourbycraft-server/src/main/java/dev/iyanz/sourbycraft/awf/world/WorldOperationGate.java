@@ -29,9 +29,15 @@ final class WorldOperationGate {
         Lease writer;
     }
 
+    /** How long a lease may be held before {@link #overdue} reports it. */
+    static final long OVERDUE_NANOS = TimeUnit.MINUTES.toNanos(5);
+
     private final Map<String, ResourceState> active = new HashMap<>();
+    /** Every open lease, for {@link #overdue}. */
+    private final java.util.Set<Lease> open = new java.util.LinkedHashSet<>();
     /** True on the thread an operation's completion may still need (the global tick). */
     private final BooleanSupplier waitForbidden;
+    private final java.util.function.LongSupplier nanoClock;
 
     WorldOperationGate() {
         this(() -> false);
@@ -42,7 +48,30 @@ final class WorldOperationGate {
      *     because finishing it needs that thread: {@code join}/{@code get} there throw instead
      */
     WorldOperationGate(final BooleanSupplier waitForbidden) {
+        this(waitForbidden, System::nanoTime);
+    }
+
+    WorldOperationGate(final BooleanSupplier waitForbidden, final java.util.function.LongSupplier nanoClock) {
         this.waitForbidden = Objects.requireNonNull(waitForbidden, "waitForbidden");
+        this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
+    }
+
+    /**
+     * Leases held longer than {@code thresholdNanos} and not reported before, described for a
+     * log line. Each lease is reported once. An operation whose engine callback never came
+     * (a lost save ticket, an unload that died) keeps its world locked against every later
+     * operation until restart; this makes that visible instead of silent.
+     */
+    synchronized List<String> overdue(final long thresholdNanos) {
+        final long now = this.nanoClock.getAsLong();
+        final List<String> found = new java.util.ArrayList<>();
+        for (final Lease lease : this.open) {
+            if (lease.reported || now - lease.acquiredNanos < thresholdNanos) continue;
+            lease.reported = true;
+            found.add(lease.operation + " on " + lease.resources.stream().map(Resource::key).toList() + " for "
+                + TimeUnit.NANOSECONDS.toSeconds(now - lease.acquiredNanos) + " s");
+        }
+        return found;
     }
 
     /**
@@ -92,11 +121,14 @@ final class WorldOperationGate {
     final class Lease implements AutoCloseable {
         private final String operation;
         private final List<Resource> resources;
+        private final long acquiredNanos;
         private boolean closed;
+        private boolean reported;
 
-        private Lease(final String operation, final List<Resource> resources) {
+        private Lease(final String operation, final List<Resource> resources, final long acquiredNanos) {
             this.operation = operation;
             this.resources = resources;
+            this.acquiredNanos = acquiredNanos;
         }
 
         @Override
@@ -104,6 +136,7 @@ final class WorldOperationGate {
             synchronized (WorldOperationGate.this) {
                 if (this.closed) return;
                 this.closed = true;
+                open.remove(this);
                 for (final Resource resource : this.resources) {
                     final ResourceState state = active.get(resource.key());
                     state.owners.remove(this);
@@ -127,7 +160,9 @@ final class WorldOperationGate {
             }
         }
         final Lease lease = new Lease(operation,
-            requested.entrySet().stream().map(e -> new Resource(e.getKey(), e.getValue())).toList());
+            requested.entrySet().stream().map(e -> new Resource(e.getKey(), e.getValue())).toList(),
+            this.nanoClock.getAsLong());
+        this.open.add(lease);
         for (final Resource resource : lease.resources) {
             final ResourceState state = this.active.computeIfAbsent(resource.key(), ignored -> new ResourceState());
             state.owners.put(lease, resource.shared());

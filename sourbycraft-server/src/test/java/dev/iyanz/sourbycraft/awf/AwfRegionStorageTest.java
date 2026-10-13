@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.awf;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -66,6 +67,38 @@ class AwfRegionStorageTest {
         } catch (final java.util.concurrent.ExecutionException failed) {
             throw (Exception) failed.getCause();
         }
+    }
+
+    /** A 26.2 dimension storage folder: {@code <server>/<level>/dimensions/<ns>/<name>/<storage>}. */
+    private static Path dimensionStorage(final Path server, final String level, final String dimension,
+                                         final String storage) throws IOException {
+        final Path folder = server.resolve(level).resolve("dimensions").resolve("minecraft").resolve(dimension)
+            .resolve(storage);
+        Files.createDirectories(folder);
+        return folder;
+    }
+
+    @Test
+    void anAncestorDirectoryNamedLikeAManagedWorldDoesNotAttach() throws Exception {
+        // The server lives in <tmp>/home/mc/server; managed worlds named "home" and "mc" must not
+        // claim the main world's storages because the server's own path contains those names.
+        final Path server = this.dir.resolve("home").resolve("mc").resolve("server");
+        final Path overworld = dimensionStorage(server, "world", "overworld", "region");
+        final Path managed = dimensionStorage(server, "world", "home", "region");
+        final AwfEngine engine = engine(Set.of());
+        engine.manageWorld("home", null);
+        engine.manageWorld("mc", "some-template");
+
+        assertEquals(Set.of("overworld", "world"), AwfRegionStorage.worldNames(overworld));
+        assertNull(engine.open(overworld), "the main world stays on region files");
+        assertTrue(Files.notExists(AwfRegionStorage.storeFor(overworld)), "and no store was created for it");
+        assertNotNull(engine.open(managed), "the managed dimension itself still attaches");
+
+        // The old layout outside the server directory: <world>/region and <world>/<dim>/region.
+        assertEquals(Set.of("world", "junk"), AwfRegionStorage.worldNames(this.dir.resolve("junk").resolve("world").resolve("region")));
+        assertTrue(AwfRegionStorage.listed(region("isl"), Set.of("isl")));
+        assertFalse(AwfRegionStorage.listed(server.resolve("world").resolve("region"), Set.of("home", "mc")),
+            "only the folder's own world and its parent are candidates, never the server's ancestors");
     }
 
     @Test

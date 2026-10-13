@@ -22,6 +22,12 @@ public final class AuroraWorldsRuntime {
         return service;
     }
 
+    /** Reports world operations stuck for minutes; see {@link AuroraWorldsService#watchOperations}. */
+    public static void watchOperations() {
+        final AuroraWorldsService current = service;
+        if (current != null) current.watchOperations();
+    }
+
     public static synchronized void start(final Plugin owner) throws IOException {
         if (service != null) return;
         final AuroraWorldsService created = new AuroraWorldsService(new AuroraWorldRegistry(AwfEngine.MANAGED_FILE),

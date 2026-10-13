@@ -91,7 +91,10 @@ backend (next section). MongoDB/MySQL backends are **planned, not implemented**.
   on a later global tick even for a caller on that thread (contract changed 2026-10-13; it used to
   complete at once there). Blocking on an unfinished lifecycle future on the global tick throws
   `IllegalStateException`; never join one on a region/entity thread either. Names are `[a-z0-9_-]{1,48}`; storage folder names (`region`, `poi`, `entities`,
-  `dimensions`, …) are refused because AWF matches worlds by path element.
+  `dimensions`, …) are refused because AWF matches worlds by the storage folder's own path
+  (see "What goes through AWF" below); template names follow the same rules, and every template
+  operation (create from, delete, read, save, and a template name read back from the registry)
+  refuses a name that is not one, so no name resolves outside `awf-templates/` (AWF-4, 2026-10-14).
 - **Registry.** `sourbycraft_config/aurora-worlds.json` lists the managed worlds (environment,
   seed, autoload). It is written through a temporary file and an atomic move. A world in it is an
   AWF world without being listed in `aurora.awf.worlds`, so a world created at runtime stays in
@@ -212,7 +215,13 @@ implemented**.
   store stays on lease renewal for as long as it is open, also after losing the lease, so renewal
   or the next commit takes it back under the same rule (logged). The lease names the server by a hash of
   `HOSTNAME` (or `/etc/hostname`) and the server directory, so the same server restarting after a
-  crash takes its own lease back at once; any other server waits for expiry.
+  crash takes its own lease back at once; any other server waits for expiry. All of a server's
+  renewals go out as one pipeline per pass (one round trip however many stores are open; until
+  2026-10-14 they were serial, so N stores × `timeout-ms` could outlast the lease), and a pass
+  slower than half the renewal period is logged as a WARN (AWF-6). A store the engine opens and
+  then does not use — prepared for a world whose creation failed (`AwfEngine.unprepare`), a
+  duplicate open of an already-open folder, an export's read-only store — is closed, releasing
+  its lease (AWF-5).
 - **Opening is lazy.** A store reads only chunk coordinates (`HSCAN … NOVALUES`, `HKEYS` before
   Redis 7.4); chunk bytes are fetched one `HGET` at a time when the engine reads that chunk. Over
   a real network every chunk read pays one round trip; there is no prefetch yet.
@@ -403,7 +412,8 @@ tested); a Redis-over-network run and CI have not exercised any of this.
 
 Side observation, not root-caused and not tied to Redis: `save-all` threw `IllegalStateException:
 Ticket already propagated` (`SaveAllCommand.java:108` → `TicketHolder.propagate`) 2 times in ~90
-`save-all` commands sent every 4 s.
+`save-all` commands sent every 4 s. Root-caused and fixed 2026-10-14 as AWF-2 (see "Audit fixes
+2026-10-14").
 
 ### `.awf` world files (version 2)
 
@@ -452,12 +462,26 @@ timings, not server world-load or tick times. No player load.
 
 Operator guide: [testing AWF](../guides/testing-awf.md).
 
-Patch: `sourbycraft-server/minecraft-patches/sources/net/minecraft/world/level/chunk/storage/RegionFileStorage.java.patch`.
+Patches (verified 2026-10-14 against the materialized repo): the `RegionFileStorage` hook
+(`sourby$attachAwf` and the read/write/flush/close paths) is in MC feature patch
+`0021-SourbyCraft-count-chunk-system-storage-traffic-for-p.patch`, together with the `/perf storage`
+counters it was introduced with — not in the engine-baseline
+`minecraft-patches/sources/.../RegionFileStorage.java.patch`, which this section used to name. That
+follows the AGENTS.md rule (SourbyCraft edits to Minecraft classes are feature patches); the patch's
+name does not say it carries the AWF hook, which is a naming wart, not a policy breach. The shutdown
+commit is MC feature patch 0019.
 Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
 
-- **What goes through AWF.** Every `RegionFileStorage` whose folder has a path element equal to a
-  listed world name: chunk data, entities and POI of that world, each dimension separately. The
-  store lives beside the folder (`region` → `region.awf`).
+- **What goes through AWF.** Every `RegionFileStorage` whose folder belongs to a listed or managed
+  world: chunk data, entities and POI of that world, each dimension separately. The store lives
+  beside the folder (`region` → `region.awf`). Which world a folder belongs to is read from the
+  folder's own end of its path (`AwfRegionStorage.worldNames`): for the 26.2 layout
+  `<level>/dimensions/<namespace>/<name>/<storage>` it is the dimension `<name>` and the level
+  folder `<level>`; for any other layout inside the server directory, the first element of the
+  path relative to it; outside it, the storage folder's parent and grandparent. Until 2026-10-14
+  any path element matched, so a managed world named like a directory above the server (`home`
+  for `/home/mc/server`) attached every world to AWF and could make the main world read that
+  world's template chunks (AWF-1; `AwfRegionStorageTest.anAncestorDirectoryNamedLikeAManagedWorldDoesNotAttach`).
 - **Hooked paths.** Moonrise's `readData`/`startWrite`/`finishWrite` (the chunk system's I/O),
   and vanilla `read`, `write` and `scanChunk` (structure checks, upgrade tools), `flush` and
   `close`.
@@ -466,7 +490,13 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
   Region files under an AWF store are never written or cleared.
 - **Durability.** A write is held in memory. A commit starts on the governed `STORAGE` lane once
   written chunks have waited `aurora.awf.commit-interval-seconds` (checked once a second by the
-  metrics collector, which stops early in shutdown). At shutdown, feature patch 0020 commits and
+  metrics collector thread, which stops early in shutdown). The check runs first on every pass,
+  in its own `try`, before the metrics are collected: until 2026-10-14 it ran after them and was
+  skipped whenever a collection ran late (over one period), took over one period, or threw, i.e.
+  under exactly the load where commits matter, so "the writes since the last interval" could be
+  many intervals (AWF-3; `PerformanceCollectorTest.lateSlowOrFailingCollectionsStillRunStorageMaintenance`).
+  The guarantee is still bounded by that one thread: if the collector thread itself stalls, so do
+  periodic commits. At shutdown, feature patch 0019 commits and
   closes every open storage in `MinecraftServer.stopServer`, right after
   `MoonriseRegionFileIO.flush(server)`, the point where every chunk save has reached its storage.
   This is needed because Folia's shutdown never calls `RegionFileStorage.flush()`/`close()`; CI
@@ -520,7 +550,8 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
     reopened the stores with no region files written; it loaded no chunks, so it proved reopening
     but not reading. The third boot exported 529 chunks per dimension (and 1 entity-storage
     deletion each) back to region files and kept the stores as `*.awf.exported-*`. Run 441 had
-    found the lost-shutdown-commit bug fixed by feature patch 0020.
+    found the lost-shutdown-commit bug fixed by the shutdown-commit feature patch (MC 0019 on the
+    current branch).
   - **CI run 445 (`d919ea66`), read-back.** The second boot force-loads the spawn area. The
     overworld region storage saw 1089 reads, 560 of which fell through to (absent) region
     files, so 529 chunks, exactly the ones the first boot generated, were served from AWF.
@@ -618,6 +649,52 @@ no performance effect is claimed.
   0.10 s, clone 1.98 → 0.06 s, void/flat ~0.1 s both; reply time unchanged. Spawn positions from
   `level_overrides.dat` identical for all 10 worlds compared. A post-construction failure and a
   plugin generator were not run.
+
+### Audit fixes 2026-10-14 (AWF-1 … AWF-10)
+
+From a code audit of AWF; each finding was checked against the code before it was fixed, and each
+fix has a regression test. Correctness fixes only; no performance effect is claimed. Evidence:
+unit tests plus one local boot (see the end of this list); no soak, no multi-server Redis run.
+
+- **AWF-1 world matching by ancestor directory** — fixed; see "What goes through AWF" above.
+- **AWF-2 lost save ticket.** `TicketHolder.pop()` read the ticket outside its lock and then
+  cleared it, so a ticket propagated in between was cleared unseen: its `save-all` never finished
+  and an `AuroraWorlds.save` held its world's operation lease until restart. A second propagation
+  before the region ticked threw "Ticket already propagated". Now `pop` reads and clears under one
+  lock, and a second save (or unload) ticket coalesces with the present one: one save, flushed if
+  either asked, every caller's callback run (`TicketHolderTest`, including a 4-thread
+  propagate/consume loop asserting callbacks == propagations).
+- **AWF-3 commits stopped under load** — fixed; see "Durability" above.
+- **AWF-4 template path traversal** — fixed; see the API bullet above (`AuroraTemplatesTest.aNameWithParentReferencesIsRefused`).
+- **AWF-5 leaked stores/leases** — `AwfEngine.unprepare` closes the stores it drops; an open of an
+  already-open folder is refused before a second store (and lease) is taken; a store opened for a
+  storage that then fails to register is closed; the export's read-only store is closed
+  (`AwfEngineStoreLifecycleTest`, incl. `anUnpreparedStoreReleasesItsLease` against a real Redis).
+- **AWF-6 serial lease renewal** — pipelined, WARN on a slow pass (see the Redis lease bullet;
+  `RedisBackendTest.leaseRenewalIsOneRoundTripPerPassWhateverTheNumberOfStores`, stub client).
+  Not measured against a slow real Redis.
+- **AWF-8 unload callback skipped on failure.** `WorldShutdownThread` rethrew a chunk-system halt
+  or chunk-save failure without invoking the unload ticket's callback, so the unload future (and
+  the world operation lease) never completed. MC feature patch 0030 runs the unload through
+  `WorldUnloadCompletion`: `FAIL_UNKNOWN` on a throw (still rethrown, so the thread's handler stops
+  the server as before), `SUCCESS` otherwise (`WorldUnloadCompletionTest`). The world operation
+  gate now also logs, once, any operation holding its world over 5 minutes, checked once a second
+  with the AWF commits (`WorldOperationGateTest.aLeaseHeldPastTheThresholdIsReportedOnceAndAReleasedOneNever`).
+- **AWF-9 Slime import memory.** Blobs up to 1 GiB, unlimited NBT accounting and a whole-file
+  `readAllBytes` let a crafted file exhaust the heap. Now one limit, JVM property
+  `-Dsourbycraft.awf.slime.max-bytes` (default 256 MiB, read at each import, so LIVE for the next
+  one), bounds the file size before it is read, every compressed and decompressed blob length and
+  NBT value length before allocation (and a compressed length longer than the remaining file), and
+  NBT heap accounting (`SlimeImporterTest.aBlobOverTheLimitIsRefusedBeforeAllocation`).
+- **AWF-10 docs** — this section, the patch numbers and hook location above, and `WorldRole`'s
+  javadoc (it said no world used a role; VANILLA, INSTANCE, TEMPLATE and READ_ONLY are used).
+- **Not done:** AWF-7 (delta generations) is roadmap only.
+- **Local boot, 2026-10-14** (slim jar from this tree, fresh flat world, offline, no players): six
+  `save-all`/`save-all flush` in a row, `awf create t1 normal 5`, `awf save t1` ("Saved t1
+  (committed)"), `save-all flush`, `awf unload t1` ("Unloaded t1"), `stop` → exit 0, no exception.
+  With no players no region held chunks, so the save tickets fanned out to zero regions ("No regions
+  to save"): the boot shows nothing broke, not that the AWF-2 race is gone in a live server; that
+  rests on `TicketHolderTest`.
 
 ## Qualification
 Load/unload loops, COW isolation, crash during each persistence stage, backend timeout/disconnect, shutdown with pending saves, corrupt cache/blob recovery, and 1/50/250/1000-world workloads.

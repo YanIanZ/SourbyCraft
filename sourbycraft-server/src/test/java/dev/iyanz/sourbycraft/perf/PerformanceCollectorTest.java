@@ -385,6 +385,50 @@ class PerformanceCollectorTest {
     }
 
     @Test
+    void lateSlowOrFailingCollectionsStillRunStorageMaintenance() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final AtomicInteger maintained = new AtomicInteger();
+        final AtomicBoolean fail = new AtomicBoolean();
+        final PerformanceCollector.GenerationSource source = (now, consumer) -> {
+            if (fail.get()) throw new IllegalStateException("source failed");
+        };
+        // Each collection reads the clock at scan start and end: the second pair is 2 s apart.
+        final long[] clock = {0L, 1L, 10L * SECOND, 12L * SECOND, 20L * SECOND, 20L * SECOND + 1L, 30L * SECOND, 30L * SECOND + 1L};
+        final AtomicInteger tick = new AtomicInteger();
+        final AtomicInteger logs = new AtomicInteger();
+        final PerformanceCollector collector = new PerformanceCollector(provider, source,
+            PerformanceCollectorTest::emptyGlobal, PerformanceCollectorTest::runtime,
+            () -> clock[tick.getAndIncrement()], System::currentTimeMillis, () -> 20.0,
+            (message, failure) -> logs.incrementAndGet(), maintained::incrementAndGet);
+
+        collector.collect(SECOND, 1_000L, 0L);
+        assertEquals(1, maintained.get(), "an on-time collection");
+        collector.collect(10L * SECOND, 10_000L, 0L);
+        assertEquals(MetricState.STALE, provider.snapshot().freshness().state(), "a slow scan is published stale");
+        assertEquals(2, maintained.get(), "and still starts due AWF commits");
+        collector.collect(20L * SECOND, 20_000L, 3L * SECOND);
+        assertEquals(3, maintained.get(), "a collection over a period late still does");
+        fail.set(true);
+        collector.collect(30L * SECOND, 30_000L, 0L);
+        assertEquals(4, maintained.get(), "so does a failing one");
+        assertEquals(1, logs.get(), "only the collection failure is logged");
+    }
+
+    @Test
+    void aFailingMaintenanceDoesNotStopTheCollection() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final AtomicInteger logs = new AtomicInteger();
+        final PerformanceCollector collector = new PerformanceCollector(provider, source(),
+            PerformanceCollectorTest::emptyGlobal, PerformanceCollectorTest::runtime,
+            System::nanoTime, System::currentTimeMillis, () -> 20.0,
+            (message, failure) -> logs.incrementAndGet(), () -> { throw new IllegalStateException("lane full"); });
+        collector.collect(SECOND, 1_000L, 0L);
+        collector.collect(2L * SECOND, 2_000L, 0L);
+        assertEquals(1, logs.get(), "logged at most once a minute");
+        assertEquals(2L, provider.snapshot().sequence());
+    }
+
+    @Test
     void repeatedCollectionFailuresAreLoggedAtMostOncePerMinute() {
         final SourbyMetricsProvider provider = new SourbyMetricsProvider();
         final AtomicInteger logs = new AtomicInteger();

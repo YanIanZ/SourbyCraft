@@ -62,13 +62,37 @@ public final class AuroraTemplates {
         return names;
     }
 
+    /**
+     * A template's folder. Template names follow the world name rules
+     * ({@link AuroraWorldRegistry#invalidName}), so a name can never leave {@link #root}: no
+     * {@code ..}, no separator, no absolute path. Checked again on the resolved path.
+     *
+     * @throws IllegalArgumentException for a name that is not a valid template name
+     */
+    Path folder(final String template) {
+        final var invalid = AuroraWorldRegistry.invalidName(template);
+        if (invalid.isPresent()) throw new IllegalArgumentException("not a template name: " + invalid.get());
+        return resolveInside(this.root, template);
+    }
+
+    /** {@code root/name}, refused unless it is a direct child of {@code root}. */
+    public static Path resolveInside(final Path root, final String name) {
+        final Path base = root.toAbsolutePath().normalize();
+        final Path resolved = base.resolve(name).normalize();
+        if (!resolved.startsWith(base) || !base.equals(resolved.getParent())) {
+            throw new IllegalArgumentException("template name " + name + " leaves " + root);
+        }
+        return root.resolve(name);
+    }
+
     public boolean exists(final String template) {
-        return Files.isRegularFile(this.root.resolve(template).resolve(METADATA));
+        if (AuroraWorldRegistry.invalidName(template).isPresent()) return false;
+        return Files.isRegularFile(folder(template).resolve(METADATA));
     }
 
     /** What instances of the template are created with; the entry's name is the template's. */
     public Optional<AuroraWorldRegistry.Entry> read(final String template) throws IOException {
-        final Path file = this.root.resolve(template).resolve(METADATA);
+        final Path file = folder(template).resolve(METADATA);
         if (!Files.isRegularFile(file)) return Optional.empty();
         try {
             return Optional.ofNullable(GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8),
@@ -95,7 +119,7 @@ public final class AuroraTemplates {
      */
     public int save(final AwfBackend backend, final Path worldFolder, final AuroraWorldRegistry.Entry world,
                     final String template) throws IOException {
-        final Path target = this.root.resolve(template);
+        final Path target = folder(template);
         if (Files.exists(target)) throw new IllegalStateException("a template named " + template + " already exists");
         Files.createDirectories(this.root);
         final Path partial = this.root.resolve("." + template + ".partial-" + System.nanoTime());
@@ -131,7 +155,7 @@ public final class AuroraTemplates {
 
     /** Deletes a template. The caller has checked that no world is an instance of it. */
     public void delete(final String template) throws IOException {
-        final Path target = this.root.resolve(template);
+        final Path target = folder(template);
         if (!Files.isDirectory(target)) throw new IllegalArgumentException("no template named " + template);
         // Hide it first, so a failure part-way never leaves a template that looks complete.
         final Path doomed = this.root.resolve("." + template + ".deleting-" + System.nanoTime());

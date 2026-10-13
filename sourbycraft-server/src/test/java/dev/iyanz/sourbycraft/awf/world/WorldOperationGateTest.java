@@ -158,4 +158,24 @@ class WorldOperationGateTest {
         staged.complete("world");
         assertEquals("world", exposed.join());
     }
+
+    @Test
+    void aLeaseHeldPastTheThresholdIsReportedOnceAndAReleasedOneNever() {
+        final java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong();
+        final WorldOperationGate gate = new WorldOperationGate(() -> false, clock::get);
+        final CompletableFuture<Void> stuck = new CompletableFuture<>();
+        gate.run("save", List.of(world("a")), () -> stuck);
+        final var quick = gate.acquire("load", List.of(world("b")));
+        clock.addAndGet(TimeUnit.MINUTES.toNanos(4));
+        quick.close();
+        assertEquals(List.of(), gate.overdue(WorldOperationGate.OVERDUE_NANOS));
+        clock.addAndGet(TimeUnit.MINUTES.toNanos(2));
+        final List<String> overdue = gate.overdue(WorldOperationGate.OVERDUE_NANOS);
+        assertEquals(1, overdue.size());
+        assertTrue(overdue.get(0).startsWith("save on [world:a] for 360 s"), overdue.get(0));
+        assertEquals(List.of(), gate.overdue(WorldOperationGate.OVERDUE_NANOS), "reported once");
+        stuck.complete(null);
+        clock.addAndGet(TimeUnit.MINUTES.toNanos(10));
+        assertEquals(List.of(), gate.overdue(WorldOperationGate.OVERDUE_NANOS));
+    }
 }

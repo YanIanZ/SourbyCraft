@@ -18,5 +18,18 @@ import java.util.function.Consumer;
  *
  * @author dueris
  */
-public record UnloadTicket(Consumer<WorldUnloadResult> callback, boolean save) {
+public record UnloadTicket(Consumer<WorldUnloadResult> callback, boolean save) implements CoalescingTicket<UnloadTicket> {
+
+    /** Both callers learn the outcome; the world saves if either asked it to. */
+    @Override
+    public UnloadTicket coalesce(final UnloadTicket later) {
+        final UnloadTicket first = this;
+        return new UnloadTicket(result -> {
+            try {
+                first.callback().accept(result);
+            } finally {
+                later.callback().accept(result);
+            }
+        }, first.save() || later.save());
+    }
 }

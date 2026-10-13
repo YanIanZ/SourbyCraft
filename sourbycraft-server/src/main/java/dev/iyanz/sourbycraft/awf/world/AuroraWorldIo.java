@@ -46,7 +46,7 @@ final class AuroraWorldIo {
     /** A template's store for one storage folder (always on disk), or {@code null}. */
     static AwfStore openTemplate(final Path templatesRoot, final String template, final String storage)
         throws IOException {
-        return openRead(AwfBackend.FILE, templatesRoot.resolve(template), storage);
+        return openRead(AwfBackend.FILE, new AuroraTemplates(templatesRoot).folder(template), storage);
     }
 
     /**
