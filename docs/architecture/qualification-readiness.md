@@ -101,7 +101,7 @@ Two limits are stated rather than hidden:
 
 None open in source. The one recorded here was reproduced and fixed on 2026-10-13 (Minecraft feature
 patch 0028 `rebind-early-console-command-sources`, numbered 0029 before the same-day renumbering;
-SPEC B88). Verified locally and in CI run 38427215968 (head `4275912f`, 2026-10-13), whose boot step runs the early console probe.
+SPEC B88). Verified locally and in CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13), whose boot step runs the early console probe.
 
 `/say` from the console threw, once, during a config reload on the deployment server, and a console
 command threw the same way ~2 s after `Done` on an AWF reboot:

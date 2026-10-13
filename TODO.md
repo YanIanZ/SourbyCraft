@@ -41,7 +41,7 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   2026-09-15 (commit `1c883a55`) sebelum Build 47 dan tidak berlaku.
 - [x] Bug kepemilikan region yang diketahui: NPE `/say` di global tick dan NPE perintah konsol
   setelah `Done`. Direproduksi dan diperbaiki 2026-10-13 (feature patch MC 0028
-  `rebind-early-console-command-sources`, lihat item NPE konsol di bawah). SELESAI: CI run 38427215968 (head `4275912f`, 2026-10-13) success,
+  `rebind-early-console-command-sources`, lihat item NPE konsol di bawah). SELESAI: CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13) success,
   probe konsol awal `SOURBY_EARLY_CONSOLE_PROBE` di langkah boot lulus.
 - [ ] Persistensi dan crash diulang di tree kandidat rilis (`verify_persistence*.py`,
   `verify_crash.py`); XFAIL metadata game time/spawn diperbaiki atau diterima owner.
@@ -138,7 +138,7 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   persistensi tree kandidat 20/20 di demo 2026-10-07 (`verify_persistence_panel.py`, 3 restart);
   kepemilikan region: fixture bridge 20 marker OK di CI 37515867230, soak 100 menit tanpa pelanggaran.
   Crash: `verify_crash_panel.py` 14/15 di demo 2026-10-07 (2 SIGKILL, data chunk/entitas utuh; game time
-  mundur = keterbatasan P0 yang sudah tercatat). Dua NPE konsol diperbaiki (patch MC 0028, CI run 38427215968 (head `4275912f`, 2026-10-13) success)
+  mundur = keterbatasan P0 yang sudah tercatat). Dua NPE konsol diperbaiki (patch MC 0028, CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13) success)
 - [-] AWF: crash di level server dengan klien sudah lulus (53/53, `verify_crash.py --awf`). Sisa:
   backend terputus (backend Redis sudah ada; penerimaan gangguan jaringan belum tercatat), beban berkelanjutan, dan investigasi
   commit awal 529 chunk yang butuh 105,5 detik di panel demo (`docs/architecture/aurora-world-fabric.md`)
