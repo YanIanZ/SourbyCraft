@@ -426,11 +426,13 @@ backend *can* be replaced, and defers replacing one until a workload measurement
 
 ## Development documents
 
+New to the codebase? Start with the **[developer path and docs index](docs/README.md)**.
+
 The active architecture/development set is:
 
-- **[PRD.md](PRD.md)** — product/performance requirements
-- **[SPEC.md](SPEC.md)** — technical implementation rules
-- **[PLAN.md](PLAN.md)** — performance/observability roadmap
+- **[PRD.md](docs/PRD.md)** — product/performance requirements
+- **[SPEC.md](docs/SPEC.md)** — technical implementation rules
+- **[PLAN.md](docs/PLAN.md)** — performance/observability roadmap
 - **[DEVELOPMENT.md](DEVELOPMENT.md)** — unified continuation contract
 - **[Aurora Architecture](docs/architecture/AURORA.md)** — deep engine/configuration architecture
 - **[Aurora Independent Engine](docs/architecture/AURORA-INDEPENDENT-ENGINE.md)** — the phased roadmap beyond Folia constraints

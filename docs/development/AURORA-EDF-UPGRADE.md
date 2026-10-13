@@ -23,11 +23,11 @@ Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md) ("OWNER DECISION 2
   ("Starting Aurora EDF region scheduler" in the log); the `plugins-10` bench ran on it. No error from those runs is recorded in
   the log. No region split/merge, plugin-disable, cancellation-during-execution or shutdown acceptance, no soak, and no
   AFFINITY or WORK_STEALING boot is recorded, and no performance comparison was made.
-- **Tests.** `AuroraEdfSchedulerTest` passed 6/6 when run once in isolation before the hold (`parked/README.md`; log). The
+- **Tests.** `AuroraEdfSchedulerTest` passed 6/6 when run once in isolation before the hold (`sourbycraft-server/minecraft-patches/parked/README.md`; log). The
   independence policy test failed on it: `scripts/test_independence_policy.py` with 0028 applied was 308 run, 2 failures
   (`CanvasSourceCouplingTest` on `AuroraEdfScheduler`, `SchedulerCouplingTest` on `TickRegionScheduler` reached by a patch outside the
   recorded set); with 0028 parked the Python suite is 327/327 (log). No full Gradle suite with 0028 is recorded.
-- **Unpark gate** (`parked/README.md`): the policy test green with the recorded set updated, the full Gradle suite, and a boot on
+- **Unpark gate** (`sourbycraft-server/minecraft-patches/parked/README.md`): the policy test green with the recorded set updated, the full Gradle suite, and a boot on
   Sourby Demo with the user's plugins. To unpark: `git am --3way` the patch onto `sourbycraft-server/src/minecraft/java`, move it
   back to `features/` with the next free number, restore the test from `parked/test/`, then run
   `python3 scripts/patch_surface.py --check-rebuild`. Not met as of 2026-10-07.

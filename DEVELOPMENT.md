@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document is the active development contract for the `26.2` branch. It consolidates the intent of `PRD.md`, the technical rules of `SPEC.md`, the execution direction of `PLAN.md`, and the work already completed in builds 44–45.
+This document is the active development contract for the `26.2` branch. It consolidates the intent of `docs/PRD.md`, the technical rules of `docs/SPEC.md`, the execution direction of `docs/PLAN.md`, and the work already completed in builds 44–45.
 
 The older documents remain useful historical and design references. This file defines what must happen next, what is already complete, what remains unfinished, and how SourbyCraft moves from a Canvas-derived downstream fork into an independently owned SourbyCraft runtime while preserving upstream attribution and compatibility.
 
@@ -757,7 +757,7 @@ A release may not be marked performance-stable until:
 
 - make this document the active continuation plan
 - remove duplicate/contradictory implementation paths
-- ensure `PRD.md`, `SPEC.md`, and `PLAN.md` remain reference documents
+- ensure `docs/PRD.md`, `docs/SPEC.md`, and `docs/PLAN.md` remain reference documents
 - close incomplete tests with zero-byte/placeholder implementations if any remain
 - run patch regeneration and full unit/integration suite
 

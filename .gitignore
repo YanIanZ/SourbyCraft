@@ -426,13 +426,8 @@ paper-api-generator/
 /folia-api/build.gradle.kts
 /folia-api/
 /folia-server/
-docs/superpowers/*
-!docs/superpowers/specs/
-docs/superpowers/specs/*
-!docs/superpowers/specs/2026-09-02-custom-tick-metrics-design.md
-!docs/superpowers/plans/
-docs/superpowers/plans/*
-!docs/superpowers/plans/2026-09-02-custom-tick-metrics.md
+# Local planning-tool scratch (old plans/specs were removed 2026-10-13; see git history)
+docs/superpowers/
 graphify-out/
 .worktrees/
 sourbycraft-server/src/main/resources/GeoLite2-City.mmdb

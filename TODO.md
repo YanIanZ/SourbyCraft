@@ -8,7 +8,7 @@ Dokumen sumber tetap menjadi rincian dan bukti per tugas. Ketika satu tugas sele
 sini **dan** di dokumen sumbernya, sertakan bukti (run CI, commit, laporan) sesuai
 `DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy`.
 
-Plan lama di `docs/superpowers/plans/` (era v6/v12/Folia, Mei–Juli 2026) tidak dimasukkan; isinya
+Plan lama (era v6/v12/Folia, Mei–Juli 2026, dulu di `docs/superpowers/`, dihapus 2026-10-13) tidak dimasukkan; isinya
 sudah digantikan dokumen di atas.
 
 Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputusan owner
@@ -120,7 +120,7 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   mundur = keterbatasan P0 yang sudah tercatat). Sisa: dua NPE konsol yang belum tereproduksi
 - [-] AWF: crash di level server dengan klien sudah lulus (53/53, `verify_crash.py --awf`). Sisa:
   backend terputus (backend Redis sudah ada; penerimaan gangguan jaringan belum tercatat), beban berkelanjutan, dan investigasi
-  commit awal 529 chunk yang butuh 105,5 detik di panel demo (`architecture/aurora-world-fabric.md`)
+  commit awal 529 chunk yang butuh 105,5 detik di panel demo (`docs/architecture/aurora-world-fabric.md`)
 
 ### Konkurensi
 - [-] Soak konkurensi multi-jam (2 jam+) (DEV-A, AURORA-C/J): soak tersertifikasi 2 jam 10 pemain
