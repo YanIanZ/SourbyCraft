@@ -43,9 +43,26 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   setelah `Done`. Direproduksi dan diperbaiki 2026-10-13 (feature patch MC 0028
   `rebind-early-console-command-sources`, lihat item NPE konsol di bawah). SELESAI: CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13) success,
   probe konsol awal `SOURBY_EARLY_CONSOLE_PROBE` di langkah boot lulus.
-- [ ] Persistensi dan crash diulang di tree kandidat rilis (`verify_persistence*.py`,
+- [x] Persistensi dan crash diulang di tree kandidat rilis (`verify_persistence*.py`,
   `verify_crash.py`); XFAIL metadata game time/spawn diperbaiki atau diterima owner.
-- [ ] Redis terputus / lease hilang pada server yang berjalan (backend failure).
+  SELESAI 2026-10-13 (run lokal di laptop, bukan server deployment; Apple M2 `Mac14,2`, 8 core,
+  16 GiB, OpenJDK 25.0.2; mesin tidak tenang, agen lain aktif): jar slim `975d3bda…` (40.681.193 B,
+  tree head `cbef3fb9`; identitas di jar `26.2-DEV-26.2@1d9817a` = HEAD saat build sebelum commit AWF
+  `e0c241e9`, kode AWF itu sudah ada di jar). `verify_persistence.py` (3 restart, 6 klien beban saat
+  stop) **105/105** dalam 142 s; `verify_crash.py` region file **52/52** dalam 97 s; `verify_crash.py
+  --awf` **56/56** dalam 101 s (tiga SIGKILL 3/8/15 s dengan 4 klien bergerak, tanpa baris korupsi,
+  checkpoint utuh). Game time kini XPASS di ketiga pemulihan (mis. 500 ≥ 290, 1247 ≥ 830), jadi XFAIL
+  diperbaiki oleh MC 0027; entri `KNOWN_LIMITATIONS` di `verify_crash.py` perlu dihapus (belum diubah).
+- [-] Redis terputus / lease hilang pada server yang berjalan (backend failure). Run lokal 2026-10-14
+  (jar `rc-cbef3fb9`, Redis 8.10.2 loopback AOF, M2 16 GiB; detail dan perintah di
+  `docs/architecture/aurora-world-fabric.md` § *Backend failure*). Sesuai desain: commit gagal tetap
+  dirty dan dicoba ulang, tick tidak terblokir, pemulihan setelah Redis kembali, fencing saat lease
+  diambil server lain (AWFLEASE, data tidak ditimpa), `stop` tidak menggantung (≤1 s Redis mati,
+  105 s Redis beku). DEFECT terbuka: (D1) baca chunk milik AWF gagal → Moonrise membuat chunk baru →
+  chunk asli DITIMPA saat Redis kembali (kehilangan data, terbukti di AOF dan setelah reboot);
+  (D2) commit yang diterapkan tetapi balasannya hilang + lease kedaluwarsa → world terkunci permanen
+  (AWFLEASE tanpa pemegang lain) sampai dibuka ulang; (D3) setelah lease hilang lalu diambil kembali
+  lewat commit, perpanjangan lease tidak jalan lagi. Belum diperbaiki.
 - [ ] Alur pemain nyata dengan plugin bridged (EssentialsX/Vault) di Sourby Demo.
 
 ### Keputusan owner
@@ -138,7 +155,9 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   persistensi tree kandidat 20/20 di demo 2026-10-07 (`verify_persistence_panel.py`, 3 restart);
   kepemilikan region: fixture bridge 20 marker OK di CI 37515867230, soak 100 menit tanpa pelanggaran.
   Crash: `verify_crash_panel.py` 14/15 di demo 2026-10-07 (2 SIGKILL, data chunk/entitas utuh; game time
-  mundur = keterbatasan P0 yang sudah tercatat). Dua NPE konsol diperbaiki (patch MC 0028, CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13) success)
+  mundur = keterbatasan P0 yang sudah tercatat). Tree kandidat `cbef3fb9` lokal 2026-10-13 (laptop,
+  jar `975d3bda…`): persistensi 105/105, crash region 52/52, crash AWF 56/56, game time tidak lagi
+  mundur (XPASS). Dua NPE konsol diperbaiki (patch MC 0028, CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13) success)
 - [-] AWF: crash di level server dengan klien sudah lulus (53/53, `verify_crash.py --awf`). Sisa:
   backend terputus (backend Redis sudah ada; penerimaan gangguan jaringan belum tercatat), beban berkelanjutan, dan investigasi
   commit awal 529 chunk yang butuh 105,5 detik di panel demo (`docs/architecture/aurora-world-fabric.md`)

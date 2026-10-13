@@ -32,18 +32,25 @@ class CorruptionTest(unittest.TestCase):
 
 
 class KnownLimitationTest(unittest.TestCase):
+    LIMITATIONS = {"entities survived the restart": "recorded reason"}
+
     def test_a_known_failure_is_expected_and_anything_else_still_fails(self):
-        results = [{"check": "boot 2: game time survived and advanced", "ok": False},
+        results = [{"check": "boot 2: entities survived the restart", "ok": False},
                    {"check": "boot 2: blocks survived the restart", "ok": False},
-                   {"check": "boot 2: entities survived the restart", "ok": True}]
-        failed, xfail, xpass = crash.classify(results)
+                   {"check": "boot 2: game time survived and advanced", "ok": True}]
+        failed, xfail, xpass = crash.classify(results, self.LIMITATIONS)
         self.assertEqual([r["check"] for r in failed], ["boot 2: blocks survived the restart"])
-        self.assertEqual([r["check"] for r in xfail], ["boot 2: game time survived and advanced"])
+        self.assertEqual([r["check"] for r in xfail], ["boot 2: entities survived the restart"])
         self.assertEqual(xpass, [])
 
     def test_a_fixed_limitation_is_flagged_for_removal(self):
-        _, xfail, xpass = crash.classify([{"check": "boot 3: game time survived and advanced", "ok": True}])
+        _, xfail, xpass = crash.classify([{"check": "boot 3: entities survived the restart", "ok": True}],
+                                         self.LIMITATIONS)
         self.assertEqual((len(xfail), len(xpass)), (0, 1))
+
+    def test_game_time_rewinding_after_a_crash_fails_the_run(self):
+        failed, xfail, _ = crash.classify([{"check": "boot 2: game time survived and advanced", "ok": False}])
+        self.assertEqual(([r["check"] for r in failed], xfail), (["boot 2: game time survived and advanced"], []))
 
 
 if __name__ == "__main__":

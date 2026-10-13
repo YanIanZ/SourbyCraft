@@ -2678,10 +2678,10 @@ uncommitted and has never run in CI. The EDF patch (parked 0028) is HELD (B84).
 | patch regeneration | NOT RUN — renumbering 0024/0025 ↔ 0026/0027 predicted; 8 feature patches untracked |
 | plugin compatibility | PARTIAL — synthetic CI fixture; Vault/EssentialsX on Sourby Demo; uncertified `plugins-10`; new fixture markers never run |
 | region ownership | OPEN — `/say` and console-after-`Done` NPEs reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`, B88; local boot + CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13)); 0025 (watchdog) untested |
-| world load/unload/save | PARTIAL — persistence 104/104 local, 20/20 demo (2026-10-05); AWF CI boots on committed head; B80/B85 fixed locally 2026-10-13 (uncommitted, not in CI) |
-| crash recovery | PARTIAL — 49/49 region, 53/53 AWF (2026-10-05); not rerun on RC tree; game-time XFAIL |
+| world load/unload/save | PASS (local RC run, laptop, not the deployment server) — `verify_persistence.py` 105/105 on RC tree `cbef3fb9`, jar `975d3bda…`, 2026-10-13 (3 restarts, last stop under 6 clients); earlier 104/104 local, 20/20 demo (2026-10-05); still open: AWF unload with players online / `nosave` with dirty chunks; AWF CI boots on committed head; B80/B85 fixed 2026-10-13 (`e0c241e9`, CI run 38434258632 green) |
+| crash recovery | PASS (local RC run, laptop, not the deployment server) — `verify_crash.py` region 52/52, `--awf` 56/56 on RC tree `cbef3fb9`, jar `975d3bda…`, 2026-10-13 (3 SIGKILLs each, no corruption); game-time check now XPASS (fixed by MC 0027; script XFAIL entry stale); earlier 49/49, 53/53 (2026-10-05) |
 | cache corruption | PARTIAL — unit tests only |
-| backend failure | PARTIAL — Redis integration tests in CI; no disconnect/lease-loss run |
+| backend failure | FAIL — local Redis disconnect/freeze/lease-loss run 2026-10-14 (`rc-cbef3fb9`): retry, recovery, fencing and bounded stop held; defects D1 (failed read regenerates and later overwrites an AWF chunk), D2 (lost commit reply + lease expiry fences the world permanently), D3 (no renewal after commit take-back) open (`aurora-world-fabric.md` § *Backend failure*) |
 | startup | PARTIAL — CI boot of committed head; RC tree only on Sourby Demo; the provisioning patch (then 0025, now 0024) never booted in CI |
 | stress | NOT RUN (certified) — uncertified demo runs only |
 | soak | NOT RUN — the certified 2 h soak (2026-09-15) predates Build 47 |

@@ -42,13 +42,9 @@ KILL_DELAYS = (3, 8, 15)
 
 # Checks that fail for a known, recorded reason. They are reported as XFAIL and do not fail the
 # run; if one starts passing it is reported as XPASS so the entry gets removed.
-KNOWN_LIMITATIONS = {
-    "game time survived and advanced": (
-        "Historical crash XFAIL: game time rewinds. Source review of the current 26.2 path "
-        "finds authoritative game time/spawn in PaperLevelOverrides (paper:level_overrides), "
-        "omitted from RegionizedServer.autosaveSafeWorldData's safe-data whitelist. "
-        "Fix and runtime confirmation pending; tracked in TODO.md P0"),
-}
+# None at present: game time rewinding after a crash was one until Minecraft feature 0027 (world
+# metadata on autosave); it passed every recovery in both modes on 2026-10-13 and now fails the run.
+KNOWN_LIMITATIONS = {}
 AWF_COMMIT_SECONDS = 5
 
 # Console text that means the storage layer met damage it should never see after a crash.
@@ -58,11 +54,12 @@ CORRUPTION = ("Failed to read chunk", "Couldn't load chunk", "Failed to load chu
               "Aurora World Fabric: failed", "could not be opened")
 
 
-def classify(results):
+def classify(results, limitations=None):
     """Split check results into failures, expected failures and unexpected passes."""
+    limitations = KNOWN_LIMITATIONS if limitations is None else limitations
     failed, xfail, xpass = [], [], []
     for result in results:
-        known = next((reason for name, reason in KNOWN_LIMITATIONS.items()
+        known = next((reason for name, reason in limitations.items()
                       if result["check"].endswith(name)), None)
         if known and not result["ok"]:
             xfail.append({**result, "known": known})
