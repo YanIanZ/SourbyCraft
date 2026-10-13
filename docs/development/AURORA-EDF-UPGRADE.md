@@ -37,8 +37,13 @@ Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md) ("OWNER DECISION 2
   `python3 scripts/patch_surface.py --check-rebuild`. Not met as of 2026-10-07.
 - Acceptance list, item by item: **1** test run done (6/6, isolated), binary compatibility of the volatile field with AFFINITY and
   WORK_STEALING not done; **2** boot and startup identification seen on the demo, ordinary dispatch ran under the bench; split/
-  merge, plugin disable, cancellation during execution, server stop not recorded; **3** not done; **4** not done (the AWF spawn
-  wait is still open, see SPEC B80/B85 and `aurora-world-fabric.md`); **5** not done as an EDF comparison (the only chunk-worker
+  merge, plugin disable, cancellation during execution, server stop not recorded; **3** not done; **4** partly done 2026-10-13
+  (locally, uncommitted, not in CI; independent of this EDF patch): staged AWF creation (MC 0029, Paper 0014) removes the
+  global-tick wait for the spawn search's first chunk; preparation is composed, never joined. Covered by local runs: normal
+  (4 seeds), nether, flat, void, create from template, clone, load of a world whose creation was cut short by `stop`
+  (clean exit 0 in 2.1 s, spawn searched at the next load); spawns identical to the old jar. Not covered: a plugin
+  generator, a failure after the world was constructed (unload-and-clean path), preparation failure at runtime. See SPEC
+  B80/B85 and `aurora-world-fabric.md`; **5** not done as an EDF comparison (the only chunk-worker
   spark, <https://spark.lucko.me/C2D7rXIJGY>, is a worker-count observation, see
   [CHUNK-GENERATION-STUTTER.md](CHUNK-GENERATION-STUTTER.md)).
 

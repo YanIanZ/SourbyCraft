@@ -87,9 +87,10 @@ backend (next section). MongoDB/MySQL backends are **planned, not implemented**.
   services manager: `list`, `exists`, `isLoaded`, `create(WorldCreator, autoload)`, `load`,
   `save`, `unload(name, save)` → `UnloadResult`, `delete`, `autoload`/`setAutoload`. Every call
   returns a future; completion callbacks have no guaranteed thread. World creation/loading
-  runs on the global region, and callers on that thread retain the existing synchronous
-  compatibility path (waiting for store preparation). Elsewhere, never join a lifecycle future
-  on a region/entity thread. Names are `[a-z0-9_-]{1,48}`; storage folder names (`region`, `poi`, `entities`,
+  runs on the global region in stages (see "Staged creation" below) and its future can complete
+  on a later global tick even for a caller on that thread (contract changed 2026-10-13; it used to
+  complete at once there). Blocking on an unfinished lifecycle future on the global tick throws
+  `IllegalStateException`; never join one on a region/entity thread either. Names are `[a-z0-9_-]{1,48}`; storage folder names (`region`, `poi`, `entities`,
   `dimensions`, …) are refused because AWF matches worlds by path element.
 - **Registry.** `sourbycraft_config/aurora-worlds.json` lists the managed worlds (environment,
   seed, autoload). It is written through a temporary file and an atomic move. A world in it is an
@@ -412,10 +413,37 @@ no performance effect is claimed.
   `theHeaderOnlyReaderSeesWhatAFullParseSees`, `slimeToAwfToImportKeepsTheProperties`. The service
   wiring (`AuroraWorldsService.importSlimeInternal`) has no unit test because it needs a running
   server.
-- **Not changed: B80/A5, B85.** `createAfter` still joins preparation on the global tick. The
-  `AuroraWorlds` contract promises a completed future to callers on the global region thread so
-  they can join it there. An asynchronous handoff would break that promise, and such callers
-  would deadlock. Fixing it needs a contract change first.
+- **Staged creation (B80/A5, B85), 2026-10-13, local, uncommitted, not in CI; LIVE for every
+  AWF create/load/clone/import, no setting.** `createAfter` composes on store preparation
+  instead of joining it, then hops to the global tick. There it calls
+  `CraftServer#sourbycraft$createWorldStaged` (Paper feature 0014), which runs `createWorld` up to
+  `WorldInitEvent` (`MinecraftServer#initWorldBeforeSpawn`, MC feature 0029), computes the chunk
+  the spawn search loads first without loading it (`initialSpawnSearchChunk`, same checks as
+  `setInitialSpawn`: spawn already set, forced, debug, generator-fixed → none), and starts that
+  chunk's load to `SPAWN` with the same non-full ticket `syncLoadNonFull` uses
+  (`ChunkTaskScheduler#beginNonFullLoad`). This is legal before `RegionizedServer.addWorld`
+  because it is exactly what the old path did from the global tick: the chunk system generates
+  non-full chunks on its workers without region or global tasks. A virtual thread polls the
+  chunk (lock-free read) and queues the rest on the global tick: the unchanged spawn search
+  (`initWorldSpawn`), the ticket's removal, `prepareLevel`, `addWorld`, `WorldLoadEvent`.
+  `Bukkit.createWorld` is unchanged and synchronous. The operation lease stays held until the
+  future completes. On failure after construction the half-built world is unloaded with
+  `unloadWorldAsync`, then the service removes its stores, folder, registry entry and engine
+  management off the region threads. If the server stops first, the future fails, the world is
+  saved by the shutdown with its spawn unset and stays registered, and its next `load` searches
+  the spawn (verified locally: `stop` during create exited 0 in 2.1 s; the later load found the
+  same spawn as an uninterrupted create). Exposure: until the future completes
+  `Bukkit.getWorld(name)` returns the world before `WorldLoadEvent` and without global ticking,
+  as it did inside `createWorld`, now for a few ticks; AWF operations on the name are refused by
+  the gate and `unloadWorldAsync` refuses the world (`FAIL_UNKNOWN`); other plugin access is not
+  guarded. Residual: only the first spawn chunk is prefetched; a spawn search that moves to other
+  spiral chunks loads them synchronously as before. A plugin generator's
+  `getFixedSpawnLocation` is called twice. Evidence (Apple M2, 8 cores, one uncertified run per
+  case, no players, `awf_create_stall.py`, max gap between console `say` echoes): normal seeds
+  11/22/33 3.29/2.30/2.19 s → 0.10/0.14/0.06 s, nether 0.73 → 0.06 s, from template 1.98 →
+  0.10 s, clone 1.98 → 0.06 s, void/flat ~0.1 s both; reply time unchanged. Spawn positions from
+  `level_overrides.dat` identical for all 10 worlds compared. A post-construction failure and a
+  plugin generator were not run.
 
 ## Qualification
 Load/unload loops, COW isolation, crash during each persistence stage, backend timeout/disconnect, shutdown with pending saves, corrupt cache/blob recovery, and 1/50/250/1000-world workloads.

@@ -102,13 +102,21 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   baris korupsi; `verify_crash_panel.py` di demo 2026-10-07: game time PASS, 64/64 blok, entitas utuh.
   Sisa: run dengan pemain nyata, world border,
   world PDC dan `level.dat` belum masuk. Detail: `docs/architecture/engine-storage.md` §6.
-- [ ] AWF create masih menunggu generasi spawn pada global tick: report Spark pengguna
+- [x] AWF create masih menunggu generasi spawn pada global tick: report Spark pengguna
   `https://spark.lucko.me/RyP3FlAYME` mencatat 4.650 ms sampel inclusive pada
   `/awf create` → `setInitialSpawn` → `syncLoadNonFull`; 4.570 ms di `parkNanos`.
-  Ini akumulasi sampel, bukan bukti satu pause 4,65 s. Handoff Claude: tahap persiapan async
-  saja belum menghilangkan wait di dalam `createWorld`; perlu desain spawn/lifecycle yang
-  mempertahankan ownership dan kondisi terrain. Tidak membuktikan semua stutter eksplorasi.
-  Bukti/lingkup: `docs/development/AURORA-EDF-UPGRADE.md`.
+  Ini akumulasi sampel, bukan bukti satu pause 4,65 s. Tidak membuktikan semua stutter eksplorasi.
+  DIPERBAIKI LOKAL 2026-10-13 (belum di-commit di root, belum CI): pembuatan dunia bertahap
+  (MC 0029, Paper 0014, `AuroraWorldsService`; SPEC B80/B85): chunk pertama pencarian spawn
+  dimuat async ke SPAWN, lalu `setInitialSpawn`/`prepareLevel` yang tidak diubah berjalan di
+  global tick berikutnya; `Bukkit.createWorld` tetap sinkron. Lokal (M2 8 core, satu run per
+  spesifikasi, tanpa pemain, tidak tersertifikasi): jeda maksimum global tick saat
+  `/awf create` normal 11/22/33 3,29/2,30/2,19 s → 0,10/0,14/0,06 s, nether 0,73 → 0,06 s,
+  template 1,98 → 0,10 s, clone 1,98 → 0,06 s; spawn identik dengan jar lama (10 dunia).
+  Sisa: kandidat spiral tambahan masih sinkron; jalur gagal-setelah-konstruksi dan generator
+  plugin belum dijalankan di server; future `AuroraWorlds` kini bisa selesai di tick berikutnya
+  (SSB-AuroraWorlds `world()` perlu dicek bila dipanggil di global tick).
+  Bukti/lingkup: `docs/development/AURORA-EDF-UPGRADE.md`, `docs/architecture/aurora-world-fabric.md`.
 - [x] Perintah konsol kadang gagal dengan `NullPointerException` (`CommandSourceStack.getLevel()`
   null) dalam ~2 detik setelah `Done`, teramati saat boot ulang dunia AWF. DIPERBAIKI 2026-10-13
   (feature patch MC 0028 `rebind-early-console-command-sources`; 0029 sebelum renumbering hari yang

@@ -29,12 +29,19 @@ import org.jspecify.annotations.Nullable;
  * in, an empty world spawning at 0.5, 64, 0.5), a plugin's generator as {@code Plugin} or
  * {@code Plugin:id}, or {@code null} for the environment's own terrain.</p>
  *
- * <p>Completion callbacks have no guaranteed thread. {@code create},
- * {@code createFromTemplate}, the imports and {@code load} called <em>on</em> the global region
- * thread do their work there and return a completed future, so a caller that needs the world at
- * once (a world provider asked for an island's world, say) can join it there. Elsewhere, joining
- * blocks that thread until the global tick has created the world; never do so on a region/entity
- * thread. Conflicting lifecycle work fails with {@link WorldOperationBusyException}, and
+ * <p>Completion callbacks have no guaranteed thread. World creation and loading ({@code create},
+ * {@code createFromTemplate}, {@code cloneWorld}, the imports and {@code load}) run on the global
+ * region thread in stages: the global tick does not wait while the new world's initial spawn
+ * terrain generates, and the future completes on a later global tick once the world is loaded,
+ * even when called on the global region thread. Never block on these futures on the global
+ * region thread: {@code join} and {@code get} there throw {@link IllegalStateException} while the
+ * work is unfinished (blocking would stop the very tick that finishes it). Use a callback
+ * ({@code thenAccept}, {@code whenComplete}) instead. A world that is already loaded, or loads
+ * without a spawn search (its spawn already set or fixed by its generator), can still complete
+ * at once. Elsewhere, joining blocks that thread until the global tick has created the world;
+ * never do so on a region/entity thread. Until the future completes, {@code Bukkit.getWorld}
+ * may already return the world, before {@code WorldLoadEvent}; do not use it until then.
+ * Conflicting lifecycle work fails with {@link WorldOperationBusyException}, and
  * cancelling its future does not stop engine work. World and template names are lower-case {@code [a-z0-9_-]}, 1 to 48
  * characters.</p>
  */

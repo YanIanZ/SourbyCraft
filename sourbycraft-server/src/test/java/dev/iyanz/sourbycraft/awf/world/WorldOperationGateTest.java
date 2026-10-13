@@ -125,4 +125,37 @@ class WorldOperationGateTest {
             gate.acquire("delete", List.of(world("arena"))).close();
         }
     }
+
+    @Test
+    void blockingOnUnfinishedWorkIsRefusedWhereFinishingItNeedsTheThread() throws Exception {
+        // A staged world creation finishes on a later global tick: joining it there never returns.
+        final java.util.concurrent.atomic.AtomicBoolean onGlobal = new java.util.concurrent.atomic.AtomicBoolean(true);
+        final WorldOperationGate gate = new WorldOperationGate(onGlobal::get);
+        final CompletableFuture<String> staged = new CompletableFuture<>();
+        final CompletableFuture<String> exposed = gate.run("create", List.of(world("a")), () -> staged);
+        final CompletableFuture<Integer> derived = exposed.thenApply(String::length);
+        for (final CompletableFuture<?> future : List.of(exposed, derived)) {
+            assertThrows(IllegalStateException.class, future::join);
+            assertThrows(IllegalStateException.class, future::get);
+            assertThrows(IllegalStateException.class, () -> future.get(1, TimeUnit.MILLISECONDS));
+        }
+        // Elsewhere it simply waits.
+        onGlobal.set(false);
+        assertThrows(java.util.concurrent.TimeoutException.class, () -> exposed.get(1, TimeUnit.MILLISECONDS));
+        // Finished work is never refused, on any thread.
+        onGlobal.set(true);
+        staged.complete("world");
+        assertEquals("world", exposed.join());
+        assertEquals(5, derived.get());
+    }
+
+    @Test
+    void aGateWithoutAThreadRuleNeverRefusesToWait() {
+        final WorldOperationGate gate = new WorldOperationGate();
+        final CompletableFuture<String> staged = new CompletableFuture<>();
+        final CompletableFuture<String> exposed = gate.run("create", List.of(world("a")), () -> staged);
+        assertThrows(java.util.concurrent.TimeoutException.class, () -> exposed.get(1, TimeUnit.MILLISECONDS));
+        staged.complete("world");
+        assertEquals("world", exposed.join());
+    }
 }

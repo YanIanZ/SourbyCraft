@@ -1,0 +1,198 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 13 Oct 2026 23:45:29 +0700
+Subject: [PATCH] SourbyCraft - staged createWorld that prefetches the spawn
+ chunk
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 88044ae59f6697a7379fd01dbe052f43d7cd5bd4..06058d61e6c3de61cab712d86d558608fed615f5 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1198,6 +1198,28 @@ public final class CraftServer implements Server {
+ 
+     @Override
+     public World createWorld(WorldCreator creator) {
++        // SourbyCraft start - staged world creation
++        final Object constructed = this.sourbycraft$constructWorld(creator);
++        if (!(constructed instanceof ServerLevel serverLevel)) {
++            return (World) constructed; // the world that already exists, or null
++        }
++        this.console.addLevel(serverLevel);
++        this.console.initWorld(serverLevel, creator);
++
++        serverLevel.setSpawnSettings(true);
++
++        this.getServer().prepareLevel(serverLevel);
++
++        return serverLevel.getWorld();
++    }
++
++    /**
++     * {@link #createWorld} up to and including the construction of the new level, which registers
++     * its CraftWorld: the world that already exists under that name, {@code null}, or the new
++     * {@link ServerLevel}.
++     */
++    private Object sourbycraft$constructWorld(WorldCreator creator) {
++        // SourbyCraft end - staged world creation
+         dev.iyanz.aurora.engine.util.TickGuard.ensureGlobalOrStartup("Cannot create worlds off global tick"); // Canvas - region threading
+         Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
+         //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
+@@ -1339,15 +1361,138 @@ public final class CraftServer implements Server {
+             return null;
+         }
+ 
+-        this.console.addLevel(serverLevel);
+-        this.console.initWorld(serverLevel, creator);
++        // SourbyCraft start - staged world creation
++        return serverLevel;
++    }
+ 
+-        serverLevel.setSpawnSettings(true);
++    /** Levels {@link #sourbycraft$createWorldStaged} has constructed and not yet finished or given up. */
++    private final java.util.Set<ServerLevel> sourbycraft$stagedLevels = java.util.concurrent.ConcurrentHashMap.newKeySet();
+ 
+-        this.getServer().prepareLevel(serverLevel);
++    /**
++     * {@link #createWorld} in stages, so the global tick does not wait while the initial spawn's
++     * terrain generates. Used by Aurora World Fabric; {@code createWorld} itself is unchanged.
++     * Call it on the global tick.
++     *
++     * <p>Everything up to and including {@code WorldInitEvent} runs now. The first chunk the initial
++     * spawn search would load is then loaded to {@code ChunkStatus.SPAWN} asynchronously, through
++     * the same non-full load ticket {@code syncLoadNonFull} uses, and the rest of
++     * {@code createWorld} (the unchanged spawn search, {@code prepareLevel}, the regionised server's
++     * {@code addWorld} and {@code WorldLoadEvent}) runs on a later global tick, where the search finds
++     * that chunk loaded. The future completes there, with what {@code createWorld} would have
++     * returned. When no search will run (spawn already set, fixed or forced) it all runs now.</p>
++     *
++     * <p>Until then {@code Bukkit.getWorld(name)} already returns the world, as it does inside
++     * {@code createWorld}, but the global tick does not tick it and {@code WorldLoadEvent} has not
++     * fired; {@code unloadWorldAsync} refuses it with {@code FAIL_UNKNOWN}. If a later stage fails,
++     * the half-built world is unloaded through {@code unloadWorldAsync} before the future fails.
++     * If the server stops first, the future fails and the world is left to the server's shutdown,
++     * which saves it with its spawn still unset, so its next load searches again.</p>
++     */
++    public java.util.concurrent.CompletableFuture<World> sourbycraft$createWorldStaged(final WorldCreator creator) {
++        final Object constructed;
++        try {
++            constructed = this.sourbycraft$constructWorld(creator);
++        } catch (final Throwable failed) {
++            return java.util.concurrent.CompletableFuture.failedFuture(failed);
++        }
++        if (!(constructed instanceof ServerLevel level)) {
++            return java.util.concurrent.CompletableFuture.completedFuture((World) constructed);
++        }
++        final java.util.concurrent.CompletableFuture<World> result = new java.util.concurrent.CompletableFuture<>();
++        this.sourbycraft$stagedLevels.add(level);
++        final net.minecraft.world.level.ChunkPos first;
++        try {
++            this.console.addLevel(level);
++            this.console.initWorldBeforeSpawn(level);
++            first = this.console.initialSpawnSearchChunk(level, creator);
++        } catch (final Throwable failed) {
++            this.sourbycraft$abandonStagedWorld(level, failed, result);
++            return result;
++        }
++        if (first == null) {
++            this.sourbycraft$finishStagedWorld(level, creator, null, null, result);
++            return result;
++        }
++        final net.minecraft.world.level.chunk.status.ChunkStatus status = net.minecraft.world.level.chunk.status.ChunkStatus.SPAWN;
++        final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler chunks = level.moonrise$getChunkTaskScheduler();
++        final Long ticket;
++        try {
++            ticket = chunks.beginNonFullLoad(first.x(), first.z(), status);
++        } catch (final Throwable failed) {
++            this.sourbycraft$abandonStagedWorld(level, failed, result);
++            return result;
++        }
++        // Whoever claims the level first finishes it: the global tick, or this waiter when the
++        // server stops (the global tick then never runs the task) or the chunk system shut down.
++        final java.util.concurrent.atomic.AtomicBoolean claimed = new java.util.concurrent.atomic.AtomicBoolean();
++        Thread.ofVirtual().name("SourbyCraft staged world " + creator.name()).start(() -> {
++            boolean queued = false;
++            while (!claimed.get()) {
++                if (this.console.hasStartedShutdownThread.get() || !this.console.isRunning() || chunks.hasShutdown()) {
++                    if (claimed.compareAndSet(false, true)) {
++                        this.sourbycraft$stagedLevels.remove(level);
++                        result.completeExceptionally(new IllegalStateException("the server stopped, or the world's chunk system"
++                            + " shut down, before " + creator.name() + " finished loading"));
++                    }
++                    return;
++                }
++                if (!queued && level.moonrise$getSpecificChunkIfLoaded(first.x(), first.z(), status) != null) {
++                    queued = true;
++                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> {
++                        if (claimed.compareAndSet(false, true)) {
++                            this.sourbycraft$finishStagedWorld(level, creator, first, ticket, result);
++                        }
++                    });
++                }
++                java.util.concurrent.locks.LockSupport.parkNanos(queued ? 10_000_000L : 1_000_000L);
++            }
++        });
++        return result;
++    }
+ 
+-        return serverLevel.getWorld();
++    /** The rest of {@link #createWorld}, unchanged, then drops the prefetch ticket. On the global tick. */
++    private void sourbycraft$finishStagedWorld(final ServerLevel level, final WorldCreator creator,
++                                               final net.minecraft.world.level.ChunkPos first, final Long ticket, // null when none was loaded
++                                               final java.util.concurrent.CompletableFuture<World> result) {
++        try {
++            try {
++                this.console.initWorldSpawn(level, creator);
++            } finally {
++                if (ticket != null) {
++                    level.moonrise$getChunkTaskScheduler().endNonFullLoad(first.x(), first.z(),
++                        net.minecraft.world.level.chunk.status.ChunkStatus.SPAWN, ticket);
++                }
++            }
++
++            level.setSpawnSettings(true);
++
++            this.getServer().prepareLevel(level);
++        } catch (final Throwable failed) {
++            this.sourbycraft$abandonStagedWorld(level, failed, result);
++            return;
++        }
++        this.sourbycraft$stagedLevels.remove(level);
++        result.complete(level.getWorld());
+     }
++
++    /** Unloads a level a later stage failed on, then fails {@code result}. On the global tick. */
++    private void sourbycraft$abandonStagedWorld(final ServerLevel level, final Throwable failed,
++                                                final java.util.concurrent.CompletableFuture<World> result) {
++        this.sourbycraft$stagedLevels.remove(level);
++        final String name = level.getWorld().getName();
++        try {
++            this.unloadWorldAsync(level.getWorld(), false, outcome -> {
++                if (outcome != io.canvasmc.canvas.WorldUnloadResult.SUCCESS) {
++                    this.getLogger().warning("Could not unload " + name + " after its creation failed: " + outcome);
++                }
++                result.completeExceptionally(failed);
++            });
++        } catch (final Throwable unloadFailed) {
++            failed.addSuppressed(unloadFailed);
++            result.completeExceptionally(failed);
++        }
++    }
++    // SourbyCraft end - staged world creation
+     // Canvas start - region threading
+ 
+     // note: we need to check these things:
+@@ -1369,6 +1514,13 @@ public final class CraftServer implements Server {
+     public void unloadWorldAsync(@NotNull final World world, final boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback) {
+         io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Can only unload worlds on global tick"); // Canvas - region threading
+         ServerLevel handle = ((CraftWorld) world).getHandle();
++        // SourbyCraft start - staged world creation
++        if (this.sourbycraft$stagedLevels.contains(handle)) {
++            this.getLogger().warning("Refusing to unload " + world.getName() + " while it is still being created");
++            callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNKNOWN);
++            return;
++        }
++        // SourbyCraft end - staged world creation
+         try {
+             handle.canvas$obtainWorldStageLock();
+ 

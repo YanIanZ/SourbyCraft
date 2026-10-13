@@ -94,9 +94,10 @@ release admission early.
 Use future continuations. Completion callbacks have no guaranteed thread; schedule block work
 through the region scheduler and player/entity work through that entity's scheduler. A bridged
 plugin can use this API, but bridge admission does not make arbitrary world/NMS calls safe.
-Never wait with `join()`/`get()` from an entity or ordinary region task. Existing global-thread
-creation/loading compatibility can complete synchronously and wait for I/O preparation; prefer
-the asynchronous flow to avoid stalling the global tick.
+Never wait with `join()`/`get()` from an entity or ordinary region task. On the global region
+thread, creation/loading/cloning futures can complete on a later global tick (since 2026-10-13):
+`join()`/`get()` on an unfinished one there throws `IllegalStateException`, because the tick
+that would finish it is the one blocked. Continue with `thenAccept`/`whenComplete` instead.
 
 Bridge `safe` mode is opt-in and RESTART_REQUIRED. At I/O saturation, a bridged async task is
 cancelled and diagnosed; an AWF operation rejected by the existing I/O executor fails its future.

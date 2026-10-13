@@ -49,7 +49,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     private final AuroraTemplates templates;
     /** Worlds whose pending unload must not save; see {@link #discardOnUnload}. */
     private final Set<String> unloadWithoutSaving = java.util.concurrent.ConcurrentHashMap.newKeySet();
-    private final WorldOperationGate operations = new WorldOperationGate();
+    private final WorldOperationGate operations = new WorldOperationGate(AuroraWorldsService::onGlobalTick);
 
     public AuroraWorldsService(final AuroraWorldRegistry registry, final AuroraTemplates templates) {
         this.registry = registry;
@@ -391,28 +391,68 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
                 before.run();
                 return null;
             }).thenCompose(ignored -> prepared(entry));
-        return createAfter(ready, () -> {
-            final World world = Bukkit.createWorld(creator);
-            if (world == null) throw new IllegalStateException("the server refused to create " + name);
+        return createAfter(ready, () -> createStaged(creator, entry, "create"))
+            .handle((world, failed) -> failed == null ? CompletableFuture.completedFuture(world) : forgetFailedStart(name, failed))
+            .thenCompose(java.util.function.Function.identity());
+    }
+
+    /**
+     * Undoes a {@link #start} that failed: the entry, the world's AWF stores and folder, and the
+     * engine's management of the name. The stores and folder are removed only once the world is
+     * gone (a failed creation unloads its half-built world first), and never existed before
+     * {@code start}, which refuses an existing folder or stores. The I/O runs off the region
+     * threads; the operation stays reserved until it is done, so the name cannot be reused midway.
+     *
+     * <p>Not when the server is stopping and the world still exists: the shutdown saves it, spawn
+     * still unset, and the entry is kept so a later load finishes it (its spawn search runs then).</p>
+     */
+    private CompletableFuture<World> forgetFailedStart(final String name, final Throwable failed) {
+        if (serverStopping() && Bukkit.getWorld(name) != null) {
+            SourbyLogger.warn("Aurora World Fabric: the server stopped while creating " + name + "; it stays registered"
+                + " and finishes at its next load");
+            return CompletableFuture.failedFuture(failed);
+        }
+        return dev.iyanz.sourbycraft.util.VirtualExecutor.<Void>supply(() -> {
+            AwfEngine.unprepare(folder(name));
+            if (Bukkit.getWorld(name) == null) {
+                try {
+                    AwfEngine.deleteStores(folder(name));
+                    deleteRecursively(folder(name));
+                } catch (final IOException cleanup) {
+                    // The folder or stores block the name until removed; the caller sees the original failure.
+                    failed.addSuppressed(cleanup);
+                }
+            }
+            try {
+                this.registry.remove(name);
+            } catch (final IOException ignored) {
+                // The original failure is what the caller needs; the entry is retried on delete.
+            }
+            AwfEngine.release(name);
+            return null;
+        }).handle((ignored, cleanupFailed) -> {
+            if (cleanupFailed != null) failed.addSuppressed(cleanupFailed);
+            throw failed instanceof CompletionException completion ? completion : new CompletionException(failed);
+        });
+    }
+
+    /** Whether the server has begun stopping, so the global tick may never run again. */
+    private static boolean serverStopping() {
+        final MinecraftServer server = MinecraftServer.getServer();
+        return server == null || server.hasStartedShutdownThread.get() || !server.isRunning();
+    }
+
+    /**
+     * Creates or loads the world in stages ({@code CraftServer#sourbycraft$createWorldStaged}): on
+     * the global tick, the global tick never waiting for the initial spawn's terrain. Completes
+     * on the global tick with the world, its properties applied.
+     */
+    private static CompletableFuture<World> createStaged(final WorldCreator creator, final AuroraWorldRegistry.Entry entry,
+                                                         final String verb) {
+        return ((org.bukkit.craftbukkit.CraftServer) Bukkit.getServer()).sourbycraft$createWorldStaged(creator).thenApply(world -> {
+            if (world == null) throw new IllegalStateException("the server refused to " + verb + " " + creator.name());
             applyProperties(world, entry.propertiesOrNone());
             return world;
-        }).whenComplete((world, failed) -> {
-            if (failed != null) {
-                AwfEngine.unprepare(folder(name));
-                if (before != null && Bukkit.getWorld(name) == null) {
-                    try {
-                        deleteRecursively(folder(name));
-                    } catch (final IOException ignored) {
-                        // Reported by the original failure; the folder blocks the name until removed.
-                    }
-                }
-                try {
-                    this.registry.remove(name);
-                } catch (final IOException ignored) {
-                    // The original failure is what the caller needs; the entry is retried on delete.
-                }
-                AwfEngine.release(name);
-            }
         });
     }
 
@@ -431,11 +471,8 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
             AwfEngine.configure(name, entry.prunesEmptyChunks(), entry.propertiesOrNone().saveBounds());
         return createAfter(prepared(entry), () -> {
             final World existing = Bukkit.getWorld(name);
-            if (existing != null) return existing;
-            final World world = Bukkit.createWorld(creator);
-            if (world == null) throw new IllegalStateException("the server refused to load " + name);
-            applyProperties(world, entry.propertiesOrNone());
-            return world;
+            if (existing != null) return CompletableFuture.completedFuture(existing);
+            return createStaged(creator, entry, "load");
         }).whenComplete((world, failed) -> {
             if (failed != null) AwfEngine.unprepare(folder(name));
         });
@@ -746,23 +783,31 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     }
 
     /**
-     * Runs {@code action} on the global region thread once {@code ready} completes. Called on the
-     * global region thread itself, it waits for {@code ready} (blocking I/O on the I/O lane) and
-     * runs the action at once, so the returned future is already complete and a caller there can
-     * join it; scheduling it for a later global tick instead would deadlock such a caller.
+     * Runs {@code action} on the global region thread once {@code ready} completes, and follows
+     * the future it returns. The global tick never waits for {@code ready} (blocking I/O on the
+     * I/O lane): completed already and called there, the action runs at once; otherwise it runs
+     * on a later global tick. The result therefore may complete after this returns even for a
+     * caller on the global tick, which must not join it there (see {@link WorldOperationGate}).
      */
-    private static <T> CompletableFuture<T> createAfter(final CompletableFuture<Void> ready, final Action<T> action) {
-        if (Bukkit.isGlobalTickThread()) {
-            try {
-                ready.join();
-                return CompletableFuture.completedFuture(action.run());
-            } catch (final CompletionException failed) {
-                return CompletableFuture.failedFuture(failed.getCause() == null ? failed : failed.getCause());
-            } catch (final Throwable failed) {
-                return CompletableFuture.failedFuture(failed);
-            }
+    private static <T> CompletableFuture<T> createAfter(final CompletableFuture<Void> ready,
+                                                        final Action<CompletableFuture<T>> action) {
+        if (ready.isDone() && !ready.isCompletedExceptionally() && Bukkit.isGlobalTickThread()) {
+            return started(action);
         }
-        return ready.thenCompose(ignored -> onGlobal(action));
+        return ready.thenCompose(ignored -> onGlobal(action).thenCompose(java.util.function.Function.identity()));
+    }
+
+    private static <T> CompletableFuture<T> started(final Action<CompletableFuture<T>> action) {
+        try {
+            return action.run();
+        } catch (final Throwable failed) {
+            return CompletableFuture.failedFuture(failed);
+        }
+    }
+
+    /** True on the global region thread; false without a server (unit tests). */
+    private static boolean onGlobalTick() {
+        return Bukkit.getServer() != null && Bukkit.isGlobalTickThread();
     }
 
     private static <T> CompletableFuture<T> onGlobal(final Action<T> action) {

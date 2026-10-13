@@ -6,6 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -26,6 +30,64 @@ final class WorldOperationGate {
     }
 
     private final Map<String, ResourceState> active = new HashMap<>();
+    /** True on the thread an operation's completion may still need (the global tick). */
+    private final BooleanSupplier waitForbidden;
+
+    WorldOperationGate() {
+        this(() -> false);
+    }
+
+    /**
+     * @param waitForbidden true on a thread that must not block on an unfinished operation,
+     *     because finishing it needs that thread: {@code join}/{@code get} there throw instead
+     */
+    WorldOperationGate(final BooleanSupplier waitForbidden) {
+        this.waitForbidden = Objects.requireNonNull(waitForbidden, "waitForbidden");
+    }
+
+    /**
+     * An operation's future. World creation finishes on a later global tick, so blocking on it on
+     * the global tick could never return; {@code join} and {@code get} refuse that with an
+     * {@link IllegalStateException} instead of hanging the server. Futures derived from it
+     * ({@code thenApply} and the like) refuse the same way; a finished future never refuses.
+     */
+    static final class OperationFuture<T> extends CompletableFuture<T> {
+        private final BooleanSupplier waitForbidden;
+
+        OperationFuture(final BooleanSupplier waitForbidden) {
+            this.waitForbidden = waitForbidden;
+        }
+
+        @Override
+        public <U> CompletableFuture<U> newIncompleteFuture() {
+            return new OperationFuture<>(this.waitForbidden);
+        }
+
+        private void refuseBlockingHere() {
+            if (!isDone() && this.waitForbidden.getAsBoolean()) {
+                throw new IllegalStateException("an AWF world operation finishes on the global tick; waiting for it there"
+                    + " would never return. Use a completion callback (whenComplete/thenAccept) instead");
+            }
+        }
+
+        @Override
+        public T join() {
+            refuseBlockingHere();
+            return super.join();
+        }
+
+        @Override
+        public T get() throws InterruptedException, ExecutionException {
+            refuseBlockingHere();
+            return super.get();
+        }
+
+        @Override
+        public T get(final long timeout, final TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
+            refuseBlockingHere();
+            return super.get(timeout, unit);
+        }
+    }
 
     final class Lease implements AutoCloseable {
         private final String operation;
@@ -91,7 +153,7 @@ final class WorldOperationGate {
         }
         // The caller can cancel/complete its future without releasing ownership while the
         // underlying engine/I/O work is still running. Release before publishing completion.
-        final CompletableFuture<T> result = new CompletableFuture<>();
+        final CompletableFuture<T> result = new OperationFuture<>(this.waitForbidden);
         source.whenComplete((value, failed) -> {
             lease.close();
             if (failed == null) result.complete(value);
