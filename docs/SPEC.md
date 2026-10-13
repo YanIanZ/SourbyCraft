@@ -2336,14 +2336,10 @@ V22: Bootstrap progress counts finished stage attempts; failures remain explicit
 V23: /pl and /plugins resolve same Command; claiming bare names preserves namespaced built-ins; sorted search/filter pages retain status and failure evidence; disabled alone ≠ failed; diagnostics captures both JUL and modern Log4j plugin failures (AURORA-UX).
 V24: New config files seed typed UI defaults with lifecycle comments; existing bytes stay unchanged; tracked restart changes compare against boot, not previous reload; partial reload failures surfaced (AURORA-CONFIG).
 
-V25: Private Intave source relocation changes declared text formats only; binary replay fixtures retain original bytes even when UTF-8-decodable (INTAVE-NATIVE).
-V26: Native Intave publishes ACTIVE only from the same STARTING state that passed readiness; concurrent callback failure or late completion after stop cannot reopen admission (INTAVE-NATIVE).
-V27: Native Connection sends retain ready-head ordering, nested extras and per-send filter scope; finish subscribers receive a real success/failure future exactly once, or null on queued cancellation; filter scope restores before the next regular send (INTAVE-NATIVE).
-V28: Private native Intave build inputs under src/generated and every compile-library JAR belong to the pinned baseline/port ledger or pinned resource inventory; unrecorded files and symlink escapes reject preparation/native build without rewriting them (INTAVE-NATIVE).
-V29: Native source migration renders/validates the complete port before writing; transformation errors preserve every baseline byte and legacy entrypoint; ordinary write failures roll back, and the native ledger is published only after all source changes finish (INTAVE-NATIVE).
+V25–V29: removed 2026-10-13 (owner decision: private anticheat integration dropped).
 V30: Managed plugin JAR provisioning runs on the active launcher/server path before Paper's first plugin scan, using the selected --plugins directory for JARs and seeded configs (PLUGIN-PROVISIONING).
 V31: Bootstrap auto-provision switches are table-qualified: protocollib, viaversion and unrelated TOML tables cannot enable/disable one another; malformed/unreadable switches do not authorize network installation (PLUGIN-PROVISIONING).
-V32: Native world block/shape reads check region ownership for each queried position, including neighbors; they never load chunks or turn unavailable/unindexed data into AIR, an empty shape or variant zero. Immutable state conversion rejects missing/non-native inputs; ownership/runtime qualification remains a separate gate (INTAVE-NATIVE).
+V32: removed 2026-10-13 (owner decision: private anticheat integration dropped).
 
 V33: AWF lifecycle admission covers actual engine/I/O completion and failed-creation cleanup; caller future cancellation/completion cannot release live work; same-world conflicts fail before mutation; independent worlds and shared template readers proceed without queued waits; template writers are exclusive; save failures drain every admitted region before publishing completion (§28–29, §35–42, §128).
 V34: Bridge task registration/completion/cancellation/rejection updates global and per-plugin indexes together; disable closes that plugin's admission before draining; late handles are cancelled; running state counts overlapping invocations; scheduler/I/O rejection leaves no pending one-shot task and does not quarantine other plugins (§35, §71, §125–126, §138).
@@ -2415,32 +2411,13 @@ V39: Bridge explicit entity target (`EntityTask`) takes precedence over an expli
 
 | B42 | 2026-10-06 | Plugin diagnostics tailed JUL only; modern Paper loader logs through Log4j, so real jar failures were absent from /plugins despite direct-capture unit tests | V23; bounded process-owned Log4j appender alongside JUL, deduplicated per jar; PluginLoggingRouteTest emits through the actual logger |
 
-| B43 | 2026-10-06 | Native packet-config facade extended PluginBase without its required lifecycle callbacks; anonymous owner failed javac | Implement Plugin API callbacks; bridge/Connection compiler check passes against local 26.2 artifacts; mechanical native API migration, no new invariant; full engine compile pending |
-| B44 | 2026-10-06 | Private source importer treated every UTF-8-decodable resource as text, altering binary replay data containing old package strings | V25; relocate declared text formats only; UTF-8 binary fixture regression fails before fix and passes after |
-| B45 | 2026-10-06 | Toolchain policy counted archived Intave upstream build scripts as executable SourbyCraft modules | Skip private provenance archives, still inspect executable workspace target; failing scope regression covers both; existing Java 25 constraint unchanged |
-| B46 | 2026-10-06 | Native readiness unconditionally published ACTIVE after a concurrent channel failure had published FAILED | V26; compare-and-set original STARTING snapshot; readiness race regression fails before fix and passes after |
-| B47 | 2026-10-06 | Private test source wiring inherited server's TestSuite-only include, which omits ordinary upstream Intave test classes | Include both private test packages explicitly; preserve server suites; Gradle execution/discovery counts remain pending, same suite-discovery failure class as B31 |
-| B48 | 2026-10-06 | FAILED stopped controller/packet callbacks but left the legacy API owner enabled for further Bukkit admission | V26; nonblocking engine admission hook disables facade on fail/stop; native commands/sends reject inactive state; controller admission-stop regression fails before fix and passes after; full engine behavior pending |
-| B49 | 2026-10-06 | Connection used Netty voidPromise for sends without an explicit listener, then attached packet finish subscribers; native feedback threw void future and initiated disconnect | V27; real promise only when packet finish listener is present; actual patched Connection/EmbeddedChannel probes cover ordered extras, cancellation, filtering and failed writes; engine/runtime qualification remains pending |
-| B50 | 2026-10-06 | Private provenance hashed listed files but srcDir/fileTree also admitted unrecorded Java/resources/JARs; generated identity was absent from baseline ledger | V28; closed input inventory in doctor and Gradle, hash generated identity at preparation; regressions reject extra sources/libraries/symlinks and accept pinned resource recovery; actual Gradle inventory helper probe passes |
-| B51 | 2026-10-06 | Native migration renamed entrypoint and wrote source files before validating the final diagnostics/template targets; rerun trusted port report without baseline/revision/removal checks | V29; render all changes first, validate full ledger on rerun, roll back ordinary write errors; failing preservation/revision/legacy-entrypoint tests now pass; all 152 existing port hashes reproduced without mutation |
-| B52 | 2026-10-06 | Java method replacement counted braces in quoted strings/chars/comments and truncated the wrong source span | V29; mask non-code tokens before balanced-body matching, reject duplicate/unbalanced targets; failing literal-brace regression now passes; pinned full port remains byte-identical |
-| B53 | 2026-10-06 | Native profile restricted ac.intave runtime coordinates to Maven Local, although upstream tagged build scripts publish samples/cloud-protocol to Central | Route only this runtime group to Central; preserve private Sourby toolchain repository policy; exact source tags retrieved and 147 API classes compiled; actual Maven artifact/Gradle resolution remains pending; repository wiring correction, no new runtime invariant |
-| B54 | 2026-10-06 | Intave and modern Bukkit both declare Input; wildcard imports made MovementMetadata ambiguous against the actual 26.2 API | Explicit Intave Input import in reproducible native source migration; compiler diagnostic no longer reports ambiguity; full engine remains uncompiled due dependency and other adapter API errors; mechanical API migration, no new runtime invariant |
-| B55 | 2026-10-06 | UTF-8 writer edit accidentally dedented publication outside the per-file loop; normal migration test found the engine file absent | V29; write encoded bytes inside the loop and verify every rendered hash before publishing ledger; full migration/rollback suite rerun; mechanical implementation error, no new invariant |
-| B56 | 2026-10-06 | Detached Intave inventory implemented an older PlayerInventory contract; integer slots ignored equipment, setContents lost armor/extras and removal silently returned success | Reproducible 26.2 migration, 43-slot equipment mapping, actual removal/remainders, detached arrays and writable iterator; real Minecraft item probe passes; one-time API migration, no new invariant; other legacy mock methods remain outside this probe |
-| B57 | 2026-10-06 | Fallback block lacked modern Block methods; fixed minimum Y/piston response and stale location-copy semantics disagreed with current API | Native read-only AIR properties/data/collision, actual minimum height, explicit unsupported world mutations and non-AIR subclass rejection; actual AIR state probe passes; one-time API migration, no new invariant; broader world ownership audit pending |
-| B58 | 2026-10-06 | Legacy fluid resolver compiled obfuscated Fluid/IBlockData against mapped Fluid/BlockState; reflection errors returned Dry and indexing swallowed exceptions | Read immutable mapped FluidState, direct native resolver setup and propagate indexing failure; real water/lava levels 0..15 plus waterlogged probe passes; one-time mapping migration, no new invariant; full indexing startup/replays remain unverified |
-| B59 | 2026-10-06 | New inventory probe bootstrapped items before binding 26.2 components and ran from repository cwd, seeding config there | Use actual vanilla component initialization and default Paper configuration, execute in disposable directory and remove only newly generated config; probe passes; test-environment isolation issue, no new runtime invariant |
-| B60 | 2026-10-06 | Via jar installation existed only in legacy SourbyBootstrap, while the current slim JAR enters SourbyClip directly; configs also ignored the CLI plugin directory | V30; feature patch 0025 invokes installer before PluginInitializerManager.load, records selected path for config seeding; applied-source ordering/custom-directory probes; full packaged boot pending |
+| B43–B59 | 2026-10-06 | removed 2026-10-13 (owner decision: private anticheat integration dropped) | — |
+| B60 | 2026-10-06 | Via jar installation existed only in legacy SourbyBootstrap, while the current slim JAR enters SourbyClip directly; configs also ignored the CLI plugin directory | V30; feature patch 0025 (now 0024) invokes installer before PluginInitializerManager.load, records selected path for config seeding; applied-source ordering/custom-directory probes; full packaged boot pending |
 | B61 | 2026-10-06 | Bootstrap Via toggle scanner accepted bare auto-provision in any TOML table, so adding ProtocolLib could disable/enable Via accidentally | V31; table/dotted-key switch reader shared by independent groups, reject malformed/unreadable switches; regression covers unrelated tables, quoted keys and opposite group values |
 | B62 | 2026-10-06 | Managed plugin quarantine replaced an existing disabled file with different operator bytes; plugin downloads reused a shared temp filename and ignored Clip offline mode | V15/V18 and offline constraint; preserve conflicting quarantine, unique staged download, verified reuse/restore before offline rejection; actual installer regressions pass; no new invariant |
 | B63 | 2026-10-06 | Installer publication could replace a plugin dropped by the operator while its download ran | V15/V18; recheck plugin presence before non-replacing publication, always clean staging; controlled late-operator regression preserves bytes; no new invariant |
 | B64 | 2026-10-06 | Via filename-prefix detection missed common ViaVersion.jar and renamed descriptors, so the newly active installer could create duplicate plugins | V15; detect plugin names from bounded descriptors and canonical filename, including uppercase JAR extension; manual Via and renamed Paper plugin regressions pass; no new invariant |
-| B65 | 2026-10-06 | Native block/shape adapters still mixed mapped LightChunk with old IBlockAccess; missing chunk/state paths fabricated AIR/empty/default and shape neighbors had no ownership boundary | V32; direct mapped adapters and owner-checked non-loading BlockGetter, reject block-entity reads needing an audited snapshot, remove emergency world fallback/cache-miss defaults, direct index/conversion setup; actual immutable state/property/geometry probe passes; Netty handoff/snapshots and real region ownership tests remain pending |
-| B66 | 2026-10-06 | Modern Bukkit removed legacy attribute/effect/enchantment names, material switches and Block.setData; mixed NMS versions also broke unused historical adapter bodies | Reproducible code-only name mapping, actual Levelled block-data update, mapped material properties and historical internal adapters delegate native 26.2; comment/literal preservation regression passes; latest full-source diagnostic reports only missing dependency symbols, not proof of a complete build; mechanical API migration, no new invariant |
-| B67 | 2026-10-06 | Source port could not accept subsequent template fixes safely; native InjectionService omitted subscriptionsOf still referenced by the retained legacy class | V29; explicit verified-original refresh rejects local edits, verifies every resulting hash, restores partial ledger/source writes and is idempotent; three refresh regressions pass; retain immutable actual subscription snapshots, compiler no longer reports missing method; full packet engine still unverified |
-| B68 | 2026-10-06 | Engine diagnostic placed the packaged server Connection before the patched class, so javac falsely reported missing sendNative | Compile the actual Connection feature patch first into a disposable directory and place it first; compile 1,191 engine plus 147 verified API source files; remaining diagnostics are dependency failures; probe exits nonzero and never reports build/boot/efficacy success; diagnostic orchestration bug, no new invariant |
+| B65–B68 | 2026-10-06 | removed 2026-10-13 (owner decision: private anticheat integration dropped) | — |
 
 | B69 | 2026-10-06 | Typed AWF request used legacy WorldCreator(name), whose default key depends on Bukkit main-level state; API dispatch fixture failed without a server | V35; use WorldCreator.ofKey(minecraft:name), matching managed-world identity; explicit-key dispatch regression |
 | B70 | 2026-10-06 | Bridge registered tasks before scheduling but left them pending when executor admission threw or timed I/O was rejected; disable could race new submissions | V34; per-plugin admission/index, late-handle cancellation and explicit rejected-I/O cleanup; scheduler rejection, disable race and 100-plugin isolation regressions |
@@ -2460,12 +2437,13 @@ V39: Bridge explicit entity target (`EntityTask`) takes precedence over an expli
 | B80 | 2026-10-06 | Static review: createAfter joins backend/import preparation on global tick before returning its future | OPEN A5; asynchronous owner handoff required; no measured stall/benchmark claim; Claude delayed-preparation regression pending |
 
 | B81 | 2026-10-06 | User Build 47 log: SuperiorSkyblock2 SpawnIsland constructor callback read biome from global tick; an opaque startup sync task supplied no target region | V36; RegionTask API, fingerprinted 2026.3 spawn adapter and feature patch 0010. PARTIAL 2026-10-07: the three dispatch regressions pass (`BridgeTargetRoutingTest` 9/9 with V39, bridge package 61/61), resolver NPE fixed (B87); adapter never run against the real 2026.3 jar; SuperiorSkyblock2 itself ported to native Folia outside this repo (Sourby Demo 2026-10-06), so the adapter covers only the unported jar; fixture marker `LEGACY_REGION_TASK_OK` not yet run in CI; no full-plugin qualification |
-| B82 | 2026-10-06 | User reports stutter generating new terrain; runtime cause unknown and generic-stage queue/run timing unavailable | V37; optional recorder and feature 0027 written; diagnosis/profiling/optimization acceptance pending with Claude, no speed claim |
+| B82 | 2026-10-06 | User reports stutter generating new terrain; runtime cause unknown and generic-stage queue/run timing unavailable | V37; optional recorder and feature 0027 (now 0026) written; diagnosis/profiling/optimization acceptance pending with Claude, no speed claim |
 | B83 | 2026-10-06 | Claude reports Bukkit AnnotationTest rejects RegionTask reference signatures lacking nullability declarations | Existing API annotation regression; JSpecify NullMarked added. FIXED 2026-10-07: `org.bukkit.AnnotationTest` 1/1 passes with `RegionTask` and `EntityTask` present (`sourbyapi/build/test-results`, 2026-10-07 01:27 +07); no new invariant |
 | B84 | 2026-10-06 | LeafPile 1.2.0 source/JAR review: EDF running cancellation never marks cancellation; cancel/retime replacement loses awaiting link; same-task retime leaves cached deadline; task state lacks volatile publication | V38; LeafPile-derived AuroraEdfScheduler and feature 0028 written; attribution/GPL included. HELD 2026-10-07 by owner decision: 0028 and `AuroraEdfSchedulerTest` parked in `sourbycraft-server/minecraft-patches/parked/`, not in the build; it ran in the Sourby Demo jars of 2026-10-07 00:00–00:36; no accepted test, boot or ownership result; no measured speed gain or stutter-resolution claim |
 | B85 | 2026-10-06 | User Spark RyP3FlAYME: global console /awf create reaches setInitialSpawn/syncLoadNonFull, recording 4,650 ms inclusive samples (4,570 ms parked); generation worker threads not captured | OPEN lifecycle/spawn follow-up to B80; preserve spawn/terrain fidelity and ownership in phased initialization; sample accumulation is not a single-pause measurement; Claude-owned AWF work untouched |
 | B86 | 2026-10-07 | Review of uncommitted bridge work: plugin disable set a per-plugin admission-closed flag that nothing reopened; a bridged plugin loaded again under the same name (reload after disable) had every scheduler task rejected | FIXED 2026-10-07 (unit-tested, no boot): `BridgeRuntime.admit` reopens admission, called only when the loader admits a (re)loaded instance; disable still drains and refuses until then; BridgeReviewTest.aPluginLoadedAgainAfterDisableCanScheduleAgain. Same-instance `enablePlugin` after `disablePlugin` without reload stays closed (no enable hook) |
 | B87 | 2026-10-07 | Review: `SuperiorSpawnTaskOwner.resolve` dereferenced `getPluginMeta()` without a null check; a plugin named SuperiorSkyblock2 with no meta raised NullPointerException instead of the adapter's refusal (submit still failed closed) | FIXED 2026-10-07 (unit-tested): null meta refused with the version/classloader IllegalArgumentException before admission, no violation counted; BridgeReviewTest.superiorCallbackWithoutMetaIsRefusedBeforeAdmissionWithoutViolation |
+| B88 | 2026-10-13 | Console lines read before the overworld was registered captured a `CommandSourceStack` with a null level (`PaperConsole.runCommand` → `createCommandSourceStack()`); the queued command threw `NullPointerException` at `Commands.executeCommandInContext` on the first global tick after `Done`. Explains the `/say` sighting (identical stack) and the console NPE after an AWF reboot | FIXED 2026-10-13 (local boot): MC feature 0028 (`rebind-early-console-command-sources`; 0029 before the same-day renumbering) rebuilds a null-level source in `DedicatedServer.handleConsoleInputs`. Repro `/say` every 0.25 s during boot: old jar 97/109 NPE, 0029 jar 0/37, all run on the first tick after `Done`, clean exit. Pre-dates Build 47: the Build 45c REL jar throws on the same probe. CI boot step now writes `say SOURBY_EARLY_CONSOLE_PROBE` at launch and fails if it threw or did not run (verified locally: 45c fails, 0029 passes) |
 
 # 154. Delivery Scope
 
@@ -2594,14 +2572,14 @@ I.region-watchdog: JVM property `sourbycraft.region-watchdog.enabled`, default f
 RESTART_REQUIRED; Java Boolean semantics. Read at watchdog class initialization before
 scheduler startup; independent of TOML/YAML and bridge mode. Off starts no watchdog thread,
 allocates/retains no RunningTick records and manual run returns immediately. True restores
-existing diagnostic loop. Feature patch 0026 covers FoliaWatchdogThread and both tick
+existing diagnostic loop. Feature patch 0025 covers FoliaWatchdogThread and both tick
 paths/startup in TickRegionScheduler; materialized edits never committed as root sources.
 
 | id | status | goal | cites |
 | --- | --- | --- | --- |
 | T-WATCHDOG-1 | ~ | Region watchdog off by default; opt-in restart flag; guard/boot/shutdown acceptance | I.region-watchdog |
 
-Status 2026-10-06: feature patch 0026 exported from materialized commit 952f1e1 in src/minecraft/java; targeted edits applied.
+Status 2026-10-06: feature patch 0026 (now 0025) exported from materialized commit 952f1e1 in src/minecraft/java; targeted edits applied.
 No Codex build/test/boot/deployment. Acceptance cases assigned to Claude in
 `docs/development/REGION-WATCHDOG.md`; task remains pending.
 
@@ -2616,7 +2594,7 @@ existing task cancellation, future waits and radius-aware execution; no new exec
 
 I.chunk-generation: Startup JVM property `sourbycraft.chunk-generation-metrics.enabled` or TOML
 `aurora.diagnostics.chunk-generation-metrics` (added 2026-10-07; either enables), default false,
-RESTART_REQUIRED. Minecraft feature 0027 hooks non-empty generic generation;
+RESTART_REQUIRED. Minecraft feature 0026 hooks non-empty generic generation;
 `perf/ChunkGenerationMetrics` retains fixed vanilla keys and 1024 queue/run samples each.
 `/perf chunks` displays recent p95/p99 and cumulative completed run counts. Failed executed
 runs included. Wall time includes future waits and callbacks; not CPU or end-to-end latency.
@@ -2633,7 +2611,7 @@ PaperLevelOverrides omission identified, no save-path fix or XFAIL removal in th
 | T-CHUNK-1 | ~ | Bounded stage queue/run samples and command rendering; hook/build acceptance | V37,I.chunk-generation |
 | T-CHUNK-2 | . | Reproduce/profile fresh terrain; identify and validate measured optimization | I.chunk-generation-handoff |
 
-Status 2026-10-06: two recorder regression sources written, unexecuted. Feature 0027
+Status 2026-10-06: two recorder regression sources written, unexecuted. Feature 0027 (now 0026)
 exported from materialized commit 0569a90 in src/minecraft/java; document corrections prepared; no Codex build, test, boot, deployment or performance result.
 RegionTask annotation follow-up awaits Claude rerun of the existing API annotation test.
 
@@ -2648,7 +2626,8 @@ retained. No new executor, intermediate draining, throughput claim or default ga
 change. User assigns all build/testing/boot/profiling to Claude; status remains pending.
 
 I.edf: Owned `engine/threadedregions/scheduler/AuroraEdfScheduler` selected by the
-existing boot-time EDF option through feature 0028 (materialized commit ade3b24).
+existing boot-time EDF option through the EDF feature patch (then 0028, materialized commit ade3b24;
+parked since 2026-10-07 as `minecraft-patches/parked/0028-…`, not the current feature 0028).
 `SchedulableTick.state` stays public Object, becomes volatile; owner final before task
 publication. Cancellation during tick fences reschedule; completed/cancelled tasks are
 terminal; every queued-to-awaiting handoff installs its link. Deadline-max update re-arms
@@ -2690,7 +2669,7 @@ recorded results only.
 
 Trees: committed head `1fe984ed` passed CI run 485 (`37420627980`, 2026-10-06). The release-candidate
 tree (Paper 0005–0011, Minecraft 0023–0027, bridge/AWF fixes, `RegionTask`/`EntityTask`) is
-uncommitted and has never run in CI. Patch 0028 is HELD (B84).
+uncommitted and has never run in CI. The EDF patch (parked 0028) is HELD (B84).
 
 | Gate | State 2026-10-07 |
 | --- | --- |
@@ -2698,18 +2677,18 @@ uncommitted and has never run in CI. Patch 0028 is HELD (B84).
 | unit/integration | PARTIAL — CI for committed head; RC tree local: Gradle 10,152/10,152 (2026-10-06, after 0007), bridge 61/61, AWF 151 run/0 failed, Python 327/327 (2026-10-07) |
 | patch regeneration | NOT RUN — renumbering 0024/0025 ↔ 0026/0027 predicted; 8 feature patches untracked |
 | plugin compatibility | PARTIAL — synthetic CI fixture; Vault/EssentialsX on Sourby Demo; uncertified `plugins-10`; new fixture markers never run |
-| region ownership | OPEN — two unreproduced NPEs (`/say`, console after `Done`); 0026 untested |
+| region ownership | OPEN — `/say` and console-after-`Done` NPEs reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`, B88; local boot only, no CI yet); 0025 (watchdog) untested |
 | world load/unload/save | PARTIAL — persistence 104/104 local, 20/20 demo (2026-10-05); AWF CI boots on committed head; B80/B85 open |
 | crash recovery | PARTIAL — 49/49 region, 53/53 AWF (2026-10-05); not rerun on RC tree; game-time XFAIL |
 | cache corruption | PARTIAL — unit tests only |
 | backend failure | PARTIAL — Redis integration tests in CI; no disconnect/lease-loss run |
-| startup | PARTIAL — CI boot of committed head; RC tree only on Sourby Demo; 0024/0025 never booted in CI |
+| startup | PARTIAL — CI boot of committed head; RC tree only on Sourby Demo; the provisioning patch (then 0025, now 0024) never booted in CI |
 | stress | NOT RUN (certified) — uncertified demo runs only |
 | soak | NOT RUN — the certified 2 h soak (2026-09-15) predates Build 47 |
 | shutdown | PARTIAL — CI on committed head; 0009 shutdown check never run in CI |
 | attribution/licence | OPEN — owner decision |
 
 B-row consistency (2026-10-07): B76 PARTIAL; B77, B78, B79 FIXED (unit-tested); B80 OPEN; B81 PARTIAL;
-B82 pending (no recorded run with the 0027 recorder enabled; its two tests not recorded as run); B83 FIXED; B84 HELD;
+B82 pending (no recorded run with the 0027 (now 0026) recorder enabled; its two tests not recorded as run); B83 FIXED; B84 HELD;
 B85 OPEN; B86, B87 FIXED (unit-tested). §156 T-BRIDGE-2/3/4 and §157 T-BRIDGE-5 stay `~`: unit
 evidence exists, CI/boot acceptance does not. `release=pre` stays.

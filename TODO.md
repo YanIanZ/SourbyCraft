@@ -27,20 +27,22 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   shutdown, termasuk marker fixture yang belum pernah jalan (`LEGACY_GLOBAL_*`,
   `LEGACY_REGION_TASK_OK`, `LEGACY_ENTITY_TASK_OK`, `LEGACY_ENTITY_RETIRED_OK`,
   `LEGACY_DISABLE_*`) dan langkah baru `patch_surface.py --check`. Boot CI ini juga yang pertama
-  dengan feature patch 0024/0025 (Intave privat, auto-provision plugin sebelum plugin scan).
+  dengan feature patch auto-provision plugin sebelum plugin scan (saat itu 0025, kini 0024).
   SELESAI: push `beb7f40e` 2026-10-07, CI run 37515867230 success 33/33 langkah, 20 jenis marker OK.
 - [x] Regenerasi patch bersih: urutan commit materialized = urutan file (0024/0025 ↔ 0026/0027
   menurut `patch_surface.py --check-rebuild`, 2026-10-07), `rebuild*Patches` tanpa diff isi,
   8 file feature patch yang masih untracked di-commit. SELESAI 2026-10-07: reorder tanpa diff isi,
   rebuild tanpa perubahan konten, `applyAllPatches` dari file lulus lokal dan di CI 37515867230.
-- [!] Patch 0028 (`AuroraEdfScheduler`) DITAHAN dan diparkir (keputusan owner 2026-10-07): rilis
-  tanpa 0028 kecuali owner memutuskan lain.
+- [!] Patch EDF (`AuroraEdfScheduler`, file `minecraft-patches/parked/0028-…`) DITAHAN dan diparkir
+  (keputusan owner 2026-10-07): rilis tanpa patch EDF kecuali owner memutuskan lain.
 - [ ] Pasangan referensi tersertifikasi (`idle` + `chunk-stress`) di mesin tenang; tanpa itu gate
   regresi >3% terblokir (`docs/architecture/qualification-readiness.md` §1, §6).
 - [ ] Soak multi-jam di tree kandidat rilis dengan set plugin `plugins-10`; soak tersertifikasi
   2026-09-15 (commit `1c883a55`) sebelum Build 47 dan tidak berlaku.
-- [ ] Bug kepemilikan region yang diketahui: NPE `/say` di global tick dan NPE perintah konsol
-  setelah `Done` (keduanya belum direproduksi ulang).
+- [-] Bug kepemilikan region yang diketahui: NPE `/say` di global tick dan NPE perintah konsol
+  setelah `Done`. Direproduksi dan diperbaiki 2026-10-13 (feature patch MC 0028
+  `rebind-early-console-command-sources`, lihat item NPE konsol di bawah); sisa: satu run CI hijau
+  dengan patch itu.
 - [ ] Persistensi dan crash diulang di tree kandidat rilis (`verify_persistence*.py`,
   `verify_crash.py`); XFAIL metadata game time/spawn diperbaiki atau diterima owner.
 - [ ] Redis terputus / lease hilang pada server yang berjalan (backend failure).
@@ -50,6 +52,9 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
 - [!] **Lisensi:** repo memakai PolyForm Noncommercial, sementara jar yang didistribusikan berisi kode
   server Paper berlisensi GPLv3. Perlu keputusan apakah kombinasi ini memenuhi GPLv3
   (`docs/releases/26.2-build-47-aurora-nexus.md`). Ini juga menentukan bentuk migrasi penuh di P2.
+- [x] **Integrasi anticheat privat dihapus** (keputusan owner 2026-10-13): feature patch, tooling
+  dan docs-nya dihapus dari repo; feature patch MC sesudahnya dinomori ulang turun satu
+  (0025–0029 → 0024–0028).
 - [x] **Definisi "migrasi 100% ke Aurora":** owner memilih "lepas Canvas + Weaver", Paper tetap
   upstream (2026-10-05). Lihat bagian *Migrasi penuh* di P2.
 - [!] **Workload produk yang representatif:** "satu pemain menjelajah medan baru" atau
@@ -61,12 +66,12 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   rekomendasi di `chunk-workers.md`, dan prioritas pre-generation dunia.
 
 ### Persistensi dan kepemilikan region
-- [!] **Scheduler region EDF baru (patch 0028, `AuroraEdfScheduler`, turunan LeafPile) DITAHAN** (keputusan
+- [!] **Scheduler region EDF baru (patch EDF yang diparkir, `AuroraEdfScheduler`, turunan LeafPile) DITAHAN** (keputusan
   owner 2026-10-07) sampai lulus `AuroraEdfSchedulerTest`, tes independence policy, dan boot. Patch
   dan tesnya diparkir di `sourbycraft-server/minecraft-patches/parked/`; commit materialisasinya dilepas.
   Catatan: jar demo 2026-10-07 00:00–00:36 dan bench `plugins-10` sempat berjalan di atasnya.
 - [-] Matikan watchdog diagnosis region/Folia secara default (permintaan pengguna,
-  2026-10-06). Feature patch 0026 ditulis dan diterapkan ke source materialized;
+  2026-10-06). Feature patch 0025 (dulu 0026) ditulis dan diterapkan ke source materialized;
   JVM `sourbycraft.region-watchdog.enabled` default false, RESTART_REQUIRED. Ownership
   guard serta penanganan failure/shutdown tetap aktif; build/boot/testing oleh Claude
   masih pending. Scope/kasus penerimaan: `docs/development/REGION-WATCHDOG.md`, SPEC §158.
@@ -88,7 +93,7 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   `RegionizedServer.autosaveSafeWorldData`; judul lama yang hanya menyalahkan `level.dat`
   tidak menggambarkan jalur load sekarang. Jangan memanggil bulk save SavedData dari global
   tick karena sebagian data dimiliki region.
-  Diperbaiki 2026-10-07 (feature patch MC 0028, commit `44593a50`): whitelist itu kini
+  Diperbaiki 2026-10-07 (feature patch MC 0028, kini 0027, commit `44593a50`): whitelist itu kini
   menambah `WorldMetadataAutosave.GLOBAL_OWNED_TYPES` (hanya `PaperLevelOverrides`) untuk
   autosave global tick dan `save-all`; encode di global tick, tulis di
   `DIMENSION_DATA_IO_POOL`; SavedData milik region tetap di luar. Bukti: `WorldMetadataAutosaveTest`
@@ -104,10 +109,18 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   saja belum menghilangkan wait di dalam `createWorld`; perlu desain spawn/lifecycle yang
   mempertahankan ownership dan kondisi terrain. Tidak membuktikan semua stutter eksplorasi.
   Bukti/lingkup: `docs/development/AURORA-EDF-UPGRADE.md`.
-- [ ] Perintah konsol kadang gagal dengan `NullPointerException` (`CommandSourceStack.getLevel()`
-  null) dalam ~2 detik setelah `Done`, teramati saat boot ulang dunia AWF (direproduksi sekali,
-  lalu tidak muncul di run berikutnya). Akar masalah belum ditemukan; harness sekarang menunggu
-  perintah konsol pertama yang berhasil
+- [x] Perintah konsol kadang gagal dengan `NullPointerException` (`CommandSourceStack.getLevel()`
+  null) dalam ~2 detik setelah `Done`, teramati saat boot ulang dunia AWF. DIPERBAIKI 2026-10-13
+  (feature patch MC 0028 `rebind-early-console-command-sources`; 0029 sebelum renumbering hari yang
+  sama). Akar masalah: thread konsol
+  membuat `CommandSourceStack` saat membaca baris (`PaperConsole.runCommand` →
+  `createCommandSourceStack()` → `overworld()`); baris yang terbaca sebelum overworld terdaftar
+  menyimpan level null, menunggu di antrean, lalu NPE di global tick pertama setelah `Done`.
+  `DedicatedServer.handleConsoleInputs` kini membuat ulang source bila levelnya null. Bukti lokal
+  (slim jar, flat, `/say` tiap 0,25 s selama boot): jar 2026-10-07 97/109 NPE dengan stack yang sama
+  persis dengan sighting `/say` (`Commands.java:461` ← `RegionizedServer.globalTick:278`); jar dengan perbaikan
+  ini 0/37 NPE, 37/37 dieksekusi di tick pertama setelah `Done`, stop bersih exit 0. Sighting `/say` saat
+  reload di demo cocok dengan stack ini; waktunya tidak bisa dipastikan ulang dari log.
 - [-] Review konkurensi penulisan region-file (DEV-G), dimulai 2026-10-06. Diperbaiki: dua commit AWF
   bisa mendarat di store dalam urutan terbalik dari snapshot-nya, sehingga store menyimpan isi chunk
   lama (`AwfCommitOrderTest`); `AwfRegionStorage.write` vs `close` kini saling eksklusif
@@ -117,7 +130,7 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   persistensi tree kandidat 20/20 di demo 2026-10-07 (`verify_persistence_panel.py`, 3 restart);
   kepemilikan region: fixture bridge 20 marker OK di CI 37515867230, soak 100 menit tanpa pelanggaran.
   Crash: `verify_crash_panel.py` 14/15 di demo 2026-10-07 (2 SIGKILL, data chunk/entitas utuh; game time
-  mundur = keterbatasan P0 yang sudah tercatat). Sisa: dua NPE konsol yang belum tereproduksi
+  mundur = keterbatasan P0 yang sudah tercatat). Sisa: CI hijau dengan patch MC 0028 (rebind konsol; dua NPE konsol direproduksi dan diperbaiki 2026-10-13)
 - [-] AWF: crash di level server dengan klien sudah lulus (53/53, `verify_crash.py --awf`). Sisa:
   backend terputus (backend Redis sudah ada; penerimaan gangguan jaringan belum tercatat), beban berkelanjutan, dan investigasi
   commit awal 529 chunk yang butuh 105,5 detik di panel demo (`docs/architecture/aurora-world-fabric.md`)
@@ -208,17 +221,17 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
 ### Optimasi NMS terukur (hanya setelah baseline ada)
 - [ ] Profil Entity/LivingEntity/Mob tick, GoalSelector, Brain/Sensor, navigasi, merge/pickup item
 - [-] Stutter generasi area baru (laporan pengguna 2026-10-06): source pengukuran opsional
-  antrean/eksekusi per tahap generic generation di `/perf chunks`, feature patch 0027.
+  antrean/eksekusi per tahap generic generation di `/perf chunks`, feature patch 0026 (dulu 0027).
   RESTART_REQUIRED: `-Dsourbycraft.chunk-generation-metrics.enabled=true` ATAU TOML
   `aurora.diagnostics.chunk-generation-metrics = true` (2026-10-07, untuk panel yang tidak bisa
-  mengirim flag -D; `ChunkGenerationMetricsEarlyConfigTest` 7/7); default off. 0027 sudah
+  mengirim flag -D; `ChunkGenerationMetricsEarlyConfigTest` 7/7); default off. Patch itu sudah
   di-build dan boot di demo dengan metrik mati. Sisa: run dengan metrik nyala di demo, profil
   worker/region + CPU/GC, lalu A/B kandidat; akar stutter dan keuntungan belum terbukti.
   Pengukuran delivery chunk 2026-10-06 (worker 2 vs 6) ada di `chunk-workers.md`.
   Lingkup/sisa: `docs/development/CHUNK-GENERATION-STUTTER.md`.
-- [!] EDF LeafPile/Spottedleaf (DITAHAN 2026-10-07, patch 0028 diparkir; lihat P0): source backend turunan `AuroraEdfScheduler` memperbaiki
+- [!] EDF LeafPile/Spottedleaf (DITAHAN 2026-10-07, patch EDF diparkir; lihat P0): source backend turunan `AuroraEdfScheduler` memperbaiki
   cancel saat tick berjalan, link replacement, rearm deadline, pelepasan blocker task batal,
-  publikasi state, dan admission setelah halt. Feature 0028 memasang backend pada opsi EDF;
+  publikasi state, dan admission setelah halt. Patch EDF itu memasang backend pada opsi EDF;
   perlu build + restart. Enam regresi disiapkan, belum dijalankan; semua testing oleh Claude.
   Worker/tick rate tetap. Kredit + GPL LeafPile disertakan. Belum qualified/performa terukur;
   `docs/development/AURORA-EDF-UPGRADE.md`, SPEC V38/B84.
@@ -262,37 +275,13 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
 
 ## P2 — Menengah (independensi dan arsitektur)
 
-### Anticheat native untuk build pribadi
+### Provisioning plugin (ProtocolLib)
 - [x] Implementasi auto-provision ProtocolLib melalui jalur aktif SourbyClip/SourbyPatcher
   (2026-10-06): pin asset resmi, HTTPS + SHA-256/ukuran, setting independen, hook sebelum
   plugin scan, folder CLI, cache/offline dan pelestarian operator; 12 tes installer lulus.
-  Mode Intave native tetap mengisolasi backend paket internal. Bukti: `docs/development/PROTOCOLLIB.md`.
+  Bukti: `docs/development/PROTOCOLLIB.md`.
 - [-] Qualification ProtocolLib: download artifact resmi, packaging/boot baru, dependency-plugin
-  compatibility dan region soak belum diverifikasi; coexistence dengan Intave native belum tersedia.
-- [x] Persiapan workspace Intave privat (2026-10-06): 1.403 file upstream terverifikasi,
-  relokasi main/test, 147 kelas tes, inventaris library lokal, pin 18 dependency, tooling
-  resolve/doctor/pemulihan fixture, project baseline Gradle, contoh config dan 10 gate port.
-  22 tes tooling lulus. Belum siap build/runtime: 20 binary belum tersedia, DNS terminal
-  gagal, Gradle socket-lock ditolak lingkungan. Bukti: `docs/architecture/intave-native-integration.md`.
-- [x] Implementasi awal port native Intave (2026-10-06): private `IntaveEngine` bukan JavaPlugin,
-  lifecycle server, adapter packet dengan antrean Connection, hook owner tick, status operator,
-  profil build opt-in dan pemeriksaan provenance. 12 tes controller + 22 tes tooling + 8 tes migrasi lulus;
-  compiler adapter/Connection terhadap artifact lokal 26.2 lulus; 4 probe antrean paket nyata
-  lulus setelah perbaikan finish future; static typecheck wiring Gradle lulus. Bukti dan cakupan:
-  `docs/architecture/intave-native-integration.md`.
-- [-] Verifikasi engine Intave lengkap: `NATIVE_ACTIVE_SELFTEST_PASSED_DETECTION_UNVERIFIED` (2026-10-07).
-  Profile privat dicompile (1.189 source engine), `slimServerJar` privat dibangun, boot lokal
-  mencapai `ACTIVE`, self-test Intave selesai (59 metode, 7 no-op karena gate versi) dan shutdown
-  bersih (`Native engine cleanup completed`, exit 0). Keputusan owner: pembacaan blok off-region
-  hanya racy read chunk yang sudah loaded (tanpa load/ticket; unloaded = AIR/0/shape kosong);
-  write, block entity dan akses entity tetap ditolak. Perbaikan port: urutan classpath NMS lama,
-  filter Floodgate, ASM vendored ke Java 25, atribusi caller native, self-test legacy material dan
-  scoreboard via global scheduler, tes potion; 183 hash direproduksi, 0 fixture hilang. Tes:
-  server-owned 23/23 (privat), 19/19 (publik); upstream 721: 694 lulus, 27 gagal (registry tes,
-  server null, path cwd, material 26.3), 4 skipped. Sisa gate: efektivitas deteksi (butuh client
-  nyata + cheat diketahui), false positive, join/quit, race pembacaan racy, ViaVersion, region soak,
-  CPU/alokasi. Tidak ada klaim efektivitas. Bukti/batasan:
-  `docs/architecture/intave-native-integration.md#kebijakan-pembacaan-blok-2026-10-07`.
+  compatibility dan region soak belum diverifikasi.
 
 ### Migrasi penuh ke SourbyCraft (Aurora Engine) tanpa Canvas/Folia
 Sejak 2026-10-05 build berjalan: vanilla → Paper (`paperRef` 9240f586) → SourbyCraft, lewat
@@ -341,7 +330,8 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [-] Nomor feature patch punya celah (0018) dan akan dinomori ulang pada rebuild berikutnya;
   perbarui rujukan nomor patch di docs/test saat itu terjadi. Celah 0018 tertutup oleh rebuild
   2026-10-06 (0019–0023 → 0018–0022, isi sama); rujukan lama baru dianotasi sebagian (AURORA.md
-  kontradiksi 21); renumbering 0024–0027 berikutnya masih diprediksi `patch_surface.py`
+  kontradiksi 21); renumbering 0024–0027 berikutnya masih diprediksi `patch_surface.py`. 2026-10-13: 0024 lama dihapus
+  dan 0025–0029 dinomori ulang menjadi 0024–0028; rujukan nomor di docs current-state diperbarui
 - [ ] M-5 Opsional, paling berat: lepas Paper sebagai upstream (vanilla → SourbyCraft langsung).
   Artinya ~974 patch Paper menjadi milik SourbyCraft, dan setiap rilis Minecraft serta perbaikan
   keamanan Paper harus di-port sendiri.

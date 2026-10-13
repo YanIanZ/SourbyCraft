@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 13 Oct 2026 22:41:46 +0700
+Subject: [PATCH] SourbyCraft - rebind early console command sources
+
+
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index 17492d0286d8a949a0ef034f85ceda9322847b8a..b2b161cc561fc871f253aea09f91010c07b9516a 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -595,7 +595,12 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+             org.bukkit.event.server.ServerCommandEvent event = new org.bukkit.event.server.ServerCommandEvent(this.console, input.msg);
+             this.server.getPluginManager().callEvent(event);
+             if (event.isCancelled()) continue;
+-            input = new ConsoleInput(event.getCommand(), input.source);
++            // SourbyCraft start - rebind console sources read before the overworld existed
++            // The console thread builds the source when it reads the line; a line read during startup captured a
++            // null level and threw in Commands#executeCommandInContext on the first global tick after Done.
++            CommandSourceStack source = input.source.getLevel() == null ? this.createCommandSourceStack() : input.source;
++            input = new ConsoleInput(event.getCommand(), source);
++            // SourbyCraft end - rebind console sources read before the overworld existed
+             // CraftBukkit end
+             this.getCommands().performPrefixedCommand(input.source, input.msg);
+         }

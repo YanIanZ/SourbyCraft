@@ -253,6 +253,10 @@ jobs:
           else
             fail_after_launch "Could not open the server console FIFO."
           fi
+          # Read by the console thread before the overworld exists; it must still run after Done (SPEC B88).
+          if ! printf 'say SOURBY_EARLY_CONSOLE_PROBE\n' >&3; then
+            fail_after_launch "Server console closed before accepting the early console probe."
+          fi
 
           ready=0
           for _ in $(seq 1 240); do
@@ -295,6 +299,11 @@ jobs:
             || { echo "spark command output marker missing."; exit 1; }
           grep -Eq 'SourbyCraft.*Memory' server.log || { echo "RAM marker missing"; exit 1; }
           grep -Eq 'SourbyCraft.*Performance' server.log || { echo "PERF marker missing"; exit 1; }
+          grep -q '\[Server\] SOURBY_EARLY_CONSOLE_PROBE' server.log \
+            || { echo "A console command read before the worlds loaded did not run (SPEC B88)."; exit 1; }
+          if grep -q 'Command exception: /say SOURBY_EARLY_CONSOLE_PROBE' server.log; then
+            echo "A console command read before the worlds loaded threw (SPEC B88)."; exit 1
+          fi
           echo "----- Aurora boot summary -----"
           grep -E 'stages completed without error|Aurora startup|Aurora startup index|failed during Aurora boot' server.log || echo "(no Aurora boot summary line found)"
           jfr summary boot.jfr

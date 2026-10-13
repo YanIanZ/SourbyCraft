@@ -16,7 +16,7 @@ passes.
 |---|---|---|
 | representative benchmark exists | **partial** | 9 of 11 workloads (§2). Updated 2026-10-07: the plugin-heavy `plugins-10` is defined (`build-data/representative-plugins.json`; EssentialsX and Vault bridged, the SuperiorSkyblock2 Folia port native, spark) and was **measured** once, uncertified, on Sourby Demo (2026-10-06; `docs/BASELINE.md` *The plugin workload*). Its fidelity: plugins loaded, not driven by player commands. AI stress still missing |
 | no unexplained >3% regression in affected workloads | **blocked** | needs a certified comparable before/after reference pair; a certified soak is not a regression pair. Still blocked on 2026-10-07: the newer observations are **measured**, not certified — Demo `players-10` (2026-10-05), Demo `plugins-10` (2026-10-06), and one exploring player's chunk delivery with 2 vs 6 workers (Demo, 2026-10-06: full view in 18–23 s vs 11–17 s; `chunk-workers.md`). None is a reference pair, and the chunk-worker result answers a different workload from the swarm A/B |
-| no known region ownership bug | **one open** | §5. A second sighting of the same family (console command, `CommandSourceStack.getLevel()` null ~2 s after `Done` on an AWF reboot) is recorded in TODO P0, reproduced once. Not in the current build: the held EDF backend (patch 0028, parked 2026-10-07) whose ownership acceptance is pending |
+| no known region ownership bug | **fixed locally, CI pending** | §5. Both sightings (`/say`, console command ~2 s after `Done` on an AWF reboot) were one startup bug, reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`); not yet in a CI run. Not in the current build: the held EDF backend (parked EDF patch, `minecraft-patches/parked/`, 2026-10-07) whose ownership acceptance is pending |
 | no known persistence bug | **one known limitation** | Chunk, entity and player data: no bug found — 104/104 local and 20/20 on Sourby Demo (2026-10-05, post-migration build), crash 49/49 region files and 53/53 AWF (§4). Known XFAIL: world game time/spawn metadata (`PaperLevelOverrides`) is not written by autosave, so a crash rewinds game time to the last boot (TODO P0). No run on the Build 47 release-candidate tree of 2026-10-07 |
 | no unbounded queue | **met** | `UnboundedQueueAuditTest`, 3 tests |
 | heap/threads/tasks stabilize after load | **partial** | certified 2h 10-player soak (2026-09-15, commit `1c883a55`, before Build 47) shows stable RSS, heap-after-GC and tick duration; thread/task stabilization still needs explicit gate evidence; no soak of the Build 47 tree or with plugins |
@@ -80,7 +80,7 @@ structurally valid and hold the wrong chunk.
 |---|---|
 | Local fixture, build 46c | **16 / 16 checks** |
 | Deployment server, live restart | **4 / 4** — 64/64 blocks, 24/24 entities, game time advanced, gamerule survived |
-| Crash (`verify_crash_panel.py`), Sourby Demo, tree with feature 0028 (2026-10-07) | game time **survives** a SIGKILL after `save-all flush` (1,792,900 ≥ 1,792,548); no corruption; 64/64 blocks; 48/48 entities (harness double-count, all survived) |
+| Crash (`verify_crash_panel.py`), Sourby Demo, tree with feature 0028 (world metadata on autosave, now 0027) (2026-10-07) | game time **survives** a SIGKILL after `save-all flush` (1,792,900 ≥ 1,792,548); no corruption; 64/64 blocks; 48/48 entities (harness double-count, all survived) |
 | Crash (`verify_crash_panel.py`), Sourby Demo, Build 47 candidate tree (2026-10-07) | **14 / 15** — two panel SIGKILLs (after flush, mid-write): clean boots, no corruption, 64/64 blocks and 24/24 entities of the last checkpoint; the known game-time rewind remains (XFAIL) |
 | Deployment server (Sourby Demo), Build 47 candidate tree `beb7f40e` (2026-10-07) | **20 / 20** — `verify_persistence_panel.py`, 3 real panel restarts; clean shutdowns, no boot errors, 64/64 blocks, 24/24 entities, game time advancing |
 | Deployment server (Sourby Demo), post-migration build (2026-10-05) | **20 / 20** — `verify_persistence_panel.py`: 3 real panel stop/start cycles, each reading back 64 blocks, 24 entities and an advancing game time written by the previous boot; clean shutdowns, no boot errors; probe placed at y=300 and removed afterwards. No player check: the server is online-mode |
@@ -99,9 +99,12 @@ Two limits are stated rather than hidden:
 
 ## 5. Known region-ownership bug
 
-One, open and unreproduced.
+None open in source. The one recorded here was reproduced and fixed on 2026-10-13 (Minecraft feature
+patch 0028 `rebind-early-console-command-sources`, numbered 0029 before the same-day renumbering;
+SPEC B88). Local boot evidence only; no CI run has included it yet.
 
-`/say` from the console threw, once, during a config reload on the deployment server:
+`/say` from the console threw, once, during a config reload on the deployment server, and a console
+command threw the same way ~2 s after `Done` on an AWF reboot:
 
 ```text
 NullPointerException: Cannot invoke "ServerLevel.getGameRules()" because the return value of
@@ -110,13 +113,23 @@ NullPointerException: Cannot invoke "ServerLevel.getGameRules()" because the ret
     at RegionizedServer.globalTick(RegionizedServer.java:278)
 ```
 
-Same family as the fixed `/execute if block` crash (patch 0016): a console command running on a
-tick thread with no region context bound. **24 subsequent `/say` calls interleaved with a
-reload produced 0 reproductions**, so it is recorded rather than patched — a speculative guard
-on one sighting would be a change nobody can verify.
+**Cause.** This was not a missing region context. The console thread builds the
+`CommandSourceStack` when it *reads* the line (`PaperConsole.runCommand` →
+`MinecraftServer.createCommandSourceStack()` → `findRespawnDimension()` → `overworld()`). A line read
+before the overworld is registered captures `level = null`. It waits in `serverCommandQueue` until
+the first global tick after `Done` and throws there. The earlier 24 `/say` calls interleaved with a
+reload produced nothing because the overworld already existed. The deployment log cannot show whether
+that line was read during a restart. The stack matches exactly.
 
-The gate says *no known region ownership bug*. This is a known one until it is either
-reproduced and fixed, or explained.
+**Fix.** `DedicatedServer.handleConsoleInputs` rebuilds the source when its level is null; by then the
+worlds exist. Both eager producers (the terminal console and the GUI) go through it.
+
+**Evidence** (local slim jar, flat world, `/say` written to stdin every 0.25 s from process start
+until `Done`): the 2026-10-07 jar threw on 97 of 109 lines, with the stack above; the fixed jar
+ran 37 of 37 with no exception, all on the first tick after `Done`, then stopped cleanly (exit 0).
+The bug predates Build 47: the Build 45c release jar fails the same probe. The main CI boot step
+now writes `say SOURBY_EARLY_CONSOLE_PROBE` at launch and fails if it threw or did not run (checked
+locally through a FIFO as CI does: 45c fails, the fixed jar passes).
 
 ---
 
