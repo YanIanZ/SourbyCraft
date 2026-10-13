@@ -16,8 +16,9 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * One AWF store in Redis. Four keys share the store's hash tag, so they live in one cluster slot:
+ * One AWF store in Redis. Five keys share the store's hash tag, so they live in one cluster slot:
  * <ul>
+ *   <li>{@code <prefix>{<id>}:writer} — the lease token of the last commit;</li>
  *   <li>{@code <prefix>{<id>}:chunks} — hash, field {@code x,z}, value the chunk's bytes;</li>
  *   <li>{@code <prefix>{<id>}:deleted} — set of {@code x,z} the world deleted (they shadow its base);</li>
  *   <li>{@code <prefix>{<id>}:gen} — the committed generation, a counter;</li>
@@ -25,9 +26,13 @@ import java.util.TreeSet;
  * </ul>
  *
  * <p><b>Commits are atomic.</b> A commit is one Lua script: it checks the lease, applies every
- * change and increments the generation. A lease that expired while nobody else took it — this
- * server stalled past it — is taken back, but only if the generation is still the one this store
- * last saw, i.e. no other server opened the world and committed in between. Redis runs a script without interleaving anything else, and
+ * change, records this store's lease token as the last writer ({@code :writer}) and increments the
+ * generation. A lease that expired while nobody else took it — this server stalled past it — is
+ * taken back if no other server committed in between: the generation is still the one this store
+ * last saw, or the last writer is this store's own token (a commit of ours that Redis applied but
+ * whose reply never arrived moves the generation without this store seeing it). The script then
+ * reports the take-back, and the backend puts the store back on lease renewal. Redis runs a script
+ * without interleaving anything else, and
  * a {@code #!lua} script is refused up front when Redis is out of memory instead of failing
  * half-way. If the connection drops before the reply, the commit may or may not have been applied;
  * {@code AwfWorld} keeps the chunks dirty and commits them again, which writes the same values.</p>
@@ -42,17 +47,23 @@ import java.util.TreeSet;
 final class RedisStore implements AwfStore {
 
     /**
-     * KEYS: chunks, deleted, gen, lock. ARGV: token, changed, removed and deleted counts, the
-     * generation this store last saw, the lease in ms, then the fields.
+     * KEYS: chunks, deleted, gen, lock, writer. ARGV: token, changed, removed and deleted counts, the
+     * generation this store last saw, the lease in ms, then the fields. Returns the new generation
+     * and 1 when the lease was taken back, else 0.
      */
     static final String COMMIT_SCRIPT = """
         #!lua
         local holder = redis.call('GET', KEYS[4])
+        local retaken = 0
         if holder ~= ARGV[1] then
-          if holder or (redis.call('GET', KEYS[3]) or '0') ~= ARGV[5] then
-            return redis.error_reply('AWFLEASE this server no longer holds the world')
+          if holder then
+            return redis.error_reply('AWFLEASE another server holds the world')
+          end
+          if (redis.call('GET', KEYS[3]) or '0') ~= ARGV[5] and redis.call('GET', KEYS[5]) ~= ARGV[1] then
+            return redis.error_reply('AWFLEASE another server committed to the world since this server held it')
           end
           redis.call('SET', KEYS[4], ARGV[1], 'PX', ARGV[6])
+          retaken = 1
         end
         local i = 7
         for n = 1, tonumber(ARGV[2]) do
@@ -70,7 +81,8 @@ final class RedisStore implements AwfStore {
           redis.call('SADD', KEYS[2], ARGV[i])
           i = i + 1
         end
-        return redis.call('INCR', KEYS[3])
+        redis.call('SET', KEYS[5], ARGV[1])
+        return {redis.call('INCR', KEYS[3]), retaken}
         """;
 
     private final RedisBackend backend;
@@ -81,6 +93,7 @@ final class RedisStore implements AwfStore {
     final String deletedKey;
     final String genKey;
     final String lockKey;
+    final String writerKey;
     private volatile Set<ChunkKey> live;
     private volatile Set<ChunkKey> tombstones;
     private volatile boolean closed;
@@ -97,6 +110,7 @@ final class RedisStore implements AwfStore {
         this.deletedKey = base + "deleted";
         this.genKey = base + "gen";
         this.lockKey = base + "lock";
+        this.writerKey = base + "writer";
     }
 
     String id() {
@@ -185,11 +199,12 @@ final class RedisStore implements AwfStore {
         final List<Object> command = new ArrayList<>(8 + changed.size() * 2 + removed.size() + deleted.size());
         command.add("EVAL");
         command.add(COMMIT_SCRIPT);
-        command.add("4");
+        command.add("5");
         command.add(this.chunksKey);
         command.add(this.deletedKey);
         command.add(this.genKey);
         command.add(this.lockKey);
+        command.add(this.writerKey);
         command.add(this.token);
         command.add(Integer.toString(changed.size()));
         command.add(Integer.toString(removed.size()));
@@ -204,8 +219,10 @@ final class RedisStore implements AwfStore {
         }
         for (final ChunkKey key : removed) command.add(field(key));
         for (final ChunkKey key : deleted) command.add(field(key));
-        final long generation = (Long) this.backend.client().call(command.toArray());
+        final List<?> reply = (List<?>) this.backend.client().call(command.toArray());
+        final long generation = (Long) reply.get(0);
         this.knownGeneration = generation;
+        if (reply.get(1) instanceof Long retaken && retaken == 1) this.backend.retaken(this);
         this.backend.awaitDurable();
 
         final Set<ChunkKey> nextLive = new HashSet<>(this.live);

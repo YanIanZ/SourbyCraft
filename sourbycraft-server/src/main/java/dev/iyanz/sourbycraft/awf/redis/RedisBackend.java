@@ -52,14 +52,15 @@ public final class RedisBackend implements AwfBackend {
         return 'OK'
         """;
     /**
-     * KEYS: lock, gen. ARGV: token, lease ms, the generation the store last saw. 1 renewed, 2 taken
-     * back after it expired unclaimed with no commit since, 0 lost.
+     * KEYS: lock, gen, writer. ARGV: token, lease ms, the generation the store last saw. 1 renewed,
+     * 2 taken back after it expired unclaimed with no other server's commit since (the generation is
+     * unchanged, or the last commit was this store's own), 0 refused.
      */
     static final String RENEW_SCRIPT = """
         #!lua
         local holder = redis.call('GET', KEYS[1])
         if holder == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) end
-        if not holder and (redis.call('GET', KEYS[2]) or '0') == ARGV[3] then
+        if not holder and ((redis.call('GET', KEYS[2]) or '0') == ARGV[3] or redis.call('GET', KEYS[3]) == ARGV[1]) then
           redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
           return 2
         end
@@ -70,7 +71,13 @@ public final class RedisBackend implements AwfBackend {
     private final RedisClient client;
     /** This server's identity in leases; see the class comment. */
     private final String owner;
+    /**
+     * Writable stores, by token, from open to close. A store stays here when its lease is lost, so
+     * renewal keeps checking whether it may take the lease back; see {@link #renewAll}.
+     */
     private final Map<String, RedisStore> leased = new ConcurrentHashMap<>();
+    /** Tokens whose lease is currently lost, so the loss is logged once rather than every renewal. */
+    private final java.util.Set<String> lost = ConcurrentHashMap.newKeySet();
     private final ScheduledExecutorService renewals;
     private volatile boolean waitForAof;
     private volatile boolean novaluesUnsupported;
@@ -229,26 +236,44 @@ public final class RedisBackend implements AwfBackend {
         }
     }
 
+    /** A commit took the store's lapsed lease back: renewal continues for it (it never stopped). */
+    void retaken(final RedisStore store) {
+        this.lost.remove(store.token());
+        this.leased.putIfAbsent(store.token(), store);
+        SourbyLogger.warn("Aurora World Fabric: the Redis lease on " + store.id() + " had lapsed with no other holder"
+            + " and no other server's commit since; a commit took it back and renewal continues");
+    }
+
     void release(final RedisStore store) throws IOException {
         if (store.token() == null) return;
         this.leased.remove(store.token());
+        this.lost.remove(store.token());
         this.client.call("EVAL", RELEASE_SCRIPT, "1", store.lockKey, store.token());
     }
 
-    private void renewAll() {
+    /**
+     * Renews every open store's lease. A store whose lease was lost stays registered: if the lease
+     * later becomes free and no other server committed since, renewal (or the store's next commit)
+     * takes it back; while another server holds it or has committed, every commit is refused.
+     */
+    void renewAll() {
         for (final RedisStore store : this.leased.values()) {
             try {
-                final Object renewed = this.client.call("EVAL", RENEW_SCRIPT, "2", store.lockKey, store.genKey,
-                    store.token(), Long.toString(this.settings.leaseSeconds() * 1000L),
+                final Object renewed = this.client.call("EVAL", RENEW_SCRIPT, "3", store.lockKey, store.genKey,
+                    store.writerKey, store.token(), Long.toString(this.settings.leaseSeconds() * 1000L),
                     Long.toString(store.knownGeneration()));
                 if (renewed instanceof Long n && n == 2) {
-                    SourbyLogger.warn("Aurora World Fabric: the Redis lease on " + store.id() + " had expired (this"
-                        + " server stalled for longer than lease-seconds?); nobody else took it or committed, so it"
-                        + " was taken back");
-                } else if (!(renewed instanceof Long n && n == 1)) {
-                    this.leased.remove(store.token());
-                    SourbyLogger.error("Aurora World Fabric lost its Redis lease on " + store.id()
-                        + "; commits to it are refused until the world is opened again");
+                    this.lost.remove(store.token());
+                    SourbyLogger.warn("Aurora World Fabric: the Redis lease on " + store.id() + " had lapsed (this"
+                        + " server stalled or Redis was unreachable for longer than lease-seconds, or another holder"
+                        + " released it); nobody else held it or committed since, so it was taken back");
+                } else if (renewed instanceof Long n && n == 1) {
+                    this.lost.remove(store.token());
+                } else if (this.lost.add(store.token())) {
+                    SourbyLogger.error("Aurora World Fabric lost its Redis lease on " + store.id() + ": another server"
+                        + " holds it or has committed to the world since. Commits to it are refused and its unsaved"
+                        + " chunks stay in memory; this server takes the lease back only if it becomes free with no"
+                        + " other server's commit since");
                 }
             } catch (final IOException | RuntimeException failed) {
                 SourbyLogger.warn("Aurora World Fabric could not renew its Redis lease on " + store.id() + ": "
@@ -266,6 +291,7 @@ public final class RedisBackend implements AwfBackend {
                 this.client.call("RENAME", key, key + suffix);
             }
         }
+        this.client.call("DEL", store.writerKey);
         return "Redis keys " + store.chunksKey + suffix + " (and :deleted, :gen)";
     }
 
@@ -275,7 +301,7 @@ public final class RedisBackend implements AwfBackend {
         if (this.client.call("EXISTS", store.lockKey) instanceof Long n && n > 0) {
             throw new IOException("AWF store " + storageId + " is open on a server; unload it there first");
         }
-        this.client.call("DEL", store.chunksKey, store.deletedKey, store.genKey);
+        this.client.call("DEL", store.chunksKey, store.deletedKey, store.genKey, store.writerKey);
     }
 
     /** Releases every lease and closes the connections. */

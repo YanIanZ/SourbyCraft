@@ -53,16 +53,18 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   --awf` **56/56** dalam 101 s (tiga SIGKILL 3/8/15 s dengan 4 klien bergerak, tanpa baris korupsi,
   checkpoint utuh). Game time kini XPASS di ketiga pemulihan (mis. 500 ≥ 290, 1247 ≥ 830), jadi XFAIL
   diperbaiki oleh MC 0027; entri `KNOWN_LIMITATIONS` di `verify_crash.py` perlu dihapus (belum diubah).
-- [-] Redis terputus / lease hilang pada server yang berjalan (backend failure). Run lokal 2026-10-14
-  (jar `rc-cbef3fb9`, Redis 8.10.2 loopback AOF, M2 16 GiB; detail dan perintah di
-  `docs/architecture/aurora-world-fabric.md` § *Backend failure*). Sesuai desain: commit gagal tetap
-  dirty dan dicoba ulang, tick tidak terblokir, pemulihan setelah Redis kembali, fencing saat lease
-  diambil server lain (AWFLEASE, data tidak ditimpa), `stop` tidak menggantung (≤1 s Redis mati,
-  105 s Redis beku). DEFECT terbuka: (D1) baca chunk milik AWF gagal → Moonrise membuat chunk baru →
-  chunk asli DITIMPA saat Redis kembali (kehilangan data, terbukti di AOF dan setelah reboot);
-  (D2) commit yang diterapkan tetapi balasannya hilang + lease kedaluwarsa → world terkunci permanen
-  (AWFLEASE tanpa pemegang lain) sampai dibuka ulang; (D3) setelah lease hilang lalu diambil kembali
-  lewat commit, perpanjangan lease tidak jalan lagi. Belum diperbaiki.
+- [x] Redis terputus / lease hilang pada server yang berjalan (backend failure). Run pertama 2026-10-14
+  (jar `rc-cbef3fb9`) menemukan D1–D6; perbaikan di working tree (belum di-commit, belum CI), run
+  ulang lokal 2026-10-14 (jar final `d55469a0…`, Redis 8.10.2 loopback AOF, M2 16 GiB; detail di
+  `docs/architecture/aurora-world-fabric.md` § *Backend failure*, SPEC B89–B93). Semua skenario
+  sesuai desain: (D1) baca gagal dicoba ulang lalu posisi di-fence — chunk hasil regenerasi tidak
+  pernah menimpa chunk tersimpan (AOF + marker tetap ada setelah reload dan reboot); (D2) token
+  penulis terakhir (`:writer`) — tidak ada AWFLEASE setelah freeze/resume/kill/restart; (D3) lease
+  tetap diperpanjang setelah diambil kembali; (D5) gagal lepas lease tidak dilaporkan sebagai chunk
+  hilang; (D7, baru) tulis socket Redis tanpa timeout membuat `stop` menggantung >10 menit saat Redis
+  beku — kini watchdog, `stop` 115 s. Masih terbuka (bukan defek data): D6 tanpa batas waktu total
+  shutdown AWF, D4 hanya WARN; belum ada run Redis lewat jaringan atau CI. Bukti lokal laptop, bukan
+  kualifikasi.
 - [ ] Alur pemain nyata dengan plugin bridged (EssentialsX/Vault) di Sourby Demo.
 
 ### Keputusan owner

@@ -206,8 +206,11 @@ implemented**.
   (`lease-seconds`, default 60) renewed every third of that. Another server opening the same world
   is refused until the lease is released (unload, delete, clean stop) or expires. Every commit
   checks the lease in its script. A lease that expired while this server stalled is taken back
-  only if nobody holds it and the generation is unchanged (nobody committed since); otherwise the
-  commit is refused and the chunks stay dirty. The lease names the server by a hash of
+  only if nobody holds it and no other server committed since: the generation is unchanged, or the
+  last commit's token (`:writer`, written by every commit) is this store's own (a commit Redis
+  applied whose reply was lost). Otherwise the commit is refused and the chunks stay dirty. A
+  store stays on lease renewal for as long as it is open, also after losing the lease, so renewal
+  or the next commit takes it back under the same rule (logged). The lease names the server by a hash of
   `HOSTNAME` (or `/etc/hostname`) and the server directory, so the same server restarting after a
   crash takes its own lease back at once; any other server waits for expiry.
 - **Opening is lazy.** A store reads only chunk coordinates (`HSCAN … NOVALUES`, `HKEYS` before
@@ -235,8 +238,10 @@ generation-guarded take-back above is the fix, with tests for both the commit an
 
 #### Backend failure (Redis gone / lease lost on a running server)
 
-Build 47 release gate *backend failure*. **State: FAIL — three defects open (D1–D3), not fixed.**
-Local laptop evidence only, not a qualification.
+Build 47 release gate *backend failure*. **State: local scenarios PASS after fixes (2026-10-14
+rerun below); D1–D3, D5 and a write-hang found in the rerun (D7) fixed in the working tree,
+uncommitted, not in CI; D4 only mitigated (log line), D6 open (report only).** Local laptop
+evidence only, not a qualification.
 
 **Designed behavior (from code, before testing).**
 - *Redis gone.* Every call fails within `timeout-ms` (connect, read and pool wait each bounded;
@@ -284,7 +289,7 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
 | D2 … after SIGCONT | Redis executed the dead server's queued commit (crying obsidian present after reboot, gen 47) although the server had logged it as lost | Designed (indeterminate commit); message inaccurate (D5) |
 | Clean `stop` with Redis healthy (boot 4) | 3 s, 0 lock keys left, 0 ERROR lines | Designed |
 
-**Defects (root cause and proposed fix; none implemented).**
+**Defects found 2026-10-13 (root cause as found; fixes in *Fixes* below).**
 - **D1 — data loss.** `AwfRegionStorage.read` (`AwfRegionStorage.java:117`) lets the backend's
   `IOException` escape from `RegionFileStorage.read` (feature patch, `RegionFileStorage.java:214` in the
   materialized tree). Moonrise treats a failed read as "no data"
@@ -314,6 +319,87 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
   in fact applied (D2 run).
 - D6 (risk) — a frozen Redis makes `stop` take up to stores × (`commit-attempts` + 1) × `timeout-ms`
   (105 s here for 9 stores); there is no overall shutdown deadline for AWF.
+
+**Fixes (2026-10-14, working tree, uncommitted; SourbyCraft-side only, no Minecraft/Paper patch).**
+- **D1** (`AwfRegionStorage.read`/`readStored`/`fence`/`recovered`, `AwfRegionStorage.java:151-215`):
+  a read of stored bytes is retried (3 attempts, 100/400 ms backoff, no new attempt after 5 s, none
+  on a region thread or after close). If it still fails the position is *fenced* before the
+  `IOException` is thrown: every later write of it is refused and counted (`admittedWrite`, :254), so
+  the chunk the engine regenerates is never committed; the stored bytes stay. The fence is lifted
+  only by a successful read on the chunk-load path (`RegionFileStorage.moonrise$readData` on the
+  stack): that read means the regenerated chunk has left memory and the stored one is being loaded.
+  A successful read elsewhere (structure scan) returns the stored bytes but keeps the fence, since
+  the regenerated chunk may still be loaded. After a read gives up, every read in the server gets a
+  single attempt for 5 s (`FAIL_FAST_NANOS`): the first rerun showed a chunk load pulls in hundreds
+  of stored neighbours and the chunk system has one I/O thread here; retrying each kept the I/O queue
+  busy for minutes, and `save-all flush` waits for that queue on the region threads (`MoonriseRegionFileIO.flush`).
+  `/perf awf` shows `read retries / failed reads / unreadable / refused writes` once non-zero; close
+  logs how many positions stayed fenced. Moonrise still logs "chunk data will be lost" and generates
+  the chunk in memory; the store is what is protected. Not covered: a POI or entity store whose
+  read succeeded while the chunk store's failed keeps committing (derived from its own stored data).
+- **D2** (`RedisStore.COMMIT_SCRIPT` :54, `RedisBackend.RENEW_SCRIPT` :59): every commit writes its
+  lease token to `<prefix>{id}:writer`; a free lease is taken back when the generation is unchanged
+  *or* the last writer is this store's token. `delete` removes `:writer`, `retire` drops it.
+- **D3** (`RedisBackend.renewAll` :259, `retaken` :240, `RedisStore.commit` :225): a lost lease no
+  longer removes the store from renewal; the loss is logged once per episode with a true message; a
+  take-back by renewal or by a commit (the script now returns `{generation, retaken}`) is logged and
+  renewal simply continues.
+- **D4** (mitigation, `AwfRegionStorage.flush` :323): a region-thread flush (`save-all flush`) logs
+  a WARN naming the storage and its in-memory chunk count when its last commit failed. `save-all`
+  still prints "Saved the game".
+- **D5** (`AwfRegionStorage.close`, `CloseFailure`, `AwfEngine.closeEvery` :510): a close whose
+  commit succeeded but whose release failed no longer throws (WARN "no chunks are lost"; counted as
+  "not released on the backend" in the shutdown summary). A failed final commit throws
+  `CloseFailure` with the uncommitted count and says the backend may still have applied it.
+- **D7 (new, found in the rerun)** — `RedisClient` bounded reads (`SO_TIMEOUT`) but not writes. With
+  Redis SIGSTOPped, a commit larger than the TCP buffers blocked in `SocketOutputStream.write` for
+  good while holding `AwfWorld.commitLock`; `stop` then waited on that lock (jstack). Observed: `stop`
+  still running after 10 min, finished 1 s after SIGCONT. Fix (`RedisClient.WriteWatch` :260): request
+  bytes are written in 64 KiB slices that record progress; a watchdog closes the connection when no
+  byte went out for `timeout-ms`, and the call fails with `SocketTimeoutException`.
+- **D6** not changed: a frozen Redis still makes `stop` take stores × attempts × `timeout-ms` (115 s
+  in the rerun). No overall AWF shutdown deadline.
+
+Tests (all with `SOURBY_REQUIRE_REDIS=1`): `AwfReadFailureTest` (6: transient failure retried and
+invisible; regenerated chunk never committed, stored chunk committed again only after a load-path
+read; off-load-path read keeps the fence; fail-fast window; no retry after close; release-only
+close is not a loss / failed final commit reports its count), `RedisBackendTest`
+`aCommitWhoseReplyWasLostDoesNotFenceTheStoreForever` (D2, renewal and commit path, plus another
+server's commit still fences), `aLeaseTakenBackByACommitIsRenewedAgain` (D3),
+`aWriteThatMakesNoProgressFailsWithinTheTimeout` (D7; failed in 0.5 s). Full suites 2026-10-14:
+server 10,230 tests / 0 failures / 23 skipped (10,221 before + 9), API 525/0/2, test-plugin 1/0;
+Python 281 OK; `patch_surface.py --check` passed.
+
+**Rerun 2026-10-14 (after the fixes).** Same host, JDK, heap, Redis 8.10.2 and `aurora.toml` as
+above, on a fresh world (seed 440044) and a fresh Redis on 127.0.0.1:6392, Minecraft on 25622; same
+load (`load.sh`) and fault methods. In-game checks with a non-destructive probe (`clone X Y Z X Y Z
+X Y+30 Z filtered <block>`, "cloned 1" = present, one probe at a time; console `execute if block`
+is refused cross-region). Jars: `d1d0034a…` (A1–C3, A2), `4d0cc1de…` (stop with Redis killed,
+frozen-Redis stop that exposed D7), `d55469a0…` (final tree: retry under load, stolen lease, frozen
+stop, reboot check, clean stop). Evidence: `scratchpad/gates/redis2/` (`events.txt`, `boot1-6.log`,
+`a1.jstack`, `s3.jstack`); the first attempt without the fail-fast window is kept in `redis2-attempt1/`.
+
+| Scenario | Before (2026-10-13) | After (2026-10-14) |
+| --- | --- | --- |
+| A1 read of evicted committed chunk 106,106 with Redis SIGKILLed | regenerated, markers gone | Still regenerated in memory (Moonrise); 729 positions fenced, 60 then 781 regenerated writes refused; `save-all flush` WARNs that commits fail |
+| B Redis restarted on same AOF | regenerated 106,106 committed over the stored one (D1) | AOF: no `HSET 106,106` after the kill; Redis copy keeps emerald + gold; after unload/reload the stored chunk loads (probe: emerald and gold present), 25 positions unfenced by load-path reads; markers present after the reboots checked (boots 2, 3 and 6) |
+| A1 retry under load (final jar, Redis down 30 s) | designed | commits fail and stay dirty, retried; recovered on restart (gen → 64); worst region MSPT avg 0.35 ms |
+| C1 lock deleted | designed | taken back by renewal, now logged |
+| C2 lock set to another holder | designed | AWFLEASE on commits, one "lost its Redis lease" ERROR, gen unchanged (64 → 64 during the steal, final jar) |
+| C2b holder deletes lock without committing | retaken by commit, never renewed (D3) | taken back by renewal (WARN); PTTL sampled every 5 s for 40 s stayed ~10 s (renewed every 5 s), lease never lapsed; sponge committed and present after reboot |
+| C3 other holder + `INCR gen`, then `stop` | designed | commits refused; `stop` 1 s; "could not confirm the final commit … lost"; glass absent after reboot |
+| A2 Redis SIGSTOP 25 s, SIGCONT + SIGKILL 0.3 s later, restart after lease expiry | permanent AWFLEASE with no holder (D2) | Gen 37 at SIGSTOP, 39 after replay (commits applied, replies lost: `EOFException`); after restart 0 AWFLEASE, overworld/region lease "taken back by a commit", commits continue (gen 43). During the freeze each evicted-chunk read timed out once (5 s) and was fenced; diamond chunk regenerated in memory, kept in Redis, present after unload/reload and after reboot |
+| `stop` with Redis SIGKILLed | < 1 s; release failures reported as lost chunks (D5) | 1 s; stores with no dirty chunk: WARN "committed … could not release … no chunks are lost", summary "(6 not released on the backend)"; stores with dirty chunks: loss reported with count |
+| `stop` with Redis SIGSTOPped, dirty chunks | 105 s, bounded | jar `4d0cc1de`: **hung > 10 min** (D7, writer blocked in socket write), exited 1 s after SIGCONT. Final jar: 115 s, bounded (D6) |
+| Clean `stop`, Redis healthy | 3 s, 0 lock keys | 3 s, 0 lock keys, 0 ERROR lines in that boot |
+
+Left open: D6 (no overall shutdown deadline); D4 beyond the log line (`save-all` output);
+Moonrise's misleading "chunk data will be lost" line on a fenced read; a regenerated chunk is
+playable in memory while Redis is down (writes to it are dropped at the store, so player edits to
+such a chunk are lost by design); the load-path check is the `moonrise$readData` frame, so a
+Moonrise read that is not a chunk load (`ChunkMap.read`, e.g. a plugin reading chunk NBT) and
+succeeds while the regenerated chunk is still loaded would lift the fence early (not observed, not
+tested); a Redis-over-network run and CI have not exercised any of this.
 
 Side observation, not root-caused and not tied to Redis: `save-all` threw `IllegalStateException:
 Ticket already propagated` (`SaveAllCommand.java:108` → `TicketHolder.propagate`) 2 times in ~90

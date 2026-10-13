@@ -30,8 +30,11 @@ import javax.net.ssl.SSLSocketFactory;
  * protocol error is closed rather than returned to the pool, so a half-read reply can never be
  * read as the answer to the next command. Error replies are values, not broken connections.</p>
  *
- * <p>Every call blocks for at most the configured timeout per socket read, and waits at most that
- * long for a free connection.</p>
+ * <p>Every call blocks for at most the configured timeout per socket read, waits at most that
+ * long for a free connection, and fails when Redis accepts no bytes of a request for that long:
+ * a socket write has no timeout of its own, so a watchdog closes a connection whose write makes no
+ * progress (a frozen Redis stops reading once the TCP buffers are full, and a large commit would
+ * otherwise block forever, holding the world's commit lock).</p>
  */
 public final class RedisClient implements AutoCloseable {
 
@@ -109,6 +112,14 @@ public final class RedisClient implements AutoCloseable {
         }
     }
 
+    /** Closes connections whose writes stall; see the class comment. One daemon thread for all clients. */
+    private static final java.util.concurrent.ScheduledExecutorService WATCHDOG =
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
+            final Thread thread = new Thread(task, "SourbyCraft-Storage-redis-watchdog");
+            thread.setDaemon(true);
+            return thread;
+        });
+
     private final Endpoint endpoint;
     private final int timeoutMillis;
     private final Semaphore permits;
@@ -154,8 +165,19 @@ public final class RedisClient implements AutoCloseable {
         try {
             connection = this.idle.poll();
             if (connection == null) connection = connect();
-            for (final Object[] command : commands) connection.write(command);
-            connection.flush();
+            final WriteWatch watch = new WriteWatch(connection, TimeUnit.MILLISECONDS.toNanos(this.timeoutMillis));
+            try {
+                for (final Object[] command : commands) connection.write(command);
+                connection.flush();
+            } catch (final IOException failed) {
+                if (watch.stalled) {
+                    throw new java.net.SocketTimeoutException("Redis accepted no request bytes for " + this.timeoutMillis
+                        + " ms; connection closed");
+                }
+                throw failed;
+            } finally {
+                watch.done();
+            }
             final List<Object> replies = new ArrayList<>(commands.size());
             for (int i = 0; i < commands.size(); i++) replies.add(connection.read());
             if (this.idle.offer(connection)) connection = null;      // else closed below
@@ -231,6 +253,42 @@ public final class RedisClient implements AutoCloseable {
         return reply.toString();
     }
 
+    /**
+     * Watches one request's writes: closes the connection when no bytes went out for the timeout.
+     * Re-arms itself while writes progress, so a large request over a slow link is not cut off.
+     */
+    private static final class WriteWatch implements Runnable {
+        private final Connection connection;
+        private final long timeoutNanos;
+        private volatile boolean finished;
+        volatile boolean stalled;
+        private volatile java.util.concurrent.ScheduledFuture<?> pending;
+
+        WriteWatch(final Connection connection, final long timeoutNanos) {
+            this.connection = connection;
+            this.timeoutNanos = timeoutNanos;
+            connection.progressNanos = System.nanoTime();
+            this.pending = WATCHDOG.schedule(this, timeoutNanos, TimeUnit.NANOSECONDS);
+        }
+
+        @Override
+        public void run() {
+            if (this.finished) return;
+            final long idle = System.nanoTime() - this.connection.progressNanos;
+            if (idle >= this.timeoutNanos) {
+                this.stalled = true;
+                this.connection.close();
+            } else {
+                this.pending = WATCHDOG.schedule(this, this.timeoutNanos - idle, TimeUnit.NANOSECONDS);
+            }
+        }
+
+        void done() {
+            this.finished = true;
+            this.pending.cancel(false);
+        }
+    }
+
     /** One socket speaking RESP2. Not thread safe; the pool hands it to one caller at a time. */
     static final class Connection {
         private static final byte[] CRLF = {'\r', '\n'};
@@ -239,11 +297,37 @@ public final class RedisClient implements AutoCloseable {
         private final Socket socket;
         private final InputStream in;
         private final OutputStream out;
+        /** When the last slice of a write reached the socket; read by {@link WriteWatch}. */
+        volatile long progressNanos;
 
         Connection(final Socket socket) throws IOException {
             this.socket = socket;
             this.in = new BufferedInputStream(socket.getInputStream(), 64 * 1024);
-            this.out = new BufferedOutputStream(socket.getOutputStream(), 64 * 1024);
+            final OutputStream raw = socket.getOutputStream();
+            // Slices, so the watchdog sees progress within one large argument.
+            final OutputStream sliced = new OutputStream() {
+                @Override
+                public void write(final int b) throws IOException {
+                    raw.write(b);
+                    Connection.this.progressNanos = System.nanoTime();
+                }
+
+                @Override
+                public void write(final byte[] data, final int offset, final int length) throws IOException {
+                    for (int at = offset, end = offset + length; at < end; ) {
+                        final int slice = Math.min(64 * 1024, end - at);
+                        raw.write(data, at, slice);
+                        at += slice;
+                        Connection.this.progressNanos = System.nanoTime();
+                    }
+                }
+
+                @Override
+                public void flush() throws IOException {
+                    raw.flush();
+                }
+            };
+            this.out = new BufferedOutputStream(sliced, 64 * 1024);
         }
 
         void write(final Object[] command) throws IOException {

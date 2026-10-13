@@ -510,10 +510,16 @@ public final class AwfEngine {
     int closeEvery() {
         int failed = 0;
         int closed = 0;
+        int unreleased = 0;
         for (final AwfRegionStorage storage : this.storages.values()) {
             try {
                 storage.close();
                 closed++;
+                if (storage.releaseFailed()) unreleased++;
+            } catch (final AwfRegionStorage.CloseFailure failure) {
+                failed++;
+                SourbyLogger.error("Aurora World Fabric could not commit " + storage.name() + " at shutdown: "
+                    + failure.getMessage(), failure);
             } catch (final IOException | RuntimeException failure) {
                 failed++;
                 SourbyLogger.error("Aurora World Fabric could not commit " + storage.name()
@@ -522,7 +528,8 @@ public final class AwfEngine {
         }
         if (closed + failed > 0) {
             SourbyLogger.info("Aurora World Fabric: committed and closed " + closed + " storage(s) at shutdown"
-                + (failed > 0 ? ", " + failed + " failed" : ""));
+                + (unreleased > 0 ? " (" + unreleased + " not released on the backend)" : "")
+                + (failed > 0 ? ", " + failed + " failed to commit" : ""));
         }
         return failed;
     }

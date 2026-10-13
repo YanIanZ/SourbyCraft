@@ -416,6 +416,10 @@ public final class PerfCommand extends Command {
                 stats.reads() + " / " + stats.baseFallthroughs() + " / " + stats.deletes());
             add(lines, name + " retries / failures / written", world.retries() + " / " + world.failures() + " / "
                 + (world.bytesWritten() / 1024) + " KiB");
+            if (stats.readFailures() > 0 || stats.readRetries() > 0) {
+                add(lines, name + " read retries / failed reads / unreadable / refused writes", stats.readRetries()
+                    + " / " + stats.readFailures() + " / " + stats.unreadable() + " / " + stats.refusedWrites());
+            }
         }
     }
 

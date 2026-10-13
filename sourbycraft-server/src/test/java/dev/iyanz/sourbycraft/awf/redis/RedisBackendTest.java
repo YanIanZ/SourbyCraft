@@ -203,6 +203,99 @@ class RedisBackendTest {
             .open("stall/region", WorldRole.READ_ONLY, 1).read(new ChunkKey(0, 0)).orElseThrow());
     }
 
+    /**
+     * Backend failure D2 (2026-10-13): Redis applied a commit whose reply never arrived, so the
+     * generation moved without the store seeing it; then the lease lapsed. No other server is
+     * involved, so the store must get its lease back, by renewal and by its next commit.
+     */
+    @Test
+    void aCommitWhoseReplyWasLostDoesNotFenceTheStoreForever() throws Exception {
+        final RedisBackend backend = backend();
+        final RedisStore store = (RedisStore) backend.open("lost/region", WorldRole.VANILLA, 1);
+        store.commit(Map.of(new ChunkKey(0, 0), b("one")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL);
+        // The same script the store runs, applied by Redis while the store saw no reply (a timeout).
+        backend.client().call("EVAL", RedisStore.COMMIT_SCRIPT, "5", store.chunksKey, store.deletedKey, store.genKey,
+            store.lockKey, store.writerKey, store.token(), "1", "0", "0", Long.toString(store.knownGeneration()),
+            "30000", "0,0", "two");
+        assertEquals(1, store.knownGeneration());
+        backend.client().call("PEXPIRE", store.lockKey, "1");          // Redis was gone longer than the lease
+        Thread.sleep(20);
+
+        backend.renewAll();
+        assertTrue((Long) backend.client().call("PTTL", store.lockKey) > 0, "renewal took the lease back");
+        backend.client().call("DEL", store.lockKey);
+        assertEquals(3, store.commit(Map.of(new ChunkKey(0, 0), b("three")), Set.of(), Set.of(),
+            PersistenceMode.INCREMENTAL).generation(), "the next commit takes it back too");
+        assertArrayEquals(b("three"), store.read(new ChunkKey(0, 0)).orElseThrow());
+
+        // Another server's commit in between still fences it: the last writer is not this store.
+        backend.client().call("DEL", store.lockKey);
+        final AwfStore other = backend(this.server.uri(), "test:", false).open("lost/region", WorldRole.VANILLA, 1);
+        other.commit(Map.of(new ChunkKey(0, 0), b("other")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL);
+        other.close();
+        backend.renewAll();
+        assertEquals(-2L, backend.client().call("PTTL", store.lockKey), "renewal refuses");
+        final IOException refused = assertThrows(IOException.class, () -> store.commit(Map.of(new ChunkKey(0, 0),
+            b("stale")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL));
+        assertTrue(refused.getMessage().contains("AWFLEASE"), refused.getMessage());
+    }
+
+    /**
+     * Backend failure D3 (2026-10-13): after the lease was lost to another holder and that holder
+     * let it go without committing, a commit takes it back; renewal must keep it from then on.
+     */
+    @Test
+    void aLeaseTakenBackByACommitIsRenewedAgain() throws Exception {
+        final RedisBackend backend = backend();
+        final RedisStore store = (RedisStore) backend.open("retake/region", WorldRole.VANILLA, 1);
+        backend.client().call("SET", store.lockKey, "someone-else/1", "PX", "30000");
+        backend.renewAll();                                          // lost: refused, but still registered
+        assertThrows(IOException.class, () -> store.commit(Map.of(new ChunkKey(0, 0), b("refused")), Set.of(),
+            Set.of(), PersistenceMode.INCREMENTAL));
+        backend.client().call("DEL", store.lockKey);                // the other holder let go, no commit
+        store.commit(Map.of(new ChunkKey(0, 0), b("retaken")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL);
+        assertEquals(store.token(), RedisClient.text(backend.client().call("GET", store.lockKey)));
+
+        backend.client().call("PEXPIRE", store.lockKey, "500");     // nearly lapsed, as between commits
+        backend.renewAll();
+        assertTrue((Long) backend.client().call("PTTL", store.lockKey) > 10_000, "renewed for a full lease again");
+        store.close();
+        assertEquals(-2L, backend.client().call("PTTL", store.lockKey), "released at close");
+    }
+
+    /**
+     * Backend failure 2026-10-14 (D7): a frozen Redis stops reading; once the TCP buffers are full a
+     * socket write blocks with no timeout of its own. A large commit then hung shutdown for good.
+     */
+    @Test
+    void aWriteThatMakesNoProgressFailsWithinTheTimeout() throws Exception {
+        try (java.net.ServerSocket frozen = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+            final java.util.List<java.net.Socket> accepted = new java.util.concurrent.CopyOnWriteArrayList<>();
+            final Thread acceptor = new Thread(() -> {
+                try {
+                    accepted.add(frozen.accept());       // accepted, never read: like a SIGSTOPped Redis
+                } catch (final IOException closed) {
+                    // test over
+                }
+            });
+            acceptor.setDaemon(true);
+            acceptor.start();
+            try (RedisClient client = new RedisClient(new RedisClient.Endpoint("127.0.0.1", frozen.getLocalPort(), false,
+                null, null, 0), 1, 500)) {
+                final long started = System.nanoTime();
+                // Preemptive: before the fix this call never returned.
+                final IOException failed = org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                    java.time.Duration.ofSeconds(20), () -> assertThrows(IOException.class,
+                        () -> client.call("HSET", "k", "f", new byte[64 * 1024 * 1024])));
+                final long millis = (System.nanoTime() - started) / 1_000_000L;
+                assertTrue(millis < 10_000, "failed after " + millis + " ms: " + failed);
+                assertTrue(failed.getMessage().contains("accepted no request bytes"), failed.getMessage());
+            } finally {
+                for (final java.net.Socket socket : accepted) socket.close();
+            }
+        }
+    }
+
     @Test
     void prefixesKeepServersApart() throws Exception {
         final RedisBackend a = backend();
