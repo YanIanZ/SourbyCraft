@@ -71,7 +71,10 @@ these supply today's implementation of it. This is the set the ledger test pins.
 
 Patches against the materialised Minecraft source. They exist because the behaviour is inside a
 vanilla or engine class; individual patches may connect an Aurora-owned backend.
-The table below is a historical inventory, not a current patch count. The parked EDF patch would add
+The table below is a historical inventory, not a current patch count. Historical, numbering as of
+2026-10-05 or earlier: its numbers predate the 2026-10-06 rebuild (0019–0023 → 0018–0022) and the 2026-10-13
+renumbering (old 0024 removed, 0025–0029 → 0024–0028); current names are in
+`sourbycraft-server/minecraft-patches/features/` (29 files on 2026-10-14). The parked EDF patch would add
 the EDF backend selection and compatible task-state publication described above.
 
 | Patch | Keeps |

@@ -230,12 +230,12 @@ See the status table in [releases/26.2-build-47-aurora-nexus.md](releases/26.2-b
 - [ ] cold vs warm startup benchmark
 - [ ] transform output caching
 - [x] AWF: world roles, atomic generations, `.awf` lazy images, FULL/INCREMENTAL/CHECKPOINT/READ_ONLY, COW instances, metrics
-- [-] AWF integration with the engine's chunk load/save — FILE backend under `RegionFileStorage` for worlds in `aurora.awf.worlds` (off by default), `/perf awf`, tombstones; CI and demo-panel boot/read-back/export passed. Not qualified: no server-level crash or sustained player load ([aurora-world-fabric.md](architecture/aurora-world-fabric.md#engine-integration-regionfilestorage))
+- [-] AWF integration with the engine's chunk load/save — FILE backend under `RegionFileStorage` for worlds in `aurora.awf.worlds` (off by default), `/perf awf`, tombstones; CI and demo-panel boot/read-back/export passed. Not qualified: server-level crash measured only locally (`verify_crash.py --awf` 56/56, 2026-10-13, headless clients); no sustained player load ([aurora-world-fabric.md](architecture/aurora-world-fabric.md#engine-integration-regionfilestorage))
 - [-] AWF export back to region files — `aurora.awf.export`, resumable, store kept; unit-tested, CI export boot added
 - [-] AWF qualification — storage layer in-process: crash at each commit stage, 200 load/unload cycles, shutdown with a pending commit, concurrent writers, 1/50/250/1000 storages, corrupt object (`AwfQualificationTest`). Open: server-level crash with players, backend disconnect, sustained load measurement, and investigation of the demo panel's 105.5-second initial 529-chunk commit
-- [-] AWF backend SPI (`AwfStore`, `AwfBackend`, `aurora.awf.backend`), FILE built in, no fallback on a missing backend
-- [ ] AWF database backends (MongoDB/MySQL/Redis) — none shipped
-- [ ] SlimeLoader adapter — needs a Slime-format converter
+- [-] AWF backend SPI (`AwfStore`, `AwfBackend`, `aurora.awf.backend`), FILE built in plus a `redis` backend (`awf/redis/RedisBackend`), no fallback on a missing backend
+- [-] AWF database backends — Redis shipped (`awf/redis/`: own RESP client, Lua atomic commit, single-writer lease; backend-failure fixes `d97fe247`, 2026-10-14, local scenarios only); MongoDB/MySQL none
+- [-] SlimeLoader adapter — a Slime v12/v13 importer exists (`awf/world/SlimeImporter`, `/awf import`, `/awf convert` to `.awf`); no live SlimeLoader adapter. Untrusted-file limits open (audit AWF-9)
 - [x] Resource Governor specification
 - [-] governed lanes with reject-not-caller-runs, `/perf governor`
 - [x] operator-configurable governor budgets (`[aurora.scheduler]`)

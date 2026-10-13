@@ -80,6 +80,12 @@ Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](d
 [developing-awf.md](guides/developing-awf.md) (plugin API) · [testing-awf.md](guides/testing-awf.md) ·
 [testing-legacy-plugins.md](guides/testing-legacy-plugins.md)
 
+### Audits (`audits/`)
+[2026-10-14 system audit](audits/2026-10-14-system-audit.md) (AWF, region engine/bridge,
+boot/distribution/security, observability/tooling: findings AWF-/ENG-/SEC-/OBS-n with proposed
+patches, plus proposals; a dated snapshot — fix status is tracked in [TODO.md](../TODO.md)
+*Audit sistem 2026-10-14*)
+
 ### Releases (`releases/`)
 [Build 47 — Aurora Nexus](releases/26.2-build-47-aurora-nexus.md) (current candidate and its gates) ·
 [46](releases/46.md) · [45](releases/45.md) · [44](releases/44.md)

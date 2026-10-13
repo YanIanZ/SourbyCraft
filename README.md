@@ -22,7 +22,7 @@
 
 **SourbyCraft 26.2 Aurora** is a Java 25, region-threaded Minecraft server project focused on **stable performance, efficient resource usage, deep engine optimization, observability, and progressive runtime independence**.
 
-The current codebase still consumes Paper/Folia/Canvas-derived implementation where it is useful, but **Aurora is the SourbyCraft architecture** that defines the public runtime contract, configuration ownership, diagnostics, telemetry, lifecycle, and future engine direction.
+SourbyCraft is built on **Paper, its only upstream**, plus a SourbyCraft-owned region-threading engine derived from Folia/Canvas work (attribution below). It is not a Canvas-based build: **Aurora is the SourbyCraft architecture** that defines the public runtime contract, configuration ownership, diagnostics, telemetry, lifecycle, and future engine direction.
 
 Aurora is not just a rebrand of Canvas and it is not limited to helper patches outside Minecraft code. SourbyCraft may modify **Minecraft/NMS hot paths directly** when profiling proves that the optimization belongs there.
 
@@ -45,8 +45,9 @@ The architecture direction is:
                               │
           ┌───────────────────┼───────────────────┐
           │                   │                   │
-       Minecraft            Paper               Canvas
-        / NMS           compatibility       retained internals
+       Minecraft            Paper          Region engine
+        / NMS        (only upstream)   (SourbyCraft-owned,
+                                        ex-Folia/Canvas)
 ```
 
 Since 2026-10-05 Paper is the only upstream: the region-threading changes that came from Canvas/Folia are SourbyCraft-owned patches and sources. Canvas survives only as the plugin API package `io.canvasmc.canvas.*` and the `config/canvas-*.yml` file names. It is **not** the SourbyCraft product architecture.
@@ -102,7 +103,7 @@ The `26.2` branch already includes or is actively refining:
 - reproducible builds via `SOURCE_DATE_EPOCH`
 - persistence validation: `scripts/verify_persistence.py`, 16 checks
 
-**Not yet fully qualified.** A certified two-hour 10-player stability soak now exists and showed stable heap-after-GC, resident memory and tick duration over the window. That is stability evidence; it is **not** a certified performance reference pair and does not by itself clear the regression gate. Certified comparable reference runs, remaining representative workloads, missing domain telemetry, and the open region-ownership issue still block T10. The exact gate state is tracked in **[Qualification Readiness](docs/architecture/qualification-readiness.md)** and raw measurement history in **[Performance Baseline](docs/BASELINE.md)**.
+**Not yet fully qualified.** A certified two-hour 10-player stability soak now exists and showed stable heap-after-GC, resident memory and tick duration over the window. That is stability evidence; it is **not** a certified performance reference pair and does not by itself clear the regression gate. Certified comparable reference runs, remaining representative workloads, missing domain telemetry, and the open region-ownership gate still block T10. The exact gate state is tracked in **[Qualification Readiness](docs/architecture/qualification-readiness.md)** and raw measurement history in **[Performance Baseline](docs/BASELINE.md)**.
 
 Deeper entity/chunk/network profiling and further Aurora ownership work remain active
 development tasks.
@@ -134,10 +135,10 @@ A single workload, machine, percentile or profiler sample must never be generali
 | Certified performance regression reference pair | **INCOMPLETE** |
 | Network throughput / storage backlog telemetry | **PARTIAL** — wire bytes/packets per direction (`/perf network`); per-world pending chunk-system I/O (`/perf storage`); no vanilla save-latency percentiles. Whether `/perf storage` satisfies the T10 "storage backlog" metric is undecided |
 | Aurora Resource Governor / unified execution fabric | **PARTIAL** — fixed-budget governed lanes (`/perf governor`); existing executors not yet governed |
-| Aurora Compatibility Bridge | **IMPLEMENTED, UNQUALIFIED** — `aurora.bridge.mode = off` by default. Unit-tested (bridge package 61/61, 2026-10-07) and booted with a synthetic legacy plugin in CI (runs 440–485); Vault/EssentialsX enabled through it on Sourby Demo, and one uncertified `plugins-10` bench (2026-10-06). The 2026-10-07 additions (`RegionTask`/`EntityTask` owner routing, per-plugin limits, body timing, LightingLuminol global-scheduler port) are uncommitted and have not run in CI. No player-workflow or soak qualification; a native port is the route to full compatibility |
-| Aurora World Fabric | **EXPERIMENTAL, OFF BY DEFAULT** — FILE and Redis backends under region storage for worlds in `aurora.awf.worlds` or managed by `/awf` (`/perf awf`); templates, copy-on-write instances, Slime import, `.awf` files; crash test 53/53 is MEASURED (2026-10-05); unqualified, a crash loses writes since the last commit; no MongoDB/MySQL backends |
+| Aurora Compatibility Bridge | **IMPLEMENTED, UNQUALIFIED** — `aurora.bridge.mode = off` by default. Unit-tested (bridge package 61/61, 2026-10-07) and booted with a synthetic legacy plugin in CI (runs 440–485); Vault/EssentialsX enabled through it on Sourby Demo, and one uncertified `plugins-10` bench (2026-10-06). The 2026-10-07 additions (`RegionTask`/`EntityTask` owner routing, per-plugin limits, body timing, LightingLuminol global-scheduler port, same-instance re-enable hook) are committed and their fixture markers pass in CI since run 37515867230. No player-workflow or soak qualification; a native port is the route to full compatibility |
+| Aurora World Fabric | **EXPERIMENTAL, OFF BY DEFAULT** — FILE and Redis backends under region storage for worlds in `aurora.awf.worlds` or managed by `/awf` (`/perf awf`); templates, copy-on-write instances, Slime import, `.awf` files; crash test 56/56 is MEASURED (local laptop, 2026-10-13; 53/53 on 2026-10-05); Redis backend-failure fixes committed (`d97fe247`), failure scenarios run locally only; unqualified, a crash loses writes since the last commit; no MongoDB/MySQL backends |
 | Fully independent Aurora scheduler | **RESEARCH / PLANNED**, not current runtime |
-| Build 47 — Aurora Nexus release | **NOT READY for `release=true`** — `release=pre`; every mandatory gate is PARTIAL, OPEN or NOT RUN for the release-candidate tree ([audit 2026-10-07](docs/releases/26.2-build-47-aurora-nexus.md#release-readiness-audited-2026-10-07)) |
+| Build 47 — Aurora Nexus release | **NOT READY for `release=true`** — `release=pre`. Gate state (release doc, consistency pass 2026-10-14): compile, unit/integration, patch regeneration, startup and shutdown PASS in CI (latest run 38445246566); world load/save and crash recovery PASS on local laptop runs of the RC tree (plus earlier Sourby Demo runs), backend failure PASS on local laptop scenarios only; plugin compatibility, cache corruption and soak PARTIAL; region ownership and licence OPEN; certified stress NOT RUN. Open findings of the [2026-10-14 system audit](docs/audits/2026-10-14-system-audit.md) include security HIGHs (e.g. `sourbycraft-security.yml` limits have no consumer) ([gates](docs/releases/26.2-build-47-aurora-nexus.md#release-readiness-audited-2026-10-07)) |
 
 ### Aurora engine, and where it lives
 
@@ -196,7 +197,7 @@ Existing files remain supported:
 
 - `sourbycraft_config/sourbycraft_global_config.toml` — SourbyCraft utility/global configuration
 - `sourbycraft_config/aurora.toml` — early-boot Aurora CPU budget consumed before normal SourbyCraft bootstrap
-- `sourbycraft-security.yml`
+- `sourbycraft-security.yml` — currently **not enforced**: only `/sourbycraft` and the spark config dump read it (audit SEC-1, 2026-10-14; rebuild decided by the owner, not implemented)
 - `config/canvas-server.yml`
 - `config/canvas-worlds.yml`
 

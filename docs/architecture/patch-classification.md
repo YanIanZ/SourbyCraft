@@ -3,6 +3,12 @@
 DEVELOPMENT-TASKS K. Every active SourbyCraft patch, as of 2026-09-27 (Build 47), with its
 role and what should happen to it. Sizes are added lines (`+`) in the patch file.
 
+> Historical, as of 2026-09-27: numbers predate the 2026-10-06 rebuild (0019–0023 → 0018–0022,
+> closing the 0018 gap) and the 2026-10-13 renumbering, so the 0019/0020 rows are today's 0018/0019.
+> Current Minecraft features 0020–0029 (0020 and 0021 are the two Minecraft source patches below,
+> moved into features) and Paper features 0001–0014 (0001–0004 are the Paper file patches below)
+> are not classified here in their current form. Current files: `sourbycraft-server/{minecraft,paper}-patches/features/`.
+
 **Categories:** FOUNDATION (the product cannot boot or identify itself without it), INTEGRATION
 (connects SourbyCraft code to an upstream seam), PERFORMANCE (a measured or measurable
 optimisation), COMPATIBILITY (keeps plugins/config working), SECURITY, BRANDING, LEGACY.

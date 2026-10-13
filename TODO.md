@@ -20,8 +20,9 @@ Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputu
 ### Rilis Build 47 — gate yang masih terbuka (audit 2026-10-07)
 Hal yang memblokir `release=true`. Status per gate dan buktinya:
 `docs/releases/26.2-build-47-aurora-nexus.md` *Release readiness (audited 2026-10-07)*.
-Head ter-commit `1fe984ed` lulus CI run 485 (2026-10-06); tree kandidat rilis (Paper 0005–0011,
-Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah jalan di CI.
+CI hijau terbaru: run 38445246566 pada `d97fe247` (2026-10-14). Tree kandidat rilis (Paper
+0005–0014, Minecraft 0023–0029, perbaikan bridge/AWF) sudah di-commit (`3da221d0`, `f188fe78`,
+`e0c241e9`, `d97fe247`) dan jalan di CI.
 - [!] Keputusan lisensi owner (PolyForm Noncommercial vs GPLv3 Paper; lihat *Keputusan owner*).
 - [x] Commit tree kandidat rilis, lalu satu run CI hijau: compile, suite Java + Python, boot,
   shutdown, termasuk marker fixture yang belum pernah jalan (`LEGACY_GLOBAL_*`,
@@ -52,9 +53,11 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   stop) **105/105** dalam 142 s; `verify_crash.py` region file **52/52** dalam 97 s; `verify_crash.py
   --awf` **56/56** dalam 101 s (tiga SIGKILL 3/8/15 s dengan 4 klien bergerak, tanpa baris korupsi,
   checkpoint utuh). Game time kini XPASS di ketiga pemulihan (mis. 500 ≥ 290, 1247 ≥ 830), jadi XFAIL
-  diperbaiki oleh MC 0027; entri `KNOWN_LIMITATIONS` di `verify_crash.py` perlu dihapus (belum diubah).
-- [x] Redis terputus / lease hilang pada server yang berjalan (backend failure). Run pertama 2026-10-14
-  (jar `rc-cbef3fb9`) menemukan D1–D6; perbaikan di working tree (belum di-commit, belum CI), run
+  diperbaiki oleh MC 0027; entri `KNOWN_LIMITATIONS` di `verify_crash.py` sudah dihapus di `3cd33b3f`
+  (game time mundur kini menggagalkan run).
+- [-] Redis terputus / lease hilang pada server yang berjalan (backend failure). Run pertama 2026-10-14
+  (jar `rc-cbef3fb9`) menemukan D1–D6; perbaikan di-commit `d97fe247`, CI run 38445246566 hijau
+  (suite + boot; skenario gangguan Redis sendiri tidak dijalankan di CI), run
   ulang lokal 2026-10-14 (jar final `d55469a0…`, Redis 8.10.2 loopback AOF, M2 16 GiB; detail di
   `docs/architecture/aurora-world-fabric.md` § *Backend failure*, SPEC B89–B93). Semua skenario
   sesuai desain: (D1) baca gagal dicoba ulang lalu posisi di-fence — chunk hasil regenerasi tidak
@@ -63,14 +66,53 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   tetap diperpanjang setelah diambil kembali; (D5) gagal lepas lease tidak dilaporkan sebagai chunk
   hilang; (D7, baru) tulis socket Redis tanpa timeout membuat `stop` menggantung >10 menit saat Redis
   beku — kini watchdog, `stop` 115 s. Masih terbuka (bukan defek data): D6 tanpa batas waktu total
-  shutdown AWF, D4 hanya WARN; belum ada run Redis lewat jaringan atau CI. Bukti lokal laptop, bukan
-  kualifikasi.
+  shutdown AWF, D4 hanya WARN; belum ada run Redis lewat jaringan, dan skenario gangguan hanya
+  dijalankan lokal. Bukti lokal laptop, bukan kualifikasi; tetap `[-]` selama D4/D6 terbuka.
 - [ ] Alur pemain nyata dengan plugin bridged (EssentialsX/Vault) di Sourby Demo.
+
+### Audit sistem 2026-10-14
+Laporan: [`docs/audits/2026-10-14-system-audit.md`](docs/audits/2026-10-14-system-audit.md)
+(read-only, `d97fe247`; nomor baris di laporan per commit itu). Temuan HIGH di sini; MEDIUM di P1,
+LOW di P2, proposal di P3. Keputusan owner 2026-10-14: SEC-1 bangun ulang guard; SEC-2/3 updater
+aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) tetap terbuka
+(*Keputusan owner*). Status `[ ]` = belum diperbaiki.
+- [ ] **AWF-1** Nama dunia managed dicocokkan ke setiap elemen path (dunia bernama seperti direktori
+  induk server menempelkan semua dunia ke AWF) — cocokkan path relatif ke direktori server (`storageId()`) (audit §1)
+- [ ] **AWF-2** `TicketHolder.pop()` membaca di luar monitor dan race dengan `propagate()`: ticket
+  save hilang, `save-all`/`AuroraWorlds.save` tidak pernah selesai — pop atomik, gabungkan ticket kedua (audit §1)
+- [ ] **AWF-3** Commit periodik AWF menumpang collector metrik dan terlewat saat koleksi telat, janji
+  "hilang maksimal satu interval" tidak berlaku di bawah beban — driver maintenance AWF sendiri (audit §1)
+- [ ] **ENG-1** `guard-severity: LOG` (default) membiarkan akses lintas region; pelanggaran plugin
+  bridged tidak pernah sampai ke quarantine — sink guard yang mengatribusi ke plugin + rate limit log (audit §2)
+- [ ] **ENG-2** Async pathfinding mengganti `nodeEvaluator` hidup milik mob dan kehilangan flag
+  pintu/float (fitur default off) — simpan/pulihkan evaluator, salin flag (amend MC 0006) (audit §2)
+- [ ] **ENG-3** Task region/entity yang antre di dunia yang di-unload tidak pernah dijalankan,
+  dibatalkan atau dipensiunkan — kuras antrean (cancel-only) dan pensiunkan scheduler saat unload (audit §2)
+- [ ] **ENG-4** Task batal yang antre di section ter-unload bisa membuat split melempar di bawah
+  write lock regioniser dan menghentikan server (PLAUSIBLE) — lewati task batal saat split (audit §2)
+- [ ] **SEC-1** `sourbycraft-security.yml` tanpa consumer sejak `6b774810`: tidak ada guard
+  packet/NBT/book/sign/payload, padahal docs bilang ditegakkan — **keputusan owner: bangun ulang**
+  sebagai `dev.iyanz.sourbycraft.security` + satu feature patch, mode LOG dulu, tes per limit, cek
+  policy bahwa setiap key punya consumer (audit §3)
+- [ ] **SEC-2** Auto-updater hanya mempercayai respons API GitHub (tanpa tanda tangan), default
+  `apply_mode=auto` — **keputusan owner:** rilis bertanda tangan (Ed25519, public key di jar), default `notify` (audit §3)
+- [ ] **SEC-3** Swap in-place tidak menyimpan jar sebelumnya dan otomatis melintasi versi Minecraft —
+  **keputusan owner:** simpan `.prev` + rollback setelah boot gagal, gate versi MC yang sama (audit §3)
+- [ ] **SEC-4** `SourbyBootstrap` kode mati (entry point = SourbyClip); grep guard download offline
+  di CI tidak mungkin cocok — hapus atau sambungkan, tolak staging jar dengan versi clip berbeda, perbaiki grep CI dan docs (audit §3)
+- [ ] **OBS-1** Password Redis di `aurora.awf.redis.uri` bocor ke report spark — sembunyikan key,
+  scrub userinfo URI di semua tempat (audit §4)
+- [ ] **OBS-2** `/speedtest` yang menggantung mengunci command selamanya dan membocorkan proses —
+  baca output paralel, tunggu dengan timeout (audit §4)
+- [ ] **OBS-3** Identitas build tidak terikat ke tree (tanpa flag dirty/tree hash; CI tidak cek
+  `Git-Commit`) — `-dirty`, tree hash, cek `--commit $GITHUB_SHA` (audit §4)
 
 ### Keputusan owner
 - [!] **Lisensi:** repo memakai PolyForm Noncommercial, sementara jar yang didistribusikan berisi kode
   server Paper berlisensi GPLv3. Perlu keputusan apakah kombinasi ini memenuhi GPLv3
   (`docs/releases/26.2-build-47-aurora-nexus.md`). Ini juga menentukan bentuk migrasi penuh di P2.
+  Audit 2026-10-14 **SEC-13**: jar tidak memuat teks GPL maupun tawaran source; label lisensi
+  Docker (SEC-12) menunggu keputusan ini.
 - [x] **Integrasi anticheat privat dihapus** (keputusan owner 2026-10-13): feature patch, tooling
   dan docs-nya dihapus dari repo; feature patch MC sesudahnya dinomori ulang turun satu
   (0025–0029 → 0024–0028).
@@ -92,8 +134,11 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
 - [-] Matikan watchdog diagnosis region/Folia secara default (permintaan pengguna,
   2026-10-06). Feature patch 0025 (dulu 0026) ditulis dan diterapkan ke source materialized;
   JVM `sourbycraft.region-watchdog.enabled` default false, RESTART_REQUIRED. Ownership
-  guard serta penanganan failure/shutdown tetap aktif; build/boot/testing oleh Claude
-  masih pending. Scope/kasus penerimaan: `docs/development/REGION-WATCHDOG.md`, SPEC §158.
+  guard serta penanganan failure/shutdown tetap aktif. Patch di-commit `49d4e640` dan sudah
+  di-build serta di-boot (watchdog mati) di setiap run CI sejak 37515867230. Sisa: penerimaan
+  khusus watchdog (`docs/development/REGION-WATCHDOG.md` kasus 1–4, SPEC §158): bukti tidak ada
+  `Folia Watchdog Thread` saat flag mati, run dengan flag nyala dan tick macet terkendali, dan
+  akses wrong-owner terkendali.
 - [x] Tes persistensi restart penuh setelah perubahan performa (DEV-A, AURORA-J), build
   pasca-migrasi, 2026-10-05:
   - lokal: `verify_persistence.py` 104/104 (4 restart berturut-turut, data pemain round-trip di
@@ -104,7 +149,8 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
 - [x] Tes restart/crash untuk setiap perubahan save async (DEV-G), 2026-10-05:
   `verify_crash.py` — region file 49/49, AWF 53/53; tiga `kill -9` (3/8/15 detik) saat penyimpanan
   berjalan dengan 4 klien bergerak; checkpoint yang sudah di-flush/commit selalu utuh, tidak ada
-  korupsi. Satu keterbatasan diketahui (lihat item berikut)
+  korupsi. Satu keterbatasan diketahui (lihat item berikut). Run terbaru tree kandidat (lokal
+  2026-10-13): region file 52/52, AWF 56/56, game time XPASS (lihat gate P0 di atas)
 - [x] **Metadata game time/spawn dunia belum masuk save-all/autosave** (DIPERBAIKI 2026-10-07, commit
   `44593a50`; demo: game time 1.792.900 ≥ 1.792.548 setelah `save-all flush` → SIGKILL → boot): bukti crash historis
   `verify_crash.py` XFAIL. Review source 26.2 (2026-10-06): metadata aktif ada di
@@ -125,7 +171,8 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   `https://spark.lucko.me/RyP3FlAYME` mencatat 4.650 ms sampel inclusive pada
   `/awf create` → `setInitialSpawn` → `syncLoadNonFull`; 4.570 ms di `parkNanos`.
   Ini akumulasi sampel, bukan bukti satu pause 4,65 s. Tidak membuktikan semua stutter eksplorasi.
-  DIPERBAIKI LOKAL 2026-10-13 (belum di-commit di root, belum CI): pembuatan dunia bertahap
+  DIPERBAIKI 2026-10-13 (commit `e0c241e9`, CI run 38434258632 hijau pada `cbef3fb9` yang
+  memuatnya): pembuatan dunia bertahap
   (MC 0029, Paper 0014, `AuroraWorldsService`; SPEC B80/B85): chunk pertama pencarian spawn
   dimuat async ke SPAWN, lalu `setInitialSpawn`/`prepareLevel` yang tidak diubah berjalan di
   global tick berikutnya; `Bukkit.createWorld` tetap sinkron. Lokal (M2 8 core, satu run per
@@ -160,9 +207,10 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   mundur = keterbatasan P0 yang sudah tercatat). Tree kandidat `cbef3fb9` lokal 2026-10-13 (laptop,
   jar `975d3bda…`): persistensi 105/105, crash region 52/52, crash AWF 56/56, game time tidak lagi
   mundur (XPASS). Dua NPE konsol diperbaiki (patch MC 0028, CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13) success)
-- [-] AWF: crash di level server dengan klien sudah lulus (53/53, `verify_crash.py --awf`). Sisa:
-  backend terputus (backend Redis sudah ada; penerimaan gangguan jaringan belum tercatat), beban berkelanjutan, dan investigasi
-  commit awal 529 chunk yang butuh 105,5 detik di panel demo (`docs/architecture/aurora-world-fabric.md`)
+- [-] AWF: crash di level server dengan klien sudah lulus (terbaru lokal 56/56, `verify_crash.py
+  --awf`, 2026-10-13; sebelumnya 53/53, 2026-10-05). Sisa: beban berkelanjutan dan investigasi
+  commit awal 529 chunk yang butuh 105,5 detik di panel demo (`docs/architecture/aurora-world-fabric.md`);
+  backend terputus dilacak di item Redis P0 di atas (tidak diulang di sini)
 
 ### Konkurensi
 - [-] Soak konkurensi multi-jam (2 jam+) (DEV-A, AURORA-C/J): soak tersertifikasi 2 jam 10 pemain
@@ -178,7 +226,9 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
 
 ### Jaringan dan keamanan
 - [ ] Verifikasi event loop Netty tidak melakukan I/O blocking yang tidak terkait (DEV-H)
-- [ ] Pertahankan limit packet/security (`sourbycraft-security.yml`) di setiap perubahan network
+- [ ] Pertahankan limit packet/security (`sourbycraft-security.yml`) di setiap perubahan network.
+  Catatan audit 2026-10-14: file itu tidak punya consumer sejak `6b774810`, jadi saat ini tidak ada
+  limit yang ditegakkan — lihat **SEC-1** di bawah
 
 ### SourbyClip (sekarang bisa dikerjakan di repo `YanIanZ/SourbyClip` dengan Codex)
 - [-] Audit timeout downloader, retry/failure, validasi SHA/cache, dan konkurensi di dalam
@@ -220,11 +270,14 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   (2026-10-06): TPS median 20, MSPT 4,93 ms, p99 12,7 ms, 10 region; biaya body bridge total
   Essentials 84,8 ms / Vault 7,69 ms sepanjang run (`docs/BASELINE.md` "The plugin workload").
   Sisa: run di harness lokal tidak mungkin di mesin ini; sertifikasi butuh host lain
+- [x] Waktu onLoad/onEnable per plugin (Paper feature 0013, `PluginTimings`, `PluginTimingsTest`):
+  di-commit `f188fe78`/`49d4e640` 2026-10-07, ikut CI sejak 37515867230
 - [-] Waktu eksekusi task bridge per plugin (count, total, max, jendela terbaru) di `/plugins <name>`
   dan `/perf plugins`, metrik penghubung kompatibilitas dan performa
   (`compat-vs-performance.md` §6 butir 2). Selesai di kode, 48 tes bridge lulus, terlihat di demo
-  (`/perf plugins` menampilkan body total/p99 per plugin bridged, 2026-10-06). Belum di-commit
-  per 2026-10-07; dipakai di run `plugins-10` (Essentials 84,8 ms total, Vault 7,69 ms)
+  (`/perf plugins` menampilkan body total/p99 per plugin bridged, 2026-10-06). Di-commit `f188fe78`
+  (2026-10-07; CI hijau sejak 37515867230); dipakai di run `plugins-10` (Essentials 84,8 ms total,
+  Vault 7,69 ms). Sisa: validasi dengan alur pemain nyata
 
 ### Scheduler dan pathfinding
 - [ ] Benchmark pathfinding sync vs async
@@ -241,10 +294,15 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
 - [-] `/tps`, `/mspt`, `/perf`, `/perfbar`, `/tpsbar`, `/rambar` disatukan dengan Sourby metrics
   (sudah diimplementasikan, perlu validasi)
 - [ ] `/ram` lengkap; `/perf region <world> <x> <z>`
-- [-] `/perf scheduler`: antrean milik region scheduler sendiri belum ditampilkan
+- [ ] View antrean region scheduler (DIRENCANAKAN; `/perf scheduler` tidak ada — view yang ada di
+  `PerfCommand.VIEWS`: `lanes` beban CPU per lane, `governor` antrean lane governed, `async`
+  pool path; antrean milik region scheduler sendiri belum ditampilkan di mana pun)
 - [ ] Verifikasi config SourbyCraft/Aurora tampil benar di Spark web viewer
 - [ ] Klasifikasi thread region yang lebih baik di Spark
-- [ ] Telemetri: latensi tunggu task, counter siklus hidup chunk, counter tick entity, histori insiden
+- [x] Telemetri histori: `/perf history` (`PerformanceHistory`, ring 60 menit, satu sampel per menit:
+  TPS/MSPT region terburuk, CPU proses, heap; `PerformanceHistoryTest`)
+- [ ] Telemetri sisa: latensi tunggu task, counter siklus hidup chunk, counter tick entity, log
+  insiden (kejadian, bukan sampel per menit)
 - [-] Latensi save region-file (saat ini hanya ada latensi commit AWF)
 
 ### Optimasi NMS terukur (hanya setelah baseline ada)
@@ -280,25 +338,78 @@ Minecraft 0023–0027, perbaikan bridge/AWF) belum di-commit dan belum pernah ja
   source adapter dan feature patch 0007 disiapkan 2026-10-06, credits/lisensi dipertahankan.
   Source materialized di Paper commit `425610c83`; suite Gradle penuh 10.152/10.152 lulus
   sesudahnya (2026-10-06), regresi native-disable ditemukan saat boot dan diperbaiki di 0009.
-  Marker fixture `LEGACY_GLOBAL_*` belum pernah jalan di CI. Rincian dan kasus penerimaan
+  Marker fixture `LEGACY_GLOBAL_*` lulus di CI sejak run 37515867230. Rincian dan kasus penerimaan
   di `docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md`.
 - [-] Upgrade kapasitas bridge per plugin: limit pending/running async LIVE (default 0),
   worker Bukkit + status body yang masih draining setelah cancel, dan statistik `/plugins`.
   Source + feature patch 0008 ditulis dan materialized; tes batas `BridgeReviewTest` lulus
-  (2026-10-07, unit saja); disable lalu reload kini bisa menjadwalkan lagi (B86). Sisa: enable ulang
-  instance yang sama tanpa reload (butuh hook enable), boot/CI.
+  (2026-10-07, unit saja); disable lalu reload kini bisa menjadwalkan lagi (B86). Enable ulang
+  instance yang sama tanpa reload kini dibuka lagi oleh hook di Paper feature 0012
+  (`reopen-bridge-admission-on-enable`, di-commit `49d4e640`, ikut boot CI sejak 37515867230).
+  Sisa: bukti runtime untuk enable ulang instance yang sama (belum ada marker/boot yang
+  menjalankannya).
 - [x] Indeks task per plugin + disable/admission/rejection cleanup; regresi 100 plugin simulasi,
   overlap async dan race scheduler; BridgeRuntimeTest 24/24, suite server 10.147 tes tanpa
   kegagalan (23 skipped), 2026-10-06; SPEC §155 dan `docs/architecture/aurora-plugin-bridge.md`.
 - [x] Rute entity-owner lewat `EntityTask` (sourbyapi) + Paper 0011: IMPLEMENTED, 6 tes
   `BridgeTargetRoutingTest` v39 lulus (2026-10-07), SPEC V39; callback tanpa `EntityTask` tetap tidak
-  dirutekan ke entity. Marker CI `LEGACY_ENTITY_*` belum jalan (blok rilis P0)
+  dirutekan ke entity. Marker CI `LEGACY_ENTITY_*` lulus sejak run 37515867230
 - [-] Plugin legacy representatif dengan alur pemain dan soak
 
 ### Rilis
 - [ ] Tetap `release=pre` sampai semua gate di atas lulus
 - [-] Audit ulang klaim terukur di README/release notes sebelum tagging: audit 2026-10-07 dilakukan
   (release doc, README, SPEC §161); ulangi pada commit yang akan di-tag
+
+### Audit sistem 2026-10-14 — MEDIUM
+Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
+- [ ] **AWF-4** Nama template tidak divalidasi di from-template/delete/read: path traversal termasuk
+  delete rekursif — validasi nama, batasi resolusi ke root template (audit §1)
+- [ ] **AWF-5** Lease Redis bocor lewat `unprepare` dan jalur "already open", lalu error palsu
+  "lost its Redis lease" — tutup store di setiap removal/throw (audit §1)
+- [ ] **AWF-6** Perpanjangan lease serial: stores × `timeout-ms` bisa melebihi lease pada Redis
+  lambat (PLAUSIBLE) — pipeline renewal, WARN bila satu pass > period/2 (audit §1)
+- [ ] **AWF-7** (roadmap) Biaya commit FILE O(dunia): indeks penuh ditulis ulang, di-hash dan
+  di-fsync per commit; satu fsync per objek — generasi delta, fsync batch (audit §1; lihat item
+  "AWF FILE: tulis massal lambat" di P3)
+- [ ] **ENG-5** Ticket save dilaporkan selesai saat region merge/split di tengah save; bagiannya
+  tanpa ticket (flush AWF melewatkan chunk) — teruskan ticket saat merge, sebar saat split (audit §2)
+- [ ] **ENG-6** Satu lane `BRIDGE_IO` penuh membatalkan timer async berulang milik plugin lain
+  selamanya — lewati, jangan batalkan, task berulang (audit §2)
+- [ ] **ENG-7** Penolakan path async memakai slot recompute tanpa fallback sinkron — kembalikan
+  null saat ditolak supaya vanilla jalan (audit §2)
+- [ ] **ENG-8** Worker path membaca state mob hidup di luar owner — snapshot immutable yang diambil
+  di owner (audit §2; terkait audit snapshot M5 di P0 *Konkurensi*)
+- [ ] **ENG-9** Oversubscription CPU secara default (thread region = semua prosesor ditambah pool
+  chunk, async, Netty, path, bridge) — ledger thread saat boot; ubah default hanya dengan bukti A/B (audit §2)
+- [ ] **ENG-10** Future `propagateSaveAllTicket` diselesaikan di bawah write lock regioniser;
+  dependent sinkron yang masuk lagi bisa deadlock (PLAUSIBLE) — selesaikan secara async (audit §2)
+- [ ] **SEC-5** SourbyClip memanggil tiga layanan geo-IP setiap boot, dua lewat HTTP biasa —
+  **keputusan owner: hapus lookup** di repo SourbyClip (audit §3)
+- [ ] **SEC-6** `ViaAutoUpdate` menimpa pin Via, bisa memasang versi yang tidak mencantumkan MC
+  yang berjalan, mempercayai hash dari API, menghapus jar operator — hanya versi yang mencantumkan
+  versi MC, jangan hapus jar yang bukan milik kita, batasi ukuran (audit §3)
+- [ ] **SEC-7** Pin ProtocolLib menunjuk asset `dev-build` yang bisa berubah, belum pernah di-boot —
+  pin rilis bertag, probe CI terjadwal (audit §3)
+- [ ] **SEC-8** CI: action di-pin per tag bukan SHA; `contents: write` untuk seluruh job — pin
+  per SHA, persempit permission (audit §3)
+- [ ] **OBS-4** Maintenance AWF di thread metrik; kegagalan setelah publish menurunkan snapshot
+  segar jadi STALE — perbaikan sama dengan AWF-3, try/catch terpisah (audit §4)
+- [ ] **OBS-5** Ring sampel mentah 384 merusak jendela 10/15 s di atas 25,6 Hz atau saat sprint —
+  ukuran dari tick rate (audit §4)
+- [ ] **OBS-6** Generasi telemetri region hanya disapu collector; tak terbatas bila metrik gagal
+  start — sapuan teramortisasi, batas (audit §4)
+- [ ] **OBS-7** Policy script melewatkan patch Paper dan package engine; root yang hilang dilewati
+  diam-diam — tuple root termasuk fitur Paper dan engine; assert root ada (audit §4)
+- [ ] **OBS-8** Balasan command async melewati `SourbyReply` (command block mendapat exception) —
+  lewatkan via `SourbyReply.run` (audit §4)
+- [ ] **OBS-9** Gate CI yang lulus tanpa banyak membuktikan: CI PR tidak pernah jalan, grep smoke
+  cocok dengan header panel apa pun, marker metrik hanya cek non-null, tes zstd skip diam-diam —
+  perbaiki trigger, assert per view, `SOURBY_REQUIRE_ZSTD` (audit §4)
+- [-] **OBS-10** Release doc / SPEC / README saling bertentangan soal status gate — pass konsistensi
+  2026-10-14 (release doc, SPEC §161, README, `qualification-readiness.md`); ulangi saat tagging (audit §4)
+- [ ] **OBS-11** `/awf export|import|convert` menerima path filesystem sembarang — batasi ke
+  `awf/exports` / `awf/imports` (audit §4)
 
 ---
 
@@ -317,8 +428,8 @@ Sejak 2026-10-05 build berjalan: vanilla → Paper (`paperRef` 9240f586) → Sou
 paperweight resmi (SourbyPatcher `paper-toolchain` 3.0.0). Seluruh perubahan yang dulu datang dari
 Canvas/Folia sekarang milik SourbyCraft: baseline engine di `minecraft-patches/sources` (476 file),
 `paper-patches/files` (234), `sourbyapi/paper-patches/files` (16), dan source `io.canvasmc` di
-`src/main/java`. Perubahan buatan Sourby ada di feature patch (`minecraft-patches/features` 22,
-`paper-patches/features` 4). Batasan yang tidak bisa dihindari:
+`src/main/java`. Perubahan buatan Sourby ada di feature patch (`minecraft-patches/features` 29,
+`paper-patches/features` 14, dihitung 2026-10-14; 22/4 pada 2026-10-05). Batasan yang tidak bisa dihindari:
 
 - Source Minecraft hasil decompile tidak boleh di-commit (EULA Mojang), jadi pipeline
   "decompile + apply patch" tetap dibutuhkan, dengan SourbyPatcher sebagai pemiliknya.
@@ -395,6 +506,39 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
   HttpClient ditutup. `BootstrapWorkersTest`, `IPUtilTest`, `LauncherProcessTest` lulus;
   cakupan/batas audit di `docs/architecture/bootstrap-download-audit.md`; belum aktif di pin resmi
 
+### Audit sistem 2026-10-14 — LOW
+Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
+- [ ] **AWF-8** `WorldShutdownThread` bisa melempar ulang tanpa memanggil callback unload: future
+  unload tidak selesai, lease tertahan — callback di `finally`; watchdog lease (audit §1)
+- [ ] **AWF-9** `.slime` tak tepercaya: batas blob 1 GiB, accounter NBT tanpa batas, seluruh file di
+  memori — batas yang bisa dikonfigurasi (256 MiB), accounter terbatas (audit §1)
+- [ ] **AWF-10** Drift docs: nomor patch 0020 (seharusnya 0019), lokasi hook vs patch policy, javadoc
+  `WorldRole` usang — perbaiki docs (audit §1; `aurora-world-fabric.md` sedang dipegang agen lain)
+- [ ] **ENG-11** Penolakan patch 0016 di fork `execute if/unless block … run` membatalkan kedua
+  cabang diam-diam (PLAUSIBLE) — dokumentasikan atau rutekan ke owner (audit §2)
+- [ ] **ENG-12** Plugin ter-quarantine yang di-reload dengan nama sama diterima dan semua task-nya
+  ditolak diam-diam — log sekali saat admit (audit §2)
+- [ ] **ENG-13** Drift docs: javadoc `CompatibilityClassifier`, default region-parallelism §4,
+  lokasi config scheduler di AGENTS.md — perbaiki docs (audit §2)
+- [ ] **ENG-14** Snapshot path async diambil sebelum penolakan mungkin terjadi; kegagalan worker
+  dilog tanpa throttle — cek kapasitas dulu; rate-limit log (audit §2)
+- [ ] **SEC-9** Mode restart `exit` melakukan halt dari shutdown hook (PLAUSIBLE) — exit setelah
+  shutdown selesai (audit §3)
+- [ ] **SEC-10** Download updater tanpa batas sebelum cek ukuran; polling tanpa autentikasi tiap
+  30 menit (PLAUSIBLE) — copy terbatas; ETag / Retry-After (audit §3)
+- [ ] **SEC-11** Baseline Folia membuang guard login Paper (`max-joins-per-tick`, pre-login sinkron,
+  profil duplikat) — warisan, belum didokumentasikan; dokumentasikan + limit laju koneksi (audit §3)
+- [ ] **SEC-12** Base image Docker tidak di-pin per digest; label lisensi — pin digest; label
+  setelah keputusan SEC-13 (audit §3)
+- [ ] **OBS-12** `/speedtest` mencatat log sebelum cek permission — pindahkan log (audit §4)
+- [ ] **OBS-13** Jalur `getTPS()` mengalokasi dan mengurutkan di bawah monitor region — layani dari
+  snapshot yang sudah dipublikasikan (audit §4)
+- [ ] **OBS-14** Lubang cakupan tes (engine, hud, maxplayers, lang, update, bootstrap); tes sensitif
+  waktu — tes berprioritas; clock yang diinjeksi (audit §4)
+- [ ] **OBS-15** `averageGcPauseMs` adalah waktu koleksi, bukan pause STW — caveat di javadoc (audit §4)
+- [ ] **OBS-16** Kesiapan baseline berpatokan `Done (`, yang kini bisa mendahului terrain spawn
+  bertahap (PLAUSIBLE) — tunggu juga ringkasan boot (audit §4)
+
 ---
 
 ## P3 — Rendah (polish dan fitur tambahan)
@@ -425,8 +569,9 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
   region saat save gagal; WorldRequestTest 3/3, WorldOperationGateTest 7/7, WorldSaveBarrierTest
   3/3; suite API/server tanpa kegagalan, 2026-10-06; SPEC §155 dan `docs/guides/developing-awf.md`.
 - [-] Tutup temuan review port ASP `dev/26.2` → AWF (2026-10-06). Per 2026-10-07 (unit test saja):
-  B77, B78, B79 FIXED; B76 sebagian (properti ter-mapping, PDC world belum); B80 dan B85 terbuka
-  (`docs/architecture/aurora-world-fabric.md` *Robustness fixes 2026-10-07*). Temuan awal: metadata Slime/world PDC,
+  B77, B78, B79 FIXED; B76 sebagian (properti ter-mapping, PDC world belum)
+  (`docs/architecture/aurora-world-fabric.md` *Robustness fixes 2026-10-07*). B80 dan B85 diperbaiki
+  2026-10-13 (commit `e0c241e9`, CI run 38434258632 hijau; lihat item AWF create di P0). Temuan awal: metadata Slime/world PDC,
   pruning PDC/biome, fence commit sesudah discard, WorldProperties pada export/import,
   dan join I/O pada global tick. Review statis saja; fix serta pengujian regresi masih terbuka,
   testing oleh Claude. Bukti source dan skenario: `docs/development/ASP-26.2-AWF-PORT-REVIEW.md`;
@@ -438,3 +583,34 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
   punya batas sendiri)
 - [ ] Namespace config `aurora.performance`, `aurora.chunk`, `aurora.memory`, `aurora.ai`,
   `aurora.world` (hanya ditambahkan bila sudah ada key yang benar-benar dipakai)
+
+### Inovasi (proposal, belum direncanakan)
+Dari audit sistem 2026-10-14 §5 (`docs/audits/2026-10-14-system-audit.md`). Belum diterima dan
+belum direncanakan, kecuali yang ditandai; tidak ada yang diimplementasikan.
+- [ ] Storage: generasi FILE ber-indeks delta dengan kompaksi (menutup AWF-7) — byte commit dan fsync
+  sebanding dengan chunk kotor
+- [ ] Storage: driver maintenance AWF dengan commit yang dipicu byte — jendela kehilangan terbatas
+  waktu dan byte, umur kotor maksimum di `/perf awf`
+- [ ] Storage: Redis `EVALSHA` + renewal ber-pipeline — satu round trip per pass renewal
+- [ ] Storage: API rollback point-in-time di atas generasi FILE yang disimpan, untuk pemulihan operator
+- [ ] Storage: object store content-addressed dibagi satu keluarga template (dedup antar pulau; di
+  belakang flag)
+- [ ] Engine/bridge: konteks kepemilikan task bridged yang mengirim setiap hit guard ke quarantine
+  tanpa mode THROW
+- [ ] Engine/bridge: lane I/O bridged yang adil — sub-antrean berbobot per plugin, timer lewati-bukan-batal
+- [ ] Engine/bridge: antrean region yang aman saat unload (`drainForUnload()`) dengan fixture CI
+- [ ] Engine/bridge: `MobPathSnapshot` immutable untuk async pathfinding (menutup ENG-8 dan audit M5)
+- [ ] Engine/bridge: ledger CPU saat boot di `ResourceGovernor` dan `/perf governor`
+- [ ] Distribusi: manifest rilis bertanda tangan dengan persentase staged rollout dan daftar yank
+  (tanda tangan rilis sendiri sudah diterima owner sebagai SEC-2; rollout/yank belum)
+- [ ] Distribusi: rollback auto-update yang digate kesehatan boot (rollback `.prev` diterima owner
+  sebagai SEC-3; dilacak di P0)
+- [ ] Distribusi: SBOM (CycloneDX) dan atestasi provenance build per rilis
+- [ ] Distribusi: slim jar reproducible dengan job rebuild independen
+- [ ] Keamanan: satu modul security milik sendiri yang teruji untuk semua limit packet (= SEC-1,
+  **diterima owner** 2026-10-14; dilacak di P0)
+- [ ] Observability: gate regresi performa kontinu di CI (advisory dulu, sadar noise)
+- [ ] Observability: ringkasan flame per region untuk region lambat (JFR opt-in)
+- [ ] Observability: atribusi biaya plugin per region
+- [ ] Observability: lane housekeeping dengan marker kesegarannya sendiri (commit AWF, sampling, histori)
+- [ ] Observability: manifest provenance build (tree hash, flag dirty, hash direktori patch) dicetak `/ver`

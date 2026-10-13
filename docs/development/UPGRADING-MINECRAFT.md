@@ -22,6 +22,9 @@ patch.
 > 2026-10-07 snapshot and predate that change; patch numbers in the procedure and in the
 > hook-candidate table below use the new numbering. Dated check results keep the numbering of
 > their date.
+>
+> Historical, as of 2026-10-07: the counts table below. Current file counts (2026-10-14): 29
+> Minecraft and 14 Paper feature patches; re-run `patch_surface.py` for the rest.
 
 | What | Count | Where |
 | --- | ---: | --- |
@@ -233,7 +236,7 @@ old jar as `SourbyCraft-slim.<tag>.jar`. After the CI jar passes:
    suffix.
 3. Existing world loads and persists: `scripts/verify_persistence_panel.py`.
 4. Plugins: ViaVersion/ViaBackwards/ProtocolLib provisioning still runs before the plugin
-   scan (patch 0024). Bridged legacy plugins load (`/plugins`, Paper features 0003–0010).
+   scan (patch 0024). Bridged legacy plugins load (`/plugins`, Paper features 0003 and 0006–0012).
 5. New-terrain generation runs without "Detected unsafe terrain read during worldgen"
    (patch 0023's case).
 6. Clean `stop`.
