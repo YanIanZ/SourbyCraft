@@ -28,7 +28,7 @@ The AWF Redis backend tests start their own `redis-server` and skip without it; 
 - `sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/` — SourbyCraft-owned services: `awf` (Aurora World Fabric: region-aware world storage/templates/instances, attached from `RegionFileStorage`; see `docs/architecture/aurora-world-fabric.md`), `bootstrap`/`startup`, `config`, `perf`/`hud`/`spark` (observability), `update` (auto-updater), `bridge`, `command`, `brand`.
 - `sourbycraft-server/src/main/java/dev/iyanz/aurora/engine/` — the region-threading engine (former Canvas/Folia internals: `threadedregions`, engine configuration behind `config/canvas-*.yml`).
 - Changes to Minecraft or Paper classes cannot be made in these sources; they go through feature patches (`sourbycraft-server/{minecraft,paper}-patches/features/`, numbered `NNNN-SourbyCraft-*.patch`). Rebuild them from the materialized repos with `rebuildMinecraftFeaturePatches` / `rebuildPaperServerPatches` after committing there.
-- `scripts/` — Python release, benchmark, policy (`*_policy.py`) and private-Intave tooling, each with a `test_*.py`.
+- `scripts/` — Python release, benchmark, policy (`*_policy.py`) tooling, each with a `test_*.py`.
 
 ## Documentation map
 

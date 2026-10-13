@@ -44,7 +44,7 @@ class PluginProvisioningTest(unittest.TestCase):
     def test_manual_via_jars_are_not_duplicated(self): self.probe("preserve-via")
     def test_quarantine_restore_preserves_conflicting_quarantine(self): self.probe("quarantine")
     def test_clip_offline_mode_never_downloads(self): self.probe("offline")
-    def test_native_intave_does_not_install_second_packet_injector(self): self.probe("native")
+    def test_protocollib_install_follows_only_its_toggle(self): self.probe("protocollib-toggle")
     def test_cli_plugin_directory_is_used_for_configs(self): self.probe("custom-directory")
 
     def test_runtime_pin_matches_official_asset_provenance(self):
@@ -57,7 +57,7 @@ class PluginProvisioningTest(unittest.TestCase):
                           str(metadata["size_bytes"])], result.stdout.splitlines())
 
     def test_hook_precedes_the_actual_plugin_scan(self):
-        patch = ROOT / "sourbycraft-server/minecraft-patches/features/0025-SourbyCraft-provision-plugins-before-plugin-scan.patch"
+        patch = ROOT / "sourbycraft-server/minecraft-patches/features/0024-SourbyCraft-provision-plugins-before-plugin-scan.patch"
         source = Path("net/minecraft/server/Main.java")
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / source

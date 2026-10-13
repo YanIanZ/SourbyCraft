@@ -1,5 +1,8 @@
 # Region watchdog switch
 
+Current patch file: `features/0025-SourbyCraft-disable-region-watchdog-by-default.patch`
+(0026 until the 2026-10-13 renumbering; dated entries below keep the number of their date).
+
 2026-10-06: user requested disabling the Folia diagnostic watchdog. Source change
 is written in Minecraft feature patch
 `0026-SourbyCraft-disable-region-watchdog-by-default.patch` and applied to the two
@@ -77,7 +80,7 @@ java -Dsourbycraft.region-watchdog.enabled=true -jar server.jar --nogui
 ```
 
 An existing released JAR does not gain this switch from the documentation; use a
-build containing patch 0026. The value uses Java Boolean property semantics: only
+build containing patch 0025. The value uses Java Boolean property semantics: only
 case-insensitive `true` enables it; unset or other values are false.
 
 ## Claude acceptance — partly done (status per item in the 2026-10-07 section above)
@@ -93,7 +96,7 @@ case-insensitive `true` enables it; unset or other values are false.
 4. A controlled wrong-owner world access still raises the existing ownership error;
    scheduler failure handling and bridge violation/quarantine behavior remain active.
 5. Reapply feature patches and rebuild the server; retain unrelated materialized
-   edits and confirm both RunningTick call sites are covered by patch 0026.
+   edits and confirm both RunningTick call sites are covered by patch 0025.
 
 These are proposed acceptance cases; only items 1 (partly) and 5 have recorded evidence as of 2026-10-07 (see
 above). No performance,

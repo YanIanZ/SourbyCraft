@@ -62,7 +62,6 @@ disagree, the code wins ([DEVELOPMENT.md](../DEVELOPMENT.md), truthfulness polic
 | Startup & bootstrap | [aurora-instant-startup.md](architecture/aurora-instant-startup.md), [bootstrap-download-audit.md](architecture/bootstrap-download-audit.md), [slim-jar-bootstrap-failure.md](architecture/slim-jar-bootstrap-failure.md), [BOOTSTRAP.md](BOOTSTRAP.md), [CDS.md](CDS.md) |
 | Independence & patches | [independence.md](architecture/independence.md), [dependency-ledger.md](architecture/dependency-ledger.md), [patch-classification.md](architecture/patch-classification.md), [patches.md](architecture/patches.md), [rebase-log.md](architecture/rebase-log.md) |
 | Audits & reviews | [reuse-audit.md](architecture/reuse-audit.md), [cache-inventory.md](architecture/cache-inventory.md), [hotspots-entity-ai.md](architecture/hotspots-entity-ai.md), [region-safety-review-0017-0019.md](architecture/region-safety-review-0017-0019.md), [aurora-task-d-validation.md](architecture/aurora-task-d-validation.md), [qualification-readiness.md](architecture/qualification-readiness.md) |
-| Anti-cheat | [intave-native-integration.md](architecture/intave-native-integration.md) |
 
 ### Operations, config and observability
 [AURORA-CONFIG.md](AURORA-CONFIG.md) (config contract; samples in [config-examples/](config-examples/)) ·

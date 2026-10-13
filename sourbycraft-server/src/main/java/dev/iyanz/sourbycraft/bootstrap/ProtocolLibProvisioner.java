@@ -14,12 +14,8 @@ final class ProtocolLibProvisioner {
 
     private ProtocolLibProvisioner() {}
 
-    static void provision(Path plugins, Path config, boolean nativeIntave, LibDownloader.Transport transport) {
+    static void provision(Path plugins, Path config, LibDownloader.Transport transport) {
         boolean enabled = BootstrapPluginSettings.enabled(config, "protocollib", true);
-        if (nativeIntave) {
-            System.out.println("[SourbyCraft] ProtocolLib plugin auto-install skipped: the private native build reserves its packet API.");
-            enabled = false;
-        }
         try {
             if (enabled) PluginProvisioner.ensureJar(PIN, plugins, transport);
             else PluginProvisioner.quarantineProvisionedJars(plugins, java.util.List.of(PIN));

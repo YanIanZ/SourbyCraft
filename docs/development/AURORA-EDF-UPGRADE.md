@@ -7,6 +7,10 @@ the pinned LeafPile 1.2.0 JAR bytecode and upstream source.
 
 ## Status update 2026-10-07: patch 0028 is HELD (parked, not in the build)
 
+> Numbering note (2026-10-13): in this document "0028" always means this parked EDF patch
+> (`minecraft-patches/parked/0028-…`). The current `features/0028` is the unrelated console-rebind
+> patch, and the chunk-generation timing patch called 0027 below is now `features/0026`.
+
 Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md) ("OWNER DECISION 2026-10-07", "0028 hold executed"),
 `sourbycraft-server/minecraft-patches/parked/README.md`, the materialized tree and the baseline patch
 `SchedulerUtil.java.patch`. The sections below describe the **parked** patch and class, not the current build;
@@ -150,7 +154,7 @@ they are not evidence that these defects caused the user's stutter.
 
 ## Claude acceptance — held (status per item in the 2026-10-07 section at the top)
 
-1. Apply feature 0028 with the existing patch set, compile and run
+1. Apply the parked EDF patch (0028) with the existing patch set, compile and run
    `AuroraEdfSchedulerTest` plus the relevant server suites. Six unexecuted methods
    cover running cancellation, awaiting replacement/completed-task terminal behavior,
    earlier-task handoff after retiming, self-retiming/preemption, parked-cancellation blocker release, and refused/foreign

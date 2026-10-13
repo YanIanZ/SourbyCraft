@@ -25,10 +25,8 @@ assuming the work was done.
 | `perf/NetworkCounters`, `perf/NetworkMetrics` | Wire bytes in/out (pipeline head, after compression/encryption), packets in/out (beside `packet_handler`), connections opened; per-second rates sampled by the metrics collector |
 
 There is no Aurora packet path, no compression policy, no queue-health
-service, and no network *policy* in any feature patch. One patch edits network classes: 0024 (private
-native Intave lifecycle; untracked in the working tree on 2026-10-07) touches `Connection` and
-`ServerGamePacketListenerImpl` for that integration's lifecycle. (Corrected 2026-10-07 from "all
-16 feature patches are entity, AI, chunk, world, runtime or command patches".)
+service, and no network *policy* in any feature patch. No Minecraft feature patch edits network
+classes (`net/minecraft/network/`, `ServerGamePacketListenerImpl`; checked 2026-10-13).
 
 ## 2. Metrics
 

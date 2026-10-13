@@ -61,7 +61,7 @@ these supply today's implementation of it. This is the set the ledger test pins.
 |---|---|---|
 | `config/upstream/CanvasConfigBridge.java` | `dev.iyanz.aurora.engine.GlobalConfiguration`, `WorldConfig` (formerly `io.canvasmc.canvas`) | Reloads the engine config so an existing deployment's `canvas-server.yml` keeps working. No Aurora behaviour reads it; it sits behind `config/upstream/UpstreamConfigBridge`. This is the **only** engine-config reference in Aurora's own source. The only other engine doorway is `awf/world/AuroraWorldsService.java` (§1.2), for world lifecycle. |
 | `perf/NetworkMetrics.java` | `io.papermc.paper.network.ChannelInitializeListenerHolder`, Netty `ChannelPipeline` | The only hook for adding a handler to every connection's pipeline. Paper marks it unofficial. If it disappears, the `network counters` boot stage fails in isolation and `/perf network` reports nothing. It is not a threaded-regions internal, so the ledger test does not pin it; it is listed here by hand. |
-| `engine/threadedregions/scheduler/AuroraEdfScheduler.java` | LeafPile `Scheduler`, public SourbyCraft `SchedulableTick` fields/methods, `LinkedSortedSet`, `ConcurrentUtil`, `TimeUtil`, `LazyRunnable` | Source-owned derivative of LeafPile v1.2.0. Feature 0028 selects it for EDF and publishes task state through a compatible public volatile field. Existing EDF worker budget, parking and region thread factory retained. GPL/credits in `NOTICE_LEAFPILE`; source acceptance pending, not an independent scheduler. |
+| `engine/threadedregions/scheduler/AuroraEdfScheduler.java` | LeafPile `Scheduler`, public SourbyCraft `SchedulableTick` fields/methods, `LinkedSortedSet`, `ConcurrentUtil`, `TimeUtil`, `LazyRunnable` | Source-owned derivative of LeafPile v1.2.0. The parked EDF patch (`minecraft-patches/parked/0028-…`, held since 2026-10-07, not built) would select it for EDF and publish task state through a compatible public volatile field. Existing EDF worker budget, parking and region thread factory retained. GPL/credits in `NOTICE_LEAFPILE`; source acceptance pending, not an independent scheduler. |
 
 ---
 
@@ -71,7 +71,7 @@ these supply today's implementation of it. This is the set the ledger test pins.
 
 Patches against the materialised Minecraft source. They exist because the behaviour is inside a
 vanilla or engine class; individual patches may connect an Aurora-owned backend.
-The table below is a historical inventory, not a current patch count. Feature 0028 adds
+The table below is a historical inventory, not a current patch count. The parked EDF patch would add
 the EDF backend selection and compatible task-state publication described above.
 
 | Patch | Keeps |

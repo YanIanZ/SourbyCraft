@@ -12,7 +12,7 @@ Build/testing/profiling are assigned to Claude by the user.
 Status update 2026-10-07 ([AGENT-COORDINATION.md](../../AGENT-COORDINATION.md), the tree and `build/`
 outputs): patch 0027 is applied as materialized commit `0569a90` (on top of 0026 `952f1e1`; the patch file is
 still untracked in the root repository) and was compiled into the demo jars (2026-10-07 00:00 and 00:36 at the
-latest, because 0028 `ade3b24` was stacked on it; the 22:40 build on 2026-10-06 likely too, not inspected). The
+latest, because the EDF patch `ade3b24` (then 0028, now parked) was stacked on it; the 22:40 build on 2026-10-06 likely too, not inspected). The
 metrics were never enabled on the demo, so `/perf chunks` stage samples do not exist. Nothing here is
 measured by 0027. A TOML switch (`aurora.diagnostics.chunk-generation-metrics` in `sourbycraft_config/aurora.toml`)
 is **in progress** by another agent (log, owner instruction 2026-10-07 ~02:00, agent "codex-items"); the working
@@ -22,8 +22,8 @@ that work lands and is tested. The handoff list below carries a per-item status.
 
 ## Written increment
 
-Minecraft feature patch `0027-SourbyCraft-measure-generic-chunk-generation-stages.patch`
-adds optional timing around `ChunkUpgradeGenericStatusTask`. It is exported from
+Minecraft feature patch `0026-SourbyCraft-measure-generic-chunk-generation-stages.patch`
+(0027 until the 2026-10-13 renumbering; dated status entries keep the number of their date) adds optional timing around `ChunkUpgradeGenericStatusTask`. It is exported from
 materialized commit `0569a90` in `sourbycraft-server/src/minecraft/java`; generated
 sources are not committed to the root repository. The owned recorder is
 `perf/ChunkGenerationMetrics`; `/perf chunks` displays its queue/run p95 and p99.
@@ -74,7 +74,7 @@ a bottleneck by themselves.
 
 ## Claude acceptance handoff — partly done (status per item, 2026-10-07)
 
-1. Materialize feature patch 0027 alongside existing patches. Run
+1. Materialize feature patch 0026 (formerly 0027) alongside existing patches. Run
    `ChunkGenerationMetricsTest` and the relevant command/server suites, compile, and boot.
    Two regression methods are written but unexecuted: canonical registry names preserve
    separate queue/run samples; rings stay bounded and refuse arbitrary labels.
@@ -149,7 +149,7 @@ does not resolve the user's report. No stutter resolution is claimed.
   decision (user approval, RESTART_REQUIRED, applied with a restart). The code default is
   unchanged.
 - The panel cannot pass `-D` JVM flags (its startup variables are version/jar/build only), so
-  `-Dsourbycraft.chunk-generation-metrics.enabled=true` from patch 0027 cannot be enabled
+  `-Dsourbycraft.chunk-generation-metrics.enabled=true` from patch 0026 cannot be enabled
   there. Since 2026-10-07 the same switch is the TOML key
   `aurora.diagnostics.chunk-generation-metrics` (see *Enable* above), which the panel can set;
   no build carrying it has run on the demo yet, so handoff step 3 is still open for that server.

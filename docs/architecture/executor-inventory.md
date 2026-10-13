@@ -22,9 +22,10 @@ Two shutdown hooks exist (`bootstrap/SourbyBootstrap`, `update/UpdateApplier`); 
 running thread.
 
 The historical two-thread statement referred to service samplers, not the running server's
-region pool or every engine/library worker. The current EDF selection is wired to the
-LeafPile-derived `engine/threadedregions/scheduler/AuroraEdfScheduler` (feature 0028,
-source acceptance pending). Its thread count is the existing boot-computed `initialThreads`;
+region pool or every engine/library worker. The current EDF selection constructs LeafPile's
+`EDFSchedulerThreadPool` (baseline `SchedulerUtil.java.patch`). The parked EDF patch
+(`minecraft-patches/parked/0028-…`, held since 2026-10-07, not built) would wire it to the
+LeafPile-derived `engine/threadedregions/scheduler/AuroraEdfScheduler` instead. That backend's thread count is the existing boot-computed `initialThreads`;
 it replaces the original EDF pool and adds no second executor or CPU capacity. A runner has
 one assigned task; remaining handles queue in the original uncapped priority queue.
 See [EDF scope/acceptance](../development/AURORA-EDF-UPGRADE.md).

@@ -63,7 +63,7 @@ BASELINE_DIRS = [
 HOOK_MAX_ADDED = 10
 HOOK_MAX_REMOVED = 2
 DEFAULT_MAX_PAIRS = 6
-OWNED_REFERENCE = re.compile(r"\bdev\.(iyanz|yanianz)\.")
+OWNED_REFERENCE = re.compile(r"\bdev\.iyanz\.")
 FIX_SUBJECT = re.compile(r"\b(fix|fixes|fixed|typo|bug|bugfix|regression|crash)\b", re.IGNORECASE)
 NUMBER_PREFIX = re.compile(r"^(\d{4})-")
 HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
@@ -286,7 +286,7 @@ def classify(patch):
     1. default -- every code change is a removed/added line pair that differs only in
        literals (numbers, strings, booleans), at most DEFAULT_MAX_PAIRS pairs, no new files.
     2. hook    -- no new files, at most HOOK_MAX_ADDED added and HOOK_MAX_REMOVED removed code
-       lines, and at least one added code line references dev.iyanz.* / dev.yanianz.*.
+       lines, and at least one added code line references dev.iyanz.*.
     3. fix     -- the subject says fix/typo/bug/regression/crash.
     4. logic   -- everything else: behaviour written inside upstream files (or a new class
        carried inside the patch).
@@ -302,7 +302,7 @@ def classify(patch):
     owned = [l for l in added_code if OWNED_REFERENCE.search(l)]
     if (not new_files and owned and len(added_code) <= HOOK_MAX_ADDED
             and len(removed_code) <= HOOK_MAX_REMOVED):
-        return "hook", ("%d added / %d removed code lines (limits %d/%d); %d call into dev.iyanz/dev.yanianz"
+        return "hook", ("%d added / %d removed code lines (limits %d/%d); %d call into dev.iyanz"
                         % (len(added_code), len(removed_code), HOOK_MAX_ADDED, HOOK_MAX_REMOVED, len(owned)))
 
     if FIX_SUBJECT.search(patch.subject):
@@ -313,7 +313,7 @@ def classify(patch):
         reasons.append("creates %d new file(s) inside the patch" % len(new_files))
     reasons.append("%d added / %d removed code lines" % (len(added_code), len(removed_code)))
     if not owned:
-        reasons.append("no call into dev.iyanz/dev.yanianz")
+        reasons.append("no call into dev.iyanz")
     elif len(added_code) > HOOK_MAX_ADDED or len(removed_code) > HOOK_MAX_REMOVED:
         reasons.append("over hook limits %d/%d" % (HOOK_MAX_ADDED, HOOK_MAX_REMOVED))
     return "logic", "; ".join(reasons)
@@ -677,7 +677,7 @@ def render_markdown(report):
     w("")
     w("Classification rules (first match wins): default = literal-only line swaps (<= %d pairs); "
       "hook = no new files, <= %d added and <= %d removed code lines, at least one added line "
-      "calls dev.iyanz.*/dev.yanianz.*; fix = subject says fix/typo/bug/regression/crash; "
+      "calls dev.iyanz.*; fix = subject says fix/typo/bug/regression/crash; "
       "logic = everything else." % (DEFAULT_MAX_PAIRS, HOOK_MAX_ADDED, HOOK_MAX_REMOVED))
     return "\n".join(out) + "\n"
 

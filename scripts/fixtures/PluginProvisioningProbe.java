@@ -96,7 +96,7 @@ public final class PluginProvisioningProbe {
                 Path config = PLUGINS.resolve("ProtocolLib/config.yml");
                 Files.createDirectories(config.getParent()); Files.writeString(config, "operator: preserved\n");
                 Files.writeString(CONFIG, "[protocollib]\nauto-provision=false\n[viaversion]\nauto-provision=false\n");
-                PluginProvisioner.provisionJars(PLUGINS, CONFIG, false, forbidden);
+                PluginProvisioner.provisionJars(PLUGINS, CONFIG, forbidden);
                 check(Files.readString(config).equals("operator: preserved\n"), "operator config overwritten");
             }
             case "late-operator" -> {
@@ -137,10 +137,16 @@ public final class PluginProvisioningProbe {
                 PluginProvisioner.ensureJar(pin, PLUGINS, forbidden);
                 check(Files.exists(target), "verified offline jar lost");
             }
-            case "native" -> {
+            case "protocollib-toggle" -> {
+                // Only [protocollib] auto-provision decides whether the official jar is fetched.
+                Files.writeString(CONFIG, "[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=false\n");
+                PluginProvisioner.provisionJars(PLUGINS, CONFIG, forbidden);
+                check(!Files.exists(PLUGINS.resolve(ProtocolLibProvisioner.PIN.fileName())), "disabled toggle installed ProtocolLib");
                 Files.writeString(CONFIG, "[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=true\n");
-                PluginProvisioner.provisionJars(PLUGINS, CONFIG, true, forbidden);
-                check(!Files.exists(PLUGINS.resolve(ProtocolLibProvisioner.PIN.fileName())), "native mode installed conflicting injector");
+                PluginProvisioner.provisionJars(PLUGINS, CONFIG, good);
+                check(calls.get() == 1, "enabled toggle did not fetch the pinned ProtocolLib");
+                check(!Files.exists(PLUGINS.resolve(ProtocolLibProvisioner.PIN.fileName())), "unverified ProtocolLib installed");
+                noTemps();
             }
             case "custom-directory" -> {
                 System.setProperty("sourbyclip.offline", "true");

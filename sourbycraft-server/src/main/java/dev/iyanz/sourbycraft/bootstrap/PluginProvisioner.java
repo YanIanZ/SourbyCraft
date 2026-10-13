@@ -17,8 +17,7 @@ import java.nio.charset.StandardCharsets;
  * The active SourbyClip launcher enters the patched Minecraft Main, which invokes phase 1
  * before PluginInitializerManager.load. SourbyCraftBootstrap seeds absent Via configs later.
  * Independent RESTART_REQUIRED toggles live in the global TOML. Operator jars/configs are
- * preserved; only exact pinned jars are quarantined/restored. Native Intave retains its own
- * packet backend and skips the external ProtocolLib plugin. No network is used in Clip offline mode.
+ * preserved; only exact pinned jars are quarantined/restored. No network is used in Clip offline mode.
  */
 public final class PluginProvisioner {
 
@@ -83,13 +82,11 @@ public final class PluginProvisioner {
     /** Active SourbyClip/Patcher server path calls this before PluginInitializerManager.load. */
     public static void provisionJars(Path pluginsDir) {
         configuredPluginsDirectory = pluginsDir;
-        boolean nativePacketBackend = Boolean.getBoolean("sourbycraft.intave.enabled")
-            || PluginProvisioner.class.getResource("/dev/yanianz/intave/integration/NativeEngineProvider.class") != null;
-        provisionJars(pluginsDir, UNIFIED_CONFIG, nativePacketBackend, LibDownloader.HTTPS);
+        provisionJars(pluginsDir, UNIFIED_CONFIG, LibDownloader.HTTPS);
     }
 
-    static void provisionJars(Path pluginsDir, Path config, boolean nativeIntave, LibDownloader.Transport transport) {
-        ProtocolLibProvisioner.provision(pluginsDir, config, nativeIntave, transport);
+    static void provisionJars(Path pluginsDir, Path config, LibDownloader.Transport transport) {
+        ProtocolLibProvisioner.provision(pluginsDir, config, transport);
         if (!BootstrapPluginSettings.enabled(config, "viaversion", true)) {
             System.out.println("[SourbyBootstrap] ViaVersion auto-provision disabled "
                 + "(viaversion.auto-provision=false) — old clients will not be bridged.");

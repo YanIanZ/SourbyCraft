@@ -18,6 +18,11 @@ Counted by `python3 scripts/patch_surface.py` on branch `26.2` at `1fe984ed` plu
 tree on **2026-10-07**. Re-run the script for current numbers. These go stale with the next
 patch.
 
+> 2026-10-13: the old MC 0024 was removed by owner decision and MC 0025–0029 were renumbered to 0024–0028. The counts and hot spots in this section are the
+> 2026-10-07 snapshot and predate that change; patch numbers in the procedure and in the
+> hook-candidate table below use the new numbering. Dated check results keep the numbering of
+> their date.
+
 | What | Count | Where |
 | --- | ---: | --- |
 | Minecraft feature patches | 28 (hook 3, fix 1, logic 24) | `sourbycraft-server/minecraft-patches/features/` |
@@ -28,7 +33,7 @@ patch.
 
 Conflict hot spots, meaning files that several feature patches touch:
 `CraftScheduler.java` (Paper 0003, 0006–0010: six patches), `MinecraftServer.java`
-(0013, 0019, 0024), `TickRegionScheduler.java` (0013, 0026), `TickRegions.java` (0002, 0013),
+(0013, 0019, and the since-removed old 0024), `TickRegionScheduler.java` (0013, old 0026, now 0025), `TickRegions.java` (0002, 0013),
 `ServerLevel.java` (0010, 0013) and `Entity.java` (0009, 0012). Every Minecraft file a feature
 patch modifies is also patched by the engine baseline (28 of 28 Minecraft rows, 7 of 10 Paper
 rows). A Paper change to one of those files can therefore break the baseline patch first and
@@ -228,7 +233,7 @@ old jar as `SourbyCraft-slim.<tag>.jar`. After the CI jar passes:
    suffix.
 3. Existing world loads and persists: `scripts/verify_persistence_panel.py`.
 4. Plugins: ViaVersion/ViaBackwards/ProtocolLib provisioning still runs before the plugin
-   scan (patch 0025). Bridged legacy plugins load (`/plugins`, Paper features 0003–0010).
+   scan (patch 0024). Bridged legacy plugins load (`/plugins`, Paper features 0003–0010).
 5. New-terrain generation runs without "Detected unsafe terrain read during worldgen"
    (patch 0023's case).
 6. Clean `stop`.
@@ -261,7 +266,7 @@ Every line inside an upstream file is a line that can conflict on the next bump.
 
 ### Current `logic` patches as hook candidates
 
-From the script's output on 2026-10-07. "Logic" here means the heuristic found behaviour
+From the script's output on 2026-10-07 (patch numbers updated to the 2026-10-13 numbering). "Logic" here means the heuristic found behaviour
 written inside an upstream file. It is **not** a judgement that the patch is wrong.
 Converting any of these is real work. Each conversion needs its own regression test before
 the patch changes, and the allocation patches 0007 and 0009–0012 have no dedicated tests yet
@@ -276,13 +281,12 @@ inside patches because of the package the upstream code imports) has to be check
 | MC 0006 async pathfinding | 141/1 | 70 code lines over five files | **Candidate:** split per `patch-classification.md`, then push scheduling into `perf/AsyncPath*` |
 | MC 0013 tick metrics | 97/14 | 84 code lines over six files | **Candidate:** split telemetry from lifecycle. Most lines are already calls into `dev.iyanz.sourbycraft.perf` |
 | MC 0021 storage traffic counters | 108/0 | 84 code lines in `RegionFileStorage` | **Candidate:** counters into an owned class, one call per I/O site |
-| MC 0027 chunk-generation stage timing | 22/0 | 19 code lines | **Candidate:** timing into an owned class |
-| MC 0024 private Intave lifecycle | 42/9 | three files, packet path | Candidate only after the private-native plan settles. Owned by that work |
-| MC 0026 region watchdog off by default | 17/3 | property gate written into upstream | Possible: read the flag from an owned config class. Small gain |
+| MC 0026 chunk-generation stage timing | 22/0 | 19 code lines | **Candidate:** timing into an owned class |
+| MC 0025 region watchdog off by default | 17/3 | property gate written into upstream | Possible: read the flag from an owned config class. Small gain |
 | MC 0003, 0014, 0023 spawn and worldgen rules | 47/0, 25/3, 25/0 | gameplay decisions inline | Possible: move the predicate to an owned static method. The upstream `if` stays either way |
 | Paper 0003, 0007 bridge admission and routing | 39/3, 43/1 | scheduler/provider logic in CraftBukkit | Possible: concentrate on `AuroraBridge` calls. `CraftScheduler` is the largest hot spot (six patches) |
 | Paper 0002 branded bootstrap line | 37/6 | formatting inline | Branding rule: render the line in an owned class from `BuildInfo` |
-| MC 0004, 0007, 0009–0012, 0015, 0017, 0018, 0022, 0028; Paper 0001, 0004, 0005, 0006, 0008, 0009; MC 0020 | small | they replace upstream statements in place (allocation removals, operand order, a gate, a removed registration) | **Not candidates.** A hook cannot replace an upstream statement. These stay as patches, or go upstream |
+| MC 0004, 0007, 0009–0012, 0015, 0017, 0018, 0022, 0027; Paper 0001, 0004, 0005, 0006, 0008, 0009; MC 0020 | small | they replace upstream statements in place (allocation removals, operand order, a gate, a removed registration) | **Not candidates.** A hook cannot replace an upstream statement. These stay as patches, or go upstream |
 
 The classifier's limits: it reads only `+`/`-` lines. It cannot tell a gameplay rule from a
 counter, and it uses fixed thresholds (≤ 10 added and ≤ 2 removed code lines plus a

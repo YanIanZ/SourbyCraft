@@ -34,9 +34,10 @@ its threads alongside upstream's I/O workers only because they share the lane's 
 
 **Three feature patches touch storage:** 0019 commits AWF stores at shutdown
 (`MinecraftServer`), 0021 counts chunk-system storage traffic and routes AWF worlds in
-`RegionFileStorage`, and 0028 adds the global-owned world metadata to the global-tick autosave
+`RegionFileStorage`, and 0027 adds the global-owned world metadata to the global-tick autosave
 selection (§6). No patch changes chunk serialization or the save queue. (Corrected
-2026-10-07 from "none of the 16 feature patches"; 0028 added the same day.)
+2026-10-07 from "none of the 16 feature patches"; the metadata patch, numbered 0028 until the
+2026-10-13 renumbering, was added the same day.)
 
 ## 2. Metrics
 
@@ -85,12 +86,12 @@ fifth dropped 217 MB.
 Honest status: unowned, instrumented, and gated behind durability validation rather than a
 performance target.
 
-## 6. World metadata on autosave and `save-all` (2026-10-07, feature patch 0028)
+## 6. World metadata on autosave and `save-all` (2026-10-07, feature patch 0027, formerly 0028)
 
 **Problem.** Game time, spawn, game type, difficulty, the initialized flag and the per-world
 distance override live in `PaperLevelOverrides` (`paper:level_overrides`, a `SavedData` in each
 dimension's data storage). `PaperWorldLoader` reads that file at world load and only falls back
-to `level.dat` when it is missing. Before 0028 the only writer during a run was
+to `level.dat` when it is missing. Before this patch the only writer during a run was
 `ServerLevel.saveLevelData` (`saveAndJoin`/`scheduleSave` of *all* the world's `SavedData`),
 which Folia reaches only at a clean stop (`RegionShutdownThread.saveLevelData`). The region
 autosave calls `saveIncrementally(false)`, which skips it ("don't auto save level data"), and
@@ -124,7 +125,7 @@ from any thread), and `level.dat`.
 `level_overrides` is written with its game time; a dirty `WanderingTraderData` in the same
 storage is not. Local slim jar, flat world, no players, 2026-10-07: `save-all flush` at game time
 651 (732 right after), SIGKILL at 942, restart restored **681** (the old path would fall back to
-the clean-stop value of boot 1, about 119; a pre-0028 jar was not re-run locally); autosave only (span set to 20 s, no `save-all`):
+the clean-stop value of boot 1, about 119; a jar without this patch was not re-run locally); autosave only (span set to 20 s, no `save-all`):
 start 699, SIGKILL at 1709, restored **1479**. Clean stops exited 0; no corruption or error lines
 on the restarts. Not yet re-run on Sourby Demo (`verify_crash_panel.py`), with players, or with
 AWF worlds.

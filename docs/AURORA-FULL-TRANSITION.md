@@ -64,7 +64,7 @@ However, several critical areas still depend directly on Canvas/Folia implementa
 Examples include:
 
 - engine config reload through the retained `CanvasConfigBridge` compatibility class,
-- region dispatch still uses the locally owned Folia-named implementation; feature 0028 selects a LeafPile-derived Aurora EDF pool, with acceptance pending,
+- region dispatch still uses the locally owned Folia-named implementation; the parked EDF patch (`minecraft-patches/parked/0028-…`, held since 2026-10-07, not built) would select a LeafPile-derived Aurora EDF pool, with acceptance pending,
 - Spark integration still requires patches to platform integration classes,
 - execution contracts and owner handoff are present but do not constitute an independent scheduler,
 - compatibility boundaries exist but still require direct engine/NMS dependencies,

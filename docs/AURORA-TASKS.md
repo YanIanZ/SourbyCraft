@@ -100,7 +100,7 @@ collision candidate 0019 (feature patch 0018 after renumbering) passes arithmeti
 
 - [ ] profile chunk holder lookup
 - [ ] profile ticket processing
-- [-] measure generation latency — optional queue/run timing for generic stages in `/perf chunks`, feature patch 0027; sources written, not built or measured; dedicated lighting and full integration remain outside coverage
+- [-] measure generation latency — optional queue/run timing for generic stages in `/perf chunks`, feature patch 0026 (formerly 0027); sources written, not built or measured; dedicated lighting and full integration remain outside coverage
 - [ ] measure load/integration latency
 - [ ] measure save latency/backlog
 - [ ] profile region-file I/O
@@ -122,7 +122,7 @@ collision candidate 0019 (feature patch 0018 after renumbering) passes arithmeti
 
 ## E. Scheduler / concurrency
 
-- [-] EDF lifecycle upgrade — LeafPile-derived `AuroraEdfScheduler`, feature 0028; six unexecuted
+- [-] EDF lifecycle upgrade — LeafPile-derived `AuroraEdfScheduler`, the parked EDF patch (`minecraft-patches/parked/0028-…`, held since 2026-10-07, not built); six unexecuted
   regressions, build/boot/ownership/shutdown acceptance assigned to Claude; no independent
   scheduler or speed claim ([source/profile handoff](development/AURORA-EDF-UPGRADE.md))
 

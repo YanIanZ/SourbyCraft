@@ -1,14 +1,14 @@
 # ProtocolLib provisioning
 
 SourbyCraft memasang ProtocolLib sebelum Paper memindai plugin. Jalur aktif adalah SourbyClip
-→ server → feature patch `0025` yang diterapkan SourbyPatcher → `PluginProvisioner` → pemindaian
+→ server → feature patch `0024` yang diterapkan SourbyPatcher → `PluginProvisioner` → pemindaian
 plugin. Ini memakai entrypoint toolchain yang sudah dipin; perubahan JAR/revision SourbyClip
 atau SourbyPatcher tidak diperlukan untuk hook server ini. Entry `SourbyBootstrap` lama bukan
 main slim JAR saat ini. Hook yang sama kini memasang ViaVersion/ViaBackwards dari jalur aktif.
 
-Status 2026-10-07 01:35 (sumber: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md), tree ter-materialisasi): patch 0025 sudah
+Status 2026-10-07 01:35 (sumber: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md), tree ter-materialisasi): patch 0025 (kini 0024) sudah
 **diterapkan** ke tree Minecraft ter-materialisasi dengan `git am --3way` sebagai commit `392a8e5` ("SourbyCraft provision packet plugins
-before the plugin scan", mengubah `net/minecraft/server/Main.java`, 3 baris; HEAD tree itu pada 2026-10-07), di atas 0024 (`049aabd`). Sebelumnya patch
+before the plugin scan", mengubah `net/minecraft/server/Main.java`, 3 baris; HEAD tree itu pada 2026-10-07), di atas commit `049aabd`. Sebelumnya patch
 ini belum pernah diterapkan, sehingga **setiap jar yang dibangun sebelum 01:35 tidak memiliki hook provisioning** (log). Berkas
 `features/0025-SourbyCraft-provision-plugins-before-plugin-scan.patch` masih untracked di repo root. Tidak tercatat di log: boot
 dengan jar yang dibangun sesudah 01:35 maupun provisioning ProtocolLib yang benar-benar berjalan; klaim "jalur aktif" di atas
@@ -50,23 +50,14 @@ Artifact resmi belum diunduh dalam sesi implementasi ini; digest berasal dari me
 `.jar.disabled`; mengaktifkannya kembali memulihkan JAR terverifikasi tanpa unduhan. JAR operator
 tetap dapat dimuat. File karantina yang berbeda tidak ditimpa.
 
-**Intave native:** build `includePrivateIntave` atau `-Dsourbycraft.intave.enabled=true` melewati pemasangan ProtocolLib eksternal
-dan mengarantina JAR managed dengan pin tersebut. Intave native masih memakai API/adapter paket
-internalnya; coexistence dengan plugin ProtocolLib belum diimplementasikan/divalidasi. Instalasi
-eksternal juga dilewati ketika engine native disabled tetapi build masih membundel API tersebut.
-JAR manual tetap dipertahankan, tetapi provider Intave native menolak backend yang bertabrakan.
-Status build dan efektivitas Intave tetap mengikuti [dokumen native](../architecture/intave-native-integration.md).
-Boot lokal build privat 2026-10-07 mencatat `ProtocolLib plugin auto-install skipped: the private
-native build reserves its packet API.`; library ProtocolLib embedded dimuat tanpa plugin.
-
 Verifikasi:
 
 ```bash
 python3 -m unittest discover -s scripts -p test_plugin_provisioning.py
 ```
 
-12 tes JDK-only memeriksa install/hash/ukuran, cache, HTTPS-only, offline, setting independen,
+Tes JDK-only memeriksa install/hash/ukuran, cache, HTTPS-only, offline, setting independen,
 pelestarian JAR/config, karantina, folder CLI, pin metadata dan hook sebelum scan. Hook Main
 dikompilasi terpisah terhadap artifact lokal 26.2. Ini belum membuktikan unduhan HTTPS artifact
 resmi, packaging slim JAR baru, load ProtocolLib, kompatibilitas plugin lain atau boot/region soak.
-Full Gradle build masih ditolak oleh pembatasan socket lingkungan ini (batasan sesi Codex saat itu; agen Claude menjalankan Gradle dari 2026-10-06, lihat log, tetapi tidak ada hasil Gradle yang dicatat khusus untuk hook 0025).
+Full Gradle build masih ditolak oleh pembatasan socket lingkungan ini (batasan sesi Codex saat itu; agen Claude menjalankan Gradle dari 2026-10-06, lihat log, tetapi tidak ada hasil Gradle yang dicatat khusus untuk hook 0025, kini 0024).

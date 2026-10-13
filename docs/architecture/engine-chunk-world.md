@@ -1,6 +1,6 @@
 # Aurora Chunk & World Engine — Ownership
 
-> **Role:** T5 ownership document for Chunk and World. **Status:** Active; its patch table predates feature patches 0017, 0018 and 0027.
+> **Role:** T5 ownership document for Chunk and World. **Status:** Active; its patch table predates feature patches 0017, 0018 and 0026 (chunk-generation timing, formerly 0027).
 >
 > Entry point: [docs/architecture/AURORA.md](AURORA.md).
 

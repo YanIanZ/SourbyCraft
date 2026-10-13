@@ -519,7 +519,7 @@ public final class SourbyCraftConfig {
         seed(f, changed, "viaversion.auto-provision", true,
             "RESTART_REQUIRED. Provision verified ViaVersion/ViaBackwards jars and default configs before plugin loading. false = manage Via yourself.");
         seed(f, changed, "protocollib.auto-provision", true,
-            "RESTART_REQUIRED. Install the pinned official ProtocolLib plugin before the plugin scan. Existing operator jars/configs are preserved. false disables managed installation; private native Intave skips this external plugin to keep its packet backend isolated.");
+            "RESTART_REQUIRED. Install the pinned official ProtocolLib plugin before the plugin scan. Existing operator jars/configs are preserved. false disables managed installation.");
 
         dev.iyanz.sourbycraft.lang.SourbyMessages.seedDefaults(f, changed);
         dev.iyanz.sourbycraft.update.AutoUpdateSettings.seedDefaults(f, changed);
