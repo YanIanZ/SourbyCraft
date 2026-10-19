@@ -411,8 +411,9 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [x] **ENG-10** Future `propagateSaveAllTicket` diselesaikan di bawah write lock regioniser;
   dependent sinkron yang masuk lagi bisa deadlock (PLAUSIBLE) — selesaikan secara async (audit §2)
   — selesai `1c57a736` (2026-10-20): `SaveAllTicket.completing` menyelesaikan future di luar thread pemanggil (MC 0031)
-- [ ] **SEC-5** SourbyClip memanggil tiga layanan geo-IP setiap boot, dua lewat HTTP biasa —
+- [x] **SEC-5** SourbyClip memanggil tiga layanan geo-IP setiap boot, dua lewat HTTP biasa —
   **keputusan owner: hapus lookup** di repo SourbyClip (audit §3)
+  — selesai `5a3806f1` (2026-10-20): SourbyClip 3.1.2 (`85b4dd70`, tanpa `IPUtil`/geo-IP) di-pin di `gradle.properties` + lock file; artifact Maven Local hash = pin; slimServerJar 40.756.217 B; test_clip_launcher 4/4; ClipDownloadProbe/ClipLaunchProbe hijau (probe hash-rejection disesuaikan ke chained IOException 3.1.2); boot lokal: banner `=== SourbyClip 3.1.2 ===`, `Done (` 21.3s, `stop` exit 0; bawa 3.1.1: terminal controls, worker lifecycle, `--sourbyclip-prepare`
 - [ ] **SEC-6** `ViaAutoUpdate` menimpa pin Via, bisa memasang versi yang tidak mencantumkan MC
   yang berjalan, mempercayai hash dari API, menghapus jar operator — hanya versi yang mencantumkan
   versi MC, jangan hapus jar yang bukan milik kita, batasi ukuran (audit §3)
@@ -421,12 +422,15 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [x] **SEC-8** CI: action di-pin per tag bukan SHA; `contents: write` untuk seluruh job — pin
   per SHA, persempit permission (audit §3)
   — selesai `1b33fe1e` (2026-10-20): semua `uses:` di-pin SHA 40-hex dengan tag di komentar; `permissions: contents: read` di atas dan job build, `write` hanya di job `release` baru (`needs: build`)
-- [ ] **OBS-4** Maintenance AWF di thread metrik; kegagalan setelah publish menurunkan snapshot
+- [x] **OBS-4** Maintenance AWF di thread metrik; kegagalan setelah publish menurunkan snapshot
   segar jadi STALE — perbaikan sama dengan AWF-3, try/catch terpisah (audit §4)
-- [ ] **OBS-5** Ring sampel mentah 384 merusak jendela 10/15 s di atas 25,6 Hz atau saat sprint —
+  — selesai `46cbbefd` (2026-10-20): housekeeping pasca-publish diisolasi di try/catch sendiri dengan log rate-limited; snapshot segar tidak lagi turun ke STALE; tes regresi `aPostPublishFailureKeepsTheFreshSnapshotPublished`
+- [x] **OBS-5** Ring sampel mentah 384 merusak jendela 10/15 s di atas 25,6 Hz atau saat sprint —
   ukuran dari tick rate (audit §4)
-- [ ] **OBS-6** Generasi telemetri region hanya disapu collector; tak terbatas bila metrik gagal
+  — selesai `46cbbefd` (2026-10-20): kapasitas ring dari interval tick teramati (default 384, headroom 2×, cap 4096); tes `rawRingSizesFromTickRateSoFastTicksDoNotTruncateTheFifteenSecondWindow`
+- [x] **OBS-6** Generasi telemetri region hanya disapu collector; tak terbatas bila metrik gagal
   start — sapuan teramortisasi, batas (audit §4)
+  — selesai `46cbbefd` (2026-10-20): `sweepExpired` amortisasi dari `activate()` (SWEEP_BATCH 64, kursor id generasi dengan wrap); tes `activationSweepsExpiredGenerationsWithoutTheCollector`
 - [x] **OBS-7** Policy script melewatkan patch Paper dan package engine; root yang hilang dilewati
   diam-diam — tuple root termasuk fitur Paper dan engine; assert root ada (audit §4)
   — selesai `65dba8fb` (2026-10-20): root eksplisit (minecraft + paper `features`, `aurora/engine`), root hilang = error; pemindaian yang diperluas menemukan 4 simbol di patch Paper 0005/0014 yang dicatat dengan alasan di `test_independence_policy.py` (`PATCH_APPROVED` + set scheduler) dan `independence.md`; Python 302 OK di 3.9 dan 3.12
@@ -575,8 +579,9 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
   — selesai `65dba8fb` (2026-10-20): `FROM eclipse-temurin:25-jre@sha256:dbb43d81…` (digest dari `docker buildx imagetools inspect`, dicocokkan dengan header registry); label lisensi menunggu SEC-13; `docker build` belum dijalankan (daemon mati)
 - [x] **OBS-12** `/speedtest` mencatat log sebelum cek permission — pindahkan log (audit §4)
   — selesai `1b33fe1e` (2026-10-20): log `/speedtest` dipindah setelah `testPermission`
-- [ ] **OBS-13** Jalur `getTPS()` mengalokasi dan mengurutkan di bawah monitor region — layani dari
+- [x] **OBS-13** Jalur `getTPS()` mengalokasi dan mengurutkan di bawah monitor region — layani dari
   snapshot yang sudah dipublikasikan (audit §4)
+  — selesai `46cbbefd` (2026-10-20): `tps()`/`mspt()` melayani rata-rata lewat helper `sumsFor` tanpa alokasi/sort (mirip resolusi targetless `report()`); tes bytecode `tpsAndMsptServeAveragesWithoutAllocatingOrSorting`; catatan: `MSPTData.rawData()` kini kosong (tidak ada konsumen produksi)
 - [ ] **OBS-14** Lubang cakupan tes (engine, hud, maxplayers, lang, update, bootstrap); tes sensitif
   waktu — tes berprioritas; clock yang diinjeksi (audit §4)
   — daftar prioritas `65dba8fb` (2026-10-20) di `docs/development/TEST-COVERAGE-GAPS.md` (P1–P3 + 10 test sensitif waktu dengan seam clock); test Java-nya belum ditulis
