@@ -22,7 +22,7 @@ looked up anywhere else, and that repository serves nothing else.
 | --- | --- | --- | --- |
 | `https://services.gradle.org/distributions/gradle-9.8.0-bin.zip` | Gradle wrapper distribution (first `./gradlew` on a host) | `gradle/wrapper/gradle-wrapper.properties` | verified; no `distributionSha256Sum` is set, CI validates the wrapper JAR with `gradle/actions/wrapper-validation` |
 | Gradle Plugin Portal (`gradlePluginPortal()`) | `io.papermc.paperweight.core` 2.0.0-beta.24, `org.gradle.toolchains.foojay-resolver-convention` 1.0.0, `io.papermc.fill.gradle` 1.0.12 | `settings.gradle.kts` `pluginManagement`/`plugins`; generated `sourbycraft-server/build.gradle.kts` | verified (declaration) |
-| Maven Local (`~/.m2/repository` or `-Dmaven.repo.local`) | `dev.iyanz.sourbypatcher.*` plugin, exclusively | `settings.gradle.kts` | verified; settings evaluation **fails** unless `paper-toolchain-${patcherVersion}.jar` exists there with SHA-256 `patcherSha256` (`gradle.properties`) |
+| Maven Local (`~/.m2/repository` or `-Dmaven.repo.local`) | `dev.iyanz.sourbypatcher.*` plugin, exclusively | `settings.gradle.kts` | verified; settings evaluation **fails** unless `paper-toolchain-${patcherVersion}.jar` **and its `.pom`/`.module` metadata** exist there with SHA-256 `patcherSha256` / `patcherPomSha256` / `patcherModuleSha256` (`gradle.properties`); `scripts/private_toolchain.py` additionally requires the metadata to declare `paperweightVersion` |
 | `https://repo.papermc.io/repository/maven-public/` | remaining plugin dependencies | `settings.gradle.kts` | verified |
 
 Plugin resolution order: Plugin Portal, then Maven Local (SourbyPatcher only), then PaperMC.

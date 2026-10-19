@@ -507,9 +507,10 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
   (sekarang sengaja tetap, agar konfigurasi server yang sudah ada tetap terbaca)
 - [ ] Pengaman agar baseline engine (`minecraft-patches/sources`, `paper-patches/files`) tidak
   diedit diam-diam: perubahan Sourby wajib lewat feature patch supaya terlihat oleh policy
-- [ ] Pin SHA-256 SourbyPatcher hanya mencakup jar, tidak POM tempat versi paperweight ditentukan
+- [x] Pin SHA-256 SourbyPatcher hanya mencakup jar, tidak POM tempat versi paperweight ditentukan
   — kandidat lokal 3.1.0 memeriksa versi paperweight yang dimuat terhadap identitas di JAR;
   hash POM/dependency penuh tetap belum diimplementasikan
+  — selesai `9147ce3b` (2026-10-20): `settings.gradle.kts` kini memverifikasi SHA-256 POM **dan** `.module` paper-toolchain (hilang/mismatch = gagal konfigurasi) + `paperweightVersion` dibaca dari properti; `scripts/private_toolchain.py` menuntut metadata ter-pin mendeklarasikan persis `paperweightVersion` (equality check, jalan di CI sebelum Gradle); 9 tes; BELUM: hash graph dependency paperweight transitif (artifact dari repo.papermc.io tetap tidak diverifikasi — di luar cakupan pin ini)
 - [-] Nomor feature patch punya celah (0018) dan akan dinomori ulang pada rebuild berikutnya;
   perbarui rujukan nomor patch di docs/test saat itu terjadi. Celah 0018 tertutup oleh rebuild
   2026-10-06 (0019–0023 → 0018–0022, isi sama); rujukan lama baru dianotasi sebagian (AURORA.md

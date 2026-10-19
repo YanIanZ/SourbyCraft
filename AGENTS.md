@@ -19,7 +19,7 @@ Region-threaded Minecraft 26.2 server fork with the **Aurora** runtime/engine ar
 Slim-jar task: `slimServerJar` strips 19 hard-coded artifact dirs from the paperclip jar (`build.gradle.kts:90-110`); `sourbyclip` re-downloads them by coordinate on first boot via `META-INF/libraries` manifest. If the strip count is 0, the task **fails** — update the prefix list when libraries move.
 
 The CI workflow `.github/workflows/build.yml` has two jobs since 2026-10-20 (audit SEC-8/OBS-9): `Build 26.2 jar` (push, pull_request and dispatch; `contents: read`) and `Publish release` (`needs: build`, `contents: write`, only pushes/dispatches on `release/26.2-canvas`). Every action is pinned by commit SHA with the tag in a comment. Pull requests from forks cannot run it: the private-toolchain checkout needs the repository's deploy keys. The build job does:
-1. Checks out the private `YanIanZ/SourbyPatcher` and `YanIanZ/SourbyClip` at the revisions in `build-data/private-toolchain.lock.json` (deploy keys) and publishes them to Maven Local with `scripts/private_toolchain.py --publish`. `settings.gradle.kts` refuses to configure without the hash-verified SourbyPatcher `paper-toolchain` jar. See `docs/development/PRIVATE-TOOLCHAIN.md`.
+1. Checks out the private `YanIanZ/SourbyPatcher` and `YanIanZ/SourbyClip` at the revisions in `build-data/private-toolchain.lock.json` (deploy keys) and publishes them to Maven Local with `scripts/private_toolchain.py --publish`. `settings.gradle.kts` refuses to configure without the hash-verified SourbyPatcher `paper-toolchain` jar and its POM/`.module` metadata (`patcherSha256`/`patcherPomSha256`/`patcherModuleSha256`), which must declare `paperweightVersion`. See `docs/development/PRIVATE-TOOLCHAIN.md`.
 2. `bash scripts/setup_metal.sh` — Metal is **vendored** at `Metal/`, not a submodule (upstream LuminolMC/Metal went offline). `setup_metal.sh` calls `Metal/gen_sources.sh`.
 3. `applyAllPatches`, then `:sourbyapi:test :sourbycraft-server:test :test-plugin:test`, then the Python `scripts/test_*.py` suite, clip probes, then `slimServerJar -PsourbyBuild=N` and `verify_build_identity.py`.
 4. Boot test in the same job: boots with the test plugin, `online-mode=false`, `level-type=minecraft:normal`, waits up to 240s for `Done (` plus the metrics markers, sends `stop`, and fails on timeout or unclean exit.
@@ -35,7 +35,7 @@ The CI workflow `.github/workflows/build.yml` has two jobs since 2026-10-20 (aud
 
 ## Patch application
 
-Single-level fork through the private SourbyPatcher `paper-toolchain` plugin, which applies paperweight's patcher (2.0.0-beta.24; `io.papermc.paperweight.core` in `settings.gradle.kts` must be the same release) with Paper as the only upstream. `gitFilePatches = false` — file patches are codechicken diffpatch format and go through `java-diff-utils`.
+Single-level fork through the private SourbyPatcher `paper-toolchain` plugin, which applies paperweight's patcher (2.0.0-beta.24; `io.papermc.paperweight.core` in `settings.gradle.kts` must be the same release — enforced by the pinned toolchain POM/`.module` hashes plus the `paperweightVersion` property and `scripts/private_toolchain.py`'s equality check) with Paper as the only upstream. `gitFilePatches = false` — file patches are codechicken diffpatch format and go through `java-diff-utils`.
 
 Two kinds of patch, and the policy scripts depend on keeping them apart:
 

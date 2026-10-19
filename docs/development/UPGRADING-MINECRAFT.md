@@ -101,12 +101,16 @@ Do all of this before touching `paperRef`.
    `grep -rn '26\.2'` is the inventory. A Paper-only update on the same Minecraft version
    changes none of these.
 3. **Paperweight version.** `settings.gradle.kts` pins `io.papermc.paperweight.core` (currently
-   `2.0.0-beta.24`), and it must be the **same release** that the private SourbyPatcher
-   `paper-toolchain` was built against. If Paper's new revision needs a newer paperweight, the
-   change goes into SourbyPatcher first: bump its version, update
-   `build-data/private-toolchain.lock.json` and `patcherSha256`/`patcherVersion` in
-   `gradle.properties` (procedure in `docs/development/PRIVATE-TOOLCHAIN.md` and SourbyPatcher's
-   own `AGENTS.md`). Gradle fails at settings time without the hash-verified jar in Maven Local.
+   `2.0.0-beta.24`) via the `paperweightVersion` property, and it must be the **same release** that
+   the private SourbyPatcher `paper-toolchain` was built against — the published
+   `paper-toolchain-<v>.pom` and `.module` are SHA-256-pinned (`patcherPomSha256`/
+   `patcherModuleSha256` in `gradle.properties`) and `scripts/private_toolchain.py` fails unless
+   both declare exactly `paperweightVersion`. If Paper's new revision needs a newer paperweight,
+   the change goes into SourbyPatcher first: bump its version, update
+   `build-data/private-toolchain.lock.json` and `patcherSha256`/`patcherVersion` **plus the two
+   metadata hashes and `paperweightVersion`** in `gradle.properties` (procedure in
+   `docs/development/PRIVATE-TOOLCHAIN.md` and SourbyPatcher's own `AGENTS.md`). Gradle fails at
+   settings time without the hash-verified jar, POM and module metadata in Maven Local.
 4. **Access transformers:** `build-data/sourbycraft.at`, `build-data/paperServer.at`,
    `build-data/paperApi.at`. An AT entry naming a field or method that upstream renamed or
    removed fails the apply. Fix the entry, or delete it if nothing needs it any more.
