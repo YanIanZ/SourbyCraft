@@ -161,10 +161,27 @@ val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 // through META-INF/sourbycraft-build.properties). Branch is read via providers.exec so
 // the value is correct on CI and locally; the writeBuildInfo task opts itself out of the
 // config cache because the branch provider cannot be serialised into a doLast closure.
-val sourbycraftBranchProvider: Provider<String> = providers.exec {
-    commandLine("git", "rev-parse", "--abbrev-ref", "HEAD")
-    isIgnoreExitValue = true
-}.standardOutput.asText.map { it.trim() }
+val sourbycraftBranchSnapshot = try {
+    providers.exec {
+        commandLine("git", "--no-optional-locks", "rev-parse", "--abbrev-ref", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim()
+} catch (_: Exception) { "unknown" }
+val sourbycraftBranchProvider: Provider<String> = providers.provider { sourbycraftBranchSnapshot }
+extra["sourbycraftBranchProvider"] = sourbycraftBranchProvider
+
+// Realize exactly once: every manifest/properties consumer uses this same snapshot.
+// Missing Python/Git or unsupported source layouts remain local unknown + dirty builds.
+val sourbycraftSourceSnapshot = try {
+    providers.exec {
+        commandLine("python3", rootProject.file("scripts/build_identity.py").absolutePath)
+    }.standardOutput.asText.get()
+} catch (_: Exception) {
+    logger.warn("Build provenance unavailable; using unknown + dirty (publication disabled).")
+    """{"commit":"unknown","treeHash":"unknown","dirty":"true"}"""
+}
+val sourbycraftSourceIdentity: Provider<String> = providers.provider { sourbycraftSourceSnapshot }
+extra["sourbycraftSourceIdentity"] = sourbycraftSourceIdentity
 
 val sourbycraftSuffixProvider: Provider<String> = sourbycraftBranchProvider.map { branch ->
     val releaseVersionFull = providers.gradleProperty("releaseVersion").getOrElse("dev")
@@ -247,6 +264,8 @@ subprojects {
         // Build 47+: public build identity belongs to SourbyCraft and intentionally does not
         // encode the current upstream platform as a suffix.
         val rawBuild = providers.gradleProperty("sourbyBuild").getOrElse("1").trim()
+        val provenance = sourbycraftSourceIdentity
+        inputs.property("sourceIdentity", provenance)
         val sourbyBuild = rawBuild
         val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
 
@@ -280,12 +299,18 @@ subprojects {
             // cache, and System.getenv here sees the daemon's environment at execution time.
             val timestamp = (System.getenv("SOURCE_DATE_EPOCH")?.trim()?.toLongOrNull()
                 ?.let { Instant.ofEpochSecond(it) } ?: Instant.now()).toString()
+            val identity = groovy.json.JsonSlurper().parseText(provenance.get()) as Map<*, *>
+            val dirty = identity["dirty"].toString()
+            val buildLabel = sourbyBuild + if (dirty == "true") "-dirty" else ""
             val resolved = internalVersionProvider.get()
             f.writeText(
                 """
                 version=$resolved
-                build=$sourbyBuild
+                build=$buildLabel
                 buildNumber=$rawBuild
+                gitCommit=${identity["commit"]}
+                treeHash=${identity["treeHash"]}
+                dirty=$dirty
                 mcVersion=$mcVersion
                 codename=$engineCodename
                 tagline=Reliable Stable High Performance

@@ -109,7 +109,7 @@
      testImplementation("org.mockito:mockito-core:5.22.0")
      mockitoAgent("org.mockito:mockito-core:5.22.0") { isTransitive = false } // Configure mockito agent that is needed in newer java versions
      testImplementation("org.ow2.asm:asm-tree:9.9.1")
-@@ -164,23 +_,56 @@
+@@ -164,23 +_,62 @@
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
@@ -117,10 +117,14 @@
 +        // SourbyCraft - build time in GMT+7 (Asia/Jakarta), matching the previous SourbyCraft
 +        // convention (paper-26.2-pre-folia). /ver + startup render this in the day-name format.
 +        val buildTime = providers.environmentVariable("SOURCE_DATE_EPOCH").map { Instant.ofEpochSecond(it.trim().toLong()) }.orElse(providers.environmentVariable("BUILD_STARTED_AT").map(Instant::parse)).orElse(ZonedDateTime.now(ZoneId.of("Asia/Jakarta")).toInstant()).get() // SourbyCraft - reproducible builds (T8); upstream had BUILD_STARTED_AT before this patch
-         val gitHash = git.exec(providers, "rev-parse", "--short=7", "HEAD").get().trim()
+-        val gitHash = git.exec(providers, "rev-parse", "--short=7", "HEAD").get().trim()
 -        val implementationVersion = "$mcVersion-${build ?: "DEV"}-$gitHash"
-         val date = git.exec(providers, "show", "-s", "--format=%ci", gitHash).get().trim()
-         val gitBranch = git.exec(providers, "rev-parse", "--abbrev-ref", "HEAD").get().trim()
+-        val date = git.exec(providers, "show", "-s", "--format=%ci", gitHash).get().trim()
+-        val gitBranch = git.exec(providers, "rev-parse", "--abbrev-ref", "HEAD").get().trim()
++        val date = try {
++            git.exec(providers, "--no-optional-locks", "show", "-s", "--format=%ci", "HEAD").get().trim()
++        } catch (_: Exception) { "unknown" }
++        val gitBranch = (rootProject.extra["sourbycraftBranchProvider"] as Provider<String>).get()
 +        // SourbyCraft - version suffix derived from the git branch, matching the previous
 +        // SourbyCraft convention (paper-26.2-pre-folia patches 0004/0006/0007): vN-DEV / vN-REL /
 +        // vN-EXP. Kept in lockstep with META-INF/sourbycraft-build.properties (writeBuildInfo /
@@ -145,7 +149,10 @@
 +        // Keep this in lockstep with root writeBuildInfo.
 +        val rawBuild = rootProject.providers.gradleProperty("sourbyBuild").getOrElse("1").trim()
 +        val sourbyBuild = rawBuild
-+        val implementationVersion = "Build $sourbyBuild"
++        val identityJson = (rootProject.extra["sourbycraftSourceIdentity"] as Provider<String>).get()
++        val identity = groovy.json.JsonSlurper().parseText(identityJson) as Map<*, *>
++        val dirty = identity["dirty"].toString()
++        val implementationVersion = "Build $sourbyBuild" + if (dirty == "true") "-dirty" else ""
 +        // SourbyCraft — pre-formatted GMT+7 (Asia/Jakarta) day-name build timestamp, matching the
 +        // previous-version / GH-release convention and the /ver formatter (EEEE, d MMMM yyyy, HH:mm).
 +        // ServerBuildInfoImpl.asString(VERSION_FULL) appends this verbatim as "(<display> GMT+7)" on
@@ -172,7 +179,10 @@
              "Build-Time" to buildTime.toString(),
 +            "Build-Time-Display" to buildTimeDisplay, // SourbyCraft - GMT+7 day-name boot-line timestamp
              "Git-Branch" to gitBranch,
-             "Git-Commit" to gitHash,
+-            "Git-Commit" to gitHash,
++            "Git-Commit" to identity["commit"].toString(),
++            "Git-Tree-Hash" to identity["treeHash"].toString(),
++            "Git-Dirty" to dirty,
          )
 @@ -240,6 +_,10 @@
          excludeTags("Slow")

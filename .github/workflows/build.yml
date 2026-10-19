@@ -99,6 +99,9 @@ jobs:
       - name: Validate release identity and profiling scripts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
+      - name: Engine baseline guard
+        run: python3 scripts/baseline_policy.py
+
       - name: Check patch surface
         run: python3 scripts/patch_surface.py --check
 
@@ -139,7 +142,7 @@ jobs:
           # only upstream; slimServerJar (root build.gradle.kts) strips libraries from its paperclip jar.
           ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.number }}
           mkdir -p release
-          python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-${{ steps.relnum.outputs.channel }}.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}"
+          python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-${{ steps.relnum.outputs.channel }}.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}" --commit "$GITHUB_SHA"
           cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
           api_version=$(sed -n 's/^apiVersion=//p' gradle.properties)
           python3 scripts/verify_build_identity.py build/libs/SourbyCraft-slim.jar --api-only --api-version "$api_version"

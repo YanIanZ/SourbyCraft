@@ -77,6 +77,8 @@ Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](d
 [LIGHTINGLUMINOL-BRIDGE-PORT.md](development/LIGHTINGLUMINOL-BRIDGE-PORT.md), [SUPERIORSKYBLOCK-BRIDGE.md](development/SUPERIORSKYBLOCK-BRIDGE.md),
 [LOGIN-GUARDS.md](development/LOGIN-GUARDS.md) (Paper login guards the Folia baseline drops or re-purposes; documentation only),
 [TEST-COVERAGE-GAPS.md](development/TEST-COVERAGE-GAPS.md) (prioritised list of missing unit tests and timing-sensitive tests to convert).
+[REMOTE-REPOSITORIES.md](development/REMOTE-REPOSITORIES.md) (every remote the build, CI and first boot reach, fallback order, offline behaviour).
+[PLUGIN-NETTY-GUIDANCE.md](development/PLUGIN-NETTY-GUIDANCE.md) (for plugin authors and operators: which events run on a Netty event loop, why blocking there hurts, what to do instead; from a source audit, not a benchmark).
 
 ### Guides (`guides/`)
 [developing-awf.md](guides/developing-awf.md) (plugin API) · [testing-awf.md](guides/testing-awf.md) ·

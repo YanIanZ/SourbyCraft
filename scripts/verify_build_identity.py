@@ -3,6 +3,7 @@
 import argparse
 import io
 import json
+import re
 import zipfile
 
 
@@ -26,16 +27,35 @@ def verify_api_version(jar, api_version):
     return api_info
 
 
-def verify(jar, number, channel=None, api_version=None):
+def verify(jar, number, channel=None, api_version=None, commit=None):
     with zipfile.ZipFile(jar) as archive:
         info = properties(archive.read("META-INF/sourbycraft-build.properties").decode())
         manifest = archive.read("META-INF/MANIFEST.MF").decode().replace("\r\n ", "")
     attributes = dict(line.split(": ", 1) for line in manifest.splitlines() if ": " in line)
     # Build 47+: the public identity is "Build N" with no upstream-platform letter.
-    if info["buildNumber"] != str(number) or info["build"] != str(number):
+    dirty = info.get("dirty", "false")
+    if dirty not in ("true", "false"):
+        raise ValueError("Invalid dirty flag")
+    label = str(number) + ("-dirty" if dirty == "true" else "")
+    if info["buildNumber"] != str(number) or info["build"] != label:
         raise ValueError("Build properties do not match release number")
-    if attributes["Implementation-Version"] != f"Build {number}":
+    if attributes["Implementation-Version"] != f"Build {label}":
         raise ValueError("Manifest differs from build properties")
+    if commit is not None or "gitCommit" in info:
+        expected = {"Git-Commit": "gitCommit", "Git-Tree-Hash": "treeHash", "Git-Dirty": "dirty"}
+        for attribute, key in expected.items():
+            if not info.get(key) or attributes.get(attribute) != info[key]:
+                raise ValueError(f"Manifest and properties disagree on {key}")
+        local_unknown = commit is None and dirty == "true"
+        if not re.fullmatch(r"[0-9a-f]{40}", info["gitCommit"]) and not (local_unknown and info["gitCommit"] == "unknown"):
+            raise ValueError("Missing full Git commit")
+        if not re.fullmatch(r"[0-9a-f]{64}", info["treeHash"]) and not (local_unknown and info["treeHash"] == "unknown"):
+            raise ValueError("Missing SHA-256 source tree hash")
+    if commit is not None:
+        if info.get("gitCommit") != commit:
+            raise ValueError("Build commit differs from expected commit")
+        if dirty != "false":
+            raise ValueError("Publication requires a clean source tree")
     if channel is not None and not info.get("version", "").endswith("-" + channel):
         raise ValueError("Build channel differs from expected artifact channel")
     if api_version is not None:
@@ -49,6 +69,7 @@ if __name__ == "__main__":
     parser.add_argument("number", type=int, nargs="?")
     parser.add_argument("--channel", choices=("DEV", "EXP", "REL"))
     parser.add_argument("--api-version")
+    parser.add_argument("--commit", help="Require this full Git commit and a clean source tree")
     parser.add_argument("--api-only", action="store_true")
     args = parser.parse_args()
     if args.api_only:
@@ -58,4 +79,4 @@ if __name__ == "__main__":
     else:
         if args.number is None:
             parser.error("a build number is required unless --api-only is used")
-        print(verify(args.jar, args.number, args.channel, args.api_version))
+        print(verify(args.jar, args.number, args.channel, args.api_version, args.commit))
