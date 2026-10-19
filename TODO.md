@@ -73,8 +73,8 @@ CI hijau terbaru: run 38445246566 pada `d97fe247` (2026-10-14). Tree kandidat ri
 ### Audit sistem 2026-10-14
 **Lanjutkan dari sini:** [`docs/development/HANDOFF-2026-10-14.md`](docs/development/HANDOFF-2026-10-14.md) —
 status per gelombang. Gelombang AWF sudah di-push (`ebb9c1fb`: AWF-1..6, 8..10). Gelombang engine/bridge
-(ENG-*) ada di working tree lokal, BELUM dites dan BELUM di-commit (agent terhenti 2026-10-14);
-gelombang security dan observability belum dimulai.
+sudah di-push (`1c57a736`, 2026-10-20: ENG-1..7, 9 (ledger saja), 10, 12..14; ENG-11 didokumentasikan; ENG-8 tetap
+roadmap); gelombang security dan observability belum dimulai.
 
 Laporan: [`docs/audits/2026-10-14-system-audit.md`](docs/audits/2026-10-14-system-audit.md)
 (read-only, `d97fe247`; nomor baris di laporan per commit itu). Temuan HIGH di sini; MEDIUM di P1,
@@ -87,14 +87,18 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   save hilang, `save-all`/`AuroraWorlds.save` tidak pernah selesai — pop atomik, gabungkan ticket kedua (audit §1)
 - [ ] **AWF-3** Commit periodik AWF menumpang collector metrik dan terlewat saat koleksi telat, janji
   "hilang maksimal satu interval" tidak berlaku di bawah beban — driver maintenance AWF sendiri (audit §1)
-- [ ] **ENG-1** `guard-severity: LOG` (default) membiarkan akses lintas region; pelanggaran plugin
+- [x] **ENG-1** `guard-severity: LOG` (default) membiarkan akses lintas region; pelanggaran plugin
   bridged tidak pernah sampai ke quarantine — sink guard yang mengatribusi ke plugin + rate limit log (audit §2)
-- [ ] **ENG-2** Async pathfinding mengganti `nodeEvaluator` hidup milik mob dan kehilangan flag
+  — selesai `1c57a736` (2026-10-20): `GuardViolations` + `BridgeRuntime` (satu pelanggaran per run body, log per (plugin, alasan)/60 s); unit test, belum ada fixture boot
+- [x] **ENG-2** Async pathfinding mengganti `nodeEvaluator` hidup milik mob dan kehilangan flag
   pintu/float (fitur default off) — simpan/pulihkan evaluator, salin flag (amend MC 0006) (audit §2)
-- [ ] **ENG-3** Task region/entity yang antre di dunia yang di-unload tidak pernah dijalankan,
+  — selesai `1c57a736` (2026-10-20): `PathNavigation.sourbyIsolatedPathFinder` (amend MC 0006), `AsyncPathEvaluatorIsolationTest`
+- [x] **ENG-3** Task region/entity yang antre di dunia yang di-unload tidak pernah dijalankan,
   dibatalkan atau dipensiunkan — kuras antrean (cancel-only) dan pensiunkan scheduler saat unload (audit §2)
-- [ ] **ENG-4** Task batal yang antre di section ter-unload bisa membuat split melempar di bawah
+  — selesai `1c57a736` (2026-10-20): MC 0033 + `WorldUnloadDrain`; gate boot lokal `awf create/unload t1` bersih (tidak ada task antre saat itu, jalur kuras hanya teruji unit)
+- [x] **ENG-4** Task batal yang antre di section ter-unload bisa membuat split melempar di bawah
   write lock regioniser dan menghentikan server (PLAUSIBLE) — lewati task batal saat split (audit §2)
+  — selesai `1c57a736` (2026-10-20): MC 0032, `RegionTaskQueueDrainTest`
 - [ ] **SEC-1** `sourbycraft-security.yml` tanpa consumer sejak `6b774810`: tidak ada guard
   packet/NBT/book/sign/payload, padahal docs bilang ditegakkan — **keputusan owner: bangun ulang**
   sebagai `dev.iyanz.sourbycraft.security` + satu feature patch, mode LOG dulu, tes per limit, cek
@@ -377,18 +381,23 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [ ] **AWF-7** (roadmap) Biaya commit FILE O(dunia): indeks penuh ditulis ulang, di-hash dan
   di-fsync per commit; satu fsync per objek — generasi delta, fsync batch (audit §1; lihat item
   "AWF FILE: tulis massal lambat" di P3)
-- [ ] **ENG-5** Ticket save dilaporkan selesai saat region merge/split di tengah save; bagiannya
+- [x] **ENG-5** Ticket save dilaporkan selesai saat region merge/split di tengah save; bagiannya
   tanpa ticket (flush AWF melewatkan chunk) — teruskan ticket saat merge, sebar saat split (audit §2)
-- [ ] **ENG-6** Satu lane `BRIDGE_IO` penuh membatalkan timer async berulang milik plugin lain
+  — selesai `1c57a736` (2026-10-20): MC 0031, `SaveAllTicket.split`/`TicketHolder.forwardTo`, `SaveTicketRegionChangeTest`
+- [x] **ENG-6** Satu lane `BRIDGE_IO` penuh membatalkan timer async berulang milik plugin lain
   selamanya — lewati, jangan batalkan, task berulang (audit §2)
-- [ ] **ENG-7** Penolakan path async memakai slot recompute tanpa fallback sinkron — kembalikan
+  — selesai `1c57a736` (2026-10-20): `BridgeRuntime.rejectedIo` lewati run task berulang (`skippedRuns`), `BridgeRuntimeTest`
+- [x] **ENG-7** Penolakan path async memakai slot recompute tanpa fallback sinkron — kembalikan
   null saat ditolak supaya vanilla jalan (audit §2)
+  — selesai `1c57a736` (2026-10-20): `AsyncPathProcessor.trySubmit` null → recompute sinkron vanilla, `AsyncPathRefusalTest`
 - [ ] **ENG-8** Worker path membaca state mob hidup di luar owner — snapshot immutable yang diambil
   di owner (audit §2; terkait audit snapshot M5 di P0 *Konkurensi*)
-- [ ] **ENG-9** Oversubscription CPU secara default (thread region = semua prosesor ditambah pool
+- [x] **ENG-9** Oversubscription CPU secara default (thread region = semua prosesor ditambah pool
   chunk, async, Netty, path, bridge) — ledger thread saat boot; ubah default hanya dengan bukti A/B (audit §2)
-- [ ] **ENG-10** Future `propagateSaveAllTicket` diselesaikan di bawah write lock regioniser;
+  — ledger saja, selesai `1c57a736` (2026-10-20): `ThreadLedger` di log boot dan `/perf governor` (boot lokal: 22 thread / 8 prosesor, 2.8x); default TIDAK diubah
+- [x] **ENG-10** Future `propagateSaveAllTicket` diselesaikan di bawah write lock regioniser;
   dependent sinkron yang masuk lagi bisa deadlock (PLAUSIBLE) — selesaikan secara async (audit §2)
+  — selesai `1c57a736` (2026-10-20): `SaveAllTicket.completing` menyelesaikan future di luar thread pemanggil (MC 0031)
 - [ ] **SEC-5** SourbyClip memanggil tiga layanan geo-IP setiap boot, dua lewat HTTP biasa —
   **keputusan owner: hapus lookup** di repo SourbyClip (audit §3)
 - [ ] **SEC-6** `ViaAutoUpdate` menimpa pin Via, bisa memasang versi yang tidak mencantumkan MC
@@ -519,14 +528,18 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
   memori — batas yang bisa dikonfigurasi (256 MiB), accounter terbatas (audit §1)
 - [ ] **AWF-10** Drift docs: nomor patch 0020 (seharusnya 0019), lokasi hook vs patch policy, javadoc
   `WorldRole` usang — perbaiki docs (audit §1; `aurora-world-fabric.md` sedang dipegang agen lain)
-- [ ] **ENG-11** Penolakan patch 0016 di fork `execute if/unless block … run` membatalkan kedua
+- [x] **ENG-11** Penolakan patch 0016 di fork `execute if/unless block … run` membatalkan kedua
   cabang diam-diam (PLAUSIBLE) — dokumentasikan atau rutekan ke owner (audit §2)
-- [ ] **ENG-12** Plugin ter-quarantine yang di-reload dengan nama sama diterima dan semua task-nya
+  — didokumentasikan `1c57a736` (2026-10-20) di `patch-classification.md` baris 0016; perubahan perilaku menunggu keputusan owner
+- [x] **ENG-12** Plugin ter-quarantine yang di-reload dengan nama sama diterima dan semua task-nya
   ditolak diam-diam — log sekali saat admit (audit §2)
-- [ ] **ENG-13** Drift docs: javadoc `CompatibilityClassifier`, default region-parallelism §4,
+  — selesai `1c57a736` (2026-10-20): peringatan sekali per admit saat plugin ter-quarantine dimuat ulang, `BridgeRuntimeTest`
+- [x] **ENG-13** Drift docs: javadoc `CompatibilityClassifier`, default region-parallelism §4,
   lokasi config scheduler di AGENTS.md — perbaiki docs (audit §2)
-- [ ] **ENG-14** Snapshot path async diambil sebelum penolakan mungkin terjadi; kegagalan worker
+  — selesai `1c57a736` (2026-10-20): javadoc `CompatibilityClassifier`, `region-parallelism.md` §4, AGENTS.md
+- [x] **ENG-14** Snapshot path async diambil sebelum penolakan mungkin terjadi; kegagalan worker
   dilog tanpa throttle — cek kapasitas dulu; rate-limit log (audit §2)
+  — selesai `1c57a736` (2026-10-20): `hasCapacity()` sebelum snapshot, log kegagalan solver 1/60 s (`AsyncPathRefusalTest`)
 - [ ] **SEC-9** Mode restart `exit` melakukan halt dari shutdown hook (PLAUSIBLE) — exit setelah
   shutdown selesai (audit §3)
 - [ ] **SEC-10** Download updater tanpa batas sebelum cek ukuran; polling tanpa autentikasi tiap
@@ -600,12 +613,15 @@ belum direncanakan, kecuali yang ditandai; tidak ada yang diimplementasikan.
 - [ ] Storage: API rollback point-in-time di atas generasi FILE yang disimpan, untuk pemulihan operator
 - [ ] Storage: object store content-addressed dibagi satu keluarga template (dedup antar pulau; di
   belakang flag)
-- [ ] Engine/bridge: konteks kepemilikan task bridged yang mengirim setiap hit guard ke quarantine
-  tanpa mode THROW
-- [ ] Engine/bridge: lane I/O bridged yang adil — sub-antrean berbobot per plugin, timer lewati-bukan-batal
-- [ ] Engine/bridge: antrean region yang aman saat unload (`drainForUnload()`) dengan fixture CI
+- [x] Engine/bridge: konteks kepemilikan task bridged yang mengirim setiap hit guard ke quarantine
+  tanpa mode THROW — selesai `1c57a736` (ENG-1)
+- [ ] Engine/bridge: lane I/O bridged yang adil — sub-antrean berbobot per plugin (belum); timer
+  lewati-bukan-batal selesai `1c57a736` (ENG-6)
+- [ ] Engine/bridge: antrean region yang aman saat unload — kuras cancel-only ada (`WorldUnloadDrain`,
+  `1c57a736`, ENG-3); fixture CI yang mengantrekan task lalu unload belum ada
 - [ ] Engine/bridge: `MobPathSnapshot` immutable untuk async pathfinding (menutup ENG-8 dan audit M5)
-- [ ] Engine/bridge: ledger CPU saat boot di `ResourceGovernor` dan `/perf governor`
+- [x] Engine/bridge: ledger CPU saat boot di `ResourceGovernor` dan `/perf governor` — selesai `1c57a736`
+  (`ThreadLedger`, ENG-9; laporan saja)
 - [ ] Distribusi: manifest rilis bertanda tangan dengan persentase staged rollout dan daftar yank
   (tanda tangan rilis sendiri sudah diterima owner sebagai SEC-2; rollout/yank belum)
 - [ ] Distribusi: rollback auto-update yang digate kesehatan boot (rollback `.prev` diterima owner
