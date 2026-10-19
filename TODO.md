@@ -83,12 +83,15 @@ Laporan: [`docs/audits/2026-10-14-system-audit.md`](docs/audits/2026-10-14-syste
 LOW di P2, proposal di P3. Keputusan owner 2026-10-14: SEC-1 bangun ulang guard; SEC-2/3 updater
 aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) tetap terbuka
 (*Keputusan owner*). Status `[ ]` = belum diperbaiki.
-- [ ] **AWF-1** Nama dunia managed dicocokkan ke setiap elemen path (dunia bernama seperti direktori
+- [x] **AWF-1** Nama dunia managed dicocokkan ke setiap elemen path (dunia bernama seperti direktori
   induk server menempelkan semua dunia ke AWF) — cocokkan path relatif ke direktori server (`storageId()`) (audit §1)
-- [ ] **AWF-2** `TicketHolder.pop()` membaca di luar monitor dan race dengan `propagate()`: ticket
+  — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): nama dunia managed dicocokkan ke folder world milik storage itu sendiri
+- [x] **AWF-2** `TicketHolder.pop()` membaca di luar monitor dan race dengan `propagate()`: ticket
   save hilang, `save-all`/`AuroraWorlds.save` tidak pernah selesai — pop atomik, gabungkan ticket kedua (audit §1)
+  — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): `TicketHolder.pop` baca+kosongkan di bawah satu lock; propagate kedua di-coalesce
 - [ ] **AWF-3** Commit periodik AWF menumpang collector metrik dan terlewat saat koleksi telat, janji
   "hilang maksimal satu interval" tidak berlaku di bawah beban — driver maintenance AWF sendiri (audit §1)
+  — sebagian `ebb9c1fb`: maintenance storage jalan pertama di tiap koleksi dalam try/catch sendiri (`PerformanceCollectorTest.lateSlowOrFailingCollectionsStillRunStorageMaintenance`); driver terpisah dari thread metrik = OBS-4 (deepseek, ronde 2)
 - [x] **ENG-1** `guard-severity: LOG` (default) membiarkan akses lintas region; pelanggaran plugin
   bridged tidak pernah sampai ke quarantine — sink guard yang mengatribusi ke plugin + rate limit log (audit §2)
   — selesai `1c57a736` (2026-10-20): `GuardViolations` + `BridgeRuntime` (satu pelanggaran per run body, log per (plugin, alasan)/60 s); unit test, belum ada fixture boot
@@ -378,12 +381,15 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 
 ### Audit sistem 2026-10-14 — MEDIUM
 Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
-- [ ] **AWF-4** Nama template tidak divalidasi di from-template/delete/read: path traversal termasuk
+- [x] **AWF-4** Nama template tidak divalidasi di from-template/delete/read: path traversal termasuk
   delete rekursif — validasi nama, batasi resolusi ke root template (audit §1)
-- [ ] **AWF-5** Lease Redis bocor lewat `unprepare` dan jalur "already open", lalu error palsu
+  — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): nama template divalidasi dan di-resolve di dalam root templates
+- [x] **AWF-5** Lease Redis bocor lewat `unprepare` dan jalur "already open", lalu error palsu
   "lost its Redis lease" — tutup store di setiap removal/throw (audit §1)
-- [ ] **AWF-6** Perpanjangan lease serial: stores × `timeout-ms` bisa melebihi lease pada Redis
+  — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): unprepare/already-open/registrasi gagal/export menutup store-nya, lease Redis dilepas
+- [x] **AWF-6** Perpanjangan lease serial: stores × `timeout-ms` bisa melebihi lease pada Redis
   lambat (PLAUSIBLE) — pipeline renewal, WARN bila satu pass > period/2 (audit §1)
+  — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): perpanjangan lease satu round trip ter-pipeline per putaran
 - [ ] **AWF-7** (roadmap) Biaya commit FILE O(dunia): indeks penuh ditulis ulang, di-hash dan
   di-fsync per commit; satu fsync per objek — generasi delta, fsync batch (audit §1; lihat item
   "AWF FILE: tulis massal lambat" di P3)
@@ -533,12 +539,15 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 
 ### Audit sistem 2026-10-14 — LOW
 Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
-- [ ] **AWF-8** `WorldShutdownThread` bisa melempar ulang tanpa memanggil callback unload: future
+- [x] **AWF-8** `WorldShutdownThread` bisa melempar ulang tanpa memanggil callback unload: future
   unload tidak selesai, lease tertahan — callback di `finally`; watchdog lease (audit §1)
-- [ ] **AWF-9** `.slime` tak tepercaya: batas blob 1 GiB, accounter NBT tanpa batas, seluruh file di
+  — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): MC 0030 selalu menyelesaikan callback unload (FAIL_UNKNOWN saat throw)
+- [x] **AWF-9** `.slime` tak tepercaya: batas blob 1 GiB, accounter NBT tanpa batas, seluruh file di
   memori — batas yang bisa dikonfigurasi (256 MiB), accounter terbatas (audit §1)
-- [ ] **AWF-10** Drift docs: nomor patch 0020 (seharusnya 0019), lokasi hook vs patch policy, javadoc
+  — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): impor Slime dibatasi (default 256 MiB, dicek sebelum alokasi), baca NBT dibatasi
+- [x] **AWF-10** Drift docs: nomor patch 0020 (seharusnya 0019), lokasi hook vs patch policy, javadoc
   `WorldRole` usang — perbaiki docs (audit §1; `aurora-world-fabric.md` sedang dipegang agen lain)
+  — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): `aurora-world-fabric.md` dan javadoc `WorldRole` dikoreksi
 - [x] **ENG-11** Penolakan patch 0016 di fork `execute if/unless block … run` membatalkan kedua
   cabang diam-diam (PLAUSIBLE) — dokumentasikan atau rutekan ke owner (audit §2)
   — didokumentasikan `1c57a736` (2026-10-20) di `patch-classification.md` baris 0016; perubahan perilaku menunggu keputusan owner
