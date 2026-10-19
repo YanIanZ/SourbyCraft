@@ -21,10 +21,13 @@ import java.util.logging.Logger;
  * snapshot off-thread. Nothing in the submitted work may touch the live world — see {@code
  * SnapshotPathRegion} for why.
  *
- * <p>Overload is handled with backpressure, not CallerRuns. If the bounded queue is saturated,
- * the solve is refused with a completed {@code null} future. The navigation keeps following its
- * already-live path and may try a later periodic recompute. This deliberately avoids turning
- * async saturation into a region-thread A* spike after the snapshot cost has already been paid.
+ * <p>Overload is handled with backpressure, not CallerRuns: the pool never runs a refused solve on
+ * the submitting thread. The navigation asks {@link #hasCapacity()} before it pays for a snapshot
+ * and offers the solve with {@link #trySubmit}; when either says no, the offload is declined and
+ * the navigation runs its ordinary synchronous recompute for that slot, exactly as with the
+ * feature off. A refusal therefore never consumes the recompute slot without a path being
+ * computed (the old behaviour kept the stale path and skipped the recompute). {@link #submit}
+ * keeps the older contract of a completed {@code null} future for callers that want it.</p>
  *
  * <p>A stopped pool or failed/stopping runtime uses the same refusal contract. Work admitted
  * before shutdown follows {@link #shutdown()}'s disposal rules.</p>
@@ -58,6 +61,12 @@ public final class AsyncPathProcessor {
         new java.util.concurrent.atomic.AtomicLong();
     private static final java.util.concurrent.atomic.AtomicLong SLOWEST_WAIT_NANOS =
         new java.util.concurrent.atomic.AtomicLong();
+    /** Solver failures are per mob and can repeat every recompute: log one per window. */
+    static final long FAILURE_LOG_WINDOW_NANOS = TimeUnit.SECONDS.toNanos(60L);
+    private static final Object FAILURE_LOG_LOCK = new Object();
+    private static long lastFailureLogNanos;
+    private static boolean failureLogged;
+    private static long suppressedFailures;
 
     /**
      * What the pool has actually been doing.
@@ -131,13 +140,18 @@ public final class AsyncPathProcessor {
         return enabled;
     }
 
+    /** Worker threads the pool is sized to when it starts: a quarter of the processors, at least one. */
+    public static int poolThreads() {
+        return Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
+    }
+
     /** Idempotent. Sizes the pool to a quarter of the cores (min 1) — pathfinding is a background cost. */
     public static synchronized void ensureStarted() {
         stopped = false;                 // Starting again lifts the refusal a shutdown installed.
         if (pool != null && !pool.isShutdown()) {
             return;
         }
-        final int threads = Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
+        final int threads = poolThreads();
         final AtomicInteger idx = new AtomicInteger();
         // Bounded queue + AbortPolicy: path recomputes are periodic and the mob already has a live
         // path, so saturation should defer work rather than push CPU-bound A* back onto the region
@@ -174,6 +188,29 @@ public final class AsyncPathProcessor {
      * @return result future, possibly already completed by refusal or inline execution
      */
     public static <T> CompletableFuture<T> submit(final Supplier<T> solve) {
+        final CompletableFuture<T> offered = trySubmit(solve);
+        return offered != null ? offered : CompletableFuture.completedFuture(null);
+    }
+
+    /**
+     * Whether a solve offered now would be admitted, checked before the caller pays for a
+     * snapshot. Best effort: {@link #trySubmit} can still refuse when another region filled the
+     * queue in between.
+     */
+    public static boolean hasCapacity() {
+        if (stopped || dev.iyanz.sourbycraft.core.AuroraRuntime.stopping()) return false;
+        final ThreadPoolExecutor p = pool;
+        // Not started: trySubmit solves inline, as it always has.
+        return p == null || p.isShutdown() || p.getQueue().remainingCapacity() > 0;
+    }
+
+    /**
+     * As {@link #submit}, except that a refused solve returns {@code null} instead of a completed
+     * future, so the caller can run its synchronous path instead. Refusals are counted.
+     *
+     * @return the result future, or {@code null} when the solve was refused and never ran
+     */
+    public static <T> CompletableFuture<T> trySubmit(final Supplier<T> solve) {
         // The pool's own flag covers its lifecycle; the runtime's covers the server's. A solve
         // arriving while the server is going down must not start, even if this pool has not been
         // told to stop yet -- shutdown runs in an order, and this is not first.
@@ -184,7 +221,7 @@ public final class AsyncPathProcessor {
             // still receives a completed future, so its pending bookkeeping is released and no
             // request is left outstanding.
             REFUSED.incrementAndGet();
-            return CompletableFuture.completedFuture(null);
+            return null;
         }
         final ThreadPoolExecutor p = pool;
         if (p == null || p.isShutdown()) {
@@ -192,7 +229,7 @@ public final class AsyncPathProcessor {
             try {
                 return CompletableFuture.completedFuture(solve.get());
             } catch (final Throwable t) {
-                LOGGER.log(Level.WARNING, "AsyncPath inline solve failed", t);
+                logSolveFailure("AsyncPath inline solve failed", t);
                 return CompletableFuture.completedFuture(null);
             }
         }
@@ -221,7 +258,7 @@ public final class AsyncPathProcessor {
                 if (isCancelled()) { future.complete(null); return; }
                 try { future.complete(get()); }
                 catch (Exception failure) {
-                    LOGGER.log(Level.WARNING, "AsyncPath solve failed", failure);
+                    logSolveFailure("AsyncPath solve failed", failure);
                     future.complete(null);
                 }
             }
@@ -238,10 +275,46 @@ public final class AsyncPathProcessor {
             // Saturation and a concurrent shutdown have the same safe result for this periodic
             // recompute: keep the mob's existing live path, release pending bookkeeping, and let
             // a later recompute try again. Never run A* on the rejecting region thread.
+            // The task never ran and its future is dropped; release the outstanding count here.
             REFUSED.incrementAndGet();
-            task.cancel(false);
+            OUTSTANDING.decrementAndGet();
+            return null;
         }
         return future;
+    }
+
+    private static void logSolveFailure(final String message, final Throwable failure) {
+        final long suppressed = admitFailureLog(System.nanoTime());
+        if (suppressed < 0) return;
+        LOGGER.log(Level.WARNING, message + (suppressed > 0 ? " (" + suppressed
+            + " more solve failure(s) suppressed in the last 60 s)" : ""), failure);
+    }
+
+    /**
+     * Rate limit for solver failure logs: one line per {@link #FAILURE_LOG_WINDOW_NANOS}.
+     *
+     * @return {@code -1} to suppress, otherwise how many failures were suppressed before this one
+     */
+    static long admitFailureLog(final long nowNanos) {
+        synchronized (FAILURE_LOG_LOCK) {
+            if (failureLogged && nowNanos - lastFailureLogNanos < FAILURE_LOG_WINDOW_NANOS) {
+                suppressedFailures++;
+                return -1L;
+            }
+            final long suppressed = suppressedFailures;
+            failureLogged = true;
+            lastFailureLogNanos = nowNanos;
+            suppressedFailures = 0L;
+            return suppressed;
+        }
+    }
+
+    /** Test seam: forgets the failure log window. */
+    static void resetFailureLogForTest() {
+        synchronized (FAILURE_LOG_LOCK) {
+            failureLogged = false;
+            suppressedFailures = 0L;
+        }
     }
 
     /**

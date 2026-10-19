@@ -230,6 +230,7 @@ public final class PerfCommand extends Command {
 
     /** Budgets and counters for each Resource Governor lane that has been used. */
     private static void renderGovernor(final List<Component> lines) {
+        renderThreadLedger(lines);
         final var stats = dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.stats();
         if (stats.isEmpty()) {
             add(lines, "Resource Governor", "no governed lane has been used yet");
@@ -242,6 +243,20 @@ public final class PerfCommand extends Command {
             add(lines, lane.name() + " submitted / completed / failed / rejected", lane.submitted() + " / "
                 + lane.completed() + " / " + lane.failed() + " / " + lane.rejected());
         }
+    }
+
+    /** Configured platform threads per pool against the processors; ceilings, not load. */
+    private static void renderThreadLedger(final List<Component> lines) {
+        final var pools = dev.iyanz.sourbycraft.execution.ThreadLedger.collect();
+        final int processors = Runtime.getRuntime().availableProcessors();
+        lines.add(UiPanel.section("Thread ledger"));
+        add(lines, "Summary", dev.iyanz.sourbycraft.execution.ThreadLedger.format(pools, processors).get(0)
+            .replaceFirst("^Thread ledger: ", ""));
+        for (final var pool : pools) {
+            add(lines, pool.name(), (pool.threads() < 0 ? "?" : pool.threads() == 0 ? "off" : pool.threads())
+                + " (" + pool.source() + ")");
+        }
+        lines.add(UiPanel.section("Resource Governor lanes"));
     }
 
     private static final dev.iyanz.sourbycraft.execution.region.RegionPopulation POPULATION =

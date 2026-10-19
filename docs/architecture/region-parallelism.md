@@ -73,8 +73,11 @@ matters:
 
 ## 4. What to do with this
 
-- **Per host:** set `threaded-regions.threads` explicitly. On 8 cores, 8 measured better than
-  the default 4 for this workload.
+- **Per host:** decide `threaded-regions.threads` deliberately. On 8 cores, 8 measured better
+  than the then-default 4 for this workload. The current default (`threads: -1`) already resolves
+  to every available processor, or to `aurora.cpu.cores` when set (§1, patch 0002); setting a
+  number lower than that is how to hold processors back for chunk workers, Netty and the other
+  pools, which the startup thread ledger (`/perf governor`) lists against the processor count.
 - **For load that should use the machine:** separate it. Disconnected areas, not one large one.
 - **Before believing a parallelism measurement:** check what is actually loaded between the
   sites. `forceload query` and the active-region count disagree loudly when sites have merged,

@@ -51,7 +51,8 @@ The patch directories are the source of truth — **edit patch files (or the mat
 Configuration surfaces (do not conflate, and verify boot-order consumers before documenting reloadability):
 
 - **SourbyCraft utility layer** → `sourbycraft_config/sourbycraft_global_config.toml` (nightconfig). Messages, `/maxp` persistence, auto-updater, ViaVersion auto-provision.
-- **Region-threading engine** (formerly Canvas; file names kept so existing servers keep their settings) → `config/canvas-server.yml` + `config/canvas-worlds.yml` (region scheduler, tick rate, autosave). Default `region-scheduler.guard-severity: LOG` (not Canvas's crash-prone `THROW`); pinned with the other engine defaults in `scripts/test_patch_policy.py`.
+- **Region-threading engine** (formerly Canvas; file names kept so existing servers keep their settings) → `config/canvas-server.yml` + `config/canvas-worlds.yml` (region-scheduler options such as `guard-severity`, tick rate, autosave). Default `region-scheduler.guard-severity: LOG` (not Canvas's crash-prone `THROW`); pinned with the other engine defaults in `scripts/test_patch_policy.py`. With LOG, a cross-region access inside a bridged plugin's task counts toward that plugin's Aurora Bridge quarantine (`GuardViolations`).
+- **Region scheduler sizing** → `config/paper-global.yml` `threaded-regions` (`threads`, `grid-exponent`, `scheduler`), not the canvas files. `threads: -1` resolves through MC patch 0002 to every available processor or `aurora.cpu.cores`. Startup logs a thread ledger of every pool against the processor count (also `/perf governor`); it reports, it changes no default.
 - **Crash-prevention + packet-guard limits** → `sourbycraft-security.yml` (checked in; sampled at `sourbycraft-security.yml`).
 
 ## Cherry mixin engine

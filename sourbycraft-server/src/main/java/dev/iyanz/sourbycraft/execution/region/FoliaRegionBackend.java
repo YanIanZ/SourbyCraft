@@ -7,14 +7,15 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * {@link RegionBackend} and {@link CurrentRegion} over the Folia-derived region scheduler.
+ * {@link RegionBackend}, {@link CurrentRegion}, {@link RegionPopulation} and {@link EnginePools} over
+ * the Folia-derived region scheduler and the Moonrise chunk system.
  *
  * <p>With this in place the region scheduler is named in exactly two files: here, and
  * {@link dev.iyanz.sourbycraft.execution.RegionOwnerHandoff}. One answers "how is the engine
  * ticking" and "which region is this thread ticking", the other "hand this to whoever owns that
  * entity". Nothing else reaches the backend.</p>
  */
-public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, RegionPopulation {
+public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, RegionPopulation, EnginePools {
 
     private static final int MAX_CACHED_ANCHORS = 4096;
     /** Anchors by region id; recomputed when the cached chunk has left the region. */
@@ -73,5 +74,21 @@ public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, R
             out.add(new WorldCounts(world.getWorld().getName(), (int)sums[0], sums[1], sums[2], sums[3]));
         }
         return out;
+    }
+
+    // EnginePools: the Moonrise chunk pools' configured sizes, for the thread ledger (audit ENG-9).
+
+    @Override
+    public int chunkWorkerThreads() {
+        return poolSize(ca.spottedleaf.moonrise.common.util.MoonriseCommon.WORKER_POOL);
+    }
+
+    @Override
+    public int chunkIoThreads() {
+        return poolSize(ca.spottedleaf.moonrise.common.util.MoonriseCommon.IO_POOL);
+    }
+
+    private static int poolSize(final ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool pool) {
+        return pool == null ? -1 : pool.getCoreThreads().length;
     }
 }

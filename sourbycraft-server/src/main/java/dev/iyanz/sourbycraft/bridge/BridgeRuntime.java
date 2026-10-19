@@ -29,6 +29,17 @@ import java.util.function.IntSupplier;
  * <p>Quarantine: after {@code quarantineAfter} fatal violations the plugin's bridged tasks are
  * cancelled and new ones rejected. The plugin is not disabled — disabling runs plugin code from
  * whatever thread noticed the violation, which is the thing being contained.</p>
+ *
+ * <p>Guard hits: with the engine's default {@code guard-severity: LOG}, a cross-region access the
+ * engine's tick guard notices is logged and allowed to proceed rather than thrown, so it never
+ * escapes the task body. While a bridged body runs, its plugin is published to the running thread;
+ * such a guard hit is then reported here ({@link GuardViolations#report}) and counted as one
+ * fatal violation of that plugin per body invocation, through the same quarantine path. Its log
+ * line is rate-limited per (plugin, reason). A guard hit outside any bridged body (native plugins,
+ * the server itself) is not the bridge's business and keeps the engine's own log line.</p>
+ *
+ * <p>BRIDGE_IO saturation: a one-shot async task the lane refuses is cancelled; a repeating one
+ * skips that run (counted as a skipped run) and stays scheduled for its next period.</p>
  */
 public final class BridgeRuntime {
 
@@ -83,6 +94,27 @@ public final class BridgeRuntime {
 
     private record Scheduled(String plugin, Object owner, Handle handle, Task task, BridgeRouter.Route route) {}
 
+    /** The bridged body running on this thread, if any; see {@link GuardViolations}. */
+    private static final ThreadLocal<Invocation> CURRENT = new ThreadLocal<>();
+
+    /** One run of a bridged body. Only its own thread touches it. */
+    private static final class Invocation {
+        final BridgeRuntime runtime;
+        final String plugin;
+        final int taskId;
+        /** One body run counts at most one violation, however many guard hits it makes. */
+        boolean violationCounted;
+
+        Invocation(final BridgeRuntime runtime, final String plugin, final int taskId) {
+            this.runtime = runtime;
+            this.plugin = plugin;
+            this.taskId = taskId;
+        }
+    }
+
+    /** How long one (plugin, reason) log line suppresses the next. */
+    static final long LOG_WINDOW_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(60L);
+
     /** A running async callback, including bodies draining after task cancellation. */
     public record AsyncWorker(int taskId, Object owner, Thread thread) {
         // Ownership is instance identity; never invoke plugin equals/hashCode under admission locks.
@@ -104,6 +136,15 @@ public final class BridgeRuntime {
         final Map<Integer, Scheduled> tasks = new ConcurrentHashMap<>();
         boolean disabled;
         int runningAsync;
+        /** Whether admitting this plugin while quarantined has been reported since its last disable. */
+        boolean quarantineAdmitReported;
+    }
+
+    /** Rate-limited log state per (plugin, reason): last logged time and lines suppressed since. */
+    private static final class LogWindow {
+        long lastNanos;
+        long suppressed;
+        boolean logged;
     }
 
     private final BridgeMode mode;
@@ -120,6 +161,10 @@ public final class BridgeRuntime {
     private final java.util.function.Supplier<dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute> syncRoute;
     private final IntSupplier maxPendingTasks;
     private final IntSupplier maxRunningAsyncTasks;
+    /** Bounded by plugins times the engine's fixed set of guard reasons (plus one lane reason). */
+    private final Map<String, LogWindow> logWindows = new ConcurrentHashMap<>();
+    /** Test seam for the log rate limit. */
+    java.util.function.LongSupplier nanoClock = System::nanoTime;
 
     /** Unanchored sync tasks use the global region: no caller-region lookup. */
     public BridgeRuntime(final BridgeMode mode, final IntSupplier quarantineAfter, final Executor executor,
@@ -177,10 +222,21 @@ public final class BridgeRuntime {
             ignored -> new PluginTasks());
         // Admission is asked again only when a plugin of this name is loaded again (a reload after
         // disable). Disable drained the earlier instance's index; reopen it for the new instance.
+        final boolean report;
         synchronized (tasks) {
+            report = quarantined(plugin) && (tasks.disabled || !tasks.quarantineAdmitReported);
+            if (report) tasks.quarantineAdmitReported = true;
             tasks.disabled = false;
         }
         this.telemetry.register(plugin);
+        if (report) {
+            // Quarantine outlives a reload by name; without this the new instance would load and
+            // every task it schedules would be rejected without a word.
+            final BridgeTelemetry.PluginStats stats = this.telemetry.stats(plugin);
+            this.warn.accept("Aurora Bridge admitted " + plugin + " again, but it is quarantined for region-ownership"
+                + " violations earlier in this run; every task it schedules is rejected until the server restarts."
+                + (stats != null && stats.lastFailure() != null ? " Last: " + stats.lastFailure() : ""), null);
+        }
         return true;
     }
 
@@ -288,7 +344,7 @@ public final class BridgeRuntime {
         final Runnable body = () -> runGuarded(entry, period > 0);
         try {
             handle.bind(Objects.requireNonNull(switch (route) {
-                case IO_LANE -> this.executor.async(owner, body, delay, period, () -> rejectedIo(entry));
+                case IO_LANE -> this.executor.async(owner, body, delay, period, () -> rejectedIo(entry, period > 0));
                 case REGION_OWNER -> this.executor.region(owner, anchor, body, delay, period);
                 case ENTITY_OWNER -> this.executor.entity(owner, entity, body, delay, period, () -> retired(entry));
                 default -> this.executor.global(owner, body, delay, period);
@@ -326,12 +382,95 @@ public final class BridgeRuntime {
             + " cancelled: its target entity was removed before it ran (retired)");
     }
 
-    private void rejectedIo(final Scheduled entry) {
+    /**
+     * The BRIDGE_IO lane refused a timed run. A one-shot task has no later run, so it is cancelled.
+     * A repeating task only loses this run: it stays scheduled, the run is counted as skipped, and
+     * the log line is rate-limited -- one plugin filling the lane must not cancel another plugin's
+     * timer for good.
+     */
+    private void rejectedIo(final Scheduled entry, final boolean repeating) {
+        final String reason = "BRIDGE_IO lane is full or stopping";
+        if (repeating) {
+            if (this.scheduled.get(entry.task().id()) != entry || entry.task().cancelled()) return;
+            this.telemetry.skipped(entry.plugin());
+            this.telemetry.failure(entry.plugin(), "run of repeating task " + entry.task().id() + " skipped: " + reason);
+            final long suppressed = admitLog(entry.plugin(), reason);
+            if (suppressed >= 0) {
+                this.warn.accept("Aurora Bridge skipped a run of repeating async task " + entry.task().id() + " for "
+                    + entry.plugin() + ": " + reason + "; the task stays scheduled" + suppressedNote(suppressed),
+                    new java.util.concurrent.RejectedExecutionException(reason));
+            }
+            return;
+        }
         if (!rejected(entry)) return;
-        final var failure = new java.util.concurrent.RejectedExecutionException("BRIDGE_IO lane is full or stopping");
+        final var failure = new java.util.concurrent.RejectedExecutionException(reason);
         this.telemetry.failure(entry.plugin(), failure.getMessage());
         this.warn.accept("Aurora Bridge cancelled async task " + entry.task().id() + " for " + entry.plugin()
             + ": " + failure.getMessage(), failure);
+    }
+
+    /**
+     * Whether a (plugin, reason) line may be logged now.
+     *
+     * @return {@code -1} to suppress it, otherwise how many lines the window suppressed before it
+     */
+    private long admitLog(final String plugin, final String reason) {
+        final LogWindow window = this.logWindows.computeIfAbsent(plugin + '|' + reason, ignored -> new LogWindow());
+        final long now = this.nanoClock.getAsLong();
+        synchronized (window) {
+            if (window.logged && now - window.lastNanos < LOG_WINDOW_NANOS) {
+                window.suppressed++;
+                return -1L;
+            }
+            final long suppressed = window.suppressed;
+            window.logged = true;
+            window.lastNanos = now;
+            window.suppressed = 0L;
+            return suppressed;
+        }
+    }
+
+    private static String suppressedNote(final long suppressed) {
+        return suppressed > 0 ? " (" + suppressed + " more suppressed in the last "
+            + java.util.concurrent.TimeUnit.NANOSECONDS.toSeconds(LOG_WINDOW_NANOS) + " s)" : "";
+    }
+
+    /**
+     * Called by {@link GuardViolations#report} on the thread where the engine's LOG-mode tick
+     * guard saw a cross-region access.
+     *
+     * @return whether a bridged body is running on this thread, so the hit was recorded here
+     */
+    static boolean reportGuardViolation(final String reason) {
+        final Invocation invocation = CURRENT.get();
+        if (invocation == null) return false;
+        invocation.runtime.guardViolation(invocation, reason == null ? "unknown" : reason);
+        return true;
+    }
+
+    private void guardViolation(final Invocation invocation, final String reason) {
+        final String plugin = invocation.plugin;
+        if (invocation.violationCounted) {
+            // A loop touching a hundred foreign blocks is one bad body run, not a hundred.
+            return;
+        }
+        invocation.violationCounted = true;
+        final String description = "cross-region access allowed by guard-severity LOG: " + reason;
+        final long fatal = this.telemetry.fatal(plugin, description);
+        final var evidence = new IllegalStateException("Thread failed main thread check: " + reason);
+        if (fatal >= this.quarantineAfter.getAsInt() && this.telemetry.quarantine(plugin)) {
+            cancelAll(plugin);
+            this.warn.accept("Aurora Bridge quarantined " + plugin + " after " + fatal
+                + " region-ownership violation(s); its bridged tasks are cancelled and new ones rejected. "
+                + "Last: " + description, evidence);
+            return;
+        }
+        final long suppressed = admitLog(plugin, reason);
+        if (suppressed >= 0) {
+            this.warn.accept("Bridged plugin " + plugin + " accessed state owned by another region in task "
+                + invocation.taskId + " (" + reason + "; " + fatal + "/" + this.quarantineAfter.getAsInt()
+                + " before quarantine)" + suppressedNote(suppressed), evidence);
+        }
     }
 
     /** Removes both indexes together; stale callbacks cannot remove another task's entry. */
@@ -397,6 +536,9 @@ public final class BridgeRuntime {
             if (rejected(entry)) capacityFailure(plugin, task.id(), "running async callback limit " + asyncLimit);
             return;
         }
+        final Invocation previous = CURRENT.get();
+        final Invocation invocation = new Invocation(this, plugin, task.id());
+        CURRENT.set(invocation);
         try {
             // Body wall time only: queue wait and failure handling are outside the timed span.
             final long started = System.nanoTime();
@@ -406,8 +548,10 @@ public final class BridgeRuntime {
                 this.telemetry.bodyTime(plugin, BridgeTelemetry.BodyLane.of(entry.route()), System.nanoTime() - started);
             }
         } catch (final Throwable thrown) {
-            onFailure(plugin, thrown, task.id());
+            onFailure(plugin, thrown, task.id(), invocation.violationCounted);
         } finally {
+            if (previous == null) CURRENT.remove();
+            else CURRENT.set(previous);
             this.running.computeIfPresent(task.id(), (id, count) -> count == 1 ? null : count - 1);
             if (async) {
                 this.workers.computeIfPresent(worker, (key, count) -> count == 1 ? null : count - 1);
@@ -427,10 +571,11 @@ public final class BridgeRuntime {
         this.warn.accept("Aurora Bridge cancelled task " + taskId + " for " + plugin + ": " + reason, failure);
     }
 
-    private void onFailure(final String plugin, final Throwable thrown, final int taskId) {
+    private void onFailure(final String plugin, final Throwable thrown, final int taskId, final boolean alreadyCounted) {
         final String description = thrown.getClass().getSimpleName()
             + (thrown.getMessage() == null ? "" : ": " + thrown.getMessage());
-        if (!ViolationClassifier.isRegionViolation(thrown)) {
+        if (!ViolationClassifier.isRegionViolation(thrown) || alreadyCounted) {
+            // A body whose guard hit already counted this run's violation is not counted twice.
             this.telemetry.failure(plugin, description);
             this.warn.accept("Bridged plugin " + plugin + " generated an exception while executing task "
                 + taskId, thrown);

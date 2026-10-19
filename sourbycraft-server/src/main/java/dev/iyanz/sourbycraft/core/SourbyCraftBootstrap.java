@@ -161,6 +161,15 @@ public final class SourbyCraftBootstrap {
             .info(dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
                 TOTAL_STAGES, failureCount, (System.nanoTime() - begun) / 1_000_000L));
         progress.clear();
+        // Configured thread ceilings per pool against the processors (audit ENG-9). Report only.
+        try {
+            for (final String line : dev.iyanz.sourbycraft.execution.ThreadLedger.format(
+                dev.iyanz.sourbycraft.execution.ThreadLedger.collect(), Runtime.getRuntime().availableProcessors())) {
+                java.util.logging.Logger.getLogger("Aurora Engine").info(line);
+            }
+        } catch (final RuntimeException unavailable) {
+            SourbyLogger.debug("thread ledger unavailable: " + unavailable);
+        }
         // Build 47 lifecycle truth: a partial boot is operational but DEGRADED, not healthy.
         // FAILED is reserved for a bootstrap where no stage came up.
         AuroraRuntime.transition(failureCount >= TOTAL_STAGES

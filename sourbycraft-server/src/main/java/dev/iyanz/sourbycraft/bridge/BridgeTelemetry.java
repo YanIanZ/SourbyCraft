@@ -12,8 +12,8 @@ import java.util.concurrent.atomic.LongAdder;
 /**
  * Per-plugin Aurora Bridge counters, as listed under Telemetry in
  * {@code aurora-plugin-bridge.md}: scheduler redirects, owner handoffs, rejected operations,
- * fatal violations, quarantine, startup duration and cache state, the last failure, and the wall
- * time of bridged task bodies per lane.
+ * fatal violations, quarantine, startup duration and cache state, the last failure, the wall
+ * time of bridged task bodies per lane, and runs of repeating async tasks skipped on a full lane.
  *
  * <p>Counters are monotonic and lock-free; {@link #snapshot()} copies them into immutable records
  * for rendering. Entries exist only for plugins the bridge admitted, so the map is bounded by the
@@ -25,7 +25,7 @@ public final class BridgeTelemetry {
     public record PluginStats(String plugin, long schedulerRedirects, long ownerHandoffs,
                               long rejectedOperations, long fatalViolations, boolean quarantined,
                               String lastFailure, long enableMillis, String startupCacheState,
-                              BodyTimes bodyTimes) {}
+                              BodyTimes bodyTimes, long skippedRuns) {}
 
     /** Recent-window size for body-time percentiles, per plugin and lane. */
     static final int BODY_WINDOW = 256;
@@ -101,6 +101,8 @@ public final class BridgeTelemetry {
         final AtomicLong handoffs = new AtomicLong();
         final AtomicLong rejected = new AtomicLong();
         final AtomicLong fatal = new AtomicLong();
+        /** Runs of a repeating async task skipped because the BRIDGE_IO lane was full; the task stays scheduled. */
+        final AtomicLong skipped = new AtomicLong();
         final AtomicBoolean quarantined = new AtomicBoolean();
         final AtomicReference<String> lastFailure = new AtomicReference<>();
         final AtomicLong enableMillis = new AtomicLong(-1L);
@@ -118,6 +120,7 @@ public final class BridgeTelemetry {
     void redirect(final String plugin) { of(plugin).redirects.incrementAndGet(); }
     void handoff(final String plugin) { of(plugin).handoffs.incrementAndGet(); }
     void rejected(final String plugin) { of(plugin).rejected.incrementAndGet(); }
+    void skipped(final String plugin) { of(plugin).skipped.incrementAndGet(); }
     void failure(final String plugin, final String description) { of(plugin).lastFailure.set(description); }
     void enableMillis(final String plugin, final long millis) { of(plugin).enableMillis.set(millis); }
     void cacheState(final String plugin, final String state) { of(plugin).cacheState.set(state); }
@@ -152,7 +155,7 @@ public final class BridgeTelemetry {
         return new PluginStats(plugin, c.redirects.get(), c.handoffs.get(), c.rejected.get(), c.fatal.get(),
             c.quarantined.get(), c.lastFailure.get(), c.enableMillis.get(), c.cacheState.get(),
             new BodyTimes(c.bodies[BodyLane.REGION.ordinal()].snapshot(), c.bodies[BodyLane.GLOBAL.ordinal()].snapshot(),
-                c.bodies[BodyLane.ASYNC.ordinal()].snapshot()));
+                c.bodies[BodyLane.ASYNC.ordinal()].snapshot()), c.skipped.get());
     }
 
     public List<PluginStats> snapshot() {

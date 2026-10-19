@@ -78,7 +78,7 @@ index 45942481a972f2308eae80f6f0f8b886e47016ec..e50157aa7469c654b06dd7d697993b29
      protected PathFinder createPathFinder(final int maxVisitedNodes) {
          this.nodeEvaluator = new AmphibiousNodeEvaluator(false);
 diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2af7b34e81a35d38053ccb0b6484696e0d215e6f 100644
+index 0b5fab274d9471472ffe81dead60e4d0906b0f31..1e61ab4e0aabdd4c140a0957dda48dd54a0e9536 100644
 --- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 +++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 @@ -100,6 +100,17 @@ public abstract class PathNavigation {
@@ -99,7 +99,7 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2af7b34e81a35d38053ccb0b6484696e
              this.path = null;
              this.path = this.createPath(this.targetPos, this.reachRange);
              this.timeLastRecompute = this.tick; // Folia - region threading
-@@ -107,6 +118,99 @@ public abstract class PathNavigation {
+@@ -107,6 +118,139 @@ public abstract class PathNavigation {
          }
      }
  
@@ -126,6 +126,33 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2af7b34e81a35d38053ccb0b6484696e
 +        return true;
 +    }
 +
++    /**
++     * A {@code PathFinder} with its own {@code NodeEvaluator} for one off-thread solve.
++     *
++     * <p>{@link #createPathFinder} assigns the evaluator it creates to {@code this.nodeEvaluator}
++     * as a side effect. That field is the live one: {@code setCanOpenDoors}, {@code canFloat} and
++     * the other flag accessors read and write it, and {@code this.pathFinder} solves with it. So
++     * the live evaluator is put back, and the new one takes over the live door, float and fence
++     * flags, which a fresh evaluator would otherwise have at their defaults.</p>
++     */
++    public final net.minecraft.world.level.pathfinder.PathFinder sourbyIsolatedPathFinder(final int maxVisitedNodes) {
++        final net.minecraft.world.level.pathfinder.NodeEvaluator live = this.nodeEvaluator;
++        final net.minecraft.world.level.pathfinder.PathFinder solver;
++        try {
++            solver = this.createPathFinder(maxVisitedNodes);
++        } finally {
++            final net.minecraft.world.level.pathfinder.NodeEvaluator isolated = this.nodeEvaluator;
++            this.nodeEvaluator = live;
++            if (isolated != null && live != null && isolated != live) {
++                isolated.setCanPassDoors(live.canPassDoors());
++                isolated.setCanOpenDoors(live.canOpenDoors());
++                isolated.setCanFloat(live.canFloat());
++                isolated.setCanWalkOverFences(live.canWalkOverFences());
++            }
++        }
++        return solver;
++    }
++
 +    private boolean sourbyKickAsyncRecompute(final net.minecraft.core.BlockPos targetPos, final int reachRange) {
 +        // The solve runs on a worker, so anything it touches on the mob is touched from a thread
 +        // that does not own the entity. Reads of position and bounding box are tolerable -- they
@@ -137,6 +164,12 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2af7b34e81a35d38053ccb0b6484696e
 +            return false;
 +        }
 +        if (this.mob.getY() < this.level.getMinY() || !this.canUpdatePath()) {
++            return false;
++        }
++        // Ask the pool for room before firing the event and paying for the snapshot: a declined
++        // offload leaves the caller's synchronous recompute to run this slot, so a full pool
++        // never costs a snapshot and never leaves the mob on its stale path.
++        if (!dev.iyanz.sourbycraft.perf.AsyncPathProcessor.hasCapacity()) {
 +            return false;
 +        }
 +        // EntityPathfindEvent must fire on the region thread (Bukkit event), same as createPath.
@@ -154,7 +187,7 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2af7b34e81a35d38053ccb0b6484696e
 +        // A fresh solver per solve — PathFinder/NodeEvaluator hold mutable A* buffers and MUST NOT be
 +        // shared with the region thread's this.pathFinder.
 +        final net.minecraft.world.level.pathfinder.PathFinder solver =
-+            this.createPathFinder(net.minecraft.util.Mth.floor(maxPathLength * 16.0F));
++            this.sourbyIsolatedPathFinder(net.minecraft.util.Mth.floor(maxPathLength * 16.0F));
 +        final float mult = this.maxVisitedNodesMultiplier;
 +        final net.minecraft.world.entity.Mob mob = this.mob;
 +        // The path the mob is following right now, as this solve's validity token. Every event
@@ -165,9 +198,16 @@ index 0b5fab274d9471472ffe81dead60e4d0906b0f31..2af7b34e81a35d38053ccb0b6484696e
 +        // so a retarget shows up here too. No epoch field is needed to see any of it.
 +        final net.minecraft.world.level.pathfinder.Path requested = this.path;
 +        this.sourbyAsyncPathPending = true;
-+        dev.iyanz.sourbycraft.perf.AsyncPathProcessor
-+            .submit(() -> solver.findPath(snapshot, mob, targets, maxPathLength, reachRange, mult))
-+            .whenComplete((path, err) -> dev.iyanz.sourbycraft.perf.AsyncPathCompletion.deliver(
++        final java.util.concurrent.CompletableFuture<net.minecraft.world.level.pathfinder.Path> solving =
++            dev.iyanz.sourbycraft.perf.AsyncPathProcessor
++                .trySubmit(() -> solver.findPath(snapshot, mob, targets, maxPathLength, reachRange, mult));
++        if (solving == null) {
++            // Another region filled the pool since hasCapacity(): run the synchronous recompute
++            // now instead of keeping the stale path. Rare; the pathfind event then fires twice.
++            this.sourbyAsyncPathPending = false;
++            return false;
++        }
++        solving.whenComplete((path, err) -> dev.iyanz.sourbycraft.perf.AsyncPathCompletion.deliver(
 +                dev.iyanz.sourbycraft.execution.RegionOwnerHandoff.forEntity(mob),
 +                owner -> {
 +                    // The region hands back the entity as it is now. A dimension transfer

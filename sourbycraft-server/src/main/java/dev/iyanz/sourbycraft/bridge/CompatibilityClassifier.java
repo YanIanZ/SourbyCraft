@@ -8,10 +8,12 @@ package dev.iyanz.sourbycraft.bridge;
  * fatal compatibility violation is present. Anything weaker falls to a less favourable state, never
  * a stronger one.</p>
  *
- * <p>Today the region-threading base refuses to load a plugin that is not marked
- * {@code folia-supported} or {@code canvas-supported}, and no bridge adapter exists, so
- * {@code bridgeInitialized} is never true in a running server and BRIDGED is unreachable. The rule
- * is kept here so that the day an adapter lands, the state cannot run ahead of it.</p>
+ * <p>A plugin marked neither {@code folia-supported} nor {@code canvas-supported} loads only when
+ * the Aurora Bridge admits it ({@code aurora.bridge.mode = "safe"}, Paper feature patch 0003);
+ * {@code bridgeInitialized} is then {@link AuroraBridge#bridgeInitialized}: bridged and not
+ * quarantined. With the bridge off such a plugin is refused at load and is FAILED. BRIDGED means
+ * only that the bridge routes the plugin's scheduler tasks by ownership; it is not a claim that
+ * the plugin is qualified for region threading.</p>
  */
 public final class CompatibilityClassifier {
 

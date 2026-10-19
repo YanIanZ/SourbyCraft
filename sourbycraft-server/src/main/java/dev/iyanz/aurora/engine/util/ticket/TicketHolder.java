@@ -106,6 +106,20 @@ public class TicketHolder<T extends Record> {
     }
 
     /**
+     * Moves the current ticket, if any, into {@code into}, coalescing with a ticket already there.
+     * Used when a region merges into another before it consumed its save ticket: the merged
+     * chunks are saved, and the ticket reported, by the region that now owns them (audit ENG-5).
+     *
+     * @return whether a ticket was moved
+     */
+    public boolean forwardTo(final TicketHolder<T> into) {
+        final T ticket = pop();
+        if (ticket == null) return false;
+        into.propagate(ticket);
+        return true;
+    }
+
+    /**
      * Fetches the current ticket if present, throws otherwise
      *
      * @return the active ticket

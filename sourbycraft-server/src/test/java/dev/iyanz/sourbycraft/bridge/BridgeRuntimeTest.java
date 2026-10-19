@@ -571,4 +571,144 @@ class BridgeRuntimeTest {
         assertEquals(new BridgeTelemetry.BodyTime(0, 0, 0, 0, 0, 0), region);
         assertEquals(0.0, region.meanMillis());
     }
+
+    // ENG-1: LOG-mode guard hits inside a bridged body reach quarantine.
+
+    @Test
+    void aGuardHitInsideABridgedBodyCountsOncePerRunTowardQuarantine() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 2);
+        bridge.admit("Legacy");
+        final List<Boolean> reported = new ArrayList<>();
+        bridge.submit("Legacy", null, new FakeTask(1, true, 1, () -> {
+            for (int i = 0; i < 3; i++) reported.add(GuardViolations.report("Cannot place block async"));
+        }), 0);
+        final FakeTask innocent = new FakeTask(2, true, 1, () -> {});
+        bridge.submit("Legacy", null, innocent, 0);
+
+        this.executor.fire(0);
+        assertEquals(List.of(true, true, true), reported, "the body's plugin is published to its thread");
+        assertEquals(1, bridge.telemetry().stats("Legacy").fatalViolations(), "one violation per body run");
+        assertFalse(bridge.quarantined("Legacy"));
+
+        this.executor.fire(0);
+        assertEquals(2, bridge.telemetry().stats("Legacy").fatalViolations());
+        assertTrue(bridge.quarantined("Legacy"));
+        assertTrue(innocent.cancelled, "quarantine cancels every bridged task");
+        assertTrue(bridge.telemetry().stats("Legacy").lastFailure().contains("Cannot place block async"));
+    }
+
+    @Test
+    void aGuardHitOutsideAnyBridgedBodyIsLeftToTheEngine() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 1);
+        bridge.admit("Legacy");
+        assertFalse(GuardViolations.report("Cannot place block async"), "native code keeps the engine's log line");
+        assertEquals(0, bridge.telemetry().stats("Legacy").fatalViolations());
+        assertTrue(this.warnings.isEmpty());
+
+        // The published plugin is cleared when the body ends, also when it throws.
+        bridge.submit("Legacy", null, new FakeTask(1, true, -1, () -> { throw new NullPointerException("bug"); }), 0);
+        this.executor.fire(0);
+        assertFalse(GuardViolations.report("Cannot place block async"));
+    }
+
+    @Test
+    void guardHitLogsAreRateLimitedPerPluginAndReason() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 1000);
+        final long[] now = {0L};
+        bridge.nanoClock = () -> now[0];
+        bridge.admit("Legacy");
+        final String[] reason = {"Cannot place block async"};
+        bridge.submit("Legacy", null, new FakeTask(1, true, 1, () -> GuardViolations.report(reason[0])), 0);
+
+        for (int i = 0; i < 5; i++) this.executor.fire(0);
+        assertEquals(5, bridge.telemetry().stats("Legacy").fatalViolations(), "every run still counts");
+        assertEquals(1, this.warnings.size(), "one line per (plugin, reason) per window");
+
+        reason[0] = "Cannot add entity to tracking async";
+        this.executor.fire(0);
+        assertEquals(2, this.warnings.size(), "another reason has its own window");
+
+        now[0] += BridgeRuntime.LOG_WINDOW_NANOS;
+        reason[0] = "Cannot place block async";
+        this.executor.fire(0);
+        assertEquals(3, this.warnings.size());
+        assertTrue(this.warnings.get(2).contains("4 more suppressed"), this.warnings.get(2));
+    }
+
+    @Test
+    void aBodyThatHitsTheGuardAndThenThrowsCountsOnce() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 5);
+        bridge.admit("Legacy");
+        bridge.submit("Legacy", null, new FakeTask(1, true, -1, () -> {
+            GuardViolations.report("Cannot place block async");
+            throw new UnsupportedOperationException("Unsupported in region threading");
+        }), 0);
+        this.executor.fire(0);
+        assertEquals(1, bridge.telemetry().stats("Legacy").fatalViolations());
+    }
+
+    // ENG-6: a full BRIDGE_IO lane skips a repeating task's run instead of cancelling it.
+
+    @Test
+    void ioSaturationSkipsARunOfARepeatingTaskAndKeepsItScheduled() {
+        final List<Runnable> rejections = new ArrayList<>();
+        final AtomicBoolean timerCancelled = new AtomicBoolean();
+        final BridgeRuntime.Executor saturated = new BridgeRuntime.Executor() {
+            @Override public BridgeRuntime.Handle global(Object o, Runnable b, long d, long p) { throw new AssertionError(); }
+            @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p) { throw new AssertionError(); }
+            @Override public BridgeRuntime.Handle async(Object o, Runnable b, long d, long p, Runnable rejected) {
+                rejections.add(rejected);
+                return () -> timerCancelled.set(true);
+            }
+            @Override public BridgeRuntime.Handle region(Object o, dev.iyanz.sourbycraft.execution.region.RegionAnchor a,
+                                                         Runnable b, long d, long p) { throw new AssertionError(); }
+            @Override public BridgeRuntime.Handle entity(Object o, Object e, Runnable b, long d, long p,
+                                                         Runnable r) { throw new AssertionError(); }
+        };
+        final BridgeRuntime bridge = new BridgeRuntime(BridgeMode.SAFE, () -> 3, saturated, new BridgeTelemetry(),
+            (message, thrown) -> this.warnings.add(message));
+        bridge.admit("A");
+        final FakeTask timer = new FakeTask(31, false, 20, () -> {});
+        assertTrue(bridge.submit("A", null, timer, 0));
+        rejections.get(0).run();
+        rejections.get(0).run();
+        assertFalse(timer.cancelled(), "a repeating task survives a full lane");
+        assertFalse(timerCancelled.get());
+        assertTrue(bridge.knows(31));
+        assertEquals(1, bridge.pending("A"));
+        final BridgeTelemetry.PluginStats stats = bridge.telemetry().stats("A");
+        assertEquals(2, stats.skippedRuns());
+        assertEquals(0, stats.rejectedOperations());
+        assertEquals(1, this.warnings.size(), "skips are logged rate-limited");
+
+        bridge.cancel(31);
+        rejections.get(0).run();
+        assertEquals(2, bridge.telemetry().stats("A").skippedRuns(), "a cancelled timer's late rejection is ignored");
+    }
+
+    // ENG-12: re-admitting a quarantined plugin says so once.
+
+    @Test
+    void readmittingAQuarantinedPluginIsLoggedOnce() {
+        final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 1);
+        assertTrue(bridge.admit("Legacy"));
+        assertTrue(this.warnings.isEmpty(), "a first admission is not a quarantine notice");
+        bridge.submit("Legacy", null, new FakeTask(1, true, -1,
+            () -> { throw new UnsupportedOperationException("Unsupported in region threading"); }), 0);
+        this.executor.fire(0);
+        assertTrue(bridge.quarantined("Legacy"));
+        bridge.disable("Legacy");
+        this.warnings.clear();
+
+        assertTrue(bridge.admit("Legacy"), "admission itself is unchanged");
+        assertTrue(bridge.admit("Legacy"), "the loader asks twice per load");
+        assertEquals(1, this.warnings.size(), this.warnings.toString());
+        assertTrue(this.warnings.get(0).contains("quarantined"));
+        assertFalse(bridge.submit("Legacy", null, new FakeTask(2, true, -1, () -> {}), 0),
+            "its tasks are still rejected");
+
+        bridge.disable("Legacy");
+        bridge.admit("Legacy");
+        assertEquals(2, this.warnings.size(), "each reload is reported");
+    }
 }

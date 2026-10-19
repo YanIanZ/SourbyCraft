@@ -36,7 +36,8 @@ public class TickGuard {
             case LOG -> {
                 // ensure tick thread first, since that is required, then we check and log
                 ensureIsTickThread(reason);
-                if (!TickThread.isTickThreadFor(level, chunkX, chunkZ)) {
+                // SourbyCraft - inside a bridged plugin's task the hit counts toward its quarantine
+                if (!TickThread.isTickThreadFor(level, chunkX, chunkZ) && !dev.iyanz.sourbycraft.bridge.GuardViolations.report(reason)) {
                     LOGGER.warn("Thread failed main thread check: {}, context={}, world={}, chunk_pos={}", reason, getThreadContext(), WorldUtil.getWorldName(level), new ChunkPos(chunkX, chunkZ), new Throwable());
                 }
             }
@@ -50,7 +51,8 @@ public class TickGuard {
             case LOG -> {
                 // ensure tick thread first, since that is required, then we check and log
                 ensureIsTickThread(reason);
-                if (!TickThread.isTickThreadFor(entity)) {
+                // SourbyCraft - inside a bridged plugin's task the hit counts toward its quarantine
+                if (!TickThread.isTickThreadFor(entity) && !dev.iyanz.sourbycraft.bridge.GuardViolations.report(reason)) {
                     LOGGER.warn("Thread failed main thread check: {}, context={}, entity={}", reason, getThreadContext(), TickThread.getEntityContext(entity), new Throwable());
                 }
             }

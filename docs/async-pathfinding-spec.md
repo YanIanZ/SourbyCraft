@@ -38,9 +38,14 @@ only **chunk references**; block reads dereference the live mutable section pale
 
 2. **`AsyncPathProcessor`** — bounded platform-thread pool (size ~`max(1, cores/4)`; CPU-bound,
    NOT virtual threads). Submits `() -> pathFinder.findPath(snapshot, ...)`. Each solve owns its
-   own `PathFinder`/`NodeEvaluator` (mutable A* buffers are never shared across threads).
-   Saturation uses **backpressure**: a full queue refuses the periodic recompute instead of
-   CallerRuns. The mob keeps its current valid path and can retry on a later recompute.
+   own `PathFinder`/`NodeEvaluator` (mutable A* buffers are never shared across threads). The
+   solver comes from `PathNavigation.sourbyIsolatedPathFinder`: `createPathFinder` assigns the
+   evaluator it creates to the navigation's live `nodeEvaluator` field as a side effect, so the
+   live evaluator is restored and the solver's copy takes over its `canPassDoors`,
+   `canOpenDoors`, `canFloat` and `canWalkOverFences` flags (audit ENG-2; before 2026-10-14 each
+   offload replaced the mob's live evaluator and reset those flags to their defaults).
+   Saturation never runs a refused solve on the pool's caller (no CallerRuns); see the
+   saturation contract below for what the navigation does instead.
 
 3. **Periodic recompute only** — `PathNavigation.recomputePath` offloads only when the mob already
    has a live, unfinished path. Snapshot + event validation happen on the owning region thread;
@@ -73,16 +78,24 @@ Saturation must not create a latency cliff.
 Current contract:
 
 ```text
-worker capacity available -> solve asynchronously
-queue full               -> refuse this periodic recompute
-refused result            -> keep current live path
-later recompute           -> may try again
-shutdown/failure          -> refuse admission
+worker capacity available       -> snapshot, solve asynchronously
+no capacity (hasCapacity false) -> decline the offload before the event and the snapshot;
+                                   the vanilla synchronous recompute runs this slot
+queue filled since the check    -> trySubmit returns null; the vanilla recompute runs this
+  (trySubmit null)                 slot (the snapshot was wasted and EntityPathfindEvent
+                                   fires a second time; a narrow race)
+shutdown/stopping               -> no capacity, as above
+solver failure                  -> null result, the mob keeps its live path; logged at most
+                                   once a minute with a suppressed count
 ```
 
-A rejected solve must **never** be executed on the submitting region thread. This is a reliability
-rule, not a throughput claim: snapshot creation has already consumed region-thread work, so adding
-a full synchronous A* after rejection creates positive feedback exactly when the server is loaded.
+The pool itself never executes a refused solve on the submitting thread. Since 2026-10-14 (audit
+ENG-7/ENG-14) a refusal no longer consumes the recompute slot: the old contract kept the stale
+path and skipped the recompute, and it paid for the snapshot before learning the pool was full.
+Capacity is now checked first, so a declined offload costs exactly what the feature-off path
+costs (one synchronous A*) and nothing more; under saturation the region thread does the
+vanilla work, not vanilla work plus a snapshot. This is a correctness/latency-cliff statement,
+not a throughput claim; no measurement backs a number here.
 
 `/perf async` exposes refused submissions. A rising refusal count means the async feature is at
 capacity and needs workload-specific investigation; it does not justify adding threads blindly.

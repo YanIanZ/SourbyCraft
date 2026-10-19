@@ -1,0 +1,158 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 14 Oct 2026 02:08:50 +0700
+Subject: [PATCH] SourbyCraft - drain region work and close storage when a
+ world unloads
+
+A world being unloaded stops ticking its regions, and the work queued
+on them was abandoned: entity schedulers neither ran nor retired their
+tasks (Folia promises one of the two), region scheduler tasks stayed
+IDLE forever and queued region tasks kept their runnables. After the
+chunks are saved, the world's shutdown thread now retires every entity
+scheduler holding tasks (invoking the retired callbacks), cancels the
+region scheduler tasks and cancels the queued region tasks without
+running them (WorldUnloadDrain).
+
+The world's region storage was closed only by the last region's chunk
+save, so a world unloaded with no region kept its region files open,
+and an Aurora World Fabric world its stores and Redis lease, until the
+server stopped. Without a region the storage is now flushed and closed
+directly.
+
+diff --git a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
+index ac9669706b5ba1e62fe98d8e69af1c17e54574db..f14120ef6678d0cebd3c6805736c637b22959973 100644
+--- a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
++++ b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
+@@ -183,6 +183,8 @@ public class WorldShutdownThread extends RegionShutdownThread {
+                     region = regions.get(i);
+                 saveRegionChunks(region, (i + 1) == regions.size());
+             }
++            // SourbyCraft - the last region's save closes the world's storage; without a region it must be closed here
++            WorldUnloadDrain.closeStorageWithoutRegions(this.level, regions.size());
+         } catch (final Throwable thrown) {
+             LOGGER.error("Failed to save chunks in {}", getWorldName(), thrown);
+             throw thrown;
+@@ -190,6 +192,9 @@ public class WorldShutdownThread extends RegionShutdownThread {
+             LOGGER.info("Saved chunks in {}", getWorldName());
+         }
+ 
++        // SourbyCraft - retire entity schedulers, cancel region scheduler and queued region tasks
++        WorldUnloadDrain.drain(this, this.level, regions, LOGGER);
++
+         // now we save level data and force pearl data save
+ 
+         saveLevelData(this.level);
+diff --git a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+index e66ce540744b9a93d0505dbb875d5e55d5009a1c..2ae2b9799bc3709dbea96f1d1cd86bf72b6d605c 100644
+--- a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
++++ b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+@@ -305,6 +305,18 @@ public final class RegionizedTaskQueue {
+         public boolean hasTasks() {
+             return !this.tickTaskQueue.isEmpty() || !this.chunkQueue.isEmpty();
+         }
++
++        // SourbyCraft start - cancel-only drain for an unloading world
++        /**
++         * Cancels every queued task without running it, for a region of a world being unloaded:
++         * it never ticks again. Chunk tickets are not released; the world's chunk system is closed.
++         *
++         * @return how many tasks were cancelled
++         */
++        public int sourbyCancelQueuedTasks() {
++            return this.tickTaskQueue.sourbyCancelAll() + this.chunkQueue.sourbyCancelAll();
++        }
++        // SourbyCraft end - cancel-only drain for an unloading world
+     }
+ 
+     static final class PrioritisedQueue {
+@@ -334,6 +346,27 @@ public final class RegionizedTaskQueue {
+             }
+         }
+ 
++        // SourbyCraft start - cancel-only drain for an unloading world
++        int sourbyCancelAll() {
++            final java.util.List<ChunkBasedPriorityTask> drained = new java.util.ArrayList<>();
++            synchronized (this) {
++                for (final ArrayDeque<ChunkBasedPriorityTask> queue : this.queues) {
++                    ChunkBasedPriorityTask task;
++                    while ((task = queue.pollFirst()) != null) {
++                        drained.add(task);
++                    }
++                }
++            }
++            int cancelled = 0;
++            for (final ChunkBasedPriorityTask task : drained) {
++                if (task.sourbyCancelWithoutTicket()) {
++                    ++cancelled;
++                }
++            }
++            return cancelled;
++        }
++        // SourbyCraft end - cancel-only drain for an unloading world
++
+         public boolean isEmpty() {
+             final ArrayDeque<ChunkBasedPriorityTask>[] queues = this.queues;
+             final int max = Priority.IDLE.priority;
+@@ -558,6 +591,23 @@ public final class RegionizedTaskQueue {
+                 this.run = null;
+             }
+ 
++            // SourbyCraft start - cancel-only drain for an unloading world
++            // Claims the task like tryComplete(true) but leaves its chunk ticket alone: the world's
++            // chunk system is already closed when an unload drains its queues.
++            private boolean sourbyCancelWithoutTicket() {
++                for (ReferenceCountData curr = this.getReferenceCounterVolatile();;) {
++                    if (curr == null) {
++                        return false;
++                    }
++                    if (curr == (curr = this.compareAndExchangeReferenceCounter(curr, null))) {
++                        this.setPriorityVolatile(Priority.COMPLETING);
++                        this.cancelInternal();
++                        return true;
++                    }
++                }
++            }
++            // SourbyCraft end - cancel-only drain for an unloading world
++
+             private boolean tryComplete(final boolean cancel) {
+                 int failures = 0;
+                 for (ReferenceCountData curr = this.getReferenceCounterVolatile();;) {
+diff --git a/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java b/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
+index 31478be4da6f1bdb184b4579338eca7942a3098e..f2dd35f0f6fbc1f54920389e084d9f91c49316f9 100644
+--- a/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
+@@ -150,6 +150,34 @@ public final class FoliaRegionScheduler implements RegionScheduler {
+         SCHEDULER_DATA.get().tick();
+     }
+ 
++    // SourbyCraft start - cancel what a region of an unloading world still holds
++    /**
++     * Cancels every task the current region's scheduler holds, for a region of a world being
++     * unloaded: it never ticks again, so the tasks would otherwise stay {@code IDLE} forever.
++     * Chunk tickets are left alone; the world's chunk system is closed by then.
++     *
++     * @return how many tasks were cancelled
++     */
++    public static int sourbyCancelCurrentRegionTasks() {
++        final Scheduler scheduler = SCHEDULER_DATA.get();
++        if (scheduler == null) {
++            return 0;
++        }
++        int cancelled = 0;
++        for (final Long2ObjectOpenHashMap<List<LocationScheduledTask>> section : scheduler.tasksByDeadlineBySection.values()) {
++            for (final List<LocationScheduledTask> tasks : section.values()) {
++                for (final LocationScheduledTask task : tasks) {
++                    if (task.cancel() == ScheduledTask.CancelledState.CANCELLED_BY_CALLER) {
++                        ++cancelled;
++                    }
++                }
++            }
++        }
++        scheduler.tasksByDeadlineBySection.clear();
++        return cancelled;
++    }
++    // SourbyCraft end - cancel what a region of an unloading world still holds
++
+     private static final class Scheduler {
+ 
+         private Scheduler(final TickRegions.TickRegionData regionData) {}

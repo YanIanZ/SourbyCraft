@@ -34,6 +34,51 @@ public record SaveAllTicket(Runnable callback, Consumer<Throwable> exceptionProp
     }
 
     /**
+     * Splits this ticket among the regions a region split into (audit ENG-5): one part per region,
+     * each saving its region's chunks with this ticket's flush option. This ticket's callback runs
+     * once, when the last part has run its callback, so a {@code save-all} (or a world save
+     * barrier) is not told the save finished while a part of the old region is still unsaved.
+     * Every part reports failures to this ticket's exception callback.
+     *
+     * @param parts how many regions; at least 1
+     */
+    public List<SaveAllTicket> split(final int parts) {
+        if (parts < 1) throw new IllegalArgumentException("a split has at least one part");
+        if (parts == 1) return List.of(this);
+        final java.util.concurrent.atomic.AtomicInteger remaining = new java.util.concurrent.atomic.AtomicInteger(parts);
+        final Runnable whole = this.callback;
+        final List<SaveAllTicket> split = new ArrayList<>(parts);
+        for (int i = 0; i < parts; i++) {
+            final java.util.concurrent.atomic.AtomicBoolean done = new java.util.concurrent.atomic.AtomicBoolean();
+            split.add(new SaveAllTicket(() -> {
+                // A part counts once even if its callback is invoked twice.
+                if (done.compareAndSet(false, true) && remaining.decrementAndGet() == 0) whole.run();
+            }, this.exceptionPropagator, this.flush));
+        }
+        return List.copyOf(split);
+    }
+
+    /**
+     * A ticket that completes {@code future} when its region has saved, off the calling thread
+     * (audit ENG-10): the callback can run under the regioniser's write lock (a region destroyed
+     * while holding the ticket), and a caller's synchronous dependent of the future must not run
+     * there. A failure reported first completes the future exceptionally; the callback that always
+     * follows it does not overwrite that.
+     */
+    public static SaveAllTicket completing(final java.util.concurrent.CompletableFuture<Void> future, final boolean flush) {
+        final java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>();
+        return new SaveAllTicket(() -> completeOffThread(future, failure.get()),
+            thrown -> failure.compareAndSet(null, thrown), flush);
+    }
+
+    private static void completeOffThread(final java.util.concurrent.CompletableFuture<Void> future, final Throwable failure) {
+        Thread.ofVirtual().name("Aurora save ticket completion").start(() -> {
+            if (failure != null) future.completeExceptionally(failure);
+            else future.complete(null);
+        });
+    }
+
+    /**
      * Coalesced callbacks, kept flat rather than nested so a ticket that absorbed many others runs
      * them in order without a deep call chain. Every one runs even if an earlier one throws; the
      * first failure is rethrown afterwards with the others suppressed.

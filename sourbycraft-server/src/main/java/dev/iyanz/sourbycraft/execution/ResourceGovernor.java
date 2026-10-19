@@ -58,6 +58,11 @@ public final class ResourceGovernor {
         this.budgets = java.util.Objects.requireNonNull(scheduler, "scheduler");
     }
 
+    /** The budgets lanes are (or will be) created with. */
+    public dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler budgets() {
+        return this.budgets;
+    }
+
     /** The lane, created on first use with its configured budget. */
     public GovernedLane lane(final Lane lane) {
         return this.lanes.computeIfAbsent(lane, l -> {

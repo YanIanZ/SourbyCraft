@@ -25,6 +25,16 @@ class ViolationClassifierTest {
     }
 
     @Test
+    void theEngineTickGuardsOffTickThreadRefusalIsAViolation() {
+        // An async bridged body calling e.g. openInventory: TickGuard refuses it with a plain ISE.
+        final IllegalStateException fromGuard = new IllegalStateException("Cannot open inventory async");
+        fromGuard.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("dev.iyanz.aurora.engine.util.TickGuard", "ensureIsTickThread", "TickGuard.java", 1),
+            new StackTraceElement("dev.iyanz.aurora.engine.util.TickGuard", "guard", "TickGuard.java", 1)});
+        assertTrue(ViolationClassifier.isRegionViolation(fromGuard));
+    }
+
+    @Test
     void aWrappedViolationIsFound() {
         assertTrue(ViolationClassifier.isRegionViolation(
             new RuntimeException("task failed", new UnsupportedOperationException("Unsupported in region threading"))));

@@ -12,8 +12,10 @@ import java.util.Locale;
  *
  * <p>The base signals ownership violations with {@code UnsupportedOperationException} ("Unsupported
  * in region threading", "Not on any region") and with {@code IllegalStateException} thrown from
- * {@code TickThread.ensureTickThread}. Both shapes are matched here; anything else is not a
- * violation.</p>
+ * {@code TickThread.ensureTickThread} or by the engine's {@code TickGuard}. These shapes are
+ * matched here; anything else is not a violation. A cross-region access the guard lets through
+ * ({@code guard-severity: LOG}) throws nothing and reaches the bridge through
+ * {@link GuardViolations} instead.</p>
  */
 public final class ViolationClassifier {
 
@@ -40,6 +42,11 @@ public final class ViolationClassifier {
         }
         for (final StackTraceElement frame : t.getStackTrace()) {
             if (frame.getClassName().endsWith(".TickThread") && frame.getMethodName().startsWith("ensureTickThread")) {
+                return true;
+            }
+            // The engine's tick guard refuses a body running on no tick thread at all (an async
+            // task opening an inventory, say) with a plain IllegalStateException of its own.
+            if (frame.getClassName().endsWith(".TickGuard")) {
                 return true;
             }
         }

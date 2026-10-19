@@ -75,6 +75,26 @@ this increment remains assigned to Claude.
   default 3) violations, the plugin's bridged tasks are cancelled and new ones are rejected. The
   plugin is not disabled: disabling would run plugin code on whichever thread noticed the
   violation.
+- **Guard hits under `guard-severity: LOG` (2026-10-14, audit ENG-1; unit-tested, no boot
+  fixture yet).** With the engine default `LOG`, a cross-region access the tick guard notices
+  (`TickGuard`, 13 call sites: block placement, entity tracking, menus, potion effects, game
+  mode, ...) is logged and proceeds; it never throws, so the rule above never saw it. While a
+  bridged body runs, `BridgeRuntime` publishes its plugin to the running thread, and the guard
+  reports the hit to `GuardViolations`: it counts as one fatal violation of that plugin per body
+  run (however many hits the run makes) through the same quarantine path, and its log line is
+  rate-limited to one per (plugin, reason) per 60 s with a suppressed count. The access itself is
+  still allowed (LOG decides that). A hit outside any bridged body (native plugins, the server)
+  keeps the engine's own log line, unchanged. Attribution is by thread: a hit inside a bridged
+  body is charged to that body's plugin even when something it called made the access. An
+  off-tick-thread refusal from `TickGuard` (an async body opening an inventory) is now classified
+  as a violation too.
+- **Full `BRIDGE_IO` lane (2026-10-14, ENG-6).** A one-shot async task the lane refuses is
+  cancelled, as before. A repeating async task only skips that run: it stays scheduled, the run
+  is counted (`skippedRuns` in the plugin's telemetry), and the log line is rate-limited. Before,
+  one plugin filling the lane cancelled other plugins' timers for good.
+- **Quarantine outlives a reload (ENG-12).** Re-admitting a quarantined plugin by name (a reload
+  after disable) still admits it and still rejects every task it schedules; the bridge now logs
+  that once per admission instead of saying nothing.
 - **Telemetry.** Per plugin: scheduler redirects, owner handoffs (region- and entity-owner task routing),
   rejected operations, fatal violations, quarantine, startup cache state and last
   failure. `/plugins <name>` shows them.
