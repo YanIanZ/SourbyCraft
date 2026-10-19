@@ -104,10 +104,11 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 - [x] **ENG-4** Task batal yang antre di section ter-unload bisa membuat split melempar di bawah
   write lock regioniser dan menghentikan server (PLAUSIBLE) — lewati task batal saat split (audit §2)
   — selesai `1c57a736` (2026-10-20): MC 0032, `RegionTaskQueueDrainTest`
-- [ ] **SEC-1** `sourbycraft-security.yml` tanpa consumer sejak `6b774810`: tidak ada guard
+- [x] **SEC-1** `sourbycraft-security.yml` tanpa consumer sejak `6b774810`: tidak ada guard
   packet/NBT/book/sign/payload, padahal docs bilang ditegakkan — **keputusan owner: bangun ulang**
   sebagai `dev.iyanz.sourbycraft.security` + satu feature patch, mode LOG dulu, tes per limit, cek
   policy bahwa setiap key punya consumer (audit §3)
+  — selesai `41a444f5` (2026-10-20): guard di `dev.iyanz.sourbycraft.security`, MC 0034/0038/0040, mode LOG default; perbaikan review Opus (klik drag, NBT di bawah kuota vanilla, test hook decoder). Belum ada soak keamanan/boot proxy
 - [ ] **SEC-2** Auto-updater hanya mempercayai respons API GitHub (tanpa tanda tangan), default
   `apply_mode=auto` — **keputusan owner:** rilis bertanda tangan (Ed25519, public key di jar), default `notify` (audit §3)
   — sebagian `4a830168` (2026-10-20): default `apply_mode=notify` (seed + docs `AUTO-UPDATER.md`), verifier Ed25519 aktif hanya bila `META-INF/sourbycraft-release.pub` ada di jar (tidak ada key yang dikirim), gate versi MC sama; BELUM: key pair + secret CI + langkah signing (keputusan owner)
@@ -123,10 +124,11 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 - [x] **OBS-2** `/speedtest` yang menggantung mengunci command selamanya dan membocorkan proses —
   baca output paralel, tunggu dengan timeout (audit §4)
   — selesai `1b33fe1e` (2026-10-20): stdout/stderr dikuras di thread sendiri, `waitFor(timeout)` lalu `destroyForcibly()`, flag in-flight selalu direset; `SpeedtestCommandTest` 5
-- [ ] **OBS-3** Identitas build tidak terikat ke tree (tanpa flag dirty/tree hash; CI tidak cek
+- [x] **OBS-3** Identitas build tidak terikat ke tree (tanpa flag dirty/tree hash; CI tidak cek
   `Git-Commit`) — `-dirty`, tree hash, cek `--commit $GITHUB_SHA` (audit §4)
 
 ### Keputusan owner
+  — selesai `d4269dcb` (2026-10-20): tree hash + flag dirty (repo materialisasi termasuk minecraft/resources, file build tergenerasi), `--commit $GITHUB_SHA` di CI; CI run berikutnya adalah bukti pertama di runner
 - [!] **Lisensi:** repo memakai PolyForm Noncommercial, sementara jar yang didistribusikan berisi kode
   server Paper berlisensi GPLv3. Perlu keputusan apakah kombinasi ini memenuhi GPLv3
   (`docs/releases/26.2-build-47-aurora-nexus.md`). Ini juga menentukan bentuk migrasi penuh di P2.
@@ -244,7 +246,8 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 - [-] Bukti runtime bahwa thread region tidak pernah blok pada I/O eksternal (saat ini baru audit statis)
 
 ### Jaringan dan keamanan
-- [ ] Verifikasi event loop Netty tidak melakukan I/O blocking yang tidak terkait (DEV-H)
+- [x] Verifikasi event loop Netty tidak melakukan I/O blocking yang tidak terkait (DEV-H)
+  — audit sumber `41a444f5` (2026-10-20) di `region-io-audit.md`; H1 (MC 0035) dan H4/H5 (MC 0037) diperbaiki; H2/H3/H6 = panduan plugin `PLUGIN-NETTY-GUIDANCE.md`; tanpa bukti runtime
 - [ ] Pertahankan limit packet/security (`sourbycraft-security.yml`) di setiap perubahan network.
   Catatan audit 2026-10-14: file itu tidak punya consumer sejak `6b774810`, jadi saat ini tidak ada
   limit yang ditegakkan — lihat **SEC-1** di bawah
@@ -403,8 +406,9 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [x] **ENG-7** Penolakan path async memakai slot recompute tanpa fallback sinkron — kembalikan
   null saat ditolak supaya vanilla jalan (audit §2)
   — selesai `1c57a736` (2026-10-20): `AsyncPathProcessor.trySubmit` null → recompute sinkron vanilla, `AsyncPathRefusalTest`
-- [ ] **ENG-8** Worker path membaca state mob hidup di luar owner — snapshot immutable yang diambil
+- [x] **ENG-8** Worker path membaca state mob hidup di luar owner — snapshot immutable yang diambil
   di owner (audit §2; terkait audit snapshot M5 di P0 *Konkurensi*)
+  — selesai `41a444f5` (2026-10-20): MC 0039 `MobPathSnapshot` diambil di owner; worker tidak menyentuh Mob hidup (`MobPathSnapshotTest`); fitur tetap default off, soak flag-on masih terbuka (papan)
 - [x] **ENG-9** Oversubscription CPU secara default (thread region = semua prosesor ditambah pool
   chunk, async, Netty, path, bridge) — ledger thread saat boot; ubah default hanya dengan bukti A/B (audit §2)
   — ledger saja, selesai `1c57a736` (2026-10-20): `ThreadLedger` di log boot dan `/perf governor` (boot lokal: 22 thread / 8 prosesor, 2.8x); default TIDAK diubah
@@ -414,9 +418,10 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [x] **SEC-5** SourbyClip memanggil tiga layanan geo-IP setiap boot, dua lewat HTTP biasa —
   **keputusan owner: hapus lookup** di repo SourbyClip (audit §3)
   — selesai `5a3806f1` (2026-10-20): SourbyClip 3.1.2 (`85b4dd70`, tanpa `IPUtil`/geo-IP) di-pin di `gradle.properties` + lock file; artifact Maven Local hash = pin; slimServerJar 40.756.217 B; test_clip_launcher 4/4; ClipDownloadProbe/ClipLaunchProbe hijau (probe hash-rejection disesuaikan ke chained IOException 3.1.2); boot lokal: banner `=== SourbyClip 3.1.2 ===`, `Done (` 21.3s, `stop` exit 0; bawa 3.1.1: terminal controls, worker lifecycle, `--sourbyclip-prepare`
-- [ ] **SEC-6** `ViaAutoUpdate` menimpa pin Via, bisa memasang versi yang tidak mencantumkan MC
+- [x] **SEC-6** `ViaAutoUpdate` menimpa pin Via, bisa memasang versi yang tidak mencantumkan MC
   yang berjalan, mempercayai hash dari API, menghapus jar operator — hanya versi yang mencantumkan
   versi MC, jangan hapus jar yang bukan milik kita, batasi ukuran (audit §3)
+  — selesai `d93794eb` (2026-10-20): Via hanya memulihkan pin yang direview (metadata harus mencantumkan versi MC, hash pin, ukuran dibatasi, jar operator tidak dihapus, tanpa request bila jar ada)
 - [ ] **SEC-7** Pin ProtocolLib menunjuk asset `dev-build` yang bisa berubah, belum pernah di-boot —
   pin rilis bertag, probe CI terjadwal (audit §3)
 - [x] **SEC-8** CI: action di-pin per tag bukan SHA; `contents: write` untuk seluruh job — pin
@@ -571,9 +576,10 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [x] **SEC-10** Download updater tanpa batas sebelum cek ukuran; polling tanpa autentikasi tiap
   30 menit (PLAUSIBLE) — copy terbatas; ETag / Retry-After (audit §3)
   — selesai `4a830168` (2026-10-20): `Content-Length` di atas batas ditolak sebelum dibaca, stream dipotong di batas; `ETag`/`If-None-Match` + 304; `Retry-After`/`X-RateLimit-*` backoff (`RATE_LIMITED`)
-- [ ] **SEC-11** Baseline Folia membuang guard login Paper (`max-joins-per-tick`, pre-login sinkron,
+- [x] **SEC-11** Baseline Folia membuang guard login Paper (`max-joins-per-tick`, pre-login sinkron,
   profil duplikat) — warisan, belum didokumentasikan; dokumentasikan + limit laju koneksi (audit §3)
   — didokumentasikan `65dba8fb` (2026-10-20) di `docs/development/LOGIN-GUARDS.md` (buffer join per tick diganti `if (true)`, `PlayerPreLoginEvent` sinkron tidak pernah menyala, jalur duplicate-profile diganti `pushPendingJoin`); rate limit koneksi BELUM dibangun
+  — rate limit selesai `41a444f5` (2026-10-20): MC 0036/0041, LRU + overflow hanya global, epoch monoton, loopback dikecualikan, kunci alamat forward di belakang proxy, IPv6 /64; tidak ada uji proxy/TCP nyata
 - [x] **SEC-12** Base image Docker tidak di-pin per digest; label lisensi — pin digest; label
   setelah keputusan SEC-13 (audit §3)
   — selesai `65dba8fb` (2026-10-20): `FROM eclipse-temurin:25-jre@sha256:dbb43d81…` (digest dari `docker buildx imagetools inspect`, dicocokkan dengan header registry); label lisensi menunggu SEC-13; `docker build` belum dijalankan (daemon mati)
@@ -585,6 +591,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [ ] **OBS-14** Lubang cakupan tes (engine, hud, maxplayers, lang, update, bootstrap); tes sensitif
   waktu — tes berprioritas; clock yang diinjeksi (audit §4)
   — daftar prioritas `65dba8fb` (2026-10-20) di `docs/development/TEST-COVERAGE-GAPS.md` (P1–P3 + 10 test sensitif waktu dengan seam clock); test Java-nya belum ditulis
+  — 86 test P1 `b5766689` (2026-10-20) untuk hud/maxplayers/lang/engine util; sisa seam (SourbyCraftConfig, HudBars scheduler, PearlsMigration) di papan
 - [x] **OBS-15** `averageGcPauseMs` adalah waktu koleksi, bukan pause STW — caveat di javadoc (audit §4)
   — selesai `65dba8fb` (2026-10-20): caveat javadoc `RuntimeMetrics.averageGcPauseMs()`/`gcTimePercent()` dan `GcTracker` (waktu koleksi, bukan pause STW)
 - [x] **OBS-16** Kesiapan baseline berpatokan `Done (`, yang kini bisa mendahului terrain spawn
