@@ -94,6 +94,8 @@ jobs:
         env:
           # The Redis backend tests start their own redis-server; here they must run, not skip.
           SOURBY_REQUIRE_REDIS: "1"
+          # zstd-dependent AWF/Slime tests must fail instead of silently skipping (OBS-9).
+          SOURBY_REQUIRE_ZSTD: "1"
         run: ./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test :test-plugin:jar :legacy-test-plugin:jar --no-daemon --stacktrace
 
       - name: Validate release identity and profiling scripts
