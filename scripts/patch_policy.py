@@ -4,15 +4,60 @@
 The patch files are the source of truth; the materialized sources under
 `src/minecraft/java` are regenerated from them. Checking the patches catches a rule
 break at the point it is introduced and needs no build.
+
+Which files are read
+--------------------
+Every `*.patch` under the three patch trees below is a SourbyCraft change to Minecraft or
+Paper, and every rule in this module reads all of them:
+
+    sourbycraft-server/minecraft-patches     (features/, parked/, todo/, resources/, ...)
+    sourbycraft-server/paper-patches         (features/)
+    sourbyapi/paper-patches                  (features/)   <- Paper API tree
+
+The inherited engine baseline — `minecraft-patches/sources`, `paper-patches/files` and
+`sourbyapi/paper-patches/files` (AGENTS.md, "Patch application") — is excluded; it is not a
+SourbyCraft change and `scripts/baseline_policy.py` polices it against
+`build-data/engine-baseline.sha256` instead.
+
+The roots are the patch *trees*, not a list of leaf directories, so a patch cannot escape the
+rules by sitting in a directory nobody thought to list. That is the audit-2026-10-14 OBS-7
+failure mode, which was a root tuple that silently skipped what it did not know about. A tree
+that is missing entirely is reported by `missing_trees()` and fails `main()` rather than
+shrinking the audit quietly.
+
+Consequences of walking the tree, and why they are deliberate:
+
+* `parked/` is scanned. Its patches are held out of the build by owner decision
+  (`parked/README.md`), so they ship nothing today — but unparking is a file move back into
+  `features/`, not a re-review, and the rules should report a break where it was written
+  rather than at the unpark that finally ships it.
+* `todo/` (an unapplied Java fragment today) and `resources/` (an empty scratch directory) are
+  covered by the same walk. Neither ships, and neither is *required* to exist: git cannot
+  track an empty directory, so demanding them would fail a clean checkout. Walking the tree
+  means a `*.patch` dropped in either cannot sit outside the rules, which is the part that
+  matters.
+* A fourth location added later is scanned without editing this file.
 """
+import argparse
 import re
+import sys
 from pathlib import Path
 
-# SourbyCraft's own edits. minecraft-patches/sources and paper-patches/files are the engine
-# baseline inherited from Canvas/Folia when Paper became the only upstream; every SourbyCraft
-# change to that baseline is a feature patch, so these rules see all of them and nothing else.
-PATCH_ROOTS = ("sourbycraft-server/minecraft-patches/features",
-               "sourbycraft-server/paper-patches/features")
+# The three patch trees that carry SourbyCraft's own changes. Every `*.patch` under one of
+# them is read except under the baseline directories below.
+PATCH_TREES = (
+    "sourbycraft-server/minecraft-patches",
+    "sourbycraft-server/paper-patches",
+    "sourbyapi/paper-patches",
+)
+
+# The engine baseline inherited from Canvas/Folia when Paper became the only upstream. These
+# are base patches, not SourbyCraft changes; `scripts/baseline_policy.py` owns them.
+BASELINE_DIRS = (
+    "sourbycraft-server/minecraft-patches/sources",
+    "sourbycraft-server/paper-patches/files",
+    "sourbyapi/paper-patches/files",
+)
 
 # Classes whose single instance is reached by more than one region thread. ServerLevel is
 # subdivided into many regions by ServerLevel.regioniser and every region thread calls
@@ -44,10 +89,22 @@ ARRAY_FIELD = re.compile(r"^\+ {4}(?:@\w+\s+)*(?:private|protected|public|static
 
 
 def patch_files(root):
-    for directory in PATCH_ROOTS:
-        base = Path(root) / directory
-        if base.is_dir():
-            yield from sorted(base.rglob("*.patch"))
+    """Every SourbyCraft patch under the three patch trees, sorted, engine baseline excluded."""
+    root = Path(root)
+    excluded = [root / directory for directory in BASELINE_DIRS]
+    for tree in PATCH_TREES:
+        base = root / tree
+        if not base.is_dir():
+            continue  # reported by missing_trees(); never silently shrinks the audit
+        for path in sorted(base.rglob("*.patch")):
+            if any(directory == path or directory in path.parents for directory in excluded):
+                continue
+            yield path
+
+
+def missing_trees(root):
+    """Patch trees that do not exist. Non-empty means the audit just shrank; do not ignore."""
+    return [tree for tree in PATCH_TREES if not (Path(root) / tree).is_dir()]
 
 
 def added_fields_on(patch, targets):
@@ -136,7 +193,7 @@ def source_field_defaults(root, relative):
     return defaults
 
 
-# Patch 0017 replaces `boundingBox.move(-blockX, -blockY, -blockZ)` with an inline AABB
+# Patch 0012 replaces `boundingBox.move(-blockX, -blockY, -blockZ)` with an inline AABB
 # built from scalars. Twice the translation went missing — once as a dangling reference to
 # the deleted variable, once as bounds left in world space — and it took three follow-up
 # commits to settle. The Java test IsInWallBoundsTest pins the arithmetic *contract*; it
@@ -163,3 +220,41 @@ def translated_bounds(root):
                                     for axis in ("x", "y", "z")},
             })
     return results
+
+
+def violations(root):
+    """Every rule break as one printable line; empty when the patch set is clean."""
+    problems = [f"patch tree missing: {tree} -- the audit would silently shrink; restore it or "
+                f"update PATCH_TREES in scripts/patch_policy.py" for tree in missing_trees(root)]
+    for found in shared_mutable_fields(root):
+        problems.append(f"{found['patch']}: reusable mutable state on a region-shared class: "
+                        f"{found['file']}: {found['declaration']} (per-region state belongs in "
+                        f"RegionizedWorldData)")
+    for key, (before, after) in sorted(upstream_default_changes(root).items()):
+        problems.append(f"{key}: upstream default changed {before!r} -> {after!r}; record it and "
+                        f"the reason in test_patch_policy.APPROVED, or drop the change")
+    for found in translated_bounds(root):
+        if found["translated_axes"] != {"x": 2, "y": 2, "z": 2}:
+            problems.append(f"{found['patch']}: inline toCollide box is not translated on every "
+                            f"axis: {found['translated_axes']} in {found['expression']}")
+    return problems
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--root", default=str(Path(__file__).resolve().parents[1]))
+    args = parser.parse_args(argv)
+    problems = violations(args.root)
+    for problem in problems:
+        print(f"patch_policy: {problem}", file=sys.stderr)
+    if problems:
+        print(f"patch_policy: {len(problems)} violation(s)", file=sys.stderr)
+        return 1
+    print(f"patch_policy: OK ({len(list(patch_files(args.root)))} patches under "
+          f"{len(PATCH_TREES)} patch trees)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+

@@ -1,4 +1,6 @@
 from pathlib import Path
+import contextlib
+import io
 import tempfile
 import unittest
 
@@ -6,9 +8,11 @@ import patch_policy
 
 REPO = Path(__file__).resolve().parents[1]
 
+MINECRAFT_FEATURES = "sourbycraft-server/minecraft-patches/features"
 
-def write_patch(root, name, body):
-    target = root / "sourbycraft-server" / "minecraft-patches" / "features"
+
+def write_patch(root, name, body, directory=MINECRAFT_FEATURES):
+    target = root / directory
     target.mkdir(parents=True, exist_ok=True)
     (target / name).write_text(body)
     return root
@@ -162,9 +166,9 @@ class UpstreamDefaultTest(unittest.TestCase):
 
 
 class TranslatedBoundsTest(unittest.TestCase):
-    """Patch 0017's inline block-local AABB must translate all six components.
+    """Patch 0012's inline block-local AABB must translate all six components.
 
-    Upstream writes `boundingBox.move(-blockX, -blockY, -blockZ)`. 0017 inlines it to
+    Upstream writes `boundingBox.move(-blockX, -blockY, -blockZ)`. 0012 inlines it to
     drop an allocation. The translation went missing twice while that was being settled,
     and an untranslated box makes isInWall test the wrong region of space — suffocation
     decided against blocks the entity is not in. Silent, not a crash.
@@ -211,6 +215,92 @@ class TranslatedBoundsTest(unittest.TestCase):
             self.assertEqual(found[0]["translated_axes"], {"x": 2, "y": 2, "z": 2})
 
 
+class ScannedRootTest(unittest.TestCase):
+    """Which patch files the rules read.
+
+    The rules walk the three patch trees (audit 2026-10-14 OBS-7 was a root tuple that silently
+    skipped locations it did not know about) and read every `*.patch` in them except the
+    inherited engine baseline, which belongs to `scripts/baseline_policy.py`. The non-build
+    directories under `minecraft-patches` are covered by that walk on purpose: a parked patch
+    is one file move from shipping, and a patch dropped in `todo/` or `resources/` must not sit
+    outside the rules.
+    """
+
+    SERVER_LEVEL = "net/minecraft/server/level/ServerLevel.java"
+    PLANTED = "+    private final List<Entity> planted = new ArrayList<>();"
+    API_FEATURES = "sourbyapi/paper-patches/features"
+    PARKED = "sourbycraft-server/minecraft-patches/parked"
+    TODO = "sourbycraft-server/minecraft-patches/todo"
+    RESOURCES = "sourbycraft-server/minecraft-patches/resources"
+
+    @staticmethod
+    def trees(root):
+        for tree in patch_policy.PATCH_TREES:
+            (root / tree).mkdir(parents=True, exist_ok=True)
+        return root
+
+    def scan(self, directory):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.trees(Path(tmp))
+            write_patch(root, "0001-fixture.patch",
+                        patch_for(self.SERVER_LEVEL, self.PLANTED), directory=directory)
+            return patch_policy.shared_mutable_fields(root)
+
+    def test_the_third_feature_root_is_scanned(self):
+        # sourbyapi/paper-patches/features: the location both policy scripts missed (OBS-7).
+        self.assertEqual(len(self.scan(self.API_FEATURES)), 1)
+
+    def test_a_paper_api_patch_obeyed_the_same_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.trees(Path(tmp))
+            write_patch(root, "0001-fixture.patch", patch_for(
+                "io/papermc/paper/ServerBuildInfoImpl.java",
+                "-    public int viewDistance = 10;",
+                "+    public int viewDistance = 4;"), directory=self.API_FEATURES)
+            self.assertEqual(patch_policy.upstream_default_changes(root),
+                             {"0001-fixture.patch:viewDistance": ("10", "4")})
+
+    def test_the_inventory_names_the_paper_api_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.trees(Path(tmp))
+            write_patch(root, "0001-fixture.patch", patch_for(self.SERVER_LEVEL),
+                        directory=self.API_FEATURES)
+            self.assertEqual([p.relative_to(root).as_posix() for p in patch_policy.patch_files(root)],
+                             [f"{self.API_FEATURES}/0001-fixture.patch"])
+
+    def test_parked_patches_are_scanned(self):
+        self.assertEqual(len(self.scan(self.PARKED)), 1)
+
+    def test_scratch_directories_are_scanned(self):
+        for directory in (self.TODO, self.RESOURCES):
+            with self.subTest(directory=directory):
+                self.assertEqual(len(self.scan(directory)), 1)
+
+    def test_the_engine_baseline_is_excluded(self):
+        # Not a SourbyCraft change; baseline_policy.py and the manifest own it.
+        for directory in patch_policy.BASELINE_DIRS:
+            with self.subTest(directory=directory):
+                self.assertEqual(self.scan(directory), [])
+
+    def test_a_missing_tree_is_reported_rather_than_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_patch(root, "0001-fixture.patch", patch_for(self.SERVER_LEVEL))
+            self.assertEqual(patch_policy.missing_trees(root),
+                             ["sourbycraft-server/paper-patches", "sourbyapi/paper-patches"])
+            self.assertEqual(len(list(patch_policy.patch_files(root))), 1)
+
+    def test_the_command_fails_a_fixture_violation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.trees(Path(tmp))
+            write_patch(root, "0001-fixture.patch", patch_for(self.SERVER_LEVEL, self.PLANTED))
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = patch_policy.main(["--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("planted", stderr.getvalue())
+
+
 class RepositoryTest(unittest.TestCase):
     def test_the_committed_patch_set_holds_no_shared_mutable_buffer(self):
         violations = patch_policy.shared_mutable_fields(REPO)
@@ -221,6 +311,35 @@ class RepositoryTest(unittest.TestCase):
     def test_the_rule_actually_sees_the_repository_patches(self):
         # Guards against the rule silently passing because it found no files to read.
         self.assertGreater(len(list(patch_policy.patch_files(REPO))), 10)
+
+    def test_every_patch_tree_is_present(self):
+        self.assertEqual(patch_policy.missing_trees(REPO), [],
+                         "a patch tree disappeared; the policy would silently stop reading it")
+
+    def test_the_walk_reads_every_patch_outside_the_baseline(self):
+        # Recomputed here from the trees, so a directory the walk skips shows up as a diff.
+        expected = set()
+        for tree in patch_policy.PATCH_TREES:
+            for path in (REPO / tree).rglob("*.patch"):
+                relative = path.relative_to(REPO).as_posix()
+                if not any(relative.startswith(baseline + "/")
+                           for baseline in patch_policy.BASELINE_DIRS):
+                    expected.add(relative)
+        found = {p.relative_to(REPO).as_posix() for p in patch_policy.patch_files(REPO)}
+        self.assertEqual(found, expected)
+
+    def test_the_parked_set_is_part_of_the_audit(self):
+        # Non-vacuous today: parked/ holds 0028 (LeafPile-derived EDF backend, 2026-10-07). When
+        # parked/ is deliberately emptied, delete this assertion with it rather than loosen it.
+        parked = [p.name for p in patch_policy.patch_files(REPO) if "parked" in p.parts]
+        self.assertEqual(parked,
+                         ["0028-SourbyCraft-use-LeafPile-derived-Aurora-EDF-backend.patch"])
+
+    def test_the_command_reports_the_clean_tree(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = patch_policy.main(["--root", str(REPO)])
+        self.assertEqual(code, 0, stderr.getvalue())
 
 
 if __name__ == "__main__":
