@@ -41,7 +41,7 @@ class AwfWorldFileTest {
     @Test
     void everyCodecRoundTripsAndReadsChunksOnDemand() throws IOException {
         for (final byte codec : new byte[] {Compression.NONE, Compression.DEFLATE, Compression.ZSTD}) {
-            if (codec == Compression.ZSTD && !Compression.zstdAvailable()) continue;
+            if (codec == Compression.ZSTD && !ZstdTestSupport.zstdOrSkipPart()) continue;
             try (AwfWorldFile file = AwfWorldFile.open(write(codec))) {
                 assertEquals("normal", file.metadata().get("environment"));
                 assertEquals(Map.of("region", 7, "entities", 1), file.counts());
@@ -60,7 +60,7 @@ class AwfWorldFileTest {
         final long none = Files.size(write(Compression.NONE));
         final long deflate = Files.size(write(Compression.DEFLATE));
         assertTrue(deflate < none / 2, deflate + " vs " + none);
-        if (Compression.zstdAvailable()) assertTrue(Files.size(write(Compression.ZSTD)) < none / 2);
+        if (ZstdTestSupport.zstdOrSkipPart()) assertTrue(Files.size(write(Compression.ZSTD)) < none / 2);
     }
 
     @Test

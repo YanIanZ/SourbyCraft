@@ -21,9 +21,9 @@ import org.bukkit.plugin.Plugin;
  * Paper command registration and before plugin loading. This lets SourbyCraft register its
  * commands and install {@link PluginLoadDiagnostics} before plugins are loaded.</p>
  *
- * <p>Individual stage failures are logged and isolated. Completion publishes RUNNING when any
- * stage succeeded, or FAILED when all stages failed; RUNNING therefore permits degraded service
- * availability. Diagnostics do not tune JVM options or operator configuration.</p>
+ * <p>Individual stage failures are logged and isolated. Completion publishes RUNNING when every
+ * stage succeeded, DEGRADED when some failed, and FAILED only when all of them failed (see
+ * {@link #verdict}). Diagnostics do not tune JVM options or operator configuration.</p>
  *
  * <p>The server owns the call order: startup precedes shutdown. Synchronization prevents duplicate
  * initialization; it does not serialize {@link #close()} against initialization.</p>
@@ -156,11 +156,10 @@ public final class SourbyCraftBootstrap {
             dev.iyanz.sourbycraft.perf.GcTracker.start();
         });
 
-        bootStages = java.util.List.copyOf(progress);
+        publishBootStages();
         java.util.logging.Logger.getLogger("Aurora Engine")
             .info(dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
                 TOTAL_STAGES, failureCount, (System.nanoTime() - begun) / 1_000_000L));
-        progress.clear();
         // Configured thread ceilings per pool against the processors (audit ENG-9). Report only.
         try {
             for (final String line : dev.iyanz.sourbycraft.execution.ThreadLedger.format(
@@ -172,10 +171,48 @@ public final class SourbyCraftBootstrap {
         }
         // Build 47 lifecycle truth: a partial boot is operational but DEGRADED, not healthy.
         // FAILED is reserved for a bootstrap where no stage came up.
-        AuroraRuntime.transition(failureCount >= TOTAL_STAGES
-            ? AuroraRuntime.State.FAILED
-            : failureCount > 0 ? AuroraRuntime.State.DEGRADED : AuroraRuntime.State.RUNNING);
+        AuroraRuntime.transition(verdict(failureCount, TOTAL_STAGES));
     }
+
+    /** The lifecycle state a finished bootstrap publishes: none failed RUNNING, some DEGRADED, all FAILED. */
+    static AuroraRuntime.State verdict(final int failures, final int totalStages) {
+        return failures >= totalStages
+            ? AuroraRuntime.State.FAILED
+            : failures > 0 ? AuroraRuntime.State.DEGRADED : AuroraRuntime.State.RUNNING;
+    }
+
+    /** Makes the stages run so far readable through {@link #bootStages()} and starts the next attempt empty. */
+    private static void publishBootStages() {
+        bootStages = java.util.List.copyOf(progress);
+        progress.clear();
+    }
+
+    /**
+     * Test seam: clears the stage counters and published stages, and clears them again when closed.
+     * It does not touch {@code started} or the {@link AuroraRuntime} state, so {@link #init()}
+     * stays unreachable from tests.
+     */
+    static synchronized AutoCloseable resetStagesForTesting() {
+        stageCount = 0;
+        failureCount = 0;
+        progress.clear();
+        bootStages = java.util.List.of();
+        return () -> {
+            stageCount = 0;
+            failureCount = 0;
+            progress.clear();
+            bootStages = java.util.List.of();
+        };
+    }
+
+    /** Test seam: what {@link #publishBootStages()} publishes, as {@link #bootStages()} would show it. */
+    static synchronized java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> publishBootStagesForTesting() {
+        publishBootStages();
+        return bootStages;
+    }
+
+    /** Test seam: failures counted since the last reset. */
+    static synchronized int failureCountForTesting() { return failureCount; }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
     private static final int TOTAL_STAGES = 14;
@@ -195,7 +232,7 @@ public final class SourbyCraftBootstrap {
      * more useful than one that refuses to boot. The bar turns critical from the first failure, so
      * the progress line cannot read healthy while something is broken.</p>
      */
-    private static void stage(final String name, final Runnable body) {
+    static void stage(final String name, final Runnable body) {
         java.util.logging.Logger.getLogger("Aurora Engine").info("START " + (stageCount + 1) + "/" + TOTAL_STAGES + "  " + name);
         final long stageBegun = System.nanoTime();
         boolean successful = true;

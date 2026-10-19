@@ -227,9 +227,7 @@ class SlimeImporterTest {
 
     @Test
     void version12FilesAreReadToo() throws Exception {
-        org.junit.jupiter.api.Assumptions.assumeTrue(
-            SlimeImporterTest.class.getClassLoader().getResource("com/github/luben/zstd/Zstd.class") != null,
-            "zstd-jni is not on the test classpath");
+        dev.iyanz.sourbycraft.awf.ZstdTestSupport.requireZstd();
         final Path world = this.dir.resolve("old-nether");
         assertEquals(new SlimeImporter.Result(1, 1, 0, 4189), SlimeImporter.importInto(v12File(), world, 0));
         final CompoundTag chunk = stored(world, "region", new ChunkKey(2, -5));
@@ -294,8 +292,7 @@ class SlimeImporterTest {
 
     @Test
     void advancedSlimePapersOwnVersion13IsRead() throws Exception {
-        org.junit.jupiter.api.Assumptions.assumeTrue(dev.iyanz.sourbycraft.awf.Compression.zstdAvailable(),
-            "zstd-jni is not on the test classpath");
+        dev.iyanz.sourbycraft.awf.ZstdTestSupport.requireZstd();
         final byte[] file = aspV13File();
         final SlimeImporter.SlimeFile parsed = SlimeImporter.read(file);
         assertEquals("normal", parsed.properties().get("environment"));
