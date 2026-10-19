@@ -422,8 +422,9 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
   yang berjalan, mempercayai hash dari API, menghapus jar operator — hanya versi yang mencantumkan
   versi MC, jangan hapus jar yang bukan milik kita, batasi ukuran (audit §3)
   — selesai `d93794eb` (2026-10-20): Via hanya memulihkan pin yang direview (metadata harus mencantumkan versi MC, hash pin, ukuran dibatasi, jar operator tidak dihapus, tanpa request bila jar ada)
-- [ ] **SEC-7** Pin ProtocolLib menunjuk asset `dev-build` yang bisa berubah, belum pernah di-boot —
+- [x] **SEC-7** Pin ProtocolLib menunjuk asset `dev-build` yang bisa berubah, belum pernah di-boot —
   pin rilis bertag, probe CI terjadwal (audit §3)
+  — selesai `6e50b735` (2026-10-20): pin tagged 5.4.0 (asset 280088448, 10.251.186 B, SHA-256 dihitung dari artifact resmi; dev-build sudah ganti bytes lagi: 608298510→616780410); load test 2 boot di slim jar 26.2: enable + disable bersih (`Done (` 15,7s/16,0s, exit 0); caveat soft upstream `MC 26.2.0 has not yet been tested` permanen sampai 26.2 masuk MCVERSIONS upstream (bukan regresi SourbyCraft); probe CI terjadwal = snippet workflow read-only di AGENT-COORDINATION.md (milik CI owner)
 - [x] **SEC-8** CI: action di-pin per tag bukan SHA; `contents: write` untuk seluruh job — pin
   per SHA, persempit permission (audit §3)
   — selesai `1b33fe1e` (2026-10-20): semua `uses:` di-pin SHA 40-hex dengan tag di komentar; `permissions: contents: read` di atas dan job build, `write` hanya di job `release` baru (`needs: build`)
