@@ -14,6 +14,7 @@ import dev.iyanz.sourbycraft.util.BarUtil;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Supplier;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.command.Command;
@@ -26,8 +27,16 @@ public class TpsCommand extends Command {
 
     private static final int TPS_BAR_WIDTH = 20;
 
+    private final Supplier<SourbyMetrics> metrics;
+
     public TpsCommand(final String name) {
+        this(name, MetricsRuntime::provider);
+    }
+
+    /** Test seam: the metrics source {@link #execute} reads; production uses {@link MetricsRuntime#provider()}. */
+    TpsCommand(final String name, final Supplier<SourbyMetrics> metrics) {
         super(name);
+        this.metrics = metrics;
         this.description = "SourbyCraft TPS panel (TPS/MSPT, tier, memory)";
         this.usageMessage = "/tps";
         this.setPermission("sourbycraft.command.tps");
@@ -37,7 +46,7 @@ public class TpsCommand extends Command {
     @Override
     public boolean execute(final CommandSender sender, final String alias, final String[] args) {
         if (!this.testPermission(sender)) return true;
-        final PerformanceSnapshot snapshot = MetricsRuntime.provider().snapshot();
+        final PerformanceSnapshot snapshot = this.metrics.get().snapshot();
         render(snapshot).forEach(sender::sendMessage);
         return true;
     }

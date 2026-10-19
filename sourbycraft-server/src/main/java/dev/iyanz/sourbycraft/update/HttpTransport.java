@@ -63,10 +63,20 @@ interface HttpTransport {
 
     /** Production transport on {@link HttpURLConnection}. */
     static HttpTransport jdk() {
+        return jdk(10_000, 15_000);
+    }
+
+    /** Test seam: {@link #jdk()} with explicit timeouts (production uses 10 s connect, 15 s read). */
+    static HttpTransport jdk(int connectTimeoutMillis, int readTimeoutMillis) {
         return (url, headers) -> {
             HttpURLConnection conn;
             try {
-                conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+                // file:/jar:/ftp: URLs open a non-HTTP connection; refuse them as an IOException
+                // (the contract) instead of letting a ClassCastException escape.
+                if (!(URI.create(url).toURL().openConnection() instanceof HttpURLConnection http)) {
+                    throw new IOException("unsupported URL scheme (http/https only): " + url);
+                }
+                conn = http;
             } catch (IllegalArgumentException e) {
                 throw new IOException("bad url: " + url, e);
             }
@@ -75,8 +85,8 @@ interface HttpTransport {
             for (Map.Entry<String, String> h : headers.entrySet()) {
                 conn.setRequestProperty(h.getKey(), h.getValue());
             }
-            conn.setConnectTimeout(10_000);
-            conn.setReadTimeout(15_000);
+            conn.setConnectTimeout(connectTimeoutMillis);
+            conn.setReadTimeout(readTimeoutMillis);
             conn.setInstanceFollowRedirects(true);
             int code = conn.getResponseCode();
             InputStream body;

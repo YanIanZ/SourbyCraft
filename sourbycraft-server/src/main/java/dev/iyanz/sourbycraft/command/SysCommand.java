@@ -38,8 +38,16 @@ public class SysCommand extends Command {
     private static final java.lang.management.OperatingSystemMXBean OS_BEAN =
         ManagementFactory.getOperatingSystemMXBean();
 
+    private final java.util.function.Supplier<SourbyMetrics> metrics;
+
     public SysCommand(String name) {
+        this(name, MetricsRuntime::provider);
+    }
+
+    /** Test seam: the metrics source {@link #execute} reads; production uses {@link MetricsRuntime#provider()}. */
+    SysCommand(String name, java.util.function.Supplier<SourbyMetrics> metrics) {
         super(name);
+        this.metrics = metrics;
         this.description = "Server specs";
         this.usageMessage = "/sys";
         this.setPermission("sourbycraft.command.sys");
@@ -67,7 +75,7 @@ public class SysCommand extends Command {
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
-        final PerformanceSnapshot snapshot = MetricsRuntime.provider().snapshot();
+        final PerformanceSnapshot snapshot = this.metrics.get().snapshot();
 
         s.sendMessage(UiPanel.header("System"));
 

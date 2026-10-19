@@ -94,19 +94,24 @@ public final class AutoUpdateSettings {
             "Also keep the auto-provisioned ViaVersion + ViaBackwards plugins current on the same cadence.");
     }
 
-    /** Refresh every static field from the unified TOML (called at boot + on {@code /sourbycraft reload}). */
+    /**
+     * Refresh every static field from the unified TOML (called at boot + on {@code /sourbycraft reload}).
+     * A missing, blank or wrong-typed key falls back to the documented default, not to the previous
+     * live value: deleting {@code apply_mode} from the TOML and reloading must not keep an earlier
+     * {@code auto}.
+     */
     public static void loadFromToml() {
-        enabled = SourbyCraftConfig.cfgBool("misc.auto_update.enabled", enabled);
-        repo = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.repo", repo), "YanIanZ/SourbyCraft");
-        channel = SourbyCraftConfig.cfgGet("misc.auto_update.channel", channel);
-        applyMode = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.apply_mode", applyMode), "notify");
+        enabled = SourbyCraftConfig.cfgBool("misc.auto_update.enabled", true);
+        repo = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.repo", ""), "YanIanZ/SourbyCraft");
+        channel = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.channel", ""), "");
+        applyMode = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.apply_mode", ""), "notify");
         List<String> times = SourbyCraftConfig.cfgStringList("misc.auto_update.check_times");
-        checkTimes = times.isEmpty() ? checkTimes : times;
-        checkIntervalMinutes = Math.max(0, SourbyCraftConfig.cfgInt("misc.auto_update.check_interval_minutes", checkIntervalMinutes));
-        restartMode = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.restart_mode", restartMode), "auto");
-        restartDelaySeconds = Math.max(5, SourbyCraftConfig.cfgInt("misc.auto_update.restart_delay_seconds", restartDelaySeconds));
-        allowPrerelease = SourbyCraftConfig.cfgBool("misc.auto_update.allow_prerelease", allowPrerelease);
-        viaAutoUpdate = SourbyCraftConfig.cfgBool("misc.auto_update.via_auto_update", viaAutoUpdate);
+        checkTimes = times.isEmpty() ? List.of("06:00") : times;
+        checkIntervalMinutes = Math.max(0, SourbyCraftConfig.cfgInt("misc.auto_update.check_interval_minutes", 30));
+        restartMode = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.restart_mode", ""), "auto");
+        restartDelaySeconds = Math.max(5, SourbyCraftConfig.cfgInt("misc.auto_update.restart_delay_seconds", 60));
+        allowPrerelease = SourbyCraftConfig.cfgBool("misc.auto_update.allow_prerelease", false);
+        viaAutoUpdate = SourbyCraftConfig.cfgBool("misc.auto_update.via_auto_update", true);
     }
 
     private static String valueOr(String v, String def) {

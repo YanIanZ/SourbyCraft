@@ -29,8 +29,16 @@ public class VerCommand extends Command {
             DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy HH:mm", Locale.ENGLISH);
     private static final ZoneId GMT_PLUS_7 = ZoneId.of("Asia/Jakarta");
 
+    private final java.util.function.Supplier<ServerBuildInfo> serverBuildInfo;
+
     public VerCommand(String n) {
+        this(n, ServerBuildInfo::buildInfo);
+    }
+
+    /** Test seam: Paper's {@link ServerBuildInfo} cannot initialise outside a running server. */
+    VerCommand(String n, java.util.function.Supplier<ServerBuildInfo> serverBuildInfo) {
         super(n);
+        this.serverBuildInfo = serverBuildInfo;
         this.description = "Version info";
         this.usageMessage = "/ver";
         this.setPermission("sourbycraft.command.ver");
@@ -41,7 +49,7 @@ public class VerCommand extends Command {
     @Override
     public boolean execute(CommandSender s, String alias, String[] args) {
         if (!testPermission(s)) return true;
-        ServerBuildInfo bi = ServerBuildInfo.buildInfo();
+        ServerBuildInfo bi = this.serverBuildInfo.get();
         BuildInfo brand = BuildInfo.load();
 
         String buildDate;
@@ -64,7 +72,9 @@ public class VerCommand extends Command {
         // Build 47: whether the runtime came up whole, and whether legacy plugins are admitted,
         // are properties of this run an operator should not have to dig out of the boot log.
         s.sendMessage(line("Aurora runtime", dev.iyanz.sourbycraft.core.AuroraRuntime.state().name()));
-        s.sendMessage(line("Aurora Bridge", dev.iyanz.sourbycraft.bridge.AuroraBridge.runtimeMode().name().toLowerCase(java.util.Locale.ROOT)));
+        // Read-only: runtimeMode() would create the bridge runtime as a side effect of /ver.
+        final var bridgeMode = dev.iyanz.sourbycraft.bridge.AuroraBridge.modeIfStarted();
+        s.sendMessage(line("Aurora Bridge", bridgeMode == null ? "not-started" : bridgeMode.name().toLowerCase(java.util.Locale.ROOT)));
         s.sendMessage(line("Bukkit API", Bukkit.getBukkitVersion()));
         s.sendMessage(line("Java", Runtime.version().toString()));
         final String channel = dev.iyanz.sourbycraft.update.AutoUpdateSettings.channel;

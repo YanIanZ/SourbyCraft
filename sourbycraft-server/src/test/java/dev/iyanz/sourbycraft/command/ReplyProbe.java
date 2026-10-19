@@ -62,6 +62,19 @@ final class ReplyProbe implements BiConsumer<CommandSender, Runnable> {
         return sender;
     }
 
+    /**
+     * Opt-in: also record the legacy {@code sendMessage(String)} overload on {@code sender}, for a
+     * command that replies with plain strings. Not done by {@link #sender} so existing tests that
+     * count messages keep seeing exactly what they saw before.
+     */
+    <T extends CommandSender> T captureStrings(final T sender) {
+        doAnswer(invocation -> {
+            this.inbox.add(new Received((String) invocation.getArgument(0), this.inside.get()));
+            return null;
+        }).when(sender).sendMessage(anyString());
+        return sender;
+    }
+
     /** The next message, waiting up to 20 s for it. */
     Received next() throws InterruptedException {
         final Received next = this.inbox.poll(20, TimeUnit.SECONDS);

@@ -31,7 +31,8 @@ until the operator changes it. New files get `notify`.
 Verified against the consumers: `/sourbycraft reload` → `SourbyCraftConfig.applyLiveConfig` →
 `AutoUpdateSettings.loadFromToml()` refreshes the static fields; `SourbyUpdater.check()` reads
 them on every check; `SourbyUpdater.start()` builds the schedule once at boot and is not re-run
-by reload.
+by reload. A key that is missing, blank or of the wrong type reads as the default in the table
+below, not as the previous live value: deleting `apply_mode` and reloading gives `notify`.
 
 | Key | Default | Reloadability |
 |---|---|---|
