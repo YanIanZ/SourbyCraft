@@ -36,7 +36,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * so this pins what the code does: colour tiers relative to the dynamic target, the MSPT tier
  * against the tick budget, progress clamped to [0, 1], unavailable inputs (NaN, target &lt;= 0,
  * UNAVAILABLE freshness, missing heap/CPU) and viewer eviction on quit. Scheduling (show/hide on
- * the player's region, the global updater task) needs a running server and is not covered.</p>
+ * the player's region, the global updater task) is covered by {@code HudBarsSchedulingTest} through
+ * the {@code HudBars.installForTesting} seam.</p>
  *
  * <p>{@code perf/MetricsConsumerTest} already covers single-snapshot reads, the cap at the target
  * and WARMING/UNAVAILABLE text; those cases are not repeated here.</p>

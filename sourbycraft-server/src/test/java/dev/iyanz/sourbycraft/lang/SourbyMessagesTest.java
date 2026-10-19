@@ -2,10 +2,7 @@ package dev.iyanz.sourbycraft.lang;
 
 import com.electronwill.nightconfig.core.file.CommentedFileConfig;
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
-import dev.iyanz.sourbycraft.config.ConfigSnapshot;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
+import dev.iyanz.sourbycraft.SourbyCraftConfigTesting;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -32,8 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Messages come from {@code messages.<key>} in the unified TOML, which an operator can break.
  * Join, quit and login handlers call {@link SourbyMessages#get}, so it must never throw and never
- * render an empty line for a known key. {@link SourbyCraftConfig} has no test seam, so the
- * in-memory snapshot is swapped by reflection and restored (see {@link #withConfig}).</p>
+ * render an empty line for a known key. The in-memory snapshot is installed through
+ * the {@link SourbyCraftConfig} test seam and restored (see {@link #withConfig}).</p>
  */
 class SourbyMessagesTest {
 
@@ -187,25 +184,10 @@ class SourbyMessagesTest {
     }
 
     /**
-     * Swaps {@code SourbyCraftConfig.loaded} for a snapshot of {@code values} while {@code action}
-     * runs. A {@code SourbyCraftConfig.overrideForTesting(ConfigSnapshot)} seam would replace this.
+     * Installs a snapshot of {@code values} as the utility config while {@code action} runs, through
+     * the {@code SourbyCraftConfig.installForTesting} seam (restored afterwards).
      */
     static void withConfig(final Map<String, ?> values, final ThrowingRunnable action) throws Exception {
-        final Field loaded = SourbyCraftConfig.class.getDeclaredField("loaded");
-        loaded.setAccessible(true);
-        final Object previous = loaded.get(null);
-        final Class<?> record = loaded.getType();
-        final Constructor<?> constructor = record.getDeclaredConstructors()[0];
-        constructor.setAccessible(true);
-        final Method aurora = record.getDeclaredMethod("aurora");
-        aurora.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        final Map<String, Object> typed = (Map<String, Object>) values;
-        loaded.set(null, constructor.newInstance(new ConfigSnapshot(typed), aurora.invoke(previous)));
-        try {
-            action.run();
-        } finally {
-            loaded.set(null, previous);
-        }
+        SourbyCraftConfigTesting.withConfig(values, action::run);
     }
 }

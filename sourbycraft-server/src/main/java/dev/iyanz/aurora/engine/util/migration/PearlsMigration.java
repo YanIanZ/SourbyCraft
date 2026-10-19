@@ -15,19 +15,38 @@ public class PearlsMigration implements Migration {
 
     public static final Path OLD_PATH = Path.of("pearls.dat").toAbsolutePath().normalize();
 
+    private final Path legacyPath;
+
+    public PearlsMigration() {
+        this(OLD_PATH);
+    }
+
+    /**
+     * Test seam: a migration whose pre-26.1 file is {@code legacyPath} instead of {@code pearls.dat}
+     * in the working directory. Production always uses {@link #OLD_PATH} through the public
+     * constructor.
+     */
+    PearlsMigration(final Path legacyPath) {
+        this.legacyPath = legacyPath;
+    }
+
     @Override
     public void conduct(final WorldMigrationContext context) {
+        conduct(resolveNewPath(context));
+    }
+
+    /** {@link #conduct(WorldMigrationContext)} with the new file already resolved (the testable part). */
+    void conduct(final Path newPath) {
         try {
-            final Path newPath = resolveNewPath(context);
             // create directories first or else we throw
             Files.createDirectories(newPath.getParent());
 
             if (Files.exists(newPath)) {
                 migratePearlsFile(newPath);
             } else {
-                final CompoundTag oldData = NbtIo.readCompressed(OLD_PATH, NbtAccounter.unlimitedHeap());
+                final CompoundTag oldData = NbtIo.readCompressed(this.legacyPath, NbtAccounter.unlimitedHeap());
                 NbtIo.writeCompressed(migratePearlsTag(oldData), newPath);
-                Files.delete(OLD_PATH);
+                Files.delete(this.legacyPath);
             }
         } catch (final IOException ioe) {
             throw new RuntimeException("Couldn't conduct pearl migration", ioe);
@@ -78,12 +97,19 @@ public class PearlsMigration implements Migration {
 
     @Override
     public boolean hasOldData(final WorldMigrationContext context) {
-        return Files.exists(OLD_PATH) || needsMigration(resolveNewPath(context)); // pre-26.1 path or pre-merger 26.2 data shape
+        return hasOldData(resolveNewPath(context));
+    }
+
+    boolean hasOldData(final Path newPath) {
+        return Files.exists(this.legacyPath) || needsMigration(newPath); // pre-26.1 path or pre-merger 26.2 data shape
     }
 
     @Override
     public boolean hasNewData(final WorldMigrationContext context) {
-        final Path newPath = resolveNewPath(context);
+        return hasNewData(resolveNewPath(context));
+    }
+
+    boolean hasNewData(final Path newPath) {
         return Files.exists(newPath) && !needsMigration(newPath);
     }
 

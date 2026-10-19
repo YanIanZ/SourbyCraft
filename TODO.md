@@ -592,6 +592,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
   waktu — tes berprioritas; clock yang diinjeksi (audit §4)
   — daftar prioritas `65dba8fb` (2026-10-20) di `docs/development/TEST-COVERAGE-GAPS.md` (P1–P3 + 10 test sensitif waktu dengan seam clock); test Java-nya belum ditulis
   — 86 test P1 `b5766689` (2026-10-20) untuk hud/maxplayers/lang/engine util; sisa seam (SourbyCraftConfig, HudBars scheduler, PearlsMigration) di papan
+  — seam selesai (2026-10-20): `SourbyCraftConfig.installForTesting`, `HudBars.installForTesting` + `HudBarsSchedulingTest` (17), `PearlsMigration(Path)` + 6 tes legacy; refleksi di tes maxplayers/lang dihapus; `TimeSpanValidation` membuat `M` ambigu di `logs.cleanerTimeSpan`/`autosave.autosaveFrequency` gagal saat load dengan nama key. Full suite server 10561/0. Sisa OBS-14: baris terbuka di `TEST-COVERAGE-GAPS.md` + konversi clock
 - [x] **OBS-15** `averageGcPauseMs` adalah waktu koleksi, bukan pause STW — caveat di javadoc (audit §4)
   — selesai `65dba8fb` (2026-10-20): caveat javadoc `RuntimeMetrics.averageGcPauseMs()`/`gcTimePercent()` dan `GcTracker` (waktu koleksi, bukan pause STW)
 - [x] **OBS-16** Kesiapan baseline berpatokan `Done (`, yang kini bisa mendahului terrain spawn

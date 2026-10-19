@@ -23,10 +23,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * OBS-14 engine util/migration: the pearl-data shape migration (pre-merger 26.2 top-level keys
  * wrapped under {@code data}). Must be idempotent and lossless, since it rewrites a world file.
  *
- * <p>{@code conduct}/{@code hasOldData}/{@code hasNewData} resolve the legacy file as
- * {@code pearls.dat} in the process working directory ({@code PearlsMigration.OLD_PATH}) and need a
- * {@code WorldMigrationContext}; only the static tag/file helpers are covered. A seam taking the
- * legacy path would make the full move testable on a temp dir.</p>
+ * <p>{@code conduct}/{@code hasOldData}/{@code hasNewData} are tested through the package-private
+ * overloads that take the resolved new file and the {@code PearlsMigration(Path legacyPath)} test
+ * constructor, so the whole move runs on a {@code @TempDir}. Resolving the new file from a
+ * {@code WorldMigrationContext} ({@code resolveNewPath}) needs a real {@code LevelStorageAccess}
+ * and is not covered.</p>
  */
 class PearlsMigrationTest {
 
@@ -102,6 +103,81 @@ class PearlsMigrationTest {
     void unreadableFileFailsLoudlyInsteadOfBeingTreatedAsMigrated(@TempDir final Path dir) throws IOException {
         final Path file = Files.writeString(dir.resolve("pearls.dat"), "not gzip nbt");
         assertThrows(RuntimeException.class, () -> PearlsMigration.needsMigration(file));
+    }
+
+    @Test
+    void conductMovesTheLegacyFileIntoTheNewLocationWrappedAndDeletesTheOldOne(@TempDir final Path dir) throws IOException {
+        final Path legacyFile = dir.resolve("pearls.dat");
+        final Path newFile = dir.resolve("world").resolve("data").resolve("canvas").resolve("pearls.dat");
+        NbtIo.writeCompressed(legacy(), legacyFile);
+        final PearlsMigration migration = new PearlsMigration(legacyFile);
+
+        assertTrue(migration.hasOldData(newFile));
+        assertFalse(migration.hasNewData(newFile));
+
+        migration.conduct(newFile);   // creates the missing parent directories
+
+        assertFalse(Files.exists(legacyFile), "legacy file removed after a successful move");
+        assertEquals(PearlsMigration.migratePearlsTag(legacy()), NbtIo.readCompressed(newFile, NbtAccounter.unlimitedHeap()));
+        assertFalse(migration.hasOldData(newFile), "nothing left to migrate");
+        assertTrue(migration.hasNewData(newFile));
+    }
+
+    @Test
+    void conductReshapesAnExistingNewFileInPlaceAndLeavesTheLegacyFileAlone(@TempDir final Path dir) throws IOException {
+        final Path legacyFile = dir.resolve("pearls.dat");
+        final Path newFile = dir.resolve("data").resolve("canvas").resolve("pearls.dat");
+        Files.createDirectories(newFile.getParent());
+        NbtIo.writeCompressed(legacy(), newFile);          // pre-merger 26.2 shape already at the new path
+        NbtIo.writeCompressed(legacy(), legacyFile);
+        final PearlsMigration migration = new PearlsMigration(legacyFile);
+
+        assertTrue(migration.hasOldData(newFile));
+        assertFalse(migration.hasNewData(newFile), "a legacy-shaped file at the new path is not new data");
+
+        migration.conduct(newFile);
+
+        assertTrue(Files.exists(legacyFile), "the new-path branch never touches the legacy file");
+        assertEquals(PearlsMigration.migratePearlsTag(legacy()), NbtIo.readCompressed(newFile, NbtAccounter.unlimitedHeap()));
+        assertTrue(migration.hasNewData(newFile));
+    }
+
+    @Test
+    void hasOldDataIsFalseWhenNeitherLocationHoldsLegacyData(@TempDir final Path dir) {
+        final PearlsMigration migration = new PearlsMigration(dir.resolve("pearls.dat"));
+        final Path newFile = dir.resolve("data").resolve("canvas").resolve("pearls.dat");
+
+        assertFalse(migration.hasOldData(newFile));
+        assertFalse(migration.hasNewData(newFile));
+    }
+
+    @Test
+    void conductFailsLoudlyAndLeavesNothingBehindWhenThereIsNoSourceData(@TempDir final Path dir) {
+        final Path newFile = dir.resolve("data").resolve("canvas").resolve("pearls.dat");
+        final PearlsMigration migration = new PearlsMigration(dir.resolve("missing-pearls.dat"));
+
+        final RuntimeException failure = assertThrows(RuntimeException.class, () -> migration.conduct(newFile));
+
+        assertEquals("Couldn't conduct pearl migration", failure.getMessage());
+        assertTrue(failure.getCause() instanceof IOException);
+        assertFalse(Files.exists(newFile));
+    }
+
+    @Test
+    void conductDoesNotDeleteTheLegacyFileWhenItCannotBeParsed(@TempDir final Path dir) throws IOException {
+        final Path legacyFile = Files.writeString(dir.resolve("pearls.dat"), "not gzip nbt");
+        final Path newFile = dir.resolve("data").resolve("canvas").resolve("pearls.dat");
+        final PearlsMigration migration = new PearlsMigration(legacyFile);
+
+        assertThrows(RuntimeException.class, () -> migration.conduct(newFile));
+
+        assertTrue(Files.exists(legacyFile), "operator data survives a failed migration");
+        assertFalse(Files.exists(newFile));
+    }
+
+    @Test
+    void publicConstructorKeepsThePre26Point1WorkingDirectoryPath() {
+        assertEquals(java.nio.file.Path.of("pearls.dat").toAbsolutePath().normalize(), PearlsMigration.OLD_PATH);
     }
 
     private static CompoundTag legacy() {

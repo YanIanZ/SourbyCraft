@@ -111,10 +111,12 @@ public class GlobalConfiguration extends Part {
     }
 
     private static void postLoad(final GlobalConfiguration configuration) {
-        INSTANCE = configuration;
-
-        // validate the configuration so users don't end up doing a stupid
+        // validate the configuration so users don't end up doing a stupid. Validation comes before
+        // publication: a value that fails (an unreadable time span, say) must not become the live
+        // configuration on a reload; on first boot the failure stops the load either way.
         Validator.validateObject(configuration);
+
+        INSTANCE = configuration;
 
         if (TickRegions.hasStarted()) {
 
@@ -168,12 +170,13 @@ public class GlobalConfiguration extends Part {
             // start log cleaner, only at startup
             if (configuration.logs.enableLogCleaner && Files.exists(logsDirectoryPath)) {
                 final MutableInt amountRemoved = new MutableInt(0);
+                // already validated (see the cleanerTimeSpan option), so this cannot fail on an ambiguous unit;
+                // accept large units because servers may specify units larger than days
+                final TimeSpan loggerTimeSpan = TimeSpan.parse(configuration.logs.cleanerTimeSpan).acceptLargeUnits();
 
                 Util.removeDirectoryContentsIf(logsDirectoryPath.toFile(), (path) -> {
                     try {
                         final Instant lastModified = Files.getLastModifiedTime(path).toInstant();
-                        // accept large units because servers may specify units larger than days
-                        final TimeSpan loggerTimeSpan = TimeSpan.parse(configuration.logs.cleanerTimeSpan).acceptLargeUnits();
                         if (lastModified.isBefore(loggerTimeSpan.inPast()) && !path.getFileName().toString().equalsIgnoreCase("latest.log")) {
                             // the time the log file was modified is before the
                             // thresh, meaning it is older than the thresh set
@@ -555,7 +558,11 @@ public class GlobalConfiguration extends Part {
 
         {
             option("enableLogCleaner").docs("Auto-removes old log files from the \"logs\" directory");
-            option("cleanerTimeSpan").docs("The amount of the time since the log file was last edited until it will be deleted");
+            option("cleanerTimeSpan").docs(
+                "The amount of the time since the log file was last edited until it will be deleted. RESTART_REQUIRED: read once at startup, and only when enableLogCleaner is true.",
+                "Write a whole number and a unit: s (seconds), m (minutes), h (hours), d (days), w (weeks), mo (months), y (years), e.g. 30d or 2w.",
+                "A lone upper-case \"M\" is rejected on purpose because it reads as months but means minutes; use \"m\" or \"mo\". An unreadable value stops the configuration from loading and names this key."
+            ).timeSpan("logs.cleanerTimeSpan", true);
             option("logEnderPearlRewriteActions").docs("Logs when a pearl is saved or loaded from Canvas' pearl save rewrite");
         }
 
@@ -600,7 +607,11 @@ public class GlobalConfiguration extends Part {
     public static class Autosave extends Part {
 
         {
-            option("autosaveFrequency").docs("The time frequency of how often to autosave the enabled selection. Default is 5 minutes to match upstream");
+            option("autosaveFrequency").docs(
+                "The time frequency of how often to autosave the enabled selection. Default is 5 minutes to match upstream. Applied when this file is (re)loaded.",
+                "Write a whole number and a unit no larger than days: s, m (minutes), h, d, e.g. 5m or 90s. Weeks, months and years are rejected.",
+                "A lone upper-case \"M\" is rejected on purpose because it reads as months but means minutes; use \"m\". An unreadable value stops the configuration from loading and names this key."
+            ).timeSpan("autosave.autosaveFrequency", false);
         }
 
         private String autosaveFrequency = "5m";

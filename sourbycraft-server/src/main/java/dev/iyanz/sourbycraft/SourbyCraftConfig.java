@@ -42,6 +42,11 @@ public final class SourbyCraftConfig {
 
     private static final Path CONFIG_PATH = Path.of("sourbycraft_config", "sourbycraft_global_config.toml");
     /**
+     * The file {@link #file()} opens. Always {@link #CONFIG_PATH} in production; only the test seam
+     * ({@link #installForTesting}) ever points it elsewhere.
+     */
+    private static volatile Path utilityPath = CONFIG_PATH;
+    /**
      * Aurora's own file. The engine and SourbyCraft are different things -- that is the whole
      * point of the Aurora/SourbyCraft split -- and an operator tuning the engine should not have to
      * read past join messages to find it. The unified file is still read underneath, so a
@@ -398,12 +403,13 @@ public final class SourbyCraftConfig {
 
     private static synchronized CommentedFileConfig file() {
         if (FILE != null) return FILE;
+        final Path path = utilityPath;
         try {
-            if (CONFIG_PATH.getParent() != null) {
-                Files.createDirectories(CONFIG_PATH.getParent());
+            if (path.getParent() != null) {
+                Files.createDirectories(path.getParent());
             }
-            newFile = !Files.exists(CONFIG_PATH);
-            CommentedFileConfig f = CommentedFileConfig.builder(CONFIG_PATH)
+            newFile = !Files.exists(path);
+            CommentedFileConfig f = CommentedFileConfig.builder(path)
                 .sync() // save() completes before reporting persistence or allowing reload
                 .onFileNotFound(FileNotFoundAction.CREATE_EMPTY)
                 .build();
@@ -414,6 +420,46 @@ public final class SourbyCraftConfig {
                 + "every read will fall back to its default", t);
         }
         return FILE;
+    }
+
+    // ------------------------------------------------------------------------------- test seam
+
+    /**
+     * Test seam: publishes {@code utility} as the utility snapshot and points the utility file at
+     * {@code path}, so tests neither swap the private {@code loaded} field by reflection nor
+     * write {@code sourbycraft_config/} in the working directory. Package-private; tests in other
+     * packages reach it through the {@code SourbyCraftConfigTesting} helper in the test tree.
+     * Production code never calls it, so every production path keeps {@link #CONFIG_PATH}.
+     *
+     * <p>The utility file handle is dropped, so the next {@link #setAndSave} (or {@link #init})
+     * opens {@code path}. The Aurora layer and the boot snapshot are left alone. Closing the
+     * returned handle restores everything it replaced, including the previous file handle.</p>
+     *
+     * @param utility the snapshot {@link #cfgGet} and its siblings should read
+     * @param path    the utility TOML file {@link #setAndSave} should write
+     * @return a handle that restores the previous state; use it in try-with-resources
+     */
+    static synchronized AutoCloseable installForTesting(final ConfigSnapshot utility, final Path path) {
+        final LoadedConfig previousLoaded = loaded;
+        final CommentedFileConfig previousFile = FILE;
+        final Path previousPath = utilityPath;
+        final boolean previousNewFile = newFile;
+        utilityPath = path;
+        FILE = null;
+        newFile = false;
+        loaded = new LoadedConfig(utility, previousLoaded.aurora());
+        return () -> {
+            synchronized (SourbyCraftConfig.class) {
+                final CommentedFileConfig opened = FILE;
+                if (opened != null && opened != previousFile) {
+                    opened.close();
+                }
+                loaded = previousLoaded;
+                FILE = previousFile;
+                utilityPath = previousPath;
+                newFile = previousNewFile;
+            }
+        };
     }
 
     // -------------------------------------------------------------------------------- typed reads

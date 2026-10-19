@@ -173,6 +173,16 @@ public abstract class Part {
             return validation(new StringValidation(StringValidation.StringType.SINGLE_WORD));
         }
 
+        /**
+         * Requires a time span {@link dev.iyanz.aurora.engine.util.TimeSpan} can read.
+         *
+         * @param keyPath          the dotted path of the option, named in the failure message
+         * @param acceptLargeUnits whether weeks, months and years are allowed
+         */
+        public OptionDefinition timeSpan(final String keyPath, final boolean acceptLargeUnits) {
+            return validation(new dev.iyanz.aurora.engine.configuration.validation.TimeSpanValidation(keyPath, acceptLargeUnits));
+        }
+
         public OptionDefinition validation(final Validation<?> validation) {
             validations.add(validation);
             return this;

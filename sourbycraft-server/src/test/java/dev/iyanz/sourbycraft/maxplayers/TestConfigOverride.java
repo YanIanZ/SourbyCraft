@@ -1,10 +1,7 @@
 package dev.iyanz.sourbycraft.maxplayers;
 
-import dev.iyanz.sourbycraft.SourbyCraftConfig;
-import dev.iyanz.sourbycraft.config.ConfigSnapshot;
-import java.lang.reflect.Constructor;
+import dev.iyanz.sourbycraft.SourbyCraftConfigTesting;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.function.Function;
 import org.bukkit.Bukkit;
@@ -13,10 +10,10 @@ import org.bukkit.Server;
 /**
  * Test-only overrides for the two process-wide singletons the maxplayers code reads.
  *
- * <p>{@link SourbyCraftConfig} has no test seam: it reads a hard-coded relative TOML path into a
- * private static {@code loaded} snapshot. Writing that file would touch the module working
- * directory, so the tests swap the in-memory snapshot by reflection and always restore it. A
- * {@code SourbyCraftConfig.overrideForTesting(ConfigSnapshot)} seam would replace this.</p>
+ * <p>The config snapshot goes through {@link SourbyCraftConfigTesting} (the package-private
+ * {@code SourbyCraftConfig.installForTesting} seam), which also points the utility TOML at a
+ * temporary file. {@code Bukkit.server} is still swapped by reflection: {@code Bukkit} has no
+ * seam of its own.</p>
  */
 final class TestConfigOverride {
 
@@ -27,20 +24,7 @@ final class TestConfigOverride {
     }
 
     static void withConfig(final Map<String, Object> values, final ThrowingRunnable action) throws Exception {
-        final Field loaded = SourbyCraftConfig.class.getDeclaredField("loaded");
-        loaded.setAccessible(true);
-        final Object previous = loaded.get(null);
-        final Class<?> record = loaded.getType();
-        final Constructor<?> constructor = record.getDeclaredConstructors()[0];
-        constructor.setAccessible(true);
-        final Method aurora = record.getDeclaredMethod("aurora");
-        aurora.setAccessible(true);
-        loaded.set(null, constructor.newInstance(new ConfigSnapshot(values), aurora.invoke(previous)));
-        try {
-            action.run();
-        } finally {
-            loaded.set(null, previous);
-        }
+        SourbyCraftConfigTesting.withConfig(values, action::run);
     }
 
     /** Installs a {@link Server} proxy as {@code Bukkit.server} for the duration of {@code action}. */

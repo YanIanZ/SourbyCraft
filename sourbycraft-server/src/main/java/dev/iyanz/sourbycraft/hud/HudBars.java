@@ -35,7 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * gap is a JVM flag issue, and the bar makes it visible).
  *
  * <p>The updater task is scheduled lazily on the first toggle and keeps running (single cheap
- * task; updates are skipped entirely while nobody watches). Viewers are evicted on quit.
+ * task; while nobody watches it still reads the cached snapshot once a second but leaves every bar untouched). Viewers are evicted on quit.
  */
 public final class HudBars {
 
@@ -55,6 +55,45 @@ public final class HudBars {
 
     private static volatile boolean taskStarted;
     private static io.papermc.paper.threadedregions.scheduler.ScheduledTask updater;
+
+    /**
+     * Starts the repeating updater. Production schedules {@code update} on the global region
+     * scheduler every second; tests inject a scheduler through {@link #installForTesting} so the
+     * task can be captured and run by hand.
+     */
+    @FunctionalInterface
+    interface UpdaterScheduler {
+        io.papermc.paper.threadedregions.scheduler.ScheduledTask schedule(Runnable update);
+    }
+
+    private static final UpdaterScheduler GLOBAL_REGION_SCHEDULER = update ->
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate(
+            MinecraftInternalPlugin.INSTANCE, task -> update.run(), 20L, 20L);
+
+    private static volatile UpdaterScheduler updaterScheduler = GLOBAL_REGION_SCHEDULER;
+    private static volatile java.util.function.Supplier<SourbyMetrics> metricsSource = MetricsRuntime::provider;
+
+    /**
+     * Test seam: replaces the updater scheduler and the metrics source for the duration of the
+     * returned handle. Package-private; production never calls it, so the defaults (the global
+     * region scheduler and {@link MetricsRuntime#provider()}) are the only production path. Closing
+     * the handle cancels nothing and clears nothing except to restore the two hooks; tests that
+     * started the updater call {@link #close()}.
+     *
+     * @param scheduler the scheduler {@code ensureTask} should use
+     * @param metrics   the metrics the updater task reads each run
+     * @return a handle that restores the previous hooks
+     */
+    static AutoCloseable installForTesting(final UpdaterScheduler scheduler, final SourbyMetrics metrics) {
+        final UpdaterScheduler previousScheduler = updaterScheduler;
+        final java.util.function.Supplier<SourbyMetrics> previousSource = metricsSource;
+        updaterScheduler = scheduler;
+        metricsSource = () -> metrics;
+        return () -> {
+            updaterScheduler = previousScheduler;
+            metricsSource = previousSource;
+        };
+    }
 
     private HudBars() {}
 
@@ -151,9 +190,7 @@ public final class HudBars {
 
     private static synchronized void ensureTask() {
         if (taskStarted) return;
-        updater = Bukkit.getGlobalRegionScheduler().runAtFixedRate(
-            MinecraftInternalPlugin.INSTANCE,
-            task -> update(), 20L, 20L);
+        updater = updaterScheduler.schedule(HudBars::update);
         taskStarted = true;
     }
 
@@ -169,7 +206,7 @@ public final class HudBars {
 
     private static void update() {
         try {
-            final PerformanceSnapshot snapshot = MetricsRuntime.provider().snapshot();
+            final PerformanceSnapshot snapshot = metricsSource.get().snapshot();
             if (!TPS_VIEWERS.isEmpty()) applyTps(renderTps(snapshot));
             if (!RAM_VIEWERS.isEmpty()) updateRam(snapshot);
             if (!PERF_VIEWERS.isEmpty()) {
