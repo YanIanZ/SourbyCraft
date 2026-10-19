@@ -448,6 +448,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
   perbaiki trigger, assert per view, `SOURBY_REQUIRE_ZSTD` (audit §4)
   — sebagian `1b33fe1e` (2026-10-20): trigger `pull_request` (build+test, tanpa publikasi), grep smoke per-view pada log tanpa ANSI, `SOURBY_METRICS_SAMPLED_OK` dengan nilai nyata; BELUM: `SOURBY_REQUIRE_ZSTD` (`SlimeImporterTest` tidak membaca env), bukti boot dari run CI berikutnya
   — `SOURBY_REQUIRE_ZSTD` sisi tes (2026-10-20): `awf/ZstdTestSupport` (pola `RedisTestServer`) dipakai `SlimeImporterTest` + `AwfWorldFileTest`; BELUM: baris env `SOURBY_REQUIRE_ZSTD: "1"` di langkah tes `build.yml` (workflow sedang dipegang SEC-7)
+  — selesai `52cce4b8` (2026-10-20): env `SOURBY_REQUIRE_ZSTD: "1"` di langkah tes `build.yml` (zstd-dependent gagal bukan skip); sisanya hanya bukti boot dari run CI berikutnya
 - [-] **OBS-10** Release doc / SPEC / README saling bertentangan soal status gate — pass konsistensi
   2026-10-14 (release doc, SPEC §161, README, `qualification-readiness.md`); ulangi saat tagging (audit §4)
 - [x] **OBS-11** `/awf export|import|convert` menerima path filesystem sembarang — batasi ke
