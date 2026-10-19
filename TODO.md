@@ -114,8 +114,9 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 - [x] **SEC-3** Swap in-place tidak menyimpan jar sebelumnya dan otomatis melintasi versi Minecraft —
   **keputusan owner:** simpan `.prev` + rollback setelah boot gagal, gate versi MC yang sama (audit §3)
   — selesai `4a830168` (2026-10-20): `<jar>.prev` sebelum swap (tanpa .prev tidak ada swap), `UpdateRollbackGuard` APPLIED→BOOTING→OK, restore di boot berikutnya bila tidak mencapai ready (`ServerLoadEvent STARTUP`), `/update resume`; `MC_VERSION_MISMATCH`; 34 test unit, belum ada boot nyata jalur apply/rollback
-- [ ] **SEC-4** `SourbyBootstrap` kode mati (entry point = SourbyClip); grep guard download offline
+- [x] **SEC-4** `SourbyBootstrap` kode mati (entry point = SourbyClip); grep guard download offline
   di CI tidak mungkin cocok — hapus atau sambungkan, tolak staging jar dengan versi clip berbeda, perbaiki grep CI dan docs (audit §3)
+  — sebagian `db1be477` (2026-10-20): `SourbyBootstrap`/`CdsEnvironment`/`BootstrapManifest` + jalur `ensure()` mati di `LibDownloader` dihapus (transport seam untuk provisioning tetap), docs `CDS.md` + AGENTS.md "Boot-time network" dikoreksi ke SourbyClip; compileJava/compileTestJava hijau, LibDownloaderTest 2/2, test_plugin_provisioning.py 12 OK; BELUM: staging gate versi clip (snippet di AGENT-COORDINATION.md, area `update/**`) dan perbaikan grep CI offline (snippet; `build.yml` milik CI)
 - [x] **OBS-1** Password Redis di `aurora.awf.redis.uri` bocor ke report spark — sembunyikan key,
   scrub userinfo URI di semua tempat (audit §4)
   — selesai `1b33fe1e` (2026-10-20): `aurora.awf.redis.uri` disembunyikan dan userinfo `scheme://user:pass@` di-scrub di seluruh nilai config spark; `SourbyServerConfigProviderTest` +3
