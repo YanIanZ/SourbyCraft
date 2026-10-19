@@ -32,6 +32,9 @@ class PerfPlayerViewTest {
         when(player.getName()).thenReturn("Steve");
         final World world = mock(World.class);
         when(world.getName()).thenReturn("world");
+        // Location holds its world weakly; the getWorld() stub keeps this mock strongly reachable
+        // for the player's lifetime, or a GC mid-test makes Location.getWorld() throw "World unloaded".
+        when(player.getWorld()).thenReturn(world);
         when(player.getLocation()).thenReturn(new Location(world, 17.5, 64.0, -33.2));
         when(player.getPing()).thenReturn(42);
         when(player.getViewDistance()).thenReturn(10);
