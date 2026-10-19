@@ -16,6 +16,12 @@ import org.jetbrains.annotations.Nullable;
  * <p>
  * Utilization of this class is intended to be more specific and consistent about time frames rather than relying on
  * ticks always running 20 times per second
+ * <p>
+ * Parsed text is an integer followed by a unit, case-insensitive, e.g. {@code 250ms}, {@code 5m}, {@code 30d}. Units
+ * are written in lower case ({@code ns us ms s m h d w mo y} and their long forms); the one exception is a lone
+ * upper-case {@code M}, which is rejected because it reads as "month" to many operators but would otherwise be parsed
+ * as a minute. Use {@code m} for minutes and {@code mo} (or {@code month}) for months. Months, weeks and years are
+ * large units: see {@link #acceptLargeUnits()}.
  *
  * @author dueris
  */
@@ -62,6 +68,9 @@ public class TimeSpan {
         map.put("hour", ChronoUnit.HOURS);
         map.put("hours", ChronoUnit.HOURS);
 
+        map.put("halfday", ChronoUnit.HALF_DAYS);
+        map.put("halfdays", ChronoUnit.HALF_DAYS);
+
         map.put("d", ChronoUnit.DAYS);
         map.put("day", ChronoUnit.DAYS);
         map.put("days", ChronoUnit.DAYS);
@@ -101,6 +110,10 @@ public class TimeSpan {
 
     /**
      * Constructs a new time span from a chrono unit and the amount of said unit type
+     * <p>
+     * Every unit from {@link ChronoUnit#NANOS} to {@link ChronoUnit#YEARS} (including
+     * {@link ChronoUnit#HALF_DAYS}) is accepted; larger units such as decades have no alias and throw
+     * {@link IllegalStateException}.
      *
      * @param unit
      *     the type of unit
@@ -134,7 +147,14 @@ public class TimeSpan {
         }
 
         final long count = Long.parseLong(matcher.group(1));
-        final String unitStr = matcher.group(2).toLowerCase(java.util.Locale.ROOT);
+        final String rawUnit = matcher.group(2);
+        if (rawUnit.equals("M")) {
+            // Lower-casing would silently turn "1M" into one minute; a log cleaner meaning "1 month" would then
+            // delete files after a minute. Fail loudly instead of guessing.
+            throw new IllegalArgumentException("Ambiguous time unit 'M' in '" + str
+                + "': use 'm' for minutes or 'mo' (or 'month') for months");
+        }
+        final String unitStr = rawUnit.toLowerCase(java.util.Locale.ROOT);
 
         final ChronoUnit unit = UNIT_ALIASES.get(unitStr);
         if (unit == null) {

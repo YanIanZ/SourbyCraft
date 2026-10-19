@@ -278,11 +278,19 @@ public class Util {
      * @param nanos
      *     the amount of nanoseconds to convert
      *
-     * @return the converted nanoseconds to the largest decimal unit. e.g. "5.3s", "10.1ms", etc.
+     * @return the converted nanoseconds to the largest decimal unit. e.g. "5.3s", "10.1ms", "250.00µs", etc.
+     *
+     * @implNote Numbers are formatted with {@link java.util.Locale#ROOT}, so the decimal separator is always a dot
+     *     regardless of the JVM default locale.
      */
     public static String formatNanosToLargestDecimalUnit(final long nanos) {
         if (nanos < 1_000L)
             return truncateToSecondDecimal(nanos) + "ns";
+
+        if (nanos < 1_000_000L) {
+            final double micros = nanos / 1_000D;
+            return truncateToSecondDecimal(micros) + "\u00b5s";
+        }
 
         if (nanos < 1_000_000_000L) {
             final double ms = nanos / 1_000_000D;
@@ -309,11 +317,14 @@ public class Util {
      * @param nanos
      *     the amount of nanoseconds to convert
      *
-     * @return the converted nanoseconds to the largest whole unit. e.g. "5s", "10ms", etc.
+     * @return the converted nanoseconds to the largest whole unit. e.g. "5s", "10ms", "250µs", etc.
      */
     public static String formatNanosToLargestWholeUnit(final long nanos) {
         if (nanos < 1_000L)
             return nanos + "ns";
+
+        if (nanos < 1_000_000L)
+            return (nanos / 1_000L) + "\u00b5s";
 
         if (nanos < 1_000_000_000L) {
             final long ms = nanos / 1_000_000L;
@@ -373,7 +384,7 @@ public class Util {
     }
 
     private static String truncateToSecondDecimal(final double value) {
-        return String.format("%.2f", value);
+        return String.format(java.util.Locale.ROOT, "%.2f", value);
     }
 
     @ApiStatus.Internal

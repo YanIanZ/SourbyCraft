@@ -135,6 +135,18 @@ public final class SourbyMessages {
         return raw == null ? "" : raw;
     }
 
+    /**
+     * True when the operator explicitly configured {@code messages.<key>} as a list with no usable (non-blank
+     * string) entry, e.g. {@code join = []}. Callers whose message is optional (the join/leave broadcast) treat
+     * that as "send nothing"; a key that is absent, or not a list, is not disabled and keeps its built-in default.
+     * {@link #get} itself is unchanged and still falls back to the defaults, so a required message (server-full,
+     * MOTD) is never rendered empty.
+     */
+    public static boolean isDisabled(String key) {
+        return SourbyCraftConfig.cfgGet(SECTION + "." + key, null) instanceof List<?> raw
+            && raw.stream().noneMatch(o -> o instanceof String s && !s.isBlank());
+    }
+
     /** The number of variants currently configured for a key (operator list if present+usable, else built-in). */
     public static int variantCount(String key) {
         List<String> ops = readVariants(key);
@@ -228,8 +240,8 @@ public final class SourbyMessages {
         // Per-key comments (only if not already commented).
         maybeComment(f, SECTION + "." + SERVER_FULL, "Kick line shown when a non-bypass player hits a full server (KICK_FULL).");
         maybeComment(f, SECTION + "." + MOTD, "Server-list MOTD. \\n splits two lines. RESTART_REQUIRED: one variant applied at startup.");
-        maybeComment(f, SECTION + "." + JOIN, "Broadcast when a player joins. <player> = their name.");
-        maybeComment(f, SECTION + "." + LEAVE, "Broadcast when a player leaves. <player> = their name.");
+        maybeComment(f, SECTION + "." + JOIN, "Broadcast when a player joins. <player> = their name. [] (empty list) = no join message; remove the key to restore the built-in variants. LIVE (/sourbycraft reload).");
+        maybeComment(f, SECTION + "." + LEAVE, "Broadcast when a player leaves. <player> = their name. [] (empty list) = no leave message; remove the key to restore the built-in variants. LIVE (/sourbycraft reload).");
     }
 
     private static void maybeComment(com.electronwill.nightconfig.core.file.CommentedFileConfig f, String path, String comment) {

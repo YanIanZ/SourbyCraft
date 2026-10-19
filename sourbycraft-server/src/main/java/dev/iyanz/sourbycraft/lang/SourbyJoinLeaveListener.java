@@ -14,7 +14,10 @@ import org.bukkit.plugin.Plugin;
  *
  * <p>Overrides the vanilla "&lt;player&gt; joined the game" / "left the game" broadcast with a
  * random SourbyCraft-flavored, hex-colored variant from {@link SourbyMessages} (keys
- * {@link SourbyMessages#JOIN} / {@link SourbyMessages#LEAVE}). The joining/leaving player's name
+ * {@link SourbyMessages#JOIN} / {@link SourbyMessages#LEAVE}). If the operator sets
+ * {@code messages.join} / {@code messages.leave} to an empty list ({@code []}, or a list with only blank
+ * entries) the broadcast is switched off (message set to null); an absent key keeps the built-in variants.
+ * The config is read on use, so the switch is LIVE after {@code /sourbycraft reload}. The joining/leaving player's name
  * is supplied via the MiniMessage {@code <player>} placeholder, so operator variants opt in simply
  * by writing {@code <player>} in their string.
  *
@@ -44,6 +47,11 @@ public final class SourbyJoinLeaveListener implements Listener {
     public void onJoin(PlayerJoinEvent e) {
         // Only override when a broadcast would have been sent (null = another plugin suppressed it).
         if (e.joinMessage() == null) return;
+        // An explicitly empty messages.join list means "no join message" (operator switch); absent keeps the default.
+        if (SourbyMessages.isDisabled(SourbyMessages.JOIN)) {
+            e.joinMessage(null);
+            return;
+        }
         e.joinMessage(SourbyMessages.get(
             SourbyMessages.JOIN,
             Placeholder.unparsed("player", e.getPlayer().getName())));
@@ -53,6 +61,10 @@ public final class SourbyJoinLeaveListener implements Listener {
     @EventHandler(priority = EventPriority.NORMAL)
     public void onQuit(PlayerQuitEvent e) {
         if (e.quitMessage() == null) return;
+        if (SourbyMessages.isDisabled(SourbyMessages.LEAVE)) {
+            e.quitMessage(null);
+            return;
+        }
         e.quitMessage(SourbyMessages.get(
             SourbyMessages.LEAVE,
             Placeholder.unparsed("player", e.getPlayer().getName())));
