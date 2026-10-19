@@ -18,20 +18,30 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URI;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalTime;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.zip.ZipFile;
 
 /**
@@ -49,36 +59,93 @@ import java.util.zip.ZipFile;
  *       derives its {@link UpdateChannel}, and only considers releases whose tag is on the SAME
  *       channel. A REL server never offers a DEV/EXP build. Newer-ness is a numeric
  *       {@link SemVer} compare of the channel-stripped cores.</li>
- *   <li><b>Verify.</b> Before staging, the downloaded jar is validated: byte size &gt; 0, matches
- *       the asset's declared size when present, SHA-256 equals the release asset {@code digest}
- *       when GitHub exposes one, and it always must open as a valid ZIP/JAR. A corrupt/partial
- *       download is deleted and never staged.</li>
+ *   <li><b>Same Minecraft version only.</b> A release whose tag core ({@code v26.3-r50} → 26.3)
+ *       differs from the running build's Minecraft version is announced but never staged or
+ *       applied (audit SEC-3); crossing a Minecraft version is an operator decision.</li>
+ *   <li><b>Verify.</b> The download is bounded BEFORE it is read (the asset's declared size, else
+ *       {@link #MAX_JAR_BYTES}; an oversize {@code Content-Length} is refused without reading the
+ *       body and a stream that runs past the bound is cut off). The file then must match the
+ *       declared size, its SHA-256 must equal the release asset {@code digest} (mandatory), it must
+ *       open as a ZIP/JAR, and — when this build ships a release public key — its detached
+ *       Ed25519 signature asset must verify ({@link ReleaseSignatureVerifier}). A failing download
+ *       is deleted and never staged.</li>
  *   <li><b>Safe apply modes.</b> {@code notify} (default) logs + op-notifies only; {@code stage}
  *       additionally downloads+verifies and places the jar in {@code auto_update/sourbycraft} plus
- *       writes {@code auto_update/core.path} for a launcher swap on the NEXT restart; {@code off}
- *       disables checks. The running jar is NEVER hot-swapped.</li>
+ *       writes {@code auto_update/core.path}; {@code auto} also swaps the launch jar and restarts
+ *       ({@link UpdateApplier}); {@code off} disables checks. The running jar is NEVER hot-swapped.</li>
+ *   <li><b>Rollback hold.</b> While {@link UpdateRollbackGuard} holds after a failed boot on an
+ *       applied update, every check returns {@link Outcome#HELD} without touching the network.</li>
+ *   <li><b>Polite polling.</b> The releases listing is a conditional request ({@code ETag} /
+ *       {@code If-None-Match}; a 304 reuses the cached listing) and a {@code 429}/{@code 403} with
+ *       {@code Retry-After} or an exhausted {@code X-RateLimit-Remaining} puts the updater in a
+ *       backoff window during which checks return {@link Outcome#RATE_LIMITED} immediately.</li>
  *   <li><b>Folia-safe.</b> Periodic checks run on {@link Bukkit#getAsyncScheduler()} (never the
  *       Bukkit global scheduler). Network + disk I/O happen off the region threads.</li>
  * </ol>
  *
  * <p>Every network path is defensive: a 404 (no matching release yet), a rate-limit, a parse error
  * or an offline host is logged at INFO/WARN and the check simply ends — it can never crash boot or
- * a scheduled tick.
+ * a scheduled tick. All network I/O goes through {@link HttpTransport}; the package-private
+ * constructor injects it (plus the build info, clock, signature verifier and rollback guard) so the
+ * check path is unit-tested without GitHub.
  */
 public final class SourbyUpdater {
 
     private static final Gson GSON = new Gson();
     private static final String GITHUB_API = "https://api.github.com/repos/";
     private static final long DAILY_MILLIS = TimeUnit.DAYS.toMillis(1);
+    /** Ceiling for a release jar download when the asset declares no size. */
+    static final long MAX_JAR_BYTES = 512L * 1024 * 1024;
+    /** Ceiling for a detached signature asset download. */
+    static final long MAX_SIGNATURE_BYTES = 16L * 1024;
+    /** Backoff window bounds applied to whatever the server asks for. */
+    static final Duration MIN_BACKOFF = Duration.ofMinutes(1);
+    static final Duration MAX_BACKOFF = Duration.ofHours(6);
+    /** Backoff when a 429 carries no usable hint at all. */
+    static final Duration DEFAULT_BACKOFF = Duration.ofMinutes(5);
 
-    private final Path autoUpdateDir = Path.of("auto_update");
-    private final Path stageDir      = autoUpdateDir.resolve("sourbycraft");
-    private final Path corePathFile  = autoUpdateDir.resolve("core.path");
-    private final Path latestPathFile = stageDir.resolve("latest.path");
+    private final Path autoUpdateDir;
+    private final Path stageDir;
+    private final Path corePathFile;
+    private final Path latestPathFile;
+    private final HttpTransport transport;
+    private final Supplier<BuildInfo> buildInfo;
+    private final Clock clock;
+    private final ReleaseSignatureVerifier signatures;
+    private final UpdateRollbackGuard rollbackGuard;
+
+    // Conditional-request state for the releases listing, and the rate-limit backoff window.
+    // Scheduled checks are serialised by checkRunning; an operator's /update may run alongside,
+    // so the ETag pair is guarded by its own lock (never the start()/stop() monitor: a network
+    // call must not block shutdown).
+    private final Object listingLock = new Object();
+    private @Nullable String releasesEtag;
+    private @Nullable JsonArray releasesCache;
+    private volatile Instant backoffUntil = Instant.EPOCH;
 
     private final AtomicBoolean checkRunning = new AtomicBoolean(false);
     private final List<ScheduledTask> scheduledChecks = new ArrayList<>();
     private UpdateNotifier.JoinListener joinListener;
+
+    /** The server's updater: live GitHub transport, this jar's build info, wall clock. */
+    public SourbyUpdater() {
+        this(Path.of("auto_update"), HttpTransport.jdk(), BuildInfo::load, Clock.systemUTC(),
+            ReleaseSignatureVerifier.fromClasspath(), UpdateRollbackGuard.SERVER);
+    }
+
+    /** Test seam: every external dependency injected. */
+    SourbyUpdater(Path autoUpdateDir, HttpTransport transport, Supplier<BuildInfo> buildInfo, Clock clock,
+                  ReleaseSignatureVerifier signatures, UpdateRollbackGuard rollbackGuard) {
+        this.autoUpdateDir = autoUpdateDir;
+        this.stageDir = autoUpdateDir.resolve("sourbycraft");
+        this.corePathFile = autoUpdateDir.resolve("core.path");
+        this.latestPathFile = stageDir.resolve("latest.path");
+        this.transport = transport;
+        this.buildInfo = buildInfo;
+        this.clock = clock;
+        this.signatures = signatures;
+        this.rollbackGuard = rollbackGuard;
+    }
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -164,6 +231,7 @@ public final class SourbyUpdater {
             + " mode=" + mode.name().toLowerCase(Locale.ROOT)
             + " times=" + times
             + (Config.checkIntervalMinutes() > 0 ? " interval=" + Config.checkIntervalMinutes() + "m" : "")
+            + " signatures=" + (signatures.isActive() ? "enforced" : "not enforced")
             + " (AsyncScheduler)");
     }
 
@@ -216,10 +284,26 @@ public final class SourbyUpdater {
         ApplyMode mode = overrideMode != null ? overrideMode : ApplyMode.parse(Config.mode());
         if (mode == ApplyMode.OFF) return Outcome.DISABLED;
 
-        String currentVersion = BuildInfo.load().version();
+        if (rollbackGuard.isHeld()) {
+            SourbyLogger.error("auto-updater: HELD — " + rollbackGuard.holdReason()
+                + " No check or apply runs until an operator runs /update resume (or deletes "
+                + rollbackGuard.stateFile() + ").");
+            return Outcome.HELD;
+        }
+
+        Instant now = clock.instant();
+        if (now.isBefore(backoffUntil)) {
+            SourbyLogger.info("auto-updater: rate-limited by GitHub; next check allowed at " + backoffUntil + ".");
+            return Outcome.RATE_LIMITED;
+        }
+
+        BuildInfo info = buildInfo.get();
+        String currentVersion = info.version();
         UpdateChannel channel = resolveChannel();
 
-        ReleaseInfo latest = fetchLatestForChannel(channel);
+        Listing listing = fetchReleases(GITHUB_API + Config.repo() + "/releases?per_page=100");
+        if (listing.rateLimited()) return Outcome.RATE_LIMITED;
+        ReleaseInfo latest = listing.releases() == null ? null : latestForChannel(listing.releases(), channel);
         if (latest == null) {
             SourbyLogger.info("auto-updater: no matching " + channel.suffix()
                 + " release found for repo " + Config.repo() + " (up to date, or none published yet).");
@@ -227,9 +311,9 @@ public final class SourbyUpdater {
             return Outcome.NO_RELEASE;
         }
 
-        if (!isNewerThanRunning(latest.tagName, currentVersion)) {
+        if (!isNewerThanRunning(latest.tagName, currentVersion, ownBuildVersion(info))) {
             SourbyLogger.info("auto-updater: already up to date on channel "
-                + channel.suffix() + " (current " + currentVersion + " build " + ownBuildVersion()
+                + channel.suffix() + " (current " + currentVersion + " build " + ownBuildVersion(info)
                 + ", latest " + latest.tagName + ").");
             UpdateNotifier.clearPending();
             return Outcome.UP_TO_DATE;
@@ -247,6 +331,14 @@ public final class SourbyUpdater {
 
         if (mode == ApplyMode.NOTIFY) {
             return Outcome.NOTIFIED;
+        }
+
+        String runningMc = runningMinecraftVersion(info);
+        if (!sameMinecraftVersion(latest.tagName, runningMc)) {
+            SourbyLogger.warn("auto-updater: NOT staging " + latest.tagName + ": it targets Minecraft "
+                + coreOf(latest.tagName) + " but this server runs " + runningMc
+                + ". Crossing a Minecraft version is a manual upgrade (worlds, plugins, data formats).");
+            return Outcome.MC_VERSION_MISMATCH;
         }
 
         // stage/auto: download + verify + place in the stage dir.
@@ -269,6 +361,11 @@ public final class SourbyUpdater {
         }
     }
 
+    /** Instant until which checks are skipped because GitHub asked us to back off. */
+    Instant backoffUntil() {
+        return backoffUntil;
+    }
+
     // ------------------------------------------------------------------ release-number ordering
 
     /**
@@ -279,10 +376,13 @@ public final class SourbyUpdater {
      * compares equal to the running version and no update is ever taken.
      */
     static boolean isNewerThanRunning(String tag, String currentVersion) {
+        return isNewerThanRunning(tag, currentVersion, ownBuildVersion());
+    }
+
+    static boolean isNewerThanRunning(String tag, String currentVersion, BuildVersion own) {
         int coreCmp = SemVer.compare(coreOf(tag), coreOf(currentVersion));
         if (coreCmp != 0) return coreCmp > 0;
         BuildVersion tagRel = releaseVersionOf(tag);
-        BuildVersion own = ownBuildVersion();
         return !tagRel.isUnknown() && !own.isUnknown() && tagRel.compareTo(own) > 0;
     }
 
@@ -301,9 +401,32 @@ public final class SourbyUpdater {
     }
 
     /** Version core with any {@code -rXXX} release counter AND channel suffix stripped. */
-    private static String coreOf(String version) {
+    static String coreOf(String version) {
         String v = SemVer.stripChannel(version);
         return RELEASE_NUM.matcher(v).replaceFirst("");
+    }
+
+    /**
+     * The Minecraft version this server runs, for the same-version gate: the build-info
+     * {@code mcVersion} stamp when present, else the running version's core ({@code 26.2-REL} →
+     * {@code 26.2}). A dev build without either yields {@code "unknown"}, which matches no tag — a
+     * build that cannot say which Minecraft it is never stages anything.
+     */
+    static String runningMinecraftVersion(BuildInfo info) {
+        String mc = info.mcVersion();
+        if (mc != null && !mc.isBlank() && !"unknown".equalsIgnoreCase(mc.trim())) return mc.trim();
+        String core = coreOf(info.version());
+        return core.isBlank() || "dev".equalsIgnoreCase(core) ? "unknown" : core;
+    }
+
+    /** True when the tag's version core names the same Minecraft version as {@code runningMc}. */
+    static boolean sameMinecraftVersion(String tag, String runningMc) {
+        if ("unknown".equals(runningMc)) return false;
+        String tagMc = coreOf(tag);
+        if (tagMc.isBlank()) return false;
+        // Both sides must look like a numeric version; SemVer.compare would otherwise rank the
+        // alpha token "unknown" below any number and never report equality anyway.
+        return SemVer.compare(tagMc, runningMc) == 0;
     }
 
     /**
@@ -333,8 +456,15 @@ public final class SourbyUpdater {
      */
     static BuildVersion ownBuildVersion() {
         try {
-            String bn = BuildInfo.load().buildNumber();
-            return BuildVersion.parse(bn);
+            return ownBuildVersion(BuildInfo.load());
+        } catch (Throwable t) {
+            return BuildVersion.UNKNOWN;
+        }
+    }
+
+    static BuildVersion ownBuildVersion(BuildInfo info) {
+        try {
+            return BuildVersion.parse(info.buildNumber());
         } catch (Throwable t) {
             return BuildVersion.UNKNOWN;
         }
@@ -353,15 +483,127 @@ public final class SourbyUpdater {
         // Operator override wins; else derive from this build's own version suffix.
         UpdateChannel forced = UpdateChannel.parseConfig(Config.channel());
         if (forced != null) return forced;
-        return UpdateChannel.parseFromVersion(BuildInfo.load().version());
+        return UpdateChannel.parseFromVersion(buildInfo.get().version());
     }
 
     // ------------------------------------------------------------------ GitHub
 
-    private @Nullable ReleaseInfo fetchLatestForChannel(UpdateChannel channel) {
-        JsonArray releases = requestArray(GITHUB_API + Config.repo() + "/releases?per_page=100");
-        if (releases == null) return null;
+    /** Result of the releases listing request. */
+    private record Listing(@Nullable JsonArray releases, boolean rateLimited) {
+        static final Listing FAILED = new Listing(null, false);
+        static final Listing RATE_LIMITED = new Listing(null, true);
+    }
 
+    /**
+     * GET the releases listing as a conditional request. A {@code 304 Not Modified} answers from the
+     * cached listing of the previous check; a new {@code ETag} replaces the cache; a rate-limit
+     * response arms the backoff window.
+     */
+    private Listing fetchReleases(String url) {
+        synchronized (listingLock) {
+            return fetchReleasesLocked(url);
+        }
+    }
+
+    private Listing fetchReleasesLocked(String url) {
+        Map<String, String> headers = new LinkedHashMap<>();
+        if (releasesEtag != null && releasesCache != null) {
+            headers.put("If-None-Match", releasesEtag);
+        }
+        try (HttpTransport.Response resp = transport.get(url, headers)) {
+            int code = resp.status();
+            if (code == 304 && releasesCache != null) {
+                SourbyLogger.info("auto-updater: releases unchanged since last check (304).");
+                return new Listing(releasesCache, false);
+            }
+            if (code == 404) {
+                SourbyLogger.info("auto-updater: repo/releases not found (404) for " + url
+                    + " — no releases yet, or check misc.auto_update.repo.");
+                return Listing.FAILED;
+            }
+            if (code == 429 || code == 403) {
+                Optional<Duration> wait = retryAfter(resp, clock.instant());
+                if (wait.isEmpty() && code == 429) wait = Optional.of(DEFAULT_BACKOFF);
+                if (wait.isPresent()) {
+                    backoffUntil = clock.instant().plus(wait.get());
+                    SourbyLogger.warn("auto-updater: GitHub returned " + code + " (rate limit); backing off "
+                        + wait.get().toSeconds() + "s, next check at " + backoffUntil + ".");
+                    return Listing.RATE_LIMITED;
+                }
+                SourbyLogger.warn("auto-updater: GitHub API returned " + code + " for " + url);
+                return Listing.FAILED;
+            }
+            if (code >= 400) {
+                SourbyLogger.warn("auto-updater: GitHub API returned " + code + " for " + url);
+                return Listing.FAILED;
+            }
+            JsonElement el;
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(resp.bodyOrEmpty(), StandardCharsets.UTF_8))) {
+                el = GSON.fromJson(r, JsonElement.class);
+            }
+            if (el == null || !el.isJsonArray()) {
+                SourbyLogger.warn("auto-updater: unexpected GitHub response shape from " + url);
+                return Listing.FAILED;
+            }
+            JsonArray arr = el.getAsJsonArray();
+            String etag = resp.header("ETag");
+            if (etag != null && !etag.isBlank()) {
+                releasesEtag = etag.trim();
+                releasesCache = arr;
+            } else {
+                releasesEtag = null;
+                releasesCache = null;
+            }
+            return new Listing(arr, false);
+        } catch (JsonSyntaxException e) {
+            SourbyLogger.warn("auto-updater: failed to parse GitHub response from " + url);
+            return Listing.FAILED;
+        } catch (Exception e) {
+            SourbyLogger.warn("auto-updater: request to " + url + " failed: " + e.getMessage());
+            return Listing.FAILED;
+        }
+    }
+
+    /**
+     * How long a rate-limited response asks us to wait: {@code Retry-After} as seconds or an HTTP
+     * date, else {@code X-RateLimit-Reset} (epoch seconds) when {@code X-RateLimit-Remaining} is 0.
+     * Clamped to [{@link #MIN_BACKOFF}, {@link #MAX_BACKOFF}]. Empty when the response gives no hint.
+     */
+    static Optional<Duration> retryAfter(HttpTransport.Response resp, Instant now) {
+        String retry = resp.header("Retry-After");
+        if (retry != null && !retry.isBlank()) {
+            String v = retry.trim();
+            try {
+                return Optional.of(clamp(Duration.ofSeconds(Long.parseLong(v))));
+            } catch (NumberFormatException notSeconds) {
+                try {
+                    Instant at = ZonedDateTime.parse(v, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+                    return Optional.of(clamp(Duration.between(now, at)));
+                } catch (DateTimeParseException ignored) {
+                    // fall through to the X-RateLimit headers
+                }
+            }
+        }
+        String remaining = resp.header("X-RateLimit-Remaining");
+        String reset = resp.header("X-RateLimit-Reset");
+        if (remaining != null && reset != null && "0".equals(remaining.trim())) {
+            try {
+                Instant at = Instant.ofEpochSecond(Long.parseLong(reset.trim()));
+                return Optional.of(clamp(Duration.between(now, at)));
+            } catch (NumberFormatException ignored) {
+                // no usable hint
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Duration clamp(Duration d) {
+        if (d.compareTo(MIN_BACKOFF) < 0) return MIN_BACKOFF;
+        if (d.compareTo(MAX_BACKOFF) > 0) return MAX_BACKOFF;
+        return d;
+    }
+
+    private @Nullable ReleaseInfo latestForChannel(JsonArray releases, UpdateChannel channel) {
         ReleaseInfo best = null;
         for (JsonElement el : releases) {
             if (!el.isJsonObject()) continue;
@@ -387,44 +629,108 @@ public final class SourbyUpdater {
             ? rel.getAsJsonArray("assets") : null;
         if (assets == null || assets.isEmpty()) return null;
 
+        JsonObject jar = null;
         for (JsonElement ae : assets) {
             if (!ae.isJsonObject()) continue;
             JsonObject asset = ae.getAsJsonObject();
             String name = getString(asset, "name");
             if (name == null || !name.toLowerCase(Locale.ROOT).endsWith(".jar")) continue;
-
-            String url = getString(asset, "browser_download_url");
-            if (url == null) continue;
-            long size = asset.has("size") && asset.get("size").isJsonPrimitive()
-                ? asset.get("size").getAsLong() : -1L;
-            String sha256 = normalizeSha256(getString(asset, "digest"));
-
-            return new ReleaseInfo(
-                tag,
-                getString(rel, "html_url"),
-                getString(rel, "body"),
-                name, url, size, sha256
-            );
+            if (getString(asset, "browser_download_url") == null) continue;
+            jar = asset;
+            break;
         }
-        return null;
+        if (jar == null) return null;
+        String jarName = getString(jar, "name");
+
+        // The detached signature, when the release publishes one, is "<jar name>.sig".
+        String sigUrl = null;
+        long sigSize = -1L;
+        for (JsonElement ae : assets) {
+            if (!ae.isJsonObject()) continue;
+            JsonObject asset = ae.getAsJsonObject();
+            if ((jarName + ReleaseSignatureVerifier.SIGNATURE_SUFFIX).equals(getString(asset, "name"))) {
+                sigUrl = getString(asset, "browser_download_url");
+                sigSize = asset.has("size") && asset.get("size").isJsonPrimitive() ? asset.get("size").getAsLong() : -1L;
+                break;
+            }
+        }
+
+        long size = jar.has("size") && jar.get("size").isJsonPrimitive() ? jar.get("size").getAsLong() : -1L;
+        return new ReleaseInfo(
+            tag,
+            getString(rel, "html_url"),
+            getString(rel, "body"),
+            jarName,
+            getString(jar, "browser_download_url"),
+            size,
+            normalizeSha256(getString(jar, "digest")),
+            sigUrl,
+            sigSize
+        );
     }
 
     // ------------------------------------------------------------------ download + verify + stage
 
-    private Path downloadAndStage(ReleaseInfo info) throws IOException {
+    private Path downloadAndStage(ReleaseInfo info) throws IOException, GeneralSecurityException {
         Files.createDirectories(stageDir);
         Path temp   = stageDir.resolve(info.assetName + ".part");
         Path target = stageDir.resolve(info.assetName);
 
         Files.deleteIfExists(temp);
-        try (InputStream in = openConnection(info.downloadUrl).getInputStream()) {
-            Files.copy(in, temp, StandardCopyOption.REPLACE_EXISTING);
+        long limit = info.declaredSize > 0 ? info.declaredSize : MAX_JAR_BYTES;
+        try (HttpTransport.Response resp = transport.get(info.downloadUrl, Map.of("Accept", "application/octet-stream"))) {
+            if (resp.status() >= 400) {
+                throw new IOException("download of " + info.assetName + " returned HTTP " + resp.status());
+            }
+            long advertised = resp.contentLength();
+            if (advertised > limit) {
+                throw new IOException("refusing " + info.assetName + ": Content-Length " + advertised
+                    + " exceeds the " + limit + "-byte bound; nothing was read");
+            }
+            try {
+                copyBounded(resp.bodyOrEmpty(), temp, limit);
+            } catch (IOException e) {
+                fail(temp, e.getMessage());
+            }
         }
 
         verifyOrThrow(temp, info);
+        if (signatures.isActive()) {
+            verifySignatureOrThrow(temp, info);
+        }
 
         Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
         return target;
+    }
+
+    /**
+     * Stream {@code in} to {@code target}, aborting (and throwing) as soon as more than {@code limit}
+     * bytes have arrived, so an oversize or endless body never fills the disk before the size check.
+     * Returns the number of bytes written.
+     */
+    static long copyBounded(InputStream in, Path target, long limit) throws IOException {
+        long total = 0L;
+        byte[] buf = new byte[64 * 1024];
+        try (OutputStream out = Files.newOutputStream(target, StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+            for (int n; (n = in.read(buf)) > 0; ) {
+                total += n;
+                if (total > limit) {
+                    throw new IOException("download exceeded the " + limit + "-byte bound; aborted after " + total + " bytes");
+                }
+                out.write(buf, 0, n);
+            }
+        }
+        return total;
+    }
+
+    /** Read at most {@code limit} bytes into memory; throws when the stream has more. */
+    static byte[] readBounded(InputStream in, long limit) throws IOException {
+        byte[] data = in.readNBytes((int) Math.min(limit + 1, Integer.MAX_VALUE));
+        if (data.length > limit) {
+            throw new IOException("response exceeded the " + limit + "-byte bound");
+        }
+        return data;
     }
 
     /**
@@ -456,6 +762,37 @@ public final class SourbyUpdater {
         if (!isValidZip(file)) {
             fail(file, "not a valid zip/jar: " + info.assetName);
         }
+    }
+
+    /**
+     * Signature enforcement (only when this build ships a release key): the release must carry
+     * {@code <asset>.sig} and it must verify over the downloaded bytes. The signature download is
+     * bounded to {@link #MAX_SIGNATURE_BYTES}.
+     */
+    private void verifySignatureOrThrow(Path file, ReleaseInfo info) throws IOException, GeneralSecurityException {
+        if (info.signatureUrl == null) {
+            fail(file, "refusing to stage " + info.assetName + ": this build enforces release signatures and the release has no "
+                + info.assetName + ReleaseSignatureVerifier.SIGNATURE_SUFFIX + " asset");
+        }
+        if (info.signatureSize > MAX_SIGNATURE_BYTES) {
+            fail(file, "signature asset is " + info.signatureSize + " bytes; refusing");
+        }
+        byte[] sig;
+        try (HttpTransport.Response resp = transport.get(info.signatureUrl, Map.of("Accept", "application/octet-stream"))) {
+            if (resp.status() >= 400) {
+                fail(file, "signature download returned HTTP " + resp.status());
+            }
+            if (resp.contentLength() > MAX_SIGNATURE_BYTES) {
+                fail(file, "signature Content-Length " + resp.contentLength() + " exceeds the bound");
+            }
+            sig = readBounded(resp.bodyOrEmpty(), MAX_SIGNATURE_BYTES);
+        }
+        try {
+            signatures.verifyOrThrow(file, sig);
+        } catch (GeneralSecurityException e) {
+            fail(file, "release signature rejected for " + info.assetName + ": " + e.getMessage());
+        }
+        SourbyLogger.info("auto-updater: Ed25519 release signature verified for " + info.assetName);
     }
 
     private void fail(Path file, String reason) throws IOException {
@@ -498,52 +835,7 @@ public final class SourbyUpdater {
         }
     }
 
-    // ------------------------------------------------------------------ http helpers
-
-    private @Nullable JsonArray requestArray(String url) {
-        JsonElement el = requestJson(url);
-        return el != null && el.isJsonArray() ? el.getAsJsonArray() : null;
-    }
-
-    private @Nullable JsonElement requestJson(String url) {
-        try {
-            HttpURLConnection conn = openConnection(url);
-            int code = conn.getResponseCode();
-            if (code == 404) {
-                SourbyLogger.info("auto-updater: repo/releases not found (404) for " + url
-                    + " — no releases yet, or check misc.auto_update.repo.");
-                return null;
-            }
-            if (code >= 400) {
-                SourbyLogger.warn("auto-updater: GitHub API returned " + code + " for " + url);
-                return null;
-            }
-            try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                return GSON.fromJson(r, JsonElement.class);
-            }
-        } catch (JsonSyntaxException e) {
-            SourbyLogger.warn("auto-updater: failed to parse GitHub response from " + url);
-            return null;
-        } catch (Exception e) {
-            SourbyLogger.warn("auto-updater: request to " + url + " failed: " + e.getMessage());
-            return null;
-        }
-    }
-
-    private HttpURLConnection openConnection(String url) throws IOException {
-        HttpURLConnection conn;
-        try {
-            conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
-        } catch (IllegalArgumentException e) {
-            throw new IOException("bad url: " + url, e);
-        }
-        conn.setRequestProperty("Accept", "application/vnd.github+json");
-        conn.setRequestProperty("User-Agent", "SourbyCraft-AutoUpdate");
-        conn.setConnectTimeout(10_000);
-        conn.setReadTimeout(15_000);
-        conn.setInstanceFollowRedirects(true);
-        return conn;
-    }
+    // ------------------------------------------------------------------ json helpers
 
     private static boolean getBool(JsonObject o, String key) {
         return o.has(key) && o.get(key).isJsonPrimitive() && o.get(key).getAsBoolean();
@@ -557,7 +849,15 @@ public final class SourbyUpdater {
     // ------------------------------------------------------------------ types
 
     /** Outcome of a single check — returned so an on-demand check (e.g. a command) can report it. */
-    public enum Outcome { DISABLED, NO_RELEASE, UP_TO_DATE, NOTIFIED, STAGED, STAGE_FAILED, APPLYING }
+    public enum Outcome {
+        DISABLED, NO_RELEASE, UP_TO_DATE, NOTIFIED, STAGED, STAGE_FAILED, APPLYING,
+        /** A rollback hold is in force ({@link UpdateRollbackGuard}); nothing was checked. */
+        HELD,
+        /** Inside a GitHub rate-limit backoff window; nothing was checked. */
+        RATE_LIMITED,
+        /** Newer release announced but it targets another Minecraft version; not staged. */
+        MC_VERSION_MISMATCH
+    }
 
     /**
      * Safe apply mode. {@code notify} = log + op-notify only (default, safest); {@code stage} =
@@ -584,7 +884,9 @@ public final class SourbyUpdater {
         String assetName,
         String downloadUrl,
         long declaredSize,
-        @Nullable String sha256
+        @Nullable String sha256,
+        @Nullable String signatureUrl,
+        long signatureSize
     ) {
         /** First non-blank line of the release body, for the notification's one-line notes. */
         @Nullable String notesSummary() {

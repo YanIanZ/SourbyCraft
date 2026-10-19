@@ -21,7 +21,7 @@ class BlockingIoBoundaryTest {
         "java\\.net\\.|HttpClient|URLConnection|\\.openStream\\(|new Socket\\(|InetAddress");
 
     private static final Set<String> AUDITED = Set.of(
-        "dev/iyanz/sourbycraft/update/SourbyUpdater.java",
+        "dev/iyanz/sourbycraft/update/HttpTransport.java",
         "dev/iyanz/sourbycraft/update/ViaAutoUpdate.java",
         "dev/iyanz/sourbycraft/command/SpeedtestCommand.java",
         "dev/iyanz/sourbycraft/util/GeoUtil.java",

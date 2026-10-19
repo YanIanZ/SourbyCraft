@@ -9,7 +9,7 @@ connections fails the build until it is added here with its thread context.
 
 | File | What | Runs on |
 | --- | --- | --- |
-| `update/SourbyUpdater.java` | GitHub release checks and downloads | Folia async scheduler (`runAtFixedRate`/`runDelayed`) |
+| `update/HttpTransport.java` | GitHub release checks and downloads (the one HTTP seam of `SourbyUpdater`, which holds no network call itself since 2026-10-20) | Folia async scheduler (`runAtFixedRate`/`runDelayed`) via `SourbyUpdater`; never the start/stop monitor |
 | `update/ViaAutoUpdate.java` | ViaVersion release check | Called from `SourbyUpdater`'s async check |
 | `command/SpeedtestCommand.java` | Speed test | `VirtualExecutor` (bounded virtual threads); the reply hops back to the sender's owner |
 | `util/GeoUtil.java` | GeoIP lookup for `/ping` (local `.mmdb`) | `VirtualExecutor`, from `PingCommand` |

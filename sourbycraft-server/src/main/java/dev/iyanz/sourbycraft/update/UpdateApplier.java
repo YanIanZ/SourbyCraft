@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -17,12 +18,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Applies a staged update and self-restarts (apply_mode=auto).
  *
- * <p><b>Jar swap is an atomic rename.</b> The staged jar is {@code Files.move}d over the LAUNCH
- * jar (the {@code -jar} argument of this JVM). POSIX rename replaces the directory entry while the
- * running JVM keeps its already-open file — the live process is never corrupted. On Windows the
- * rename fails on the lock; {@code auto_update/core.path} stays behind and
- * {@code SourbyBootstrap}'s phase-1 consumer performs the same swap on the NEXT boot, when the old
- * jar is no longer held open.
+ * <p><b>Jar swap is an atomic rename, after the previous jar is kept.</b> The launch jar (the
+ * {@code -jar} argument of this JVM) is first copied to {@code <jar>.prev}
+ * ({@link UpdateRollbackGuard#keepPrevious}); only then is the staged jar {@code Files.move}d over
+ * it. POSIX rename replaces the directory entry while the running JVM keeps its already-open file
+ * — the live process is never corrupted. The guard records the apply so the next boot can restore
+ * {@code .prev} if it never reaches ready (audit SEC-3). If the {@code .prev} copy fails (disk
+ * full, permissions) the swap does NOT happen and no restart is scheduled: an update without a way
+ * back is not applied automatically. On Windows the rename fails on the lock;
+ * {@code auto_update/core.path} stays behind for a launcher-side swap on the NEXT boot.
  *
  * <p><b>Restart modes</b> ({@code misc.auto_update.restart_mode}):
  * <ul>
@@ -30,9 +34,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       otherwise {@code spigot}.</li>
  *   <li>{@code spigot} — Spigot's restart path (runs {@code restart-script} when configured, else
  *       a clean stop).</li>
- *   <li>{@code exit} — clean Folia shutdown, then a JVM shutdown hook flips the exit code to 70 so
- *       a panel's crash-detection restarts the server. The hook fires AFTER the region shutdown
- *       thread has saved worlds/players (Folia exits through the normal path first).</li>
+ *   <li>{@code exit} — clean shutdown, then exit code 70 so a panel's crash-detection restarts the
+ *       server. The code is delivered through the server's own exit path:
+ *       {@code MinecraftServer.abnormalExit} is set and {@code DedicatedServer.onServerExit()} calls
+ *       {@code System.exit(abnormalExit ? 70 : 0)} once {@code stopServer()} has saved worlds and
+ *       players and the region shutdown thread has finished. No shutdown hook, no
+ *       {@code Runtime.halt}: nothing is cut short (audit SEC-9).</li>
  *   <li>{@code stop} — clean stop only; systemd/loop-script/panel brings the server back.</li>
  * </ul>
  */
@@ -74,16 +81,33 @@ public final class UpdateApplier {
             Path launchJar = launchJarPath();
             boolean swapped = false;
             if (launchJar != null) {
+                Path prev;
+                try {
+                    prev = UpdateRollbackGuard.SERVER.keepPrevious(launchJar);
+                } catch (Exception e) {
+                    SourbyLogger.error("auto-updater: could not keep the previous jar as "
+                        + UpdateRollbackGuard.prevPathFor(launchJar) + " (" + e.getMessage()
+                        + ") — NOT swapping " + tag + " and NOT restarting; the staged jar stays at " + stagedJar + ".");
+                    IN_FLIGHT.set(false);
+                    return;
+                }
                 try {
                     // Atomic rename: the running JVM keeps its open (old) file; the path now
                     // serves the new jar for the next boot. REPLACE_EXISTING is required.
                     Files.move(stagedJar, launchJar, StandardCopyOption.REPLACE_EXISTING);
                     swapped = true;
                     writeApplied(tag);
+                    try {
+                        UpdateRollbackGuard.SERVER.recordApplied(tag, launchJar, prev, Instant.now());
+                    } catch (Exception e) {
+                        SourbyLogger.warn("auto-updater: swapped but could not record the apply for rollback ("
+                            + e.getMessage() + "); the next boot will not auto-restore " + prev + ".");
+                    }
                     // The stage is consumed — remove the pointer so the bootstrap fallback
                     // does not try to re-apply a jar that no longer exists.
                     Files.deleteIfExists(Path.of("auto_update", "core.path"));
-                    SourbyLogger.info("auto-updater: swapped " + launchJar + " -> " + tag + ".");
+                    SourbyLogger.info("auto-updater: swapped " + launchJar + " -> " + tag
+                        + " (previous build kept at " + prev + ").");
                 } catch (Exception e) {
                     SourbyLogger.warn("auto-updater: in-place swap failed (" + e.getMessage()
                         + ") — leaving auto_update/core.path for the bootstrap to swap on next boot.");
@@ -139,22 +163,41 @@ public final class UpdateApplier {
         }
     }
 
-    private static void restart(String mode) {
-        String m = mode == null ? "auto" : mode.trim().toLowerCase(Locale.ROOT);
-        if ("auto".equals(m)) {
-            m = System.getenv("P_SERVER_UUID") != null ? "exit" : "spigot";
+    /** How the server is brought down after a swap. */
+    enum RestartPlan {
+        /** Spigot's restart path ({@code restart-script}), falling back to a clean stop. */
+        SPIGOT,
+        /** Clean shutdown; the process exits 0 and something outside restarts it. */
+        STOP,
+        /** Clean shutdown; the process exits 70 through {@code onServerExit()} so a panel restarts it. */
+        EXIT_70;
+
+        /** Resolve the configured mode; {@code auto} picks {@link #EXIT_70} inside a Pterodactyl/Pelican container. */
+        static RestartPlan resolve(String mode, boolean pterodactylDetected) {
+            String m = mode == null ? "auto" : mode.trim().toLowerCase(Locale.ROOT);
+            if ("auto".equals(m)) {
+                return pterodactylDetected ? EXIT_70 : SPIGOT;
+            }
+            return switch (m) {
+                case "exit" -> EXIT_70;
+                case "stop" -> STOP;
+                default -> SPIGOT;
+            };
         }
-        SourbyLogger.info("auto-updater: restarting now (mode=" + m + ").");
-        switch (m) {
-            case "exit" -> {
-                // Clean Folia shutdown first (worlds/players saved by the region shutdown thread);
-                // the hook then flips the exit code so panel crash-detection restarts the server.
-                Runtime.getRuntime().addShutdownHook(new Thread(() -> Runtime.getRuntime().halt(70),
-                    "SourbyCraft-Update-Restart-Exit70"));
+    }
+
+    private static void restart(String mode) {
+        RestartPlan plan = RestartPlan.resolve(mode, System.getenv("P_SERVER_UUID") != null);
+        SourbyLogger.info("auto-updater: restarting now (plan=" + plan + ").");
+        switch (plan) {
+            case EXIT_70 -> {
+                // The exit code rides the normal shutdown path: DedicatedServer.onServerExit() calls
+                // System.exit(abnormalExit ? 70 : 0) after stopServer() has saved worlds/players.
+                requestExitCode70();
                 Bukkit.shutdown();
             }
-            case "stop" -> Bukkit.shutdown();
-            default -> {
+            case STOP -> Bukkit.shutdown();
+            case SPIGOT -> {
                 try {
                     org.spigotmc.RestartCommand.restart();
                 } catch (Throwable t) {
@@ -164,6 +207,11 @@ public final class UpdateApplier {
                 }
             }
         }
+    }
+
+    /** Make the server's own exit path return 70 once the clean shutdown has completed. */
+    private static void requestExitCode70() {
+        net.minecraft.server.MinecraftServer.getServer().abnormalExit = true;
     }
 
     private static void broadcast(String message) {
