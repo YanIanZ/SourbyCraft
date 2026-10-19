@@ -487,12 +487,17 @@ class BridgeRuntimeTest {
         assertTrue(this.warnings.isEmpty());
     }
 
-    private static void sleep(final long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (final InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            throw new AssertionError(interrupted);
+    /** Injected clock: a body "takes" time by advancing it, so no test waits on wall time. */
+    private static final class FakeClock implements java.util.function.LongSupplier {
+        private long nanos;
+
+        @Override
+        public long getAsLong() {
+            return this.nanos;
+        }
+
+        void advance(final long delta) {
+            this.nanos += delta;
         }
     }
 
@@ -503,14 +508,16 @@ class BridgeRuntimeTest {
         final FakeExecutor executor = new FakeExecutor();
         final BridgeRuntime bridge = routed(executor, () -> HERE,
             dev.iyanz.sourbycraft.config.AuroraConfig.SyncRoute.CALLER_REGION);
-        assertTrue(bridge.submit("Legacy", null, new FakeTask(1, true, 0, () -> sleep(20)), 0));
+        final FakeClock clock = new FakeClock();
+        bridge.nanoClock = clock;
+        assertTrue(bridge.submit("Legacy", null, new FakeTask(1, true, 0, () -> clock.advance(TWENTY_MS)), 0));
         assertEquals(0, bridge.telemetry().stats("Legacy").bodyTimes().region().count(), "queued, not yet run");
         executor.fire(0);
         final BridgeTelemetry.BodyTimes times = bridge.telemetry().stats("Legacy").bodyTimes();
         assertEquals(1, times.region().count());
-        assertTrue(times.region().totalNanos() >= TWENTY_MS, "total " + times.region().totalNanos());
-        assertTrue(times.region().maxNanos() >= TWENTY_MS);
-        assertTrue(times.region().p99Nanos() >= TWENTY_MS);
+        assertEquals(TWENTY_MS, times.region().totalNanos());
+        assertEquals(TWENTY_MS, times.region().maxNanos());
+        assertEquals(TWENTY_MS, times.region().p99Nanos());
         assertEquals(0, times.global().count());
         assertEquals(0, times.async().count());
     }
@@ -519,19 +526,21 @@ class BridgeRuntimeTest {
     void globalAndAsyncBodiesAreTimedInTheirOwnLanes() {
         final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 3);
         bridge.admit("Legacy");
-        bridge.submit("Legacy", null, new FakeTask(1, true, -1, () -> sleep(20)), 0);
-        bridge.submit("Legacy", null, new FakeTask(2, false, -1, () -> sleep(20)), 0);
+        final FakeClock clock = new FakeClock();
+        bridge.nanoClock = clock;
+        bridge.submit("Legacy", null, new FakeTask(1, true, -1, () -> clock.advance(TWENTY_MS)), 0);
+        bridge.submit("Legacy", null, new FakeTask(2, false, -1, () -> clock.advance(TWENTY_MS)), 0);
         this.executor.fire(0);
         BridgeTelemetry.BodyTimes times = bridge.telemetry().stats("Legacy").bodyTimes();
         assertEquals(1, times.global().count());
-        assertTrue(times.global().p50Nanos() >= TWENTY_MS);
+        assertEquals(TWENTY_MS, times.global().p50Nanos());
         assertEquals(0, times.async().count());
         assertEquals(0, times.region().count());
         this.executor.fire(1);
         times = bridge.telemetry().stats("Legacy").bodyTimes();
         assertEquals(1, times.global().count());
         assertEquals(1, times.async().count());
-        assertTrue(times.async().totalNanos() >= TWENTY_MS);
+        assertEquals(TWENTY_MS, times.async().totalNanos());
         assertEquals(0, times.region().count());
     }
 
@@ -539,14 +548,16 @@ class BridgeRuntimeTest {
     void aThrowingBodyIsStillTimed() {
         final BridgeRuntime bridge = runtime(BridgeMode.SAFE, 3);
         bridge.admit("Legacy");
+        final FakeClock clock = new FakeClock();
+        bridge.nanoClock = clock;
         bridge.submit("Legacy", null, new FakeTask(1, true, -1, () -> {
-            sleep(20);
+            clock.advance(TWENTY_MS);
             throw new NullPointerException("bug");
         }), 0);
         this.executor.fire(0);
         final BridgeTelemetry.PluginStats stats = bridge.telemetry().stats("Legacy");
         assertEquals(1, stats.bodyTimes().global().count());
-        assertTrue(stats.bodyTimes().global().maxNanos() >= TWENTY_MS);
+        assertEquals(TWENTY_MS, stats.bodyTimes().global().maxNanos());
         assertNotNull(stats.lastFailure());
     }
 

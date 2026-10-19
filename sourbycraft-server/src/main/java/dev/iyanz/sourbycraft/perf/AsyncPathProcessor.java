@@ -61,6 +61,8 @@ public final class AsyncPathProcessor {
         new java.util.concurrent.atomic.AtomicLong();
     private static final java.util.concurrent.atomic.AtomicLong SLOWEST_WAIT_NANOS =
         new java.util.concurrent.atomic.AtomicLong();
+    /** Test seam: the clock for queue-wait and solve-duration accounting. */
+    static volatile java.util.function.LongSupplier nanoClock = System::nanoTime;
     /** Solver failures are per mob and can repeat every recompute: log one per window. */
     static final long FAILURE_LOG_WINDOW_NANOS = TimeUnit.SECONDS.toNanos(60L);
     private static final Object FAILURE_LOG_LOCK = new Object();
@@ -234,9 +236,11 @@ public final class AsyncPathProcessor {
             }
         }
         final CompletableFuture<T> future = new CompletableFuture<>();
-        final long submittedAt = System.nanoTime();
+        // One clock per submission, so swapping the seam never mixes two clocks in one measurement.
+        final java.util.function.LongSupplier clock = nanoClock;
+        final long submittedAt = clock.getAsLong();
         final FutureTask<T> task = new FutureTask<>(() -> {
-            final long began = System.nanoTime();
+            final long began = clock.getAsLong();
             // Queue wait, recorded separately from solve duration because they fail differently:
             // a long solve means the A* is expensive, a long wait means the pool is too small for
             // the arrival rate. Both can be inside budget while the pair is not.
@@ -248,7 +252,7 @@ public final class AsyncPathProcessor {
             } finally {
                 // Solve duration, not queue wait: how long the A* itself took is what says
                 // whether the pool is sized for the work, and it is comparable to a tick budget.
-                final long took = System.nanoTime() - began;
+                final long took = clock.getAsLong() - began;
                 SOLVE_NANOS.addAndGet(took);
                 SOLVED.incrementAndGet();
                 SLOWEST_NANOS.accumulateAndGet(took, Math::max);

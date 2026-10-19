@@ -210,7 +210,7 @@ final class RedisStore implements AwfStore {
         command.add(Integer.toString(removed.size()));
         command.add(Integer.toString(deleted.size()));
         command.add(Long.toString(this.knownGeneration));
-        command.add(Long.toString(this.backend.settings().leaseSeconds() * 1000L));
+        command.add(Long.toString(this.backend.leaseMillis()));
         long bytes = 0;
         for (final Map.Entry<ChunkKey, byte[]> chunk : changed.entrySet()) {
             command.add(field(chunk.getKey()));

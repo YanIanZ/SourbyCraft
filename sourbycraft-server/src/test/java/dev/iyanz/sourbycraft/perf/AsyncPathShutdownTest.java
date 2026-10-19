@@ -201,9 +201,15 @@ class AsyncPathShutdownTest {
     /** Mirrors the pool's bounded queue; a smaller value would not reach the rejection handler. */
     private static final int QUEUE_CAPACITY = 1024;
 
-    private static int awaitOutstandingSettled() throws InterruptedException {
-        for (int attempt = 0; attempt < 100 && AsyncPathProcessor.outstanding() != 0; attempt++) {
-            Thread.sleep(10L);
+    /**
+     * The counter is released by a dependent of the result future, which runs on the completing
+     * worker just after the result becomes visible, so the test thread can observe the result a
+     * few microseconds before the decrement. Spin (no sleeping) against a bounded deadline.
+     */
+    private static int awaitOutstandingSettled() {
+        final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (AsyncPathProcessor.outstanding() != 0 && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
         }
         return AsyncPathProcessor.outstanding();
     }

@@ -53,12 +53,16 @@ class AwfLifecycleFenceTest {
         return folder;
     }
 
-    private static void awaitTrue(final java.util.function.BooleanSupplier condition, final String what)
-        throws InterruptedException {
+    /**
+     * Waits for a thread-state condition (a thread parked on a lock), not for time to pass: there
+     * is no event to latch on before a thread blocks, so yield against a bounded deadline rather
+     * than sleeping. The engine clock ({@link #clock}) is already injected and plays no part here.
+     */
+    private static void awaitTrue(final java.util.function.BooleanSupplier condition, final String what) {
         final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!condition.getAsBoolean()) {
             if (System.nanoTime() > deadline) throw new AssertionError("timed out waiting: " + what);
-            Thread.sleep(1);
+            Thread.yield();
         }
     }
 

@@ -120,22 +120,35 @@ public class LaneCpuSamplerTest {
     @Test
     void theRunningJvmIsMeasurable() {
         // The fixtures above prove the arithmetic; this proves the platform source works at all.
-        final LaneCpuSampler sampler = LaneCpuSampler.platform();
+        // The CPU is real (it is the quantity measured); the sampling window is not: it comes
+        // from an injected clock, so the test neither sleeps nor depends on wall time.
+        final long[] clock = {0L};
+        final LaneCpuSampler sampler = new LaneCpuSampler(ThreadCpuSource.platform(), () -> clock[0]);
         assertFalse(sampler.sample().available(), "first sample is the baseline");
         burnCpuBriefly();
+        clock[0] += SECOND;
 
         final LaneCpuSampler.LaneLoads loads = sampler.sample();
 
         assertTrue(loads.available(), loads.reason());
+        assertEquals(SECOND, loads.intervalNanos(), "the window is the injected clock's, not wall time");
         assertTrue(loads.totalCores() > 0.0, "a JVM running a test is using some CPU");
         assertTrue(loads.lanes().stream().anyMatch(lane -> lane.threads() > 0));
     }
 
+    /** Burns 50 ms of this thread's own CPU time (not wall time), bounded by a 10 s safety cap. */
     private static void burnCpuBriefly() {
+        final java.lang.management.ThreadMXBean threads = java.lang.management.ManagementFactory.getThreadMXBean();
+        final long cpuTarget = threads.getCurrentThreadCpuTime() + TimeUnit.MILLISECONDS.toNanos(50L);
+        final long safetyCap = System.nanoTime() + TimeUnit.SECONDS.toNanos(10L);
         long sink = 0L;
-        final long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(50L);
-        while (System.nanoTime() < until) {
-            sink += System.nanoTime();
+        while (threads.getCurrentThreadCpuTime() < cpuTarget) {
+            for (int i = 0; i < 10_000; i++) {
+                sink += i * 31L;
+            }
+            if (System.nanoTime() > safetyCap) {
+                fail("could not accumulate 50 ms of thread CPU time within 10 s");
+            }
         }
         assertNotEquals(Long.MIN_VALUE, sink);
     }

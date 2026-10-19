@@ -71,6 +71,10 @@ public final class RedisBackend implements AwfBackend {
     private final RedisClient client;
     /** This server's identity in leases; see the class comment. */
     private final String owner;
+    /** How long an acquired or renewed lease lasts; {@code lease-seconds} in production. */
+    private final long leaseMillis;
+    /** The renewal cadence; a third of the lease (at least a second) in production. */
+    private final long renewalMillis;
     /**
      * Writable stores, by token, from open to close. A store stays here when its lease is lost, so
      * renewal keeps checking whether it may take the lease back; see {@link #renewAll}.
@@ -92,6 +96,18 @@ public final class RedisBackend implements AwfBackend {
     }
 
     RedisBackend(final RedisSettings settings, final RedisClient client, final String owner) {
+        this(settings, client, owner, settings.leaseSeconds() * 1000L, renewalPeriodMillis(settings));
+    }
+
+    /**
+     * Test seam: a lease TTL and renewal cadence shorter than {@code lease-seconds} allows (its
+     * minimum is 5 s), so lease expiry and renewal can be exercised in milliseconds. The
+     * constructors above keep the production values.
+     */
+    RedisBackend(final RedisSettings settings, final RedisClient client, final String owner,
+                 final long leaseMillis, final long renewalMillis) {
+        this.leaseMillis = leaseMillis;
+        this.renewalMillis = renewalMillis;
         this.owner = owner;
         this.settings = settings;
         this.client = client;
@@ -102,8 +118,7 @@ public final class RedisBackend implements AwfBackend {
             thread.setDaemon(true);
             return thread;
         });
-        final long period = renewalPeriodMillis(settings);
-        this.renewals.scheduleAtFixedRate(this::renewAll, period, period, TimeUnit.MILLISECONDS);
+        this.renewals.scheduleAtFixedRate(this::renewAll, renewalMillis, renewalMillis, TimeUnit.MILLISECONDS);
     }
 
     /** A hash of this host's name ({@code HOSTNAME} or {@code /etc/hostname}) and the server directory. */
@@ -175,7 +190,7 @@ public final class RedisBackend implements AwfBackend {
         final RedisStore store = new RedisStore(this, storageId, role, token);
         if (token != null) {
             final String claimed = RedisClient.text(this.client.call("EVAL", ACQUIRE_SCRIPT, "1", store.lockKey, token,
-                this.owner, Long.toString(this.settings.leaseSeconds() * 1000L)));
+                this.owner, Long.toString(this.leaseMillis)));
             if ("TAKEN_OVER".equals(claimed)) {
                 SourbyLogger.info("Aurora World Fabric: took over this server's Redis lease on " + storageId
                     + " from a previous run that did not release it");
@@ -267,7 +282,7 @@ public final class RedisBackend implements AwfBackend {
         final long started = System.nanoTime();
         final List<RedisStore> stores = List.copyOf(this.leased.values());
         if (stores.isEmpty()) return 0L;
-        final String leaseMillis = Long.toString(this.settings.leaseSeconds() * 1000L);
+        final String leaseMillis = Long.toString(this.leaseMillis);
         final List<Object[]> commands = new ArrayList<>(stores.size());
         for (final RedisStore store : stores) {
             commands.add(new Object[] {"EVAL", RENEW_SCRIPT, "3", store.lockKey, store.genKey, store.writerKey,
@@ -284,12 +299,17 @@ public final class RedisBackend implements AwfBackend {
             for (int i = 0; i < stores.size(); i++) renewed(stores.get(i), replies.get(i));
         }
         final long elapsed = System.nanoTime() - started;
-        if (slowPass(elapsed, renewalPeriodMillis(this.settings))) {
+        if (slowPass(elapsed, this.renewalMillis)) {
             SourbyLogger.warn("Aurora World Fabric: renewing " + stores.size() + " Redis lease(s) took "
-                + TimeUnit.NANOSECONDS.toMillis(elapsed) + " ms, over half the " + renewalPeriodMillis(this.settings)
-                + " ms renewal period; the leases expire after " + this.settings.leaseSeconds() + " s");
+                + TimeUnit.NANOSECONDS.toMillis(elapsed) + " ms, over half the " + this.renewalMillis
+                + " ms renewal period; the leases expire after " + this.leaseMillis / 1000L + " s");
         }
         return elapsed;
+    }
+
+    /** The lease TTL in milliseconds that acquisition, renewal and commits all use. */
+    long leaseMillis() {
+        return this.leaseMillis;
     }
 
     /** The renewal period: a third of the lease, at least a second. */

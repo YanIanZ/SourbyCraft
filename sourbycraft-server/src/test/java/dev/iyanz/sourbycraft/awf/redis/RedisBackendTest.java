@@ -49,6 +49,33 @@ class RedisBackendTest {
         return backend;
     }
 
+    /**
+     * Makes a lease lapse as Redis would on expiry and returns once Redis has really dropped the
+     * key. Expiry is the server's clock, so the wait is bounded polling of the server's own answer
+     * (a 1 ms TTL is gone by the first read after it), not a guess at how long to sleep.
+     */
+    private static void expireLease(final RedisBackend backend, final String lockKey)
+        throws IOException, InterruptedException {
+        backend.client().call("PEXPIRE", lockKey, "1");
+        awaitRedis(() -> Long.valueOf(-2L).equals(callPttl(backend, lockKey)), "the lease key to expire");
+    }
+
+    private static Long callPttl(final RedisBackend backend, final String lockKey) {
+        try {
+            return (Long) backend.client().call("PTTL", lockKey);
+        } catch (final IOException failed) {
+            throw new java.io.UncheckedIOException(failed);
+        }
+    }
+
+    private static void awaitRedis(final java.util.function.BooleanSupplier condition, final String what) {
+        final long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > deadline) throw new AssertionError("timed out waiting for " + what);
+            Thread.yield();
+        }
+    }
+
     private RedisBackend backend() throws Exception {
         if (this.server == null) this.server = RedisTestServer.start();
         return backend(this.server.uri(), "test:", false);
@@ -130,8 +157,7 @@ class RedisBackendTest {
         final AwfStore stale = first.open("arena/region", WorldRole.VANILLA, 1);
         final RedisStore probe = new RedisStore(first, "arena/region", WorldRole.READ_ONLY, null);
         // As if this server had stalled past its lease: the lease expires and another server opens the world.
-        first.client().call("PEXPIRE", probe.lockKey, "1");
-        Thread.sleep(20);
+        expireLease(first, probe.lockKey);
         final AwfStore owner = backend(this.server.uri(), "test:", false).open("arena/region", WorldRole.VANILLA, 1);
         owner.commit(Map.of(new ChunkKey(0, 0), b("new owner")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL);
 
@@ -165,16 +191,33 @@ class RedisBackendTest {
     @Test
     void aLeaseIsRenewedForAsLongAsTheWorldIsOpen() throws Exception {
         backend();
+        // The production backend uses a 5 s minimum lease renewed every 1.67 s (the default of the
+        // three-argument constructor, asserted below, and by aRenewalPassOverHalfThePeriodIsSlow).
+        // This test injects a 1 s lease renewed every 100 ms: ten renewals per lease, so a renewal
+        // thread stalled up to ~900 ms (GC, a loaded CI runner) does not turn into a false failure, and the proof still needs the lease
+        // to outlive its own TTL, which only Redis's clock can measure.
+        final long leaseMillis = 1_000L;
         final RedisSettings settings = new RedisSettings(this.server.uri(), "renew:", 2, 2000, 5, false);
         final RedisBackend backend = new RedisBackend(settings, new RedisClient(RedisClient.Endpoint.parse(this.server.uri()),
-            2, 2000), "renewer");
+            2, 2000), "renewer", leaseMillis, 100L);
         this.backends.add(backend);
+        final RedisBackend production = new RedisBackend(settings, new RedisClient(
+            RedisClient.Endpoint.parse(this.server.uri()), 1, 2000), "default-lease");
+        this.backends.add(production);
+        assertEquals(5_000L, production.leaseMillis(), "the three-argument constructor keeps the production lease");
         final AwfStore store = backend.open("long/region", WorldRole.VANILLA, 1);
-        Thread.sleep(8000);                       // past the 5 s lease: only renewal keeps it
-        // A stall past the lease with nobody taking it: the next renewal takes it back.
         final RedisStore probe = new RedisStore(backend, "long/region", WorldRole.READ_ONLY, null);
-        backend.client().call("PEXPIRE", probe.lockKey, "1");
-        Thread.sleep(2500);
+        // Past twice the lease: only renewal keeps it. Each poll is a Redis round trip that
+        // must see the lease held, so a lapse at any point in the window fails the test.
+        final long until = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(2 * leaseMillis);
+        while (System.nanoTime() < until) {
+            assertTrue((Long) backend.client().call("PTTL", probe.lockKey) > 0, "renewal kept the lease alive");
+        }
+        // A stall past the lease with nobody taking it: the next renewal takes it back. DEL, not
+        // expireLease: with a 100 ms renewal the expired gap can close before a poll sees PTTL -2,
+        // and to Redis an expired key and a deleted one are the same absent key.
+        backend.client().call("DEL", probe.lockKey);
+        awaitRedis(() -> callPttl(backend, probe.lockKey) > 0, "renewal to take the expired lease back");
         assertTrue((Long) backend.client().call("PTTL", probe.lockKey) > 0, "renewal took the expired lease back");
         store.commit(Map.of(new ChunkKey(0, 0), b("still mine")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL);
         store.close();
@@ -186,13 +229,11 @@ class RedisBackendTest {
         final AwfStore store = stalled.open("stall/region", WorldRole.VANILLA, 1);
         store.commit(Map.of(new ChunkKey(0, 0), b("before")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL);
         final RedisStore probe = new RedisStore(stalled, "stall/region", WorldRole.READ_ONLY, null);
-        stalled.client().call("PEXPIRE", probe.lockKey, "1");      // the process stalled past its lease
-        Thread.sleep(20);
+        expireLease(stalled, probe.lockKey);                       // the process stalled past its lease
         store.commit(Map.of(new ChunkKey(0, 0), b("after the stall")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL);
         assertTrue((Long) stalled.client().call("PTTL", probe.lockKey) > 0, "the lease was taken back");
 
-        stalled.client().call("PEXPIRE", probe.lockKey, "1");
-        Thread.sleep(20);
+        expireLease(stalled, probe.lockKey);
         final AwfStore other = backend(this.server.uri(), "test:", false).open("stall/region", WorldRole.VANILLA, 1);
         other.commit(Map.of(new ChunkKey(0, 0), b("other server")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL);
         other.close();                                               // released: no holder, but a newer generation
@@ -218,8 +259,7 @@ class RedisBackendTest {
             store.lockKey, store.writerKey, store.token(), "1", "0", "0", Long.toString(store.knownGeneration()),
             "30000", "0,0", "two");
         assertEquals(1, store.knownGeneration());
-        backend.client().call("PEXPIRE", store.lockKey, "1");          // Redis was gone longer than the lease
-        Thread.sleep(20);
+        expireLease(backend, store.lockKey);                           // Redis was gone longer than the lease
 
         backend.renewAll();
         assertTrue((Long) backend.client().call("PTTL", store.lockKey) > 0, "renewal took the lease back");

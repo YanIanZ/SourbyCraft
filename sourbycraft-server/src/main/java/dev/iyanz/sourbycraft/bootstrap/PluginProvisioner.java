@@ -309,7 +309,7 @@ public final class PluginProvisioner {
         }
     }
 
-    private static void ensureConfig(Pin pin, Path pluginsDir) throws IOException {
+    static void ensureConfig(Pin pin, Path pluginsDir) throws IOException {
         if (pin.configResource() == null) return;
         Path cfgDir = pluginsDir.resolve(pin.plugin());
         Path cfg = cfgDir.resolve("config.yml");

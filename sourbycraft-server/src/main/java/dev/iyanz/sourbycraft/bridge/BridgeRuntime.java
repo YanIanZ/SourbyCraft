@@ -163,7 +163,7 @@ public final class BridgeRuntime {
     private final IntSupplier maxRunningAsyncTasks;
     /** Bounded by plugins times the engine's fixed set of guard reasons (plus one lane reason). */
     private final Map<String, LogWindow> logWindows = new ConcurrentHashMap<>();
-    /** Test seam for the log rate limit. */
+    /** Test seam for the log rate limit and the body-time measurement. */
     java.util.function.LongSupplier nanoClock = System::nanoTime;
 
     /** Unanchored sync tasks use the global region: no caller-region lookup. */
@@ -541,11 +541,11 @@ public final class BridgeRuntime {
         CURRENT.set(invocation);
         try {
             // Body wall time only: queue wait and failure handling are outside the timed span.
-            final long started = System.nanoTime();
+            final long started = this.nanoClock.getAsLong();
             try {
                 task.run();
             } finally {
-                this.telemetry.bodyTime(plugin, BridgeTelemetry.BodyLane.of(entry.route()), System.nanoTime() - started);
+                this.telemetry.bodyTime(plugin, BridgeTelemetry.BodyLane.of(entry.route()), this.nanoClock.getAsLong() - started);
             }
         } catch (final Throwable thrown) {
             onFailure(plugin, thrown, task.id(), invocation.violationCounted);

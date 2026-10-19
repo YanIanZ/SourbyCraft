@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +23,7 @@ class AsyncPathQueueTelemetryTest {
     @AfterEach
     void stopPool() {
         AsyncPathProcessor.shutdown();
+        AsyncPathProcessor.nanoClock = System::nanoTime;
     }
 
     @Test
@@ -70,32 +72,45 @@ class AsyncPathQueueTelemetryTest {
 
     @Test
     void queueingBehindABusyPoolIsChargedToWaitNotSolve() throws Exception {
+        // Queue age is read from the processor's injected clock, so the wait is created by
+        // advancing a fake clock while the solve is provably queued, not by sleeping.
+        final AtomicLong now = new AtomicLong();
+        AsyncPathProcessor.nanoClock = now::get;
         AsyncPathProcessor.setEnabled(true);
         final double waitBefore = AsyncPathProcessor.stats().slowestWaitMillis();
 
-        // Occupy the pool with short solves. Saturation now rejects instead of running work on
-        // the submitting thread, so this test never depends on CallerRuns behavior.
-        for (int i = 0; i < 12; i++) {
+        // Occupy every worker; the next solve cannot start until they are released.
+        final int workers = Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
+        final CountDownLatch hold = new CountDownLatch(1);
+        final CountDownLatch started = new CountDownLatch(workers);
+        for (int i = 0; i < workers; i++) {
             AsyncPathProcessor.submit(() -> {
+                started.countDown();
                 try {
-                    Thread.sleep(60);
+                    hold.await(5, TimeUnit.SECONDS);
                 } catch (final InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                 }
                 return "busy";
             });
         }
+        assertTrue(started.await(5, TimeUnit.SECONDS), "every worker should be occupied");
 
         final long admittedBefore = AsyncPathProcessor.stats().admitted();
         final CompletableFuture<String> queued = AsyncPathProcessor.submit(() -> "queued");
+        assertFalse(queued.isDone(), "the solve has nowhere to run while the workers are held");
+        now.addAndGet(TimeUnit.MILLISECONDS.toNanos(500));
+        hold.countDown();
         assertEquals("queued", queued.get(5, TimeUnit.SECONDS));
 
         assertTrue(AsyncPathProcessor.stats().admitted() > admittedBefore,
             "the final solve must be submitted to the running executor");
         assertEquals(0L, AsyncPathProcessor.stats().inline(),
             "a running pool must never execute saturation fallback on the caller");
-        assertTrue(AsyncPathProcessor.stats().slowestWaitMillis() >= waitBefore,
-            "queue wait telemetry must remain monotonic");
+        // Counters are process-wide and only grow, so the slowest wait is the larger of what
+        // earlier tests saw and this solve's 500 ms of fake-clock queue age.
+        assertEquals(Math.max(waitBefore, 500.0), AsyncPathProcessor.stats().slowestWaitMillis(), 1e-6,
+            "the queue age of the delayed solve must show up as wait");
     }
 
 
