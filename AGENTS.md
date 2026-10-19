@@ -18,12 +18,12 @@ Region-threaded Minecraft 26.2 server fork with the **Aurora** runtime/engine ar
 
 Slim-jar task: `slimServerJar` strips 19 hard-coded artifact dirs from the paperclip jar (`build.gradle.kts:90-110`); `sourbyclip` re-downloads them by coordinate on first boot via `META-INF/libraries` manifest. If the strip count is 0, the task **fails** — update the prefix list when libraries move.
 
-The CI workflow `.github/workflows/build.yml` (single `Build 26.2 jar` job, push/dispatch only) does:
+The CI workflow `.github/workflows/build.yml` has two jobs since 2026-10-20 (audit SEC-8/OBS-9): `Build 26.2 jar` (push, pull_request and dispatch; `contents: read`) and `Publish release` (`needs: build`, `contents: write`, only pushes/dispatches on `release/26.2-canvas`). Every action is pinned by commit SHA with the tag in a comment. Pull requests from forks cannot run it: the private-toolchain checkout needs the repository's deploy keys. The build job does:
 1. Checks out the private `YanIanZ/SourbyPatcher` and `YanIanZ/SourbyClip` at the revisions in `build-data/private-toolchain.lock.json` (deploy keys) and publishes them to Maven Local with `scripts/private_toolchain.py --publish`. `settings.gradle.kts` refuses to configure without the hash-verified SourbyPatcher `paper-toolchain` jar. See `docs/development/PRIVATE-TOOLCHAIN.md`.
 2. `bash scripts/setup_metal.sh` — Metal is **vendored** at `Metal/`, not a submodule (upstream LuminolMC/Metal went offline). `setup_metal.sh` calls `Metal/gen_sources.sh`.
 3. `applyAllPatches`, then `:sourbyapi:test :sourbycraft-server:test :test-plugin:test`, then the Python `scripts/test_*.py` suite, clip probes, then `slimServerJar -PsourbyBuild=N` and `verify_build_identity.py`.
 4. Boot test in the same job: boots with the test plugin, `online-mode=false`, `level-type=minecraft:normal`, waits up to 240s for `Done (` plus the metrics markers, sends `stop`, and fails on timeout or unclean exit.
-5. Publication runs only for pushes to `release/26.2-canvas`. `release=` in `gradle.properties` decides: `true` normal release, `pre` prerelease (skipped by the auto-updater unless `allow_prerelease`), `false` no release. The auto-updater defaults to `apply_mode=auto`, so a normal release reaches servers automatically.
+5. Publication (the `release` job) runs only for pushes/dispatches on `release/26.2-canvas` and downloads the jar the build job uploaded as the `SourbyCraft-26.2-release` artifact. `release=` in `gradle.properties` decides: `true` normal release, `pre` prerelease (skipped by the auto-updater unless `allow_prerelease`), `false` no release. The auto-updater defaults to `apply_mode=notify` since 2026-10-20 (audit SEC-2; servers whose TOML still says `auto` keep applying automatically, with `<jar>.prev` kept and restored if the next boot does not reach ready — see `docs/development/AUTO-UPDATER.md`).
 
 ## Module layout
 

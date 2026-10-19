@@ -71,10 +71,12 @@ disagree, the code wins ([DEVELOPMENT.md](../DEVELOPMENT.md), truthfulness polic
 
 ### Development notes (`development/`)
 Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](development/PRIVATE-TOOLCHAIN.md),
-[UPGRADING-MINECRAFT.md](development/UPGRADING-MINECRAFT.md), [PROTOCOLLIB.md](development/PROTOCOLLIB.md),
+[UPGRADING-MINECRAFT.md](development/UPGRADING-MINECRAFT.md), [PROTOCOLLIB.md](development/PROTOCOLLIB.md), [AUTO-UPDATER.md](development/AUTO-UPDATER.md),
 [REGION-WATCHDOG.md](development/REGION-WATCHDOG.md), [CHUNK-GENERATION-STUTTER.md](development/CHUNK-GENERATION-STUTTER.md),
 [AURORA-EDF-UPGRADE.md](development/AURORA-EDF-UPGRADE.md), [ASP-26.2-AWF-PORT-REVIEW.md](development/ASP-26.2-AWF-PORT-REVIEW.md),
-[LIGHTINGLUMINOL-BRIDGE-PORT.md](development/LIGHTINGLUMINOL-BRIDGE-PORT.md), [SUPERIORSKYBLOCK-BRIDGE.md](development/SUPERIORSKYBLOCK-BRIDGE.md).
+[LIGHTINGLUMINOL-BRIDGE-PORT.md](development/LIGHTINGLUMINOL-BRIDGE-PORT.md), [SUPERIORSKYBLOCK-BRIDGE.md](development/SUPERIORSKYBLOCK-BRIDGE.md),
+[LOGIN-GUARDS.md](development/LOGIN-GUARDS.md) (Paper login guards the Folia baseline drops or re-purposes; documentation only),
+[TEST-COVERAGE-GAPS.md](development/TEST-COVERAGE-GAPS.md) (prioritised list of missing unit tests and timing-sensitive tests to convert).
 
 ### Guides (`guides/`)
 [developing-awf.md](guides/developing-awf.md) (plugin API) · [testing-awf.md](guides/testing-awf.md) ·

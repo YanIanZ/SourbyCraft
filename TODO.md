@@ -74,7 +74,9 @@ CI hijau terbaru: run 38445246566 pada `d97fe247` (2026-10-14). Tree kandidat ri
 **Lanjutkan dari sini:** [`docs/development/HANDOFF-2026-10-14.md`](docs/development/HANDOFF-2026-10-14.md) —
 status per gelombang. Gelombang AWF sudah di-push (`ebb9c1fb`: AWF-1..6, 8..10). Gelombang engine/bridge
 sudah di-push (`1c57a736`, 2026-10-20: ENG-1..7, 9 (ledger saja), 10, 12..14; ENG-11 didokumentasikan; ENG-8 tetap
-roadmap); gelombang security dan observability belum dimulai.
+roadmap). Security/observability ronde 1 sudah di-push (2026-10-20: `4a830168` updater SEC-2 sebagian/3/9/10, `1b33fe1e` SEC-8 + OBS-1/2/8/11/12
++ OBS-9 sebagian, `65dba8fb` SEC-12 + OBS-7/15/16 + SEC-11/OBS-14 dokumentasi). Sisa di papan OmniMemo: SEC-1/5/6/7 + OBS-3 (codex),
+SEC-4 + OBS-4/5/6/13 (deepseek) — lihat `AGENT-COORDINATION.md` ROUND 2.
 
 Laporan: [`docs/audits/2026-10-14-system-audit.md`](docs/audits/2026-10-14-system-audit.md)
 (read-only, `d97fe247`; nomor baris di laporan per commit itu). Temuan HIGH di sini; MEDIUM di P1,
@@ -105,14 +107,18 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   policy bahwa setiap key punya consumer (audit §3)
 - [ ] **SEC-2** Auto-updater hanya mempercayai respons API GitHub (tanpa tanda tangan), default
   `apply_mode=auto` — **keputusan owner:** rilis bertanda tangan (Ed25519, public key di jar), default `notify` (audit §3)
-- [ ] **SEC-3** Swap in-place tidak menyimpan jar sebelumnya dan otomatis melintasi versi Minecraft —
+  — sebagian `4a830168` (2026-10-20): default `apply_mode=notify` (seed + docs `AUTO-UPDATER.md`), verifier Ed25519 aktif hanya bila `META-INF/sourbycraft-release.pub` ada di jar (tidak ada key yang dikirim), gate versi MC sama; BELUM: key pair + secret CI + langkah signing (keputusan owner)
+- [x] **SEC-3** Swap in-place tidak menyimpan jar sebelumnya dan otomatis melintasi versi Minecraft —
   **keputusan owner:** simpan `.prev` + rollback setelah boot gagal, gate versi MC yang sama (audit §3)
+  — selesai `4a830168` (2026-10-20): `<jar>.prev` sebelum swap (tanpa .prev tidak ada swap), `UpdateRollbackGuard` APPLIED→BOOTING→OK, restore di boot berikutnya bila tidak mencapai ready (`ServerLoadEvent STARTUP`), `/update resume`; `MC_VERSION_MISMATCH`; 34 test unit, belum ada boot nyata jalur apply/rollback
 - [ ] **SEC-4** `SourbyBootstrap` kode mati (entry point = SourbyClip); grep guard download offline
   di CI tidak mungkin cocok — hapus atau sambungkan, tolak staging jar dengan versi clip berbeda, perbaiki grep CI dan docs (audit §3)
-- [ ] **OBS-1** Password Redis di `aurora.awf.redis.uri` bocor ke report spark — sembunyikan key,
+- [x] **OBS-1** Password Redis di `aurora.awf.redis.uri` bocor ke report spark — sembunyikan key,
   scrub userinfo URI di semua tempat (audit §4)
-- [ ] **OBS-2** `/speedtest` yang menggantung mengunci command selamanya dan membocorkan proses —
+  — selesai `1b33fe1e` (2026-10-20): `aurora.awf.redis.uri` disembunyikan dan userinfo `scheme://user:pass@` di-scrub di seluruh nilai config spark; `SourbyServerConfigProviderTest` +3
+- [x] **OBS-2** `/speedtest` yang menggantung mengunci command selamanya dan membocorkan proses —
   baca output paralel, tunggu dengan timeout (audit §4)
+  — selesai `1b33fe1e` (2026-10-20): stdout/stderr dikuras di thread sendiri, `waitFor(timeout)` lalu `destroyForcibly()`, flag in-flight selalu direset; `SpeedtestCommandTest` 5
 - [ ] **OBS-3** Identitas build tidak terikat ke tree (tanpa flag dirty/tree hash; CI tidak cek
   `Git-Commit`) — `-dirty`, tree hash, cek `--commit $GITHUB_SHA` (audit §4)
 
@@ -405,24 +411,28 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
   versi MC, jangan hapus jar yang bukan milik kita, batasi ukuran (audit §3)
 - [ ] **SEC-7** Pin ProtocolLib menunjuk asset `dev-build` yang bisa berubah, belum pernah di-boot —
   pin rilis bertag, probe CI terjadwal (audit §3)
-- [ ] **SEC-8** CI: action di-pin per tag bukan SHA; `contents: write` untuk seluruh job — pin
+- [x] **SEC-8** CI: action di-pin per tag bukan SHA; `contents: write` untuk seluruh job — pin
   per SHA, persempit permission (audit §3)
+  — selesai `1b33fe1e` (2026-10-20): semua `uses:` di-pin SHA 40-hex dengan tag di komentar; `permissions: contents: read` di atas dan job build, `write` hanya di job `release` baru (`needs: build`)
 - [ ] **OBS-4** Maintenance AWF di thread metrik; kegagalan setelah publish menurunkan snapshot
   segar jadi STALE — perbaikan sama dengan AWF-3, try/catch terpisah (audit §4)
 - [ ] **OBS-5** Ring sampel mentah 384 merusak jendela 10/15 s di atas 25,6 Hz atau saat sprint —
   ukuran dari tick rate (audit §4)
 - [ ] **OBS-6** Generasi telemetri region hanya disapu collector; tak terbatas bila metrik gagal
   start — sapuan teramortisasi, batas (audit §4)
-- [ ] **OBS-7** Policy script melewatkan patch Paper dan package engine; root yang hilang dilewati
+- [x] **OBS-7** Policy script melewatkan patch Paper dan package engine; root yang hilang dilewati
   diam-diam — tuple root termasuk fitur Paper dan engine; assert root ada (audit §4)
-- [ ] **OBS-8** Balasan command async melewati `SourbyReply` (command block mendapat exception) —
+  — selesai `65dba8fb` (2026-10-20): root eksplisit (minecraft + paper `features`, `aurora/engine`), root hilang = error; pemindaian yang diperluas menemukan 4 simbol di patch Paper 0005/0014 yang dicatat dengan alasan di `test_independence_policy.py` (`PATCH_APPROVED` + set scheduler) dan `independence.md`; Python 302 OK di 3.9 dan 3.12
+- [x] **OBS-8** Balasan command async melewati `SourbyReply` (command block mendapat exception) —
   lewatkan via `SourbyReply.run` (audit §4)
+  — selesai `1b33fe1e` + `4a830168` (2026-10-20): balasan async `AwfCommand`, `SpeedtestCommand`, `PerfCommand` (`/perf player`) dan `UpdateCommand` lewat `SourbyReply.run`; test dengan sender command-block
 - [ ] **OBS-9** Gate CI yang lulus tanpa banyak membuktikan: CI PR tidak pernah jalan, grep smoke
   cocok dengan header panel apa pun, marker metrik hanya cek non-null, tes zstd skip diam-diam —
   perbaiki trigger, assert per view, `SOURBY_REQUIRE_ZSTD` (audit §4)
+  — sebagian `1b33fe1e` (2026-10-20): trigger `pull_request` (build+test, tanpa publikasi), grep smoke per-view pada log tanpa ANSI, `SOURBY_METRICS_SAMPLED_OK` dengan nilai nyata; BELUM: `SOURBY_REQUIRE_ZSTD` (`SlimeImporterTest` tidak membaca env), bukti boot dari run CI berikutnya
 - [-] **OBS-10** Release doc / SPEC / README saling bertentangan soal status gate — pass konsistensi
   2026-10-14 (release doc, SPEC §161, README, `qualification-readiness.md`); ulangi saat tagging (audit §4)
-- [ ] **OBS-11** `/awf export|import|convert` menerima path filesystem sembarang — batasi ke
+- [x] **OBS-11** `/awf export|import|convert` menerima path filesystem sembarang — batasi ke
   `awf/exports` / `awf/imports` (audit §4)
 
 ---
@@ -430,6 +440,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 ## P2 — Menengah (independensi dan arsitektur)
 
 ### Provisioning plugin (ProtocolLib)
+  — selesai `1b33fe1e` (2026-10-20): `AuroraWorldFiles.confine` → `awf/exports` (tulis) / `awf/imports` (baca); path absolut, `..`, symlink keluar ditolak; API plugin tetap tidak dibatasi (didokumentasikan); `AwfCommandTest` 6, `AuroraWorldFilesTest` +2
 - [x] Implementasi auto-provision ProtocolLib melalui jalur aktif SourbyClip/SourbyPatcher
   (2026-10-06): pin asset resmi, HTTPS + SHA-256/ukuran, setting independen, hook sebelum
   plugin scan, folder CLI, cache/offline dan pelestarian operator; 12 tes installer lulus.
@@ -540,27 +551,34 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [x] **ENG-14** Snapshot path async diambil sebelum penolakan mungkin terjadi; kegagalan worker
   dilog tanpa throttle — cek kapasitas dulu; rate-limit log (audit §2)
   — selesai `1c57a736` (2026-10-20): `hasCapacity()` sebelum snapshot, log kegagalan solver 1/60 s (`AsyncPathRefusalTest`)
-- [ ] **SEC-9** Mode restart `exit` melakukan halt dari shutdown hook (PLAUSIBLE) — exit setelah
+- [x] **SEC-9** Mode restart `exit` melakukan halt dari shutdown hook (PLAUSIBLE) — exit setelah
   shutdown selesai (audit §3)
-- [ ] **SEC-10** Download updater tanpa batas sebelum cek ukuran; polling tanpa autentikasi tiap
+  — selesai `4a830168` (2026-10-20): mode `exit` memakai `MinecraftServer.abnormalExit` → `onServerExit()` keluar 70 setelah shutdown bersih; tanpa shutdown hook/halt
+- [x] **SEC-10** Download updater tanpa batas sebelum cek ukuran; polling tanpa autentikasi tiap
   30 menit (PLAUSIBLE) — copy terbatas; ETag / Retry-After (audit §3)
+  — selesai `4a830168` (2026-10-20): `Content-Length` di atas batas ditolak sebelum dibaca, stream dipotong di batas; `ETag`/`If-None-Match` + 304; `Retry-After`/`X-RateLimit-*` backoff (`RATE_LIMITED`)
 - [ ] **SEC-11** Baseline Folia membuang guard login Paper (`max-joins-per-tick`, pre-login sinkron,
   profil duplikat) — warisan, belum didokumentasikan; dokumentasikan + limit laju koneksi (audit §3)
-- [ ] **SEC-12** Base image Docker tidak di-pin per digest; label lisensi — pin digest; label
+  — didokumentasikan `65dba8fb` (2026-10-20) di `docs/development/LOGIN-GUARDS.md` (buffer join per tick diganti `if (true)`, `PlayerPreLoginEvent` sinkron tidak pernah menyala, jalur duplicate-profile diganti `pushPendingJoin`); rate limit koneksi BELUM dibangun
+- [x] **SEC-12** Base image Docker tidak di-pin per digest; label lisensi — pin digest; label
   setelah keputusan SEC-13 (audit §3)
-- [ ] **OBS-12** `/speedtest` mencatat log sebelum cek permission — pindahkan log (audit §4)
+  — selesai `65dba8fb` (2026-10-20): `FROM eclipse-temurin:25-jre@sha256:dbb43d81…` (digest dari `docker buildx imagetools inspect`, dicocokkan dengan header registry); label lisensi menunggu SEC-13; `docker build` belum dijalankan (daemon mati)
+- [x] **OBS-12** `/speedtest` mencatat log sebelum cek permission — pindahkan log (audit §4)
+  — selesai `1b33fe1e` (2026-10-20): log `/speedtest` dipindah setelah `testPermission`
 - [ ] **OBS-13** Jalur `getTPS()` mengalokasi dan mengurutkan di bawah monitor region — layani dari
   snapshot yang sudah dipublikasikan (audit §4)
 - [ ] **OBS-14** Lubang cakupan tes (engine, hud, maxplayers, lang, update, bootstrap); tes sensitif
   waktu — tes berprioritas; clock yang diinjeksi (audit §4)
-- [ ] **OBS-15** `averageGcPauseMs` adalah waktu koleksi, bukan pause STW — caveat di javadoc (audit §4)
-- [ ] **OBS-16** Kesiapan baseline berpatokan `Done (`, yang kini bisa mendahului terrain spawn
+  — daftar prioritas `65dba8fb` (2026-10-20) di `docs/development/TEST-COVERAGE-GAPS.md` (P1–P3 + 10 test sensitif waktu dengan seam clock); test Java-nya belum ditulis
+- [x] **OBS-15** `averageGcPauseMs` adalah waktu koleksi, bukan pause STW — caveat di javadoc (audit §4)
+  — selesai `65dba8fb` (2026-10-20): caveat javadoc `RuntimeMetrics.averageGcPauseMs()`/`gcTimePercent()` dan `GcTracker` (waktu koleksi, bukan pause STW)
+- [x] **OBS-16** Kesiapan baseline berpatokan `Done (`, yang kini bisa mendahului terrain spawn
   bertahap (PLAUSIBLE) — tunggu juga ringkasan boot (audit §4)
 
 ---
 
 ## P3 — Rendah (polish dan fitur tambahan)
-
+  — selesai `65dba8fb` (2026-10-20): `run_baseline.py` menunggu `Done (` DAN ringkasan boot Aurora `COMPLETE | 14/14 stages…`; DEGRADED/FAILED menggagalkan run. Catatan: premis audit tidak berlaku untuk dunia boot (spawn tidak di-stage), jadi ini gate kedua pada boot yang sama
 - [x] UI/UX terminal dan command SourbyCraft/Aurora (2026-10-06): progress per tahap dengan
   durasi/status, panel bersama, `/aurora`, `/pl` identik `/plugins`, pencarian/filter/halaman,
   diagnosis loader JUL + Log4j, header dan contoh config beranotasi. Compile/suite server penuh,
