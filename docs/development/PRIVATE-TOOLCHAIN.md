@@ -3,7 +3,7 @@
 Official server downloads are GitHub Releases. Maintainer builds require private checkouts:
 
 - `YanIanZ/SourbyPatcher`: active `paper-toolchain` 3.0.0; archived `canvas-toolchain` 2.0.x and Folia patcher.
-- `YanIanZ/SourbyClip`: launcher 3.0.26, protocol 1.
+- `YanIanZ/SourbyClip`: launcher 3.1.2, protocol 1 (revision and SHA-256 in the checked-in pins).
 
 The public repository no longer vendors these sources or SourbyClip Maven binaries.
 Previously published Git history and releases still contain earlier versions. Private access
@@ -50,7 +50,8 @@ Use `java -jar JAR --sourbyclip-info` to inspect launcher identity without start
 
 ## Local terminal/toolchain upgrade candidates — 2026-10-05
 
-The official pins above still select Patcher 3.0.0 and Clip 3.0.26. The following upgrades
+Historical candidate record: at 2026-10-05 the pins selected Patcher 3.0.0 and Clip 3.0.26.
+As of the SEC-5 integration, Clip 3.1.2 is selected; the following upgrades
 are implemented in local private commits and published to Maven Local for review/testing.
 Their private commits have not been pushed or selected by the public revision lock.
 
@@ -119,3 +120,14 @@ and JFR recordings for both phases. Server/plugin network access is outside the 
 The pre-26.2 `nms-compat.yml` harness was removed (it was never ported and was not a release
 gate). A replacement must be designed around the private checkouts from the start; do not reuse
 its old public caches or offline build invocation with private credentials.
+
+## SEC-5 integration — 2026-10-20
+
+Clip 3.1.2 is selected by `gradle.properties` and the private revision lock:
+`85b4dd70ce2e4bff529c742797c472a530c63fef`, SHA-256
+`d4cddeaebbcb1c4f33634a3361c89c0e71f9080f1c24076fec3f5322b6fd76e7`.
+That private commit removes geo-IP lookup from download-context selection. The source
+checkout HEAD and installed Maven Local artifact were verified in this session;
+Patcher remains 3.0.0. Terminal controls, worker lifecycle and prepare mode from
+Clip 3.1.1 are included. These launcher changes are RESTART_REQUIRED. Packaging,
+launcher probes and isolated boot evidence are recorded in `AGENT-COORDINATION.md`.

@@ -1,4 +1,5 @@
 import dev.iyanz.sourbyclip.DownloadContext;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -24,12 +25,18 @@ class ClipDownloadProbe {
         try {
             new DownloadContext(new byte[32], source.toUri().toURL(), "wrong-hash.jar").download(output);
             throw new AssertionError("Invalid hash accepted");
-        } catch (IllegalStateException expected) {
-            require(expected.getMessage().contains("Hash check failed"), "hash failure diagnostic");
+        } catch (IOException expected) {
+            require(causeChainContains(expected, "SHA-256 mismatch"), "hash failure diagnostic");
         }
         Files.delete(source);
         context.download(output); // source unavailable; verified cache must suffice
         System.out.println("PASS: multi-chunk transfer, corrupt-cache recovery, hash rejection, offline cache reuse");
+    }
+    private static boolean causeChainContains(Throwable failure, String needle) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause.getMessage() != null && cause.getMessage().contains(needle)) return true;
+        }
+        return false;
     }
     private static void require(boolean value, String description) {
         if (!value) throw new AssertionError(description);
