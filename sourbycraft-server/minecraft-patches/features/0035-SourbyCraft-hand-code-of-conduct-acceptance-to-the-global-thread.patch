@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 01:37:57 +0700
+Subject: [PATCH] SourbyCraft - hand code-of-conduct acceptance to the global
+ thread
+
+handleAcceptCodeOfConduct finished the code-of-conduct task on the Netty event loop, so the next configuration tasks (player-data read in PrepareSpawnTask, world joining state) started there. Hop to the global thread first, as handleSelectKnownPacks does.
+
+diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+index 4431bb34a9ca2f91d6e00af0f5baccc51e002e56..a939756ce9b3c140285976390901123d7bb89b16 100644
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -197,6 +197,7 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
+ 
+     @Override
+     public void handleAcceptCodeOfConduct(final ServerboundAcceptCodeOfConductPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor()); // SourbyCraft - finishCurrentTask starts the next configuration tasks (player data read, world joining state); never on the Netty event loop
+         this.finishCurrentTask(ServerCodeOfConductConfigurationTask.TYPE);
+     }
+ 

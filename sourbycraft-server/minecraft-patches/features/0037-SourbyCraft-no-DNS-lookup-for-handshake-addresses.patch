@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 01:54:52 +0700
+Subject: [PATCH] SourbyCraft - no DNS lookup for handshake addresses
+
+new InetSocketAddress(String, int) resolves host names synchronously, and the handshake runs on the Netty event loop. A PlayerHandshakeEvent socket address hostname and a BungeeCord-forwarded address are now parsed as IP literals only (dev.iyanz.sourbycraft.net.HandshakeAddresses). A non-literal event hostname is ignored with a one-time warning; a non-literal forwarded address takes the existing BungeeCord disconnect, also with Paper.bypassHostCheck.
+
+diff --git a/net/minecraft/server/network/ServerHandshakePacketListenerImpl.java b/net/minecraft/server/network/ServerHandshakePacketListenerImpl.java
+index 649f9646abb1bd84f1f22409aee09d2a4d27e581..6bc188ad1491803800a483d4ac778a86739e51b6 100644
+--- a/net/minecraft/server/network/ServerHandshakePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerHandshakePacketListenerImpl.java
+@@ -24,6 +24,7 @@ public class ServerHandshakePacketListenerImpl implements ServerHandshakePacketL
+     private static int throttleCounter = 0;
+     // Paper end - Connection throttle
+     private static final boolean BYPASS_HOSTCHECK = Boolean.getBoolean("Paper.bypassHostCheck"); // Paper
++    private static final java.util.concurrent.atomic.AtomicBoolean WARNED_NON_LITERAL_EVENT_ADDRESS = new java.util.concurrent.atomic.AtomicBoolean(); // SourbyCraft
+     private final MinecraftServer server;
+     private final Connection connection;
+ 
+@@ -142,7 +143,16 @@ public class ServerHandshakePacketListenerImpl implements ServerHandshakePacketL
+                         );
+                         this.connection.hostname = event.getServerHostname();
+                     }
+-                    if (event.getSocketAddressHostname() != null) this.connection.address = new java.net.InetSocketAddress(event.getSocketAddressHostname(), socketAddress instanceof java.net.InetSocketAddress ? ((java.net.InetSocketAddress) socketAddress).getPort() : 0);
++                    // SourbyCraft start - never resolve a plugin-supplied host name (DNS lookup) on the Netty event loop; IP literals only
++                    if (event.getSocketAddressHostname() != null) {
++                        final java.net.InetSocketAddress literalAddress = dev.iyanz.sourbycraft.net.HandshakeAddresses.literalSocketAddress(event.getSocketAddressHostname(), socketAddress instanceof java.net.InetSocketAddress ? ((java.net.InetSocketAddress) socketAddress).getPort() : 0);
++                        if (literalAddress != null) {
++                            this.connection.address = literalAddress;
++                        } else if (WARNED_NON_LITERAL_EVENT_ADDRESS.compareAndSet(false, true)) {
++                            net.minecraft.server.MinecraftServer.LOGGER.warn("A PlayerHandshakeEvent listener set a socket address hostname that is not an IP literal; it is ignored because resolving it would block the network thread. Return an IP address instead. (logged once)");
++                        }
++                    }
++                    // SourbyCraft end
+                     this.connection.spoofedUUID = event.getUniqueId();
+                     this.connection.spoofedProfile = gson.fromJson(event.getPropertiesJson(), com.mojang.authlib.properties.Property[].class);
+                     handledByEvent = true; // Hooray, we did it!
+@@ -153,11 +163,11 @@ public class ServerHandshakePacketListenerImpl implements ServerHandshakePacketL
+             String[] split = packet.hostName().split("\00");
+             if (!handledByEvent && proxyLogicEnabled) { // Paper
+                 // if (org.spigotmc.SpigotConfig.bungee) { // Paper - comment out, we check above!
+-                if ((split.length == 3 || split.length == 4) && (ServerHandshakePacketListenerImpl.BYPASS_HOSTCHECK || ServerHandshakePacketListenerImpl.HOST_PATTERN.matcher(split[1]).matches())) { // Paper - Add bypass host check
++                if ((split.length == 3 || split.length == 4) && (ServerHandshakePacketListenerImpl.BYPASS_HOSTCHECK || ServerHandshakePacketListenerImpl.HOST_PATTERN.matcher(split[1]).matches()) && dev.iyanz.sourbycraft.net.HandshakeAddresses.literalSocketAddress(split[1], 0) != null) { // Paper - Add bypass host check // SourbyCraft - the forwarded address must be an IP literal, never a host name (no DNS lookup on the Netty event loop; also with Paper.bypassHostCheck)
+                     // Paper start - Unix domain socket support
+                     java.net.SocketAddress socketAddress = this.connection.getRemoteAddress();
+                     this.connection.hostname = split[0];
+-                    this.connection.address = new java.net.InetSocketAddress(split[1], socketAddress instanceof java.net.InetSocketAddress ? ((java.net.InetSocketAddress) socketAddress).getPort() : 0);
++                    this.connection.address = dev.iyanz.sourbycraft.net.HandshakeAddresses.literalSocketAddress(split[1], socketAddress instanceof java.net.InetSocketAddress ? ((java.net.InetSocketAddress) socketAddress).getPort() : 0); // SourbyCraft - literal-only, checked non-null in the condition above
+                     // Paper end - Unix domain socket support
+                     this.connection.spoofedUUID = com.mojang.util.UndashedUuid.fromStringLenient(split[2]);
+                 } else {

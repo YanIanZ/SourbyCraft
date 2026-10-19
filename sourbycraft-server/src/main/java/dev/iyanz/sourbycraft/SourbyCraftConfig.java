@@ -257,6 +257,13 @@ public final class SourbyCraftConfig {
             failures.add("Auto-updater settings could not be applied: " + t.getMessage());
         }
 
+        try {
+            dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.load(java.nio.file.Path.of("sourbycraft-security.yml"));
+        } catch (Exception failure) {
+            SourbyLogger.error("Security limits could not be applied; keeping previous values", failure);
+            failures.add("Security limits could not be applied: " + failure.getMessage());
+        }
+
         // Legacy automatic memory tuning is retired. Preserve operator files and explain the change.
         if (cfgBool("perf.smart-swap.enabled", false) || cfgBool("swap.auto-create.enabled", false)) {
             SourbyLogger.warn("SmartSwap and automatic swap creation are retired in build 44. "

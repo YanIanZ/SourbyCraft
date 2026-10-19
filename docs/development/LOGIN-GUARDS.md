@@ -1,20 +1,27 @@
 # Login guards inherited from the Folia baseline
 
-Status: **documentation only**, written 2026-10-20 against the current branch for audit row
-SEC-11 (`docs/audits/2026-10-14-system-audit.md` §3, marked PLAUSIBLE there; this page is the
-verification). SourbyCraft changes none of this behaviour today, exposes no setting for it, and
-the connection-rate limit the audit proposed is **not built and not planned until accepted**.
-Everything below is in the inherited engine baseline (`sourbycraft-server/minecraft-patches/sources`,
-formerly Folia/Canvas), so changing any of it means a new feature patch under
-`sourbycraft-server/minecraft-patches/features/`, not an edit to these files (AGENTS.md, *Patch
-application*).
+Status 2026-10-20: the baseline audit below remains relevant, and SEC-11 adds an
+independent SourbyCraft admission policy in `dev.iyanz.sourbycraft.security`. Its
+`connection-guard.global` and `connection-guard.per-address` settings default to LOG,
+observe accepted TCP sockets and initial Login Hello starts, and are LIVE after
+`/sourbycraft reload`. IPv6 uses a configurable /64 default. Loopback skips per-address
+checks. With BungeeCord, Velocity or PROXY protocol configured at native listener startup,
+per-address socket limits are skipped (the TCP peer is the proxy) and per-address login
+limits key the forwarded player address (at Hello, or after Velocity forwarding); global
+limits remain active. Proxy-policy detection and installing new hooks require restart. See
+[SECURITY-GUARDS.md](SECURITY-GUARDS.md#tcp-and-login-admission-sec-11) for limits,
+KICK behavior, bounded memory, proxy/NAT handling and verification limits.
+
+The inherited behavior is in `minecraft-patches/sources` (formerly Folia/Canvas).
+SourbyCraft changes use separate feature patches; these baseline patches are unchanged.
 
 ## 1. What Paper does
 
-Paper (the pinned `paperRef`) has three guards on the login path:
+Paper (the pinned `paperRef`) has several guards on the login path:
 
 | Guard | Where in Paper | Behaviour |
 |---|---|---|
+| Per-address handshake delay | `ServerHandshakePacketListenerImpl.beginLogin`, server connection throttle | Minimum wall-clock interval between login handshakes for a transport IP; skips loopback and Unix-domain sockets |
 | Join buffering | `net.minecraft.network.Connection#tick`, `MAX_PER_TICK` = `misc.max-joins-per-tick` (`paper-global.yml`, default 5: `paper-server/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java:321`) | At most N login listeners in state `VERIFYING` are ticked per server tick; `joinAttemptsThisTick` resets each tick |
 | Synchronous pre-login | `ServerLoginPacketListenerImpl`, after `AsyncPlayerPreLoginEvent` | If a `PlayerPreLoginEvent` listener is registered, the (deprecated) sync event is fired on the main thread and can disallow the login |
 | Duplicate profile | `PlayerList#disconnectAllPlayersWithProfile`, login state `WAITING_FOR_DUPE_DISCONNECT` | An online player with the same profile is disconnected and the new login waits for that disconnect before it finishes |
@@ -68,18 +75,24 @@ routes scheduler work, it does not resurrect an event the server never calls.
 
 ## 3. What this means in practice
 
-- **No join-rate throttle exists.** Bursts of logins are bounded only by the concurrent-pending cap
-  above (default 5) and by the network layer. `sourbycraft-security.yml` has no login, join or
-  handshake key (checked 2026-10-20: `rg -i 'login|join|connection|handshake'` finds nothing), so
-  SourbyCraft adds nothing here. A connection-rate limit was proposed in the audit; it is an owner
-  decision and no code exists for it.
+- **Login starts now have a separate SourbyCraft rate policy.** SEC-11 observes sockets at
+  TCP initialization and valid-state initial Login Hello packets across channels. It does not
+  restore Paper's per-tick completion buffering or deprecated sync pre-login callback. LOG
+  counts/logs without refusing admission; KICK is an operator opt-in. There is also an inherited
+  minimum-IP-interval handshake throttle (`bukkit.yml` `settings.connection-throttle`), which is
+  separate from the concurrent-pending cap and these new fixed-window limits. The inherited
+  throttle skips loopback and disables itself for BungeeCord/Velocity; SEC-11 skips loopback,
+  never applies per-address socket limits to a proxy, and keys per-address login limits by
+  the forwarded player address in all three proxy modes.
+  Direct NAT users still share an address/prefix budget. Per-address KICK rejects consume
+  no global allowance; LOG/OFF events and per-address bypasses still count globally.
 - **`max-joins-per-tick` does not do what the Paper docs say.** Operators tuning it for a login
   burst are changing the concurrent-pending cap. Whether that cap deserves its own key is an owner
   decision; either way it would be a feature patch over the baseline.
 - **Plugin authors:** use `AsyncPlayerPreLoginEvent` or `PlayerLoginEvent`; the sync
   `PlayerPreLoginEvent` is dead on this server.
-- Nothing on this page is LIVE or RESTART_REQUIRED configuration of SourbyCraft's own; there is no
-  SourbyCraft setting involved.
+- Only the new `connection-guard` limits/modes are SourbyCraft-owned LIVE settings on this page.
+  The baseline behaviors described in §2 retain their existing semantics.
 
 ## 4. Files read for this page
 
@@ -90,5 +103,5 @@ materialized `sourbycraft-server/src/minecraft/java/net/minecraft/network/Connec
 `.../server/network/ServerLoginPacketListenerImpl.java`;
 `paper-server/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java`;
 `sourbycraft-security.yml`; `sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/maxplayers/MaxPlayersBypass.java`.
-No feature patch under `minecraft-patches/features/` or `paper-patches/features/` touches these
-hunks (`rg 'max-joins-per-tick|maxJoinsPerTick'` across both feature directories: no match).
+SEC-11 adds independent accept/login hooks through a new feature commit; it does not change
+the baseline `max-joins-per-tick` pending-login mechanism or revive sync pre-login events.

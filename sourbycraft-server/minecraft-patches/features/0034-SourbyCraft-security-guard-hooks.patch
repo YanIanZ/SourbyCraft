@@ -1,0 +1,182 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 01:24:12 +0700
+Subject: [PATCH] SourbyCraft - security guard hooks
+
+Observe client limits in LOG mode by default. Scope NBT checks to
+network decode and retain native codec limits and channel ownership.
+
+diff --git a/net/minecraft/nbt/ByteArrayTag.java b/net/minecraft/nbt/ByteArrayTag.java
+index 4fc0cfeabf60d4bd0dcfd9814d13858454bc39da..c22dce2a6b40fea73419d19c012871516799252a 100644
+--- a/net/minecraft/nbt/ByteArrayTag.java
++++ b/net/minecraft/nbt/ByteArrayTag.java
+@@ -23,6 +23,7 @@ public final class ByteArrayTag implements CollectionTag {
+         private static byte[] readAccounted(final DataInput input, final NbtAccounter accounter) throws IOException {
+             accounter.accountBytes(24L);
+             int length = input.readInt();
++            dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_LIST, length); // SourbyCraft
+             com.google.common.base.Preconditions.checkArgument(length < 1 << 24); // Spigot
+             accounter.accountBytes(1L, length);
+             byte[] data = new byte[length];
+diff --git a/net/minecraft/nbt/CompoundTag.java b/net/minecraft/nbt/CompoundTag.java
+index b9f6aa790159b2df712244c44c55d6393c837d16..dfe133d3f608e577e580ae6bf27990e3d498e025 100644
+--- a/net/minecraft/nbt/CompoundTag.java
++++ b/net/minecraft/nbt/CompoundTag.java
+@@ -128,6 +128,7 @@ public final class CompoundTag implements Tag {
+ 
+         private static String readString(final DataInput input, final NbtAccounter accounter) throws IOException {
+             String key = input.readUTF();
++            dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_STRING, key.length()); // SourbyCraft
+             accounter.accountBytes(28L);
+             accounter.accountBytes(2L, key.length());
+             return key;
+diff --git a/net/minecraft/nbt/IntArrayTag.java b/net/minecraft/nbt/IntArrayTag.java
+index 8ed91b84eb90cfe31993fa32b35263e7adea918e..0579cc712c976c503a3ef86be9758484f1ad394d 100644
+--- a/net/minecraft/nbt/IntArrayTag.java
++++ b/net/minecraft/nbt/IntArrayTag.java
+@@ -23,6 +23,7 @@ public final class IntArrayTag implements CollectionTag {
+         private static int[] readAccounted(final DataInput input, final NbtAccounter accounter) throws IOException {
+             accounter.accountBytes(24L);
+             int length = input.readInt();
++            dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_LIST, length); // SourbyCraft
+             com.google.common.base.Preconditions.checkArgument(length < 1 << 24); // Spigot
+             accounter.accountBytes(4L, length);
+             int[] data = new int[length];
+diff --git a/net/minecraft/nbt/ListTag.java b/net/minecraft/nbt/ListTag.java
+index 73b50aa596c5ce163d1130d2afac2940aefb95bc..5b7832ef9667088a6f7a7472d9fdedd7ecc5b6cf 100644
+--- a/net/minecraft/nbt/ListTag.java
++++ b/net/minecraft/nbt/ListTag.java
+@@ -111,6 +111,7 @@ public final class ListTag extends AbstractList<Tag> implements CollectionTag {
+ 
+         private static int readListCount(final DataInput input) throws IOException {
+             int count = input.readInt();
++            dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_LIST, count); // SourbyCraft
+             if (count < 0) {
+                 throw new NbtFormatException("ListTag length cannot be negative: " + count);
+             } else {
+diff --git a/net/minecraft/nbt/LongArrayTag.java b/net/minecraft/nbt/LongArrayTag.java
+index fe75d82cb43364ff58a531306bac934cbca4f729..f677b0c458db59c8ce676bac9c1de2b833c77ded 100644
+--- a/net/minecraft/nbt/LongArrayTag.java
++++ b/net/minecraft/nbt/LongArrayTag.java
+@@ -23,6 +23,7 @@ public final class LongArrayTag implements CollectionTag {
+         private static long[] readAccounted(final DataInput input, final NbtAccounter accounter) throws IOException {
+             accounter.accountBytes(24L);
+             int length = input.readInt();
++            dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_LIST, length); // SourbyCraft
+             accounter.accountBytes(8L, length);
+             long[] data = new long[length];
+ 
+diff --git a/net/minecraft/nbt/NbtAccounter.java b/net/minecraft/nbt/NbtAccounter.java
+index 47628e375ae9e1004a74f3e19247139973c7e4cb..ee8180732c0dcca8c580874b302af6f0aede258e 100644
+--- a/net/minecraft/nbt/NbtAccounter.java
++++ b/net/minecraft/nbt/NbtAccounter.java
+@@ -48,6 +48,7 @@ public class NbtAccounter {
+         }
+ 
+         this.usage += size;
++        dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_BYTES, this.usage); // SourbyCraft - network scope only
+     }
+ 
+     // Paper start - Track codec depth
+@@ -56,6 +57,7 @@ public class NbtAccounter {
+             throw new NbtAccounterException("Tried to read NBT tag with too high complexity, depth > " + this.maxDepth);
+         } else {
+             this.depth += depth;
++            dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_DEPTH, this.depth); // SourbyCraft
+         }
+     }
+     // Paper end - Track codec depth
+@@ -66,6 +68,7 @@ public class NbtAccounter {
+         }
+ 
+         this.depth++;
++        dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_DEPTH, this.depth); // SourbyCraft
+     }
+ 
+     public void popDepth() {
+diff --git a/net/minecraft/nbt/StringTag.java b/net/minecraft/nbt/StringTag.java
+index c4aa87a9ae15e6f169977644e4ccf379e845f32b..282881c7165c16e98ee810523b0a920c601db85c 100644
+--- a/net/minecraft/nbt/StringTag.java
++++ b/net/minecraft/nbt/StringTag.java
+@@ -21,6 +21,7 @@ public record StringTag(String value) implements PrimitiveTag {
+         private static String readAccounted(final DataInput input, final NbtAccounter accounter) throws IOException {
+             accounter.accountBytes(36L);
+             String data = input.readUTF();
++            dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.NBT_STRING, data.length()); // SourbyCraft
+             accounter.accountBytes(2L, data.length());
+             return data;
+         }
+diff --git a/net/minecraft/network/PacketDecoder.java b/net/minecraft/network/PacketDecoder.java
+index 662c7502cbb783cfdabce874c0dadf67c80e9061..8339257434e13b1b7bb68cd8019a13b877e63a29 100644
+--- a/net/minecraft/network/PacketDecoder.java
++++ b/net/minecraft/network/PacketDecoder.java
+@@ -21,7 +21,10 @@ public class PacketDecoder<T extends PacketListener> extends ByteToMessageDecode
+ 
+     @Override
+     protected void decode(final ChannelHandlerContext ctx, final ByteBuf input, final List<Object> out) throws Exception {
++        try (var securityScope = dev.iyanz.sourbycraft.security.SecurityGuards.begin(ctx.channel())) { // SourbyCraft - network-only security scope
++        var security = dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE;
+         int readableBytes = input.readableBytes();
++        security.packet(readableBytes);
+ 
+         Packet<? super T> packet;
+         try {
+@@ -34,6 +37,17 @@ public class PacketDecoder<T extends PacketListener> extends ByteToMessageDecode
+             throw e;
+         }
+ 
++        // SourbyCraft - no player/world access: observe decoded client content on its channel loop.
++        if (packet instanceof net.minecraft.network.protocol.game.ServerboundEditBookPacket book) security.book(book.pages(), book.title());
++        if (packet instanceof net.minecraft.network.protocol.game.ServerboundSignUpdatePacket sign) security.sign(sign.getLines());
++        if (packet instanceof net.minecraft.network.protocol.game.ServerboundRenameItemPacket anvil) security.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.ANVIL_NAME, anvil.getName().length());
++        if (packet instanceof net.minecraft.network.protocol.game.ServerboundContainerClickPacket) security.operation(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.CONTAINER_RATE);
++        if (packet instanceof net.minecraft.network.protocol.game.ServerboundRecipeBookChangeSettingsPacket
++            || packet instanceof net.minecraft.network.protocol.game.ServerboundRecipeBookSeenRecipePacket
++            || packet instanceof net.minecraft.network.protocol.game.ServerboundPlaceRecipePacket) {
++            security.operation(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.RECIPE_RATE);
++            security.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.RECIPE_BYTES, readableBytes);
++        }
+         PacketType<? extends Packet<? super T>> packetId = packet.type();
+         JvmProfiler.INSTANCE.onPacketReceived(this.protocolInfo.id(), packetId, ctx.channel().remoteAddress(), readableBytes);
+         if (input.readableBytes() > 0) {
+@@ -64,5 +78,6 @@ public class PacketDecoder<T extends PacketListener> extends ByteToMessageDecode
+         }
+ 
+         ProtocolSwapHandler.handleInboundTerminalPacket(ctx, packet);
++        } // SourbyCraft - clear the scope even when codecs or explicit KICK guards throw
+     }
+ }
+diff --git a/net/minecraft/network/protocol/common/custom/DiscardedPayload.java b/net/minecraft/network/protocol/common/custom/DiscardedPayload.java
+index c34350dfaed70e54ae0cc8c87e12ad784aa5311a..3f7f88f6936c98fac0ac34709a8fc2ef9a5bd3ee 100644
+--- a/net/minecraft/network/protocol/common/custom/DiscardedPayload.java
++++ b/net/minecraft/network/protocol/common/custom/DiscardedPayload.java
+@@ -12,6 +12,7 @@ public record DiscardedPayload(Identifier id, byte[] data) implements CustomPack
+             buf.writeBytes(payload.data);
+         }, buf -> {
+             int length = buf.readableBytes();
++            dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.PAYLOAD_BYTES, length); // SourbyCraft
+             if (length >= 0 && length <= maxPayloadSize) {
+                 final byte[] data = new byte[length];
+                 buf.readBytes(data);
+diff --git a/net/minecraft/network/protocol/game/ServerboundSetCreativeModeSlotPacket.java b/net/minecraft/network/protocol/game/ServerboundSetCreativeModeSlotPacket.java
+index 4e136b93826f67dc1924254aab78358a99fad605..2b8ed5503f205361752a9110a53a8cdc218c37aa 100644
+--- a/net/minecraft/network/protocol/game/ServerboundSetCreativeModeSlotPacket.java
++++ b/net/minecraft/network/protocol/game/ServerboundSetCreativeModeSlotPacket.java
+@@ -11,7 +11,16 @@ public record ServerboundSetCreativeModeSlotPacket(short slotNum, ItemStack item
+     public static final StreamCodec<RegistryFriendlyByteBuf, ServerboundSetCreativeModeSlotPacket> STREAM_CODEC = StreamCodec.composite(
+         ByteBufCodecs.SHORT,
+         ServerboundSetCreativeModeSlotPacket::slotNum,
+-        ItemStack.validatedStreamCodec(ItemStack.OPTIONAL_UNTRUSTED_STREAM_CODEC).apply(ByteBufCodecs::trackDepth), // Paper - Track codec depth
++        new StreamCodec<RegistryFriendlyByteBuf, ItemStack>() { // SourbyCraft - measure encoded item component bytes
++            private final StreamCodec<RegistryFriendlyByteBuf, ItemStack> delegate = ItemStack.validatedStreamCodec(ItemStack.OPTIONAL_UNTRUSTED_STREAM_CODEC).apply(ByteBufCodecs::trackDepth);
++            @Override public ItemStack decode(RegistryFriendlyByteBuf input) {
++                int before = input.readerIndex();
++                ItemStack item = this.delegate.decode(input);
++                dev.iyanz.sourbycraft.security.SecurityGuards.INSTANCE.check(dev.iyanz.sourbycraft.security.SecurityGuards.Limit.CREATIVE_BYTES, input.readerIndex() - before);
++                return item;
++            }
++            @Override public void encode(RegistryFriendlyByteBuf output, ItemStack item) { this.delegate.encode(output, item); }
++        },
+         ServerboundSetCreativeModeSlotPacket::itemStack,
+         ServerboundSetCreativeModeSlotPacket::new
+     );

@@ -22,12 +22,15 @@ class BlockingIoBoundaryTest {
 
     private static final Set<String> AUDITED = Set.of(
         "dev/iyanz/sourbycraft/update/HttpTransport.java",
-        "dev/iyanz/sourbycraft/update/ViaAutoUpdate.java",
         "dev/iyanz/sourbycraft/command/SpeedtestCommand.java",
         "dev/iyanz/sourbycraft/util/GeoUtil.java",
         "dev/iyanz/sourbycraft/bootstrap/LibDownloader.java",
         "dev/iyanz/sourbycraft/bootstrap/PluginProvisioner.java",
-        "dev/iyanz/sourbycraft/awf/redis/RedisClient.java");
+        "dev/iyanz/sourbycraft/awf/redis/RedisClient.java",
+        // parses IP literals for the handshake; opens no connection and never resolves a name (Netty event loop)
+        "dev/iyanz/sourbycraft/net/HandshakeAddresses.java",
+        // reads numeric peer bytes from an InetSocketAddress for admission limits; opens no connection, never resolves (Netty event loop)
+        "dev/iyanz/sourbycraft/security/SecurityGuards.java");
 
     private static Path sourceRoot() {
         Path dir = Path.of("").toAbsolutePath();

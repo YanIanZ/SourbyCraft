@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 02:03:36 +0700
+Subject: [PATCH] SourbyCraft - consume rejected network frames
+
+Channel close invokes decodeLast. Consume explicitly rejected input so
+the same frame cannot be counted again during shutdown.
+
+diff --git a/net/minecraft/network/PacketDecoder.java b/net/minecraft/network/PacketDecoder.java
+index 8339257434e13b1b7bb68cd8019a13b877e63a29..72e3307725b03eda7143860c8096dc3bc516c96d 100644
+--- a/net/minecraft/network/PacketDecoder.java
++++ b/net/minecraft/network/PacketDecoder.java
+@@ -78,6 +78,10 @@ public class PacketDecoder<T extends PacketListener> extends ByteToMessageDecode
+         }
+ 
+         ProtocolSwapHandler.handleInboundTerminalPacket(ctx, packet);
++        } catch (dev.iyanz.sourbycraft.security.SecurityGuards.Rejected rejected) {
++            // SourbyCraft - closing the channel calls decodeLast; do not replay a rejected frame.
++            input.skipBytes(input.readableBytes());
++            throw rejected;
+         } // SourbyCraft - clear the scope even when codecs or explicit KICK guards throw
+     }
+ }

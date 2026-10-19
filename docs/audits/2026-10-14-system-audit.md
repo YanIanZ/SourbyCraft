@@ -106,7 +106,7 @@ Engine and bridge
 - Bridged-task ownership context feeding every guard hit into quarantine without THROW mode.
 - Fair bridged I/O lane: per-plugin weighted sub-queues, skip-not-cancel timers.
 - Unload-safe region queues (`drainForUnload()`) with a CI fixture.
-- Immutable `MobPathSnapshot` for async pathfinding (closes ENG-8 and the M5 audit).
+- Immutable `MobPathSnapshot` for async pathfinding (closes ENG-8 and the M5 audit). Implemented 2026-10-20 (`dev.iyanz.sourbycraft.perf.MobPathSnapshot`, materialized MC commit "SourbyCraft - immutable mob snapshot for async pathfinding"); member trace and remaining refusals in `docs/async-pathfinding-spec.md` "What the snapshot holds".
 - Boot-time CPU ledger in `ResourceGovernor` and `/perf governor`.
 
 Distribution and security
