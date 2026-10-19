@@ -37,9 +37,16 @@ public final class PluginProvisioner {
      * @param sha256         expected lowercase hex SHA-256 (64 chars)
      * @param sizeBytes      expected content length
      * @param configResource classpath resource holding the default config.yml (server jar), or null
+     * @param projectId      Modrinth project for runtime metadata, or null for non-Via pins
      */
     record Pin(String plugin, String jarPrefix, String fileName, String downloadUrl,
-               String sha256, long sizeBytes, String configResource) {}
+               String sha256, long sizeBytes, String configResource, String projectId) {
+        // Non-Via bootstrap callers do not query Modrinth metadata.
+        Pin(String plugin, String jarPrefix, String fileName, String downloadUrl,
+            String sha256, long sizeBytes, String configResource) {
+            this(plugin, jarPrefix, fileName, downloadUrl, sha256, sizeBytes, configResource, null);
+        }
+    }
 
     /**
      * ViaVersion 5.10.0 + ViaBackwards 5.10.0 — the matched stable pair (released 2026-06-19).
@@ -52,13 +59,34 @@ public final class PluginProvisioner {
             "ViaVersion", "ViaVersion-", "ViaVersion-5.10.0.jar",
             "https://cdn.modrinth.com/data/P1OZGk5p/versions/ruzmiBqe/ViaVersion-5.10.0.jar",
             "e5a63f86198d74cd1be00a6ef626001e509921d2955982fe73f3ab6d7149d972",
-            6434343L, "/sourbycraft/via/viaversion-config.yml"),
+            6434343L, "/sourbycraft/via/viaversion-config.yml", "P1OZGk5p"),
         new Pin(
             "ViaBackwards", "ViaBackwards-", "ViaBackwards-5.10.0.jar",
             "https://cdn.modrinth.com/data/NpvuJQoq/versions/YjpKsm6j/ViaBackwards-5.10.0.jar",
             "4699b6dddd388048cd33627276f7250c23d7f7125fe620056cdf5acf96e9c62b",
-            1422522L, "/sourbycraft/via/viabackwards-config.yml")
+            1422522L, "/sourbycraft/via/viabackwards-config.yml", "NpvuJQoq")
     );
+
+    /** Reviewed trust anchors shared with the runtime Via updater; API metadata cannot change these. */
+    public record ViaPin(String projectId, String prefix, String filename, String url, String sha256, long size) {}
+
+    public static List<ViaPin> viaPins() {
+        return viaPins(PINS);
+    }
+
+    static List<ViaPin> viaPins(List<Pin> pins) {
+        return pins.stream().map(pin -> new ViaPin(pin.projectId(), pin.jarPrefix(), pin.fileName(),
+            pin.downloadUrl(), pin.sha256(), pin.sizeBytes())).toList();
+    }
+
+    public static Path pluginsDirectory() { return configuredPluginsDirectory; }
+
+    /** Includes renamed operator jars identified by their plugin descriptor. */
+    public static boolean hasViaJar(Path directory, String prefix) throws IOException {
+        Pin pin = PINS.stream().filter(candidate -> candidate.jarPrefix().equals(prefix)).findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("Unknown Via plugin: " + prefix));
+        return anyPluginJarPresent(directory, pin);
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Phase 1: JDK-only jar download, invoked by patched Minecraft Main before the plugin scan.
@@ -88,7 +116,7 @@ public final class PluginProvisioner {
     static void provisionJars(Path pluginsDir, Path config, LibDownloader.Transport transport) {
         ProtocolLibProvisioner.provision(pluginsDir, config, transport);
         if (!BootstrapPluginSettings.enabled(config, "viaversion", true)) {
-            System.out.println("[SourbyBootstrap] ViaVersion auto-provision disabled "
+            System.out.println("[SourbyCraft] ViaVersion auto-provision disabled "
                 + "(viaversion.auto-provision=false) — old clients will not be bridged.");
             quarantineProvisionedJars(pluginsDir, PINS);
             return;
@@ -96,7 +124,7 @@ public final class PluginProvisioner {
         try {
             Files.createDirectories(pluginsDir);
         } catch (IOException e) {
-            System.err.println("[SourbyBootstrap] ViaVersion auto-provision: cannot create plugins/ dir: "
+            System.err.println("[SourbyCraft] ViaVersion auto-provision: cannot create plugins/ dir: "
                 + e.getMessage());
             return;
         }

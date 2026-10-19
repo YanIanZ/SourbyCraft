@@ -263,7 +263,7 @@ public final class SourbyUpdater {
         } finally {
             checkRunning.set(false);
         }
-        // Keep the auto-provisioned Via plugins current on the same cadence (own try/catch).
+        // Recover missing reviewed Via pins on the same cadence (own try/catch); preserve installed jars.
         try {
             ViaAutoUpdate.check();
         } catch (Throwable t) {

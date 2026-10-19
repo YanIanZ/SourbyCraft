@@ -42,7 +42,7 @@ by reload.
 | `check_times`, `check_interval_minutes` | `["06:00"]`, `30` | RESTART_REQUIRED (schedule built in `start()`) |
 | `restart_mode`, `restart_delay_seconds` | `auto`, `60` | LIVE (read when an apply is scheduled) |
 | `allow_prerelease` | `false` | LIVE (next check) |
-| `via_auto_update` | `true` | see `ViaAutoUpdate` (unchanged by this wave) |
+| `via_auto_update` | `true` | LIVE: recover missing reviewed Via pins; installed jars require restart |
 
 ## Verification chain before a jar is staged
 
@@ -218,3 +218,24 @@ on 2026-10-20: `ReleaseSignatureVerifierTest` 6/6, `SourbyUpdaterCheckTest` 14/1
 `spark`) report `NoTestsDiscoveredException` under this `--tests` filter because the filter
 excludes their members; this change does not touch them and the unfiltered run was not repeated
 here. No server boot was performed.
+
+## Via plugin trust policy (SEC-6)
+
+The asynchronous Via check recovers a missing reviewed bootstrap pin; it does not track
+the latest upstream release. Installed Via jars, including renamed operator builds, skip
+all metadata and artifact requests. If a jar is absent, the check only accepts stable
+metadata explicitly listing the running Minecraft version and a Bukkit-family loader.
+It may install only the reviewed URL,
+filename, size and SHA-256 from `PluginProvisioner.viaPins()`. An API-provided hash
+cannot replace that trust anchor. New upstream versions require a reviewed pin update;
+there is no fallback to versions listing other Minecraft releases. If the reviewed pin
+does not explicitly list the running Minecraft version, runtime recovery installs nothing.
+
+Existing Via jars, including renamed operator builds and conflicting destination files,
+are preserved; the updater deletes no installed plugin jar. An old provisioned version
+also remains until the operator replaces it. Downloads stop at the pinned size (with a
+32 MiB hard ceiling), use private temporary files and install without replacement only
+after SHA-256 validation. Metadata is bounded to 4 MiB. The active `--plugins` directory
+is used, and SourbyClip offline mode prevents the check. The enable flag remains LIVE;
+new jar contents take effect on restart. Startup provisioning retains its separately
+reviewed behavior; metadata gating here is the runtime updater policy.
