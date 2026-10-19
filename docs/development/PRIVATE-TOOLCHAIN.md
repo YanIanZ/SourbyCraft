@@ -24,18 +24,53 @@ python3 scripts/private_toolchain.py --publish .private-toolchain
 Both tools publish only to Maven Local (`~/.m2/repository`). For another Maven Local directory,
 pass `--maven-local PATH` to the script and `-Dmaven.repo.local=PATH` to Gradle.
 The root build resolves private coordinates exclusively there, with no remote Maven fallback.
-The standalone check `python3 scripts/private_toolchain.py` validates installed JAR hashes.
+The standalone check `python3 scripts/private_toolchain.py` validates the installed JAR hashes,
+the SourbyPatcher POM and module-metadata hashes, and that both declare the `paperweightVersion`
+pinned in `gradle.properties`.
 
 SourbyPatcher's active plugin applies paperweight's patcher (2.0.0-beta.24) with Paper as the only
 upstream. Canvas and Weaver were dropped on 2026-10-05; the former Canvas/Folia changes are
 SourbyCraft's own patches and sources. `canvas-toolchain` is kept only to rebuild older revisions.
 Before patching or packaging, SourbyClip must match the approved SHA-256, version, main class,
-and protocol. Settings also verify the SourbyPatcher JAR hash before loading its plugin.
+and protocol. Settings also verify the SourbyPatcher JAR, POM and module-metadata hashes before
+loading its plugin.
 This detects accidental or unapproved substitutions; it is not a DRM boundary.
 
 When changing a tool, bump its version, test and publish it privately, then update both the
 revision lock and artifact hashes in `gradle.properties`. Never silently republish different
 bytes under the same approved version. Artifact generation must remain reproducible across CI hosts.
+
+## Paperweight version pin — 2026-10-20
+
+The paperweight patcher version the toolchain loads is not a constant in this repository: it is a
+dependency declared in the published `paper-toolchain` metadata,
+`dev/iyanz/sourbypatcher:paper-toolchain:${patcherVersion}` →
+`~/.m2/repository/dev/iyanz/sourbypatcher/paper-toolchain/${patcherVersion}/paper-toolchain-${patcherVersion}.pom`
+and `.module`, dependency
+`io.papermc.paperweight.patcher:io.papermc.paperweight.patcher.gradle.plugin` (the POM carries
+2.0.0-beta.24 as `<version>`, the module metadata as `runtimeElements` `version.requires`).
+Gradle resolves the `.module`; Maven consumers use the POM. `settings.gradle.kts` requests
+`io.papermc.paperweight.core` at the same release. Before this pin only the JAR was hashed, so
+replacing either metadata file could move the loaded paperweight release while every approved
+value stayed valid.
+
+Four things now have to agree:
+
+| Pin | Location | Checked by |
+| --- | --- | --- |
+| `patcherPomSha256` — SHA-256 of `paper-toolchain-${patcherVersion}.pom` | `gradle.properties` | `settings.gradle.kts` (fails configuration) and `scripts/private_toolchain.py` |
+| `patcherModuleSha256` — SHA-256 of `paper-toolchain-${patcherVersion}.module` | `gradle.properties` | same two |
+| `paperweightVersion` — paperweight-core plugin version requested in `settings.gradle.kts` | `gradle.properties` | `scripts/private_toolchain.py`, which parses the pinned POM and module metadata and requires both to declare the same version |
+| Pinned POM and module bytes | Maven Local | both of the above |
+
+The version equality is a repository assertion that paperweight core and patcher ship as one
+release (`settings.gradle.kts` and the POM/module dependency are the two consumers). A genuine
+paperweight bump is therefore one reviewed change: new `paperweightVersion`, new POM and module
+hashes, new `patcherVersion`/`patcherSha256`, and the revision lock, published together. The hash
+pins detect substitution of those two files; they do not authenticate the transitive dependency
+graph or the POMs of paperweight itself. `settings.gradle.kts` enforces the hashes but not the
+version equality — that comparison needs an XML/JSON parse and lives in
+`scripts/private_toolchain.py`, which CI runs before any Gradle step.
 
 ## Offline bootstrap
 
@@ -67,6 +102,8 @@ original-JAR replacement uses verified staging with connect/read timeouts. Patch
 `sourbyToolchainDoctor` and checks the loaded paperweight manifest version against an
 expectation embedded inside its hash-pinned JAR. This detects version drift through a
 substituted POM; it does not authenticate the complete POM/dependency contents.
+The repository-level metadata pin above covers the active 3.0.0 the same way without relying on the
+plugin, so selecting 3.1.0 does not remove the need for it.
 
 Inspect launcher controls without booting:
 
@@ -81,10 +118,16 @@ From SourbyCraft, use the tested override command to review the active diagnosti
 ./gradlew \
   -PpatcherVersion=3.1.0 \
   -PpatcherSha256=90ee7c25228541ca478049d1cbe462bfc0c6a016499b6b5f26fab6d58ea3f14d \
+  -PpatcherPomSha256=bd060c9570c99276f1f1685a5827a1af49a33c9129cd51811c63913af97bc9ab \
+  -PpatcherModuleSha256=a5951f00d3780ae4abed3dd59d62f4ac15f561560487e84529127d7748d2c8f2 \
   -PclipVersion=3.1.1 \
   -PclipSha256=ca9f54d291af8d2c0afc9b71259342668146993067cd33bb7ba92f59d4045070 \
   sourbyToolchainDoctor verifySourbyClip --configuration-cache --console=plain
 ```
+
+The two `-PpatcherPomSha256`/`-PpatcherModuleSha256` lines are required since the 2026-10-20
+metadata pin; the 3.1.0 POM and module metadata declare paperweight 2.0.0-beta.24, so
+`paperweightVersion` needs no override. The totals recorded below predate those lines.
 
 The same command succeeds again with configuration-cache reuse. Private builds pass on
 Temurin 25.0.4.1+1/Gradle 9.8.0/macOS arm64: 29 Clip Java tests, 11 Patcher Java tests and

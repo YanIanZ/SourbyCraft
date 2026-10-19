@@ -4,9 +4,14 @@ import argparse
 import hashlib
 import json
 import subprocess
+import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Group of the paperweight patcher plugin the pinned SourbyPatcher metadata depends on. Its version
+# is the paperweight release the toolchain actually loads, so it must match paperweightVersion.
+PAPERWEIGHT_GROUP = 'io.papermc.paperweight.patcher'
 
 
 def digest(path):
@@ -15,6 +20,30 @@ def digest(path):
         for data in iter(lambda: stream.read(1024 * 1024), b''):
             value.update(data)
     return value.hexdigest()
+
+
+def local_name(element):
+    return element.tag.rsplit('}', 1)[-1]
+
+
+def paperweight_version(pom):
+    """Return the paperweight patcher version a published plugin POM declares."""
+    for dependency in ElementTree.parse(pom).getroot().iter():
+        if local_name(dependency) != 'dependency':
+            continue
+        fields = {local_name(child): (child.text or '').strip() for child in dependency}
+        if fields.get('groupId') == PAPERWEIGHT_GROUP:
+            return fields.get('version', '')
+    raise ValueError(f'{pom} declares no {PAPERWEIGHT_GROUP} dependency')
+
+
+def module_paperweight_version(module):
+    """Return the paperweight patcher version published Gradle module metadata declares."""
+    for variant in json.loads(Path(module).read_text()).get('variants', []):
+        for dependency in variant.get('dependencies', []):
+            if dependency.get('group') == PAPERWEIGHT_GROUP:
+                return dependency.get('version', {}).get('requires', '')
+    raise ValueError(f'{module} declares no {PAPERWEIGHT_GROUP} dependency')
 
 
 def properties():
@@ -36,6 +65,26 @@ def verify(repository):
         if digest(path) != config[hash_key]:
             raise ValueError(f'{name} SHA-256 mismatch: {path}; use the approved private revision.')
         print(f'Verified {name} {version}')
+
+    patcher = config['patcherVersion']
+    base = Path(repository) / 'dev/iyanz/sourbypatcher/paper-toolchain' / patcher
+    for label, extension, hash_key, declared_version in (
+        ('POM', 'pom', 'patcherPomSha256', paperweight_version),
+        ('module metadata', 'module', 'patcherModuleSha256', module_paperweight_version),
+    ):
+        artifact = base / f'paper-toolchain-{patcher}.{extension}'
+        if not artifact.is_file():
+            raise ValueError(f'SourbyPatcher {label} missing: {artifact}. '
+                             'Publish the pinned private checkout to Maven Local first.')
+        if digest(artifact) != config[hash_key]:
+            raise ValueError(f'SourbyPatcher {label} SHA-256 mismatch: {artifact}; the paperweight version '
+                             'may have moved. Use the approved private revision.')
+        declared = declared_version(artifact)
+        expected = config['paperweightVersion']
+        if declared != expected:
+            raise ValueError(f'SourbyPatcher {label} declares paperweight {declared}; gradle.properties '
+                             f'paperweightVersion is {expected}. Update the toolchain pins and this version together.')
+        print(f'Verified SourbyPatcher {label} (paperweight {declared})')
 
 
 def publish(checkouts, repository):

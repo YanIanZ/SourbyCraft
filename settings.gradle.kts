@@ -1,6 +1,7 @@
 pluginManagement {
     // Private SourbyPatcher applies paperweight with Paper as the only upstream.
     val patcherVersion = providers.gradleProperty("patcherVersion").get()
+    val paperweightVersion = providers.gradleProperty("paperweightVersion").get()
     val localRepo = providers.systemProperty("maven.repo.local")
         .getOrElse(System.getProperty("user.home") + "/.m2/repository")
     val patcherJar = file("$localRepo/dev/iyanz/sourbypatcher/paper-toolchain/$patcherVersion/paper-toolchain-$patcherVersion.jar")
@@ -11,6 +12,26 @@ pluginManagement {
         .digest(providers.fileContents(layout.settingsDirectory.file(patcherJar.absolutePath)).asBytes.get()).joinToString("") { "%02x".format(it) }
     check(hash == providers.gradleProperty("patcherSha256").get()) {
         "Private SourbyPatcher SHA-256 mismatch; republish the approved private revision"
+    }
+    // The published POM and Gradle module metadata are what declare the paperweight patcher version
+    // this plugin loads (Gradle resolves the .module, Maven consumers the POM), so pin both.
+    val patcherArtifacts = listOf(
+        "POM" to file("$localRepo/dev/iyanz/sourbypatcher/paper-toolchain/$patcherVersion/paper-toolchain-$patcherVersion.pom"),
+        "module metadata" to file("$localRepo/dev/iyanz/sourbypatcher/paper-toolchain/$patcherVersion/paper-toolchain-$patcherVersion.module"),
+    )
+    val patcherArtifactPins = mapOf(
+        "POM" to providers.gradleProperty("patcherPomSha256").get(),
+        "module metadata" to providers.gradleProperty("patcherModuleSha256").get(),
+    )
+    for ((label, artifact) in patcherArtifacts) {
+        check(artifact.isFile) {
+            "Private SourbyPatcher $label missing. Publish the pinned private checkout to Maven Local; see docs/development/PRIVATE-TOOLCHAIN.md"
+        }
+        val artifactHash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(providers.fileContents(layout.settingsDirectory.file(artifact.absolutePath)).asBytes.get()).joinToString("") { "%02x".format(it) }
+        check(artifactHash == patcherArtifactPins.getValue(label)) {
+            "Private SourbyPatcher $label SHA-256 mismatch; the paperweight version may have moved. Republish the approved private revision"
+        }
     }
     repositories {
         gradlePluginPortal()
@@ -23,8 +44,9 @@ pluginManagement {
 
     plugins {
         id("dev.iyanz.sourbypatcher.paper") version patcherVersion
-        // Same paperweight release as SourbyPatcher paper-toolchain (first with Gradle 9.8 support).
-        id("io.papermc.paperweight.core") version "2.0.0-beta.24"
+        // Same paperweight release as the version declared in the pinned SourbyPatcher POM/module
+        // metadata (first with Gradle 9.8 support). scripts/private_toolchain.py enforces the equality.
+        id("io.papermc.paperweight.core") version paperweightVersion
     }
 }
 
