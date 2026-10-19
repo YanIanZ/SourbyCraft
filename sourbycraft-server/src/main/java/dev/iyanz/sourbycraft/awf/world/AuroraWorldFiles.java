@@ -8,6 +8,7 @@ import dev.iyanz.sourbycraft.awf.ChunkKey;
 import dev.iyanz.sourbycraft.awf.ChunkSource;
 import dev.iyanz.sourbycraft.awf.Compression;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -24,6 +25,10 @@ import java.util.Map;
  * <p>{@code properties} is the registry's {@link dev.iyanz.sourbycraft.api.world.WorldProperties}
  * as JSON, written when the world has any. A file without it (every file written before it was
  * added) imports with no properties, exactly as before.</p>
+ *
+ * <p>The {@code /awf} command reads files from {@link #IMPORTS} and writes them to
+ * {@link #EXPORTS} only ({@link #confine}); the {@link dev.iyanz.sourbycraft.api.world.AuroraWorlds}
+ * API takes any path, as a plugin has the file system anyway.</p>
  */
 public final class AuroraWorldFiles {
 
@@ -40,6 +45,73 @@ public final class AuroraWorldFiles {
     }
 
     private AuroraWorldFiles() {}
+
+    /**
+     * Where {@code /awf export} and {@code /awf convert} write, under the server directory. An
+     * operator's file name is confined to this folder: before, {@code /awf export world
+     * /etc/cron.d/x} wrote wherever the server process could.
+     */
+    public static final Path EXPORTS = Path.of("awf", "exports");
+
+    /** Where {@code /awf import} and {@code /awf convert} read, under the server directory. */
+    public static final Path IMPORTS = Path.of("awf", "imports");
+
+    /**
+     * Resolves a file name an operator typed inside {@code folder} (relative to the server
+     * directory, or wherever {@code folder} points when it is absolute). Accepted: a relative
+     * name, in a sub-folder or not, optionally already prefixed with the folder itself (as the
+     * command prints it). Refused: an empty name, an absolute path, any {@code ..} segment, and a
+     * name whose existing part is a symbolic link that leaves the folder.
+     *
+     * @param folder {@link #EXPORTS} or {@link #IMPORTS}
+     * @param typed the operator's argument, suffix already applied
+     * @return the path inside {@code folder}, normalized
+     * @throws IllegalArgumentException with the reason an operator can act on
+     */
+    public static Path confine(final Path folder, final String typed) {
+        final String shown = folder.toString().replace(folder.getFileSystem().getSeparator(), "/");
+        if (typed == null || typed.isBlank()) {
+            throw new IllegalArgumentException("file names are relative to " + shown + "/: give a name");
+        }
+        final Path given;
+        try {
+            given = Path.of(typed.strip());
+        } catch (final java.nio.file.InvalidPathException invalid) {
+            throw new IllegalArgumentException("file names are relative to " + shown + "/: " + invalid.getReason());
+        }
+        if (given.isAbsolute() || typed.startsWith("/") || typed.startsWith("\\")) {
+            throw new IllegalArgumentException("file names are relative to " + shown + "/ (an absolute path is"
+                + " not accepted): " + typed);
+        }
+        for (final Path segment : given) {
+            if (segment.toString().equals("..")) {
+                throw new IllegalArgumentException("file names are relative to " + shown + "/ and may not contain"
+                    + " '..': " + typed);
+            }
+        }
+        // "awf/exports/x.awf" typed back from the command's own output is the same file.
+        final Path relative = given.normalize().startsWith(folder) ? folder.relativize(given.normalize()) : given.normalize();
+        final Path resolved = folder.resolve(relative).normalize();
+        if (relative.toString().isEmpty() || !resolved.startsWith(folder)) {
+            throw new IllegalArgumentException("file names are relative to " + shown + "/: " + typed);
+        }
+        // A symbolic link inside the folder could still point outside it. Follow the deepest part
+        // that exists; a name whose parents do not exist yet cannot be a link.
+        try {
+            Path existing = resolved;
+            while (existing != null && !Files.exists(existing, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                existing = existing.getParent();
+            }
+            if (existing != null && existing.startsWith(folder) && !existing.equals(folder)
+                && Files.exists(folder) && !existing.toRealPath().startsWith(folder.toRealPath())) {
+                throw new IllegalArgumentException(typed + " leaves " + shown + "/ through a symbolic link");
+            }
+        } catch (final IOException unreadable) {
+            throw new IllegalArgumentException("cannot resolve " + typed + " under " + shown + "/: "
+                + unreadable.getMessage());
+        }
+        return resolved;
+    }
 
     /** Metadata describing how to create the world again. */
     static Map<String, String> metadata(final AuroraWorldRegistry.Entry world, final String source) {

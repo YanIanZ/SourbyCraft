@@ -6,8 +6,10 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonSerializer;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -21,6 +23,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import me.lucko.spark.paper.common.platform.serverconfig.ConfigParser;
 import me.lucko.spark.paper.common.platform.serverconfig.ExcludedConfigFilter;
 import me.lucko.spark.paper.common.platform.serverconfig.PropertiesConfigParser;
@@ -76,6 +80,10 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
             .add("world-settings.*.seed-*")
             .add("feature-seeds")
             .add("seed-*")
+            // The Redis URI may carry the password (redis://user:password@host). The key name
+            // ends in "uri", which the credential-key pass below does not treat as a secret, so
+            // the key is hidden outright; the other [aurora.awf.redis] keys stay visible.
+            .add("aurora.awf.redis.uri")
             .addAll(getTimingsHiddenConfigs())
             .addAll(getSystemPropertyList("spark.serverconfigs.hiddenpaths"));
 
@@ -86,6 +94,13 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
     public SourbyServerConfigProvider() {
         super(FILES, HIDDEN_PATHS);
     }
+
+    /**
+     * {@code scheme://user:password@host}: the user-info part of a URL-shaped value. Any scheme,
+     * because a plugin's database or message-queue URL leaks a password the same way a Redis URI
+     * does, and the key it sits under ({@code uri}, {@code url}, {@code jdbc}) names no secret.
+     */
+    private static final Pattern URL_USER_INFO = Pattern.compile("([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@\\s]+@");
 
     /** Operates only on freshly parsed report JSON, never on live config or files. */
     private static JsonElement removeSecrets(final JsonElement value) {
@@ -100,15 +115,32 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
                     || key.equals("credentials") || key.equals("authorization") || key.equals("connectionstring")) {
                     entries.remove();
                 } else {
-                    removeSecrets(entry.getValue());
+                    entry.setValue(removeSecrets(entry.getValue()));
                 }
             }
         } else if (value.isJsonArray()) {
-            for (final JsonElement element : value.getAsJsonArray()) {
-                removeSecrets(element);
+            final JsonArray array = value.getAsJsonArray();
+            for (int i = 0; i < array.size(); i++) {
+                array.set(i, removeSecrets(array.get(i)));
+            }
+        } else if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
+            final String text = value.getAsString();
+            final String scrubbed = scrubUserInfo(text);
+            if (!scrubbed.equals(text)) {
+                return new JsonPrimitive(scrubbed);
             }
         }
         return value;
+    }
+
+    /**
+     * Replaces the user-info of every URL in {@code text} with {@code ***}, so a value such as
+     * {@code redis://app:hunter2@10.0.0.5:6379/0} is reported as {@code redis://***@10.0.0.5:6379/0}.
+     * The host, port and path stay: they are what a report needs to tell two deployments apart.
+     */
+    static String scrubUserInfo(final String text) {
+        final Matcher matcher = URL_USER_INFO.matcher(text);
+        return matcher.find() ? matcher.replaceAll("$1***@") : text;
     }
 
     @Unmodifiable

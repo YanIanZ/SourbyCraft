@@ -1,13 +1,17 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
+import dev.iyanz.sourbycraft.awf.world.AuroraWorldFiles;
 import dev.iyanz.sourbycraft.awf.world.AuroraWorldsRuntime;
 import dev.iyanz.sourbycraft.awf.world.AuroraWorldsService;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
 import org.bukkit.WorldType;
@@ -24,10 +28,10 @@ import static net.kyori.adventure.text.Component.text;
  * /awf info &lt;name&gt;
  * /awf create &lt;name&gt; [normal|nether|end] [void|flat|amplified|large_biomes] [generator=Plugin[:id]] [seed] [autoload]
  * /awf create &lt;name&gt; from &lt;template&gt; [autoload]
- * /awf import &lt;file.awf&gt; &lt;name&gt; [autoload]
+ * /awf import &lt;file.awf&gt; &lt;name&gt; [autoload]                 (file in awf/imports)
  * /awf import &lt;file.slime&gt; &lt;name&gt; [normal|nether|end] [vanilla|generator=Plugin[:id]] [autoload]
- * /awf export &lt;world&gt; &lt;file.awf&gt;
- * /awf convert &lt;file.slime&gt; &lt;file.awf&gt; [normal|nether|end]
+ * /awf export &lt;world&gt; &lt;file.awf&gt;                            (file written to awf/exports)
+ * /awf convert &lt;file.slime&gt; &lt;file.awf&gt; [normal|nether|end]   (awf/imports to awf/exports)
  * /awf template list
  * /awf template save &lt;world&gt; &lt;template&gt;
  * /awf template delete &lt;template&gt; confirm
@@ -37,24 +41,39 @@ import static net.kyori.adventure.text.Component.text;
  * /awf autoload &lt;name&gt; on|off
  * </pre>
  *
- * <p>Every world operation is asynchronous; the result is sent when it completes.</p>
+ * <p>Every world operation is asynchronous; the result is sent when it completes, through
+ * {@link SourbyReply#run} so a command block gets it on the thread that owns it.</p>
+ *
+ * <p>File arguments are names inside {@code awf/imports} (read) and {@code awf/exports} (written)
+ * under the server directory, see {@link AuroraWorldFiles#confine}: an operator with the command
+ * permission can move worlds, not read or write arbitrary files on the host.</p>
  */
 public class AwfCommand extends Command {
 
     private static final List<String> SUBCOMMANDS =
         List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template", "import", "export", "convert", "clone", "set");
 
+    private final Supplier<AuroraWorldsService> service;
+    private final BiConsumer<CommandSender, Runnable> reply;
+
     public AwfCommand(final String name) {
+        this(name, AuroraWorldsRuntime::service, SourbyReply::run);
+    }
+
+    /** The service and the reply hop injectable, so the command's own rules can be tested without a server. */
+    AwfCommand(final String name, final Supplier<AuroraWorldsService> service, final BiConsumer<CommandSender, Runnable> reply) {
         super(name);
         this.description = "Manage Aurora World Fabric worlds";
         this.usageMessage = "/awf <list|info|create|load|save|unload|delete|autoload|template|import|export|convert>";
         this.setPermission("sourbycraft.command.awf");
+        this.service = service;
+        this.reply = reply;
     }
 
     @Override
     public boolean execute(final CommandSender s, final String alias, final String[] args) {
         if (!testPermission(s)) return true;
-        final AuroraWorldsService worlds = AuroraWorldsRuntime.service();
+        final AuroraWorldsService worlds = this.service.get();
         if (worlds == null) {
             s.sendMessage(text("Aurora World Fabric worlds are not available on this server", SourbyCraftColors.DANGER));
             return true;
@@ -84,9 +103,11 @@ public class AwfCommand extends Command {
             if (args.length < 3) {
                 usage(s);
             } else {
-                final java.nio.file.Path file = withSuffix(args[2]);
-                report(s, "Exported " + args[1].toLowerCase(Locale.ROOT) + " to " + file,
-                    worlds.exportWorld(args[1].toLowerCase(Locale.ROOT), file));
+                final Path file = exportTarget(s, args[2]);
+                if (file != null) {
+                    report(s, "Exported " + args[1].toLowerCase(Locale.ROOT) + " to " + file,
+                        worlds.exportWorld(args[1].toLowerCase(Locale.ROOT), file));
+                }
             }
             return true;
         }
@@ -102,11 +123,11 @@ public class AwfCommand extends Command {
             case "save" -> report(s, "Saved " + name + " (committed)", worlds.save(name));
             case "unload" -> {
                 final boolean save = !(args.length > 2 && args[2].equalsIgnoreCase("nosave"));
-                worlds.unload(name, save).whenComplete((result, failed) -> {
+                worlds.unload(name, save).whenComplete((result, failed) -> this.reply.accept(s, () -> {
                     if (failed != null) fail(s, failed);
                     else if (result == dev.iyanz.sourbycraft.api.world.UnloadResult.SUCCESS) ok(s, "Unloaded " + name);
                     else s.sendMessage(text("Could not unload " + name + ": " + result, SourbyCraftColors.DANGER));
-                });
+                }));
             }
             case "delete" -> {
                 if (args.length < 3 || !args[2].equalsIgnoreCase("confirm")) {
@@ -230,8 +251,8 @@ public class AwfCommand extends Command {
         s.sendMessage(UiPanel.footer());
     }
 
-    private static void create(final CommandSender s, final AuroraWorldsService worlds, final String name,
-                               final String[] args) {
+    private void create(final CommandSender s, final AuroraWorldsService worlds, final String name,
+                        final String[] args) {
         if (args.length >= 4 && args[2].equalsIgnoreCase("from")) {
             final boolean autoload = args.length > 4 && args[4].equalsIgnoreCase("autoload");
             final String template = args[3].toLowerCase(Locale.ROOT);
@@ -271,9 +292,28 @@ public class AwfCommand extends Command {
         report(s, "Created " + name + (autoload ? " (autoload)" : ""), worlds.create(creator, generator, autoload));
     }
 
-    private static java.nio.file.Path withSuffix(final String path) {
-        return java.nio.file.Path.of(path.endsWith(dev.iyanz.sourbycraft.awf.AwfWorldFile.SUFFIX) ? path
-            : path + dev.iyanz.sourbycraft.awf.AwfWorldFile.SUFFIX);
+    private static String withSuffix(final String path) {
+        return path.endsWith(dev.iyanz.sourbycraft.awf.AwfWorldFile.SUFFIX) ? path
+            : path + dev.iyanz.sourbycraft.awf.AwfWorldFile.SUFFIX;
+    }
+
+    /** The {@code .awf} file to write inside {@code awf/exports}, or {@code null} after telling the sender why not. */
+    private static Path exportTarget(final CommandSender s, final String typed) {
+        return confined(s, AuroraWorldFiles.EXPORTS, typed.isBlank() ? typed : withSuffix(typed));
+    }
+
+    /** The file to read inside {@code awf/imports}, or {@code null} after telling the sender why not. */
+    private static Path importSource(final CommandSender s, final String typed) {
+        return confined(s, AuroraWorldFiles.IMPORTS, typed);
+    }
+
+    private static Path confined(final CommandSender s, final Path folder, final String typed) {
+        try {
+            return AuroraWorldFiles.confine(folder, typed);
+        } catch (final IllegalArgumentException refused) {
+            s.sendMessage(text(refused.getMessage(), SourbyCraftColors.DANGER));
+            return null;
+        }
     }
 
     /** Imports an .awf world file, or a Slime file, by what the file starts with. */
@@ -282,7 +322,8 @@ public class AwfCommand extends Command {
             usage(s);
             return;
         }
-        final java.nio.file.Path file = java.nio.file.Path.of(args[1]);
+        final Path file = importSource(s, args[1]);
+        if (file == null) return;
         final String name = args[2].toLowerCase(Locale.ROOT);
         byte[] head = new byte[0];
         try (java.io.InputStream in = java.nio.file.Files.newInputStream(file)) {
@@ -316,12 +357,15 @@ public class AwfCommand extends Command {
                 }
             }
         }
-        final java.nio.file.Path target = withSuffix(args[2]);
-        report(s, "Converted " + args[1] + " to " + target, worlds.convertSlime(java.nio.file.Path.of(args[1]), target, environment));
+        final Path source = importSource(s, args[1]);
+        if (source == null) return;
+        final Path target = exportTarget(s, args[2]);
+        if (target == null) return;
+        report(s, "Converted " + source + " to " + target, worlds.convertSlime(source, target, environment));
     }
 
     /** Imports a Slime file; chunks it does not hold are void unless told otherwise. */
-    private void importSlime(final CommandSender s, final AuroraWorldsService worlds, final java.nio.file.Path file,
+    private void importSlime(final CommandSender s, final AuroraWorldsService worlds, final Path file,
                              final String name, final String[] args) {
         final WorldCreator creator = new WorldCreator(name);
         String generator = "void";
@@ -386,12 +430,18 @@ public class AwfCommand extends Command {
         }
     }
 
-    private static void report(final CommandSender s, final String success, final CompletableFuture<?> future) {
+    /**
+     * Acknowledges now and reports the outcome when the operation completes. The completion runs
+     * on whichever thread finished the work, so the report takes the sender's hop: a command
+     * block's {@code sendMessage} writes block-entity state and throws off its region thread, and
+     * this class used to call it from the storage lane.
+     */
+    private void report(final CommandSender s, final String success, final CompletableFuture<?> future) {
         s.sendMessage(text("Working...", SourbyCraftColors.DIM));
-        future.whenComplete((ignored, failed) -> {
+        future.whenComplete((ignored, failed) -> this.reply.accept(s, () -> {
             if (failed != null) fail(s, failed);
             else ok(s, success);
-        });
+        }));
     }
 
     private static void ok(final CommandSender s, final String message) {
@@ -409,11 +459,12 @@ public class AwfCommand extends Command {
         s.sendMessage(UiPanel.row("/awf create <name> [normal|nether|end] [void|flat|amplified|large_biomes]"
             + " [generator=Plugin[:id]|generator=void:<biome>] [seed] [autoload]", "new AWF world"));
         s.sendMessage(UiPanel.row("/awf create <name> from <template> [autoload]", "copy-on-write instance"));
-        s.sendMessage(UiPanel.row("/awf import <file.awf> <name> [autoload]", "new world from an .awf file"));
+        s.sendMessage(UiPanel.row("/awf import <file.awf> <name> [autoload]", "new world from awf/imports/<file.awf>"));
         s.sendMessage(UiPanel.row("/awf import <file.slime> <name> [normal|nether|end] [vanilla|generator=Plugin[:id]]"
-            + " [autoload]", "new world from a Slime file"));
-        s.sendMessage(UiPanel.row("/awf export <world> <file.awf>", "unloaded world to one .awf file"));
-        s.sendMessage(UiPanel.row("/awf convert <file.slime> <file.awf> [normal|nether|end]", "Slime file to .awf"));
+            + " [autoload]", "new world from awf/imports/<file.slime>"));
+        s.sendMessage(UiPanel.row("/awf export <world> <file.awf>", "unloaded world to awf/exports/<file.awf>"));
+        s.sendMessage(UiPanel.row("/awf convert <file.slime> <file.awf> [normal|nether|end]",
+            "awf/imports/<file.slime> to awf/exports/<file.awf>"));
         s.sendMessage(UiPanel.row("/awf template list | save <world> <template> | delete <template> confirm", "templates"));
         s.sendMessage(UiPanel.row("/awf load | save <name>", "load, or save and commit"));
         s.sendMessage(UiPanel.row("/awf unload <name> [nosave]", "unload"));
@@ -427,7 +478,7 @@ public class AwfCommand extends Command {
     @Override
     public List<String> tabComplete(final CommandSender sender, final String alias, final String[] args) {
         if (args.length == 1) return filter(SUBCOMMANDS, args[0]);
-        final AuroraWorldsService worlds = AuroraWorldsRuntime.service();
+        final AuroraWorldsService worlds = this.service.get();
         if (worlds == null) return List.of();
         if (args[0].equalsIgnoreCase("template")) {
             if (args.length == 2) return filter(List.of("list", "save", "delete"), args[1]);

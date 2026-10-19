@@ -7,6 +7,11 @@ on:
     branches: [ '26.2', release/26.2-canvas, main ]
   workflow_dispatch:
 
+# The default token can read the repository and nothing else. Only the release job, which
+# creates the tag and the GitHub release, asks for contents: write (SEC-8).
+permissions:
+  contents: read
+
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
@@ -16,19 +21,25 @@ jobs:
     name: Build 26.2 jar
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
-    if: "github.event_name != 'pull_request' && !contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'ci skip')"
+      contents: read
+    # Runs for pushes, pull requests and manual dispatch. A pull request has no head_commit, so
+    # the skip-ci check only ever applies to a push. Publication is the release job below (OBS-9).
+    if: "!contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'ci skip')"
+    outputs:
+      channel: ${{ steps.relnum.outputs.channel }}
+      number: ${{ steps.relnum.outputs.number }}
+      tag: ${{ steps.relnum.outputs.tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
         with:
           fetch-depth: 0        # paperweight needs git history for patch application
 
       - name: Validate gradle wrapper
-        uses: gradle/actions/wrapper-validation@v6
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6 (v6.4.0)
 
       - name: Setup Java 25
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6 (v6.1.0)
         with:
           java-version: 25
           distribution: temurin
@@ -50,7 +61,7 @@ jobs:
           PYTHON
 
       - name: Checkout private SourbyPatcher
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
         with:
           repository: YanIanZ/SourbyPatcher
           ref: ${{ steps.toolchain.outputs.patcher }}
@@ -59,7 +70,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout private SourbyClip
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
         with:
           repository: YanIanZ/SourbyClip
           ref: ${{ steps.toolchain.outputs.clip }}
@@ -258,20 +269,28 @@ jobs:
             fail_after_launch "Server console closed before accepting the early console probe."
           fi
 
+          # The test plugin logs ONLOAD/ONENABLE when the metrics service answers, and SAMPLED_OK
+          # once a snapshot carries real values (finite target TPS, heap, processors) -- or
+          # SAMPLED_FAILED with what was wrong. Non-null alone proved nothing (OBS-9).
           ready=0
           for _ in $(seq 1 240); do
             if grep -q 'Done (' server.log \
               && grep -q 'SOURBY_METRICS_ONLOAD_OK' server.log \
-              && grep -q 'SOURBY_METRICS_ONENABLE_OK' server.log; then
+              && grep -q 'SOURBY_METRICS_ONENABLE_OK' server.log \
+              && grep -q 'SOURBY_METRICS_SAMPLED_OK' server.log; then
               ready=1
               break
+            fi
+            if grep -q 'SOURBY_METRICS_SAMPLED_FAILED' server.log; then
+              grep 'SOURBY_METRICS_SAMPLED_FAILED' server.log
+              fail_after_launch "The metrics snapshot never carried real values."
             fi
             if ! kill -0 "$PID" 2>/dev/null; then echo "server process exited early"; break; fi
             sleep 1
           done
 
           if [ "$ready" -ne 1 ]; then
-            fail_after_launch "Server did not reach Done with both metrics markers within 240s."
+            fail_after_launch "Server did not reach Done with the metrics markers (load, enable, sampled) within 240s."
           fi
 
           if ! printf 'tps\nmspt\nram\nperf\nperf cpu\nperf gc\nspark profiler info\nstop\n' >&3; then
@@ -291,14 +310,27 @@ jobs:
             echo "Server exited with status $java_status."
             exit 1
           fi
-          grep -Eq 'SourbyCraft.*TPS' server.log \
-            || { echo "TPS command output marker missing."; exit 1; }
-          grep -Eq 'SourbyCraft.*MSPT' server.log \
-            || { echo "MSPT command output marker missing."; exit 1; }
-          grep -q 'Profiler is already running' server.log \
+          # Each command is proven by a line only its own view prints. A panel header
+          # ("SourbyCraft / ...") is printed by every command and proved nothing (OBS-9).
+          sed 's/\x1b\[[0-9;]*m//g' server.log > smoke.log
+          grep -Eq 'Target [0-9.]+ TPS' smoke.log \
+            || { echo "/tps did not print its target line."; exit 1; }
+          grep -q 'Active regions: ' smoke.log \
+            || { echo "/tps did not print its region count."; exit 1; }
+          grep -Eq 'Worst average (unavailable|[0-9.]+ms .*budget\))' smoke.log \
+            || { echo "/mspt did not print its worst-average line."; exit 1; }
+          grep -q 'Exact recent max ' smoke.log \
+            || { echo "/mspt did not print its recent maximum."; exit 1; }
+          grep -q 'Profiler is already running' smoke.log \
             || { echo "spark command output marker missing."; exit 1; }
-          grep -Eq 'SourbyCraft.*Memory' server.log || { echo "RAM marker missing"; exit 1; }
-          grep -Eq 'SourbyCraft.*Performance' server.log || { echo "PERF marker missing"; exit 1; }
+          grep -q 'Heap used / committed / maximum: ' smoke.log \
+            || { echo "/ram did not print its heap line."; exit 1; }
+          grep -q 'Worst region TPS: ' smoke.log \
+            || { echo "/perf did not print its tick section."; exit 1; }
+          grep -q 'Process CPU / system CPU: ' smoke.log \
+            || { echo "/perf cpu did not print its CPU line."; exit 1; }
+          grep -q 'GC collections / cumulative collection time: ' smoke.log \
+            || { echo "/perf gc did not print its GC line."; exit 1; }
           grep -q '\[Server\] SOURBY_EARLY_CONSOLE_PROBE' server.log \
             || { echo "A console command read before the worlds loaded did not run (SPEC B88)."; exit 1; }
           if grep -q 'Command exception: /say SOURBY_EARLY_CONSOLE_PROBE' server.log; then
@@ -547,6 +579,7 @@ jobs:
           echo "----- bridge evidence -----"
           grep -E 'Aurora Bridge|LEGACY_BRIDGE|stages completed without error|Bridge I/O|Scheduler redirects|Owner handoffs|Fatal violations|Quarantined|Plugins by state|redirects / handoffs|Minutes kept|History' server.log || true
           grep -q 'Plugins by state' server.log || { echo "/perf plugins printed nothing"; exit 1; }
+          grep -Eq 'Minutes kept: |History: no minute recorded yet' server.log || { echo "/perf history printed nothing"; exit 1; }
           if [ "$java_status" -ne 0 ]; then
             show_log
             echo "Server exited with status $java_status."
@@ -671,7 +704,7 @@ jobs:
 
       - name: Upload boot diagnostics
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
         with:
           name: SourbyCraft-boot-diagnostics
           path: |
@@ -697,26 +730,58 @@ jobs:
             'id -un; test -x /app/entrypoint.sh && echo entrypoint-ok; test -f /app/server.jar && echo jar-ok'
 
       - name: Upload verified slim jar for staging
-        if: github.ref == 'refs/heads/26.2'
-        uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/26.2'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
         with:
           name: SourbyCraft-26.2-staging
           path: build/libs/SourbyCraft-slim.jar
           if-no-files-found: error
           retention-days: 7
 
+      - name: Hand the verified jar to the release job
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/release/26.2-canvas'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
+        with:
+          name: SourbyCraft-26.2-release
+          path: release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish release
+    needs: build
+    # success() is implicit only when a job has no if of its own; spelled out so a failed or
+    # skipped build never publishes. A pull request never reaches here.
+    if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/release/26.2-canvas'
+    runs-on: ubuntu-24.04
+    # The one job that writes to the repository: it creates the tag and the GitHub release.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          fetch-depth: 0        # the notes list commits since the previous v26.2-r* tag
+
+      - name: Download the verified jar
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7 (v7.0.0)
+        with:
+          name: SourbyCraft-26.2-release
+          path: release
+
       - name: Create GitHub release
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/release/26.2-canvas'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_NUMBER: ${{ steps.relnum.outputs.number }}
-          RELEASE_TAG: ${{ steps.relnum.outputs.tag }}
+          RELEASE_NUMBER: ${{ needs.build.outputs.number }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
         run: |
           set -eu
           last=$(git tag -l 'v26.2-r*' | sed -n 's#^v26\.2-r\([0-9]*\)$#\1#p' | sort -n | tail -1)
           next="$RELEASE_NUMBER"
           tag="$RELEASE_TAG"
-          jar=release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
+          jar=release/SourbyCraft-26.2-$RELEASE_CHANNEL.jar
+          test -f "$jar" || { echo "the build job did not hand over $jar"; exit 1; }
           sha=$(sha256sum "$jar" | cut -d' ' -f1)
           echo "$sha  $(basename "$jar")" > "$jar.sha256"
           codename=$(sed -n 's/^codename=//p' gradle.properties)

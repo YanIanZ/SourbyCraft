@@ -39,9 +39,19 @@ Keys ending in `password`, `passwd`, `secret`, `token`, `apikey`, `accesskey`,
 or `connectionstring` keys are omitted with their values. This also handles quoted
 literal dotted keys in TOML. Harmless settings such as `token-bucket-size` remain.
 
-This is key-based filtering, not inspection of arbitrary string contents. A secret
-placed in a message, custom URL, or an unrecognized field name is not automatically
-detectable. Use the operator hidden-path setting for those fields. Spark uses dots
+Two rules close the gap key names leave (audit OBS-1). `aurora.awf.redis.uri` is a
+hidden path: it is the one Aurora key whose value may carry a password
+(`redis://user:password@host`) under a name that ends in `uri`, and it is omitted
+outright while the other `[aurora.awf.redis]` keys stay. And in every string value,
+under any key and inside lists, the user-info of a URL (`scheme://user:password@host`)
+is replaced by `***`: a plugin's `url: postgres://svc:pw@db:5432/mc` is reported as
+`postgres://***@db:5432/mc`; host, port and path stay because they tell deployments
+apart. The start log's `Aurora World Fabric: stores on redis …` line prints the
+endpoint without credentials for the same reason (`RedisClient.Endpoint.toString`).
+
+Apart from the URL rule, this is key-based filtering, not inspection of arbitrary
+string contents. A secret placed in a message or an unrecognized field name is not
+automatically detectable. Use the operator hidden-path setting for those fields. Spark uses dots
 for nested paths and `<dot>` for a literal dot in a key; its upstream path filter
 does not itself traverse arrays. Recognized credential keys inside arrays are
 handled by SourbyCraft's recursive pass.

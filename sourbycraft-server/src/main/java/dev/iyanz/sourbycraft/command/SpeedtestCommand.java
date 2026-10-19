@@ -18,6 +18,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import java.util.zip.GZIPInputStream;
 
 import static net.kyori.adventure.text.Component.text;
@@ -32,8 +39,10 @@ import static net.kyori.adventure.text.Component.text;
  * discipline as {@code LibDownloader}/{@code SourbyUpdater}. Runs on a
  * {@link dev.iyanz.sourbycraft.util.VirtualExecutor virtual thread}; only one speedtest may be
  * in flight at a time so repeated invocations cannot stack OS processes that would themselves
- * saturate the bandwidth being measured. The reply is delivered back through
- * {@link SourbyReply#run} since Folia has no global main thread to bounce it through.
+ * saturate the bandwidth being measured. The process's output is drained concurrently and the
+ * process is killed when it outlives {@link #DEFAULT_TIMEOUT}, so a hung CLI can neither leak
+ * nor wedge the command. Every reply is delivered back through {@link SourbyReply#run} since
+ * Folia has no global main thread to bounce it through.
  */
 public class SpeedtestCommand extends Command {
     private static final Logger LOG = LoggerFactory.getLogger("SourbyCraft:Speedtest");
@@ -102,17 +111,87 @@ public class SpeedtestCommand extends Command {
 
     private static final Path BIN = getBinaryPath();
 
+    /**
+     * Starts the Ookla CLI. The server's launcher ({@link PinnedBinaryLauncher}) downloads and
+     * verifies the pinned binary first; a test's launcher can be any process, including one that
+     * never exits. A launcher must merge stderr into stdout ({@code redirectErrorStream(true)})
+     * or the command drains both; either way no pipe is left unread.
+     */
+    @FunctionalInterface
+    interface Launcher {
+        Process start() throws IOException;
+
+        /** Why this platform cannot run a speedtest, or {@code null} when it can. */
+        default String unsupportedReason() {
+            return null;
+        }
+
+        /** Whether {@link #start()} will first download the binary (worth telling the sender). */
+        default boolean needsDownload() {
+            return false;
+        }
+    }
+
+    /** The pinned, SHA-256-verified Ookla CLI from {@code libraries/speedtest/<os>/<arch>/}. */
+    static final class PinnedBinaryLauncher implements Launcher {
+        @Override
+        public String unsupportedReason() {
+            return BINARY_NAME == null || OOKLA_URL == null
+                ? "Speedtest unsupported on this platform (OS=" + OS_NAME + ", arch=" + OS_ARCH + ")" : null;
+        }
+
+        @Override
+        public boolean needsDownload() {
+            return !Files.exists(BIN);
+        }
+
+        @Override
+        public Process start() throws IOException {
+            if (!Files.exists(BIN)) {
+                downloadSpeedtestBinary();
+            }
+            if (!Files.exists(BIN)) {
+                throw new IOException("speedtest binary unavailable (download failed)");
+            }
+            return new ProcessBuilder(BIN.toString(), "--format=json", "--accept-license", "--accept-gdpr")
+                .redirectErrorStream(true).start();
+        }
+    }
+
+    /** How long the CLI may run before it is killed; a complete Ookla run takes about 30 s. */
+    static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(120);
+
+    /** After the process has exited, how long its output pipe may take to close. */
+    private static final Duration DRAIN_GRACE = Duration.ofSeconds(10);
+
+    private final Launcher launcher;
+    private final Duration timeout;
+    private final Executor executor;
+    private final BiConsumer<CommandSender, Runnable> reply;
+    // One speedtest at a time — repeated invocations would stack OS processes, each
+    // saturating the very bandwidth the test is measuring. Reset on every exit path of run().
+    private final AtomicBoolean inFlight = new AtomicBoolean();
+
     public SpeedtestCommand(String name) {
+        this(name, new PinnedBinaryLauncher(), DEFAULT_TIMEOUT, VirtualExecutor::run, SourbyReply::run);
+    }
+
+    /**
+     * Every collaborator injectable: the process, the clock the timeout runs on, the thread the
+     * work runs on and the hop a reply takes back to the sender. A test can then hang the process
+     * with a shell script and prove the command recovers, without a network or a binary.
+     */
+    SpeedtestCommand(String name, Launcher launcher, Duration timeout, Executor executor,
+                     BiConsumer<CommandSender, Runnable> reply) {
         super(name);
         this.description = "Ookla speedtest";
         this.usageMessage = "/speedtest";
         this.setPermission("sourbycraft.command.speedtest");
+        this.launcher = launcher;
+        this.timeout = timeout;
+        this.executor = executor;
+        this.reply = reply;
     }
-
-    // One speedtest at a time — repeated invocations would stack OS processes, each
-    // saturating the very bandwidth the test is measuring.
-    private static final java.util.concurrent.atomic.AtomicBoolean IN_FLIGHT =
-        new java.util.concurrent.atomic.AtomicBoolean();
 
     /**
      * Runs the Ookla CLI on a virtual thread (downloading it first if absent), then replies with
@@ -121,114 +200,184 @@ public class SpeedtestCommand extends Command {
      */
     @Override
     public boolean execute(CommandSender sender, String alias, String[] args) {
-        LOG.info("Speedtest invoked. OS={} arch={} binPath={} binExists={} binaryName={}",
-            System.getProperty("os.name"),
-            System.getProperty("os.arch"),
-            BIN.toAbsolutePath(),
-            Files.exists(BIN),
-            BINARY_NAME
-        );
-
+        // Nothing happens before the permission check -- not even a log line (OBS-12): the log
+        // used to name the binary path and platform for every sender, permitted or not.
         if (!testPermission(sender)) return true;
 
-        if (BINARY_NAME == null || OOKLA_URL == null) {
-            sender.sendMessage(text("Speedtest unsupported on this platform (OS=" + OS_NAME + ", arch=" + OS_ARCH + ")", net.kyori.adventure.text.format.NamedTextColor.RED));
+        final String unsupported = this.launcher.unsupportedReason();
+        if (unsupported != null) {
+            sender.sendMessage(text(unsupported, SourbyCraftColors.DANGER));
             return true;
         }
 
-        if (!IN_FLIGHT.compareAndSet(false, true)) {
+        if (!this.inFlight.compareAndSet(false, true)) {
             sender.sendMessage(text("A speedtest is already running — wait for it to finish.", SourbyCraftColors.DANGER));
             return true;
         }
         sender.sendMessage(text("Running...", SourbyCraftColors.LABEL));
-        VirtualExecutor.run(() -> {
-            Process proc = null;
+        try {
+            this.executor.execute(() -> {
+                try {
+                    run(sender);
+                } finally {
+                    this.inFlight.set(false);
+                }
+            });
+        } catch (RuntimeException rejected) {                     // the I/O executor is stopped
+            this.inFlight.set(false);
+            sender.sendMessage(text("Speedtest unavailable: " + rejected.getMessage(), SourbyCraftColors.DANGER));
+        }
+        return true;
+    }
+
+    /** Off the command thread. Every message from here goes back through {@link #reply}. */
+    private void run(final CommandSender sender) {
+        LOG.info("Speedtest invoked by {}. OS={} arch={} binPath={} binExists={} binaryName={}", sender.getName(),
+            System.getProperty("os.name"), System.getProperty("os.arch"), BIN.toAbsolutePath(), Files.exists(BIN),
+            BINARY_NAME);
+        Process process = null;
+        try {
+            if (this.launcher.needsDownload()) {
+                say(sender, text("Downloading speedtest CLI (first run, ~1MB)...", SourbyCraftColors.LABEL));
+            }
+            process = this.launcher.start();
+            final Process started = process;
+            // Drained on their own threads. This thread used to call readAllBytes() before
+            // waitFor(): a CLI that hung with its pipe open blocked here for good, the timeout
+            // never ran, the process stayed, and the in-flight flag kept every later /speedtest
+            // out until restart. Draining concurrently also keeps a chatty process from
+            // blocking on a full pipe while this thread waits for it to exit.
+            final CompletableFuture<String> output = CompletableFuture.supplyAsync(
+                () -> drain(started.getInputStream()), this.executor);
+            final CompletableFuture<String> errors = CompletableFuture.supplyAsync(
+                () -> drain(started.getErrorStream()), this.executor);
+
+            if (!process.waitFor(this.timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                process.destroyForcibly();
+                LOG.error("Speedtest did not finish within {}s; process killed", this.timeout.toSeconds());
+                say(sender, text("Speedtest timed out (" + this.timeout.toSeconds() + "s); process killed",
+                    SourbyCraftColors.DANGER));
+                return;
+            }
+            final String stdout;
             try {
-                if (!Files.exists(BIN)) {
-                    sender.sendMessage(text("Downloading speedtest CLI (first run, ~1MB)...", SourbyCraftColors.LABEL));
-                    downloadSpeedtestBinary();
+                stdout = output.get(DRAIN_GRACE.toMillis(), TimeUnit.MILLISECONDS);
+                final String stderr = errors.get(DRAIN_GRACE.toMillis(), TimeUnit.MILLISECONDS);
+                if (!stderr.isBlank()) {
+                    LOG.warn("Speedtest stderr: {}", stderr.strip());
                 }
-                if (!Files.exists(BIN)) {
-                    sender.sendMessage(text("Speedtest unavailable (download failed)", SourbyCraftColors.DANGER));
-                    return;
-                }
-                proc = new ProcessBuilder(BIN.toString(),
-                        "--format=json", "--accept-license", "--accept-gdpr")
-                    .redirectErrorStream(true).start();
-                String output = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                if (!proc.waitFor(120, java.util.concurrent.TimeUnit.SECONDS)) {
-                    proc.destroyForcibly();
-                    LOG.error("Speedtest timed out after 120s — process killed");
-                    sender.sendMessage(text("Speedtest timed out (120s)", SourbyCraftColors.DANGER));
-                    return;
-                }
+            } catch (final TimeoutException pipeStillOpen) {
+                // The process is gone but something it started still holds the pipe; the reader
+                // thread ends when that closes. Do not wait on it any longer.
+                LOG.error("Speedtest exited but its output did not close within {}s", DRAIN_GRACE.toSeconds());
+                say(sender, text("Speedtest failed: output not available", SourbyCraftColors.DANGER));
+                return;
+            } catch (final ExecutionException unreadable) {
+                LOG.error("Speedtest output could not be read: {}", unreadable.getCause().toString());
+                say(sender, text("Speedtest failed: " + unreadable.getCause().getMessage(), SourbyCraftColors.DANGER));
+                return;
+            }
+            report(sender, stdout, process.exitValue());
+        } catch (final InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            say(sender, text("Speedtest interrupted", SourbyCraftColors.DANGER));
+        } catch (final Exception e) {
+            LOG.error("Speedtest process failed: {}", e.toString(), e);
+            say(sender, text("Speedtest failed: " + e.getMessage(), SourbyCraftColors.DANGER));
+        } finally {
+            if (process != null && process.isAlive()) process.destroyForcibly(); // no orphans on any exit path
+        }
+    }
 
-                if (output == null || output.trim().isEmpty()) {
-                    LOG.error("Speedtest produced empty output");
-                    sender.sendMessage(text("Speedtest failed: empty output", SourbyCraftColors.DANGER));
-                    return;
-                }
+    private static String drain(final InputStream stream) {
+        try (stream) {
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (final IOException failed) {
+            throw new UncheckedIOException(failed);
+        }
+    }
 
-                String trimmed = output.trim();
-                int jsonStart = trimmed.indexOf('{');
-                if (jsonStart < 0) {
-                    LOG.error("Speedtest output is not JSON: {}", trimmed.substring(0, Math.min(200, trimmed.length())));
-                    sender.sendMessage(text("Speedtest failed: unexpected output format", SourbyCraftColors.DANGER));
-                    return;
-                }
-                if (jsonStart > 0) {
-                    LOG.warn("Speedtest output has {} bytes of preamble before JSON, stripping", jsonStart);
-                    trimmed = trimmed.substring(jsonStart);
-                }
+    /** Parses the CLI's JSON and replies with the panel, or with why it could not. */
+    private void report(final CommandSender sender, final String output, final int exitCode) {
+        if (output == null || output.trim().isEmpty()) {
+            LOG.error("Speedtest produced empty output (exit {})", exitCode);
+            say(sender, text("Speedtest failed: empty output (exit " + exitCode + ")", SourbyCraftColors.DANGER));
+            return;
+        }
 
-                var g = new com.google.gson.Gson();
-                var r = g.fromJson(trimmed, Map.class);
-                var dl = (Map) r.get("download");
-                var ul = (Map) r.get("upload");
-                var ping = (Map) r.get("ping");
-                var sv = (Map) r.get("server");
+        String trimmed = output.trim();
+        int jsonStart = trimmed.indexOf('{');
+        if (jsonStart < 0) {
+            LOG.error("Speedtest output is not JSON (exit {}): {}", exitCode,
+                trimmed.substring(0, Math.min(200, trimmed.length())));
+            say(sender, text("Speedtest failed: unexpected output format (exit " + exitCode + ")", SourbyCraftColors.DANGER));
+            return;
+        }
+        if (jsonStart > 0) {
+            LOG.warn("Speedtest output has {} bytes of preamble before JSON, stripping", jsonStart);
+            trimmed = trimmed.substring(jsonStart);
+        }
 
-                if (dl == null || ul == null || ping == null || sv == null) {
-                    LOG.error("Speedtest JSON missing expected fields: {}", trimmed);
-                    sender.sendMessage(text("Speedtest failed: incomplete JSON response", SourbyCraftColors.DANGER));
-                    return;
-                }
+        final Map<?, ?> dl;
+        final Map<?, ?> ul;
+        final Map<?, ?> ping;
+        final Map<?, ?> sv;
+        try {
+            final Map<?, ?> r = new com.google.gson.Gson().fromJson(trimmed, Map.class);
+            dl = (Map<?, ?>) r.get("download");
+            ul = (Map<?, ?>) r.get("upload");
+            ping = (Map<?, ?>) r.get("ping");
+            sv = (Map<?, ?>) r.get("server");
+        } catch (final RuntimeException malformed) {              // JsonSyntaxException, ClassCastException
+            LOG.error("Speedtest JSON is malformed: {}", malformed.toString());
+            say(sender, text("Speedtest failed: malformed JSON response", SourbyCraftColors.DANGER));
+            return;
+        }
+        if (dl == null || ul == null || ping == null || sv == null
+            || !(dl.get("bandwidth") instanceof Number) || !(ul.get("bandwidth") instanceof Number)
+            || !(ping.get("latency") instanceof Number)) {
+            LOG.error("Speedtest JSON missing expected fields: {}", trimmed);
+            say(sender, text("Speedtest failed: incomplete JSON response", SourbyCraftColors.DANGER));
+            return;
+        }
 
-                LOG.info("Speedtest parsed: dl={} ul={} ping={} server={}", dl.get("bandwidth"), ul.get("bandwidth"), ping.get("latency"), sv.get("name"));
+        LOG.info("Speedtest parsed: dl={} ul={} ping={} server={}", dl.get("bandwidth"), ul.get("bandwidth"),
+            ping.get("latency"), sv.get("name"));
 
-                double dm = ((Number) dl.get("bandwidth")).doubleValue() * 8 / 1_000_000;
-                double um = ((Number) ul.get("bandwidth")).doubleValue() * 8 / 1_000_000;
-                double pm = ((Number) ping.get("latency")).doubleValue();
+        final double dm = ((Number) dl.get("bandwidth")).doubleValue() * 8 / 1_000_000;
+        final double um = ((Number) ul.get("bandwidth")).doubleValue() * 8 / 1_000_000;
+        final double pm = ((Number) ping.get("latency")).doubleValue();
 
-                // Folia-safe reply hop. MinecraftServer.execute() throws UnsupportedOperationException
-                // on Folia (no global main thread) — the crash the boot log showed at line 169. Bounce
-                // the reply onto the sender's own scheduler instead (player region / console direct).
-                SourbyReply.run(sender, () -> {
-                    try {
-                        sender.sendMessage(text()
-                            .append(text("DL: ", SourbyCraftColors.LABEL))
-                            .append(BarUtil.coloredBar(Math.min(dm / 10, 100), 20))
-                            .append(text(String.format(java.util.Locale.ROOT, " %.1f Mbps", dm), SourbyCraftColors.SUCCESS))
-                            .append(text("\nUL: ", SourbyCraftColors.LABEL))
-                            .append(BarUtil.coloredBar(Math.min(um / 10, 100), 20))
-                            .append(text(String.format(java.util.Locale.ROOT, " %.1f Mbps", um), SourbyCraftColors.SUCCESS))
-                            .append(text("\nPing: ", SourbyCraftColors.LABEL))
-                            .append(text(String.format(java.util.Locale.ROOT, "%.0fms", pm),
-                                pm < 30 ? SourbyCraftColors.SUCCESS : SourbyCraftColors.PRIMARY))
-                            .append(text(" | " + sv.get("name") + ", " + sv.get("location"), SourbyCraftColors.DIM)));
-                    } catch (Exception ex) {
-                        LOG.error("Failed to send speedtest result: {}", ex.toString(), ex);
-                    }
-                });
-            } catch (Exception e) {
-                LOG.error("Speedtest process failed: {}", e.toString(), e);
-                sender.sendMessage(text("Speedtest failed: " + e.getMessage(), SourbyCraftColors.DANGER));
-            } finally {
-                if (proc != null && proc.isAlive()) proc.destroyForcibly(); // no orphans on any exit path
-                IN_FLIGHT.set(false);
+        // Folia-safe reply hop. MinecraftServer.execute() throws UnsupportedOperationException
+        // on Folia (no global main thread). Bounce the reply onto the sender's own scheduler
+        // instead (player region / console direct / command block's region).
+        say(sender, text()
+            .append(text("DL: ", SourbyCraftColors.LABEL))
+            .append(BarUtil.coloredBar(Math.min(dm / 10, 100), 20))
+            .append(text(String.format(java.util.Locale.ROOT, " %.1f Mbps", dm), SourbyCraftColors.SUCCESS))
+            .append(text("\nUL: ", SourbyCraftColors.LABEL))
+            .append(BarUtil.coloredBar(Math.min(um / 10, 100), 20))
+            .append(text(String.format(java.util.Locale.ROOT, " %.1f Mbps", um), SourbyCraftColors.SUCCESS))
+            .append(text("\nPing: ", SourbyCraftColors.LABEL))
+            .append(text(String.format(java.util.Locale.ROOT, "%.0fms", pm),
+                pm < 30 ? SourbyCraftColors.SUCCESS : SourbyCraftColors.PRIMARY))
+            .append(text(" | " + sv.get("name") + ", " + sv.get("location"), SourbyCraftColors.DIM))
+            .build());
+    }
+
+    /**
+     * Delivers one message from the worker to the sender on the thread that owns the sender.
+     * Every message sent after {@link #execute} returned goes through here (OBS-8): a command
+     * block's {@code sendMessage} writes block-entity state and throws off its region thread.
+     */
+    private void say(final CommandSender sender, final Component message) {
+        this.reply.accept(sender, () -> {
+            try {
+                sender.sendMessage(message);
+            } catch (final Exception ex) {
+                LOG.error("Failed to send speedtest message: {}", ex.toString(), ex);
             }
         });
-        return true;
     }
 
     private static void downloadSpeedtestBinary() throws IOException {

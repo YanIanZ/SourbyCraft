@@ -149,6 +149,63 @@ class SourbyServerConfigProviderTest {
     }
 
     @Test
+    void redisUriWithPasswordNeverReachesTheReport() throws Exception {
+        // OBS-1: aurora.awf.redis.uri = "redis://user:password@host" is the one place the operator
+        // may write a password into Aurora's file, and its key name ends in "uri", not "password",
+        // so the credential-key pass did not catch it -- the password went out in Spark reports.
+        Files.createDirectories(directory.resolve("sourbycraft_config"));
+        final Path aurora = directory.resolve("sourbycraft_config/aurora.toml");
+        final String original = "[aurora.awf]\nbackend='redis'\n"
+            + "[aurora.awf.redis]\nuri='redis://app:synthetic-redis-password@10.0.0.5:6379/0'\n"
+            + "key-prefix='sourbycraft:awf:'\npool-size=8\n";
+        Files.writeString(aurora, original);
+
+        final JsonObject out = new SourbyServerConfigProvider.SourbyCraftSplitParser(directory)
+            .load("sourbycraft/", filter()).getAsJsonObject();
+
+        final String report = out.toString();
+        assertFalse(report.contains("synthetic-redis-password"), report);
+        assertFalse(report.contains("app:"), "the user name goes with the password: " + report);
+        final JsonObject redis = out.getAsJsonObject("aurora.toml").getAsJsonObject("aurora")
+            .getAsJsonObject("awf").getAsJsonObject("redis");
+        assertFalse(redis.has("uri"), "the key itself is hidden, not only its password");
+        assertEquals("sourbycraft:awf:", redis.get("key-prefix").getAsString(), "the other Redis keys stay reported");
+        assertEquals(8, redis.get("pool-size").getAsInt());
+        assertEquals(original, Files.readString(aurora), "the profiler never rewrites operator config");
+    }
+
+    @Test
+    void userInfoIsScrubbedFromAnyUrlShapedValueUnderAnyKey() throws Exception {
+        // A plugin's database URL under "url", "jdbc" or inside a list carries a password the same
+        // way; the key is kept (an operator wants to see which host a slow server talked to) and
+        // only the credentials go.
+        final Path path = directory.resolve("plugin.yml");
+        // Not under "database": that whole section is already a hidden path.
+        Files.writeString(path, "storage:\n  url: postgres://svc:synthetic-db-password@db.internal:5432/mc\n"
+            + "mirrors:\n  - rediss://synthetic-only-password@cache-a:6380/1\n  - redis://cache-b:6379\n"
+            + "docs: https://example.org/path?x=1\n"
+            + "note: see redis://u:synthetic-inline-password@h:1/0 and http://plain.example\n");
+        final JsonObject out = SourbyServerConfigProvider.YamlConfigParser.INSTANCE.load(path.toString(), filter())
+            .getAsJsonObject();
+        assertFalse(out.toString().contains("synthetic-"), out.toString());
+        assertEquals("postgres://***@db.internal:5432/mc", out.getAsJsonObject("storage").get("url").getAsString());
+        assertEquals("rediss://***@cache-a:6380/1", out.getAsJsonArray("mirrors").get(0).getAsString());
+        assertEquals("redis://cache-b:6379", out.getAsJsonArray("mirrors").get(1).getAsString(),
+            "a URL without credentials is untouched");
+        assertEquals("https://example.org/path?x=1", out.get("docs").getAsString());
+        assertEquals("see redis://***@h:1/0 and http://plain.example", out.get("note").getAsString());
+    }
+
+    @Test
+    void scrubKeepsEverythingButTheCredentials() {
+        assertEquals("redis://***@h:6379/0", SourbyServerConfigProvider.scrubUserInfo("redis://u:p@h:6379/0"));
+        assertEquals("redis://***@h", SourbyServerConfigProvider.scrubUserInfo("redis://p%40ss@h"));
+        assertEquals("redis://h/0", SourbyServerConfigProvider.scrubUserInfo("redis://h/0"));
+        assertEquals("mailto:a@b", SourbyServerConfigProvider.scrubUserInfo("mailto:a@b"), "no // means no authority");
+        assertEquals("user@host", SourbyServerConfigProvider.scrubUserInfo("user@host"));
+    }
+
+    @Test
     void missingGroupCreatesNothing() throws Exception {
         assertNull(new SourbyServerConfigProvider.SourbyCraftSplitParser(directory).load("sourbycraft/", filter()));
         try (var entries = Files.list(directory)) {

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.iyanz.sourbycraft.api.world.WorldProperties;
 import dev.iyanz.sourbycraft.awf.AwfWorldFile;
@@ -34,6 +35,49 @@ class AuroraWorldFilesTest {
         try (AwfWorldFile awf = AwfWorldFile.open(file)) {
             return AuroraWorldFiles.describe(awf, name, true);
         }
+    }
+
+    @Test
+    void confineAcceptsNamesInsideTheFolderAndRefusesEscapes() {
+        // OBS-11: /awf export|import|convert took any path. The operator's name is resolved
+        // inside awf/exports or awf/imports; an absolute path or a '..' segment is refused with
+        // the folder named, so the message tells them what to type instead.
+        final Path exports = AuroraWorldFiles.EXPORTS;
+        assertEquals(exports.resolve("hub.awf"), AuroraWorldFiles.confine(exports, "hub.awf"));
+        assertEquals(exports.resolve("2026").resolve("hub.awf"), AuroraWorldFiles.confine(exports, "2026/hub.awf"));
+        assertEquals(exports.resolve("hub.awf"), AuroraWorldFiles.confine(exports, "./hub.awf"));
+        assertEquals(exports.resolve("hub.awf"), AuroraWorldFiles.confine(exports, "awf/exports/hub.awf"),
+            "the path the command prints can be typed back");
+        assertEquals(exports.resolve("hub.awf"), AuroraWorldFiles.confine(exports, "  hub.awf "));
+
+        for (final String escape : java.util.List.of("", "   ", "/etc/cron.d/x", "/awf/exports/x", "../hub.awf",
+            "a/../../hub.awf", "awf/exports/../../x", "awf/exports", "..")) {
+            final IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                () -> AuroraWorldFiles.confine(exports, escape), escape);
+            assertTrue(refused.getMessage().contains("awf/exports"), escape + " -> " + refused.getMessage());
+        }
+        assertEquals(AuroraWorldFiles.IMPORTS.resolve("old.slime"), AuroraWorldFiles.confine(AuroraWorldFiles.IMPORTS, "old.slime"));
+    }
+
+    @Test
+    void confineFollowsASymbolicLinkOutOfTheFolder() throws IOException {
+        final Path imports = this.dir.resolve("awf").resolve("imports");
+        java.nio.file.Files.createDirectories(imports);
+        final Path outside = this.dir.resolve("outside");
+        java.nio.file.Files.createDirectories(outside);
+        try {
+            java.nio.file.Files.createSymbolicLink(imports.resolve("link"), outside);
+        } catch (final UnsupportedOperationException | IOException cannotLink) {
+            org.junit.jupiter.api.Assumptions.abort("this file system does not allow symbolic links: " + cannotLink);
+        }
+
+        final IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+            () -> AuroraWorldFiles.confine(imports, "link/x.slime"));
+        assertTrue(refused.getMessage().contains("symbolic link"), refused.getMessage());
+        assertEquals(imports.resolve("real.slime"), AuroraWorldFiles.confine(imports, "real.slime"),
+            "a name whose parents exist and are not links is fine");
+        assertEquals(imports.resolve("new").resolve("x.slime"), AuroraWorldFiles.confine(imports, "new/x.slime"),
+            "a name under a folder that does not exist yet cannot be a link");
     }
 
     @Test

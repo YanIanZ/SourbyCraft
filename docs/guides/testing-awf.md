@@ -59,9 +59,12 @@ gets `held by another server`. Details and limits: `docs/architecture/aurora-wor
 
 ## 4. Moving worlds: `.awf` files
 
-`/awf export <world> exports/<world>.awf` (unload it first), copy the file to another server,
-`/awf import exports/<world>.awf <name>`. Old Slime files: `/awf import <file.slime> <name>` or
-convert them once with `/awf convert <file.slime> <file.awf>`.
+`/awf export <world> <world>.awf` (unload it first) writes `awf/exports/<world>.awf` under the
+server directory. Copy the file into the other server's `awf/imports/` and run
+`/awf import <world>.awf <name>`. Old Slime files go into `awf/imports/` too:
+`/awf import <file.slime> <name>`, or convert once with `/awf convert <file.slime> <file.awf>`
+(written to `awf/exports/`). The command accepts only names inside those two folders -- no
+absolute paths, no `..`.
 
 ## 5. Leaving AWF
 

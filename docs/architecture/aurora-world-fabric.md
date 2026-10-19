@@ -142,7 +142,8 @@ backend (next section). MongoDB/MySQL backends are **planned, not implemented**.
   not supported unless they use one of these two layouts. zstd comes from the engine's runtime
   libraries and is called reflectively. The source file is only read.
 - **Command.** `/awf import <file> <name> [normal|nether|end] [vanilla|generator=Plugin[:id]]
-  [autoload]` — the file path is relative to the server directory.
+  [autoload]` — the file is read from `awf/imports/` under the server directory; an absolute
+  path or a `..` segment is refused (`AuroraWorldFiles.confine`).
 - **Command.** `/awf list | info <n> | create <n> [normal|nether|end] [void|flat|amplified|
   large_biomes] [generator=Plugin[:id]] [seed] [autoload] | create <n> from <template> [autoload] |
   load <n> | save <n> | unload <n> [nosave] | delete <n> confirm | autoload <n> on|off |
@@ -433,6 +434,13 @@ One file holds a world's `region`, `entities` and `poi` chunk streams plus metad
   chunks beneath it), `/awf import <file.awf> <name> [autoload]` (environment, seed and generator
   from the file), `/awf convert <file.slime> <file.awf> [normal|nether|end]`. `/awf import`
   recognises `.awf` and `.slime` by their first bytes.
+- The command's files are confined (audit OBS-11): `/awf import` and `/awf convert` read from
+  `awf/imports/`, `/awf export` and `/awf convert` write to `awf/exports/`, both under the server
+  directory. A name may use sub-folders (`2026/hub.awf`) and may be typed back as the command
+  printed it (`awf/exports/hub.awf`); an absolute path or any `..` segment is refused with the
+  folder named, and a symbolic link inside the folder that leaves it is refused too
+  (`AuroraWorldFiles.confine`, `AuroraWorldFilesTest`, `AwfCommandTest`). The `AuroraWorlds` API
+  still takes any `Path`: a plugin has the file system anyway.
 - `AwfFile` (version 1: one stream, SHA-256) stays as the immutable image the qualification tests
   use.
 
