@@ -62,11 +62,11 @@ Off by default. Enable with `-Dcherry.enable.mixin=true`. Plugin authors drop a 
 ## Boot-time network
 
 First boot needs internet once:
-- `SourbyLoader`/`SourbyClip` fetches the externalized libraries into the paperclip cache.
+- `SourbyClip` (the launcher, `dev.iyanz:sourbyclip`) reads `META-INF/libraries.list` and fetches the externalized libraries into the paperclip cache by coordinate, SHA-256-verifying each against the bundled hash (on-disk copy, then embedded/original-JAR bytes, then Maven mirrors). On a cold boot it also fetches the Mojang server jar.
 - `ViaVersion` + `ViaBackwards` jars auto-provisioned into `plugins/` (SHA-256-verified, https-only) **before** the plugin manager scans. Toggle: `[viaversion] auto-provision` in the global TOML (default `true`). Idempotent — never re-downloads verified jars, never overwrites user config.
 - ProtocolLib uses independent `[protocollib] auto-provision` (default `true`, RESTART_REQUIRED), official asset pin in `build-data/protocollib-pin.json`. Feature patch 0024 calls provisioning from the active SourbyClip-loaded server before Paper's plugin scan; `--plugins` selects the JAR/config folder. Clip offline mode forbids plugin downloads. See `docs/development/PROTOCOLLIB.md`.
 
-If the boot host has no internet, `SourbyLoader` prints the exact URLs + target paths. Offline-immutable; subsequent boots run fully offline.
+Offline: `-Dsourbyclip.offline=true` refuses launcher downloads and IP lookup; verified cached or embedded libraries remain usable, so after a first successful boot the server runs fully offline. A missing/corrupt library on a cold offline boot fails non-zero, naming the coordinate it could not fetch.
 
 ## Docker
 
