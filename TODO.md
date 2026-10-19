@@ -91,7 +91,7 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): `TicketHolder.pop` baca+kosongkan di bawah satu lock; propagate kedua di-coalesce
 - [ ] **AWF-3** Commit periodik AWF menumpang collector metrik dan terlewat saat koleksi telat, janji
   "hilang maksimal satu interval" tidak berlaku di bawah beban — driver maintenance AWF sendiri (audit §1)
-  — sebagian `ebb9c1fb`: maintenance storage jalan pertama di tiap koleksi dalam try/catch sendiri (`PerformanceCollectorTest.lateSlowOrFailingCollectionsStillRunStorageMaintenance`); driver terpisah dari thread metrik = OBS-4 (deepseek, ronde 2)
+  — sebagian `ebb9c1fb`: maintenance storage jalan pertama di tiap koleksi dalam try/catch sendiri (`PerformanceCollectorTest.lateSlowOrFailingCollectionsStillRunStorageMaintenance`); `46cbbefd` (OBS-4, 2026-10-20): housekeeping pasca-publish diisolasi try/catch sendiri sehingga tidak menurunkan snapshot segar ke STALE; MASIH TERBUKA: driver maintenance AWF yang sepenuhnya terpisah dari thread metrik (commit periodik tetap bisa terlewat saat koleksi telat)
 - [x] **ENG-1** `guard-severity: LOG` (default) membiarkan akses lintas region; pelanggaran plugin
   bridged tidak pernah sampai ke quarantine — sink guard yang mengatribusi ke plugin + rate limit log (audit §2)
   — selesai `1c57a736` (2026-10-20): `GuardViolations` + `BridgeRuntime` (satu pelanggaran per run body, log per (plugin, alasan)/60 s); unit test, belum ada fixture boot
