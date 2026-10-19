@@ -104,7 +104,7 @@ The table above is qualitative. This is the counted version, produced by
 | Surface | Count | What it is |
 | --- | ---: | --- |
 | Engine/Canvas symbols reached from SourbyCraft-owned code | **5** | `GlobalConfiguration.reload()` and `WorldConfig.reload()` in `config/upstream/CanvasConfigBridge`; `SaveAllTicket`, `WorldUnloadResult` and `WorldUnloadAsyncEvent` in `awf/world/AuroraWorldsService` (recounted 2026-10-07; was 2, both in `SourbyCraftConfig`) |
-| `io.canvasmc` calls added by `minecraft-patches` | **0** | The integration patches add no live call into Canvas |
+| `io.canvasmc` calls added by feature patches (`minecraft-patches/features` + `paper-patches/features`, scanned since 2026-10-20, audit OBS-7) | **2** | Paper feature 0014 (staged `createWorld`) returns `WorldUnloadResult.SUCCESS` / `FAIL_UNKNOWN`, the retained plugin-API enum CraftServer's unload path already returns; recorded in `PATCH_APPROVED`. No engine internal is called from a patch |
 | Engine baseline (`minecraft-patches/sources`, former Canvas sources) | — | Excluded from the measure: since the 2026-10-05 migration this is the SourbyCraft-owned engine Aurora integrates with, not a dependency of it |
 
 **SourbyCraft's own code barely touches Canvas.** The entire live coupling is two static
@@ -126,7 +126,11 @@ it is where the effort belongs.
 
 Both counts are pinned. New Canvas coupling fails `test_independence_policy.py` until it
 is added to the approved set with a reason, and a patch adding a live Canvas call fails
-outright. Comments naming a Canvas type are excluded from both — a Javadoc line
+until it is recorded in `PATCH_APPROVED` with a reason (today: the two `WorldUnloadResult`
+constants above). The scheduler scan likewise covers both patch directories: Paper 0005
+(`RegionizedServer.getGlobalTickData` for `getTPS` off any region) and Paper 0014
+(`RegionizedServer.getInstance` for the global-tick spawn stages) are the recorded patch sites
+beside MC 0006's `getCurrentRegionizedWorldData`. Comments naming a Canvas type are excluded from both — a Javadoc line
 explaining which engine class a bridge talks to is not coupling, and the one apparent
 patch-side call turned out to be a comment recording a call that had been removed.
 

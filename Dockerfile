@@ -8,7 +8,12 @@
 # First boot needs internet once (SourbyLoader fetches externalized libs into the
 # paperclip cache); afterwards it runs offline. Persist /data to keep worlds, the
 # lib cache, and the CDS archive across restarts.
-FROM eclipse-temurin:25-jre AS runtime
+# Base image pinned by digest (audit SEC-12). Tag: eclipse-temurin:25-jre, the multi-arch OCI
+# index (linux/amd64, arm64, ppc64le, s390x; Temurin 25.0.4.1_1-jre). Digest read on 2026-10-20
+# from `docker buildx imagetools inspect eclipse-temurin:25-jre` and confirmed against the
+# Docker-Content-Digest header of registry-1.docker.io/v2/library/eclipse-temurin/manifests/25-jre.
+# To move to a newer JRE: re-run that inspect, paste the new index digest, keep the tag comment.
+FROM eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165b95112372ad0d67e87f AS runtime
 
 LABEL org.opencontainers.image.title="SourbyCraft" \
       org.opencontainers.image.description="SourbyCraft 26.2 region-threaded Minecraft server (Aurora runtime, Java 25)" \

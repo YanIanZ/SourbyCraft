@@ -15,10 +15,24 @@ public interface RuntimeMetrics {
 
     double rssPercent();
 
+    /**
+     * MXBean collection time as a percentage of wall-clock time over the sampling window.
+     * Not a pause metric: for concurrent collectors it includes work done beside the mutator.
+     */
     double gcTimePercent();
 
     double gcCollectionsPerMinute();
 
+    /**
+     * Mean MXBean collection time per GC cycle over the sampling window, in milliseconds.
+     *
+     * <p>Despite the name this is <em>not</em> a stop-the-world pause measurement. It is
+     * {@code GarbageCollectorMXBean#getCollectionTime()} divided by
+     * {@code getCollectionCount()} (deltas over the window), and for concurrent collectors
+     * (G1 concurrent phases, ZGC, Shenandoah) that elapsed time includes work done while the
+     * application keeps running. Real pause times need GC logging or JFR {@code GCPhasePause}
+     * events. The name is kept for binary compatibility with build 44 consumers.</p>
+     */
     double averageGcPauseMs();
 
     /** Additional metrics return unavailable defaults for providers compiled before build 44. */

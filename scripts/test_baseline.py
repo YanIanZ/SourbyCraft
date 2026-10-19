@@ -945,5 +945,67 @@ class HeapGuardTest(unittest.TestCase):
                 run_baseline.prepare(Path(directory), workloads.build("idle"), 25585, 4096)
 
 
+class ReadinessTest(unittest.TestCase):
+    """Readiness needs "Done (" and a COMPLETE Aurora boot summary (audit OBS-16).
+
+    The summary line is what `SourbyCraftBootstrap` logs through `AuroraBoot.summary()` at the
+    end of its stages; in code order it precedes "Done (" (the boot hook runs from
+    DedicatedServer#initServer, minecraft feature patch 0001), so it is a second gate on the
+    same boot, not a signal of anything after "Done (".
+    """
+
+    DONE = 'Done (12.345s)! For help, type "help"\n'
+    SUMMARY = ("[Aurora Engine] COMPLETE | 14/14 stages completed without error | 0 failed | 812ms\n"
+               "Minecraft continues loading; wait for the server-ready message before connecting.\n")
+
+    def test_done_alone_is_not_ready(self):
+        self.assertEqual(run_baseline.startup_state(self.DONE), ("waiting", None))
+
+    def test_the_summary_alone_is_not_ready(self):
+        self.assertEqual(run_baseline.startup_state(self.SUMMARY), ("waiting", None))
+
+    def test_done_and_a_complete_summary_are_ready_in_either_order(self):
+        self.assertEqual(run_baseline.startup_state(self.SUMMARY + self.DONE), ("ready", None))
+        self.assertEqual(run_baseline.startup_state(self.DONE + self.SUMMARY), ("ready", None))
+
+    def test_a_colour_painted_summary_is_recognised(self):
+        # ConsoleStyle.paint wraps the verdict text in a 24-bit ANSI sequence when the style is rich.
+        painted = ("\x1b[38;2;80;200;120mCOMPLETE | 14/14 stages completed without error | 0 failed"
+                   " | 812ms\x1b[0m\n")
+        self.assertEqual(run_baseline.startup_state(painted + self.DONE), ("ready", None))
+
+    def test_a_degraded_boot_fails_the_run_instead_of_being_measured(self):
+        degraded = "DEGRADED | 13/14 stages completed without error | 1 failed | 900ms\n"
+        state, reason = run_baseline.startup_state(degraded + self.DONE)
+        self.assertEqual(state, "failed")
+        self.assertIn("Aurora boot DEGRADED", reason)
+        self.assertIn("13/14 stages completed without error | 1 failed", reason)
+
+    def test_a_startup_failure_marker_still_fails_first(self):
+        state, reason = run_baseline.startup_state("FAILED TO BIND TO PORT\n" + self.SUMMARY + self.DONE)
+        self.assertEqual(state, "failed")
+        self.assertIn("FAILED TO BIND TO PORT", reason)
+
+    def server(self, directory, text):
+        (directory / "server.log").write_text(text)
+        server = run_baseline.Server.__new__(run_baseline.Server)
+        server._directory = directory
+        server.process = type("P", (), {"poll": staticmethod(lambda: None)})()
+        return server
+
+    def test_await_ready_returns_once_both_lines_are_present(self):
+        with tempfile.TemporaryDirectory() as directory:
+            server = self.server(Path(directory), self.SUMMARY + self.DONE)
+            self.assertGreaterEqual(server.await_ready(5), 0.0)
+
+    def test_await_ready_times_out_naming_the_missing_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            server = self.server(Path(directory), self.DONE)
+            with self.assertRaises(RuntimeError) as raised:
+                server.await_ready(0)
+            self.assertIn("Done: True", str(raised.exception))
+            self.assertIn("Aurora boot summary: False", str(raised.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

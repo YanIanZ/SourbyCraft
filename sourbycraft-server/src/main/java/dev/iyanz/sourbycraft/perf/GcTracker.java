@@ -112,6 +112,9 @@ public final class GcTracker {
             final double windowSec = dNanos / 1.0E9;
             final double collectionsPerMin = dCount * 60.0 / windowSec;
             final double gcTimePercent = 100.0 * (dTimeMs / 1000.0) / windowSec; // collection time as % of elapsed wall time
+            // Mean MXBean collection time per cycle (getCollectionTime / getCollectionCount deltas).
+            // It is not a stop-the-world pause: for concurrent collectors (G1 concurrent phases,
+            // ZGC, Shenandoah) the elapsed collection time includes work done beside the mutator.
             final double avgPauseMs = dCount > 0 ? (double) dTimeMs / dCount : 0.0;
             return new Gc(collectionsPerMin, gcTimePercent, avgPauseMs, windowSec);
         } catch (final Throwable t) {
@@ -123,7 +126,9 @@ public final class GcTracker {
      * @param collectionsPerMin GC cycles per minute over the window
      * @param gcTimePercent      total collection time as a percentage of wall-clock (not a pause metric;
      *                           includes concurrent collector work)
-     * @param avgPauseMs         legacy accessor name for mean MXBean collection time
+     * @param avgPauseMs         legacy accessor name for mean MXBean collection time per cycle;
+     *                           not a stop-the-world pause (exposed as
+     *                           {@code RuntimeMetrics#averageGcPauseMs()})
      * @param windowSeconds      the actual window the figures were computed over
      */
     public record Gc(double collectionsPerMin, double gcTimePercent, double avgPauseMs, double windowSeconds) {

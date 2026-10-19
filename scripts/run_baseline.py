@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import threading
@@ -41,6 +42,19 @@ RSS_INTERVAL = 1.0
 # Console output that means the server will never reach "Done (".
 STARTUP_FAILURES = ("Failed to start the minecraft server", "Perhaps a server is already running",
                     "crash report has been saved", "FAILED TO BIND TO PORT")
+
+# The Aurora boot summary. SourbyCraftBootstrap logs it on the "Aurora Engine" logger once its
+# service stages have run, built by AuroraBoot.summary():
+#     COMPLETE | 14/14 stages completed without error | 0 failed | 812ms
+# followed by "Minecraft continues loading; wait for the server-ready message before connecting."
+# The verdict is DEGRADED when a stage failed and FAILED when every stage did. The hook runs
+# from DedicatedServer#initServer (minecraft feature patch 0001), so in code order the summary
+# precedes Paper's "Done (" from MinecraftServer#runServer; it may be wrapped in ANSI colour
+# when the console style resolves to rich. Readiness needs both lines: "Done (" says Minecraft
+# is up, the summary says every SourbyCraft stage ran and whether one of them failed -- a
+# baseline measured on a DEGRADED engine is not a baseline of the engine (audit OBS-16).
+BOOT_SUMMARY = re.compile(
+    r"(COMPLETE|DEGRADED|FAILED) \| (\d+)/(\d+) stages completed without error \| (\d+) failed")
 
 COMMAND_FAILURES = ("Unknown or incomplete command", "Incorrect argument for command",
                     "Expected whitespace to end one argument", "Invalid or unknown entity type",
@@ -170,6 +184,26 @@ class ResidentSampler:
         self._thread.join(timeout=RSS_INTERVAL * 3)
 
 
+def startup_state(text):
+    """Classify console output so far: ``("ready", None)``, ``("waiting", None)`` or
+    ``("failed", reason)``.
+
+    Ready means both "Done (" and an Aurora boot summary whose verdict is COMPLETE. A
+    DEGRADED or FAILED summary fails the run at once, like a startup failure marker,
+    instead of measuring a server with a SourbyCraft stage missing.
+    """
+    for marker in STARTUP_FAILURES:
+        if marker in text:
+            return "failed", f"Server failed to start: {marker!r}. See server.log."
+    summary = BOOT_SUMMARY.search(text)
+    if summary is not None and summary.group(1) != "COMPLETE":
+        return "failed", (f"Aurora boot {summary.group(1)}: {summary.group(0)}. A baseline needs "
+                          "every SourbyCraft stage up; server.log names the stage that failed.")
+    if "Done (" in text and summary is not None:
+        return "ready", None
+    return "waiting", None
+
+
 class Server:
     """An isolated server process driven through its console."""
 
@@ -197,16 +231,19 @@ class Server:
             time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
 
     def await_ready(self, timeout):
+        """Seconds until the console shows both "Done (" and a COMPLETE Aurora boot summary."""
         started = time.monotonic()
         while True:
             text = self.text
-            if "Done (" in text:
+            state, reason = startup_state(text)
+            if state == "ready":
                 return time.monotonic() - started
-            for marker in STARTUP_FAILURES:
-                if marker in text:
-                    raise RuntimeError(f"Server failed to start: {marker!r}. See server.log.")
+            if state == "failed":
+                raise RuntimeError(reason)
             if time.monotonic() - started > timeout:
-                raise RuntimeError(f"Server startup timeout ({timeout}s)")
+                raise RuntimeError(f"Server startup timeout ({timeout}s); "
+                                   f"Done: {'Done (' in text}, "
+                                   f"Aurora boot summary: {BOOT_SUMMARY.search(text) is not None}")
             self.hold(1)
 
     def apply(self, commands):
