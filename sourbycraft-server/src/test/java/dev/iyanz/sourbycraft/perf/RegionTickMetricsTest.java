@@ -518,13 +518,42 @@ class RegionTickMetricsTest {
     @Test
     void rawRingHardCapIsExplicitlyReportedAsTruncation() {
         final RegionTickMetrics metrics = new RegionTickMetrics();
-        appendTicks(metrics, 1_000, 0L, MILLISECOND, 1L);
-        metrics.tickCompleted(tick(999L * MILLISECOND, SECOND, 1L), MILLISECOND);
+        // More than the sized cap, so the ring wraps even after it grew for the fast tick rate.
+        final int total = RegionTickMetrics.MAX_RAW_CAPACITY + 1;
+        appendTicks(metrics, total, 0L, MILLISECOND, 1L);
 
-        final RegionTickMetrics.WindowSnapshot window = metrics.snapshot(SECOND + 1L).fifteenSeconds();
+        final RegionTickMetrics.WindowSnapshot window = metrics.refreshSnapshot((long)total * MILLISECOND).fifteenSeconds();
 
-        assertTrue(window.sampleCount() < 1_001L);
+        assertTrue(window.sampleCount() < total);
         assertTrue(window.truncated());
+    }
+
+    @Test
+    void rawRingSizesFromTickRateSoFastTicksDoNotTruncateTheFifteenSecondWindow() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        // 40 Hz: a fixed 384-sample ring would wrap after 9.6 s and truncate the 15 s window.
+        final long interval = 25L * MILLISECOND;
+        appendTicks(metrics, 1_000, 0L, interval, 1L);
+
+        final RegionTickMetrics.WindowSnapshot window = metrics.refreshSnapshot(1_000L * interval).fifteenSeconds();
+
+        assertEquals(600L, window.sampleCount());
+        assertFalse(window.truncated());
+    }
+
+    @Test
+    void tpsAndMsptServeAveragesWithoutAllocatingOrSorting() throws Exception {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 0L, 3L * MILLISECOND), TARGET_20_TPS);
+        metrics.tickCompleted(tick(0L, TARGET_20_TPS, MILLISECOND), TARGET_20_TPS);
+        metrics.tickCompleted(tick(TARGET_20_TPS, 2L * TARGET_20_TPS, 2L * MILLISECOND), TARGET_20_TPS);
+
+        // The averages still match the exact report() result.
+        assertEquals(20.0, metrics.tps(5L * SECOND, null, TARGET_20_TPS), 1.0E-9);
+        assertEquals(2.0, metrics.mspt(5L * SECOND, null, TARGET_20_TPS).avg(), 1.0E-9);
+
+        // And the average path no longer allocates arrays or sorts under the region monitor.
+        assertNoArrayAllocationOrSort(RegionTickMetrics.class, Set.of("tps", "mspt"));
     }
 
     @Test
@@ -587,6 +616,36 @@ class RegionTickMetricsTest {
                         || instruction.opcode() == java.lang.classfile.Opcode.MULTIANEWARRAY
                         || rejectObjects && instruction.opcode() == java.lang.classfile.Opcode.NEW,
                         () -> type.getName() + "." + method.methodName() + " allocates via " + instruction.opcode());
+                }
+            }
+            assertEquals(methodNames.size(), matchedMethods);
+        }
+    }
+
+    private static void assertNoArrayAllocationOrSort(final Class<?> type, final Set<String> methodNames)
+            throws IOException {
+        final String resource = "/" + type.getName().replace('.', '/') + ".class";
+        try (InputStream input = type.getResourceAsStream(resource)) {
+            assertNotNull(input);
+            int matchedMethods = 0;
+            for (final MethodModel method : ClassFile.of().parse(input.readAllBytes()).methods()) {
+                if (!methodNames.contains(method.methodName().stringValue())) {
+                    continue;
+                }
+                ++matchedMethods;
+                for (final CodeElement element : method.code().orElseThrow()) {
+                    if (!(element instanceof Instruction instruction)) {
+                        continue;
+                    }
+                    final java.lang.classfile.Opcode opcode = instruction.opcode();
+                    assertFalse(opcode == java.lang.classfile.Opcode.NEWARRAY
+                            || opcode == java.lang.classfile.Opcode.ANEWARRAY
+                            || opcode == java.lang.classfile.Opcode.MULTIANEWARRAY,
+                        () -> type.getName() + "." + method.methodName() + " allocates an array");
+                    if (instruction instanceof InvokeInstruction invocation) {
+                        assertFalse(invocation.name().stringValue().equals("sort"),
+                            () -> type.getName() + "." + method.methodName() + " sorts under the monitor");
+                    }
                 }
             }
             assertEquals(methodNames.size(), matchedMethods);

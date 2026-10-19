@@ -68,11 +68,13 @@ public final class PerformanceCollector implements AutoCloseable {
     private int retainedGenerations;
     private boolean loggedCollectionError;
     private long lastCollectionErrorNanos;
+    private boolean loggedPostPublishError;
+    private long lastPostPublishErrorNanos;
     private long observationStartNanos;
     private boolean observing;
     // Lane load is sampled on this thread, so the collector's own cost lands in TELEMETRY where
     // it can be seen rather than being quietly attributed to whatever it was measuring.
-    private final LaneCpuSampler lanes = LaneCpuSampler.platform();
+    private final LaneCpuSampler lanes;
     // The latest division of the machine, for operators asking where the time went. Volatile
     // because it is written on the collector thread and read from whichever thread asks.
     private volatile LanePortions.Report lanePortions =
@@ -115,6 +117,17 @@ public final class PerformanceCollector implements AutoCloseable {
                          final DoubleSupplier targetTpsSource,
                          final BiConsumer<String, Throwable> errorLogger,
                          final Runnable maintenance) {
+        this(provider, generations, globalSource, runtimeSource, nanoClock, epochClock, targetTpsSource, errorLogger,
+            maintenance, LaneCpuSampler.platform());
+    }
+
+    PerformanceCollector(final SourbyMetricsProvider provider, final GenerationSource generations,
+                         final GlobalSource globalSource, final Supplier<ImmutableRuntimeMetrics> runtimeSource,
+                         final LongSupplier nanoClock, final LongSupplier epochClock,
+                         final DoubleSupplier targetTpsSource,
+                         final BiConsumer<String, Throwable> errorLogger,
+                         final Runnable maintenance,
+                         final LaneCpuSampler lanes) {
         this.maintenance = Objects.requireNonNull(maintenance, "maintenance");
         this.provider = Objects.requireNonNull(provider, "provider");
         this.generations = Objects.requireNonNull(generations, "generations");
@@ -124,6 +137,7 @@ public final class PerformanceCollector implements AutoCloseable {
         this.epochClock = Objects.requireNonNull(epochClock, "epochClock");
         this.targetTpsSource = Objects.requireNonNull(targetTpsSource, "targetTpsSource");
         this.errorLogger = Objects.requireNonNull(errorLogger, "errorLogger");
+        this.lanes = Objects.requireNonNull(lanes, "lanes");
         for (int i = 0; i < this.accumulators.length; ++i) {
             this.accumulators[i] = new WindowAccumulator(WINDOWS[i]);
         }
@@ -242,15 +256,21 @@ public final class PerformanceCollector implements AutoCloseable {
                 new ImmutableFreshness(state, 0L, latenessMillis, duration, warmingReason),
                 windows[0], windows[1], windows[2], windows[3], windows[4], runtime, global);
             this.publishUnlessClosed(next);
-            final var minute = next.window(dev.iyanz.sourbycraft.api.metrics.MetricWindow.ONE_MINUTE);
-            PerformanceHistory.GLOBAL.offer(new PerformanceHistory.Sample(nowEpochMillis, minute.worstTps(),
-                minute.worstAverageMspt(), next.runtime().processCpuPercent(), next.runtime().heapUsedBytes(),
-                next.runtime().heapMaxBytes()));
-            this.slowestRegion = this.slowestCandidate;
-            NetworkCounters.GLOBAL.sample(nowNanos);
-            final LaneCpuSampler.LaneLoads reading = this.lanes.sample();
-            this.lanePortions = LanePortions.of(reading, runtime.availableProcessors());
-            LaneLoadEvent.record(reading);
+            // Post-publish housekeeping, isolated from the collection's own try so a failure here
+            // logs but cannot downgrade the fresh snapshot to STALE (audit OBS-4).
+            try {
+                final var minute = next.window(dev.iyanz.sourbycraft.api.metrics.MetricWindow.ONE_MINUTE);
+                PerformanceHistory.GLOBAL.offer(new PerformanceHistory.Sample(nowEpochMillis, minute.worstTps(),
+                    minute.worstAverageMspt(), next.runtime().processCpuPercent(), next.runtime().heapUsedBytes(),
+                    next.runtime().heapMaxBytes()));
+                this.slowestRegion = this.slowestCandidate;
+                NetworkCounters.GLOBAL.sample(nowNanos);
+                final LaneCpuSampler.LaneLoads reading = this.lanes.sample();
+                this.lanePortions = LanePortions.of(reading, runtime.availableProcessors());
+                LaneLoadEvent.record(reading);
+            } catch (final Throwable failure) {
+                this.logPostPublishFailure(nowNanos, failure);
+            }
         } catch (final Throwable failure) {
             final long duration = elapsed(this.nanoClock.getAsLong(), scanStarted);
             final long latenessMillis = TimeUnit.NANOSECONDS.toMillis(Math.max(0L, latenessNanos));
@@ -322,6 +342,14 @@ public final class PerformanceCollector implements AutoCloseable {
             return true;
         }
         return false;
+    }
+
+    private void logPostPublishFailure(final long nowNanos, final Throwable failure) {
+        if (!this.loggedPostPublishError || nowNanos - this.lastPostPublishErrorNanos >= ERROR_LOG_INTERVAL_NANOS) {
+            this.loggedPostPublishError = true;
+            this.lastPostPublishErrorNanos = nowNanos;
+            this.errorLogger.accept("Post-publish housekeeping failed; the fresh snapshot stays published", failure);
+        }
     }
 
     private void ensureMedianCapacity(final int required) {

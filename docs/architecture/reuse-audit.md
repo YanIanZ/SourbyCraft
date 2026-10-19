@@ -59,7 +59,7 @@ Inventory of the reusable state inspected in `dev.iyanz.sourbycraft`; this is no
 | S2 | `float[] medianBuffer` + `int medianCapacity` | `perf/PerformanceCollector.java:55-56` | Same daemon; grown in `ensureMedianCapacity` `:216-233`; never shrinks | **KEEP** (see F2, F5) |
 | S3 | `WindowAccumulator[] accumulators` and their scalar fields | `perf/PerformanceCollector.java:49`, `:317-451` | Same daemon; `reset()` per cycle `:341-359` | **KEEP** |
 | S4 | `long[] histogramScratch` (64 bins) | `perf/RegionTickMetrics.java:60` | The `RegionTickMetrics` instance monitor; refilled at `:478-479` and `:513-514` | **KEEP** |
-| S5 | Raw sample ring: `rawStarts/rawEnds/rawIntervals/rawExecutions/rawMissingCpu/rawTargets/rawOverflow`, capacity 384 | `perf/RegionTickMetrics.java:40-48` | Instance monitor; fixed size, wraps with `lastDroppedEnd` truncation marker | **KEEP** |
+| S5 | Raw sample ring: `rawStarts/rawEnds/rawIntervals/rawExecutions/rawMissingCpu/rawTargets/rawOverflow`, capacity sized from the observed tick rate (default 384, hard cap 4096) | `perf/RegionTickMetrics.java` | Instance monitor; wraps with `lastDroppedEnd` truncation marker | **KEEP** |
 | S6 | Unresolved-interval ring, capacity 8 | `perf/RegionTickMetrics.java:50-53` | Instance monitor; fixed size | **KEEP** |
 | S7 | `BucketStore seconds` (61 slots) / `fiveSeconds` (169 slots) and their 12 parallel arrays | `perf/RegionTickMetrics.java:58-59`, `:736-923` | Instance monitor; slot-recycling ring, `prepare()` `:904-922` resets a slot on epoch change | **KEEP** |
 | S8 | `acquired` / `acquiredState` snapshot memo | `perf/RegionTickMetrics.java:69-70`, `:213-226` | Instance monitor; holds an immutable `Snapshot` record | **KEEP** |

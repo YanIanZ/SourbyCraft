@@ -15,10 +15,14 @@ public final class RegionMetricsRegistry {
 
     private static final long MAXIMUM_WINDOW_NANOS = TimeUnit.MINUTES.toNanos(15L);
     private static final long EXPIRY_GRACE_NANOS = TimeUnit.SECONDS.toNanos(1L);
+    /** How many generations one activation examines before deferring the rest (audit OBS-6). */
+    private static final int SWEEP_BATCH = 64;
 
     private final AtomicLong nextWorldId = new AtomicLong();
     private final AtomicLong nextGenerationId = new AtomicLong();
     private final ConcurrentHashMap<Long, Generation> generations = new ConcurrentHashMap<>();
+    /** The highest generation id a sweep has already passed; wraps so nothing is skipped. */
+    private final AtomicLong sweepCursor = new AtomicLong();
 
     RegionMetricsRegistry() {}
 
@@ -44,6 +48,11 @@ public final class RegionMetricsRegistry {
         if (existing != 0L) {
             return existing;
         }
+
+        // Amortised sweep: the collector normally reaps expired generations, but if it never
+        // started the map would otherwise grow without bound as regions activate and retire.
+        // Activation is the one place generations are added, so it reaps a bounded batch here.
+        this.sweepExpired(nowNanos);
 
         final long generationId = nextNonZero(this.nextGenerationId);
         final Generation generation = new Generation(generationId, worldId, regionId, holder.current());
@@ -129,6 +138,31 @@ public final class RegionMetricsRegistry {
         final long expiresAt = retiredAtNanos > Long.MAX_VALUE - retention
             ? Long.MAX_VALUE : retiredAtNanos + retention;
         return nowNanos > expiresAt;
+    }
+
+    /**
+     * Removes a bounded batch of expired generations, spread across activations. A monotonic
+     * cursor spreads the scan over the whole map rather than re-examining the first few entries
+     * every time; it wraps once every generation has been passed, so a generation that was still
+     * live when first passed is re-examined after it retires.
+     */
+    private void sweepExpired(final long nowNanos) {
+        final long cursor = this.sweepCursor.get();
+        long highest = cursor;
+        int examined = 0;
+        for (final Generation generation : this.generations.values()) {
+            if (generation.generationId <= cursor) {
+                continue;
+            }
+            if (++examined > SWEEP_BATCH) {
+                break;
+            }
+            highest = Math.max(highest, generation.generationId);
+            if (!generation.isActive() && expired(nowNanos, generation.retiredAtNanos)) {
+                this.generations.remove(generation.generationId, generation);
+            }
+        }
+        this.sweepCursor.compareAndSet(cursor, highest == cursor ? 0L : highest);
     }
 
     private static long nextNonZero(final AtomicLong sequence) {

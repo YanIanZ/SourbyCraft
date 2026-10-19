@@ -65,19 +65,21 @@ class TickDataBinaryCompatibilityTest {
     @Test
     void truncatedShortCompatibilityViewsReturnNullInsteadOfPartialRawArrays() {
         final RegionTickMetrics owner = new RegionTickMetrics();
+        // More than the sized cap, so the raw ring wraps and the short views report truncation.
+        final int total = RegionTickMetrics.MAX_RAW_CAPACITY + 1;
         long previous = TimeUtil.DEADLINE_NOT_SET;
-        for (int i = 0; i < 500; ++i) {
+        for (int i = 0; i < total; ++i) {
             final long start = i * MILLISECOND;
             owner.tickCompleted(tick(previous, start, 100_000L), MILLISECOND);
             previous = start;
         }
-        owner.tickCompleted(tick(previous, TimeUnit.SECONDS.toNanos(1L), 100_000L), MILLISECOND);
+        final long now = (long)total * MILLISECOND;
 
-        assertTrue(owner.snapshot(TimeUnit.SECONDS.toNanos(1L) + 100_000L).fiveSeconds().truncated());
-        assertTrue(owner.snapshot(TimeUnit.SECONDS.toNanos(1L) + 100_000L).fifteenSeconds().truncated());
+        assertTrue(owner.refreshSnapshot(now).fiveSeconds().truncated());
+        assertTrue(owner.refreshSnapshot(now).fifteenSeconds().truncated());
         for (final long window : new long[] {5L, 15L}) {
             final TickData view = new TickData(owner, TimeUnit.SECONDS.toNanos(window));
-            assertNull(view.generateTickReport(null, TimeUnit.SECONDS.toNanos(1L) + 100_000L, MILLISECOND));
+            assertNull(view.generateTickReport(null, now, MILLISECOND));
             assertNull(view.getMSPTData(null, MILLISECOND));
             assertNull(view.getTPSAverage(null, MILLISECOND));
         }

@@ -6,6 +6,7 @@ import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
 import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
 import dev.iyanz.sourbycraft.api.metrics.WindowMetrics;
+import dev.iyanz.sourbycraft.execution.LaneCpuSampler;
 import java.util.List;
 import java.io.IOException;
 import java.io.InputStream;
@@ -426,6 +427,29 @@ class PerformanceCollectorTest {
         collector.collect(2L * SECOND, 2_000L, 0L);
         assertEquals(1, logs.get(), "logged at most once a minute");
         assertEquals(2L, provider.snapshot().sequence());
+    }
+
+    @Test
+    void aPostPublishFailureKeepsTheFreshSnapshotPublished() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final AtomicInteger logs = new AtomicInteger();
+        // Lane sampling is the one post-publish step with an injectable seam; make it throw.
+        final LaneCpuSampler failingLanes = new LaneCpuSampler(
+            () -> { throw new IllegalStateException("lane sample failed"); }, System::nanoTime);
+        final PerformanceCollector collector = new PerformanceCollector(provider,
+            source(view(1L, true, window(1L, 50L * MILLISECOND, 5L * MILLISECOND, 0.1))),
+            PerformanceCollectorTest::emptyGlobal, PerformanceCollectorTest::runtime,
+            System::nanoTime, System::currentTimeMillis, () -> 20.0,
+            (message, failure) -> logs.incrementAndGet(),
+            PerformanceCollector::maintainStorage, failingLanes);
+
+        collector.collect(SECOND, 1_000L, 0L);
+        final PerformanceSnapshot snapshot = provider.snapshot();
+
+        assertEquals(MetricState.WARMING, snapshot.freshness().state(),
+            "a post-publish failure must not downgrade the fresh snapshot to STALE");
+        assertEquals(1L, snapshot.sequence());
+        assertTrue(logs.get() >= 1, "the post-publish failure is still logged");
     }
 
     @Test

@@ -195,6 +195,22 @@ class RegionMetricsRegistryTest {
     }
 
     @Test
+    void activationSweepsExpiredGenerationsWithoutTheCollector() throws Exception {
+        final RegionMetricsRegistry registry = new RegionMetricsRegistry();
+        final long world = registry.newWorldId();
+        final long retired = registry.activate(world, 1L, new RegionTickMetricsHolder(), 0L);
+        registry.retire(retired, RegionMetricsRegistry.RetirementReason.INACTIVE, SECOND);
+
+        // Advance past retention and trigger another activation: the amortised sweep must reap
+        // the expired generation on its own, even though the collector never ran.
+        final long later = 2L * SECOND + RETENTION;
+        registry.activate(world, 2L, new RegionTickMetricsHolder(), later);
+
+        assertEquals(1, generationCount(registry),
+            "the expired generation is reaped by activation, not only by the collector");
+    }
+
+    @Test
     void transientDestroyWithoutActivationLeavesRegistryEmpty() {
         final RegionMetricsRegistry registry = new RegionMetricsRegistry();
 
@@ -262,5 +278,11 @@ class RegionMetricsRegistryTest {
         final Field field = RegionMetricsRegistry.class.getDeclaredField(name);
         field.setAccessible(true);
         return (AtomicLong)field.get(registry);
+    }
+
+    private static int generationCount(final RegionMetricsRegistry registry) throws Exception {
+        final Field field = RegionMetricsRegistry.class.getDeclaredField("generations");
+        field.setAccessible(true);
+        return ((java.util.Map<?, ?>)field.get(registry)).size();
     }
 }

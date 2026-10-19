@@ -28,7 +28,16 @@ public final class RegionTickMetrics {
     private static final long MINUTE = 60L * SECOND;
     private static final long FIVE_MINUTES = 5L * MINUTE;
     private static final long FIFTEEN_MINUTES = 15L * MINUTE;
-    private static final int RAW_CAPACITY = 384;
+    /**
+     * Default raw-ring capacity: fifteen seconds at the 20 Hz default with headroom. Sized from
+     * the observed tick interval instead of a fixed value, so a faster rate (or a tick sprint)
+     * does not wrap the ring and truncate the 10/15-second windows (audit OBS-5).
+     */
+    static final int DEFAULT_RAW_CAPACITY = 384;
+    /** Hard cap on the raw ring, bounding memory however fast the tick rate is (audit OBS-5). */
+    static final int MAX_RAW_CAPACITY = 4096;
+    /** Headroom over fifteen seconds so a 2x tick sprint does not wrap the ring (audit OBS-5). */
+    private static final int RAW_HEADROOM = 2;
     private static final int UNRESOLVED_CAPACITY = 8;
     private static final int HISTOGRAM_BINS = 64;
     private static final int HISTOGRAM_VALUES_PER_SLICE = 4;
@@ -37,13 +46,14 @@ public final class RegionTickMetrics {
     private static final double HISTOGRAM_LOG_RATIO = Math.log((double)HISTOGRAM_MAX / HISTOGRAM_MIN) / 62.0;
     private static final long[] EMPTY_RAW_DATA = new long[0];
 
-    private final long[] rawStarts = new long[RAW_CAPACITY];
-    private final long[] rawEnds = new long[RAW_CAPACITY];
-    private final long[] rawIntervals = new long[RAW_CAPACITY];
-    private final long[] rawExecutions = new long[RAW_CAPACITY];
-    private final long[] rawMissingCpu = new long[RAW_CAPACITY];
-    private final long[] rawTargets = new long[RAW_CAPACITY];
-    private final byte[] rawOverflow = new byte[RAW_CAPACITY];
+    private long[] rawStarts = new long[DEFAULT_RAW_CAPACITY];
+    private long[] rawEnds = new long[DEFAULT_RAW_CAPACITY];
+    private long[] rawIntervals = new long[DEFAULT_RAW_CAPACITY];
+    private long[] rawExecutions = new long[DEFAULT_RAW_CAPACITY];
+    private long[] rawMissingCpu = new long[DEFAULT_RAW_CAPACITY];
+    private long[] rawTargets = new long[DEFAULT_RAW_CAPACITY];
+    private byte[] rawOverflow = new byte[DEFAULT_RAW_CAPACITY];
+    private int rawCapacity = DEFAULT_RAW_CAPACITY;
     private int rawStart;
     private int rawSize;
     private long lastDroppedEnd = INACTIVE;
@@ -162,7 +172,7 @@ public final class RegionTickMetrics {
         final long cutoff = subtractFloor(nowNanos, windowNanos);
         if (windowNanos <= FIFTEEN_SECONDS) {
             for (int i = 0; i < this.rawSize; ++i) {
-                final int index = (this.rawStart + i) % RAW_CAPACITY;
+                final int index = (this.rawStart + i) % this.rawCapacity;
                 if (this.rawEnds[index] >= cutoff && this.rawEnds[index] <= nowNanos) {
                     final int bin = histogramBin(this.rawExecutions[index]);
                     destination[offset + bin] = saturatingAdd(destination[offset + bin], 1L);
@@ -236,7 +246,7 @@ public final class RegionTickMetrics {
             return null;
         }
         for (int i = 0; i < this.rawSize; ++i) {
-            final int index = (this.rawStart + i) % RAW_CAPACITY;
+            final int index = (this.rawStart + i) % this.rawCapacity;
             if (this.rawEnds[index] >= cutoff && this.rawEnds[index] <= nowNanos) {
                 ++count;
             }
@@ -257,7 +267,7 @@ public final class RegionTickMetrics {
         long utilised = 0L;
         int resultIndex = 0;
         for (int i = 0; i < this.rawSize; ++i) {
-            final int index = (this.rawStart + i) % RAW_CAPACITY;
+            final int index = (this.rawStart + i) % this.rawCapacity;
             final long end = this.rawEnds[index];
             if (end < cutoff || end > nowNanos) {
                 continue;
@@ -352,25 +362,101 @@ public final class RegionTickMetrics {
         return new TickData.SegmentData(count, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
     }
 
+    /**
+     * The average TPS over {@code windowNanos}, served from the same window aggregates the
+     * published snapshot holds, without allocating or sorting under the region monitor (audit
+     * OBS-13). The value matches {@code report(…).tpsData().segmentAll().average()} exactly.
+     */
     public synchronized Double tps(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
         final long now = inProgress == null ? this.lastCompletedEnd : inProgress.tickEnd();
-        final TickData.TickReportData report = this.report(windowNanos, inProgress, now, targetIntervalNanos);
-        return report == null ? null : report.tpsData().segmentAll().average();
+        final WindowSums sums = this.sumsFor(windowNanos, inProgress, now, targetIntervalNanos);
+        return sums == null ? null : sums.tps();
     }
 
+    /**
+     * The average MSPT over {@code windowNanos}, served without allocating or sorting under the
+     * region monitor (audit OBS-13). The per-tick raw array is not recomputed: no caller consumes
+     * it and producing it requires the sort this method avoids.
+     */
     public synchronized TickData.MSPTData mspt(final long windowNanos, final TickTime inProgress, final long targetIntervalNanos) {
         final long now = inProgress == null ? this.lastCompletedEnd : inProgress.tickEnd();
-        final TickData.TickReportData report = this.report(windowNanos, inProgress, now, targetIntervalNanos);
-        if (report == null) {
+        final WindowSums sums = this.sumsFor(windowNanos, inProgress, now, targetIntervalNanos);
+        return sums == null ? null : new TickData.MSPTData(sums.mspt(), EMPTY_RAW_DATA);
+    }
+
+    /** The TPS and MSPT averages a window yields, computed without sorting. */
+    private record WindowSums(double tps, double mspt) {}
+
+    /**
+     * Sums the requested window exactly as {@link #report} does — including the targetless
+     * interval resolution and the in-progress tick — but never allocates the per-tick arrays or
+     * sorts them. Returns {@code null} when {@link #report} would (truncation or no data).
+     */
+    private WindowSums sumsFor(final long windowNanos, final TickTime inProgress,
+                               final long nowNanos, final long targetIntervalNanos) {
+        if (windowNanos > FIFTEEN_SECONDS) {
+            if (!this.unresolvedIntervalsAvailable(nowNanos, windowNanos)) {
+                return null;
+            }
+            final WindowSnapshot completed = this.bucketWindow(nowNanos, windowNanos, targetIntervalNanos);
+            long count = completed.sampleCount();
+            long interval = completed.intervalNanos();
+            long execution = completed.executionNanos();
+            if (inProgress != null) {
+                count = saturatingAdd(count, 1L);
+                interval = saturatingAdd(interval, intervalNanos(inProgress, targetIntervalNanos));
+                execution = saturatingAdd(execution, executionNanos(inProgress));
+            }
+            if (count == 0L) {
+                return null;
+            }
+            final double tps = interval == 0L || interval == Long.MAX_VALUE
+                ? Double.NaN : (double)count * 1.0E9 / (double)interval;
+            final double mspt = execution == Long.MAX_VALUE
+                ? Double.NaN : (double)execution / (double)count * 1.0E-6;
+            return new WindowSums(tps, mspt);
+        }
+        final long cutoff = subtractFloor(nowNanos, windowNanos);
+        if (this.lastDroppedEnd != INACTIVE && this.lastDroppedEnd >= cutoff) {
             return null;
         }
-        return new TickData.MSPTData(report.timePerTickData().segmentAll().average() * 1.0E-6,
-            report.timePerTickData().rawData());
+        long count = 0L;
+        long interval = 0L;
+        long execution = 0L;
+        for (int i = 0; i < this.rawSize; ++i) {
+            final int index = (this.rawStart + i) % this.rawCapacity;
+            final long end = this.rawEnds[index];
+            if (end < cutoff || end > nowNanos) {
+                continue;
+            }
+            ++count;
+            interval = saturatingAdd(interval, this.rawTargets[index] == INACTIVE
+                ? Math.max(Math.max(0L, targetIntervalNanos), this.rawIntervals[index])
+                : this.rawIntervals[index]);
+            execution = saturatingAdd(execution, this.rawExecutions[index]);
+        }
+        if (inProgress != null) {
+            ++count;
+            interval = saturatingAdd(interval, intervalNanos(inProgress, targetIntervalNanos));
+            execution = saturatingAdd(execution, executionNanos(inProgress));
+        }
+        if (count == 0L) {
+            return null;
+        }
+        return new WindowSums((double)count * 1.0E9 / (double)interval,
+            (double)execution / (double)count * 1.0E-6);
     }
 
     private void recordCompletedSample(final TickTime tick, final long targetIntervalNanos) {
         if (this.completionFailure != null) {
             this.completionFailure.run();
+        }
+        // Size the raw ring from the tick rate so the 10/15-second windows survive a rate above
+        // the 20 Hz default or a tick sprint. The growth (allocation) lives in growRawRing, not
+        // here, so this hot method stays allocation-free.
+        final int requiredCapacity = rawCapacityFor(targetIntervalNanos);
+        if (requiredCapacity > this.rawCapacity) {
+            this.growRawRing(requiredCapacity);
         }
         final long tickLength = nonNegativeDifference(tick.tickEnd(), tick.tickStart());
         final long execution = saturatingAdd(tickLength, Math.max(0L, tick.intermediateTaskExecutionTime()));
@@ -379,12 +465,12 @@ public final class RegionTickMetrics {
         final long interval = intervalNanos(tick, targetIntervalNanos);
         final long missingCpu = missingCpuNanos(tick, execution);
         final int index;
-        if (this.rawSize == RAW_CAPACITY) {
+        if (this.rawSize == this.rawCapacity) {
             index = this.rawStart;
             this.lastDroppedEnd = this.rawEnds[index];
-            this.rawStart = (this.rawStart + 1) % RAW_CAPACITY;
+            this.rawStart = (this.rawStart + 1) % this.rawCapacity;
         } else {
-            index = (this.rawStart + this.rawSize) % RAW_CAPACITY;
+            index = (this.rawStart + this.rawSize) % this.rawCapacity;
             ++this.rawSize;
         }
         this.rawStarts[index] = tick.tickStart();
@@ -415,6 +501,53 @@ public final class RegionTickMetrics {
         }
         this.unresolvedEnds[index] = end;
         this.unresolvedDurations[index] = duration;
+    }
+
+    /** The raw-ring capacity the given tick interval demands, with headroom and a hard cap. */
+    private static int rawCapacityFor(final long targetIntervalNanos) {
+        if (targetIntervalNanos <= 0L) {
+            return DEFAULT_RAW_CAPACITY;
+        }
+        final long needed = ceilDiv(FIFTEEN_SECONDS, targetIntervalNanos);
+        final long withHeadroom = needed * (long)RAW_HEADROOM;
+        return (int)Math.max(DEFAULT_RAW_CAPACITY, Math.min(MAX_RAW_CAPACITY, withHeadroom));
+    }
+
+    /** Reallocates the raw ring at the larger capacity, preserving the samples already recorded. */
+    private void growRawRing(final int newCapacity) {
+        if (newCapacity <= this.rawCapacity) {
+            return;
+        }
+        final long[] starts = new long[newCapacity];
+        final long[] ends = new long[newCapacity];
+        final long[] intervals = new long[newCapacity];
+        final long[] executions = new long[newCapacity];
+        final long[] missingCpu = new long[newCapacity];
+        final long[] targets = new long[newCapacity];
+        final byte[] overflow = new byte[newCapacity];
+        final int size = this.rawSize;
+        for (int i = 0; i < size; ++i) {
+            final int source = (this.rawStart + i) % this.rawCapacity;
+            starts[i] = this.rawStarts[source];
+            ends[i] = this.rawEnds[source];
+            intervals[i] = this.rawIntervals[source];
+            executions[i] = this.rawExecutions[source];
+            missingCpu[i] = this.rawMissingCpu[source];
+            targets[i] = this.rawTargets[source];
+            overflow[i] = this.rawOverflow[source];
+        }
+        this.rawStarts = starts;
+        this.rawEnds = ends;
+        this.rawIntervals = intervals;
+        this.rawExecutions = executions;
+        this.rawMissingCpu = missingCpu;
+        this.rawTargets = targets;
+        this.rawOverflow = overflow;
+        this.rawCapacity = newCapacity;
+        this.rawStart = 0;
+        this.rawSize = size;
+        // lastDroppedEnd is left untouched: it marks the oldest sample already dropped, and a grow
+        // never recovers it.
     }
 
     private void promoteExpiredSeconds(final long nowNanos) {
@@ -478,7 +611,7 @@ public final class RegionTickMetrics {
         final long[] histogram = this.histogramScratch;
         Arrays.fill(histogram, 0L);
         for (int i = 0; i < this.rawSize; ++i) {
-            final int index = (this.rawStart + i) % RAW_CAPACITY;
+            final int index = (this.rawStart + i) % this.rawCapacity;
             final long end = this.rawEnds[index];
             if (end < cutoff || end > nowNanos) {
                 continue;
