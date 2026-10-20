@@ -17,14 +17,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Pull requests get no secrets (owner decision 2026-10-20): no deploy keys, so no private
+  # SourbyPatcher/SourbyClip, so no Gradle (settings.gradle.kts refuses without the pinned
+  # SourbyPatcher jar), no Java build, no Java tests, no boot. This job runs what needs none of that.
+  pr-checks:
+    name: PR checks (no secrets; Java build and tests NOT run)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          persist-credentials: false
+
+      - name: Validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6 (v6.4.0)
+
+      - name: Set git identity (the Python tests create fixture repositories)
+        run: |
+          git config --global user.email "no-reply@github.com"
+          git config --global user.name "Github Actions"
+
+      - name: Python policy and tooling suite (private-toolchain tests reported as skipped)
+        run: python3 scripts/pr_checks.py
+
+      - name: Patch policy
+        run: python3 scripts/patch_policy.py
+
+      - name: Engine baseline guard
+        run: python3 scripts/baseline_policy.py
+
+      - name: Check patch surface
+        run: python3 scripts/patch_surface.py --check
+
+      - name: State what this pull request was not checked for
+        if: always()
+        run: |
+          {
+            echo "## Java build and tests did NOT run for this pull request"
+            echo
+            echo "They need the private-toolchain deploy keys (SourbyPatcher, SourbyClip), which pull requests do not get."
+            echo "Not run here: applyAllPatches, every Gradle task (compile, :sourbyapi/:sourbycraft-server/:test-plugin tests),"
+            echo "the four Python tests that read private-toolchain outputs (listed in scripts/pr_checks.py), slimServerJar,"
+            echo "verify_build_identity, the SBOM, the boot tests and the Docker image. They run on push and workflow_dispatch."
+            echo
+            echo "Run here: gradle wrapper validation, scripts/test_*.py (rest), patch_policy, baseline_policy, patch_surface --check."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Java build and tests not run::This pull request ran no Gradle build, no Java tests and no boot test (they need private-toolchain secrets). They run after merge on push."
+
   build:
     name: Build 26.2 jar
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    # Runs for pushes, pull requests and manual dispatch. A pull request has no head_commit, so
-    # the skip-ci check only ever applies to a push. Publication is the release job below (OBS-9).
-    if: "!contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'ci skip')"
+    # The secret-bearing build: pushes and manual dispatch only, never pull_request (the PR job
+    # above). The skip-ci check applies to a push's head commit. Publication is the release job (OBS-9).
+    if: "github.event_name != 'pull_request' && !contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'ci skip')"
     outputs:
       channel: ${{ steps.relnum.outputs.channel }}
       number: ${{ steps.relnum.outputs.number }}
@@ -144,10 +194,32 @@ jobs:
           # only upstream; slimServerJar (root build.gradle.kts) strips libraries from its paperclip jar.
           ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.number }}
           mkdir -p release
-          python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-${{ steps.relnum.outputs.channel }}.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}" --commit "$GITHUB_SHA"
+          # --source-root: the provenance hashes in the jar (patch directories, engine baseline,
+          # toolchain lock and pins) must equal this checkout's.
+          python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-${{ steps.relnum.outputs.channel }}.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}" --commit "$GITHUB_SHA" --source-root .
           cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
           api_version=$(sed -n 's/^apiVersion=//p' gradle.properties)
           python3 scripts/verify_build_identity.py build/libs/SourbyCraft-slim.jar --api-only --api-version "$api_version"
+
+      - name: Generate and verify the SBOM (CycloneDX)
+        run: |
+          set -eu
+          # From what the jar ships (libraries.list, versions.list, download-context, launcher), see
+          # scripts/sbom.py for why this is not the CycloneDX Gradle plugin. verify fails the build
+          # unless every libraries.list line is exactly one component with the same SHA-256.
+          channel=${{ steps.relnum.outputs.channel }}
+          python3 scripts/sbom.py generate "release/SourbyCraft-26.2-$channel.jar" \
+            --server-jar "sourbycraft-server/build/libs/sourbycraft-server-26.2-$channel.jar" \
+            -o "release/SourbyCraft-26.2-$channel.cdx.json"
+          python3 scripts/sbom.py verify "release/SourbyCraft-26.2-$channel.jar" "release/SourbyCraft-26.2-$channel.cdx.json"
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
+        with:
+          name: SourbyCraft-26.2-sbom
+          path: release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.cdx.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Show build info
         run: |
@@ -768,7 +840,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
         with:
           name: SourbyCraft-26.2-release
-          path: release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
+          path: |
+            release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
+            release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.cdx.json
           if-no-files-found: error
           retention-days: 1
 
@@ -782,6 +856,11 @@ jobs:
     # The one job that writes to the repository: it creates the tag and the GitHub release.
     permissions:
       contents: write
+    env:
+      # A secret cannot appear in a step's if:, so its presence is turned into a plain flag here.
+      # The value itself is only ever exposed to the signing step below.
+      HAS_RELEASE_SIGNING_KEY: ${{ secrets.SOURBYCRAFT_RELEASE_SIGNING_KEY != '' }}
+      RELEASE_PUBLIC_KEY: sourbycraft-server/src/main/resources/META-INF/sourbycraft-release.pub
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
@@ -793,6 +872,44 @@ jobs:
         with:
           name: SourbyCraft-26.2-release
           path: release
+
+      # SEC-2 + signed release manifest ship together: the public key in the jar, the jar signature
+      # and the manifest signature. A key without the secret would publish an unsigned release that
+      # every server enforcing signatures refuses; a secret without the key would sign for nobody.
+      - name: Check release signing setup
+        run: |
+          set -eu
+          if [ -f "$RELEASE_PUBLIC_KEY" ] && [ "$HAS_RELEASE_SIGNING_KEY" != true ]; then
+            echo "$RELEASE_PUBLIC_KEY is in the tree but the SOURBYCRAFT_RELEASE_SIGNING_KEY secret is not set" >&2; exit 1
+          fi
+          if [ ! -f "$RELEASE_PUBLIC_KEY" ] && [ "$HAS_RELEASE_SIGNING_KEY" = true ]; then
+            echo "SOURBYCRAFT_RELEASE_SIGNING_KEY is set but $RELEASE_PUBLIC_KEY is not in the tree" >&2; exit 1
+          fi
+          echo "release signing: $([ "$HAS_RELEASE_SIGNING_KEY" = true ] && echo enabled || echo 'not configured (unsigned release, as before)')"
+
+      - name: Sign release jar and manifest (Ed25519)
+        if: env.HAS_RELEASE_SIGNING_KEY == 'true'
+        env:
+          SOURBYCRAFT_RELEASE_SIGNING_KEY: ${{ secrets.SOURBYCRAFT_RELEASE_SIGNING_KEY }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
+        run: |
+          set -eu
+          openssl version
+          umask 077
+          key="$RUNNER_TEMP/release.key"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$SOURBYCRAFT_RELEASE_SIGNING_KEY" > "$key"
+          jar=release/SourbyCraft-26.2-$RELEASE_CHANNEL.jar
+          manifest=release/sourbycraft-release-manifest.json
+          # rollout % from gradle.properties, yank list from build-data/yanked-releases.txt.
+          python3 scripts/release_manifest.py generate --tag "$RELEASE_TAG" --jar "$jar" -o "$manifest"
+          python3 scripts/release_manifest.py check "$manifest" --tag "$RELEASE_TAG" --jar "$jar"
+          for file in "$jar" "$manifest"; do
+            openssl pkeyutl -sign -rawin -inkey "$key" -in "$file" -out "$file.sig"
+            openssl pkeyutl -verify -rawin -pubin -inkey "$RELEASE_PUBLIC_KEY" -in "$file" -sigfile "$file.sig"
+            test "$(wc -c < "$file.sig")" -eq 64
+          done
 
       - name: Create GitHub release
         env:
@@ -841,4 +958,12 @@ jobs:
               git log -10 --format='- %s'
             fi
           } > notes.md
-          gh release create "$tag" $publish_flags --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$jar" "$jar.sha256"
+          sbom=release/SourbyCraft-26.2-$RELEASE_CHANNEL.cdx.json
+          test -f "$sbom" || { echo "the build job did not hand over $sbom"; exit 1; }
+          assets=("$jar" "$jar.sha256" "$sbom")
+          if [ "$HAS_RELEASE_SIGNING_KEY" = true ]; then
+            # Asset names are what SourbyUpdater matches: <jar>.sig, sourbycraft-release-manifest.json(.sig).
+            assets+=("$jar.sig" release/sourbycraft-release-manifest.json release/sourbycraft-release-manifest.json.sig)
+            for asset in "${assets[@]}"; do test -f "$asset" || { echo "missing signed asset $asset"; exit 1; }; done
+          fi
+          gh release create "$tag" $publish_flags --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "${assets[@]}"

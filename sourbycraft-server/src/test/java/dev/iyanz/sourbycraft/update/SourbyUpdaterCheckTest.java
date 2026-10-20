@@ -221,7 +221,8 @@ class SourbyUpdaterCheckTest {
     @Test
     void withAKeyInTheBuildAReleaseWithoutASignatureIsRefused() throws Exception {
         KeyPair kp = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
-        transport.enqueue(LISTING, ok(listing(release("v26.2-r48", jarBytes.length, jarSha, false)), Map.of()));
+        transport.enqueue(LISTING, ok(listing(release("v26.2-r48", jarBytes.length, jarSha, false, true)), Map.of()));
+        enqueueManifest(kp, "v26.2-r48", jarSha, 100, List.of());
         transport.enqueue(JAR_URL, ok(jarBytes, Map.of()));
 
         assertEquals(Outcome.STAGE_FAILED,
@@ -238,17 +239,19 @@ class SourbyUpdaterCheckTest {
         byte[] sig = s.sign();
         ReleaseSignatureVerifier verifier = ReleaseSignatureVerifier.fromEncodedKey(kp.getPublic().getEncoded());
 
-        transport.enqueue(LISTING, ok(listing(release("v26.2-r48", jarBytes.length, jarSha, true)), Map.of()));
+        transport.enqueue(LISTING, ok(listing(release("v26.2-r48", jarBytes.length, jarSha, true, true)), Map.of()));
+        enqueueManifest(kp, "v26.2-r48", jarSha, 100, List.of());
         transport.enqueue(JAR_URL, ok(jarBytes, Map.of()));
         transport.enqueue(SIG_URL, ok(sig, Map.of()));
         assertEquals(Outcome.STAGED, updater(verifier).check(ApplyMode.STAGE));
-        assertEquals(List.of(LISTING, JAR_URL, SIG_URL), transport.urls());
+        assertEquals(List.of(LISTING, manifestUrl("v26.2-r48"), manifestUrl("v26.2-r48") + ".sig", JAR_URL, SIG_URL), transport.urls());
 
         // Same release, flipped signature byte: refused and nothing staged over the good copy.
         Files.delete(root.resolve("auto_update/sourbycraft/SourbyCraft-slim.jar"));
         byte[] bad = sig.clone();
         bad[0] ^= 0x01;
-        transport.enqueue(LISTING, ok(listing(release("v26.2-r48", jarBytes.length, jarSha, true)), Map.of()));
+        transport.enqueue(LISTING, ok(listing(release("v26.2-r48", jarBytes.length, jarSha, true, true)), Map.of()));
+        enqueueManifest(kp, "v26.2-r48", jarSha, 100, List.of());
         transport.enqueue(JAR_URL, ok(jarBytes, Map.of()));
         transport.enqueue(SIG_URL, ok(bad, Map.of()));
         assertEquals(Outcome.STAGE_FAILED, updater(verifier).check(ApplyMode.STAGE));
@@ -261,6 +264,33 @@ class SourbyUpdaterCheckTest {
         transport.enqueue(JAR_URL, ok(jarBytes, Map.of()));
         assertEquals(Outcome.STAGED, updater().check(ApplyMode.STAGE));
         assertEquals(List.of(LISTING, JAR_URL), transport.urls());
+    }
+
+    /** Script a signed manifest (and its signature) for {@code tag} on the transport. */
+    void enqueueManifest(KeyPair kp, String tag, String sha, int rollout, List<String> yanked) throws Exception {
+        byte[] manifest = manifestJson(tag, "SourbyCraft-slim.jar", sha, rollout, yanked).getBytes(StandardCharsets.UTF_8);
+        transport.enqueue(manifestUrl(tag), ok(manifest, Map.of()));
+        transport.enqueue(manifestUrl(tag) + ".sig", ok(sign(kp, manifest), Map.of()));
+    }
+
+    static String manifestJson(String tag, String asset, String sha, int rollout, List<String> yanked) {
+        return manifestJson(tag, asset, sha, rollout, yanked, 1, "2099-01-01T00:00:00Z");
+    }
+
+    static String manifestJson(String tag, String asset, String sha, int rollout, List<String> yanked,
+                               long revision, String expiresAt) {
+        StringBuilder y = new StringBuilder();
+        for (String t : yanked) y.append(y.isEmpty() ? "" : ",").append('"').append(t).append('"');
+        return "{\"schema\":1,\"tag\":\"" + tag + "\",\"asset\":\"" + asset + "\",\"sha256\":\"" + sha
+            + "\",\"rollout_percent\":" + rollout + ",\"yanked\":[" + y + "],\"policy_revision\":" + revision
+            + ",\"issued_at\":\"2026-10-20T00:00:00Z\",\"expires_at\":\"" + expiresAt + "\"}";
+    }
+
+    static byte[] sign(KeyPair kp, byte[] data) throws Exception {
+        Signature s = Signature.getInstance("Ed25519");
+        s.initSign(kp.getPrivate());
+        s.update(data);
+        return s.sign();
     }
 
     // ------------------------------------------------------------------ SEC-4: launcher gate
@@ -326,7 +356,20 @@ class SourbyUpdaterCheckTest {
     // ------------------------------------------------------------------ fixtures
 
     static String release(String tag, long size, String sha, boolean withSig) {
+        return release(tag, size, sha, withSig, false);
+    }
+
+    static String manifestUrl(String tag) {
+        return "https://example.invalid/" + tag + "/" + ReleaseManifest.ASSET_NAME;
+    }
+
+    /** A release whose assets optionally include the signed release manifest and its signature. */
+    static String release(String tag, long size, String sha, boolean withSig, boolean withManifest) {
         String sig = withSig ? ",{\"name\":\"SourbyCraft-slim.jar.sig\",\"browser_download_url\":\"" + SIG_URL + "\",\"size\":64}" : "";
+        if (withManifest) {
+            sig += ",{\"name\":\"" + ReleaseManifest.ASSET_NAME + "\",\"browser_download_url\":\"" + manifestUrl(tag) + "\",\"size\":300}"
+                + ",{\"name\":\"" + ReleaseManifest.SIGNATURE_ASSET_NAME + "\",\"browser_download_url\":\"" + manifestUrl(tag) + ".sig\",\"size\":64}";
+        }
         return "{\"tag_name\":\"" + tag + "\",\"draft\":false,\"prerelease\":false,"
             + "\"html_url\":\"https://example.invalid/rel/" + tag + "\",\"body\":\"# Notes\\nfirst line\","
             + "\"assets\":[{\"name\":\"SourbyCraft-slim.jar\",\"browser_download_url\":\"" + JAR_URL + "\","

@@ -68,6 +68,7 @@ CI hijau terbaru: run 38445246566 pada `d97fe247` (2026-10-14). Tree kandidat ri
   beku — kini watchdog, `stop` 115 s. Masih terbuka (bukan defek data): D6 tanpa batas waktu total
   shutdown AWF, D4 hanya WARN; belum ada run Redis lewat jaringan, dan skenario gangguan hanya
   dijalankan lokal. Bukti lokal laptop, bukan kualifikasi; tetap `[-]` selama D4/D6 terbuka.
+  — ulang di HEAD 2026-10-20 (server-w1, PARTIAL + temuan bug; jar `f84e9c10…`, tree kotor `69189766`, redis-server 8.10.2 127.0.0.1:6391 AOF everysec, resident-chunks=1, lease 15 s, commit 5 s, tanpa pemain/plugin, laptop bersama): freeze 33 s -> WARN renew/commit, 0 kotor setelah SIGCONT, commit lanjut; SIGKILL Redis + forceload chunk 100,100 yang di-evict -> "AWF could not read chunk 100,100 … (3 attempt(s)) … writes of this position are refused" (fence D1), chunk regenerasi tidak disimpan; Redis restart di AOF sama -> chunk dibaca ulang, marker diamond + emerald ada; `stop` dengan Redis SIGSTOP + chunk kotor 91 s exit 0 ("committed and closed 6 storage(s) at shutdown (6 not released)", D6 masih berskala store x timeout); reboot `server-w1-redis-2`: marker tersimpan ada, blok setelah freeze hilang (sesuai desain), tanpa AWFLEASE (D2). TEMUAN operasional: satu `forceload add 1600 1600` saat Redis mati = 731 ERROR SourbyCraft + 729 ERROR Moonrise `ChunkLoadTask` dengan stack penuh dalam 1 s (server.log 6,4 MB; forceload level 31 -> 27x27 chunk). opus-w6 (belum commit, untuk review): `awf/ReadFailureLog` (jendela 10 s per storage, kegagalan pertama dengan stack, sisanya dihitung + ringkasan) dan `AwfRegionStorage.fence` melempar `RepeatedReadFailure` tanpa stack untuk pengulangan; harness `opus-w6-redisflood-1` (jar `5c89e921…`, HEAD `69189766` tree kotor): ERROR baca SourbyCraft 731 -> 3, semua ERROR 2193 -> 1461, frame stack 40936 -> 164, 47519 -> 3099 baris, 6,29 -> 1,23 MB; data aman (marker tetap setelah restart Redis, blok yang dibuat selama outage tidak disimpan). Baris Moonrise (`MoonriseRegionFileIO:1103`, `ChunkLoadTask:333/:472`, ~1458 ERROR) masih butuh feature patch (todo patch: lewati/DEBUG log bila throwable `RepeatedReadFailure`). Belum: D4, D6, Redis lewat jaringan, ulang dengan SIGSTOP pada kode baru; tetap `[-]`
 - [ ] Alur pemain nyata dengan plugin bridged (EssentialsX/Vault) di Sourby Demo.
 
 ### Audit sistem 2026-10-14
@@ -231,10 +232,12 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   mundur = keterbatasan P0 yang sudah tercatat). Tree kandidat `cbef3fb9` lokal 2026-10-13 (laptop,
   jar `975d3bda…`): persistensi 105/105, crash region 52/52, crash AWF 56/56, game time tidak lagi
   mundur (XPASS). Dua NPE konsol diperbaiki (patch MC 0028, CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13) success)
+  — bukti fungsional agent test server 2026-10-20 (server-w1, PARTIAL, bukan kualifikasi): jar `f84e9c10…` dibangun dari HEAD `69189766` dengan tree kotor, Apple M2 16 GiB, load average 6–12 (mesin bersama, tidak tenang), tanpa klien dan tanpa plugin. Persistensi file region 61/61 (`server-w1-persist-region-1..4`: tulis, restart bersih x2, churn + SIGKILL exit -9, pulih; 64/64 blok, 24/24 armor stand, game time maju tiap boot, mis. 627 >= 443 setelah kill, 2352 chunk utuh) dan AWF FILE 65/65 (9 store, tiap store komitmen, tanpa `.mca` saat attached); 0 penanda korupsi `verify_crash` di 8 log. Kepemilikan: `server-w1-ownership-1` 28 langkah ok (3 area forceload, mob dan teleport lintas region, merge region, `save-all`), 0 baris guard/lintas-region/"Thread failed main thread check" di log. BELUM: round trip data pemain (tanpa klien), `stop` di bawah beban klien, plugin bridged (karantina `GuardViolations`), soak, mesin tenang, multi-world; item tetap `[-]`
 - [-] AWF: crash di level server dengan klien sudah lulus (terbaru lokal 56/56, `verify_crash.py
   --awf`, 2026-10-13; sebelumnya 53/53, 2026-10-05). Sisa: beban berkelanjutan dan investigasi
   commit awal 529 chunk yang butuh 105,5 detik di panel demo (`docs/architecture/aurora-world-fabric.md`);
   backend terputus dilacak di item Redis P0 di atas (tidak diulang di sini)
+  — bukti fungsional agent test server 2026-10-20 (server-w1, PARTIAL): siklus crash AWF di HEAD `69189766` (jar `f84e9c10…`, tree kotor, tanpa klien): SIGKILL setelah 8 s churn, checkpoint utuh, semua store komit; AWF FILE 65/65. Commit awal 529 chunk lokal (`server-w1-persist-awf-1`, `/perf awf`): region nether 1235 ms, end 1266 ms, overworld maks 1197 ms (1 sampel masing-masing, laptop bersama) vs 105,5 s di panel — investigasi panel tetap butuh panel; beban berkelanjutan butuh soak panjang; tanpa klien, bukan sertifikasi; item tetap `[-]`
 
 ### Konkurensi
 - [-] Soak konkurensi multi-jam (2 jam+) (DEV-A, AURORA-C/J): soak tersertifikasi 2 jam 10 pemain
@@ -252,6 +255,7 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   — DIBUKA LAGI 2026-10-20 (review Codex): field turunan 0044 `double` non-volatile masih bisa robek (JLS §17.7); F3 token validitas null bisa menghidupkan lagi navigasi setelah `stop()` kedua; tes ASM punya celah setelah rekompilasi; 0009 mengubah ambang `1.0E-5F` → `1.0E-5D` (deviasi vanilla). Perbaikan di papan
   — ditutup 2026-10-20: temuan review ulang independen (Codex) diperbaiki di patch MC 0046 (predikat gerak horizontal dipublikasikan sebagai `volatile boolean` dengan ambang float `1.0E-5F`) dan 0047 (generasi navigasi membatalkan path async yang sedang berjalan, termasuk retarget dengan node yang sama); `ScratchReentrancyTest`, `AsyncPathPatchShapeTest`, `AsyncPathCancellationTest`, `AsyncPathValidityTest` diperbarui, mutasi R1-R3 tertangkap. Batas jujur: F3 di `scratch-reentrancy-proof.md` SAFE hanya untuk invalidasi yang terenumerasi (model tulisan tangan, bukan lambda patch nyata); TIDAK tercakup: scratch baseline engine (`minecraft-patches/sources`, 113 patch entity) dan bukti runtime/soak
 - [-] Bukti runtime bahwa thread region tidak pernah blok pada I/O eksternal (saat ini baru audit statis)
+  — bukti sampling agent test server 2026-10-20 (server-w1, PARTIAL): jstack JVM tiap ~0,35 s saat workload konsol (forceload/unload area jauh, fill, `save-all` tiap 2 s, mob) di backend AWF redis, resident-chunks=1 (`server-w1-redis-1`, jar `f84e9c10…`, HEAD `69189766` tree kotor). Sehat 120 s: 342 dump, 2736 stack "Folia Region Scheduler Thread", 0 frame socket/Redis/NIO (3 frame I/O = class loading lazy dari jar server). Redis SIGSTOP 33 s: 142 dump, 1136 stack region, 0 frame I/O; `/mspt` worst avg 0,38 ms, recent max 13,3 ms; renew lease dan commit timeout di luar thread region. Batas: thread region parkir ~99% sampel (beban ringan, tanpa pemain), sampling melewatkan panggilan pendek, tanpa plugin, tanpa uji stall disk, tidak tersertifikasi; item tetap `[-]`
 
 ### Jaringan dan keamanan
 - [x] Verifikasi event loop Netty tidak melakukan I/O blocking yang tidak terkait (DEV-H)
@@ -269,6 +273,7 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   SourbyClip: soket hanya dibatasi 30 s connect/read; butuh perubahan di repo itu, rilis, dan re-pin —
   keputusan owner); bukti di `docs/architecture/bootstrap-download-audit.md` (DEV-L, AURORA-I)
 - [-] Kualifikasi cold-download dari remote (cold bootstrap pernah gagal cek hash Mojang dengan exit 0)
+  — bukti lokal agent test server 2026-10-20 (server-w1, PARTIAL): `server-w1-cold-1 --no-seed-cache` (jar `f84e9c10…`, HEAD `69189766` tree kotor): SourbyClip 3.1.2 mengunduh `mojang_26.2.jar` + 112 entri library ber-SHA-256 dari mirror asli, siap 26,7 s (`Done` 8,755 s), stop exit 0. Offline cold (`server-w1-cold-offline-1`, `-Dsourbyclip.offline=true`, cache kosong): JVM exit 1, "Offline bootstrap requires SHA-256-verified cache file cache/mojang_26.2.jar". BELUM: host remote/Linux (needs-linux/panel), injeksi hash-mismatch (harness hanya mengisi cache bersama), tidak tenang/tersertifikasi; item tetap `[-]`
 
 ---
 
@@ -454,6 +459,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [x] **SEC-8** CI: action di-pin per tag bukan SHA; `contents: write` untuk seluruh job — pin
   per SHA, persempit permission (audit §3)
   — selesai `1b33fe1e` (2026-10-20): semua `uses:` di-pin SHA 40-hex dengan tag di komentar; `permissions: contents: read` di atas dan job build, `write` hanya di job `release` baru (`needs: build`)
+  — keputusan owner 2026-10-20 (build-opus, review Codex butir 5, belum commit, belum pernah jalan di GitHub): job baru `pr-checks` ("PR checks (no secrets; Java build and tests NOT run)", hanya `pull_request`, `contents: read`, checkout `persist-credentials: false`, tanpa referensi secret) menjalankan validasi wrapper, `scripts/pr_checks.py` (4 tes toolchain privat dilaporkan skipped, gagal bila id hilang), patch_policy, baseline_policy, `patch_surface --check` plus catatan bahwa build/tes Java/boot tidak jalan; job `build` (satu-satunya pemegang deploy key) kini mengecualikan `pull_request`; `release` tidak berubah
 - [x] **OBS-4** Maintenance AWF di thread metrik; kegagalan setelah publish menurunkan snapshot
   segar jadi STALE — perbaikan sama dengan AWF-3, try/catch terpisah (audit §4)
   — selesai `46cbbefd` (2026-10-20): housekeeping pasca-publish diisolasi di try/catch sendiri dengan log rate-limited; snapshot segar tidak lagi turun ke STALE; tes regresi `aPostPublishFailureKeepsTheFreshSnapshotPublished`
@@ -711,11 +717,13 @@ belum direncanakan, kecuali yang ditandai; hanya butir yang bertanda [x] sudah d
 - [ ] Engine/bridge: `MobPathSnapshot` immutable untuk async pathfinding (menutup ENG-8 dan audit M5)
 - [x] Engine/bridge: ledger CPU saat boot di `ResourceGovernor` dan `/perf governor` — selesai `1c57a736`
   (`ThreadLedger`, ENG-9; laporan saja)
-- [ ] Distribusi: manifest rilis bertanda tangan dengan persentase staged rollout dan daftar yank
+- [-] Distribusi: manifest rilis bertanda tangan dengan persentase staged rollout dan daftar yank
   (tanda tangan rilis sendiri sudah diterima owner sebagai SEC-2; rollout/yank belum)
+  — diimplementasikan 2026-10-20 (build-opus), BELUM AKTIF: aktif hanya bila jar membawa kunci publik SEC-2 (belum ada); `update/ReleaseManifest`, `RolloutBucket`, `SourbyUpdater.selectByManifest`, `scripts/release_manifest.py`, `build-data/yanked-releases.txt`, `rolloutPercent` di gradle.properties; manifest hilang = gagal tertutup (`MANIFEST_REJECTED`); langkah tanda tangan CI kondisional pada secret, belum pernah jalan; desain `docs/development/AUTO-UPDATER.md`; revisi `policy_revision` + `expires_at`, state tersimpan `auto_update/release-policy.json` (revisi tertinggi per tag + yank terakumulasi; hilang = trust on first use, korup = gagal tertutup), yank dari rilis tanpa jar tetap dihitung, kunci JSON duplikat ditolak (revisi review Codex); tes ReleaseManifestTest 7, ReleasePolicyStateTest 3, RolloutBucketTest 7, SourbyUpdaterManifestTest 25, test_release_manifest.py 8; tanpa boot, tanpa re-sign terjadwal; job CI `pr-checks` dipisah dari `build` (lihat catatan di **SEC-8**), jadi PR tidak memegang deploy key maupun kunci tanda tangan
 - [ ] Distribusi: rollback auto-update yang digate kesehatan boot (rollback `.prev` diterima owner
   sebagai SEC-3; dilacak di P0)
-- [ ] Distribusi: SBOM (CycloneDX) dan atestasi provenance build per rilis
+- [-] Distribusi: SBOM (CycloneDX) dan atestasi provenance build per rilis
+  — SBOM 2026-10-20 (build-opus): `scripts/sbom.py` (CycloneDX 1.6 dari isi jar, verifikasi terhadap `libraries.list`), CI generate+verify+artifact+lampiran rilis (belum pernah jalan di CI); `test_sbom.py` 9; provenance tertanam (baris berikut) tetapi BELUM atestasi bertanda tangan (in-toto/SLSA); tidak divalidasi terhadap skema JSON resmi
 - [ ] Distribusi: slim jar reproducible dengan job rebuild independen
 - [ ] Keamanan: satu modul security milik sendiri yang teruji untuk semua limit packet (= SEC-1,
   **diterima owner** 2026-10-14; dilacak di P0)
@@ -723,4 +731,5 @@ belum direncanakan, kecuali yang ditandai; hanya butir yang bertanda [x] sudah d
 - [ ] Observability: ringkasan flame per region untuk region lambat (JFR opt-in)
 - [ ] Observability: atribusi biaya plugin per region
 - [ ] Observability: lane housekeeping dengan marker kesegarannya sendiri (commit AWF, sampling, histori)
-- [ ] Observability: manifest provenance build (tree hash, flag dirty, hash direktori patch) dicetak `/ver`
+- [x] Observability: manifest provenance build (tree hash, flag dirty, hash direktori patch) dicetak `/ver`
+  — selesai 2026-10-20 (build-opus): hash direktori patch MC/Paper/API, manifest baseline, lock + pin toolchain, JDK toolchain di `sourbycraft-build.properties` (`provenance.*`) dan manifest (`Provenance-*`) dari satu provider; `/ver` bagian "Provenance" (`brand/BuildProvenance`); `verify_build_identity.py` cek kesesuaian + `--source-root` (CI); test_build_identity 23, BuildProvenanceTest 4, VerCommandTest 4; `docs/development/BUILD-PROVENANCE.md`

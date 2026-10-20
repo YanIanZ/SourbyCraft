@@ -47,7 +47,9 @@ below, not as the previous live value: deleting `apply_mode` and reloading gives
 
 ## Verification chain before a jar is staged
 
-In order, `SourbyUpdater.downloadAndStage` / `verifyOrThrow`:
+Before any download, a build that ships the release key first picks the release through the signed
+release manifest (yank list + staged rollout; section below). Then, in order,
+`SourbyUpdater.downloadAndStage` / `verifyOrThrow`:
 
 1. **Bound before reading** (SEC-10). The bound is the asset's declared `size`, else
    `MAX_JAR_BYTES` (512 MiB). A `Content-Length` above the bound is refused without reading the
@@ -192,7 +194,8 @@ every 30 min) stays well under that.
 ## Signed releases (SEC-2) — implemented, **not enabled**
 
 `ReleaseSignatureVerifier` (JDK `java.security`, Ed25519) is active **iff** the jar contains
-`META-INF/sourbycraft-release.pub`. **This repository ships no key and CI signs nothing**, so on
+`META-INF/sourbycraft-release.pub`. **This repository ships no key and CI signs nothing** (the release
+job has the signing step since 2026-10-20, but it only runs once the secret exists), so on
 every current build the verifier is inactive and the boot log says
 `release signatures NOT enforced (no /META-INF/sourbycraft-release.pub in this build)`.
 `ReleaseSignatureVerifierTest.thisBuildShipsNoKeySoTheVerifierIsInactive` fails the day a key
@@ -222,36 +225,158 @@ but unparseable keeps enforcement on and failing closed. Tests: `ReleaseSignatur
 2. Add the **public** key as `sourbycraft-server/src/main/resources/META-INF/sourbycraft-release.pub`
    (PEM or bare base64 both parse) and update the test above to assert the opposite.
 3. Store the PEM private key as the GitHub Actions secret `SOURBYCRAFT_RELEASE_SIGNING_KEY`.
-4. Add the signing step to `.github/workflows/build.yml` before `Create GitHub release` and
-   upload the `.sig` next to the jar (the workflow is owned by another party in this wave; the
-   step text is below). Release one build with the key in the jar **before** the first signed
-   release is required, otherwise older servers that already enforce would refuse an unsigned
-   release — in practice: ship the key and the signing step in the same release.
+4. Nothing to add to the workflow any more: `.github/workflows/build.yml` (release job) already has
+   `Check release signing setup` and `Sign release jar and manifest (Ed25519)` (2026-10-20). The
+   signing step runs only when the `SOURBYCRAFT_RELEASE_SIGNING_KEY` secret exists (a secret cannot
+   be named in a step `if:`, so the job turns its presence into `env.HAS_RELEASE_SIGNING_KEY`), and the
+   check step fails the release when exactly one of {secret, public-key resource} exists. So the key,
+   the jar signature and the manifest signature can only ship together, in the same release: a key
+   without signing would publish an unsigned release that enforcing servers refuse, a secret without
+   the key would sign for no server. Until the owner adds both, releases publish exactly as before.
 
-Step text for `build.yml` (same `if:` as the publish step):
+The signing step signs the jar and `sourbycraft-release-manifest.json` with
+`openssl pkeyutl -sign -rawin`, verifies each with `openssl pkeyutl -verify -rawin -pubin` against the
+resource in the tree, checks each signature is 64 bytes, and deletes the key file on exit.
+`Create GitHub release` then uploads `<jar>.sig`, `sourbycraft-release-manifest.json` and
+`sourbycraft-release-manifest.json.sig` next to the jar, `.sha256` and the SBOM. The asset names
+must be exactly these; `SourbyUpdater.parseRelease` matches on them. **Not run yet**: no secret and
+no public key exist, so the step has never executed on a runner.
 
-```yaml
-      - name: Sign release jar (Ed25519)
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/release/26.2-canvas'
-        env:
-          SOURBYCRAFT_RELEASE_SIGNING_KEY: ${{ secrets.SOURBYCRAFT_RELEASE_SIGNING_KEY }}
-        run: |
-          set -eu
-          test -n "$SOURBYCRAFT_RELEASE_SIGNING_KEY" || { echo "SOURBYCRAFT_RELEASE_SIGNING_KEY secret is not set" >&2; exit 1; }
-          umask 077
-          printf '%s\n' "$SOURBYCRAFT_RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release.key"
-          jar=release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
-          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/release.key" -in "$jar" -out "$jar.sig"
-          openssl pkeyutl -verify -rawin -pubin \
-            -inkey sourbycraft-server/src/main/resources/META-INF/sourbycraft-release.pub \
-            -in "$jar" -sigfile "$jar.sig"
-          rm -f "$RUNNER_TEMP/release.key"
-          test "$(wc -c < "$jar.sig")" -eq 64
+## Signed release manifest: staged rollout and yank list (2026-10-20)
+
+Code: `update/ReleaseManifest.java`, `update/RolloutBucket.java`, `SourbyUpdater.selectByManifest`;
+writer `scripts/release_manifest.py`; yank list `build-data/yanked-releases.txt`; rollout
+`rolloutPercent` in `gradle.properties` (default 100).
+
+**Activation: the same rule as SEC-2.** Enforced iff the build ships
+`META-INF/sourbycraft-release.pub` (`ReleaseSignatureVerifier.isActive()`). Without a key the updater
+never fetches a manifest and behaves exactly as before (`SourbyUpdaterManifestTest.withoutAKeyTheManifestIsNeverFetched`).
+An unsigned manifest proves nothing, and honouring one would let anyone able to edit release assets
+hold updates back.
+
+**Format** — one JSON asset per release, `sourbycraft-release-manifest.json`, plus its detached
+Ed25519 signature `sourbycraft-release-manifest.json.sig` (64 raw bytes or base64, same key and
+formats as the jar signature). The signature covers the exact bytes, so there is no canonical-JSON
+step: what was signed is what is parsed.
+
+```json
+{
+  "schema": 1,
+  "tag": "v26.2-r48",
+  "asset": "SourbyCraft-26.2-REL.jar",
+  "sha256": "<hex SHA-256 of that jar asset>",
+  "rollout_percent": 25,
+  "yanked": ["v26.2-r47"],
+  "policy_revision": 1792454400,
+  "issued_at": "2026-10-20T00:00:00Z",
+  "expires_at": "2027-01-18T00:00:00Z"
+}
 ```
 
-and in `Create GitHub release`, append `"$jar.sig"` to the `gh release create ... "$jar" "$jar.sha256"`
-argument list. The asset name must be exactly `<jar name>.sig`; `SourbyUpdater.parseRelease`
-matches on that.
+Parsing is strict (`ReleaseManifest.parse`): `schema` must be 1 (a newer format is not read with old
+rules), `tag`/`asset` non-blank strings, `sha256` 64 hex, `rollout_percent` an integer 0..100,
+`yanked` an array of non-blank strings (at most 4096), `policy_revision` a positive integer,
+`expires_at` an ISO-8601 instant; at most 64 KiB, UTF-8, **strict JSON with no duplicate member name
+in any object**, compared after escape decoding (`"rollout\u005fpercent"` duplicates
+`"rollout_percent"`) — a signed but ambiguous document is refused instead of resolved by "last one
+wins" (`ReleaseManifest.rejectAmbiguousJson`; `release_manifest.py` uses an `object_pairs_hook` with
+the same rule). Unknown fields are ignored. `tag`, `asset` and `sha256` must equal the release's tag, its jar asset name and that
+asset's published digest (`requireBoundTo`), so a validly signed manifest of another release, or of
+another build of this release, is refused.
+
+**Selection** (only with a key; runs before the announcement, so a yanked or deferred release is
+neither announced nor staged): the releases on this channel that are newer than the running build
+are inspected newest first, at most `MAX_MANIFEST_CANDIDATES = 5` — **including releases whose jar
+asset is missing** (or prereleases this server ignores), because their signed yanks must still count:
+deleting r49's jar must not hide that r49's manifest yanks r48 (`deletingTheJarOfTheYankingReleaseDoesNotHideItsYank`).
+For each, the manifest and its signature are downloaded (bounded), verified, parsed and bound (tag
+always; asset name and digest when there is a jar). A missing or unverifiable manifest stops the
+check (`MANIFEST_REJECTED`). The yank set is the persisted yanks plus every manifest read so far, so
+the newest release's manifest can yank older ones. Then, per candidate: yanked → skipped (WARN,
+never staged); no installable jar → skipped (its yanks counted); stale (below) → skipped; outside
+the rollout → skipped; otherwise it is the update. Outcomes when nothing is chosen, in this order:
+`MANIFEST_REJECTED` (a candidate was stale), `ROLLOUT_DEFERRED`, `NO_RELEASE` (only jarless
+candidates were left), `YANKED`. After a selection the existing gates (applied tag, Minecraft
+version, size, digest, jar signature, launcher) run unchanged.
+
+**Freshness and persisted policy** (`ReleasePolicyState`, `auto_update/release-policy.json`). Without
+it, anyone able to edit release assets could put back an older signed manifest (empty yank list,
+wider rollout) without the key. Each manifest carries `policy_revision` (the signer raises it every
+time it signs a policy for a tag; `release_manifest.py` defaults to the signing time in epoch
+seconds) and `expires_at` (default 90 days after signing). The server persists, per tag, the highest
+revision it accepted, and every yank any authentic manifest ever carried. A manifest is **fresh**
+when it has not expired and its revision is at least the stored one; only a fresh manifest can make
+its release installable (and only a fresh one raises the stored revision). Every authentic manifest —
+fresh, expired or rolled back — adds its yanks, since yanks only restrict. Persisted yanks keep
+applying after the yanking release is deleted. The state is saved after every policy pass; if it
+cannot be saved nothing is installed. Saves are serialised, re-read and merge (max revision, union
+of yanks) and go through a unique temporary file plus an atomic move, so concurrent checks cannot
+lower each other's knowledge.
+
+- **State file missing** (first enforcing check, or the operator deleted it): start empty — trust
+  on first use. There is nothing earlier to protect, refusing would block every fresh install
+  forever, and the replay window for a new server is bounded by `expires_at`. Deleting it needs
+  write access to the server directory, which already allows replacing the jar.
+- **State file corrupt** (unparseable, wrong schema/shape, non-positive revision, over 4096
+  entries): fail closed with `MANIFEST_REJECTED` before any manifest download, ERROR naming the file.
+  Reading it as empty would silently forget yanks and revisions, which is exactly what a replay
+  needs; deleting the file is the operator's explicit reset to trust on first use.
+
+Operational consequence of expiry: a release whose manifest has expired can no longer be installed
+by a server that is behind (`MANIFEST_REJECTED` until re-signed). Servers already on it are not
+affected (only newer releases are inspected). Re-sign with a new revision before `expires_at` (next
+paragraph) for any release that should stay installable.
+
+**Rollout bucketing** (`RolloutBucket`): a 128-bit random id is written once to
+`auto_update/rollout.id` (first use is race-free: callers are serialised, the candidate goes to a
+unique temporary file and is published with a hard link that fails if the file exists, falling back
+to a move without replace; every caller returns the id re-read from disk). It is read locally only — never logged, sent, or derived from host, IP,
+world or players; deleting the file re-buckets the server. `bucket = SHA-256("sourbycraft-rollout:v1:"
++ id + ":" + tag)`, first 8 bytes unsigned, mod 100. The server takes the release iff `bucket <
+rollout_percent`: 0 reaches nobody, 100 everybody, and raising the percentage for one tag only adds
+servers. Because the tag is in the hash, the first wave differs between releases. A server whose id
+cannot be read or written gets bucket 99 (only full rollouts reach it).
+
+**Missing manifest, with a key present: fail closed (`MANIFEST_REJECTED`).** Every release made
+after the key exists gets its manifest from the same CI step that signs the jar, so a signed
+release without one is an anomaly. If "missing" meant "100 %, nothing yanked", deleting the asset —
+by mistake or by anyone with write access to release assets — would turn a yanked release back on
+and bypass a staged rollout; the manifest exists precisely to prevent that. A broken newest manifest
+also stops the check instead of falling through to an older release, because the unreadable manifest
+may be the one that yanks it. The cost of a wrong refusal is a WARN per check and a delayed update.
+A release published before the key existed has no `.sig` either and is already refused by SEC-2.
+
+**Changing rollout or yanking after publication** (owner, offline): write a new manifest for that
+release with `scripts/release_manifest.py generate --tag <tag> --jar <the release jar> --rollout <N>`
+(a later signing time gives a higher `policy_revision`; `--revision`/`--valid-days` override),
+sign it with `openssl pkeyutl -sign -rawin -inkey <key> -in sourbycraft-release-manifest.json -out
+sourbycraft-release-manifest.json.sig`, then `gh release upload <tag> sourbycraft-release-manifest.json
+sourbycraft-release-manifest.json.sig --clobber`. To yank the newest release, list its own tag in
+`build-data/yanked-releases.txt` and re-sign its manifest the same way; future releases carry the
+whole list automatically. Between the two uploads a server can read a new manifest with the old
+signature: that check returns `MANIFEST_REJECTED` and the next one succeeds.
+
+**Limits, stated plainly:** replay protection is per server and starts at its first enforcing check:
+a server that never saw the newer policy can be served an older, unexpired signed manifest (bounded
+by `expires_at`), and deleting `release-policy.json` resets it to trust on first use. Revisions are
+per tag; a newer release's policy does not lower an older tag's stored revision. Expired manifests
+need a re-sign (no CI job re-signs them on a schedule). A running build that is itself yanked is not
+told so. `/update apply` does not bypass the rollout. Rollout and yank are evaluated per check, so a
+staged-but-not-applied jar is not withdrawn by a later yank. Not boot-tested; no real GitHub release
+with a manifest exists yet.
+
+Tests: `ReleaseManifestTest` (7: well-formed, 15 malformed shapes + non-UTF-8 + oversize, 0/100
+bounds, binding, the exact `release_manifest.py` output layout, revision/expiry, duplicate and
+escaped-duplicate names), `RolloutBucketTest` (7: id persistence, fallback, determinism/spread,
+boundary `bucket == percent` excluded / `bucket + 1` included, ~25 % of 10 000 ids, 20 rounds of 8
+concurrent first uses agreeing on the persisted id, an existing id never replaced),
+`ReleasePolicyStateTest` (3: round trip, merge of stale concurrent saves, corrupt shapes refused),
+`SourbyUpdaterManifestTest` (25: the 17 earlier scenarios plus jarless yanking release, jarless
+release without manifest, yank persisting after the yanking release is deleted, replayed older
+revision, expired manifest (yanks still count), stale newest falls back to an older fresh one,
+missing state = first use / corrupt state = fail closed, no key = no state written),
+`scripts/test_release_manifest.py` (8). The two SEC-2 tests in `SourbyUpdaterCheckTest` now also
+script a valid manifest, since a key makes the manifest mandatory.
 
 ## `/update` and command blocks (OBS-8)
 

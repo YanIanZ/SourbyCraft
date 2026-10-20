@@ -117,6 +117,79 @@ def _identity(root):
     return {'commit': commit, 'treeHash': digest.hexdigest(), 'dirty': str(dirty).lower()}
 
 
+# Build provenance (TODO Inovasi "provenance manifest"). Each key becomes the property
+# provenance.<key> in META-INF/sourbycraft-build.properties and the manifest attribute
+# Provenance-<key>; verify_build_identity.py checks both and can recompute them from a checkout.
+PROVENANCE_DIRS = {
+    'Minecraft-Features': 'sourbycraft-server/minecraft-patches/features',
+    'Paper-Features': 'sourbycraft-server/paper-patches/features',
+    'Api-Paper-Patches': 'sourbyapi/paper-patches',
+}
+PROVENANCE_FILES = {
+    'Engine-Baseline': 'build-data/engine-baseline.sha256',
+    'Toolchain-Lock': 'build-data/private-toolchain.lock.json',
+}
+PROVENANCE_PINS = {
+    'Patcher-Sha256': 'patcherSha256',
+    'Patcher-Pom-Sha256': 'patcherPomSha256',
+    'Patcher-Module-Sha256': 'patcherModuleSha256',
+    'Clip-Sha256': 'clipSha256',
+}
+# Added by Gradle (the Java 25 toolchain that compiles the sources), not computable here.
+PROVENANCE_JDK = 'Jdk'
+PROVENANCE_KEYS = tuple(PROVENANCE_DIRS) + tuple(PROVENANCE_FILES) + tuple(PROVENANCE_PINS) + (PROVENANCE_JDK,)
+
+
+def directory_hash(directory):
+    """SHA-256 over every regular file under ``directory`` on disk, uncommitted edits included.
+
+    One line per file in sorted POSIX-relative-path order: ``<path> NUL <sha256 hex of the bytes> LF``.
+    Names starting with a dot (``.DS_Store``) are skipped; symlinks and other entries are refused
+    so a hash never silently follows a link out of the tree.
+    """
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise FileNotFoundError(directory)
+    lines = []
+    for path in directory.rglob('*'):
+        relative = path.relative_to(directory)
+        if any(part.startswith('.') for part in relative.parts):
+            continue
+        mode = path.lstat().st_mode
+        if stat.S_ISDIR(mode):
+            continue
+        if not stat.S_ISREG(mode):
+            raise ValueError(f'Unsupported provenance entry: {path}')
+        lines.append(relative.as_posix().encode('utf-8', errors='surrogateescape') + b'\0'
+                     + hashlib.sha256(path.read_bytes()).hexdigest().encode() + b'\n')
+    return hashlib.sha256(b''.join(sorted(lines))).hexdigest()
+
+
+def provenance(root):
+    """Patch-directory, baseline, lock and pin hashes; any unavailable value is ``unknown``."""
+    root = Path(root)
+    result = {}
+    for key, relative in PROVENANCE_DIRS.items():
+        try:
+            result[key] = directory_hash(root / relative)
+        except (OSError, ValueError):
+            result[key] = 'unknown'
+    for key, relative in PROVENANCE_FILES.items():
+        try:
+            result[key] = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+        except OSError:
+            result[key] = 'unknown'
+    try:
+        properties = dict(line.split('=', 1) for line in (root / 'gradle.properties').read_text().splitlines()
+                          if '=' in line and not line.lstrip().startswith('#'))
+    except OSError:
+        properties = {}
+    for key, name in PROVENANCE_PINS.items():
+        value = properties.get(name, '').strip().lower()
+        result[key] = value if re.fullmatch(r'[0-9a-f]{64}', value) else 'unknown'
+    return result
+
+
 def identity(root):
     try:
         return _identity(Path(root))
@@ -132,4 +205,5 @@ if __name__ == '__main__':
     if len(sys.argv) == 2:
         print(result[sys.argv[1]])
     else:
+        result['provenance'] = provenance(Path(__file__).resolve().parent.parent)
         print(json.dumps(result, sort_keys=True))

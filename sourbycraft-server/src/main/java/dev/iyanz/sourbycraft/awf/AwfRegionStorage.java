@@ -104,6 +104,8 @@ public final class AwfRegionStorage {
     private final AtomicLong readRetries = new AtomicLong();
     private final AtomicLong readFailures = new AtomicLong();
     private final AtomicLong refusedWrites = new AtomicLong();
+    /** Rate-limits the log of failed reads: first per window with its stack, then one summary. */
+    private volatile ReadFailureLog failureLog;
     /** Whether a read is on the engine's chunk-load path; tests replace it. */
     private volatile java.util.function.BooleanSupplier loadPath = AwfRegionStorage::onChunkLoadPath;
     /** Set when {@link #close} committed everything but the backend could not release the store. */
@@ -119,6 +121,7 @@ public final class AwfRegionStorage {
         this.storageLane = storageLane;
         this.lastCommitNanos = new AtomicLong(nowNanos);
         this.onClose = onClose;
+        this.failureLog = ReadFailureLog.serverLog(name);
     }
 
     /** The FILE backend's store directory for a region folder. */
@@ -309,14 +312,39 @@ public final class AwfRegionStorage {
 
     private IOException fence(final ChunkKey key, final IOException failed, final int attempts) {
         this.readFailures.incrementAndGet();
-        final boolean first = this.unreadable.putIfAbsent(key, System.nanoTime()) == null;
+        this.unreadable.putIfAbsent(key, System.nanoTime());
         final String message = "AWF could not read chunk " + key + " of " + this.name + " (" + attempts
             + " attempt(s)): " + failed.getMessage() + ". The stored chunk is kept: writes of this position are"
             + " refused until it is read back when the chunk loads again; a chunk the server generates in its"
             + " place meanwhile is not saved";
-        // The chunk system logs the exception with its stack; one line here names the consequence.
-        if (first) dev.iyanz.sourbycraft.util.SourbyLogger.error(message);
-        return new IOException(message, failed);
+        // One chunk load reads hundreds of positions and the chunk system logs each failure with
+        // the exception's stack (twice: MoonriseRegionFileIO and ChunkLoadTask). The first failure
+        // of a window is logged here with its stack and thrown with its cause; the rest are counted
+        // and thrown without a stack, so the chunk system prints their message, not ~35 lines each.
+        // Fencing above is the same either way.
+        if (this.failureLog.failed(message, failed)) return new IOException(message, failed);
+        return new RepeatedReadFailure(message + " [" + failed + "; stack trace omitted, see the first AWF read"
+            + " failure of this window]");
+    }
+
+    /**
+     * A failed read after the first of its {@link ReadFailureLog} window: same message and meaning
+     * as the first, but no stack trace and no cause (both would repeat the first one's).
+     */
+    public static final class RepeatedReadFailure extends IOException {
+        RepeatedReadFailure(final String message) {
+            super(message);
+        }
+
+        @Override
+        public synchronized Throwable fillInStackTrace() {
+            return this;
+        }
+    }
+
+    /** Replaces the failed-read log. Tests only. */
+    void failureLog(final ReadFailureLog log) {
+        this.failureLog = log;
     }
 
     private void recovered(final ChunkKey key) {
@@ -414,6 +442,7 @@ public final class AwfRegionStorage {
      * @return whether a commit was started
      */
     public boolean maintain(final long nowNanos) {
+        this.failureLog.flush();
         if (this.discarding || this.closed.get() || this.world.dirtyCount() == 0 || this.world.pendingSaveCount() > 0) return false;
         final long last = this.lastCommitNanos.get();
         final boolean intervalPassed = nowNanos - last >= this.settings.commitIntervalSeconds() * 1_000_000_000L;
@@ -525,6 +554,7 @@ public final class AwfRegionStorage {
         } finally {
             this.transition.writeLock().unlock();
         }
+        this.failureLog.close();
         if (!this.unreadable.isEmpty()) {
             dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF " + this.name + ": " + this.unreadable.size()
                 + " chunk position(s) could not be read this session; their stored bytes were kept and "

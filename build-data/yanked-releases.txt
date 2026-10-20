@@ -1,0 +1,6 @@
+# Release tags the auto-updater must never stage (signed release manifest, yank list).
+# One tag per line, e.g. v26.2-r48; `#` starts a comment. scripts/release_manifest.py copies the
+# whole list into every new release's signed manifest, so the newest release yanks everything here.
+# Yanking the newest release itself also needs its own manifest re-signed and re-uploaded
+# (docs/development/AUTO-UPDATER.md, "Changing rollout or yanking after publication").
+# Enforced only by builds that ship META-INF/sourbycraft-release.pub (same rule as SEC-2).

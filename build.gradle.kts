@@ -183,6 +183,25 @@ val sourbycraftSourceSnapshot = try {
 val sourbycraftSourceIdentity: Provider<String> = providers.provider { sourbycraftSourceSnapshot }
 extra["sourbycraftSourceIdentity"] = sourbycraftSourceIdentity
 
+// SourbyCraft — build provenance embedded next to the source identity (TODO Inovasi "provenance
+// manifest"): scripts/build_identity.py's "provenance" object (SHA-256 of each patch directory, the
+// engine-baseline manifest, the toolchain lock and the pinned toolchain jar hashes) plus the JDK
+// that compiles the sources (the Java 25 toolchain, not the JVM running Gradle). writeBuildInfo
+// writes it as provenance.<Name>=... and the server manifest as Provenance-<Name>: ...; both read
+// this one provider, which is what keeps them in lockstep. verify_build_identity.py checks both.
+val sourbycraftBuildJdk: Provider<String> = extensions.getByType<JavaToolchainService>()
+    .compilerFor { languageVersion = JavaLanguageVersion.of(25) }
+    .map { "${it.metadata.vendor} ${it.metadata.javaRuntimeVersion}".trim() }
+    .orElse("unknown")
+val sourbycraftProvenance: Provider<Map<String, String>> = sourbycraftSourceIdentity.zip(sourbycraftBuildJdk) { json, jdk ->
+    val parsed = groovy.json.JsonSlurper().parseText(json) as Map<*, *>
+    val out = sortedMapOf<String, String>()
+    (parsed["provenance"] as? Map<*, *>)?.forEach { (k, v) -> out[k.toString()] = v.toString() }
+    out["Jdk"] = jdk
+    out
+}
+extra["sourbycraftProvenance"] = sourbycraftProvenance
+
 val sourbycraftSuffixProvider: Provider<String> = sourbycraftBranchProvider.map { branch ->
     val releaseVersionFull = providers.gradleProperty("releaseVersion").getOrElse("dev")
     val releaseMajor = releaseVersionFull.substringBefore('-')
@@ -266,6 +285,8 @@ subprojects {
         val rawBuild = providers.gradleProperty("sourbyBuild").getOrElse("1").trim()
         val provenance = sourbycraftSourceIdentity
         inputs.property("sourceIdentity", provenance)
+        val buildProvenance = sourbycraftProvenance
+        inputs.property("buildProvenance", buildProvenance)
         val sourbyBuild = rawBuild
         val outFile = layout.buildDirectory.file("generated-resources/META-INF/sourbycraft-build.properties")
 
@@ -315,7 +336,7 @@ subprojects {
                 codename=$engineCodename
                 tagline=Reliable Stable High Performance
                 buildTimestamp=$timestamp
-                """.trimIndent()
+                """.trimIndent() + buildProvenance.get().entries.joinToString("") { "\nprovenance.${it.key}=${it.value}" } + "\n"
             )
         }
     }

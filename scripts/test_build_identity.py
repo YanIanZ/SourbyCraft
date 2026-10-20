@@ -1,12 +1,24 @@
+import os
 import io
 import json
 import tempfile
 import subprocess
-from build_identity import identity
+from build_identity import PROVENANCE_KEYS, directory_hash, identity, provenance
 from pathlib import Path
 import unittest
 import zipfile
 from verify_build_identity import verify, verify_api_version
+
+
+def provenance_lines(values=None, jdk='Eclipse Adoptium 25.0.1+8-LTS'):
+    """(properties text, manifest text) for a complete provenance block."""
+    values = dict(values or {})
+    values.setdefault('Jdk', jdk)
+    for key in PROVENANCE_KEYS:
+        values.setdefault(key, 'd' * 64)
+    props = ''.join(f'provenance.{k}={v}\n' for k, v in values.items())
+    manifest = ''.join(f'Provenance-{k}: {v}\r\n' for k, v in values.items())
+    return props, manifest
 
 
 def jar(directory, properties, manifest, api_metadata=None):
@@ -176,11 +188,12 @@ class BuildIdentityTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             commit = 'a' * 40
             tree = 'b' * 64
+            props, manifest = provenance_lines()
             def make(dirty='false', manifest_tree=tree):
                 suffix = '-dirty' if dirty == 'true' else ''
                 return jar(directory,
-                    f'buildNumber=47\nbuild=47{suffix}\ngitCommit={commit}\ntreeHash={tree}\ndirty={dirty}\n',
-                    f'Implementation-Version: Build 47{suffix}\r\nGit-Commit: {commit}\r\nGit-Tree-Hash: {manifest_tree}\r\nGit-Dirty: {dirty}\r\n')
+                    f'buildNumber=47\nbuild=47{suffix}\ngitCommit={commit}\ntreeHash={tree}\ndirty={dirty}\n' + props,
+                    f'Implementation-Version: Build 47{suffix}\r\nGit-Commit: {commit}\r\nGit-Tree-Hash: {manifest_tree}\r\nGit-Dirty: {dirty}\r\n' + manifest)
             self.assertEqual(commit, verify(make(), 47, commit=commit)['gitCommit'])
             with self.assertRaises(ValueError):
                 verify(make(), 47, commit='c' * 40)
@@ -236,3 +249,131 @@ class BuildIdentityTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BuildProvenanceTest(unittest.TestCase):
+    """TODO Inovasi "provenance manifest": patch-directory/baseline/toolchain hashes + JDK."""
+
+    COMMIT = 'a' * 40
+    TREE = 'b' * 64
+
+    def make(self, directory, props_extra='', manifest_extra=''):
+        return jar(directory,
+            f'buildNumber=47\nbuild=47\ngitCommit={self.COMMIT}\ntreeHash={self.TREE}\ndirty=false\n' + props_extra,
+            f'Implementation-Version: Build 47\r\nGit-Commit: {self.COMMIT}\r\nGit-Tree-Hash: {self.TREE}\r\nGit-Dirty: false\r\n' + manifest_extra)
+
+    def source_tree(self, root):
+        for relative in ('sourbycraft-server/minecraft-patches/features', 'sourbycraft-server/paper-patches/features',
+                         'sourbyapi/paper-patches/features', 'build-data'):
+            (root / relative).mkdir(parents=True, exist_ok=True)
+        (root / 'sourbycraft-server/minecraft-patches/features/0001-a.patch').write_text('mc\n')
+        (root / 'sourbycraft-server/paper-patches/features/0001-b.patch').write_text('paper\n')
+        (root / 'sourbyapi/paper-patches/features/0001-c.patch').write_text('api\n')
+        (root / 'build-data/engine-baseline.sha256').write_text('baseline\n')
+        (root / 'build-data/private-toolchain.lock.json').write_text('{}\n')
+        (root / 'gradle.properties').write_text(
+            'patcherSha256=' + '1' * 64 + '\npatcherPomSha256=' + '2' * 64
+            + '\npatcherModuleSha256=' + '3' * 64 + '\nclipSha256=' + '4' * 64 + '\n')
+
+    def test_complete_matching_provenance_passes_the_publication_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            props, manifest = provenance_lines()
+            info = verify(self.make(directory, props, manifest), 47, commit=self.COMMIT)
+            self.assertEqual('d' * 64, info['provenance.Minecraft-Features'])
+
+    def test_publication_requires_every_provenance_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for key in PROVENANCE_KEYS:
+                with self.subTest(key=key):
+                    values = {k: ('Eclipse Adoptium 25.0.1+8-LTS' if k == 'Jdk' else 'd' * 64) for k in PROVENANCE_KEYS if k != key}
+                    props = ''.join(f'provenance.{k}={v}\n' for k, v in values.items())
+                    manifest = ''.join(f'Provenance-{k}: {v}\r\n' for k, v in values.items())
+                    with self.assertRaisesRegex(ValueError, 'Missing build provenance'):
+                        verify(self.make(directory, props, manifest), 47, commit=self.COMMIT)
+
+    def test_manifest_and_properties_must_agree_on_each_provenance_value(self):
+        with tempfile.TemporaryDirectory() as directory:
+            props, _ = provenance_lines()
+            _, manifest = provenance_lines({'Paper-Features': 'e' * 64})
+            with self.assertRaisesRegex(ValueError, 'disagree on provenance Paper-Features'):
+                verify(self.make(directory, props, manifest), 47)
+            props, manifest = provenance_lines()
+            with self.assertRaisesRegex(ValueError, 'properties lack'):
+                verify(self.make(directory, props, manifest + 'Provenance-Extra: x\r\n'), 47)
+
+    def test_values_must_be_sha256_and_the_jdk_must_be_the_25_toolchain(self):
+        with tempfile.TemporaryDirectory() as directory:
+            props, manifest = provenance_lines({'Engine-Baseline': 'not-a-hash'})
+            with self.assertRaisesRegex(ValueError, 'not a SHA-256'):
+                verify(self.make(directory, props, manifest), 47)
+            props, manifest = provenance_lines(jdk='Eclipse Adoptium 21.0.4+7-LTS')
+            with self.assertRaisesRegex(ValueError, 'Java 25 toolchain'):
+                verify(self.make(directory, props, manifest), 47)
+            props, manifest = provenance_lines(jdk='Oracle Corporation 25')
+            verify(self.make(directory, props, manifest), 47)
+
+    def test_unknown_values_are_local_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            props, manifest = provenance_lines({'Minecraft-Features': 'unknown'})
+            self.assertEqual('unknown', verify(self.make(directory, props, manifest), 47)['provenance.Minecraft-Features'])
+            with self.assertRaisesRegex(ValueError, 'not a SHA-256'):
+                verify(self.make(directory, props, manifest), 47, commit=self.COMMIT)
+
+    def test_a_jar_without_provenance_is_still_inspectable_locally(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual('47', verify(self.make(directory), 47)['buildNumber'])
+
+    def test_directory_hash_tracks_content_names_and_new_files_but_not_dot_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'sub').mkdir()
+            (root / 'a.patch').write_text('one')
+            (root / 'sub/b.patch').write_text('two')
+            base = directory_hash(root)
+            self.assertEqual(base, directory_hash(root))
+            (root / '.DS_Store').write_text('finder')
+            self.assertEqual(base, directory_hash(root))
+            (root / 'a.patch').write_text('changed')
+            changed = directory_hash(root)
+            self.assertNotEqual(base, changed)
+            (root / 'a.patch').write_text('one')
+            (root / 'a.patch').rename(root / 'c.patch')
+            self.assertNotEqual(base, directory_hash(root))
+            (root / 'c.patch').rename(root / 'a.patch')
+            (root / 'new.patch').write_text('three')
+            self.assertNotEqual(base, directory_hash(root))
+            (root / 'new.patch').unlink()
+            os.symlink(root / 'a.patch', root / 'link.patch')
+            with self.assertRaises(ValueError):
+                directory_hash(root)
+
+    def test_provenance_reads_the_tree_and_marks_missing_inputs_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertTrue(all(v == 'unknown' for v in provenance(root).values()))
+            self.source_tree(root)
+            result = provenance(root)
+            self.assertEqual(set(PROVENANCE_KEYS) - {'Jdk'}, set(result))
+            self.assertEqual('1' * 64, result['Patcher-Sha256'])
+            self.assertEqual('4' * 64, result['Clip-Sha256'])
+            self.assertEqual(directory_hash(root / 'sourbyapi/paper-patches'), result['Api-Paper-Patches'])
+            import hashlib
+            self.assertEqual(hashlib.sha256(b'baseline\n').hexdigest(), result['Engine-Baseline'])
+
+    def test_source_root_check_detects_a_patch_edit_after_the_build(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as jars:
+            root = Path(directory)
+            self.source_tree(root)
+            values = dict(provenance(root))
+            props, manifest = provenance_lines(values)
+            path = self.make(jars, props, manifest)
+            verify(path, 47, commit=self.COMMIT, source_root=root)
+            (root / 'sourbycraft-server/paper-patches/features/0002-new.patch').write_text('late\n')
+            with self.assertRaisesRegex(ValueError, 'Paper-Features differs from the source tree'):
+                verify(path, 47, commit=self.COMMIT, source_root=root)
+
+    def test_this_checkout_provides_every_source_provenance_value(self):
+        root = Path(__file__).resolve().parent.parent
+        result = provenance(root)
+        for key, value in result.items():
+            self.assertRegex(value, r'^[0-9a-f]{64}$', key)

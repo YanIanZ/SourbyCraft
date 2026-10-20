@@ -112,6 +112,9 @@ public class UpdateCommand extends Command {
             case RATE_LIMITED -> text("GitHub rate limit — check skipped until the backoff window ends (see console).", SourbyCraftColors.DIM);
             case MC_VERSION_MISMATCH -> text("Update available but for another Minecraft version — not staged (see console).", SourbyCraftColors.PRIMARY);
             case CLIP_INCOMPATIBLE -> text("Update available but its launcher cannot be handed over to — not staged (see console).", SourbyCraftColors.PRIMARY);
+            case YANKED -> text("Every newer release is yanked by its signed manifest — nothing to install.", SourbyCraftColors.DIM);
+            case ROLLOUT_DEFERRED -> text("A newer release is in staged rollout and has not reached this server yet.", SourbyCraftColors.DIM);
+            case MANIFEST_REJECTED -> text("Newer release refused: its signed release manifest is missing or invalid (see console).", SourbyCraftColors.DANGER);
         };
     }
 

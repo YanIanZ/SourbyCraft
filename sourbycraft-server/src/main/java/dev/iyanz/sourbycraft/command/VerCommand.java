@@ -2,6 +2,7 @@ package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
 import dev.iyanz.sourbycraft.brand.BuildInfo;
+import dev.iyanz.sourbycraft.brand.BuildProvenance;
 import dev.iyanz.sourbycraft.util.BarUtil;
 import io.papermc.paper.ServerBuildInfo;
 import net.kyori.adventure.text.Component;
@@ -30,6 +31,7 @@ public class VerCommand extends Command {
     private static final ZoneId GMT_PLUS_7 = ZoneId.of("Asia/Jakarta");
 
     private final java.util.function.Supplier<ServerBuildInfo> serverBuildInfo;
+    private final java.util.function.Supplier<BuildProvenance> provenance;
 
     public VerCommand(String n) {
         this(n, ServerBuildInfo::buildInfo);
@@ -37,8 +39,15 @@ public class VerCommand extends Command {
 
     /** Test seam: Paper's {@link ServerBuildInfo} cannot initialise outside a running server. */
     VerCommand(String n, java.util.function.Supplier<ServerBuildInfo> serverBuildInfo) {
+        this(n, serverBuildInfo, BuildProvenance::load);
+    }
+
+    /** Test seam: the provenance of the test classpath is whatever the last build wrote. */
+    VerCommand(String n, java.util.function.Supplier<ServerBuildInfo> serverBuildInfo,
+               java.util.function.Supplier<BuildProvenance> provenance) {
         super(n);
         this.serverBuildInfo = serverBuildInfo;
+        this.provenance = provenance;
         this.description = "Version info";
         this.usageMessage = "/ver";
         this.setPermission("sourbycraft.command.ver");
@@ -89,6 +98,12 @@ public class VerCommand extends Command {
             .append(text("  Git: ", SourbyCraftColors.LABEL))
             .append(text(bi.gitBranch().orElse("?") + "@" + bi.gitCommit().orElse("?"), SourbyCraftColors.DIM))
             .build());
+        // Build provenance (TODO Inovasi): what this jar was built from, so a server months later
+        // can be traced to the exact patch set and toolchain. Full hashes: jar manifest Provenance-*.
+        s.sendMessage(UiPanel.section("Provenance"));
+        for (String[] row : this.provenance.get().displayRows()) {
+            s.sendMessage(line(row[0], row[1]));
+        }
         s.sendMessage(UiPanel.actions(java.util.List.of("/aurora", "/sourbycraft config")));
         s.sendMessage(UiPanel.footer());
         return true;

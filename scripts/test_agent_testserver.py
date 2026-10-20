@@ -1,0 +1,606 @@
+"""Unit tests for agent_testserver.py. No JVM: a small Python program stands in for the server."""
+import json
+import os
+from pathlib import Path
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import textwrap
+import threading
+import time
+import unittest
+
+import agent_testserver as ats
+
+FAKE_SERVER = textwrap.dedent("""
+    import signal, sys, time
+    mode = sys.argv[1] if len(sys.argv) > 1 else "normal"
+    if mode == "stubborn":
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    print("Starting fake server", flush=True)
+    if mode == "no-done":
+        time.sleep(600)
+    if mode == "bind-fail":
+        print("**** FAILED TO BIND TO PORT!", flush=True)
+        sys.exit(1)
+    print("[Aurora Engine] COMPLETE | 3/3 stages completed without error | 0 failed | 5ms", flush=True)
+    print('[12:00:00 INFO]: Done (0.42s)! For help, type "help"', flush=True)
+    if mode == "crash":
+        time.sleep(2.5)
+        print("Exception in server tick loop", flush=True)
+        sys.exit(3)
+    for line in sys.stdin:
+        line = line.strip()
+        if line == "time query gametime":
+            print("[12:00:01 INFO]: The game time is 42", flush=True)
+        elif line == "stop":
+            if mode == "stubborn":
+                continue
+            print("[12:00:02 INFO]: Stopping server", flush=True)
+            sys.exit(0)
+        else:
+            print(f"[12:00:01 INFO]: echo {line}", flush=True)
+    time.sleep(600 if mode == "stubborn" else 0)
+""")
+
+
+def no_hardware(java_version=None):
+    return {"cpu_model": "fake", "java_version": java_version}
+
+
+def fake_git():
+    return {"head": "0" * 40, "dirty": False, "head_commit_time": 0}
+
+
+class TempCase(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name).resolve()
+        self.addCleanup(self._tmp.cleanup)
+
+
+class PathRefusalTest(TempCase):
+    def test_a_plain_name_resolves_inside_the_base(self):
+        base = self.root / "base"
+        self.assertEqual(ats.resolve_workdir(base, "smoke-1", repo=self.root / "repo",
+                                             home=self.root / "home"), base / "smoke-1")
+
+    def test_names_that_escape_or_are_not_identifiers_are_refused(self):
+        for name in ("../x", "a/b", "", ".hidden", "x" * 65, "a b", ats.CACHE_NAME, None):
+            with self.subTest(name=name), self.assertRaises(ats.HarnessError):
+                ats.resolve_workdir(self.root / "base", name, repo=self.root / "repo",
+                                    home=self.root / "home")
+
+    def test_a_base_inside_the_repository_is_refused(self):
+        repo = self.root / "repo"
+        with self.assertRaisesRegex(ats.HarnessError, "repository"):
+            ats.resolve_workdir(repo / "build" / "servers", "x", repo=repo, home=self.root / "h")
+
+    def test_a_base_inside_home_is_refused(self):
+        home = self.root / "home"
+        with self.assertRaisesRegex(ats.HarnessError, "home"):
+            ats.resolve_workdir(home / "servers", "x", repo=self.root / "repo", home=home)
+
+    def test_the_owners_server_tree_is_refused_except_the_harness_base(self):
+        for base in (Path("/Volumes/Ext/Sourby/TestServer"), Path("/Volumes/Ext/Sourby")):
+            with self.subTest(base=base), self.assertRaisesRegex(ats.HarnessError, "owner"):
+                ats.resolve_workdir(base, "x", repo=self.root / "repo", home=self.root / "home")
+        self.assertEqual(ats.resolve_workdir(ats.BASE, "x", repo=self.root / "repo",
+                                             home=self.root / "home"), ats.BASE.resolve() / "x")
+
+    def test_the_real_repository_and_home_are_refused_with_defaults(self):
+        with self.assertRaises(ats.HarnessError):
+            ats.resolve_workdir(ats.REPO / "run", "x")
+        with self.assertRaises(ats.HarnessError):
+            ats.resolve_workdir(Path.home() / "servers", "x")
+
+    def test_a_symlink_out_of_the_base_is_refused(self):
+        base = self.root / "base"
+        base.mkdir()
+        (base / "link").symlink_to(self.root / "elsewhere")
+        with self.assertRaises(ats.HarnessError):
+            ats.resolve_workdir(base, "link", repo=self.root / "repo", home=self.root / "home")
+
+
+class LockTest(TempCase):
+    def lock(self, **kwargs):
+        return ats.MachineLock(self.root / "t.lock", **kwargs)
+
+    def test_acquire_writes_an_owner_and_a_second_acquire_is_busy(self):
+        first = self.lock()
+        token = first.acquire(name="a", workdir="/w/a", max_lifetime_s=100)
+        owner = first.read()
+        self.assertEqual((owner["token"], owner["name"], owner["pid"]), (token, "a", os.getpid()))
+        with self.assertRaises(ats.LockBusy) as busy:
+            self.lock().acquire(name="b", max_lifetime_s=100)
+        self.assertIn("name=a", str(busy.exception))
+
+    def test_release_needs_the_token(self):
+        lock = self.lock()
+        token = lock.acquire(name="a", max_lifetime_s=100)
+        self.assertFalse(lock.release("not-the-token"))
+        self.assertTrue(lock.path.exists())
+        self.assertTrue(lock.release(token))
+        self.assertFalse(lock.path.exists())
+        self.lock().acquire(name="b", max_lifetime_s=100)      # Free again.
+
+    def test_a_dead_owner_is_broken_and_its_leftover_jvm_killed(self):
+        killed = []
+        lock = self.lock(leftover=lambda pid, workdir: killed.append((pid, workdir)) or True)
+        lock.acquire(name="a", workdir="/w/a", pid=999999, max_lifetime_s=100)
+        lock.update(lock.read()["token"], jvm_pid=4242)
+        alive = self.lock(alive=lambda pid: False,
+                          leftover=lambda pid, workdir: killed.append((pid, workdir)) or True)
+        token = alive.acquire(name="b", max_lifetime_s=100)
+        self.assertEqual(killed, [(4242, "/w/a")])
+        self.assertEqual(alive.read()["token"], token)
+
+    def test_a_live_owner_past_its_lifetime_plus_margin_is_broken(self):
+        clock = [1000.0]
+        held = self.lock(clock=lambda: clock[0], stale_margin=10)
+        held.acquire(name="a", max_lifetime_s=50)
+        later = self.lock(clock=lambda: clock[0], stale_margin=10, leftover=lambda *_: False)
+        clock[0] += 59
+        with self.assertRaises(ats.LockBusy):
+            later.acquire(name="b", max_lifetime_s=50)
+        clock[0] += 2
+        later.acquire(name="b", max_lifetime_s=50)
+        self.assertEqual(later.read()["name"], "b")
+
+    def test_a_directory_without_owner_is_stale_only_after_the_window(self):
+        (self.root / "t.lock").mkdir()
+        mtime = (self.root / "t.lock").stat().st_mtime
+        early = self.lock(clock=lambda: mtime + 5, unowned_stale=60)
+        with self.assertRaises(ats.LockBusy):
+            early.acquire(name="x")
+        late = self.lock(clock=lambda: mtime + 61, unowned_stale=60)
+        late.acquire(name="x")
+
+    def test_update_with_a_foreign_token_is_refused(self):
+        lock = self.lock()
+        lock.acquire(name="a", max_lifetime_s=100)
+        with self.assertRaises(ats.HarnessError):
+            lock.update("nope", jvm_pid=1)
+
+    def test_only_one_of_many_concurrent_acquirers_wins(self):
+        wins, errors = [], []
+
+        def contend():
+            try:
+                wins.append(self.lock().acquire(name="c", max_lifetime_s=100))
+            except ats.LockBusy:
+                errors.append(1)
+        threads = [threading.Thread(target=contend) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual((len(wins), len(errors)), (1, 7))
+
+
+class PortTest(unittest.TestCase):
+    def test_returns_a_bindable_localhost_port_outside_the_defaults(self):
+        port = ats.free_port()
+        self.assertGreater(port, 1024)
+        self.assertNotIn(port, (25565, 25575))
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", port))
+
+    def test_excluded_ports_are_never_returned(self):
+        ports = {ats.free_port() for _ in range(5)}
+        self.assertFalse(ports & {25565})
+        self.assertGreater(len(ports), 1)
+
+
+class WatchdogTest(unittest.TestCase):
+    def test_expiry_requests_a_stop_then_kills_a_process_that_does_not_exit(self):
+        events, alive = [], [True]
+        dog = ats.LifetimeWatchdog(0.2, on_expire=lambda: events.append("stop"),
+                                   kill=lambda: (events.append("kill"), alive.__setitem__(0, False)),
+                                   alive=lambda: alive[0], grace=0.3, interval=0.02).start()
+        dog.join(3)
+        self.assertEqual(events, ["stop", "kill"])
+        self.assertTrue(dog.expired and dog.killed)
+
+    def test_a_process_that_exits_within_the_grace_is_not_killed(self):
+        events, alive = [], [True]
+
+        def stop():
+            events.append("stop")
+            alive[0] = False
+        dog = ats.LifetimeWatchdog(0.1, stop, lambda: events.append("kill"),
+                                   lambda: alive[0], grace=0.5, interval=0.02).start()
+        dog.join(3)
+        self.assertEqual(events, ["stop"])
+        self.assertFalse(dog.killed)
+
+    def test_cancel_before_the_deadline_does_nothing(self):
+        events = []
+        dog = ats.LifetimeWatchdog(5, lambda: events.append("stop"), lambda: events.append("kill"),
+                                   lambda: True, grace=0.1, interval=0.02).start()
+        dog.cancel()
+        dog.join(2)
+        self.assertEqual(events, [])
+        self.assertFalse(dog.expired)
+
+    def test_kills_a_real_process_group(self):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                                 start_new_session=True)
+        self.addCleanup(lambda: child.poll() is None and child.kill())
+        dog = ats.LifetimeWatchdog(0.1, lambda: None, lambda: ats.kill_group(child.pid, grace=1),
+                                   lambda: child.poll() is None, grace=0.1, interval=0.02).start()
+        dog.join(10)
+        self.assertIsNotNone(child.wait(timeout=5))
+
+
+class ScenarioParseTest(unittest.TestCase):
+    def test_a_valid_scenario_parses_every_step_kind(self):
+        settings, steps = ats.parse_scenario({
+            "settings": {"view_distance": 3, "properties": {"difficulty": "peaceful"}},
+            "steps": [{"command": "ver", "expect": "Build", "save_as": "ver.txt"},
+                      {"wait_for": "Done \\(", "timeout": 10},
+                      {"sleep": 1.5}, {"perf": ""}, {"perf": "chunks", "label": "chunks"},
+                      {"workload": "idle", "duration": 30, "continue_on_failure": True}]})
+        self.assertEqual(settings["view_distance"], 3)
+        self.assertEqual([s["kind"] for s in steps],
+                         ["command", "wait_for", "sleep", "perf", "perf", "workload"])
+        self.assertEqual(steps[4]["index"], 5)
+
+    def test_invalid_scenarios_are_refused_before_boot(self):
+        bad = [
+            [], {"steps": []}, {"steps": "x"}, {"steps": [{}]}, {"oops": 1, "steps": [{"sleep": 1}]},
+            {"steps": [{"command": "ver", "sleep": 1}]},             # two kinds
+            {"steps": [{"command": "ver", "bogus": 1}]},             # unknown key
+            {"steps": [{"command": "stop"}]}, {"steps": [{"command": "/restart"}]},
+            {"steps": [{"command": "say a\nstop"}]},
+            {"steps": [{"command": "ver", "expect": "("}]},          # bad regex
+            {"steps": [{"wait_for": "["}]},
+            {"steps": [{"sleep": -1}]}, {"steps": [{"sleep": True}]}, {"steps": [{"sleep": 4000}]},
+            {"steps": [{"perf": "Chunks; stop"}]},
+            {"steps": [{"workload": "no-such"}]},
+            {"steps": [{"workload": "plugins-10"}]},                 # needs a plugin set
+            {"steps": [{"command": "ver", "timeout": 0}]},
+            {"steps": [{"command": "ver", "save_as": "../x"}]},
+            {"settings": {"heap_mib": "big"}, "steps": [{"sleep": 1}]},
+            {"settings": {"unknown": 1}, "steps": [{"sleep": 1}]},
+        ]
+        for data in bad:
+            with self.subTest(data=data), self.assertRaises(ats.ScenarioError):
+                ats.parse_scenario(data)
+
+
+class PropertiesAndContextTest(TempCase):
+    def test_properties_are_local_offline_and_small_by_default(self):
+        props = ats.server_properties(30001, 4, 5, "minecraft:normal")
+        self.assertEqual((props["server-ip"], props["online-mode"], props["server-port"]),
+                         ("127.0.0.1", "false", "30001"))
+        self.assertEqual((props["view-distance"], props["simulation-distance"]), ("4", "5"))
+        self.assertIn("level-type=minecraft\\:normal\n", ats.render_properties(props))
+
+    def test_isolation_properties_cannot_be_overridden(self):
+        for key in ("online-mode", "server-ip", "server-port", "enable-rcon"):
+            with self.subTest(key=key), self.assertRaises(ats.HarnessError):
+                ats.server_properties(1, 4, 5, "minecraft:flat", {key: "x"})
+        self.assertEqual(ats.server_properties(1, 4, 5, "f", {"difficulty": "peaceful"})
+                         ["difficulty"], "peaceful")
+
+    def test_hardware_context_reads_sysctl_on_darwin(self):
+        answers = {"machdep.cpu.brand_string": "Apple M2", "hw.physicalcpu": "8",
+                   "hw.perflevel0.physicalcpu": "4", "hw.perflevel1.physicalcpu": "4",
+                   "hw.memsize": str(16 * 1024 ** 3)}
+
+        def run(command, **_kwargs):
+            out = answers.get(command[-1], "26.0" if command[0] == "sw_vers" else "")
+            return subprocess.CompletedProcess(command, 0, stdout=out + "\n", stderr="")
+        info = ats.hardware_context("openjdk 25.0.2", run=run, system=lambda: "Darwin")
+        self.assertEqual((info["cpu_model"], info["physical_cpus"], info["performance_cores"],
+                          info["ram_gib"], info["os_version"], info["java_version"]),
+                         ("Apple M2", 8, 4, 16.0, "26.0", "openjdk 25.0.2"))
+
+    def test_jar_provenance_flags_a_jar_older_than_head(self):
+        jar = self.root / "x.jar"
+        jar.write_bytes(b"jar")
+        os.utime(jar, (1000, 1000))
+        self.assertTrue(ats.jar_provenance(jar, head_commit_time=2000)["older_than_head_commit"])
+        self.assertFalse(ats.jar_provenance(jar, head_commit_time=500)["older_than_head_commit"])
+        self.assertEqual(len(ats.jar_provenance(jar)["sha256"]), 64)
+
+
+class HarnessCase(TempCase):
+    """End-to-end through the real supervisor subprocess, with the fake server."""
+
+    def setUp(self):
+        super().setUp()
+        self.fake = self.root / "fake_server.py"
+        self.fake.write_text(FAKE_SERVER)
+        self.jar = self.root / "SourbyCraft-slim.jar"
+        self.jar.write_bytes(b"not really a jar")
+        self.harness = ats.Harness(base=self.root / "servers", lock_path=self.root / "ts.lock",
+                                   jar=self.jar, min_free=0,
+                                   java=lambda: (sys.executable, "fake 25"), git=fake_git,
+                                   hardware=no_hardware)
+        self.addCleanup(self._kill_leftovers)
+
+    def _kill_leftovers(self):
+        for run in self.root.glob("servers/*/run.json"):
+            data = json.loads(run.read_text())
+            for pid in (data.get("supervisor_pid"), data.get("jvm_pid")):
+                if pid and ats.pid_alive(pid):
+                    ats.kill_group(pid, grace=1)
+
+    def start(self, name="t", mode="normal", **kwargs):
+        kwargs.setdefault("max_lifetime_s", 120)
+        kwargs.setdefault("startup_timeout_s", 30)
+        return self.harness.start(name, command=[sys.executable, str(self.fake), mode], **kwargs)
+
+    def run_json(self, name="t"):
+        return json.loads((self.root / "servers" / name / "run.json").read_text())
+
+
+class LifecycleTest(HarnessCase):
+    def test_start_command_wait_for_stop_and_run_json(self):
+        run = self.start()
+        workdir = Path(run["workdir"])
+        self.assertEqual(run["status"], "ready")
+        self.assertIn("Done (0.42s)!", run["done_line"])
+        self.assertEqual(run["boot_verdict"], "COMPLETE")
+        self.assertTrue((workdir / ats.MARKER).is_file())
+        self.assertEqual((workdir / "eula.txt").read_text(), "eula=true\n")
+        self.assertEqual((workdir / self.jar.name).read_bytes(), self.jar.read_bytes())
+        self.assertNotEqual(workdir / self.jar.name, self.jar)
+        self.assertEqual(self.harness.lock().read()["role"], "supervisor")
+
+        ok, text = self.harness.command("t", "/say hello", expect="echo say hello", timeout=10)
+        self.assertTrue(ok, text)
+        self.assertEqual(self.harness.wait_for("t", r"echo say \w+", timeout=5).split("]: ")[-1],
+                         "echo say hello")
+        self.assertIsNone(self.harness.wait_for("t", "never-logged", timeout=0.5))
+        with self.assertRaises(ats.HarnessError):
+            self.harness.command("t", "stop")
+
+        final = self.harness.stop("t", timeout=10)
+        self.assertEqual((final["status"], final["exit_code"], final["stop_reason"]),
+                         ("exited", 0, "requested"))
+        self.assertTrue(final["lock_released"])
+        self.assertFalse(final["jvm_still_running"])
+        self.assertFalse(self.harness.lock_path.exists())
+        self.assertIn("Stopping server", "\n".join(final["log_tail"]))
+        for key in ("git", "jar", "hardware", "boot_seconds", "ended_at", "launch", "limits"):
+            self.assertIn(key, self.run_json())
+        self.assertFalse(ats.pid_alive(final["jvm_pid"]))
+        self.assertIn("say hello", (workdir / "commands.log").read_text())
+
+    def test_a_second_start_is_refused_while_one_runs(self):
+        self.start("a")
+        with self.assertRaises(ats.LockBusy):
+            self.start("b")
+        self.assertFalse((self.root / "servers" / "b").exists())
+        self.harness.stop("a", timeout=10)
+        self.start("b")
+        self.harness.stop("b", timeout=10)
+
+    def test_an_existing_workdir_is_never_reused(self):
+        self.start("a")
+        self.harness.stop("a", timeout=10)
+        with self.assertRaisesRegex(ats.HarnessError, "already exists"):
+            self.start("a")
+
+    def test_low_disk_space_is_refused(self):
+        self.harness.min_free = 20 * 1024 ** 3
+        self.harness._disk_free = lambda _path: 19 * 1024 ** 3
+        with self.assertRaisesRegex(ats.HarnessError, "GiB free"):
+            self.start()
+        self.assertFalse(self.harness.lock_path.exists())
+
+    def test_a_server_that_ignores_stop_is_killed_after_the_timeout(self):
+        self.start(mode="stubborn")
+        final = self.harness.stop("t", timeout=1)
+        self.assertEqual(final["status"], "exited")
+        self.assertTrue(final["killed"])
+        self.assertTrue(final["lock_released"])
+        self.assertFalse(final["jvm_still_running"])
+
+    def test_the_lifetime_watchdog_ends_a_run_and_frees_the_lock(self):
+        self.start(mode="stubborn", max_lifetime_s=2, lifetime_grace_s=1)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and "lock_released" not in self.run_json():
+            time.sleep(0.2)
+        run = self.run_json()
+        self.assertEqual(run["stop_reason"], "max lifetime reached")
+        self.assertTrue(run["lifetime_expired"] and run["killed"] and run["lock_released"])
+        self.assertFalse(ats.pid_alive(run["jvm_pid"]))
+
+    def test_a_crashing_server_is_recorded_and_frees_the_lock(self):
+        run = self.start(mode="crash", console_probe=False)
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and "lock_released" not in self.run_json():
+            time.sleep(0.2)
+        run = self.run_json()
+        self.assertEqual((run["status"], run["exit_code"], run["stop_reason"]),
+                         ("exited", 3, "jvm exited by itself"))
+        self.assertIn("Exception in server tick loop", run["log_tail"])
+        self.assertTrue(run["lock_released"])
+
+    def test_startup_failure_marker_fails_the_start_and_frees_the_lock(self):
+        with self.assertRaisesRegex(ats.HarnessError, "did not become ready"):
+            self.start(mode="bind-fail")
+        self.assertFalse(self.harness.lock_path.exists())
+        self.assertNotEqual(self.run_json()["exit_code"], 0)
+
+    def test_startup_timeout_stops_the_server(self):
+        with self.assertRaises(ats.HarnessError):
+            self.start(mode="no-done", startup_timeout_s=1, lifetime_grace_s=1)
+        run = self.run_json()
+        self.assertEqual(run["stop_reason"], "startup timeout")
+        self.assertTrue(run["lock_released"])
+        self.assertFalse(ats.pid_alive(run["jvm_pid"]))
+
+    def test_sigterm_to_the_supervisor_stops_cleanly_and_frees_the_lock(self):
+        run = self.start()
+        os.kill(run["supervisor_pid"], signal.SIGTERM)
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and "lock_released" not in self.run_json():
+            time.sleep(0.2)
+        run = self.run_json()
+        self.assertEqual((run["stop_reason"], run["exit_code"]), ("signal SIGTERM", 0))
+        self.assertTrue(run["lock_released"])
+
+    def test_a_killed_supervisor_leaves_a_lock_the_next_start_breaks(self):
+        run = self.start("a")
+        os.kill(run["supervisor_pid"], signal.SIGKILL)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and ats.pid_alive(run["supervisor_pid"]):
+            time.sleep(0.1)
+        self.assertTrue(self.harness.lock_path.exists())
+        jvm = run["jvm_pid"]
+        self.start("b")                         # Breaks the stale lock, kills a's JVM.
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and ats.pid_alive(jvm):
+            time.sleep(0.1)
+        self.assertFalse(ats.pid_alive(jvm))
+        self.harness.stop("b", timeout=10)
+
+
+class WorldReuseAndKillTest(HarnessCase):
+    """Restart persistence and crash checks need a second boot over the first run's world."""
+
+    def _fake_world(self, workdir):
+        for rel, data in (("world/region/r.0.0.mca", b"overworld"), ("world/level.dat", b"lvl"),
+                          ("world_nether/DIM-1/region/r.0.0.mca", b"nether")):
+            path = Path(workdir) / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+
+    def test_world_from_copies_only_the_previous_runs_world_dirs_and_records_it(self):
+        first = Path(self.start("a")["workdir"])
+        self._fake_world(first)
+        (first / "notes.txt").write_text("not a world")
+        self.harness.stop("a", timeout=10)
+        second = Path(self.start("b", world_from="a")["workdir"])
+        try:
+            self.assertEqual((second / "world/region/r.0.0.mca").read_bytes(), b"overworld")
+            self.assertEqual((second / "world_nether/DIM-1/region/r.0.0.mca").read_bytes(),
+                             b"nether")
+            self.assertFalse((second / "notes.txt").exists())
+            source = self.run_json("b")["world_from"]
+            self.assertEqual(source["name"], "a")
+            self.assertEqual(sorted(source["copied"]), ["world", "world_nether"])
+            self.assertEqual(source["source_exit_code"], 0)
+            # The copy is independent: the source world is untouched by the second run.
+            (second / "world/level.dat").write_bytes(b"changed")
+            self.assertEqual((first / "world/level.dat").read_bytes(), b"lvl")
+        finally:
+            self.harness.stop("b", timeout=10)
+
+    def test_world_from_is_refused_for_unknown_running_or_worldless_runs(self):
+        with self.assertRaisesRegex(ats.HarnessError, "not a harness run"):
+            self.start("b", world_from="missing")
+        live = self.root / "servers" / "live"
+        live.mkdir(parents=True)
+        (live / ats.MARKER).write_text("x")
+        (live / "run.json").write_text(json.dumps({"status": "ready"}))
+        self._fake_world(live)
+        with self.assertRaisesRegex(ats.HarnessError, "still running"):
+            self.start("b", world_from="live")
+        self.start("empty")
+        self.harness.stop("empty", timeout=10)
+        with self.assertRaisesRegex(ats.HarnessError, "no world"):
+            self.start("b", world_from="empty")
+        self.assertFalse((self.root / "servers" / "b").exists())
+        self.assertFalse(self.harness.lock_path.exists())
+
+    def test_aurora_toml_is_installed_and_carried_over_by_world_from(self):
+        toml = self.root / "awf.toml"
+        toml.write_text('[aurora.awf]\nworlds = ["world"]\n')
+        first = Path(self.start("a", aurora_toml=toml)["workdir"])
+        self.assertEqual((first / "sourbycraft_config/aurora.toml").read_text(), toml.read_text())
+        self.assertEqual(self.run_json("a")["aurora_toml"]["source"], str(toml))
+        self._fake_world(first)
+        self.harness.stop("a", timeout=10)
+        second = Path(self.start("b", world_from="a")["workdir"])
+        self.harness.stop("b", timeout=10)
+        # A world stored through AWF must come back through AWF, not through region files.
+        self.assertEqual((second / "sourbycraft_config/aurora.toml").read_text(), toml.read_text())
+        self.assertEqual(self.run_json("b")["aurora_toml"]["source"], "world_from a")
+        with self.assertRaisesRegex(ats.HarnessError, "aurora.toml"):
+            self.start("c", aurora_toml=self.root / "missing.toml")
+        self.assertFalse((self.root / "servers" / "c").exists())
+
+    def test_kill_sigkills_the_server_without_a_console_stop(self):
+        run = self.start()
+        final = self.harness.kill("t", timeout=10)
+        self.assertEqual((final["status"], final["stop_reason"]), ("exited", "killed on request"))
+        self.assertEqual(final["exit_code"], -signal.SIGKILL)
+        self.assertTrue(final["killed"] and final["lock_released"])
+        self.assertFalse(final["jvm_still_running"])
+        self.assertFalse(ats.pid_alive(run["jvm_pid"]))
+        self.assertNotIn("Stopping server", "\n".join(final["log_tail"]))
+        self.assertNotIn("stop", (Path(run["workdir"]) / "commands.log").read_text()
+                         if (Path(run["workdir"]) / "commands.log").exists() else "")
+
+
+class ScenarioRunTest(HarnessCase):
+    def test_run_writes_outputs_and_a_summary(self):
+        scenario = self.root / "s.json"
+        scenario.write_text(json.dumps({"steps": [
+            {"command": "ver", "expect": "echo ver", "save_as": "ver.txt"},
+            {"perf": "chunks"}, {"sleep": 0.2}, {"wait_for": "echo perf chunks"}]}))
+        original = self.harness.start
+        self.harness.start = lambda name, **kw: original(
+            name, command=[sys.executable, str(self.fake)], **kw)
+        summary = ats.run_scenario(self.harness, "s", scenario,
+                                   {"max_lifetime_s": 120, "startup_timeout_s": 30})
+        workdir = Path(summary["workdir"])
+        self.assertTrue(summary["all_steps_ok"], summary["steps"])
+        self.assertIn("echo ver", (workdir / "outputs" / "ver.txt").read_text())
+        self.assertIn("echo perf chunks", (workdir / "outputs" / "02-perf.txt").read_text())
+        self.assertEqual((summary["exit_code"], summary["lock_released"]), (0, True))
+        self.assertTrue((workdir / "scenario-summary.json").is_file())
+        self.assertEqual(summary["hardware"]["cpu_model"], "fake")
+
+    def test_a_failed_step_stops_the_scenario_and_the_server(self):
+        scenario = self.root / "s.json"
+        scenario.write_text(json.dumps({"steps": [
+            {"command": "ver", "expect": "never", "timeout": 1}, {"sleep": 0.1}]}))
+        original = self.harness.start
+        self.harness.start = lambda name, **kw: original(
+            name, command=[sys.executable, str(self.fake)], **kw)
+        summary = ats.run_scenario(self.harness, "s", scenario, {"max_lifetime_s": 120})
+        self.assertFalse(summary["all_steps_ok"])
+        self.assertEqual(len(summary["steps"]), 1)
+        self.assertTrue(summary["lock_released"])
+
+    def test_an_invalid_scenario_never_boots(self):
+        scenario = self.root / "s.json"
+        scenario.write_text(json.dumps({"steps": [{"command": "stop"}]}))
+        with self.assertRaises(ats.ScenarioError):
+            ats.run_scenario(self.harness, "s", scenario)
+        self.assertFalse((self.root / "servers" / "s").exists())
+
+
+class CleanupTest(HarnessCase):
+    def test_keeps_the_newest_n_and_never_touches_foreign_or_live_dirs(self):
+        base = self.root / "servers"
+        for index in range(4):
+            workdir = base / f"old{index}"
+            workdir.mkdir(parents=True)
+            (workdir / ats.MARKER).write_text("x")
+            ats.write_json(workdir / "run.json", {"created": 100 + index, "status": "exited"})
+        foreign = base / "not-ours"
+        foreign.mkdir()
+        (foreign / "server.properties").write_text("x")
+        self.start("live")
+        deleted = self.harness.cleanup(keep=2, dry_run=True)      # live + old3 kept
+        self.assertEqual(sorted(Path(p).name for p in deleted), ["old0", "old1", "old2"])
+        self.assertTrue((base / "old0").exists())
+        deleted = self.harness.cleanup(keep=0)
+        self.assertEqual(sorted(Path(p).name for p in deleted), ["old0", "old1", "old2", "old3"])
+        self.assertTrue(foreign.exists() and (base / "live").exists())
+        self.harness.stop("live", timeout=10)
+        self.assertEqual([Path(p).name for p in self.harness.cleanup(keep=0)], ["live"])
+
+
+if __name__ == "__main__":
+    unittest.main()

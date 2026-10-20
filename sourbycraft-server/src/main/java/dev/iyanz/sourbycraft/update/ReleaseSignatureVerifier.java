@@ -133,6 +133,24 @@ public final class ReleaseSignatureVerifier {
         }
     }
 
+    /**
+     * Verify {@code signatureAsset} over {@code data} held in memory (the signed release manifest,
+     * {@link ReleaseManifest}). Same key, formats and failure rules as {@link #verifyOrThrow(Path, byte[])};
+     * an inactive verifier returns without checking.
+     */
+    public void verifyBytesOrThrow(byte[] data, byte[] signatureAsset) throws GeneralSecurityException {
+        if (!active) return;
+        if (key == null) {
+            throw new SignatureException("release public key unusable: " + keyProblem);
+        }
+        Signature verifier = Signature.getInstance(ALGORITHM);
+        verifier.initVerify(key);
+        verifier.update(data);
+        if (!verifier.verify(decodeSignature(signatureAsset))) {
+            throw new SignatureException("Ed25519 signature does not match the signed data");
+        }
+    }
+
     /** Raw 64-byte signatures pass through; anything else must be base64 text of those 64 bytes. */
     static byte[] decodeSignature(byte[] asset) throws SignatureException {
         if (asset.length == RAW_SIGNATURE_BYTES) return asset;

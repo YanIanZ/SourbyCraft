@@ -103,6 +103,12 @@ public final class SourbyUpdater {
     static final long MAX_JAR_BYTES = 512L * 1024 * 1024;
     /** Ceiling for a detached signature asset download. */
     static final long MAX_SIGNATURE_BYTES = 16L * 1024;
+    /**
+     * How many newer releases one check inspects through their signed manifests (newest first)
+     * before giving up: bounds the requests a check makes when several releases are yanked or
+     * still rolling out.
+     */
+    static final int MAX_MANIFEST_CANDIDATES = 5;
     /** Backoff window bounds applied to whatever the server asks for. */
     static final Duration MIN_BACKOFF = Duration.ofMinutes(1);
     static final Duration MAX_BACKOFF = Duration.ofHours(6);
@@ -118,6 +124,7 @@ public final class SourbyUpdater {
     private final Clock clock;
     private final ReleaseSignatureVerifier signatures;
     private final UpdateRollbackGuard rollbackGuard;
+    private final Supplier<String> rolloutServerId;
 
     // Conditional-request state for the releases listing, and the rate-limit backoff window.
     // Scheduled checks are serialised by checkRunning; an operator's /update may run alongside,
@@ -141,6 +148,15 @@ public final class SourbyUpdater {
     /** Test seam: every external dependency injected. */
     SourbyUpdater(Path autoUpdateDir, HttpTransport transport, Supplier<BuildInfo> buildInfo, Clock clock,
                   ReleaseSignatureVerifier signatures, UpdateRollbackGuard rollbackGuard) {
+        this(autoUpdateDir, transport, buildInfo, clock, signatures, rollbackGuard,
+            () -> RolloutBucket.serverId(autoUpdateDir));
+    }
+
+    /** Test seam with the staged-rollout server id injected (read only when the manifest is enforced). */
+    SourbyUpdater(Path autoUpdateDir, HttpTransport transport, Supplier<BuildInfo> buildInfo, Clock clock,
+                  ReleaseSignatureVerifier signatures, UpdateRollbackGuard rollbackGuard,
+                  Supplier<String> rolloutServerId) {
+        this.rolloutServerId = rolloutServerId;
         this.autoUpdateDir = autoUpdateDir;
         this.stageDir = autoUpdateDir.resolve("sourbycraft");
         this.corePathFile = autoUpdateDir.resolve("core.path");
@@ -323,6 +339,18 @@ public final class SourbyUpdater {
             UpdateNotifier.clearPending();
             return Outcome.UP_TO_DATE;
         }
+        // Signed release manifest (staged rollout + yank list): enforced under the same rule as the
+        // SEC-2 jar signature, i.e. only when this build ships the release public key. Runs before
+        // the announcement, so a yanked or not-yet-rolled-out release is neither announced nor staged.
+        if (signatures.isActive()) {
+            Selection selection = selectByManifest(listing.releases(), channel, currentVersion, ownBuildVersion(info));
+            if (selection.release() == null) {
+                UpdateNotifier.clearPending();
+                return selection.outcome();
+            }
+            latest = selection.release();
+        }
+
         String appliedTag = readApplied();
         if (latest.tagName.equals(appliedTag)) {
             // Already swapped to this tag (waiting for/after restart, or a pre-r6 jar whose build
@@ -611,6 +639,172 @@ public final class SourbyUpdater {
         if (d.compareTo(MIN_BACKOFF) < 0) return MIN_BACKOFF;
         if (d.compareTo(MAX_BACKOFF) > 0) return MAX_BACKOFF;
         return d;
+    }
+
+    /** The release a manifest-enforcing check settles on, or the outcome when there is none. */
+    private record Selection(@Nullable ReleaseInfo release, Outcome outcome) {}
+
+    /**
+     * A newer release as seen by the policy pass: its tag and manifest assets always, and the
+     * installable jar only when it has one (and is not a prerelease this server ignores). A release
+     * without a jar still carries signed yanks that must count.
+     */
+    private record PolicyCandidate(String tag, @Nullable ReleaseInfo installable,
+                                   @Nullable String manifestUrl, long manifestSize,
+                                   @Nullable String manifestSignatureUrl, long manifestSignatureSize) {}
+
+    private @Nullable PolicyCandidate policyCandidate(JsonObject rel, UpdateChannel channel) {
+        if (getBool(rel, "draft")) return null;
+        String tag = getString(rel, "tag_name");
+        if (tag == null || tag.isBlank() || !channel.tagMatchesChannel(tag)) return null;
+        String manifestUrl = null, sigUrl = null;
+        long manifestSize = -1L, sigSize = -1L;
+        if (rel.has("assets") && rel.get("assets").isJsonArray()) {
+            for (JsonElement ae : rel.getAsJsonArray("assets")) {
+                if (!ae.isJsonObject()) continue;
+                JsonObject asset = ae.getAsJsonObject();
+                String name = getString(asset, "name");
+                long size = asset.has("size") && asset.get("size").isJsonPrimitive() ? asset.get("size").getAsLong() : -1L;
+                if (ReleaseManifest.ASSET_NAME.equals(name)) {
+                    manifestUrl = getString(asset, "browser_download_url");
+                    manifestSize = size;
+                } else if (ReleaseManifest.SIGNATURE_ASSET_NAME.equals(name)) {
+                    sigUrl = getString(asset, "browser_download_url");
+                    sigSize = size;
+                }
+            }
+        }
+        return new PolicyCandidate(tag, parseRelease(rel, channel), manifestUrl, manifestSize, sigUrl, sigSize);
+    }
+
+    /**
+     * Pick the newest release newer than the running build that the signed release policy lets this
+     * server take. Newer releases on the channel are inspected newest first (at most
+     * {@link #MAX_MANIFEST_CANDIDATES}) <b>whether or not they still have a jar</b>, so deleting a
+     * newer release's jar cannot hide its yanks.
+     *
+     * <ul>
+     *   <li>Missing, unsigned, tampered, malformed or mis-bound manifest: stop with
+     *       {@link Outcome#MANIFEST_REJECTED} (its yanks cannot be learned, so nothing older may be taken).</li>
+     *   <li>Every authentic manifest adds its yanks, even when expired or older than the revision
+     *       already accepted for its tag; yanks also persist in {@link ReleasePolicyState}.</li>
+     *   <li>Only a <i>fresh</i> manifest (not expired, {@code policy_revision} at least the highest
+     *       accepted for that tag) can make its release installable; a stale one is skipped.</li>
+     * </ul>
+     */
+    private Selection selectByManifest(JsonArray releases, UpdateChannel channel, String currentVersion, BuildVersion own) {
+        ReleasePolicyState state;
+        try {
+            state = ReleasePolicyState.load(autoUpdateDir);
+        } catch (IOException e) {
+            SourbyLogger.error("auto-updater: release policy state unreadable (" + e.getMessage() + "); refusing every update. "
+                + "Delete " + autoUpdateDir.resolve(ReleasePolicyState.FILE) + " to reset it (trust on first use).");
+            return new Selection(null, Outcome.MANIFEST_REJECTED);
+        }
+        List<PolicyCandidate> newer = new ArrayList<>();
+        for (JsonElement el : releases) {
+            if (!el.isJsonObject()) continue;
+            PolicyCandidate c = policyCandidate(el.getAsJsonObject(), channel);
+            if (c != null && isNewerThanRunning(c.tag(), currentVersion, own)) newer.add(c);
+        }
+        newer.sort((a, b) -> compareTags(b.tag(), a.tag()));
+        java.util.Set<String> yanked = new java.util.HashSet<>(state.yanked());
+        boolean deferred = false, stale = false, incomplete = false;
+        String serverId = null;
+        boolean serverIdRead = false;
+        Instant now = clock.instant();
+        Selection result = null;
+        for (PolicyCandidate c : newer.subList(0, Math.min(newer.size(), MAX_MANIFEST_CANDIDATES))) {
+            ReleaseManifest manifest;
+            try {
+                manifest = fetchManifest(c);
+            } catch (Exception e) {
+                SourbyLogger.warn("auto-updater: NOT taking " + c.tag() + " or anything older: signed release manifest rejected ("
+                    + e.getMessage() + "). This build enforces release manifests (its release key is present).");
+                result = new Selection(null, Outcome.MANIFEST_REJECTED);
+                break;
+            }
+            yanked.addAll(manifest.yanked());
+            state.addYanks(manifest.yanked());
+            boolean expired = manifest.expiredAt(now);
+            boolean rolledBack = manifest.policyRevision() < state.revision(c.tag());
+            if (!expired && !rolledBack) state.acceptRevision(c.tag(), manifest.policyRevision());
+            if (yanked.contains(c.tag())) {
+                SourbyLogger.warn("auto-updater: " + c.tag() + " is YANKED by a signed release manifest; it is never staged.");
+                continue;
+            }
+            if (c.installable() == null) {
+                SourbyLogger.warn("auto-updater: " + c.tag() + " has no installable jar asset; its signed yanks count, it is skipped.");
+                incomplete = true;
+                continue;
+            }
+            if (expired || rolledBack) {
+                SourbyLogger.warn("auto-updater: NOT taking " + c.tag() + ": its release manifest is "
+                    + (expired ? "expired (expires_at " + manifest.expiresAt() + ")" : "older (policy_revision "
+                    + manifest.policyRevision() + ") than the revision " + state.revision(c.tag()) + " already accepted")
+                    + ". Its yanks still count.");
+                stale = true;
+                continue;
+            }
+            if (!serverIdRead) {
+                serverId = rolloutServerId.get();
+                serverIdRead = true;
+            }
+            int bucket = RolloutBucket.bucket(serverId, c.tag());
+            if (bucket >= manifest.rolloutPercent()) {
+                SourbyLogger.info("auto-updater: " + c.tag() + " is rolling out to " + manifest.rolloutPercent()
+                    + "% of servers and has not reached this one yet (bucket " + bucket + ").");
+                deferred = true;
+                continue;
+            }
+            result = new Selection(c.installable(), Outcome.NOTIFIED);
+            break;
+        }
+        try {
+            state.save(autoUpdateDir);
+        } catch (IOException e) {
+            SourbyLogger.warn("auto-updater: could not persist the release policy state (" + e.getMessage()
+                + "); refusing to install on knowledge that would not survive a restart.");
+            return new Selection(null, Outcome.MANIFEST_REJECTED);
+        }
+        if (result != null) return result;
+        Outcome none = stale ? Outcome.MANIFEST_REJECTED
+            : deferred ? Outcome.ROLLOUT_DEFERRED
+            : incomplete ? Outcome.NO_RELEASE
+            : Outcome.YANKED;
+        return new Selection(null, none);
+    }
+
+    /**
+     * Download (bounded), verify the Ed25519 signature over the exact bytes, parse and bind to the
+     * release: tag always; jar asset name and digest when the release still has a jar.
+     */
+    private ReleaseManifest fetchManifest(PolicyCandidate c) throws IOException, GeneralSecurityException,
+            ReleaseManifest.InvalidManifestException {
+        if (c.manifestUrl() == null || c.manifestSignatureUrl() == null) {
+            throw new IOException("the release has no " + (c.manifestUrl() == null ? ReleaseManifest.ASSET_NAME
+                : ReleaseManifest.SIGNATURE_ASSET_NAME) + " asset");
+        }
+        byte[] bytes = fetchBounded(c.manifestUrl(), c.manifestSize(), ReleaseManifest.MAX_BYTES, "manifest");
+        byte[] sig = fetchBounded(c.manifestSignatureUrl(), c.manifestSignatureSize(), MAX_SIGNATURE_BYTES, "manifest signature");
+        signatures.verifyBytesOrThrow(bytes, sig);
+        ReleaseManifest manifest = ReleaseManifest.parse(bytes);
+        ReleaseInfo jar = c.installable();
+        if (jar != null) {
+            manifest.requireBoundTo(c.tag(), jar.assetName, jar.sha256);
+        } else {
+            manifest.requireTagBound(c.tag());
+        }
+        return manifest;
+    }
+
+    private byte[] fetchBounded(String url, long declaredSize, long limit, String what) throws IOException {
+        if (declaredSize > limit) throw new IOException(what + " asset is " + declaredSize + " bytes");
+        try (HttpTransport.Response resp = transport.get(url, Map.of("Accept", "application/octet-stream"))) {
+            if (resp.status() >= 400) throw new IOException(what + " download returned HTTP " + resp.status());
+            if (resp.contentLength() > limit) throw new IOException(what + " Content-Length " + resp.contentLength() + " exceeds the bound");
+            return readBounded(resp.bodyOrEmpty(), limit);
+        }
     }
 
     private @Nullable ReleaseInfo latestForChannel(JsonArray releases, UpdateChannel channel) {
@@ -904,7 +1098,16 @@ public final class SourbyUpdater {
          * The release is authentic but its embedded SourbyClip launcher declares a protocol or
          * version this server cannot hand over to, or declares none (fails closed); not staged.
          */
-        CLIP_INCOMPATIBLE
+        CLIP_INCOMPATIBLE,
+        /** Every newer release inspected is in the signed manifests' yank list; nothing announced or staged. */
+        YANKED,
+        /** A newer release exists but its signed manifest's rollout percentage does not include this server yet. */
+        ROLLOUT_DEFERRED,
+        /**
+         * This build enforces release manifests (release key present) and the newest candidate's
+         * manifest is missing, unsigned, tampered, malformed or bound to another release; nothing staged.
+         */
+        MANIFEST_REJECTED
     }
 
     /**

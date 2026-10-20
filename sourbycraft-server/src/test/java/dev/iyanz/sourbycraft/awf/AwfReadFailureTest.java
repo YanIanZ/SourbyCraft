@@ -214,4 +214,64 @@ class AwfReadFailureTest {
         assertThrows(IOException.class, () -> storage.read(KEY.x(), KEY.z()));
         assertEquals(1, this.store.readCalls.get(), "a stopping server does not wait on retries");
     }
+
+    /**
+     * TODO.md:58 (server-w1-redis-1, 2026-10-20): a forceload ticket loads its 27x27 chunk border
+     * (ticket level 31, chunks loaded up to level 44), and with Redis down every stored one fails.
+     * The log keeps the first failure of the window with its stack and one summary; every position
+     * is still fenced and its writes refused, exactly as before.
+     */
+    @Test
+    void aBurstOfFailedReadsLogsAtMostTwoRecordsAndFencesEveryPosition() throws Exception {
+        final AwfRegionStorage storage = storage();
+        storage.loadPath(() -> true);
+        final java.util.List<String> logged = new java.util.ArrayList<>();
+        final java.util.List<Throwable> stacks = new java.util.ArrayList<>();
+        final java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong(5L);
+        storage.failureLog(new ReadFailureLog("world/region", ReadFailureLog.WINDOW_NANOS, clock::get,
+            (message, stack) -> {
+                logged.add(message);
+                stacks.add(stack);
+            }));
+        final Set<ChunkKey> keys = new HashSet<>();
+        for (int x = 87; x <= 113; x++) {
+            for (int z = 87; z <= 113; z++) {
+                final ChunkKey key = new ChunkKey(x, z);
+                keys.add(key);
+                this.store.chunks.put(key, b("stored " + key));
+            }
+        }
+        this.store.down.set(true);
+        final java.util.List<IOException> thrown = new java.util.ArrayList<>();
+        for (final ChunkKey key : keys) {
+            thrown.add(assertThrows(IOException.class, () -> storage.read(key.x(), key.z())));
+        }
+        assertEquals(729, thrown.size());
+        assertEquals(1, logged.size(), "only the first failure is logged while the window is open");
+        assertTrue(stacks.get(0) != null, "with its stack");
+
+        // The first exception keeps its cause and stack; the repeats carry the same message, no stack.
+        assertTrue(thrown.get(0).getCause() instanceof java.net.ConnectException);
+        for (final IOException repeat : thrown.subList(1, thrown.size())) {
+            assertTrue(repeat.getMessage().startsWith("AWF could not read chunk "), repeat.getMessage());
+            assertTrue(repeat.getMessage().contains("stored chunk is kept"), repeat.getMessage());
+            assertEquals(0, repeat.getStackTrace().length, "no stack trace for the chunk system to print again");
+        }
+
+        // Data safety is unchanged: every position is fenced and a regenerated chunk is never saved.
+        assertEquals(keys, storage.unreadable());
+        for (final ChunkKey key : keys) storage.write(key.x(), key.z(), b("regenerated"));
+        assertEquals(729, storage.stats().refusedWrites());
+
+        clock.addAndGet(ReadFailureLog.WINDOW_NANOS);
+        storage.maintain(clock.get());
+        assertEquals(2, logged.size(), "one summary once the window ends");
+        assertTrue(logged.get(1).contains("729 time(s)"), logged.get(1));
+
+        this.store.down.set(false);
+        storage.close();
+        for (final ChunkKey key : keys) {
+            assertArrayEquals(b("stored " + key), this.store.chunks.get(key), "stored chunk kept: " + key);
+        }
+    }
 }

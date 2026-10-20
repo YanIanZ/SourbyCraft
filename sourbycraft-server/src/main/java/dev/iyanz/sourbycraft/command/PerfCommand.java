@@ -516,19 +516,7 @@ public final class PerfCommand extends Command {
         final var totals = dev.iyanz.sourbycraft.perf.RegionIoCounters.GLOBAL.totals();
         add(lines, "Chunk-system reads / writes / deletes", totals.reads() + " / " + totals.writes() + " / "
             + totals.deletes() + " since start");
-        final var saves = dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.GLOBAL.snapshot();
-        if (saves.isEmpty()) {
-            add(lines, "Region-file saves", "none timed yet (AWF worlds never write region files)");
-        }
-        for (final var save : saves) {
-            final String name = save.world() + " " + save.type();
-            add(lines, name + " region-file saves / failed", save.saves() + " / " + save.failures() + " since start");
-            add(lines, name + " save p50 / p99 / max", save.windowSamples() == 0
-                ? "no save in the last " + dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.WINDOW_SECONDS + "s"
-                : String.format(java.util.Locale.ROOT, "%.2f / %.2f / %.2f ms (%d saves, last %ds; max ever %.2f ms)",
-                    save.p50Millis(), save.p99Millis(), save.maxMillis(), save.windowSamples(),
-                    dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.WINDOW_SECONDS, save.maxEverMillis()));
-        }
+        PerfTelemetryRows.renderSaves(lines);
         PerfTelemetryRows.renderLoads(lines);
         final var queues = dev.iyanz.sourbycraft.perf.RegionIoQueue.INSTANCE.sample();
         if (queues.isEmpty()) {

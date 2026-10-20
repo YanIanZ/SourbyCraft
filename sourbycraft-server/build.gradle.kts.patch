@@ -109,7 +109,7 @@
      testImplementation("org.mockito:mockito-core:5.22.0")
      mockitoAgent("org.mockito:mockito-core:5.22.0") { isTransitive = false } // Configure mockito agent that is needed in newer java versions
      testImplementation("org.ow2.asm:asm-tree:9.9.1")
-@@ -164,23 +_,62 @@
+@@ -164,23 +_,66 @@
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
@@ -184,6 +184,10 @@
 +            "Git-Tree-Hash" to identity["treeHash"].toString(),
 +            "Git-Dirty" to dirty,
          )
++        // SourbyCraft - build provenance (patch-directory hashes, toolchain pins, JDK); the same
++        // snapshot root writeBuildInfo writes as provenance.<Name> into sourbycraft-build.properties.
++        @Suppress("UNCHECKED_CAST")
++        attributes((rootProject.extra["sourbycraftProvenance"] as Provider<Map<String, String>>).get().mapKeys { "Provenance-${it.key}" })
 @@ -240,6 +_,10 @@
          excludeTags("Slow")
      }

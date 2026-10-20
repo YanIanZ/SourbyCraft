@@ -52,12 +52,41 @@ class PerfTelemetryRowsTest {
         final String out = text(PerfTelemetryRows.loadLines(List.of(
             new RegionFileSaveLatency.Snapshot("world", "minecraft:overworld", "chunk", 42L, 1L, 10, 0.5, 3.25, 4.0, 9.5),
             new RegionFileSaveLatency.Snapshot("world", "minecraft:overworld", "poi", 3L, 0L, 0, 0, 0, 0, 1.0))));
-        assertTrue(out.contains("world chunk region-file loads / failed: 42 / 1 since start"), out);
-        assertTrue(out.contains("world chunk load p50 / p99 / max: 0.50 / 3.25 / 4.00 ms (10 loads, last "
+        assertTrue(out.contains("world overworld chunk region-file loads / failed: 42 / 1 since start"), out);
+        assertTrue(out.contains("world overworld chunk load p50 / p99 / max: 0.50 / 3.25 / 4.00 ms (10 loads, last "
             + RegionFileSaveLatency.WINDOW_SECONDS + "s; max ever 9.50 ms)"), out);
-        assertTrue(out.contains("world poi load p50 / p99 / max: no load in the last "
+        assertTrue(out.contains("world overworld poi load p50 / p99 / max: no load in the last "
             + RegionFileSaveLatency.WINDOW_SECONDS + "s"), out);
         assertFalse(out.contains("save"), out);
+    }
+
+    @Test
+    void storageRowsNameTheDimensionBecauseAllDimensionsShareOneWorldFolder() {
+        // 26.2 keeps every dimension under the one level folder, so RegionStorageInfo.level() is "world"
+        // for the overworld, the nether and the end alike; a server run showed three identical
+        // "world chunk" rows before the dimension was part of the label.
+        final List<RegionFileSaveLatency.Snapshot> snaps = List.of(
+            new RegionFileSaveLatency.Snapshot("world", "minecraft:overworld", "chunk", 529L, 0L, 0, 0, 0, 0, 1.0),
+            new RegionFileSaveLatency.Snapshot("world", "minecraft:the_nether", "chunk", 12L, 0L, 0, 0, 0, 0, 1.0),
+            new RegionFileSaveLatency.Snapshot("world", "custom:mine", "entities", 3L, 1L, 2, 1.0, 2.0, 2.0, 2.0));
+        final String saves = text(PerfTelemetryRows.saveLines(snaps));
+        assertTrue(saves.contains("world overworld chunk region-file saves / failed: 529 / 0 since start"), saves);
+        assertTrue(saves.contains("world the_nether chunk region-file saves / failed: 12 / 0 since start"), saves);
+        assertTrue(saves.contains("world custom:mine entities region-file saves / failed: 3 / 1 since start"), saves);
+        assertTrue(saves.contains("world custom:mine entities save p50 / p99 / max: 1.00 / 2.00 / 2.00 ms (2 saves, last "
+            + RegionFileSaveLatency.WINDOW_SECONDS + "s; max ever 2.00 ms)"), saves);
+        assertTrue(saves.contains("world overworld chunk save p50 / p99 / max: no save in the last "
+            + RegionFileSaveLatency.WINDOW_SECONDS + "s"), saves);
+        final String loads = text(PerfTelemetryRows.loadLines(snaps));
+        assertTrue(loads.contains("world the_nether chunk region-file loads / failed: 12 / 0 since start"), loads);
+        final long distinct = PerfTelemetryRows.saveLines(snaps).stream().map(PerfSchedulerView.Line::label).distinct().count();
+        assertEquals(PerfTelemetryRows.saveLines(snaps).size(), distinct, saves);
+    }
+
+    @Test
+    void saveRowsWhenNothingTimed() {
+        assertEquals("Region-file saves: none timed yet (AWF worlds never write region files)",
+            text(PerfTelemetryRows.saveLines(List.of())));
     }
 
     @Test

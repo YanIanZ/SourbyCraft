@@ -83,4 +83,23 @@ class VerCommandTest {
         final String built = all.lines().filter(l -> l.contains("Built (Asia/Jakarta):")).findFirst().orElseThrow();
         assertFalse(built.trim().endsWith(":"), built);
     }
+
+    @Test
+    void theProvenanceBlockIsPrinted() throws Exception {
+        final Server server = mock(Server.class);
+        when(server.getBukkitVersion()).thenReturn("x");
+        final String hash = "0123456789abcdef".repeat(4);
+        final dev.iyanz.sourbycraft.brand.BuildProvenance provenance = dev.iyanz.sourbycraft.brand.BuildProvenance.loadFrom(
+            new java.io.ByteArrayInputStream(("gitCommit=" + "c".repeat(40) + "\ntreeHash=" + hash + "\ndirty=false\n"
+                + "provenance.Minecraft-Features=" + hash + "\nprovenance.Jdk=Eclipse Adoptium 25.0.1+8-LTS\n")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        final ReplyProbe probe = new ReplyProbe();
+        withServer(server, () -> new VerCommand("ver", VerCommandTest::paperBuild, () -> provenance)
+            .execute(probe.sender(ConsoleCommandSender.class, true), "ver", new String[0]));
+        final String all = plainReceived(probe.received());
+        assertTrue(all.contains("Provenance"), all);
+        assertTrue(all.contains("Source: cccccccccccc tree 0123456789ab (clean)"), all);
+        assertTrue(all.contains("Patches: Minecraft features: 0123456789ab"), all);
+        assertTrue(all.contains("Built with JDK: Eclipse Adoptium 25.0.1+8-LTS"), all);
+    }
 }

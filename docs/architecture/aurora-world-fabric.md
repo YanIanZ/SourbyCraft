@@ -365,7 +365,16 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
   busy for minutes, and `save-all flush` waits for that queue on the region threads (`MoonriseRegionFileIO.flush`).
   `/perf awf` shows `read retries / failed reads / unreadable / refused writes` once non-zero; close
   logs how many positions stayed fenced. Moonrise still logs "chunk data will be lost" and generates
-  the chunk in memory; the store is what is protected. Not covered: a POI or entity store whose
+  the chunk in memory; the store is what is protected. (2026-10-20, log flood: one `forceload add`
+  with Redis down reads the ticket's whole 27x27 square — level 31 propagates to 44, vanilla — and
+  every stored chunk fails once: no retry loop or re-queue, each position is read once. The failure
+  log (`ReadFailureLog`) is now per storage per 10 s window: the first failure is logged at once with
+  its stack and thrown with its cause, the rest are counted, thrown as a stackless
+  `RepeatedReadFailure` with the same message, and summarised once ("failed N time(s) in the last
+  10 s ... first error: ..."), from `maintain` or close. Fencing and refusals are unchanged. Harness
+  `opus-w6-redisflood-1`: SourbyCraft read ERRORs 731 → 3, stack frames 40 936 → 164, log of the
+  flood 6.29 MB → 1.23 MB; Moonrise still logs two ERROR lines per failed chunk (Paper code, needs a
+  patch). The recovery INFO "read … again" is still one line per position.) Not covered: a POI or entity store whose
   read succeeded while the chunk store's failed keeps committing (derived from its own stored data).
 - **D2** (`RedisStore.COMMIT_SCRIPT` :54, `RedisBackend.RENEW_SCRIPT` :59): every commit writes its
   lease token to `<prefix>{id}:writer`; a free lease is taken back when the generation is unchanged

@@ -34,6 +34,10 @@ public final class PerfTelemetryRows {
             RegionTaskWaitLatency.GLOBAL.snapshot(Kind.CHUNK))));
     }
 
+    public static void renderSaves(final List<Component> out) {
+        out.addAll(components(saveLines(RegionFileSaveLatency.GLOBAL.snapshot())));
+    }
+
     public static void renderLoads(final List<Component> out) {
         out.addAll(components(loadLines(RegionFileLoadLatency.GLOBAL.snapshot())));
     }
@@ -79,6 +83,35 @@ public final class PerfTelemetryRows {
             "%.3f / <= %.3f / <= %.3f / %.3f ms", s.meanMillis(), s.p50AtMostMillis(), s.p99AtMostMillis(), s.maxMillis())));
     }
 
+    /**
+     * "world overworld chunk": the level folder, the dimension and the storage type. The dimension is
+     * required: 26.2 stores every dimension under the one level folder, so {@code world()} alone is
+     * the same for the overworld, the nether and the end. The {@code minecraft:} namespace is dropped.
+     */
+    static String storageName(final RegionFileSaveLatency.Snapshot s) {
+        final String dimension = s.dimension().startsWith("minecraft:")
+            ? s.dimension().substring("minecraft:".length()) : s.dimension();
+        return s.world() + " " + dimension + " " + s.type();
+    }
+
+    public static List<Line> saveLines(final List<RegionFileSaveLatency.Snapshot> saves) {
+        final List<Line> lines = new ArrayList<>();
+        if (saves.isEmpty()) {
+            lines.add(Line.row("Region-file saves", "none timed yet (AWF worlds never write region files)"));
+            return List.copyOf(lines);
+        }
+        for (final RegionFileSaveLatency.Snapshot save : saves) {
+            final String name = storageName(save);
+            lines.add(Line.row(name + " region-file saves / failed", save.saves() + " / " + save.failures() + " since start"));
+            lines.add(Line.row(name + " save p50 / p99 / max", save.windowSamples() == 0
+                ? "no save in the last " + RegionFileSaveLatency.WINDOW_SECONDS + "s"
+                : String.format(Locale.ROOT, "%.2f / %.2f / %.2f ms (%d saves, last %ds; max ever %.2f ms)",
+                    save.p50Millis(), save.p99Millis(), save.maxMillis(), save.windowSamples(),
+                    RegionFileSaveLatency.WINDOW_SECONDS, save.maxEverMillis())));
+        }
+        return List.copyOf(lines);
+    }
+
     public static List<Line> loadLines(final List<RegionFileSaveLatency.Snapshot> loads) {
         final List<Line> lines = new ArrayList<>();
         if (loads.isEmpty()) {
@@ -86,7 +119,7 @@ public final class PerfTelemetryRows {
             return List.copyOf(lines);
         }
         for (final RegionFileSaveLatency.Snapshot load : loads) {
-            final String name = load.world() + " " + load.type();
+            final String name = storageName(load);
             // In a RegionFileLoadLatency snapshot, saves() counts loads and failures() loads that threw.
             lines.add(Line.row(name + " region-file loads / failed", load.saves() + " / " + load.failures() + " since start"));
             lines.add(Line.row(name + " load p50 / p99 / max", load.windowSamples() == 0
