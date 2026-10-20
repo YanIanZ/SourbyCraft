@@ -1,7 +1,9 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.command.PerfSchedulerView.Line;
+import dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters;
 import dev.iyanz.sourbycraft.perf.ConnectionQueueHealth;
+import dev.iyanz.sourbycraft.perf.EntityTickCounters;
 import dev.iyanz.sourbycraft.perf.RegionFileLoadLatency;
 import dev.iyanz.sourbycraft.perf.RegionFileSaveLatency;
 import dev.iyanz.sourbycraft.perf.RegionTaskWaitLatency;
@@ -15,7 +17,9 @@ import net.kyori.adventure.text.Component;
  * {@code /perf} rows for metrics that are recorded elsewhere: region task queue wait
  * ({@link RegionTaskWaitLatency}, patch 0049) under {@code /perf scheduler}, region-file load latency
  * ({@link RegionFileLoadLatency}, patch 0050) under {@code /perf storage}, and Netty outbound queue
- * health ({@link ConnectionQueueHealth}) under {@code /perf network}.
+ * health ({@link ConnectionQueueHealth}) under {@code /perf network}, entity ticks per world
+ * ({@link EntityTickCounters}, patch 0052) under {@code /perf entities} and chunk lifecycle
+ * transitions ({@link ChunkLifecycleCounters}, patch 0051) under {@code /perf chunks}.
  *
  * <p>Each row builder is a pure function of a snapshot so it is tested without a server; the
  * {@code render*} methods read the live recorders. Percentiles of the task wait are bucket upper
@@ -36,6 +40,14 @@ public final class PerfTelemetryRows {
 
     public static void renderConnectionQueues(final List<Component> out) {
         out.addAll(components(queueLines(ConnectionQueueHealth.sampleServer())));
+    }
+
+    public static void renderEntityTicks(final List<Component> out) {
+        out.addAll(components(entityTickLines(EntityTickCounters.GLOBAL.snapshot())));
+    }
+
+    public static void renderChunkLifecycle(final List<Component> out) {
+        out.addAll(components(chunkLifecycleLines(ChunkLifecycleCounters.GLOBAL.snapshot())));
     }
 
     public static List<Component> components(final List<Line> lines) {
@@ -94,6 +106,37 @@ public final class PerfTelemetryRows {
             Line.row("Over write high-water mark", s.unwritable() + " of " + open + " open"),
             Line.row("Outbound bytes pending in Netty total / largest", bytes(s.pendingBytes()) + " / " + bytes(s.maxPendingBytes())),
             Line.row("Queue scope", "Netty buffer only, incl. per-message overhead; packets the game has not yet handed to Netty are not visible"));
+    }
+
+    public static List<Line> entityTickLines(final List<EntityTickCounters.Snapshot> worlds) {
+        final List<Line> lines = new ArrayList<>();
+        lines.add(Line.section("Entity ticks since boot"));
+        if (worlds.isEmpty()) {
+            lines.add(Line.row("Entity ticks", "no region entity loop has run yet"));
+            return List.copyOf(lines);
+        }
+        for (final EntityTickCounters.Snapshot w : worlds) {
+            lines.add(Line.row(w.world() + " entity ticks / region loops", w.entityTicks() + " / " + w.loops()));
+            lines.add(Line.row(w.world() + " loop mean / max", String.format(Locale.ROOT,
+                "%.3f / %.3f ms; %.1f entities per loop, max %d in one region",
+                w.meanLoopMillis(), w.maxLoopMillis(), w.meanEntitiesPerLoop(), w.maxEntitiesInOneLoop())));
+        }
+        lines.add(Line.row("Entity tick scope", "non-passenger entities handed to tick (activation-range inactive ticks"
+            + " included; frozen entities and passengers not counted); loop time includes despawn checks and"
+            + " passengers; recording overhead not benchmarked"));
+        return List.copyOf(lines);
+    }
+
+    public static List<Line> chunkLifecycleLines(final ChunkLifecycleCounters.Snapshot s) {
+        return List.of(
+            Line.section("Chunk lifecycle since boot (all worlds)"),
+            Line.row("Chunk holders created / deleted / now", s.holdersCreated() + " / " + s.holdersDeleted() + " / " + s.holders()),
+            Line.row("FULL loads / unloads / now", s.fullLoads() + " / " + s.fullUnloads() + " / " + s.fullChunks()),
+            Line.row("Ticking starts / stops / now", s.tickingStarts() + " / " + s.tickingStops() + " / " + s.tickingChunks()),
+            Line.row("Entity-ticking starts / stops / now", s.entityTickingStarts() + " / " + s.entityTickingStops()
+                + " / " + s.entityTickingChunks()),
+            Line.row("Lifecycle scope", "counted at the chunk system's callbacks; 'now' is in minus out, read counter"
+                + " by counter while chunks move, not an atomic census"));
     }
 
     static String bytes(final long value) {

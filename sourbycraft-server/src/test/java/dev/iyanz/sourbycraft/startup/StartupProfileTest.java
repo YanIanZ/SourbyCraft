@@ -8,11 +8,19 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /** Profiles round-trip, and only same-class boots are compared. */
 class StartupProfileTest {
+
+    @AfterEach
+    void forgetThisBootsProfile() {
+        // StartupTimeline is process-wide; a completed profile left here changes what later
+        // tests (for example the spark metadata "startup" section) see.
+        StartupTimeline.resetForTesting();
+    }
 
     @TempDir Path dir;
 

@@ -352,7 +352,14 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
   only by a successful read on the chunk-load path (`RegionFileStorage.moonrise$readData` on the
   stack): that read means the regenerated chunk has left memory and the stored one is being loaded.
   A successful read elsewhere (structure scan) returns the stored bytes but keeps the fence, since
-  the regenerated chunk may still be loaded. After a read gives up, every read in the server gets a
+  the regenerated chunk may still be loaded. (2026-10-20, MC 0053: a structure scan now reads through `AwfRegionStorage.scanRead`:
+  one attempt, never fenced, and for 5 s after a scan read failed, or while reads fail fast, a scan of a
+  chunk whose bytes must come from the store is refused with `ScanRefused` without a backend call.
+  The callers (/locate, eyes of ender, dolphins, explorer maps via `StructureCheck`) need the answer
+  in the same call, so no async path exists without changing vanilla; vanilla answers a throwing scan
+  with CHUNK_LOAD_NEEDED and loads the chunk, so the answer is the same and the wait moves to that load,
+  which still waits up to `timeout-ms` per attempt: that is the floor. Unit-tested, not run against a
+  stalled Redis on a server.) After a read gives up, every read in the server gets a
   single attempt for 5 s (`FAIL_FAST_NANOS`): the first rerun showed a chunk load pulls in hundreds
   of stored neighbours and the chunk system has one I/O thread here; retrying each kept the I/O queue
   busy for minutes, and `save-all flush` waits for that queue on the region threads (`MoonriseRegionFileIO.flush`).

@@ -146,6 +146,10 @@ public final class PerfCommand extends Command {
         }
         if (view.equals("chunks")) {
             renderChunkGeneration(lines);
+            PerfTelemetryRows.renderChunkLifecycle(lines);
+        }
+        if (view.equals("entities")) {
+            PerfTelemetryRows.renderEntityTicks(lines);
         }
         if (view.equals("plugins")) {
             renderPlugins(lines);

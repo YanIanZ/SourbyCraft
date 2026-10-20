@@ -87,6 +87,14 @@ public final class AwfRegionStorage {
     /** {@link System#nanoTime} until which reads are not retried, 0 for none; see {@link #FAIL_FAST_NANOS}. */
     private static final AtomicLong failFastUntil = new AtomicLong();
     /**
+     * {@link System#nanoTime} until which structure scans that would read the backend are refused, 0
+     * for none: opened for {@link #FAIL_FAST_NANOS} by a scan whose read failed; see {@link #scanRead}.
+     * Server-wide like {@link #failFastUntil}, since the backend (Redis) is shared by every world.
+     */
+    private static final AtomicLong scanRefuseUntil = new AtomicLong();
+    private final AtomicLong refusedScans = new AtomicLong();
+    private final AtomicLong scanFailures = new AtomicLong();
+    /**
      * Positions whose stored bytes could not be read, with the time they were fenced. The engine
      * treats a failed read as "no data" and generates the chunk again; writes of that position are
      * refused from then on, so the regenerated chunk can never replace the stored one. A later
@@ -195,6 +203,84 @@ public final class AwfRegionStorage {
         return null;
     }
 
+    /**
+     * {@link #read} for a structure scan ({@code RegionFileStorage.scanChunk}: {@code StructureCheck}
+     * behind /locate, eyes of ender, dolphins and explorer maps). Those callers need the answer in
+     * the same call and run on the region thread; vanilla answers a scan that throws with
+     * {@code CHUNK_LOAD_NEEDED} and loads the chunk (to {@code STRUCTURE_STARTS}), which reads it
+     * through {@link #read} on the chunk-load path. So a scan that fails changes no answer, only where
+     * the wait happens. Hence:
+     * <ul>
+     *   <li>one attempt, never retried (the chunk load that follows has its own retries);</li>
+     *   <li>a failure never fences the position: a scan does not make the engine generate the chunk
+     *       again, and a fence would refuse the saves of a copy of the chunk that is loaded meanwhile;</li>
+     *   <li>after a scan read failed, or while reads are failing fast ({@link #FAIL_FAST_NANOS}), a
+     *       scan that would have to read the backend is refused at once with {@link ScanRefused}, so
+     *       one locate does not wait {@code timeout-ms} for every stored chunk it looks at. Scans
+     *       answered from memory, by a deletion or by the region file are never refused: for those a
+     *       refusal would turn vanilla's "no data" into a chunk load that can generate the chunk.</li>
+     * </ul>
+     * The chunk load is not made faster: during an outage it still waits for the backend
+     * ({@code timeout-ms}, retries), which is the floor for a caller that needs the answer now.
+     */
+    public byte[] scanRead(final int chunkX, final int chunkZ) throws IOException {
+        final ChunkKey key = new ChunkKey(chunkX, chunkZ);
+        final long now = System.nanoTime();
+        if ((scanRefusing(now) || failingFast(now)) && this.world.readLeavesMemory(key)) {
+            this.refusedScans.incrementAndGet();
+            throw new ScanRefused("AWF structure scan of chunk " + key + " of " + this.name
+                + " refused: the store failed a read in the last " + FAIL_FAST_NANOS / 1_000_000_000L + " s");
+        }
+        this.reads.incrementAndGet();
+        final boolean owned = this.world.owns(key);
+        final Optional<byte[]> bytes;
+        try {
+            bytes = this.world.read(key);
+        } catch (final IOException failed) {
+            this.scanFailures.incrementAndGet();
+            final long previous = scanRefuseUntil.getAndSet(System.nanoTime() + FAIL_FAST_NANOS);
+            if (previous == 0 || now - previous >= 0) {
+                dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF structure scan of chunk " + key + " of " + this.name
+                    + " failed (" + failed.getMessage() + "). For " + FAIL_FAST_NANOS / 1_000_000_000L + " s, structure"
+                    + " scans of stored chunks are refused and those chunks are loaded instead (vanilla's answer to an"
+                    + " unreadable chunk; same result, the load still waits for the store)");
+            }
+            throw new IOException("AWF structure scan could not read chunk " + key + " of " + this.name + ": "
+                + failed.getMessage(), failed);
+        }
+        if (owned) return bytes.isPresent() ? bytes.get() : DELETED;
+        if (bytes.isPresent()) return bytes.get();
+        this.baseFallthroughs.incrementAndGet();
+        return null;
+    }
+
+    /** A structure scan refused by {@link #scanRead}; thrown once per refused chunk, so no stack trace. */
+    public static final class ScanRefused extends IOException {
+        ScanRefused(final String message) {
+            super(message);
+        }
+
+        @Override
+        public synchronized Throwable fillInStackTrace() {
+            return this;
+        }
+    }
+
+    static boolean scanRefusing(final long now) {
+        final long until = scanRefuseUntil.get();
+        return until != 0 && now - until < 0;
+    }
+
+    /** Structure scans refused by {@link #scanRead} since this storage opened. */
+    public long refusedScans() {
+        return this.refusedScans.get();
+    }
+
+    /** Structure scans whose backend read failed since this storage opened. */
+    public long scanFailures() {
+        return this.scanFailures.get();
+    }
+
     private Optional<byte[]> readStored(final ChunkKey key) throws IOException {
         final long started = System.nanoTime();
         // A region thread must not sleep: one attempt there, as before.
@@ -256,6 +342,7 @@ public final class AwfRegionStorage {
     /** Ends the fail-fast window. Tests only. */
     static void resetFailFast() {
         failFastUntil.set(0);
+        scanRefuseUntil.set(0);
     }
 
     /** Replaces the chunk-load-path check. Tests only. */

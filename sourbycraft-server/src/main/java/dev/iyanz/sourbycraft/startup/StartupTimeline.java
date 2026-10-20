@@ -47,6 +47,16 @@ public final class StartupTimeline {
         return last;
     }
 
+    /** Clears this boot's recorded phases and profiles. Tests only: the timeline is process-wide. */
+    static void resetForTesting() {
+        synchronized (PHASES) {
+            PHASES.clear();
+        }
+        startClass = "unknown";
+        last = null;
+        previous = null;
+    }
+
     /** The profile the previous boot saved, once this boot has completed; else {@code null}. */
     public static StartupProfile previous() {
         return previous;

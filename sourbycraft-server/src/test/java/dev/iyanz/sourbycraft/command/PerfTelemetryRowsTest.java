@@ -2,7 +2,9 @@ package dev.iyanz.sourbycraft.command;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import dev.iyanz.sourbycraft.perf.ChunkLifecycleCounters;
 import dev.iyanz.sourbycraft.perf.ConnectionQueueHealth;
+import dev.iyanz.sourbycraft.perf.EntityTickCounters;
 import dev.iyanz.sourbycraft.perf.RegionFileSaveLatency;
 import dev.iyanz.sourbycraft.perf.RegionTaskWaitLatency;
 import dev.iyanz.sourbycraft.perf.RegionTaskWaitLatency.Kind;
@@ -90,5 +92,37 @@ class PerfTelemetryRowsTest {
             final String plain = PlainTextComponentSerializer.plainText().serialize(components.get(i));
             assertTrue(plain.contains(lines.get(i).isSection() ? lines.get(i).section() : lines.get(i).value()), plain);
         }
+    }
+
+    @Test
+    void entityTickRowsShowEachWorldWithLoopTimesAndTheLargestRegionLoop() {
+        final String out = text(PerfTelemetryRows.entityTickLines(List.of(
+            new EntityTickCounters.Snapshot("world", 40L, 2L, 8_000_000L, 30L, 6_000_000L),
+            new EntityTickCounters.Snapshot("world_nether", 0L, 5L, 50_000L, 0L, 20_000L))));
+        assertTrue(out.startsWith("Entity ticks since boot"), out);
+        assertTrue(out.contains("world entity ticks / region loops: 40 / 2"), out);
+        assertTrue(out.contains("world loop mean / max: 4.000 / 6.000 ms; 20.0 entities per loop, max 30 in one region"), out);
+        assertTrue(out.contains("world_nether entity ticks / region loops: 0 / 5"), out);
+        assertTrue(out.contains("passengers"), out);
+        assertTrue(out.contains("not benchmarked"), out);
+    }
+
+    @Test
+    void entityTickRowsWithNoLoopYet() {
+        final String out = text(PerfTelemetryRows.entityTickLines(List.of()));
+        assertTrue(out.contains("Entity ticks: no region entity loop has run yet"), out);
+        assertFalse(out.contains("region loops:"), out);
+    }
+
+    @Test
+    void chunkLifecycleRowsShowInOutAndTheDerivedLevel() {
+        final String out = text(PerfTelemetryRows.chunkLifecycleLines(
+            new ChunkLifecycleCounters.Snapshot(100L, 40L, 50L, 20L, 30L, 25L, 12L, 2L)));
+        assertTrue(out.startsWith("Chunk lifecycle since boot (all worlds)"), out);
+        assertTrue(out.contains("Chunk holders created / deleted / now: 100 / 40 / 60"), out);
+        assertTrue(out.contains("FULL loads / unloads / now: 50 / 20 / 30"), out);
+        assertTrue(out.contains("Ticking starts / stops / now: 30 / 25 / 5"), out);
+        assertTrue(out.contains("Entity-ticking starts / stops / now: 12 / 2 / 10"), out);
+        assertTrue(out.contains("not an atomic census"), out);
     }
 }

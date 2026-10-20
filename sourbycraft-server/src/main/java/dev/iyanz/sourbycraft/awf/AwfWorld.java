@@ -245,6 +245,17 @@ public final class AwfWorld {
         return this.pendingSaves.size();
     }
 
+    /**
+     * Whether {@link #read} of the chunk would fetch bytes from the store or a template store: it is
+     * not held in memory, not a deletion and not absent. A base that is not an {@link AwfStore}
+     * answers {@code false}.
+     */
+    public boolean readLeavesMemory(final ChunkKey key) {
+        if (this.owned.containsKey(key)) return false;
+        if (this.store != null && this.store.has(key)) return this.store.storesBytes(key);
+        return this.base instanceof AwfStore template && template.storesBytes(key);
+    }
+
     /** Whether a chunk's bytes are currently held in memory. */
     public boolean resident(final ChunkKey key) {
         return this.owned.containsKey(key);

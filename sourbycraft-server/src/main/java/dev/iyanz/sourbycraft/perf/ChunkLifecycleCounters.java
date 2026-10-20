@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.LongAdder;
  * deleted; a chunk becomes FULL (border) or stops being FULL; it starts or stops ticking; it starts
  * or stops entity ticking. A transition is counted when its callback is entered, so a callback that
  * then throws still counts. Always on (one {@link LongAdder} increment per transition, overhead not
- * benchmarked). Not shown by any command yet.</p>
+ * benchmarked). Shown in {@code /perf chunks} (command/PerfTelemetryRows).</p>
  *
  * <p>The current levels ({@link Snapshot#fullChunks()} and the rest) are in minus out. Each counter
  * is read on its own, so while chunks move the levels can be off by the transitions that happened

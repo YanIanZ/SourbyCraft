@@ -34,6 +34,16 @@ public interface AwfStore extends ChunkSource {
     /** Chunks this world deleted: they read as absent and shadow the base. */
     Set<ChunkKey> deleted();
 
+    /**
+     * Whether {@link #read} of the chunk returns stored bytes, i.e. would have to fetch them, rather
+     * than a deletion or nothing. Only asked while structure scans are being refused
+     * ({@link AwfRegionStorage#scanRead}); the default copies {@link #deleted()}, so backends with a
+     * cheaper answer override it.
+     */
+    default boolean storesBytes(final ChunkKey key) {
+        return this.has(key) && !this.deleted().contains(key);
+    }
+
     /** The committed generation, 0 before the first commit. */
     long generation() throws IOException;
 

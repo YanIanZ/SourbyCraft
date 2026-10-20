@@ -165,6 +165,11 @@ final class RedisStore implements AwfStore {
     }
 
     @Override
+    public boolean storesBytes(final ChunkKey key) {
+        return this.live.contains(key);
+    }
+
+    @Override
     public Set<ChunkKey> keys() {
         return new TreeSet<>(this.live);
     }

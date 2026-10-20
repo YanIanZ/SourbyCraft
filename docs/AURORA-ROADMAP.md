@@ -470,8 +470,8 @@ Make Aurora telemetry the authoritative runtime truth.
 - [x] scheduler queue depth — `/perf governor` (Sourby lanes); per-region queued task counts (tick/chunk) in `/perf scheduler` since MC patch 0045 (2026-10-20); the scheduler run queue, the global task queue and the world-wide global chunk-task queue are still `n/a`
 - [x] task wait latency — recorded since boot per kind (tick/chunk) by MC patch 0049 + `perf/RegionTaskWaitLatency` (count/mean/max, p50/p99 as bucket upper bounds; `RegionTaskWaitLatencyTest` 8, `RegionTaskWaitLatencyHookTest` 4, 2026-10-20) and shown in `/perf scheduler` (`command/PerfTelemetryRows.taskWaitLines`, `PerfTelemetryRowsTest` 7); no server numbers, recording overhead not benchmarked (needs a server)
 - [x] async-path queue/solve latency — `/perf async`; see below
-- [-] chunk lifecycle counters — recorded since boot, all worlds, one adder per transition (holder create/delete, FULL in/out, ticking in/out, entity-ticking in/out) by MC patch 0051 + `perf/ChunkLifecycleCounters` (`ChunkLifecycleCountersTest` 2, `ChunkLifecycleHookTest` 3, 2026-10-20); not shown in `/perf` yet (no `/perf chunks` row), no per-world split, no server numbers, overhead not benchmarked
-- [ ] entity tick counters
+- [x] chunk lifecycle counters — shown in `/perf chunks` since 2026-10-20 (`PerfTelemetryRows`); recorded since boot, all worlds, one adder per transition (holder create/delete, FULL in/out, ticking in/out, entity-ticking in/out) by MC patch 0051 + `perf/ChunkLifecycleCounters` (`ChunkLifecycleCountersTest` 2, `ChunkLifecycleHookTest` 3, 2026-10-20), no per-world split, no server numbers, overhead not benchmarked
+- [x] entity tick counters — MC patch 0052 + `perf/EntityTickCounters` (per world plus the largest single-region loop; passengers/frozen entities not counted; `EntityTickCountersTest`, `EntityTickHookTest`), shown in `/perf entities` (2026-10-20); no per-region split (regions have no stable key), no server numbers, overhead not benchmarked
 - [x] packet counters — `/perf network`
 - [x] bytes/sec — `/perf network`
 - [x] storage backlog — `/perf storage` (Moonrise pending I/O per world), `/perf awf`

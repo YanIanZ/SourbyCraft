@@ -5,10 +5,10 @@ role and what should happen to it. Sizes are added lines (`+`) in the patch file
 
 > Historical, as of 2026-09-27: numbers predate the 2026-10-06 rebuild (0019–0023 → 0018–0022,
 > closing the 0018 gap) and the 2026-10-13 renumbering, so the 0019/0020 rows are today's 0018/0019.
-> Current Minecraft features run 0001–0051 and Paper features 0001–0015 (0001–0004 are the Paper
+> Current Minecraft features run 0001–0053 and Paper features 0001–0015 (0001–0004 are the Paper
 > file patches below). Of the Minecraft features, 0021–0038 (0020 and 0021 are the two Minecraft
 > source patches below, moved into features) are not classified here in their current form;
-> 0039–0051 are summarised in the second table below (added 2026-10-20); Paper 0015 (2026-10-20,
+> 0039–0053 are summarised in the second table below (added 2026-10-20); Paper 0015 (2026-10-20,
 > BRANDING, KEEP, hook: one `CraftCrashReport` line from `brand/CrashReportIdentity`, i.e.
 > `BuildInfo`, ahead of upstream's manifest-based `BrandInfo` line; `CrashReportIdentityTest`). Current files:
 > `sourbycraft-server/{minecraft,paper}-patches/features/`.
@@ -44,9 +44,9 @@ optimisation), COMPATIBILITY (keeps plugins/config working), SECURITY, BRANDING,
 | 0020 commit AWF stores at shutdown | 1 | INTEGRATION | KEEP | One call; no-op without AWF worlds. |
 
 There is no 0018 in the snapshot above; the number was never reused. (Today's numbering has no gap:
-Minecraft features are 0001–0051 contiguous.)
+Minecraft features are 0001–0053 contiguous.)
 
-### Minecraft feature patches added after this snapshot (0039–0051, summarised 2026-10-20)
+### Minecraft feature patches added after this snapshot (0039–0053, summarised 2026-10-20)
 
 Classified by subject and the hunks' role as reported in the patch notes, not by a fresh hunk-by-hunk
 review; added lines are `+` lines of the patch file today. Dispositions are provisional.
@@ -65,7 +65,9 @@ review; added lines are `+` lines of the patch file today. Dispositions are prov
 | 0048 unloaded chunks are not loaded for the snapshot's `*IfLoaded` reads | 33 | PERFORMANCE | KEEP | Restores vanilla's `null`/BLOCKED answer for unloaded chunks (`SnapshotPathRegionTest`). |
 | 0049 time how long region tasks wait in their queue | 4 | INTEGRATION | KEEP | Hook only (3 code lines): stamp on first `tryPush`, record before `executeTask` runs the task; the recorder is `perf/RegionTaskWaitLatency` (`RegionTaskWaitLatencyHookTest`). No view reads it yet. |
 | 0050 time region-file chunk loads for `/perf storage` | 15 | INTEGRATION | KEEP | Telemetry wrapper around the region-file part of `moonrise$readData` (found-data reads and failures; the external-stream retry calls the inner method so a retry stays one load); recorder `perf/RegionFileLoadLatency`, same ring as 0043 (`RegionFileLoadLatencyHookTest`). No view reads it yet. |
-| 0051 count chunk lifecycle transitions | 8 | INTEGRATION | KEEP | Hook only (8 code lines): first statement of each `BaseChunkSystemHooks` lifecycle callback (holder create/delete, FULL in/out, ticking in/out, entity ticking in/out) counts into `perf/ChunkLifecycleCounters` (since boot, all worlds; `ChunkLifecycleCountersTest`, `ChunkLifecycleHookTest`). Not displayed yet; overhead not benchmarked. |
+| 0051 count chunk lifecycle transitions | 8 | INTEGRATION | KEEP | Hook only (8 code lines): first statement of each `BaseChunkSystemHooks` lifecycle callback (holder create/delete, FULL in/out, ticking in/out, entity ticking in/out) counts into `perf/ChunkLifecycleCounters` (since boot, all worlds; `ChunkLifecycleCountersTest`, `ChunkLifecycleHookTest`). Shown in `/perf chunks` (`command/PerfTelemetryRows`); overhead not benchmarked. |
+| 0052 count entity ticks per world in the region entity loop | 4 | INTEGRATION | KEEP | Hook only (4 code lines): `RegionizedWorldData.sourbyEntityTicks` (plain int, region-thread owned) is zeroed before `ServerLevel.tick`'s `forEachTickingEntity` loop, incremented right before each `guardEntityTick(tickNonPassenger)`, and after the loop `perf/EntityTickCounters.regionTicked(bukkitName, count, loop nanos)` records once per region loop (per world since boot: ticks, loops, loop time, largest single-region loop; passengers and frozen entities not counted). Shown in `/perf entities`. `EntityTickCountersTest`, `EntityTickHookTest` (bytecode order). Overhead not benchmarked. |
+| 0053 structure scans read AWF once and fail fast while the store is failing | 1 | INTEGRATION | KEEP | One changed line in the 0021 AWF branch of `RegionFileStorage.scanChunk`: `read` -> `awf/AwfRegionStorage.scanRead` (one attempt, no fence, refused with a stackless `ScanRefused` for 5 s after a scan read failed or while reads fail fast, only for chunks whose bytes must come from the store). Vanilla `StructureCheck` answers a throwing scan with CHUNK_LOAD_NEEDED and loads the chunk, so answers are unchanged; the load still waits for the store. `patch_surface` = logic (1/1 line, the call goes through the `sourby$awf` field). `AwfStructureScanTest`. |
 
 ## Minecraft source patches (`minecraft-patches/sources/`)
 
