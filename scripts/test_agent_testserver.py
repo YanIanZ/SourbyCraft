@@ -31,9 +31,30 @@ FAKE_SERVER = textwrap.dedent("""
         time.sleep(2.5)
         print("Exception in server tick loop", flush=True)
         sys.exit(3)
+    import threading
+    held = []                      # reorder mode: the begin marker waits for the end marker
     for line in sys.stdin:
         line = line.strip()
-        if line == "time query gametime":
+        if line.startswith("help sc-capture-"):
+            # Bukkit HelpCommand on an unknown topic: logs "No help for <topic>" synchronously.
+            marker = "[12:00:01 INFO]: No help for " + line[len("help "):]
+            if mode == "no-markers":
+                continue
+            if mode == "no-end" and line.endswith("-end"):
+                continue
+            if mode == "reorder":
+                if line.endswith("-begin"):
+                    held.append(marker)
+                    continue
+                print(marker, flush=True)
+                for late in held:
+                    print(late, flush=True)
+                held.clear()
+                continue
+            print(marker, flush=True)
+        elif line.startswith("slow "):
+            threading.Timer(0.8, lambda l=line: print("[12:00:03 INFO]: late reply " + l, flush=True)).start()
+        elif line == "time query gametime":
             print("[12:00:01 INFO]: The game time is 42", flush=True)
         elif line == "stop":
             if mode == "stubborn":
@@ -248,6 +269,12 @@ class ScenarioParseTest(unittest.TestCase):
                          ["command", "wait_for", "sleep", "perf", "perf", "workload"])
         self.assertEqual(steps[4]["index"], 5)
 
+    def test_bracket_false_is_accepted_on_command_and_perf_steps(self):
+        _, steps = ats.parse_scenario({"steps": [
+            {"command": "perf player x", "bracket": False, "expect": "x"},
+            {"perf": "player x", "bracket": False}]})
+        self.assertEqual([s["bracket"] for s in steps], [False, False])
+
     def test_invalid_scenarios_are_refused_before_boot(self):
         bad = [
             [], {"steps": []}, {"steps": "x"}, {"steps": [{}]}, {"oops": 1, "steps": [{"sleep": 1}]},
@@ -263,6 +290,9 @@ class ScenarioParseTest(unittest.TestCase):
             {"steps": [{"workload": "plugins-10"}]},                 # needs a plugin set
             {"steps": [{"command": "ver", "timeout": 0}]},
             {"steps": [{"command": "ver", "save_as": "../x"}]},
+            {"steps": [{"command": "ver", "bracket": "no"}]},        # must be a boolean
+            {"steps": [{"sleep": 1, "bracket": False}]},             # only command/perf
+            {"steps": [{"wait_for": "x", "bracket": False}]},
             {"settings": {"heap_mib": "big"}, "steps": [{"sleep": 1}]},
             {"settings": {"unknown": 1}, "steps": [{"sleep": 1}]},
         ]
@@ -355,7 +385,7 @@ class LifecycleTest(HarnessCase):
 
         ok, text = self.harness.command("t", "/say hello", expect="echo say hello", timeout=10)
         self.assertTrue(ok, text)
-        self.assertEqual(self.harness.wait_for("t", r"echo say \w+", timeout=5).split("]: ")[-1],
+        self.assertEqual(self.harness.wait_for("t", r"echo say hello", timeout=5).split("]: ")[-1],
                          "echo say hello")
         self.assertIsNone(self.harness.wait_for("t", "never-logged", timeout=0.5))
         with self.assertRaises(ats.HarnessError):
@@ -466,6 +496,131 @@ class LifecycleTest(HarnessCase):
             time.sleep(0.1)
         self.assertFalse(ats.pid_alive(jvm))
         self.harness.stop("b", timeout=10)
+
+
+class BracketRegionTest(unittest.TestCase):
+    LOG = textwrap.dedent("""\
+        [12:00:00 INFO]: Successfully filled 9 block(s)
+        [12:00:01 INFO]: No help for sc-capture-aa-begin
+        [12:00:01 INFO]: Successfully filled 4 block(s)
+        [12:00:01 INFO]: Found 3 entities
+        [12:00:01 INFO]: No help for sc-capture-aa-end
+        [12:00:02 INFO]: Successfully filled 7 block(s)
+        """)
+    BEGIN, END = "sc-capture-aa-begin", "sc-capture-aa-end"
+
+    def test_only_lines_between_the_markers_belong_to_the_command(self):
+        state, region = ats.capture_state(self.LOG, self.BEGIN, self.END)
+        self.assertEqual(state, "closed")
+        self.assertEqual(region.splitlines(), ["[12:00:01 INFO]: Successfully filled 4 block(s)",
+                                               "[12:00:01 INFO]: Found 3 entities"])
+
+    def test_open_absent_and_empty_regions(self):
+        cut = self.LOG.split(self.END)[0]
+        state, region = ats.capture_state(cut, self.BEGIN, self.END)
+        self.assertEqual(state, "open")
+        self.assertIn("Found 3 entities", region)
+        self.assertEqual(ats.capture_state("nothing yet\n", self.BEGIN, self.END), ("absent", ""))
+        self.assertEqual(ats.capture_state("sc-capture-bb-begin\nsc-capture-bb-end\n",
+                                           "sc-capture-bb-begin", "sc-capture-bb-end"),
+                         ("closed", ""))
+
+    def test_an_end_marker_logged_before_the_begin_marker_is_disordered(self):
+        log = f"x\n{self.END}\nreply\n{self.BEGIN}\n"
+        self.assertEqual(ats.capture_state(log, self.BEGIN, self.END)[0], "disordered")
+        # end only (begin not logged yet) is not disordered, just absent
+        self.assertEqual(ats.capture_state(f"{self.END}\n", self.BEGIN, self.END)[0], "disordered")
+
+    def test_markers_carry_more_than_32_random_bits_and_never_repeat(self):
+        seen = {ats.capture_markers()[0] for _ in range(50)}
+        self.assertEqual(len(seen), 50)
+        begin, end = ats.capture_markers()
+        token = begin[len(ats.CAPTURE_MARKER):-len("-begin")]
+        self.assertGreaterEqual(len(token), 16)          # hex digits: >= 64 bits
+        self.assertTrue(begin.endswith("-begin") and end.endswith("-end"))
+        self.assertNotIn(begin, end)
+
+
+class ConcurrentCaptureTest(HarnessCase):
+    def test_a_concurrent_command_loop_does_not_leak_into_a_captured_command(self):
+        self.start()
+        stop = threading.Event()
+        sent = []
+
+        def churn():
+            while not stop.is_set():
+                self.harness.spool(self.root / "servers" / "t", [f"fill churn{len(sent)}"])
+                sent.append(1)
+                time.sleep(0.005)
+        worker = threading.Thread(target=churn, daemon=True)
+        worker.start()
+        try:
+            outputs = [self.harness.command("t", f"count {i}", timeout=15)[1] for i in range(5)]
+        finally:
+            stop.set()
+            worker.join(5)
+        self.assertGreater(len(sent), 10, "the churn loop must actually have run")
+        for index, text in enumerate(outputs):
+            self.assertIn(f"echo count {index}", text)
+            self.assertNotIn("churn", text)
+            self.assertNotIn(ats.CAPTURE_MARKER, text)
+        self.harness.stop("t", timeout=10)
+
+    def test_a_missing_end_marker_never_counts_as_success(self):
+        self.start(mode="no-end")
+        ok, text = self.harness.command("t", "time query gametime", timeout=2)
+        self.assertFalse(ok)
+        self.assertIn("delivery uncertain", text)
+        self.assertIn("end marker", text)
+        # even when the partial output would satisfy --expect
+        ok, text = self.harness.command("t", "time query gametime", expect="game time is 42",
+                                        timeout=2)
+        self.assertFalse(ok)
+        self.assertIn("delivery uncertain", text)
+        self.harness.stop("t", timeout=10)
+
+    def test_missing_markers_are_reported_as_uncertain_not_as_not_run(self):
+        self.start(mode="no-markers")
+        ok, text = self.harness.command("t", "time query gametime", timeout=2)
+        self.assertFalse(ok)
+        self.assertIn("delivery uncertain", text)
+        self.assertIn("begin marker", text)
+        self.assertNotIn("did not run", text)
+        self.harness.stop("t", timeout=10)
+
+    def test_markers_logged_out_of_order_are_refused_not_trusted(self):
+        self.start(mode="reorder")
+        ok, text = self.harness.command("t", "time query gametime", timeout=5)
+        self.assertFalse(ok)
+        self.assertIn("out of order", text)
+        self.harness.stop("t", timeout=10)
+
+    def test_a_delayed_reply_is_invisible_when_bracketed_and_visible_raw(self):
+        self.start()
+        ok, text = self.harness.command("t", "slow one", expect="late reply", timeout=2)
+        self.assertFalse(ok)                      # documented limit: replies after the end marker
+        ok, text = self.harness.command("t", "slow two", expect="late reply slow two",
+                                        timeout=5, bracket=False)
+        self.assertTrue(ok, text)
+        self.harness.stop("t", timeout=10)
+
+    def test_raw_capture_keeps_the_old_every_new_line_behaviour(self):
+        self.start()
+        ok, text = self.harness.command("t", "time query gametime", expect="game time is 42",
+                                        timeout=10, bracket=False)
+        self.assertTrue(ok, text)
+        self.assertNotIn(ats.CAPTURE_MARKER, self.harness.command(
+            "t", "time query gametime", expect="game time", timeout=10, bracket=False)[1])
+        self.harness.stop("t", timeout=10)
+
+    def test_sequential_use_with_and_without_expect(self):
+        self.start()
+        ok, text = self.harness.command("t", "time query gametime", timeout=10)
+        self.assertTrue(ok, text)
+        self.assertEqual(text.splitlines(), ["[12:00:01 INFO]: The game time is 42"])
+        ok, text = self.harness.command("t", "time query gametime", expect="is 42", timeout=10)
+        self.assertTrue(ok, text)
+        self.harness.stop("t", timeout=10)
 
 
 class SlotTest(HarnessCase):
@@ -795,6 +950,19 @@ class ScenarioRunTest(HarnessCase):
         self.assertEqual((summary["exit_code"], summary["lock_released"]), (0, True))
         self.assertTrue((workdir / "scenario-summary.json").is_file())
         self.assertEqual(summary["hardware"]["cpu_model"], "fake")
+
+    def test_a_step_can_opt_out_of_bracketing_to_see_a_delayed_reply(self):
+        scenario = self.root / "s.json"
+        scenario.write_text(json.dumps({"steps": [
+            {"command": "slow a", "expect": "late reply slow a", "bracket": False, "timeout": 5,
+             "save_as": "slow.txt"}]}))
+        original = self.harness.start
+        self.harness.start = lambda name, **kw: original(
+            name, command=[sys.executable, str(self.fake)], **kw)
+        summary = ats.run_scenario(self.harness, "s", scenario,
+                                   {"max_lifetime_s": 120, "startup_timeout_s": 30})
+        self.assertTrue(summary["all_steps_ok"], summary["steps"])
+        self.assertIn("late reply slow a", (Path(summary["workdir"]) / "outputs" / "slow.txt").read_text())
 
     def test_a_failed_step_stops_the_scenario_and_the_server(self):
         scenario = self.root / "s.json"

@@ -64,6 +64,31 @@ Exit codes: 0 ok; 1 the check failed (expect not matched, no line, unclean stop)
 builds, `--exclusive` wait timeout, startup failure). `stop`, `restart` and `end` are refused as
 console commands: lifecycle goes through `stop`.
 
+### Output capture (`cmd`, scenario `command`/`perf` steps)
+
+`cmd` sends `help sc-capture-<token>-begin`, the command and `help sc-capture-<token>-end` in ONE
+spool file (token = 96 random bits per call) and returns only the log lines between the two
+markers (the markers are not returned). Why `help`: for an unknown topic the Bukkit HelpCommand
+logs `No help for <topic>` synchronously on the console thread (`HelpCommand` ->
+`ConsoleCommandSender.sendMessage` -> `System.out`), run in order by `handleConsoleInputs`. `say` is
+not used: on this branch it decorates the chat on an executor and broadcasts through the task queue,
+so its line can be logged out of order. The supervisor writes one spool file to the console without
+interruption, so another `cmd` process or a churn loop (separate spool files) cannot land between
+the markers.
+
+A capture counts only when BOTH markers were logged, in order. Otherwise the call fails
+(`ok` false, exit 1) with `delivery uncertain: ...` (begin missing, end missing, or end logged
+before begin) plus any partial output labelled uncorrelated; a begin-less result does not claim the
+command did not run (a plugin may replace `help`). `--expect` is matched inside the closed region
+only. Limits, not detected: a reply logged BEFORE the begin marker (a command that is not
+synchronous on the console thread) is lost; output logged after the end marker (it answers on a
+later tick or another thread, e.g. `perf player <name>`) is not captured; unrelated server log lines
+logged between the markers are. The two `help` lines also appear in the server log. For delayed
+replies use `cmd --raw` or a scenario step with `"bracket": false` (allowed on `command` and
+`perf` steps): every new log line after sending, which DOES leak concurrent commands' output (seen
+in run asyncpath-soak-2: `count-*` outputs with "Successfully filled N block(s)" from a parallel
+loop). `wait-for` is not correlated; it matches log lines, not commands.
+
 ## Scenario file
 
 ```json

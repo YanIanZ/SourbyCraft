@@ -86,6 +86,9 @@ DONE_LINE = re.compile(r"^.*Done \([^)]*\)!.*$", re.MULTILINE)
 PINNED_PROPERTIES = ("server-ip", "server-port", "online-mode", "enable-rcon", "enable-query",
                      "rcon.password", "rcon.port", "query.port")
 REFUSED_COMMANDS = ("stop", "restart", "end")
+# `cmd`/scenario capture brackets a command between two console `help <marker>` lines
+# (Bukkit HelpCommand logs "No help for <marker>" synchronously on the console thread).
+CAPTURE_MARKER = "sc-capture-"
 FINAL_STATES = ("exited", "failed")
 
 
@@ -164,6 +167,38 @@ def kill_leftover(pid, workdir):
         kill_group(pid)
         return True
     return False
+
+
+def capture_markers():
+    """A fresh (begin, end) marker pair: 96 random bits, so no earlier or concurrent capture,
+    log line or plugin can contain either by accident."""
+    token = secrets.token_hex(12)
+    return f"{CAPTURE_MARKER}{token}-begin", f"{CAPTURE_MARKER}{token}-end"
+
+
+def capture_state(text, begin, end):
+    """Classify a capture window. Returns (state, region):
+
+    ``absent`` (begin not logged yet), ``open`` (begin seen, end not yet; region so far),
+    ``closed`` (both, in order; region = the lines strictly between them) or ``disordered``
+    (the end marker was logged before the begin marker: the console did not run them in order, so
+    nothing between them can be attributed). A marker may sit anywhere in its line."""
+    lines = text.splitlines()
+    start = stop = None
+    for index, line in enumerate(lines):
+        if start is None:
+            if end in line:
+                return "disordered", ""
+            if begin in line:
+                start = index
+        elif end in line:
+            stop = index
+            break
+    if start is None:
+        return "absent", ""
+    body = lines[start + 1:stop if stop is not None else len(lines)]
+    region = "\n".join(body) + "\n" if body else ""
+    return ("closed" if stop is not None else "open"), region
 
 
 def strip_ansi(text):
@@ -1227,24 +1262,72 @@ class Harness:
         tmp.write_text(text)
         os.replace(tmp, spool / f"{stem}.{suffix}")
 
-    def command(self, name, command, expect=None, timeout=30.0, quiet=1.5):
-        """Send one console command; return (matched, the log text it produced)."""
+    def command(self, name, command, expect=None, timeout=30.0, quiet=1.5, bracket=True):
+        """Send one console command; return (matched, the log text it produced).
+
+        With ``bracket`` (default) the command travels in one spool file between two
+        ``help sc-capture-<token>-begin|end`` console lines. The supervisor writes a spool file
+        to the console without interruption and the console runs lines in order, and ``help`` on an
+        unknown topic logs "No help for <topic>" synchronously on the console thread
+        (HelpCommand -> ConsoleCommandSender.sendMessage -> System.out), so the lines logged
+        between the markers are this command's own synchronous output; another ``cmd`` or a churn
+        loop (separate spool files) cannot land inside. A capture only counts as complete when both
+        markers were logged in order. Anything else (marker missing, end missing, out of order) is
+        reported as ``delivery uncertain`` with ok=False, never as success. Output a command logs
+        after the end marker (it answers on a later tick or another thread) is not captured; use
+        ``bracket=False`` for those. ``bracket=False`` is the old "every new log line after
+        sending" capture, which leaks concurrent commands' output; ``quiet`` only applies to it."""
         console = Console(self, self.existing(name))
         before = console.size()
-        console.send(command)
+        if bracket:
+            begin, end = capture_markers()
+            console.send(f"help {begin}", command, f"help {end}")
+        else:
+            begin = end = None
+            console.send(command)
         pattern = re.compile(expect) if expect else None
         deadline = time.monotonic() + timeout
         last_len, last_change = 0, time.monotonic()
+        state, produced = "absent", ""
         while time.monotonic() < deadline:
-            produced = console.since(before)
-            if pattern is not None and pattern.search(produced):
-                return True, produced
-            if len(produced) != last_len:
-                last_len, last_change = len(produced), time.monotonic()
-            elif pattern is None and produced and time.monotonic() - last_change >= quiet:
-                break
+            if bracket:
+                state, produced = capture_state(console.since(before), begin, end)
+                if state == "disordered":
+                    break
+                if state == "closed":
+                    return self._finish_capture(produced, pattern)
+            else:
+                produced = console.since(before)
+                if pattern is not None and pattern.search(produced):
+                    return True, produced
+                if len(produced) != last_len:
+                    last_len, last_change = len(produced), time.monotonic()
+                elif pattern is None and produced and time.monotonic() - last_change >= quiet:
+                    break
             time.sleep(0.2)
-        produced = console.since(before)
+        if bracket:
+            if state != "disordered":
+                state, produced = capture_state(console.since(before), begin, end)
+            if state == "closed":
+                return self._finish_capture(produced, pattern)
+            reason = {
+                "disordered": "the console logged the end marker before the begin marker "
+                              "(markers out of order)",
+                "open": f"the end marker was not logged within {timeout}s (the command may still "
+                        "be running or answer later)",
+                "absent": f"the begin marker was not logged within {timeout}s (the console may "
+                          "not have run the line, or a plugin replaced/suppressed `help`)",
+            }[state]
+            partial = f"--- partial, uncorrelated ---\n{produced}" if produced else ""
+            return False, f"[agent-testserver] delivery uncertain: {reason}; use --raw / " \
+                          f"bracket=False for uncorrelated output\n{partial}"
+        if pattern is not None:
+            return bool(pattern.search(produced)), produced
+        return not any(m in produced for m in run_baseline.COMMAND_FAILURES) and bool(produced), \
+            produced
+
+    @staticmethod
+    def _finish_capture(produced, pattern):
         if pattern is not None:
             return bool(pattern.search(produced)), produced
         return not any(m in produced for m in run_baseline.COMMAND_FAILURES) and bool(produced), \
@@ -1373,10 +1456,10 @@ class Harness:
 # ---------------------------------------------------------------------------------- scenario
 
 STEP_KEYS = {
-    "command": {"expect", "timeout", "save_as"},
+    "command": {"expect", "timeout", "save_as", "bracket"},
     "wait_for": {"timeout", "new_only"},
     "sleep": set(),
-    "perf": {"timeout"},
+    "perf": {"timeout", "bracket"},
     "workload": {"duration"},
 }
 COMMON_KEYS = {"label", "continue_on_failure"}
@@ -1429,6 +1512,8 @@ def parse_scenario(data):
             if key in step and (not isinstance(step[key], (int, float)) or isinstance(step[key], bool)
                                 or not 0 < step[key] <= MAX_LIFETIME_CEILING_S):
                 raise ScenarioError(f"{where}: {key} must be a positive number of seconds")
+        if "bracket" in step and not isinstance(step["bracket"], bool):
+            raise ScenarioError(f"{where}: bracket must be true or false")
         if kind == "command":
             if not isinstance(value, str) or not value.strip() or "\n" in value:
                 raise ScenarioError(f"{where}: command must be one non-empty line")
@@ -1536,10 +1621,12 @@ def run_scenario(harness, name, scenario_path, overrides=None):
             try:
                 if kind == "command":
                     ok, text = harness.command(name, step["command"], step.get("expect"),
-                                               step.get("timeout", 30))
+                                               step.get("timeout", 30),
+                                               bracket=step.get("bracket", True))
                 elif kind == "perf":
                     command = ("perf " + step["perf"]).strip()
-                    ok, text = harness.command(name, command, None, step.get("timeout", 20))
+                    ok, text = harness.command(name, command, None, step.get("timeout", 20),
+                                               bracket=step.get("bracket", True))
                 elif kind == "wait_for":
                     line = harness.wait_for(name, step["wait_for"], step.get("timeout", 60),
                                             step.get("new_only", False))
@@ -1638,6 +1725,9 @@ def build_parser():
     p.add_argument("command")
     p.add_argument("--expect", help="regex; exit 1 unless the output matches")
     p.add_argument("--timeout", type=float, default=30)
+    p.add_argument("--raw", action="store_true",
+                   help="no marker correlation: print every log line after sending (may include "
+                        "concurrent commands' output)")
     p = sub.add_parser("wait-for", help="wait for a log line matching a regex")
     p.add_argument("--name", required=True)
     p.add_argument("regex")
@@ -1699,7 +1789,8 @@ def main(argv=None):
             summary = run_scenario(harness, args.name, args.scenario, overrides)
             return 0 if summary["all_steps_ok"] and summary["lock_released"] else 1
         elif args.action == "cmd":
-            ok, text = harness.command(args.name, args.command, args.expect, args.timeout)
+            ok, text = harness.command(args.name, args.command, args.expect, args.timeout,
+                                    bracket=not args.raw)
             sys.stdout.write(text)
             return 0 if ok else 1
         elif args.action == "wait-for":
