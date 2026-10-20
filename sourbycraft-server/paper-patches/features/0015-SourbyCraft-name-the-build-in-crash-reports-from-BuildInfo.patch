@@ -1,0 +1,18 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 19:10:07 +0700
+Subject: [PATCH] SourbyCraft - name the build in crash reports from BuildInfo
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftCrashReport.java b/src/main/java/org/bukkit/craftbukkit/CraftCrashReport.java
+index b568f90116dc0b7e57298f9ecada1c6b1dcb337d..1d93037a84606c5195b42fced9d8823afc0e8f45 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftCrashReport.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftCrashReport.java
+@@ -21,6 +21,7 @@ public class CraftCrashReport implements CrashReportDetail<Object> {
+         final io.papermc.paper.ServerBuildInfo build = io.papermc.paper.ServerBuildInfo.buildInfo();
+         StringWriter value = new StringWriter();
+         try {
++            value.append("\n   SourbyCraft: ").append(dev.iyanz.sourbycraft.brand.CrashReportIdentity.line()); // SourbyCraft - name the build from BuildInfo, first, before anything that needs a running server
+             value.append("\n   BrandInfo: ").append(String.format("%s (%s) version %s", build.brandName(), build.brandId(), build.asString(io.papermc.paper.ServerBuildInfo.StringRepresentation.VERSION_FULL)));
+             value.append("\n   Running: ").append(Bukkit.getName()).append(" version ").append(Bukkit.getVersion()).append(" (Implementing API version ").append(Bukkit.getBukkitVersion()).append(") ").append(String.valueOf(MinecraftServer.getServer().usesAuthentication()));
+             value.append("\n   Plugins: {");

@@ -177,7 +177,7 @@ Make source, build metadata, runtime identity, and documentation describe the ac
 - [x] make startup banner use BuildInfo — `StartupBanner`, `SourbyCraftBanner`
 - [x] make `/version` use BuildInfo — `VerCommand`
 - [x] make Spark use BuildInfo — `FoliaPlatformInfo` patch, `SourbyMetadataProvider`
-- [-] make crash reports use BuildInfo — crash reports read the jar manifest `writeBuildInfo` writes; not checked in an actual crash report
+- [x] make crash reports use BuildInfo — Paper patch 0015 adds a `SourbyCraft:` build line first in the crash report system details from `brand/CrashReportIdentity` (`CrashReportIdentityTest` 3, includes a real `CraftCrashReport` without a server); the upstream `BrandInfo` line still reads the jar manifest and shows `26.2-DEV-...` when CI sets no `BUILD_NUMBER`; a crash-report file from a booted jar is not checked (needs a server)
 - [x] expose upstream revisions only in developer/debug details — `/ver` shows no upstream revision
 
 ### Target output
@@ -393,7 +393,7 @@ result
 - [x] reject stale paths — `AsyncPathValidityTest`
 - [x] test entity removal during solve — `AsyncPathCancellationTest` 17 over `AsyncPathNavigationModel` (model level; the patch lambda and a real `Mob` are not run)
 - [x] test world unload during solve — `AsyncPathCancellationTest` (model level, as above)
-- [ ] test target movement during solve
+- [x] test target movement during solve — `AsyncPathCancellationTest` (model level: a retarget that replaces the path makes the result stale, also when the new route has the same nodes, and a sync recompute during a solve; the patch lambda and a real `Mob` are not run)
 - [x] test queue saturation — `AsyncPathQueueTelemetryTest`
 - [x] test shutdown cancellation — `AsyncPathShutdownTest`
 - [ ] benchmark sync vs async
@@ -468,9 +468,9 @@ Make Aurora telemetry the authoritative runtime truth.
 ### Add
 
 - [x] scheduler queue depth — `/perf governor` (Sourby lanes); per-region queued task counts (tick/chunk) in `/perf scheduler` since MC patch 0045 (2026-10-20); the scheduler run queue, the global task queue and the world-wide global chunk-task queue are still `n/a`
-- [-] task wait latency — recorded since boot per kind (tick/chunk) by MC patch 0049 + `perf/RegionTaskWaitLatency` (count/mean/max, p50/p99 as bucket upper bounds; `RegionTaskWaitLatencyTest` 8, `RegionTaskWaitLatencyHookTest` 4, 2026-10-20); not displayed yet (needs a "Task wait" line in `/perf scheduler`), no server numbers, overhead not benchmarked
+- [x] task wait latency — recorded since boot per kind (tick/chunk) by MC patch 0049 + `perf/RegionTaskWaitLatency` (count/mean/max, p50/p99 as bucket upper bounds; `RegionTaskWaitLatencyTest` 8, `RegionTaskWaitLatencyHookTest` 4, 2026-10-20) and shown in `/perf scheduler` (`command/PerfTelemetryRows.taskWaitLines`, `PerfTelemetryRowsTest` 7); no server numbers, recording overhead not benchmarked (needs a server)
 - [x] async-path queue/solve latency — `/perf async`; see below
-- [ ] chunk lifecycle counters
+- [-] chunk lifecycle counters — recorded since boot, all worlds, one adder per transition (holder create/delete, FULL in/out, ticking in/out, entity-ticking in/out) by MC patch 0051 + `perf/ChunkLifecycleCounters` (`ChunkLifecycleCountersTest` 2, `ChunkLifecycleHookTest` 3, 2026-10-20); not shown in `/perf` yet (no `/perf chunks` row), no per-world split, no server numbers, overhead not benchmarked
 - [ ] entity tick counters
 - [x] packet counters — `/perf network`
 - [x] bytes/sec — `/perf network`

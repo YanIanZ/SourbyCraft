@@ -5,10 +5,12 @@ role and what should happen to it. Sizes are added lines (`+`) in the patch file
 
 > Historical, as of 2026-09-27: numbers predate the 2026-10-06 rebuild (0019–0023 → 0018–0022,
 > closing the 0018 gap) and the 2026-10-13 renumbering, so the 0019/0020 rows are today's 0018/0019.
-> Current Minecraft features run 0001–0048 and Paper features 0001–0014 (0001–0004 are the Paper
+> Current Minecraft features run 0001–0051 and Paper features 0001–0015 (0001–0004 are the Paper
 > file patches below). Of the Minecraft features, 0021–0038 (0020 and 0021 are the two Minecraft
 > source patches below, moved into features) are not classified here in their current form;
-> 0039–0048 are summarised in the second table below (added 2026-10-20). Current files:
+> 0039–0051 are summarised in the second table below (added 2026-10-20); Paper 0015 (2026-10-20,
+> BRANDING, KEEP, hook: one `CraftCrashReport` line from `brand/CrashReportIdentity`, i.e.
+> `BuildInfo`, ahead of upstream's manifest-based `BrandInfo` line; `CrashReportIdentityTest`). Current files:
 > `sourbycraft-server/{minecraft,paper}-patches/features/`.
 
 **Categories:** FOUNDATION (the product cannot boot or identify itself without it), INTEGRATION
@@ -42,9 +44,9 @@ optimisation), COMPATIBILITY (keeps plugins/config working), SECURITY, BRANDING,
 | 0020 commit AWF stores at shutdown | 1 | INTEGRATION | KEEP | One call; no-op without AWF worlds. |
 
 There is no 0018 in the snapshot above; the number was never reused. (Today's numbering has no gap:
-Minecraft features are 0001–0048 contiguous.)
+Minecraft features are 0001–0051 contiguous.)
 
-### Minecraft feature patches added after this snapshot (0039–0048, summarised 2026-10-20)
+### Minecraft feature patches added after this snapshot (0039–0051, summarised 2026-10-20)
 
 Classified by subject and the hunks' role as reported in the patch notes, not by a fresh hunk-by-hunk
 review; added lines are `+` lines of the patch file today. Dispositions are provisional.
@@ -63,6 +65,7 @@ review; added lines are `+` lines of the patch file today. Dispositions are prov
 | 0048 unloaded chunks are not loaded for the snapshot's `*IfLoaded` reads | 33 | PERFORMANCE | KEEP | Restores vanilla's `null`/BLOCKED answer for unloaded chunks (`SnapshotPathRegionTest`). |
 | 0049 time how long region tasks wait in their queue | 4 | INTEGRATION | KEEP | Hook only (3 code lines): stamp on first `tryPush`, record before `executeTask` runs the task; the recorder is `perf/RegionTaskWaitLatency` (`RegionTaskWaitLatencyHookTest`). No view reads it yet. |
 | 0050 time region-file chunk loads for `/perf storage` | 15 | INTEGRATION | KEEP | Telemetry wrapper around the region-file part of `moonrise$readData` (found-data reads and failures; the external-stream retry calls the inner method so a retry stays one load); recorder `perf/RegionFileLoadLatency`, same ring as 0043 (`RegionFileLoadLatencyHookTest`). No view reads it yet. |
+| 0051 count chunk lifecycle transitions | 8 | INTEGRATION | KEEP | Hook only (8 code lines): first statement of each `BaseChunkSystemHooks` lifecycle callback (holder create/delete, FULL in/out, ticking in/out, entity ticking in/out) counts into `perf/ChunkLifecycleCounters` (since boot, all worlds; `ChunkLifecycleCountersTest`, `ChunkLifecycleHookTest`). Not displayed yet; overhead not benchmarked. |
 
 ## Minecraft source patches (`minecraft-patches/sources/`)
 
@@ -120,5 +123,11 @@ review; added lines are `+` lines of the patch file today. Dispositions are prov
   the pinned revisions (CI run 445 applied them all).
 - **Regression tests before removal:** 0006 has `AsyncPathValidityTest`, 0013 has the
   metrics tests, 0016 and 0017/0019 have review docs, and AWF has its storage tests. The
-  allocation patches (0009–0012) have no dedicated tests; add them before changing those. 0007
-  has `GliderSlotsTest` since 2026-10-20.
+  allocation patches are covered as of 2026-10-20 (checked against the test tree): 0009 by
+  `ScratchReentrancyTest` (Vec3 arithmetic, upstream float threshold, single-field publication),
+  0010 by `RandomTickPosEscapeTest` (the capture points that must copy the reused random-tick
+  position: `ScheduledTick`, `CraftBlock.at`, the `BlockPos` neighbour lookups) plus
+  `ScratchBufferConfinementTest` (no `ServerLevel` scratch field), 0011 by
+  `ScratchBufferConfinementTest` (overload signature), 0012 by `IsInWallBoundsTest` and
+  `ScratchReentrancyTest`. None replays a live tick; no policy script enforces "test before
+  change". 0007 has `GliderSlotsTest` since 2026-10-20.

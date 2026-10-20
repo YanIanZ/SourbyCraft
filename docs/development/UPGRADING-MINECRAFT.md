@@ -276,7 +276,7 @@ Every line inside an upstream file is a line that can conflict on the next bump.
 From the script's output on 2026-10-07 (patch numbers updated to the 2026-10-13 numbering). "Logic" here means the heuristic found behaviour
 written inside an upstream file. It is **not** a judgement that the patch is wrong.
 Converting any of these is real work. Each conversion needs its own regression test before
-the patch changes, and the allocation patches 0009–0012 have no dedicated tests yet (0007 has `GliderSlotsTest` and is a hook since 2026-10-20)
+the patch changes; the allocation patches 0009–0012 have their contract tests listed in `patch-classification.md` (0010 since 2026-10-20: `RandomTickPosEscapeTest`; 0007 has `GliderSlotsTest` and is a hook since 2026-10-20)
 (`patch-classification.md`). The compile-boundary caveat recorded there (classes written
 inside patches because of the package the upstream code imports) has to be checked per patch.
 
@@ -288,7 +288,7 @@ inside patches because of the package the upstream code imports) has to be check
 | MC 0006 async pathfinding | 141/1 | 70 code lines over five files | **Candidate:** split per `patch-classification.md`, then push scheduling into `perf/AsyncPath*` |
 | MC 0013 tick metrics | 97/14 | 84 code lines over six files | **Candidate:** split telemetry from lifecycle. Most lines are already calls into `dev.iyanz.sourbycraft.perf` |
 | MC 0021 storage traffic counters + AWF routing | 94/0 | 72 code lines in `RegionFileStorage` (mostly the AWF read/write/scan/flush/close branches, not counters) | **Candidate:** AWF branches into an owned class, one call per I/O site. Started 2026-10-20: the chunk NBT codec moved to `awf/AwfChunkNbt` (`AwfChunkNbtTest`); `sourby$attachAwf` and the branches remain |
-| MC 0026 chunk-generation stage timing | 22/0 | 19 code lines | **Candidate:** timing into an owned class |
+| MC 0026 chunk-generation stage timing | 16/0 | 13 code lines (two fields, the `run()` try/finally split, three calls) | **Partly done 2026-10-20:** stamps and the record decision moved to `ChunkGenerationMetrics.stampQueued`/`stampRunStart`/`runFinished` (`ChunkGenerationMetricsTest`); still `logic` because the try/finally wrapper around `runTask()` has to stay in the task |
 | MC 0025 region watchdog off by default | 17/3 | property gate written into upstream | Possible: read the flag from an owned config class. Small gain |
 | MC 0003, 0014, 0023 spawn and worldgen rules | 47/0, 25/3, 25/0 | gameplay decisions inline | Possible: move the predicate to an owned static method. The upstream `if` stays either way |
 | Paper 0003, 0007 bridge admission and routing | 39/3, 43/1 | scheduler/provider logic in CraftBukkit | Possible: concentrate on `AuroraBridge` calls. `CraftScheduler` is the largest hot spot (six patches) |

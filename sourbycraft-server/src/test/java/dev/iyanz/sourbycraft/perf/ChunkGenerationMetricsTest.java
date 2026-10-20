@@ -37,4 +37,27 @@ class ChunkGenerationMetricsTest {
         // Nearest-rank p50 of the last 1024 values (1024..2047).
         assertEquals(1535 / 1_000_000.0, stage.execution().p50());
     }
+
+    // Hooks of Minecraft feature patch 0026 (ChunkUpgradeGenericStatusTask): queue = run start -
+    // schedule stamp, execution = run end - run start, from the three stamps the task takes.
+    @Test
+    void aRunIsSplitIntoQueueAndExecutionFromItsThreeStamps() {
+        final var metrics = new ChunkGenerationMetrics();
+        metrics.recordRun("minecraft:noise", 1_000_000L, 4_000_000L, 9_000_000L);
+        final var stage = metrics.snapshot().getFirst();
+        assertEquals(1, stage.completedRuns());
+        assertEquals(3.0, stage.queue().p99());
+        assertEquals(5.0, stage.execution().p99());
+    }
+
+    @Test
+    void withTimingOffTheHooksStampNothingAndRecordNothing() {
+        // ENABLED is a restart-time constant; tests run with it off (no property, no TOML).
+        assertEquals(false, ChunkGenerationMetrics.ENABLED);
+        assertEquals(0L, ChunkGenerationMetrics.stampQueued());
+        assertEquals(0L, ChunkGenerationMetrics.stampRunStart());
+        final int before = ChunkGenerationMetrics.GLOBAL.snapshot().size();
+        ChunkGenerationMetrics.runFinished(true, "noise", 0L, 0L);
+        assertEquals(before, ChunkGenerationMetrics.GLOBAL.snapshot().size());
+    }
 }

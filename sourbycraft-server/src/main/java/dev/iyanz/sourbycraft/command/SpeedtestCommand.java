@@ -291,7 +291,7 @@ public class SpeedtestCommand extends Command {
 
     private static String drain(final InputStream stream) {
         try (stream) {
-            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            return new String(dev.iyanz.sourbycraft.util.BoundedIo.readAll(stream, MAX_OUTPUT_BYTES), StandardCharsets.UTF_8);
         } catch (final IOException failed) {
             throw new UncheckedIOException(failed);
         }
@@ -380,6 +380,11 @@ public class SpeedtestCommand extends Command {
         });
     }
 
+    /** The CLI archive is about 1 MiB and SHA-256 pinned; anything this large is not it. */
+    static final long MAX_ARCHIVE_BYTES = 32L * 1024 * 1024;
+    /** The CLI's JSON report is a few KiB; output past this fails the run instead of filling memory. */
+    static final int MAX_OUTPUT_BYTES = 1024 * 1024;
+
     private static void downloadSpeedtestBinary() throws IOException {
         Files.createDirectories(BIN.getParent());
         HttpClient http = HttpClient.newBuilder()
@@ -391,16 +396,21 @@ public class SpeedtestCommand extends Command {
             .GET().build();
         Path tarball = BIN.getParent().resolve("speedtest.tgz.tmp");
         Files.deleteIfExists(tarball);
-        HttpResponse<Path> resp;
+        HttpResponse<InputStream> resp;
         try {
-            resp = http.send(req, HttpResponse.BodyHandlers.ofFile(tarball));
+            resp = http.send(req, HttpResponse.BodyHandlers.ofInputStream());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("interrupted during speedtest download", e);
         }
-        if (resp.statusCode() != 200) {
+        try (InputStream body = resp.body()) {
+            if (resp.statusCode() != 200) {
+                throw new IOException("HTTP " + resp.statusCode() + " from " + OOKLA_URL);
+            }
+            dev.iyanz.sourbycraft.util.BoundedIo.copy(body, tarball, MAX_ARCHIVE_BYTES);
+        } catch (IOException e) {
             Files.deleteIfExists(tarball);
-            throw new IOException("HTTP " + resp.statusCode() + " from " + OOKLA_URL);
+            throw e;
         }
         // SHA-256 integrity gate: verify the downloaded archive against its pin BEFORE extracting or
         // executing anything. A MITM'd/tampered mirror would otherwise yield an unpinned executable.

@@ -58,6 +58,37 @@ public final class ChunkGenerationMetrics {
         sample.runs.increment();
     }
 
+    /**
+     * One run from the three stamps of a generation task: queue = {@code started - queuedAt},
+     * execution = {@code finished - started}.
+     */
+    void recordRun(final String stage, final long queuedAt, final long started, final long finished) {
+        this.record(stage, started - queuedAt, finished - started);
+    }
+
+    // Hooks for Minecraft feature patch 0026 (ChunkUpgradeGenericStatusTask). The patch keeps only
+    // the call sites and two fields; with ENABLED off (the default) each hook is a constant branch.
+
+    /** The schedule-time stamp; {@code 0} when timing is off. */
+    public static long stampQueued() {
+        return ENABLED ? System.nanoTime() : 0L;
+    }
+
+    /** The run-start stamp; {@code 0} when timing is off. */
+    public static long stampRunStart() {
+        return ENABLED ? System.nanoTime() : 0L;
+    }
+
+    /**
+     * Records a finished run (also a failed one) when timing is on and the task really executed a
+     * generation step: {@code generated} is false for loads and for empty generation statuses.
+     */
+    public static void runFinished(final boolean generated, final String stage, final long queuedAt, final long started) {
+        if (ENABLED && generated) {
+            GLOBAL.recordRun(stage, queuedAt, started, System.nanoTime());
+        }
+    }
+
     /** Queue/run rings are individually consistent, not an atomic process-wide snapshot. */
     public List<Stage> snapshot() {
         final List<Stage> result = new ArrayList<>();

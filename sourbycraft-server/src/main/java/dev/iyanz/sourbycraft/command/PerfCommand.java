@@ -130,6 +130,7 @@ public final class PerfCommand extends Command {
         }
         if (view.equals("network")) {
             renderNetwork(lines);
+            PerfTelemetryRows.renderConnectionQueues(lines);
         }
         if (view.equals("governor")) {
             renderGovernor(lines);
@@ -154,6 +155,7 @@ public final class PerfCommand extends Command {
         }
         if (view.equals("scheduler")) {
             PerfSchedulerView.render(lines);
+            PerfTelemetryRows.renderTaskWait(lines);
         }
         if (view.equals("incidents")) {
             PerfIncidentsView.render(lines);
@@ -523,6 +525,7 @@ public final class PerfCommand extends Command {
                     save.p50Millis(), save.p99Millis(), save.maxMillis(), save.windowSamples(),
                     dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.WINDOW_SECONDS, save.maxEverMillis()));
         }
+        PerfTelemetryRows.renderLoads(lines);
         final var queues = dev.iyanz.sourbycraft.perf.RegionIoQueue.INSTANCE.sample();
         if (queues.isEmpty()) {
             add(lines, "Pending storage I/O", "no world loaded");

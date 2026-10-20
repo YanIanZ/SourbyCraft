@@ -342,8 +342,9 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   TPS/MSPT region terburuk, CPU proses, heap; `PerformanceHistoryTest`)
 - [-] Telemetri sisa: latensi tunggu task, counter siklus hidup chunk, counter tick entity, log
   insiden (kejadian, bukan sampel per menit)
-  — log insiden selesai 2026-10-20: `/perf incidents` (`IncidentLog` ring 20, merge per kind+subject, 9 sinyal; watchdog dan pause GC STW tidak bersumber); siklus hidup chunk dan tick entity masih terbuka
-  — latensi tunggu task tercatat 2026-10-20 (patch MC 0049 + `perf/RegionTaskWaitLatency`, per jenis tick/chunk sejak boot; `RegionTaskWaitLatencyTest` 8, `RegionTaskWaitLatencyHookTest` 4), tetapi belum ditampilkan (butuh baris di `/perf scheduler`), tanpa angka server, overhead belum di-benchmark
+  — log insiden selesai 2026-10-20: `/perf incidents` (`IncidentLog` ring 20, merge per kind+subject, 9 sinyal; watchdog dan pause GC STW tidak bersumber); siklus hidup chunk tercatat tetapi belum ditampilkan, tick entity masih terbuka
+  — latensi tunggu task tercatat 2026-10-20 (patch MC 0049 + `perf/RegionTaskWaitLatency`, per jenis tick/chunk sejak boot; `RegionTaskWaitLatencyTest` 8, `RegionTaskWaitLatencyHookTest` 4) dan kini ditampilkan di `/perf scheduler` (`PerfTelemetryRows`, `PerfTelemetryRowsTest` 7), tanpa angka server, overhead belum di-benchmark
+  — siklus hidup chunk tercatat 2026-10-20 (patch MC 0051 + `perf/ChunkLifecycleCounters`, 8 transisi sejak boot, semua world; `ChunkLifecycleCountersTest` 2, `ChunkLifecycleHookTest` 3), tetapi belum ditampilkan di `/perf` (baris berikutnya), tanpa pecahan per world dan angka server; tick entity masih terbuka (butuh patch MC)
 - [x] Latensi save region-file (saat ini hanya ada latensi commit AWF)
   — selesai 2026-10-20: patch MC 0043 mengukur `moonrise$finishWrite` (tulis+hapus, sukses dan gagal) ke `perf/RegionFileSaveLatency` (ring lock-free 1024, p50/p99/max 60 s per world), tampil di `/perf storage`; overhead belum dibenchmark, belum ada angka server
 
