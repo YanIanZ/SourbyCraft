@@ -2,8 +2,9 @@
 """Per-agent git worktrees of SourbyCraft, so agents can run Gradle without queueing on one tree.
 
   agent_worktree.py create <name> [--from-main-tree]   new detached worktree at main HEAD + generated inputs
-  agent_worktree.py diff <name>                        write the worktree's changes as patches (prints paths)
+  agent_worktree.py diff <name>                        write what the next apply sends as patches (prints paths)
   agent_worktree.py apply <name> [--as WORKER]         apply those patches to the main tree (git apply --3way)
+  agent_worktree.py resolve <name>                     after fixing an apply's conflicts in the main tree
   agent_worktree.py remove <name> [--discard] [--force]
   agent_worktree.py list
 
@@ -11,13 +12,25 @@ Worktrees live in /Volumes/Ext/Sourby/sc-worktrees/<name> (outside the repo); th
 in sc-worktrees/.meta/. A worktree starts as `git worktree add --detach <dir> HEAD`, then gets an APFS
 clone (`cp -c`, falling back to a plain copy) of every generated, untracked input a build reads from the
 main tree (GENERATED below: the materialized nested repos with their .git, Metal's generated sources, the
-generated module build files). With --from-main-tree it also gets the main tree's uncommitted tracked
+generated module build files) plus, when present, OPTIONAL_GENERATED (the paperweight upstream checkout
+build_identity.py reads). With --from-main-tree it also gets the main tree's uncommitted tracked
 changes (`git diff HEAD | git apply`) and its untracked, non-ignored files (minus CARRY_EXCLUDE).
 
 The base of a worktree is a git tree object recorded right after creation, for the worktree itself and
 for each nested repo (NESTED_REPOS). `diff` compares the current state (tracked + new non-ignored files,
 taken through a temporary index, so no index or HEAD is touched) with that base, one patch for the main
 repo and one per changed nested repo. So carried-over main-tree changes are never part of the diff.
+
+Apply receipts (`applied_trees`, `applied_files`, `unresolved` in the metadata, bound to the worktree by
+`receipt_digest`, a checksum against edits and copies, not a signature): a repo that applied cleanly records
+the tree it applied and the resulting main-tree blob of every touched file. `diff`/`apply` send each repo's
+changes since its last clean apply (else since the base), so reverting an applied change is sent too.
+A conflicted or failed apply records the repo as unresolved: `remove` refuses, and after conflicts `apply`
+also refuses until `resolve` (checks the markers are gone, then accepts the attempted tree). `remove` also
+refuses when a recorded main-tree file no longer has the applied content (someone changed it since), and
+ignores receipts that are legacy, edited or name trees the repo lacks. Applies are serialised per target
+repository with flock (`sourby-apply-<sha1>.lock`); the optional paperweight cache is copied while holding
+the main tree's Gradle lock and dropped unless it holds the worktree's paperRef.
 
 `apply` refuses when any touched main-tree path is held by a board file lock
 (/private/tmp/claude-501/sourby-filelocks/<sha1 of the resolved path>, the scheme of the scratchpad
@@ -26,6 +39,8 @@ index, so the main tree's real index stays as it is and conflicts are left as ma
 Nothing is ever committed. Gradle in a worktree: SOURBY_TREE=<dir> scripts/gradle_locked.sh ...
 """
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -54,6 +69,13 @@ GENERATED = (
     "sourbycraft-server/build.gradle.kts",         # generated from build.gradle.kts.patch
     "sourbyapi/build.gradle.kts",                  # generated from paper-api/build.gradle.kts
 )
+# Cloned when the main tree has them, never required. The paperweight upstream checkout is what
+# scripts/build_identity.py reads (`git show <paperRef>:paper-server/build.gradle.kts`) to tell whether the
+# generated module build files are clean; without it a worktree jar gets gitCommit=unknown and "-dirty".
+# A clone, not a symlink, so a worktree's Gradle can never rewrite the main tree's cache.
+OPTIONAL_GENERATED = (
+    ".gradle/caches/paperweight/upstreams/paper",
+)
 NESTED_REPOS = (
     "paper-api",
     "paper-server",
@@ -80,6 +102,10 @@ class Config:
     mc_lock: Path = MC_REPO_LOCK
     daemon_lister: object = None  # () -> [(pid, java.io.tmpdir)]; default gradle_daemons
     generated: tuple = GENERATED
+    optional_generated: tuple = OPTIONAL_GENERATED
+    apply_lock_root: Path = GRADLE_LOCK_ROOT   # sourby-apply-<sha1 of target repo>.lock (flock)
+    apply_lock_timeout: float = 600
+    cache_lock_timeout: float = 300           # wait for a main-tree Gradle build before skipping the cache
     nested: tuple = NESTED_REPOS
     out: object = field(default=sys.stdout)
 
@@ -156,7 +182,15 @@ def load_meta(cfg, name):
     path = cfg.meta_file(name)
     if not path.exists():
         raise WorktreeError(f"no worktree named {name!r} (no {path})")
-    return json.loads(path.read_text())
+    try:
+        meta = json.loads(path.read_text())
+    except ValueError as exc:
+        raise WorktreeError(f"metadata {path} is not valid JSON: {exc}")
+    # The path decides what remove deletes, so it must be exactly where this tool puts the worktree.
+    if not isinstance(meta, dict) or meta.get("name") != name or meta.get("path") != str(cfg.wt(name)) \
+            or not isinstance(meta.get("base_trees"), dict) or "." not in meta["base_trees"]:
+        raise WorktreeError(f"metadata {path} does not describe worktree {name!r} at {cfg.wt(name)}; refusing")
+    return meta
 
 
 def emit(cfg, obj):
@@ -175,6 +209,80 @@ def check_name(cfg, name):
         raise WorktreeError(f"a worktree named {name!r} already exists ({wt})")
 
 
+def main_gradle_lock(cfg, owner, timeout):
+    """Take the main tree's Gradle tree lock (the mkdir lock of scripts/gradle_locked.sh), breaking it only
+    when its owner pid is gone. Returns the lock path, or None when a live holder kept it past timeout."""
+    lock = cfg.gradle_lock_root / "sourby-gradle.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            lock.mkdir()
+            (lock / "owner").write_text(f"{owner} pid={os.getpid()} tree=main since={int(time.time())}\n")
+            return lock
+        except FileExistsError:
+            try:
+                holder = (lock / "owner").read_text()
+            except OSError:
+                holder = ""
+            pid = re.search(r"pid=(\d+)", holder)
+            if pid and not pid_alive(int(pid.group(1))):
+                grave = lock.with_name(f"{lock.name}.stale.{os.getpid()}")
+                with contextlib.suppress(OSError):
+                    lock.rename(grave)
+                    shutil.rmtree(grave, ignore_errors=True)
+                continue
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(1)
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def paper_ref(tree):
+    props = Path(tree) / "gradle.properties"
+    if not props.is_file():
+        return None
+    for line in props.read_text().splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.strip() == "paperRef" and re.fullmatch(r"[0-9a-f]{40}", value.strip()):
+            return value.strip()
+    return None
+
+
+def copy_optional_cache(cfg, name, rel, wt):
+    """Clone an optional cache while holding the main tree's Gradle lock (so no main-tree build rewrites it
+    mid-copy), then check the copy holds the worktree's paperRef. Returns the clone_copy result, or the
+    reason it was skipped (the partial copy is removed)."""
+    dst = wt / rel
+    lock = main_gradle_lock(cfg, f"agent_worktree create {name}", cfg.cache_lock_timeout)
+    if lock is None:
+        return "main-tree Gradle build holds sourby-gradle.lock; cache not copied (build identity will be unknown)"
+    try:
+        outcome = clone_copy(cfg.main / rel, dst)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        shutil.rmtree(dst, ignore_errors=True)
+        return f"copy failed: {exc}"
+    finally:
+        shutil.rmtree(lock, ignore_errors=True)
+    pin = paper_ref(wt)
+    ok = pin is not None and all(
+        git(dst, "cat-file", "-e", f"{pin}:{module}/build.gradle.kts", check=False).returncode == 0
+        for module in ("paper-server", "paper-api"))
+    if not ok:
+        shutil.rmtree(dst, ignore_errors=True)
+        return f"copied checkout lacks the worktree's paperRef {pin}; removed"
+    return outcome
+
+
 def cmd_create(cfg, name, from_main_tree=False):
     check_name(cfg, name)
     missing = [rel for rel in cfg.generated if not (cfg.main / rel).exists()]
@@ -187,6 +295,14 @@ def cmd_create(cfg, name, from_main_tree=False):
     git(cfg.main, "worktree", "add", "--detach", str(wt), head)
     try:
         copied = {rel: clone_copy(cfg.main / rel, wt / rel) for rel in cfg.generated}
+        cache_skipped = {}
+        for rel in cfg.optional_generated:
+            if (cfg.main / rel).is_dir():
+                outcome = copy_optional_cache(cfg, name, rel, wt)
+                if outcome in ("clone", "copy", "merged"):
+                    copied[rel] = outcome
+                else:
+                    cache_skipped[rel] = outcome
         carried = {"tracked_patch_bytes": 0, "untracked_files": 0}
         if from_main_tree:
             excludes = [f":(exclude){e}" for e in ("AGENT-COORDINATION.md", ".board-queue*")]
@@ -213,8 +329,10 @@ def cmd_create(cfg, name, from_main_tree=False):
     meta = {"name": name, "path": str(wt), "base_commit": head, "from_main_tree": from_main_tree,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "base_trees": bases, "copied": copied,
             "carried": carried, "create_seconds": round(time.monotonic() - started, 2)}
+    if cache_skipped:
+        meta["cache_skipped"] = cache_skipped
     cfg.meta_file(name).parent.mkdir(parents=True, exist_ok=True)
-    cfg.meta_file(name).write_text(json.dumps(meta, indent=2) + "\n")
+    save_meta(cfg, meta)
     emit(cfg, {"ok": True, **meta,
                "gradle": f"SOURBY_TREE={wt} AGENT_NAME=<you> {cfg.main}/scripts/gradle_locked.sh <tasks>"})
     return meta
@@ -226,8 +344,89 @@ def repos_of(cfg, meta):
     return list(meta["base_trees"].items())
 
 
-def compute_diff(cfg, name):
-    meta = load_meta(cfg, name)
+RECEIPT_KEYS = ("applied_trees", "applied_files", "unresolved")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def receipt_digest(meta):
+    """Checksum binding the receipt to this worktree's identity. It catches hand edits, copies from another
+    worktree and partial writes; it is not a signature against a deliberate forger with this source."""
+    body = {k: meta.get(k) for k in ("name", "path", "base_commit", "base_trees", *RECEIPT_KEYS)}
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+
+
+def save_meta(cfg, meta):
+    if any(k in meta for k in RECEIPT_KEYS):
+        meta["receipt_digest"] = receipt_digest(meta)
+    path = cfg.meta_file(meta["name"])
+    tmp = path.with_name(path.name + f".tmp{os.getpid()}")
+    tmp.write_text(json.dumps(meta, indent=2) + "\n")
+    os.replace(tmp, path)
+
+
+def receipt(cfg, meta):
+    """(receipt, problem). The receipt is {applied_trees, applied_files, unresolved}; when it is missing,
+    legacy (no digest), altered or refers to trees the repos do not have, it is empty and problem says why,
+    so nothing is treated as applied."""
+    empty = {"applied_trees": {}, "applied_files": {}, "unresolved": {}}
+    if not any(k in meta for k in RECEIPT_KEYS):
+        return empty, None
+    if meta.get("receipt_digest") != receipt_digest(meta):
+        return empty, "apply receipt has no valid digest (legacy or edited metadata); ignored"
+    trees, files, unresolved = (meta.get(k, {}) for k in RECEIPT_KEYS)
+    repos = meta["base_trees"]
+    if not (isinstance(trees, dict) and isinstance(files, dict) and isinstance(unresolved, dict)):
+        return empty, "apply receipt has the wrong shape; ignored"
+    wt = Path(meta["path"])
+    for rel, tree in trees.items():
+        repo = wt if rel == "." else wt / rel
+        if rel not in repos or not isinstance(tree, str) or not SHA_RE.match(tree) or \
+                git(repo, "cat-file", "-t", tree, check=False).stdout.strip() != "tree":
+            return empty, f"apply receipt names an unknown tree for {rel!r}; ignored"
+    if any(not isinstance(k, str) or not (v is None or (isinstance(v, str) and SHA_RE.match(v)))
+           for k, v in files.items()) or any(rel not in repos for rel in unresolved):
+        return empty, "apply receipt has malformed entries; ignored"
+    return {"applied_trees": trees, "applied_files": files, "unresolved": unresolved}, None
+
+
+def blob_id(path):
+    """Git blob id of a working-tree file (symlink: its target), None when it does not exist."""
+    try:
+        data = str(path.readlink()).encode() if path.is_symlink() else path.read_bytes()
+    except FileNotFoundError:
+        return None
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def current_tree(cfg, meta, rel):
+    wt = Path(meta["path"])
+    repo = wt if rel == "." else wt / rel
+    return repo, snapshot(repo, exclude=CARRY_EXCLUDE_PATHS if rel == "." else ())
+
+
+def unapplied(cfg, meta, rec=None):
+    """{repo: changed-path count} of worktree state that no clean apply has taken: each repo's current
+    snapshot is compared with the tree its last clean apply recorded (applied_trees), else with its base."""
+    rec = rec if rec is not None else receipt(cfg, meta)[0]
+    dirty = {}
+    for rel, base in repos_of(cfg, meta):
+        repo, current = current_tree(cfg, meta, rel)
+        count = len(changed_paths(repo, rec["applied_trees"].get(rel, base), current))
+        if count:
+            dirty[rel] = count
+    return dirty
+
+
+def stale_files(cfg, rec):
+    """Main-tree files whose content differs from what the last apply left there."""
+    return sorted(rel for rel, blob in rec["applied_files"].items() if blob_id(cfg.main / rel) != blob)
+
+
+def compute_diff(cfg, name, meta=None, rec=None):
+    """Patches of what the next apply sends: each repo's current state against its last clean apply
+    (applied_trees), else against the base. Reverting an applied change is part of that delta."""
+    meta = meta or load_meta(cfg, name)
+    rec = rec if rec is not None else receipt(cfg, meta)[0]
     wt = Path(meta["path"])
     out_dir = cfg.patch_dir(name)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -235,8 +434,8 @@ def compute_diff(cfg, name):
         old.unlink()
     patches = []
     for rel, base in repos_of(cfg, meta):
-        repo = wt if rel == "." else wt / rel
-        current = snapshot(repo, exclude=CARRY_EXCLUDE_PATHS if rel == "." else ())
+        base = rec["applied_trees"].get(rel, base)
+        repo, current = current_tree(cfg, meta, rel)
         paths = changed_paths(repo, base, current)
         if not paths:
             continue
@@ -316,12 +515,58 @@ def apply_patch(target, patch_file, files):
                 "output": (result.stdout + result.stderr).strip()}
 
 
+@contextlib.contextmanager
+def apply_locks(cfg, rels, owner):
+    """flock one lock per target repository (sorted, so two applies never deadlock): two worktrees applying
+    to the same repo run one after the other, and the second 3-way merges against the first's result."""
+    handles = []
+    try:
+        for rel in sorted(rels):
+            target = cfg.main if rel == "." else cfg.main / rel
+            path = cfg.apply_lock_root / f"sourby-apply-{lock_key(target)}.lock"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fh = open(path, "a+")
+            deadline = time.monotonic() + cfg.apply_lock_timeout
+            while True:
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        fh.seek(0)
+                        holder = fh.read().strip() or "?"
+                        fh.close()
+                        raise WorktreeError(f"another apply holds {path} ({holder}); try again later")
+                    time.sleep(0.2)
+            fh.seek(0)
+            fh.truncate()
+            fh.write(f"{owner} pid={os.getpid()}\n")
+            fh.flush()
+            handles.append(fh)
+        yield
+    finally:
+        for fh in reversed(handles):
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            fh.close()
+
+
 def cmd_apply(cfg, name, worker=None):
     meta = load_meta(cfg, name)
-    summary = compute_diff(cfg, name)
+    with apply_locks(cfg, meta["base_trees"], f"{worker or 'agent_worktree'} apply {name}"):
+        return locked_apply(cfg, name, meta, worker)
+
+
+def locked_apply(cfg, name, meta, worker):
+    rec, problem = receipt(cfg, meta)
+    conflicted = {rel: u for rel, u in rec["unresolved"].items() if u.get("kind") == "conflict"}
+    if conflicted:
+        emit(cfg, {"ok": False, "refused": "an earlier apply left conflicts", "unresolved": conflicted,
+                   "hint": f"fix the <<<<<<< markers in the main tree, then `resolve {name}`"})
+        return 3
+    summary = compute_diff(cfg, name, meta, rec)
     all_paths = [p for patch in summary["patches"] for p in patch["main_paths"]]
     if not all_paths:
-        emit(cfg, {"ok": True, "name": name, "applied": [], "note": "no changes against the base"})
+        emit(cfg, {"ok": True, "name": name, "applied": [], "note": "no changes against the last apply"})
         return 0
     held = held_locks(cfg, all_paths, worker)
     if held:
@@ -329,34 +574,88 @@ def cmd_apply(cfg, name, worker=None):
                    "hint": "wait for them, or lock the paths yourself and pass --as <you>"})
         return 3
     wt = Path(meta["path"])
+    # Start from the validated receipt (an invalid one is dropped, never extended).
+    meta.update({k: json.loads(json.dumps(v)) for k, v in rec.items()})
     results = []
-    for patch in summary["patches"]:
-        rel = patch["repo"]
-        target = cfg.main if rel == "." else cfg.main / rel
-        lock = None
-        if rel != ".":
+    try:
+        for patch in summary["patches"]:
+            rel = patch["repo"]
+            target = cfg.main if rel == "." else cfg.main / rel
+            lock = None
             if rel.startswith("sourbycraft-server/src/minecraft"):
                 lock = cfg.mc_lock
                 acquire_dir_lock(lock, f"{worker or 'agent_worktree'} apply {name}")
             try:
-                transfer_objects(wt / rel, target, patch["base"], patch["current"])
-            except WorktreeError:
+                if rel != ".":
+                    transfer_objects(wt / rel, target, patch["base"], patch["current"])
+                try:
+                    outcome = apply_patch(target, patch["patch"], patch["files"])
+                except Exception:
+                    # apply may have written part of it: nothing about this repo counts as taken
+                    meta["unresolved"][rel] = {"kind": "failed", "attempted": patch["current"],
+                                               "files": patch["main_paths"]}
+                    raise
+            finally:
                 if lock:
                     shutil.rmtree(lock, ignore_errors=True)
-                raise
-        try:
-            outcome = apply_patch(target, patch["patch"], patch["files"])
-        finally:
-            if lock:
-                shutil.rmtree(lock, ignore_errors=True)
-        results.append({"repo": rel, "patch": patch["patch"], "files": patch["main_paths"], **outcome,
-                        "conflicts": [p if rel == "." else f"{rel}/{p}" for p in outcome["conflicts"]]})
-    ok = all(r["returncode"] == 0 for r in results)
+            conflicts = [p if rel == "." else f"{rel}/{p}" for p in outcome["conflicts"]]
+            if outcome["returncode"] == 0 and not conflicts:
+                meta["applied_trees"][rel] = patch["current"]
+                meta["applied_files"].update({p: blob_id(cfg.main / p) for p in patch["main_paths"]})
+                meta["unresolved"].pop(rel, None)
+            else:
+                # The receipt stops authorising removal: remove and (for conflicts) apply refuse until
+                # `resolve` (conflicts) or a successful retry (plain failure). applied_trees keeps the last
+                # clean point, so a retry still sends every change since then, reverts included.
+                meta["unresolved"][rel] = {"kind": "conflict" if conflicts else "failed",
+                                           "attempted": patch["current"], "files": patch["main_paths"],
+                                           "conflicts": conflicts}
+            results.append({"repo": rel, "patch": patch["patch"], "files": patch["main_paths"], **outcome,
+                            "conflicts": conflicts})
+    finally:
+        save_meta(cfg, meta)
+    ok = all(r["returncode"] == 0 and not r["conflicts"] for r in results)
     conflicts = [c for r in results for c in r["conflicts"]]
-    emit(cfg, {"ok": ok, "name": name, "results": results, "conflicts": conflicts,
-               "note": "applied to the working tree only (index untouched, nothing committed)" if ok else
-               "see results[].output; conflicted files contain <<<<<<< markers"})
+    out = {"ok": ok, "name": name, "results": results, "conflicts": conflicts,
+           "note": "applied to the working tree only (index untouched, nothing committed)" if ok else
+           f"see results[].output; conflicted files contain <<<<<<< markers; fix them, then `resolve {name}`"}
+    if problem:
+        out["receipt_warning"] = problem
+    emit(cfg, out)
     return 0 if ok else 1
+
+
+MARKER_RE = re.compile(rb"^(<<<<<<<|>>>>>>>)( |$)", re.M)
+
+
+def cmd_resolve(cfg, name):
+    """After fixing an apply's conflicts by hand in the main tree: accept the attempted trees as applied."""
+    meta = load_meta(cfg, name)
+    with apply_locks(cfg, meta["base_trees"], f"agent_worktree resolve {name}"):
+        rec, problem = receipt(cfg, meta)
+        if problem:
+            raise WorktreeError(f"{problem}; cannot resolve, use remove --discard after checking the main tree")
+        if not rec["unresolved"]:
+            emit(cfg, {"ok": True, "name": name, "resolved": [], "note": "nothing unresolved"})
+            return
+        marked = []
+        for rel, entry in rec["unresolved"].items():
+            for path in entry.get("files", []):
+                try:
+                    if MARKER_RE.search((cfg.main / path).read_bytes()):
+                        marked.append(path)
+                except (FileNotFoundError, IsADirectoryError):
+                    pass
+        if marked:
+            raise WorktreeError(f"conflict markers still in the main tree: {sorted(marked)}")
+        meta.update({k: json.loads(json.dumps(v)) for k, v in rec.items()})
+        resolved = sorted(meta["unresolved"])
+        for rel in resolved:
+            entry = meta["unresolved"].pop(rel)
+            meta["applied_trees"][rel] = entry["attempted"]
+            meta["applied_files"].update({p: blob_id(cfg.main / p) for p in entry.get("files", [])})
+        save_meta(cfg, meta)
+        emit(cfg, {"ok": True, "name": name, "resolved": resolved})
 
 
 def gradle_daemons():
@@ -403,10 +702,20 @@ def cmd_remove(cfg, name, discard=False, force=False):
     if gradle_lock.exists() and not force:
         raise WorktreeError(f"a Gradle build holds {gradle_lock}; wait for it or pass --force")
     if wt.exists() and not discard:
-        summary = compute_diff(cfg, name)
-        if summary["files"]:
-            raise WorktreeError(f"{name} has {summary['files']} changed file(s) not known to be applied "
-                                f"(patches in {cfg.patch_dir(name)}); apply them or pass --discard")
+        rec, problem = receipt(cfg, meta)
+        if rec["unresolved"]:
+            raise WorktreeError(f"{name} has an unresolved apply in {sorted(rec['unresolved'])} (conflicts or a "
+                                f"failed apply in the main tree); fix it and `resolve`/re-apply, or pass --discard")
+        pending = sum(unapplied(cfg, meta, rec).values())
+        if pending:
+            why = f" ({problem})" if problem else ""
+            raise WorktreeError(f"{name} has {pending} changed file(s) not known to be applied{why} "
+                                f"(run `diff`/`apply`; patches go to {cfg.patch_dir(name)}) or pass --discard")
+        stale = stale_files(cfg, rec)
+        if stale:
+            raise WorktreeError(f"{name}: files changed in the main tree since they were applied: {stale}; "
+                                f"the worktree may hold the only copy of the applied version. Check them, "
+                                f"re-apply, or pass --discard")
     if git(cfg.main, "worktree", "remove", "--force", "--force", str(wt), check=False).returncode != 0:
         shutil.rmtree(wt, ignore_errors=True)
         git(cfg.main, "worktree", "prune")
@@ -437,6 +746,11 @@ def cmd_list(cfg):
                     dirty[rel] = count
             row["changed_vs_base"] = dirty
             row["dirty"] = bool(dirty)
+            rec, problem = receipt(cfg, meta)
+            row["unapplied"] = unapplied(cfg, meta, rec)
+            row["unresolved"] = sorted(rec["unresolved"])
+            if problem:
+                row["receipt_warning"] = problem
             row["gradle_lock_held"] = (cfg.gradle_lock_root / f"sourby-gradle-{meta['name']}.lock").exists()
         rows.append(row)
     managed = {r["path"] for r in rows}
@@ -464,6 +778,7 @@ def main(argv=None, cfg=None):
     p.add_argument("name")
     p.add_argument("--discard", action="store_true", help="remove even if it has changes")
     p.add_argument("--force", action="store_true", help="remove even while a Gradle build holds its lock")
+    sub.add_parser("resolve").add_argument("name")
     sub.add_parser("list")
     args = parser.parse_args(argv)
     try:
@@ -475,6 +790,8 @@ def main(argv=None, cfg=None):
             return cmd_apply(cfg, args.name, args.worker)
         elif args.cmd == "remove":
             cmd_remove(cfg, args.name, args.discard, args.force)
+        elif args.cmd == "resolve":
+            cmd_resolve(cfg, args.name)
         elif args.cmd == "list":
             cmd_list(cfg)
     except WorktreeError as exc:
