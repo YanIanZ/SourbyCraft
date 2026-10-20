@@ -958,13 +958,15 @@ class Harness:
               properties=None, jvm_properties=(), startup_timeout_s=STARTUP_TIMEOUT_S,
               rebuild_jar=False, seed_cache=True, console_probe=True, command=None,
               lifetime_grace_s=LIFETIME_GRACE_S, world_from=None, aurora_toml=None,
-              exclusive=False, exclusive_wait_s=EXCLUSIVE_WAIT_S):
+              exclusive=False, exclusive_wait_s=EXCLUSIVE_WAIT_S, config_files=None):
         """Create the run, start the supervisor, wait for ``Done (``. Returns run.json.
 
         ``world_from`` names an earlier, finished run whose world directories are copied in
         first, so a restart (persistence) or post-kill (crash) boot reads that run's saves.
         ``exclusive`` waits (up to ``exclusive_wait_s``) until every slot is free and holds all
         of them for the whole run; otherwise the first free slot is taken or LockBusy raised.
+        ``config_files`` maps a run-relative destination (e.g. ``spigot.yml``) to a source file
+        copied there before boot.
         """
         if not (60 <= max_lifetime_s <= MAX_LIFETIME_CEILING_S) and command is None:
             raise HarnessError(f"max lifetime must be 60..{MAX_LIFETIME_CEILING_S}s")
@@ -979,6 +981,7 @@ class Harness:
                                f"refusing below {self.min_free / 1024 ** 3:.0f} GiB")
         world_source = self.world_source(world_from) if world_from else None
         aurora = self.aurora_config(aurora_toml, world_source)
+        configs = self.config_files(config_files)
         jar = ensure_jar(self.jar, rebuild_jar, self._gradle)
         java, java_version = self._java()
         git = self._git()
@@ -1006,7 +1009,7 @@ class Harness:
                                 simulation_distance, heap_mib, max_lifetime_s, level_type,
                                 properties, jvm_properties, startup_timeout_s, seed_cache,
                                 command, lifetime_grace_s, token, world_source, aurora,
-                                port=port, slot=slot, resources=resources)
+                                port=port, slot=slot, resources=resources, configs=configs)
             self._spawn_supervisor(workdir, token, paths)
         except BaseException:
             for path in reversed(paths):
@@ -1029,7 +1032,8 @@ class Harness:
     def _prepare(self, workdir, name, jar, java, java_version, git, view_distance,
                  simulation_distance, heap_mib, max_lifetime_s, level_type, properties,
                  jvm_properties, startup_timeout_s, seed_cache, command, lifetime_grace_s,
-                 token, world_source=None, aurora=None, port=None, slot=None, resources=None):
+                 token, world_source=None, aurora=None, port=None, slot=None, resources=None,
+                 configs=()):
         workdir.mkdir(parents=True)
         (workdir / MARKER).write_text("created by scripts/agent_testserver.py\n")
         (workdir / "tmp").mkdir()
@@ -1045,6 +1049,11 @@ class Harness:
             text, origin = aurora
             (workdir / "sourbycraft_config" / "aurora.toml").write_text(text)
             aurora_toml = {"source": origin, "text": text}
+        installed = []
+        for dest, source, text in configs:
+            (workdir / dest).parent.mkdir(parents=True, exist_ok=True)
+            (workdir / dest).write_text(text)
+            installed.append({"dest": dest, "source": source, "text": text})
         seeded = []
         cache = self.base / CACHE_NAME
         if seed_cache and cache.is_dir():
@@ -1086,6 +1095,7 @@ class Harness:
                "resources_at_start": resources,
                "world_from": world_from,
                "aurora_toml": aurora_toml,
+               "config_files": installed,
                "other_server_jars_running": run_baseline.competing_servers(jar, -1),
                "hardware": hardware}
         write_json(workdir / "run.json", run)
@@ -1108,6 +1118,34 @@ class Harness:
             if source.is_file():
                 return source.read_text(), f"world_from {world_source[0].name}"
         return None
+
+    @staticmethod
+    def config_files(mapping):
+        """[(dest, source, text)] for extra config files (e.g. spigot.yml), validated up front.
+
+        Only server config locations are accepted: a top-level ``*.yml``/``*.yaml`` (bukkit.yml,
+        spigot.yml, ...) or a file under ``config/``, ``plugins/`` or ``sourbycraft_config/``.
+        The two TOMLs the harness writes stay reserved (``--aurora-toml`` sets aurora.toml), so a
+        copy can neither re-enable downloads nor leave ``run.json`` describing a replaced file.
+        """
+        configs = []
+        for dest, source in (mapping or {}).items():
+            rel = Path(dest)
+            if ("\\" in dest or ":" in dest or rel.is_absolute() or not rel.parts
+                    or any(part in ("", ".", "..") for part in rel.parts)):
+                raise HarnessError(f"config file destination {dest!r} must be a relative POSIX "
+                                   "path inside the run directory")
+            top_level_yaml = len(rel.parts) == 1 and rel.suffix in (".yml", ".yaml")
+            config_dir = len(rel.parts) > 1 and rel.parts[0] in CONFIG_FILE_DIRS
+            if not (top_level_yaml or config_dir) or rel.as_posix() in RESERVED_CONFIG_FILES:
+                raise HarnessError(f"config file destination {dest!r} is not an allowed config "
+                                   "location (top-level *.yml, config/, plugins/, "
+                                   "sourbycraft_config/ except the harness TOMLs)")
+            path = Path(source)
+            if not path.is_file() or path.stat().st_size > 64 * 1024:
+                raise HarnessError(f"config file {path} is not a file under 64 KiB")
+            configs.append((rel.as_posix(), str(path), path.read_text()))
+        return configs
 
     def world_source(self, name):
         """(directory, world dirs, run.json) of a finished run to boot over again.
@@ -1342,6 +1380,9 @@ STEP_KEYS = {
     "workload": {"duration"},
 }
 COMMON_KEYS = {"label", "continue_on_failure"}
+CONFIG_FILE_DIRS = ("config", "plugins", "sourbycraft_config")
+RESERVED_CONFIG_FILES = ("sourbycraft_config/aurora.toml",
+                         "sourbycraft_config/sourbycraft_global_config.toml")
 SETTINGS_KEYS = {"view_distance": int, "simulation_distance": int, "heap_mib": int,
                  "max_lifetime_s": int, "level_type": str, "startup_timeout_s": int,
                  "properties": dict, "jvm_properties": list}
@@ -1574,6 +1615,9 @@ def build_parser():
                        help="copy this finished run's world dirs in first (restart/crash checks)")
         p.add_argument("--aurora-toml", metavar="FILE",
                        help="install FILE as sourbycraft_config/aurora.toml (e.g. AWF worlds)")
+        p.add_argument("--config-file", action="append", type=_kv, default=[],
+                       metavar="DEST=FILE",
+                       help="copy FILE to DEST in the run dir before boot (e.g. spigot.yml=...)")
         p.add_argument("--no-seed-cache", action="store_true",
                        help=f"do not copy {CACHE_NAME}/ (bootstrap downloads) into the run")
         p.add_argument("--exclusive", action="store_true",
@@ -1626,7 +1670,8 @@ def _start_kwargs(args):
               "level_type": args.level_type, "startup_timeout_s": args.startup_timeout_s,
               "properties": dict(args.property) or None, "world_from": args.world_from,
               "aurora_toml": args.aurora_toml, "exclusive": args.exclusive or None,
-              "exclusive_wait_s": args.exclusive_wait_s}
+              "exclusive_wait_s": args.exclusive_wait_s,
+              "config_files": dict(args.config_file) or None}
     return kwargs
 
 

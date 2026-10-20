@@ -711,6 +711,42 @@ class WorldReuseAndKillTest(HarnessCase):
         self.assertFalse((self.root / "servers" / "b").exists())
         self.assertFalse(self.harness.lock_path.exists())
 
+    def test_config_files_are_installed_and_validated(self):
+        spigot = self.root / "spigot.yml"
+        spigot.write_text("world-settings:\n  default:\n    entity-activation-range:\n"
+                          "      monsters: 0\n")
+        workdir = Path(self.start("a", config_files={"spigot.yml": spigot,
+                                                     "config/x.yml": spigot})["workdir"])
+        self.harness.stop("a", timeout=10)
+        self.assertEqual((workdir / "spigot.yml").read_text(), spigot.read_text())
+        self.assertEqual((workdir / "config/x.yml").read_text(), spigot.read_text())
+        self.assertEqual([c["dest"] for c in self.run_json("a")["config_files"]],
+                         ["spigot.yml", "config/x.yml"])
+        for dest in ("../escape.yml", "/abs.yml", "server.properties", "eula.txt", "run.json",
+                     "outputs/x.yml", "world/level.dat", "tmp/x.yml", "config/../x.yml",
+                     "sourbycraft_config/aurora.toml",
+                     "sourbycraft_config/sourbycraft_global_config.toml",
+                     "C:/x.yml", "config\\..\\x.yml", ".", "config/"):
+            with self.assertRaisesRegex(ats.HarnessError, "config file destination"):
+                self.start("b", config_files={dest: spigot})
+        with self.assertRaisesRegex(ats.HarnessError, "config file"):
+            self.start("b", config_files={"spigot.yml": self.root / "missing.yml"})
+        big = self.root / "big.yml"
+        big.write_text("x" * (64 * 1024 + 1))
+        with self.assertRaisesRegex(ats.HarnessError, "under 64 KiB"):
+            self.start("b", config_files={"spigot.yml": big})
+        self.assertFalse((self.root / "servers" / "b").exists())
+
+    def test_cli_forwards_config_files(self):
+        args = ats.build_parser().parse_args(
+            ["start", "--name", "a", "--config-file", "spigot.yml=/x/s.yml",
+             "--config-file", "config/paper-global.yml=/x/p.yml"])
+        self.assertEqual(ats._start_kwargs(args)["config_files"],
+                         {"spigot.yml": "/x/s.yml", "config/paper-global.yml": "/x/p.yml"})
+        args = ats.build_parser().parse_args(["run", "--name", "a", "--scenario", "s.json",
+                                              "--config-file", "spigot.yml=/x/s.yml"])
+        self.assertEqual(ats._start_kwargs(args)["config_files"], {"spigot.yml": "/x/s.yml"})
+
     def test_aurora_toml_is_installed_and_carried_over_by_world_from(self):
         toml = self.root / "awf.toml"
         toml.write_text('[aurora.awf]\nworlds = ["world"]\n')
