@@ -9,6 +9,7 @@ import dev.iyanz.sourbycraft.api.metrics.WindowMetrics;
 import dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics;
 import dev.iyanz.sourbycraft.perf.MetricsRuntime;
 import dev.iyanz.sourbycraft.util.BarUtil;
+import dev.iyanz.sourbycraft.util.ContainerMemory;
 import java.util.ArrayList;
 import java.util.List;
 import net.kyori.adventure.text.format.TextColor;
@@ -110,13 +111,13 @@ public class SysCommand extends Command {
         if (runtime.heapMaxBytes() > 0L && runtime.heapUsedBytes() >= 0L) {
             final double percent = 100.0 * runtime.heapUsedBytes() / runtime.heapMaxBytes();
             s.sendMessage(text()
-                .append(text("  RAM:  ", SourbyCraftColors.LABEL))
+                .append(text("  Heap used:  ", SourbyCraftColors.LABEL))
                 .append(BarUtil.ramBar(percent, BarUtil.DEFAULT_WIDTH))
                 .append(text("  " + (runtime.heapUsedBytes() / 1048576) + " / "
                     + (runtime.heapMaxBytes() / 1048576) + " MB", SourbyCraftColors.VALUE))
                 .build());
         } else {
-            s.sendMessage(text("  RAM: unavailable", SourbyCraftColors.DIM));
+            s.sendMessage(text("  Heap used: unavailable", SourbyCraftColors.DIM));
         }
 
         s.sendMessage(text()
@@ -274,9 +275,18 @@ public class SysCommand extends Command {
                 .append(text(fmt1(heapPercent) + "%", SourbyCraftColors.VALUE))
                 .build());
         }
-        if (TpsCommand.available(runtime.rssPercent())) {
+        if (runtime.processRssBytes() > 0L) {
+            // Real resident set size of this process (/proc/self/status VmRSS; Linux only).
             lines.add(text()
-                .append(text("  RSS: ", SourbyCraftColors.LABEL))
+                .append(text("  Process RSS: ", SourbyCraftColors.LABEL))
+                .append(text(ContainerMemory.fmt(runtime.processRssBytes()), SourbyCraftColors.VALUE))
+                .build());
+        }
+        if (TpsCommand.available(runtime.rssPercent())) {
+            // cgroup memory.current / memory.max: includes page cache and kernel memory, so it is
+            // not the process RSS (VPS verification 2026-10-21, F2).
+            lines.add(text()
+                .append(text("  Cgroup memory (incl. page cache): ", SourbyCraftColors.LABEL))
                 .append(text(fmt1(runtime.rssPercent()) + "%", SourbyCraftColors.VALUE))
                 .build());
         }

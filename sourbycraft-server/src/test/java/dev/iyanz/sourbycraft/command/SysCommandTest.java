@@ -78,7 +78,7 @@ class SysCommandTest {
                 assertTrue(all.contains("Java: " + System.getProperty("java.version")), all);
                 assertTrue(all.contains("Enabled / loaded: 2 / 3"), all);
                 assertTrue(all.contains("Disabled / recent load failures: 1 / "), all);
-                assertTrue(all.contains("RAM:"), all);
+                assertTrue(all.contains("Heap used:"), all);
                 assertTrue(all.contains("512 / 1024 MB"), all);
                 assertNoLeak(all);
             }
@@ -94,7 +94,7 @@ class SysCommandTest {
             assertTrue(command.execute(probe.sender(ConsoleCommandSender.class, true), "sys", new String[0]));
 
             final String all = plainReceived(probe.received());
-            assertTrue(all.contains("RAM: unavailable"), all);
+            assertTrue(all.contains("Heap used: unavailable"), all);
             assertTrue(all.contains("Health unavailable"), all);
             assertTrue(all.contains("Freshness: UNAVAILABLE"), all);
             assertFalse(all.contains(" TPS: "), "no TPS figure was measured: " + all);
@@ -131,9 +131,23 @@ class SysCommandTest {
         assertTrue(text.contains("busiest 40% / avg 20%"), text);
         assertTrue(text.contains("GC: 1.0% time  2.0/min  ~5.0ms avg"), text);
         assertTrue(text.contains("Heap: 50.0%"), text);
-        assertTrue(text.contains("RSS: 40.0%"), text);
+        assertTrue(text.contains("Cgroup memory (incl. page cache): 40.0%") && !text.contains(" RSS: "), text);
         assertFalse(text.contains("CPU starvation"), text);
         assertNoLeak(text);
+    }
+
+    @Test
+    void processRssIsItsOwnLineAndNeverTheCgroupPercent() {
+        final String withRss = plain(SysCommand.renderPerformance(() ->
+            healthy(20.0, 10.0).runtime(runtime("heapUsedBytes", 512L << 20, "heapMaxBytes", 1024L << 20,
+                "processRssBytes", 4L << 30, "rssPercent", 57.9))));
+        assertTrue(withRss.contains("Process RSS: 4.0G"), withRss);
+        assertTrue(withRss.contains("Cgroup memory (incl. page cache): 57.9%"), withRss);
+
+        final String noRss = plain(SysCommand.renderPerformance(() ->
+            healthy(20.0, 10.0).runtime(runtime("heapUsedBytes", 512L << 20, "heapMaxBytes", 1024L << 20,
+                "rssPercent", 57.9))));
+        assertFalse(noRss.contains("Process RSS:"), noRss);
     }
 
     @Test

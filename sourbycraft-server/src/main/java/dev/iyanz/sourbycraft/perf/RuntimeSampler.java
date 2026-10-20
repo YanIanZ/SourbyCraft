@@ -31,6 +31,7 @@ final class RuntimeSampler {
             if (time >= 0) { collectionTime += time; timeKnown = true; }
         }
         final var gc = GcTracker.snapshot();
+        // third argument: cgroup memory.current / limit (page cache included), not RSS; RSS is readRss() below.
         return new ImmutableRuntimeMetrics(heap.getUsed(), heap.getMax(), ContainerMemory.usagePercentOrNaN(),
             gc.hasData() ? gc.gcTimePercent() : Double.NaN,
             gc.hasData() ? gc.collectionsPerMin() : Double.NaN,

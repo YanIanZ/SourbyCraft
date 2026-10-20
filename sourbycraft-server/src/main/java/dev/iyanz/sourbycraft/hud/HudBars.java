@@ -74,7 +74,7 @@ public final class HudBars {
     private static final BossBar TPS_BAR =
         BossBar.bossBar(Component.text("TPS"), 1.0f, BossBar.Color.GREEN, BossBar.Overlay.NOTCHED_20);
     private static final BossBar RAM_BAR =
-        BossBar.bossBar(Component.text("RAM"), 0.0f, BossBar.Color.GREEN, BossBar.Overlay.NOTCHED_10);
+        BossBar.bossBar(Component.text("Heap"), 0.0f, BossBar.Color.GREEN, BossBar.Overlay.NOTCHED_10);
     private static final BossBar PERF_BAR =
         BossBar.bossBar(Component.text("Performance"), 0.0f, BossBar.Color.GREEN, BossBar.Overlay.NOTCHED_20);
     private static final org.bukkit.NamespacedKey PERF_ENABLED =
@@ -506,7 +506,7 @@ public final class HudBars {
             : TpsCommand.value(100.0 * runtime.heapUsedBytes() / runtime.heapMaxBytes(), 0) + "%";
         final String cpu = Double.isFinite(runtime.processCpuPercent())
             ? TpsCommand.value(runtime.processCpuPercent(), 0) + "%" : "unavailable";
-        return new TpsDisplay(tick.name().append(Component.text("  RAM " + heap + "  CPU " + cpu,
+        return new TpsDisplay(tick.name().append(Component.text("  Heap " + heap + "  CPU " + cpu,
             SourbyCraftColors.DIM)), tick.progress(), tick.color());
     }
 
@@ -558,12 +558,12 @@ public final class HudBars {
         final long max = runtime.heapMaxBytes();
         final long used = runtime.heapUsedBytes();
         if (max <= 0L || used < 0L) {
-            return new RamDisplay(Component.text("RAM " + snapshot.freshness().state().name(), SourbyCraftColors.DIM),
+            return new RamDisplay(Component.text("Heap " + snapshot.freshness().state().name(), SourbyCraftColors.DIM),
                 0.0F, BossBar.Color.YELLOW);
         }
         final double pct = max > 0 ? (double) used / max : 0.0;
         final var name = Component.text()
-            .append(Component.text("RAM ", SourbyCraftColors.DIM))
+            .append(Component.text("Heap ", SourbyCraftColors.DIM))
             .append(Component.text(ContainerMemory.fmt(used) + "/" + ContainerMemory.fmt(max),
                 pct < 0.60 ? SourbyCraftColors.HEALTHY : pct < 0.85 ? SourbyCraftColors.PRESSURE : SourbyCraftColors.CRITICAL))
             .append(Component.text(String.format(java.util.Locale.ROOT, " (%.0f%%)", pct * 100), SourbyCraftColors.DIM));

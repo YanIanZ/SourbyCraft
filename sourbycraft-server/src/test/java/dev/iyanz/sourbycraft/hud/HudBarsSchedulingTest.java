@@ -331,7 +331,7 @@ class HudBarsSchedulingTest {
 
         scheduler.runTask();
 
-        assertTrue(PLAIN.serialize(ramBar.name()).startsWith("RAM "), PLAIN.serialize(ramBar.name()));
+        assertTrue(PLAIN.serialize(ramBar.name()).startsWith("Heap "), PLAIN.serialize(ramBar.name()));
         assertTrue(PLAIN.serialize(ramBar.name()).contains("(50%)"), PLAIN.serialize(ramBar.name()));
         assertEquals(0.5F, ramBar.progress(), 1.0E-5F);
         assertEquals(BossBar.Color.GREEN, ramBar.color());
@@ -342,7 +342,7 @@ class HudBarsSchedulingTest {
 
         metrics.value = snapshot(MetricState.UNAVAILABLE, 20.0, 20.0, 10.0, -1L, -1L);
         scheduler.runTask();
-        assertEquals("RAM UNAVAILABLE", PLAIN.serialize(ramBar.name()));
+        assertEquals("Heap UNAVAILABLE", PLAIN.serialize(ramBar.name()));
         assertEquals(0.0F, ramBar.progress(), 0.0F);
     }
 
@@ -358,7 +358,7 @@ class HudBarsSchedulingTest {
 
         final String text = PLAIN.serialize(perfBar.name());
         assertTrue(text.contains("TPS 20.00/20.00"), text);
-        assertTrue(text.contains("RAM 25%"), text);
+        assertTrue(text.contains("Heap 25%"), text);
         assertTrue(text.contains("CPU 37%") || text.contains("CPU 38%"), text);
     }
 
@@ -511,7 +511,7 @@ class HudBarsSchedulingTest {
 
         assertEquals(1, player.actionbars.size());
         final String text = PLAIN.serialize(player.actionbars.get(0));
-        assertTrue(text.contains("TPS 20.00/20.00") && text.contains("RAM 25%"), text);
+        assertTrue(text.contains("TPS 20.00/20.00") && text.contains("Heap 25%"), text);
     }
 
     @Test
@@ -566,7 +566,7 @@ class HudBarsSchedulingTest {
 
         assertEquals(3, player.actionbars.size(), "one send per bar; the client keeps only the last");
         assertTrue(PLAIN.serialize(player.actionbars.get(0)).startsWith("TPS "), PLAIN.serialize(player.actionbars.get(0)));
-        assertTrue(PLAIN.serialize(player.actionbars.get(1)).startsWith("RAM "), PLAIN.serialize(player.actionbars.get(1)));
+        assertTrue(PLAIN.serialize(player.actionbars.get(1)).startsWith("Heap "), PLAIN.serialize(player.actionbars.get(1)));
         assertTrue(PLAIN.serialize(player.actionbars.get(2)).contains("CPU"), PLAIN.serialize(player.actionbars.get(2)));
 
         // Turning one of them off clears the shared line once; the others keep refreshing.
@@ -580,7 +580,7 @@ class HudBarsSchedulingTest {
         player.flush();
         assertEquals(List.of(player.id, player.id), resolved);
         assertEquals(2, player.actionbars.size());
-        assertTrue(PLAIN.serialize(player.actionbars.get(0)).startsWith("RAM "));
+        assertTrue(PLAIN.serialize(player.actionbars.get(0)).startsWith("Heap "));
     }
 
     @Test

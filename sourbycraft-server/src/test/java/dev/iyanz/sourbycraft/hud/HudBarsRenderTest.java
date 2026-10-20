@@ -133,7 +133,7 @@ class HudBarsRenderTest {
         final String text = plain(display.name());
 
         assertTrue(text.startsWith(plain(tps.name())), text);
-        assertTrue(text.endsWith("RAM 25%  CPU 12%"), text);
+        assertTrue(text.endsWith("Heap 25%  CPU 12%"), text);
         assertEquals(tps.progress(), display.progress(), 0.0F);
         assertEquals(tps.color(), display.color());
     }
@@ -141,9 +141,9 @@ class HudBarsRenderTest {
     @Test
     void perfBarReportsUnavailableHeapAndCpuInsteadOfZero() {
         assertTrue(plain(HudBars.renderPerf(() -> snapshot(MetricState.AVAILABLE, 20.0, 20.0, 10.0,
-            50L, 0L, Double.NaN)).name()).endsWith("RAM unavailable  CPU unavailable"));
+            50L, 0L, Double.NaN)).name()).endsWith("Heap unavailable  CPU unavailable"));
         assertTrue(plain(HudBars.renderPerf(() -> snapshot(MetricState.AVAILABLE, 20.0, 20.0, 10.0,
-            -1L, 200L, Double.POSITIVE_INFINITY)).name()).endsWith("RAM unavailable  CPU unavailable"));
+            -1L, 200L, Double.POSITIVE_INFINITY)).name()).endsWith("Heap unavailable  CPU unavailable"));
     }
 
     @Test

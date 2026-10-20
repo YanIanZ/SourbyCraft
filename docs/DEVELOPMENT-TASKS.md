@@ -176,7 +176,7 @@ Only measured hot spots should produce new performance patches.
 - [x] **P1** basic heap/runtime metric support
 - [x] **P1** GC tracker foundation
 - [ ] **P1** allocation MB/s verification against JFR
-- [ ] **P1** RSS/container memory verification on Linux/cgroup environments
+- [-] **P1** RSS/container memory verification on Linux/cgroup environments — PARTIAL (2026-10-21, functional, shared VPS, cgroup v2, no clients): heap/non-heap/Process RSS/limit match jcmd, NMT, `/proc` and cgroup files in a private-cgroup-namespace emulation; evidence [linux-vps-verification-2026-10-21.md](development/linux-vps-verification-2026-10-21.md). F1 (host cgroup view, systemd scope/service: container usage unavailable, fixed root paths) is fixed in the working tree (uncommitted) and unit-tested against fixtures only (`ContainerMemoryCgroupTest` 11); not re-run on Linux with the new jar. F2/F3 relabelled (`/sys` Process RSS vs Cgroup memory incl. page cache, "Heap" instead of "RAM"). Not verified: real Docker/Pterodactyl, real cgroup v1, host-view retest
 - [x] **P1** top allocated classes report workflow — `scripts/profile_server.py` (JFR `settings=profile`) + `scripts/rank_hotspots.py` `allocation_hotspots` (by class/site/thread, cross-checked against `jdk.ThreadAllocationStatistics`), documented in `BASELINE.md` "Ranking hot spots"; `test_rank_hotspots.py` 37 OK; a certified real-run report does not exist yet
 - [x] **P1** cache ownership/bounds inventory — `architecture/cache-inventory.md`
 - [x] **P1** player-disconnect retention test — unit level: `HudBarsRetentionTest` 17, `BridgeRetentionTest` 8, `SpeedtestRetentionTest` 4 (`retention/Reachability`); no heap check on a live server

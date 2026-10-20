@@ -142,7 +142,7 @@ collision candidate 0019 (feature patch 0018 after renumbering) passes arithmeti
 - [x] runtime heap metrics foundation
 - [x] GC tracker foundation
 - [ ] allocation MB/s validation against JFR
-- [ ] RSS/cgroup validation
+- [-] RSS/cgroup validation — PARTIAL (2026-10-21, functional, shared VPS, cgroup v2): reported heap/Process RSS/limit match the OS in a cgroup-namespace emulation; host cgroup view had no container usage (F1), now fixed in the working tree and fixture-tested only, not re-run on Linux; evidence [linux-vps-verification-2026-10-21.md](development/linux-vps-verification-2026-10-21.md); real Docker/Pterodactyl and cgroup v1 not tested
 - [x] top allocated classes workflow — `scripts/rank_hotspots.py` `allocation_hotspots` (by class/site/thread, cross-checked against `jdk.ThreadAllocationStatistics`) over a `scripts/profile_server.py` JFR, workflow in [BASELINE.md](BASELINE.md) "Ranking hot spots"; `test_rank_hotspots.py` 37 OK; a certified real-run report does not exist yet
 - [x] cache ownership/bounds inventory — [cache-inventory.md](architecture/cache-inventory.md); `AwfWorld.owned` evicts clean chunks at the configured resident limit; dirty chunks stay pinned and can exceed it; limit 0 is unbounded
 - [x] player-disconnect retention test — unit level: `HudBarsRetentionTest` 17, `BridgeRetentionTest` 8, `SpeedtestRetentionTest` 4; no heap check on a live server

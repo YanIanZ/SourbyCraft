@@ -13,6 +13,11 @@ public interface RuntimeMetrics {
 
     long heapMaxBytes();
 
+    /**
+     * Cgroup memory usage ({@code memory.current}) as a percentage of the cgroup memory limit, or NaN
+     * when no cgroup is readable. Despite the name this is NOT the process RSS: it includes page cache
+     * and kernel memory. The process RSS is {@link #processRssBytes()}.
+     */
     double rssPercent();
 
     /**

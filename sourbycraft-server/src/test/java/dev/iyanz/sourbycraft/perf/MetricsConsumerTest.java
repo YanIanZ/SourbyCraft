@@ -73,7 +73,7 @@ class MetricsConsumerTest {
 
         assertEquals(1, reads.get());
         assertTrue(plain(bar("TPS_BAR").name()).contains("TPS 8.00/10.00"));
-        assertTrue(plain(bar("RAM_BAR").name()).contains("RAM 0M/0M (25%)"));
+        assertTrue(plain(bar("RAM_BAR").name()).contains("Heap 0M/0M (25%)"));
     }
 
     @Test
@@ -180,7 +180,7 @@ class MetricsConsumerTest {
         assertTrue(rendered.contains("5.00ms/tick owed"));
         assertTrue(rendered.contains("GC: 2.0% time"));
         assertTrue(rendered.contains("Heap: 25.0%"));
-        assertTrue(rendered.contains("RSS: 40.0%"));
+        assertTrue(rendered.contains("Cgroup memory (incl. page cache): 40.0%"));
     }
 
     @Test
