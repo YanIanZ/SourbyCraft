@@ -413,13 +413,13 @@ class RedisBackendTest {
                 boolean renewal = false;
                 for (final Object[] command : commands) {
                     final String name = (String) command[0];
-                    if ("EVAL".equals(name) && RedisBackend.RENEW_SCRIPT.equals(command[1])) {
+                    if (StubScripts.is(command, RedisBackend.RENEW_SCRIPT)) {
                         renewal = true;
                         renewals.incrementAndGet();
                         replies.add(1L);
-                    } else if ("EVAL".equals(name) && RedisBackend.ACQUIRE_SCRIPT.equals(command[1])) {
+                    } else if (StubScripts.is(command, RedisBackend.ACQUIRE_SCRIPT)) {
                         replies.add("OK");
-                    } else if ("EVAL".equals(name)) {
+                    } else if (StubScripts.isScript(command)) {
                         replies.add(1L);
                     } else if ("HSCAN".equals(name)) {
                         replies.add(List.of(b("0"), List.of()));
@@ -458,6 +458,86 @@ class RedisBackendTest {
         assertTrue(elapsed < java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(200L * stores / 2),
             "serial renewal would have taken " + (200 * stores) + " ms; took "
                 + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(elapsed) + " ms");
+    }
+
+    /** {@code calls} of one command in {@code INFO commandstats}, 0 when Redis has not run it since the last reset. */
+    private static long commandCalls(final RedisBackend backend, final String command) throws IOException {
+        final String stats = RedisClient.text(backend.client().call("INFO", "commandstats"));
+        final java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?m)^cmdstat_" + command + ":calls=(\\d+)").matcher(stats);
+        return m.find() ? Long.parseLong(m.group(1)) : 0L;
+    }
+
+    @Test
+    void scriptsRunByTheirShaAndAreSentAsTextOnlyWhenRedisLostThem() throws Exception {
+        final RedisBackend backend = backend();
+        assertEquals(RedisClient.text(backend.client().call("SCRIPT", "LOAD", RedisBackend.RENEW_SCRIPT)),
+            RedisClient.sha1(RedisBackend.RENEW_SCRIPT), "the SHA-1 Redis names the script by");
+        final AwfStore store = backend.open("world/region", WorldRole.VANILLA, 3);
+        assertEquals(1, store.commit(Map.of(new ChunkKey(0, 0), b("a")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL)
+            .generation());
+        backend.renewAll();
+
+        backend.client().call("CONFIG", "RESETSTAT");
+        assertEquals(2, store.commit(Map.of(new ChunkKey(1, 0), b("b")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL)
+            .generation());
+        backend.renewAll();
+        assertEquals(0L, commandCalls(backend, "eval"), "cached scripts are never sent as text");
+        assertEquals(2L, commandCalls(backend, "evalsha"), "one commit, one renewal");
+
+        backend.client().call("SCRIPT", "FLUSH");
+        backend.client().call("CONFIG", "RESETSTAT");
+        assertEquals(3, store.commit(Map.of(new ChunkKey(2, 0), b("c")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL)
+            .generation(), "a commit refused with NOSCRIPT did not run, and runs once by text");
+        backend.renewAll();
+        assertEquals(4, store.commit(Map.of(new ChunkKey(3, 0), b("d")), Set.of(), Set.of(), PersistenceMode.INCREMENTAL)
+            .generation());
+        backend.renewAll();
+        assertEquals(2L, commandCalls(backend, "eval"), "each script is sent as text once after the flush");
+        assertTrue(commandCalls(backend, "evalsha") >= 2L, "the later calls go by SHA again");
+        store.close();
+
+        final AwfStore reopened = backend(this.server.uri(), "test:", false).open("world/region", WorldRole.VANILLA, 3);
+        assertEquals(4, reopened.generation());
+        assertEquals(4, reopened.keys().size());
+        assertArrayEquals(b("c"), reopened.read(new ChunkKey(2, 0)).orElseThrow());
+    }
+
+    @Test
+    void aPipelineOfScriptCallsResendsOnlyTheRefusedOnesByText() throws Exception {
+        final List<List<Object[]>> sent = new java.util.ArrayList<>();
+        final RedisClient client = new RedisClient(RedisClient.Endpoint.parse("redis://127.0.0.1:1"), 1, 1000) {
+            @Override
+            public List<Object> pipeline(final List<Object[]> commands) {
+                sent.add(commands);
+                final List<Object> replies = new java.util.ArrayList<>();
+                for (final Object[] command : commands) {
+                    final Object value = command[3];
+                    replies.add("EVALSHA".equals(command[0]) && "missing".equals(value)
+                        ? new RedisClient.RedisError("NOSCRIPT No matching script. Please use EVAL.")
+                        : command[0] + ":" + value);
+                }
+                return replies;
+            }
+        };
+        final String script = "return ARGV[1]";
+        final List<Object> replies = client.evalPipeline(script, List.of(
+            new Object[] {"0", "missing"}, new Object[] {"0", "b"}, new Object[] {"0", "missing"}));
+        assertEquals(List.of("EVAL:missing", "EVALSHA:b", "EVAL:missing"), replies, "in call order");
+        assertEquals(2, sent.size(), "one round trip, plus one for the refused calls");
+        assertEquals(RedisClient.sha1(script), sent.get(0).get(1)[1]);
+        assertEquals(2, sent.get(1).size(), "only the refused calls are resent");
+        for (final Object[] resent : sent.get(1)) {
+            assertEquals("EVAL", resent[0]);
+            assertEquals(script, resent[1]);
+        }
+        assertEquals("EVALSHA:x", client.eval(script, "0", "x"));
+        assertEquals(3, sent.size(), "a cached script is one round trip");
+        assertThrows(RedisClient.RedisError.class, () -> new RedisClient(RedisClient.Endpoint.parse("redis://127.0.0.1:1"), 1, 1000) {
+            @Override
+            public List<Object> pipeline(final List<Object[]> commands) {
+                return List.of(new RedisClient.RedisError("ERR boom"));
+            }
+        }.eval(script, "0"));
     }
 
     @Test

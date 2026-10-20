@@ -30,6 +30,7 @@ This document describes **what branch `26.2` actually consumes now**. It is not 
 | `aurora.awf.resident-chunks` | ≥ 1 / `1024` | RESTART_REQUIRED | clean chunks kept per storage |
 | `aurora.awf.retained-generations` | ≥ 1 / `3` | RESTART_REQUIRED | generations kept for recovery |
 | `aurora.awf.commit-attempts` | ≥ 1 / `3` | RESTART_REQUIRED | attempts before a commit fails |
+| `aurora.awf.commit-dirty-bytes` | 0 to 2147483647 / `0` (off) | RESTART_REQUIRED | start a commit once a storage's unsaved chunks hold this many bytes, before the interval; a trigger, not a cap |
 
 **Hot-path lookup audit (2026-09-27).** Every remaining dotted-string lookup
 (`SourbyCraftConfig.cfgGet/cfgBool/cfgInt`) runs at boot, at explicit reload, on operator commands, or on a join/leave

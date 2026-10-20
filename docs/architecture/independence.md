@@ -92,7 +92,7 @@ This is the long-term target, not a requirement to rewrite every subsystem immed
 | Spark upstream library | Diagnostics | Profiler implementation/viewer ecosystem | Yes | Keep narrow integration until a deeper Sourby-specific fork is justified |
 | SourbyClip | Bootstrap | Dependency resolution / launch | Yes as Sourby component | Audit and keep Sourby-owned |
 | Metal | Build-time | Minecraft source/codegen support | No | Keep vendored/reproducible unless replaced by a better supported build path |
-| legacy sourbypatcher | Build-time legacy | Historical Folia/release compatibility | No | Remove from active 26.2 line only after CI/release no longer depends on it |
+| SourbyPatcher `paper-toolchain` (private) | Build-time | The active 26.2 build requires it: `settings.gradle.kts` refuses to configure without the hash-verified jar/POM/`.module` (`patcherSha256`, ...); see `docs/development/PRIVATE-TOOLCHAIN.md`. Not "legacy" for this line. | No | Keep pinned; replace only by an owner decision (see 2.2) |
 
 Update this table whenever a hard dependency is added, removed, or replaced.
 
@@ -133,6 +133,33 @@ constants above). The scheduler scan likewise covers both patch directories: Pap
 beside MC 0006's `getCurrentRegionizedWorldData`. Comments naming a Canvas type are excluded from both — a Javadoc line
 explaining which engine class a bridge talks to is not coupling, and the one apparent
 patch-side call turned out to be a comment recording a call that had been removed.
+
+## 2.2 Remaining hard Canvas-named surfaces
+
+Everything below was verified against the tree on 2026-10-20. "Hard" means removing or renaming it breaks
+existing plugins, existing servers' data, or the engine itself. None of it is described as removed. The
+engine baseline is SourbyCraft-owned (section 2.1); these are names and contracts that still say Canvas.
+
+| Surface | Where | Why it stays | Compatibility effect of renaming |
+| --- | --- | --- | --- |
+| Plugin API package `io.canvasmc.canvas.*` (21 files): `Unsupported`, `WorldUnloadResult`, `event.*` (`PlayerSaveEvent`, `Player{Respawn,PostRespawn}AsyncEvent`, `PlayerViewEndCreditsEvent`, `Entity{Teleport,PostTeleport,Portal,PostPortal}AsyncEvent`, `world.WorldUnloadAsyncEvent`), `region.{RegionTickData,RegionThreadingTickManager,WorldRegionizer}`, `simd.*` | `sourbyapi/src/main/java/io/canvasmc/canvas` | Public plugin API. Plugins written against Canvas's API link by these binary names. | Binary break for every such plugin. A rename needs a deprecation window with both packages. |
+| API surface wired into Bukkit through Paper patches that name `io.canvasmc` types: `World.getRegionizer()`, `CraftWorld.getRegionizer`, `CraftServer.unloadWorldAsync` (returns `WorldUnloadResult`), `createRegionizedData`, `getLocalRegionizedData`, `getRegionThreadingTickRateManager`, `MapPalette` SIMD path, `@Unsupported` on `World`/`Datapack` | `sourbyapi/paper-patches/files`, `sourbycraft-server/paper-patches/files` (engine baseline) | Same API; these are the entry points of the types above. | Same as above. |
+| Engine config file names `config/canvas-server.yml`, `config/canvas-worlds.yml`, per-world `canvas-patch.yml`, and the `canvas/` data directory (`canvas/pearls.dat`) | `aurora/engine/GlobalConfiguration`, `WorldConfig`, `util/migration/PearlsMigration` | Existing servers keep their settings and saved data. The files say so in their own header ("historical path is retained"). | Silent loss of operator settings or pearl data unless a migration is written. SourbyCraft must not rewrite them on its own (section 4). |
+| Permission nodes `canvas.broadcasting.receiver`, `canvas.command.worlddistance` | `GlobalConfiguration:50`, `subcommands/WorldDistanceSubCommand:44` | Permission plugins already hold these grants. | Operators lose access until grants are re-issued. |
+| Spark config group `canvas/` (`CanvasSplitParser`) beside `sourbycraft/` | `spark/SourbyServerConfigProvider:57,272` | It reports the engine files above to the profiler. | Follows the file names; changes only with them. |
+| Plugin descriptor key `canvas-supported` (read beside `folia-supported`) | `startup/StartupIndexStage:56`, `SourbyCraftConfig:323`, `startup/PluginDescriptor` | Plugins in the wild declare it. | Plugins that only declare it would be treated as not region-safe. |
+| Engine member names `canvas$...` / `canvasConfig()` / `reloadCanvasConfig`, class names `CanvasRegionizedWorldData`, `CanvasCommands`, `CanvasFileMigration` (about 136 `canvas$` occurrences in 34 files of the patch sources and engine code) | `minecraft-patches/sources`, `aurora/engine` | Engine-internal. Renaming is churn across the engine baseline that `build-data/engine-baseline.sha256` would show as a reviewed diff, with no behaviour change. | None for plugins; high patch churn and rebase risk. |
+| Environment variable `CANVAS_TEST_STRICT` set for the server tests | `sourbycraft-server/build.gradle.kts.patch:192` | Test-only switch for the engine's strict guard mode. | Test configuration only. |
+| CI/release branch name `release/26.2-canvas` | `.github/workflows/build.yml` (`on.push.branches`, release gating), `AGENTS.md` | The publish job is gated on this ref name. | Changing it changes who publishes; a CI and owner decision. |
+
+Not hard, listed so nobody re-audits them: the `/canvas` command tree is not registered (feature patch 0020);
+public build identity carries no Canvas suffix from Build 47 (`BuildInfo` only mentions the old `c` suffix in
+comments and strips it from legacy values); Canvas is no longer an upstream or toolchain input (section 2).
+
+Not verified here: whether any third-party plugin in the wild still links the `io.canvasmc` events, and whether
+any permission plugin holds the two nodes; both are deployment facts, not repository facts. Counts above come
+from `rg` on 2026-10-20, not from a pinned policy test; `scripts/independence_policy.py` pins only the narrower
+set in section 2.1 (symbols reached from SourbyCraft-owned code and from feature patches).
 
 ---
 
@@ -278,7 +305,7 @@ Mark each step Sourby-owned vs upstream-derived.
 
 ## B2 — Remove inactive active-line dependencies
 
-If `sourbypatcher` is not required by the active Canvas-based 26.2 build, remove or isolate CI steps that still build it only after proving release artifacts remain identical/valid.
+Status (2026-10-20): the condition is not met. The active 26.2 build requires the private SourbyPatcher `paper-toolchain` (see the ledger in section 2), so there is no inactive dependency to remove. Revisit only if the owner decides to replace the patch applier; removing it would then need identical/valid release artifacts proven first.
 
 ## B3 — Pin upstream inputs
 

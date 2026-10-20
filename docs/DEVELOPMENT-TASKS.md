@@ -148,7 +148,7 @@ Only measured hot spots should produce new performance patches.
 - [ ] **P1** chunk lookup/holder CPU profile
 - [ ] **P1** ticket processing profile
 - [-] **P1** generation latency metric — metric implemented: `perf/ChunkGenerationMetrics` (queue and run time per generic generation stage, `/perf chunks`) fed by MC patch 0026; built, unit-tested (`ChunkGenerationMetricsTest`, `ChunkGenerationMetricsEarlyConfigTest`, `PerfStartupAndChunkHintTest`) and booted on the demo with metrics off; RESTART_REQUIRED, default off (`aurora.diagnostics.chunk-generation-metrics`); no run with metrics on, lighting and full-status integration not covered
-- [ ] **P1** load latency metric
+- [-] **P1** load latency metric — recorded 2026-10-20: MC patch 0050 times the region-file read stage (`.mca` lookup/open + sector read) into `perf/RegionFileLoadLatency` (p50/p99/max over 60 s per world/type); `RegionFileLoadLatencyHookTest` 3; not displayed yet (`/perf storage` rows open), ordinary decompress/NBT parse and AWF-attached storages are not timed, no server numbers, overhead not benchmarked
 - [x] **P1** save latency/backlog metric — backlog: `/perf storage` (`perf/StorageBacklog`); region-file save latency: MC patch 0043 times `RegionFileStorage.moonrise$finishWrite` into `perf/RegionFileSaveLatency` (p50/p99/max over 60 s per world/type, `/perf storage`; `RegionFileSaveLatencyTest` 8, `RegionFileSaveLatencyHookTest` 3); AWF commit latency as before. Not timed: serialization/compression and the flush-regions-on-save flush; AWF worlds not covered; no server numbers and the overhead is not benchmarked
 - [x] **P1** unload/reference-retention test — unit level, 2026-10-20: `retention/Reachability` helper plus 9 retention classes, 55 tests green (`AwfChunkUnloadRetentionTest` 4, `AwfEngineRetentionTest` 5, `AuroraWorldsUnloadRetentionTest` 3, `AnchorCacheRetentionTest` 6, `RegionMetricsRetentionTest` 4, `BridgeRetentionTest` 8, `SpeedtestRetentionTest` 4, `HudBarsRetentionTest` 17, `RedisLeaseRetentionTest` 4); not covered: GeoUtil cache, pearls engine, Minecraft-side holders, a heap comparison on a live server
 - [x] **P0** region-file write concurrency review — 2026-10-20 (DEV-G): section "Region-file write concurrency review" in `architecture/aurora-world-fabric.md` (4 findings); empty-INCREMENTAL-commit guard in `AwfWorld.commitInOrder`; `AwfConcurrentFlushTest` 3; unit level, no boot or soak
@@ -193,16 +193,16 @@ Only measured hot spots should produce new performance patches.
 - [-] **P2** Sourby config visible to Spark metadata
 - [x] **P2** inventory direct Canvas accesses from `dev.iyanz.sourbycraft.*` — `dependency-ledger.md` §1, enforced by `UpstreamDependencyLedgerTest`
 - [x] **P2** inventory active Canvas patch files by dependency role — `dependency-ledger.md` §2
-- [ ] **P2** move large Sourby implementation bodies out of upstream classes
+- [-] **P2** move large Sourby implementation bodies out of upstream classes — slices done 2026-10-20: `AuroraCpu` out of MC patch 0002 (`dev.iyanz.aurora.cpu.AuroraCpu`), `AuroraCommandErrors` out of 0016 (`AuroraCommandErrorsTest` 3), `AwfChunkNbt` out of 0021 (`AwfChunkNbtTest` 3), `GliderSlots` out of 0007 (`GliderSlotsTest` 5); remaining: 0005 `SnapshotPathRegion` (check package-private access first), 0006/0013 splits, the AWF branches in 0021, 0026 timing; no in-game check
 - [x] **P2** define minimal region/scheduler contract Sourby depends on — `execution/region/RegionBackend`, `execution/OwnerHandoff`
 - [x] **P2** define minimal config bridge contract — `config/upstream/UpstreamConfigBridge`
 - [ ] **P2** isolate Canvas Spark bridge behind Sourby-owned integration where useful
 - [x] **P2** active build-path dependency inventory — `dependency-ledger.md` §3–4
 - [x] **P2** determine whether active 26.2 CI still needs legacy `sourbypatcher` — yes: settings.gradle.kts requires the hash-verified private SourbyPatcher (`development/PRIVATE-TOOLCHAIN.md`)
-- [ ] **P2** remove legacy active-line build dependency only after clean-build proof
+- [ ] **P2** remove legacy active-line build dependency only after clean-build proof — n/a while SourbyPatcher is the patch applier (the active build requires it, see the row above); reopen if the owner plans an in-repo applier
 - [ ] **P2** clean-checkout reproducibility test
 - [ ] **P2** cached/offline boot test
-- [ ] **P2** document every remaining hard Canvas dependency in `architecture/independence.md`
+- [x] **P2** document every remaining hard Canvas dependency in `architecture/independence.md` — 2026-10-20: section 2.2 "Remaining hard Canvas-named surfaces" (plugin API, Paper-patch entry points, config/data dir, permission nodes, spark group, descriptor key, engine member names, test env var, branch name); counts from `rg`, not pinned by a test
 - [x] **P2** track large downstream patch count/rebase conflict count per upstream update — `architecture/rebase-log.md`
 
 ---
@@ -214,9 +214,9 @@ Only measured hot spots should produce new performance patches.
 - [x] **P2** assign KEEP / SPLIT / MOVE TO SOURBY SOURCE / REPLACE / REMOVE / DEFER — same doc
 - [x] **P2** identify duplicate upstream optimizations — 2026-10-20, scoped to the pinned `paperRef`: none found among the PERFORMANCE patches (`architecture/patch-classification.md` Findings); not compared with newer Paper/Moonrise, no benchmark
 - [x] **P2** identify obsolete Folia-era patches — none found; all apply at the pinned revisions
-- [-] **P2** reduce giant mixed-responsibility patches — identified (0006, 0013 split; 0002, 0005, 0016 move classes out); not done
-- [ ] **P2** keep implementation in Sourby-owned source where possible
-- [ ] **P2** add or preserve regression tests before patch removal
+- [-] **P2** reduce giant mixed-responsibility patches — identified (0006, 0013 split; 0002, 0005, 0016 move classes out); 2026-10-20: `AuroraCpu` left 0002 and `AuroraCommandErrors` left 0016; still to do: 0006/0013 splits, 0005 class move
+- [-] **P2** keep implementation in Sourby-owned source where possible — standing rule; slices done 2026-10-20 (`AuroraCpu`, `AuroraCommandErrors`, `AwfChunkNbt`, `GliderSlots`, see the move row above); remaining as in that row
+- [-] **P2** add or preserve regression tests before patch removal — 2026-10-20: 0007 now has `GliderSlotsTest` (found and fixed a random-draw divergence from vanilla with 2+ glider slots), 0016 `AuroraCommandErrorsTest` written before the move, 0021 `AwfChunkNbtTest`; still without dedicated tests: 0009-0012; no policy-script enforcement
 
 ---
 

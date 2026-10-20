@@ -222,6 +222,24 @@ public final class AwfWorld {
         return this.dirty.size();
     }
 
+    /**
+     * Whether the unsaved chunks hold at least {@code limit} bytes of stored data (a deletion counts
+     * as zero). Stops counting once the limit is reached, so a large backlog costs at most about
+     * {@code limit} bytes' worth of chunks, not a walk of every dirty entry. A {@code limit} of zero
+     * or less is always met.
+     */
+    public boolean dirtyBytesAtLeast(final long limit) {
+        if (limit <= 0L) return true;
+        long total = 0L;
+        for (final ChunkKey key : this.dirty.keySet()) {
+            final byte[] bytes = this.owned.get(key);
+            if (bytes == null || bytes == DELETED) continue;
+            total += bytes.length;
+            if (total >= limit) return true;
+        }
+        return false;
+    }
+
     /** Saves queued or running. */
     public int pendingSaveCount() {
         return this.pendingSaves.size();

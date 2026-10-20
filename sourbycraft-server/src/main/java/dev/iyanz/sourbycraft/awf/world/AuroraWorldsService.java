@@ -315,7 +315,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         final AuroraWorldRegistry.Entry withFile = fileWorld.properties().equals(WorldProperties.NONE) ? entry
             : entry.withProperties(fileWorld.properties());
         final int minSection = creator.environment() == World.Environment.NORMAL ? -4 : 0;
-        return start(withFile, () -> {
+        final CompletableFuture<World> created = start(withFile, () -> {
             final SlimeImporter.Result result = SlimeImporter.importInto(SlimeImporter.readFile(file), folder(entry.name()), minSection);
             SourbyLogger.info("Aurora World Fabric: imported " + file.getFileName() + " as " + entry.name() + " ("
                 + result.chunks() + " chunks, " + result.entityChunks() + " with entities, " + result.poiChunks()
@@ -324,6 +324,20 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
                 SourbyLogger.warn("Aurora World Fabric: importing " + file.getFileName() + " did not keep "
                     + fileWorld.dropped() + " (not representable in AWF yet)");
             }
+        });
+        if (fileWorld.pluginData() == null) return created;
+        // The world's BukkitValues go into its persistent data container. start() completes on the
+        // global tick, where the world's container may be written; WorldLoadEvent has already fired, so
+        // a listener on it does not see the data yet. The container reaches level.dat at the world's
+        // next save (autosave, save-all or shutdown), like any other world PDC write.
+        return created.thenApply(world -> {
+            try {
+                SlimeImporter.restorePluginData(world.getPersistentDataContainer(), fileWorld.pluginData());
+            } catch (final IOException failed) {
+                SourbyLogger.warn("Aurora World Fabric: importing " + file.getFileName() + " did not restore the world's"
+                    + " plugin data (BukkitValues): " + failed.getMessage());
+            }
+            return world;
         });
     }
 

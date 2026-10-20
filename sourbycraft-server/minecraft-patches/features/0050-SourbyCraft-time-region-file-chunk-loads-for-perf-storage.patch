@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 18:34:27 +0700
+Subject: [PATCH] SourbyCraft - time region-file chunk loads for perf storage
+
+
+diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+index 690e4e0454952e05b5ca6d54e479c506e584b9f2..48ad36d1c7bb1cd8e3e932b348e62b9e2c48dd8b 100644
+--- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
++++ b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+@@ -28,6 +28,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+     private final boolean isChunkData;
+     private final dev.iyanz.sourbycraft.awf.AwfRegionStorage sourby$awf; // SourbyCraft - Aurora World Fabric: null unless this folder's world is stored in AWF
+     private final dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.Recorder sourby$saveLatency; // SourbyCraft - /perf storage: region-file save latency
++    private final dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.Recorder sourby$loadLatency; // SourbyCraft - /perf storage: region-file load latency
+ 
+     @Nullable
+     public static ChunkPos getRegionFileCoordinates(Path file) {
+@@ -239,6 +240,21 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+             // Never touched since AWF was attached: the region file is still authoritative.
+         }
+         // SourbyCraft end - Aurora World Fabric
++        // SourbyCraft start - /perf storage: time the region-file read stage of chunks that exist; a failure is recorded and propagates unchanged
++        final long sourby$started = System.nanoTime();
++        final ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData sourby$read;
++        try {
++            sourby$read = this.sourby$readRegionFile(chunkX, chunkZ);
++        } catch (final Throwable sourby$failure) {
++            this.sourby$loadLatency.record(sourby$started, System.nanoTime(), true);
++            throw sourby$failure;
++        }
++        if (sourby$read.result() != ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData.ReadResult.NO_DATA) this.sourby$loadLatency.record(sourby$started, System.nanoTime(), false);
++        return sourby$read;
++    }
++
++    private ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData sourby$readRegionFile(final int chunkX, final int chunkZ) throws IOException {
++        // SourbyCraft end - /perf storage
+         final RegionFile regionFile = this.moonrise$getRegionFileIfExists(chunkX, chunkZ);
+ 
+         final DataInputStream input = regionFile == null ? null : regionFile.getChunkDataInputStream(new ChunkPos(chunkX, chunkZ));
+@@ -262,7 +278,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+ 
+         if (syncRead == null) {
+             // need to try again
+-            return this.moonrise$readData(chunkX, chunkZ);
++            return this.sourby$readRegionFile(chunkX, chunkZ); // SourbyCraft - /perf storage: a retry is part of the same timed load
+         }
+ 
+         return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData(
+@@ -319,6 +335,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+         this.info = info;
+         this.isChunkData = info.dfuType()[0] == net.minecraft.util.datafix.DataFixTypes.CHUNK; // Paper - recalculate region file headers
+         this.sourby$saveLatency = dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.GLOBAL.recorder(String.valueOf(info.level()), info.dimension() == null ? "?" : info.dimension().identifier().toString(), String.valueOf(info.type())); // SourbyCraft - /perf storage
++        this.sourby$loadLatency = dev.iyanz.sourbycraft.perf.RegionFileLoadLatency.GLOBAL.recorder(String.valueOf(info.level()), info.dimension() == null ? "?" : info.dimension().identifier().toString(), String.valueOf(info.type())); // SourbyCraft - /perf storage
+         this.sourby$awf = sourby$attachAwf(folder); // SourbyCraft - Aurora World Fabric
+     }
+ 

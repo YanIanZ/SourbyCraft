@@ -34,13 +34,13 @@ class RedisLeaseRetentionTest {
                 boolean renewal = false;
                 for (final Object[] command : commands) {
                     final String name = (String) command[0];
-                    if ("EVAL".equals(name) && RedisBackend.RENEW_SCRIPT.equals(command[1])) {
+                    if (StubScripts.is(command, RedisBackend.RENEW_SCRIPT)) {
                         renewal = true;
                         renewals.incrementAndGet();
                         replies.add(1L);
-                    } else if ("EVAL".equals(name) && RedisBackend.ACQUIRE_SCRIPT.equals(command[1])) {
+                    } else if (StubScripts.is(command, RedisBackend.ACQUIRE_SCRIPT)) {
                         replies.add("OK");
-                    } else if ("EVAL".equals(name) && RedisBackend.RELEASE_SCRIPT.equals(command[1])) {
+                    } else if (StubScripts.is(command, RedisBackend.RELEASE_SCRIPT)) {
                         releases.incrementAndGet();
                         replies.add(1L);
                     } else if ("HSCAN".equals(name)) {

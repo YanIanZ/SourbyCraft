@@ -189,7 +189,7 @@ public final class RedisBackend implements AwfBackend {
         final String token = role.acceptsCommits() ? this.owner + "/" + UUID.randomUUID() : null;
         final RedisStore store = new RedisStore(this, storageId, role, token);
         if (token != null) {
-            final String claimed = RedisClient.text(this.client.call("EVAL", ACQUIRE_SCRIPT, "1", store.lockKey, token,
+            final String claimed = RedisClient.text(this.client.eval(ACQUIRE_SCRIPT, "1", store.lockKey, token,
                 this.owner, Long.toString(this.leaseMillis)));
             if ("TAKEN_OVER".equals(claimed)) {
                 SourbyLogger.info("Aurora World Fabric: took over this server's Redis lease on " + storageId
@@ -263,7 +263,7 @@ public final class RedisBackend implements AwfBackend {
         if (store.token() == null) return;
         this.leased.remove(store.token());
         this.lost.remove(store.token());
-        this.client.call("EVAL", RELEASE_SCRIPT, "1", store.lockKey, store.token());
+        this.client.eval(RELEASE_SCRIPT, "1", store.lockKey, store.token());
     }
 
     /**
@@ -274,7 +274,9 @@ public final class RedisBackend implements AwfBackend {
      * <p>All renewals of a pass go out as one pipeline, one round trip whatever the number of open
      * stores: renewing them one by one, a slow Redis (each call up to {@code timeout-ms}) could make
      * a pass with many stores outlast the lease itself. A pass slower than half the renewal period
-     * is logged, since a few of those in a row are how a lease is lost.</p>
+     * is logged, since a few of those in a row are how a lease is lost. The renewals call the script
+     * by its SHA-1 ({@code EVALSHA}); only a pass that finds Redis without it cached (after a restart
+     * or {@code SCRIPT FLUSH}) takes a second round trip, sending the text once.</p>
      *
      * @return how long the pass took, in nanoseconds
      */
@@ -285,12 +287,12 @@ public final class RedisBackend implements AwfBackend {
         final String leaseMillis = Long.toString(this.leaseMillis);
         final List<Object[]> commands = new ArrayList<>(stores.size());
         for (final RedisStore store : stores) {
-            commands.add(new Object[] {"EVAL", RENEW_SCRIPT, "3", store.lockKey, store.genKey, store.writerKey,
+            commands.add(new Object[] {"3", store.lockKey, store.genKey, store.writerKey,
                 store.token(), leaseMillis, Long.toString(store.knownGeneration())});
         }
         List<Object> replies = null;
         try {
-            replies = this.client.pipeline(commands);
+            replies = this.client.evalPipeline(RENEW_SCRIPT, commands);
         } catch (final IOException | RuntimeException failed) {
             SourbyLogger.warn("Aurora World Fabric could not renew its Redis leases on " + stores.size()
                 + " store(s): " + failed.getMessage());

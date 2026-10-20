@@ -452,9 +452,17 @@ public final class AwfWorldStore implements AwfStore {
             this.chainEntries += delta.size();
         }
 
-        // Collect only what can have become garbage: the objects of generations that just fell
-        // out of retention, and those of earlier failed commits, minus everything still retained.
-        this.retainedNames.addFirst(names(next));
+        final int removedObjects = retainAndCollect(next);
+        return new CommitResult(committed, next.size(), written, bytes, removedObjects);
+    }
+
+    /**
+     * After a commit: records the new generation's objects as retained and collects only what can
+     * have become garbage, the objects of generations that just fell out of retention and those of
+     * earlier failed commits, minus everything still retained. Returns how many objects it deleted.
+     */
+    private int retainAndCollect(final SortedMap<ChunkKey, String> committedIndex) throws IOException {
+        this.retainedNames.addFirst(names(committedIndex));
         final Set<String> candidates = new HashSet<>(this.orphanCandidates);
         while (this.retainedNames.size() > this.retainedGenerations) {
             candidates.addAll(this.retainedNames.removeLast());
@@ -468,7 +476,69 @@ public final class AwfWorldStore implements AwfStore {
             }
         }
         this.orphanCandidates.clear();
-        return new CommitResult(committed, next.size(), written, bytes, removedObjects);
+        return removedObjects;
+    }
+
+    /**
+     * The generations {@link #rollbackTo} accepts, newest first: the retained committed
+     * generations whose chain still replays (the current one included). A read; any role.
+     */
+    public synchronized List<Long> rollbackPoints() throws IOException {
+        final List<Long> out = new ArrayList<>();
+        final Map<Long, Resolved> resolved = new HashMap<>();
+        for (final GenerationStore.Generation retained : this.generations.readRetained()) {
+            try {
+                resolve(this.generations, retained, resolved);
+                out.add(retained.number());
+            } catch (final IOException damaged) {
+                // A generation that does not replay is no rollback point.
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    /**
+     * Point-in-time rollback for operator recovery: commits, as a new generation on top, the
+     * state retained generation {@code target} committed. Nothing is rewritten: the generations
+     * after {@code target} stay on disk until retention drops them, so a rollback can itself be
+     * rolled back while they are retained. The new generation is always a full index (it ends any
+     * delta chain), and every object it references is read back and verified first, so a damaged
+     * or missing object fails the rollback before its commit point and leaves the store as it was.
+     *
+     * <p>Only for a store no running world is using: a loaded world keeps its own dirty chunks and
+     * would commit over the rollback. Blocking, off the region threads, like {@link #commit}.</p>
+     *
+     * @return the commit, or {@code null} when {@code target} is already the current generation
+     * @throws IllegalArgumentException when {@code target} is not one of {@link #rollbackPoints()}
+     */
+    public synchronized CommitResult rollbackTo(final long target) throws IOException {
+        if (!this.role.acceptsCommits()) {
+            throw new IllegalStateException("a " + this.role + " world does not accept commits");
+        }
+        if (this.closed) throw new IllegalStateException("this AWF store was closed; it accepts no more commits");
+        if (target == this.generation && this.generation != 0) return null;
+        GenerationStore.Generation point = null;
+        for (final GenerationStore.Generation retained : this.generations.readRetained()) {
+            if (retained.number() == target) point = retained;
+        }
+        if (point == null) {
+            throw new IllegalArgumentException("generation " + target + " is not a retained rollback point; retained: "
+                + rollbackPoints());
+        }
+        final SortedMap<ChunkKey, String> state = resolve(this.generations, point, new HashMap<>()).index;
+        for (final String name : names(state)) {
+            this.objects.get(name);                    // read back and verified before the commit point
+        }
+        final long committed = this.generations.commit(Map.of(INDEX_BLOB, encodeIndex(state)));
+        this.index = Collections.unmodifiableSortedMap(new TreeMap<>(state));
+        this.generation = committed;
+        this.lastCommitCompacted = true;
+        this.chainLength = 0;
+        this.chainEntries = 0L;
+        final int removedObjects = retainAndCollect(state);
+        LOGGER.warn("AWF store rolled back to the state of generation {} as generation {} ({} chunks)", target,
+            committed, state.size());
+        return new CommitResult(committed, state.size(), 0, 0L, removedObjects);
     }
 
     /**

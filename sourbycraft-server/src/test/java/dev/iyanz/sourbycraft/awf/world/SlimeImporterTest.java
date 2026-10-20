@@ -338,8 +338,11 @@ class SlimeImporterTest {
     void worldPropertiesMapFromTypedValuesAndTheRestIsReportedDropped() {
         final SlimeImporter.WorldData data = SlimeImporter.worldData(aspWorldExtra());
         assertEquals(ASP_PROPERTIES, data.properties(), "a false byte stays false, not the server default");
+        assertEquals(java.util.List.of("properties.dragonBattle", "properties.environment"),
+            data.dropped(), "unmapped properties are named, not silently lost");
+        assertEquals(named("myplugin:owner", "steve"), data.pluginData(), "the world's plugin data is carried, not dropped");
         assertEquals(java.util.List.of("extra.BukkitValues", "properties.dragonBattle", "properties.environment"),
-            data.dropped(), "the world's plugin data and unmapped properties are named, not silently lost");
+            data.dropped(false), "a consumer that cannot keep the plugin data still names it");
 
         final CompoundTag ambiguous = new CompoundTag();
         final CompoundTag properties = new CompoundTag();
@@ -358,6 +361,47 @@ class SlimeImporterTest {
         final SlimeImporter.WorldData none = SlimeImporter.worldData(new CompoundTag());
         assertEquals(dev.iyanz.sourbycraft.api.world.WorldProperties.NONE, none.properties());
         assertTrue(none.dropped().isEmpty());
+        assertEquals(null, none.pluginData());
+        assertTrue(none.dropped(false).isEmpty());
+
+        final CompoundTag notACompound = new CompoundTag();
+        notACompound.putString("BukkitValues", "garbage");
+        final SlimeImporter.WorldData odd = SlimeImporter.worldData(notACompound);
+        assertEquals(null, odd.pluginData());
+        assertEquals(java.util.List.of("extra.BukkitValues"), odd.dropped(), "a malformed value is named as dropped");
+    }
+
+    @Test
+    void theWorldsPluginDataIsRestoredIntoTheNewWorldsContainer() throws IOException {
+        final org.bukkit.craftbukkit.persistence.CraftPersistentDataContainer world =
+            new org.bukkit.craftbukkit.persistence.CraftPersistentDataContainer(
+                new org.bukkit.craftbukkit.persistence.CraftPersistentDataTypeRegistry());
+        final org.bukkit.NamespacedKey existing = new org.bukkit.NamespacedKey("other", "kept");
+        world.set(existing, org.bukkit.persistence.PersistentDataType.INTEGER, 7);
+        final CompoundTag values = named("myplugin:owner", "steve");
+        values.putInt("myplugin:level", 3);
+
+        assertTrue(SlimeImporter.restorePluginData(world, values));
+        assertEquals("steve", world.get(new org.bukkit.NamespacedKey("myplugin", "owner"),
+            org.bukkit.persistence.PersistentDataType.STRING));
+        assertEquals(3, world.get(new org.bukkit.NamespacedKey("myplugin", "level"),
+            org.bukkit.persistence.PersistentDataType.INTEGER));
+        assertEquals(7, world.get(existing, org.bukkit.persistence.PersistentDataType.INTEGER),
+            "restoring merges; it does not clear what the world already holds");
+
+        final org.bukkit.craftbukkit.persistence.CraftPersistentDataContainer empty =
+            new org.bukkit.craftbukkit.persistence.CraftPersistentDataContainer(
+                new org.bukkit.craftbukkit.persistence.CraftPersistentDataTypeRegistry());
+        assertFalse(SlimeImporter.restorePluginData(empty, null));
+        assertFalse(SlimeImporter.restorePluginData(empty, new CompoundTag()));
+        assertTrue(empty.isEmpty());
+
+        // Read from a file's header, as the import does.
+        final Path slime = this.dir.resolve("pdc.slime");
+        Files.write(slime, file(0, aspWorldExtra()));
+        assertTrue(SlimeImporter.restorePluginData(empty, SlimeImporter.worldData(slime).pluginData()));
+        assertEquals("steve", empty.get(new org.bukkit.NamespacedKey("myplugin", "owner"),
+            org.bukkit.persistence.PersistentDataType.STRING));
     }
 
     @Test

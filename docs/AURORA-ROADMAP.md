@@ -468,16 +468,16 @@ Make Aurora telemetry the authoritative runtime truth.
 ### Add
 
 - [x] scheduler queue depth — `/perf governor` (Sourby lanes); per-region queued task counts (tick/chunk) in `/perf scheduler` since MC patch 0045 (2026-10-20); the scheduler run queue, the global task queue and the world-wide global chunk-task queue are still `n/a`
-- [ ] task wait latency
+- [-] task wait latency — recorded since boot per kind (tick/chunk) by MC patch 0049 + `perf/RegionTaskWaitLatency` (count/mean/max, p50/p99 as bucket upper bounds; `RegionTaskWaitLatencyTest` 8, `RegionTaskWaitLatencyHookTest` 4, 2026-10-20); not displayed yet (needs a "Task wait" line in `/perf scheduler`), no server numbers, overhead not benchmarked
 - [x] async-path queue/solve latency — `/perf async`; see below
 - [ ] chunk lifecycle counters
 - [ ] entity tick counters
 - [x] packet counters — `/perf network`
 - [x] bytes/sec — `/perf network`
 - [x] storage backlog — `/perf storage` (Moonrise pending I/O per world), `/perf awf`
-- [-] save latency — AWF commit p50/p95/p99, and region-file save p50/p99/max over 60 s per world/type from MC patch 0043 (`perf/RegionFileSaveLatency`, `/perf storage`; times only the `.mca` write stage, never AWF worlds); no server numbers and overhead not benchmarked
+- [x] save latency — AWF commit p50/p95/p99, and region-file save p50/p99/max over 60 s per world/type from MC patch 0043 (`perf/RegionFileSaveLatency`, `/perf storage`; times only the `.mca` write stage, never AWF worlds); no server numbers and overhead not benchmarked
 - [x] worker utilization — `/perf lanes` (CPU by execution lane)
-- [ ] incident history
+- [x] incident history — `/perf incidents` (`perf/IncidentLog`, ring of 20, merged per kind+subject, 9 signals; `IncidentLogTest`); watchdog and GC stop-the-world pauses are not sourced
 
 ### Consumer model
 

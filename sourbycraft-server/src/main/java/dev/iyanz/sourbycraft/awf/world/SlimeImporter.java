@@ -48,8 +48,9 @@ import net.minecraft.nbt.Tag;
  * wrong section heights, so imported chunks are marked unlit and the engine lights them on first
  * load. The data version is kept, so the engine's data fixers upgrade chunks from older versions.
  * A chunk's {@code ChunkBukkitValues} is kept. The world's extra data is mapped by
- * {@link #worldData(CompoundTag)}: unambiguous properties become the new world's properties, and
- * everything else (other properties, the world's {@code BukkitValues}) is reported as dropped.</p>
+ * {@link #worldData(CompoundTag)}: unambiguous properties become the new world's properties, the
+ * world's {@code BukkitValues} (its persistent data container) is carried as plugin data for
+ * {@link #restorePluginData}, and everything else is reported as dropped.</p>
  */
 public final class SlimeImporter {
 
@@ -134,11 +135,43 @@ public final class SlimeImporter {
      *
      * @param properties the Slime properties that map unambiguously onto {@link
      *     dev.iyanz.sourbycraft.api.world.WorldProperties}; {@code NONE} when none do
+     * @param pluginData the world's {@code BukkitValues} compound (its persistent data container, keyed
+     *     {@code namespace:key}); {@code null} when the file has none or it is not a compound
      * @param dropped what the import does not keep, as {@code properties.<key>} and
-     *     {@code extra.<key>} (such as {@code extra.BukkitValues}, the world's plugin data); empty when
-     *     nothing is dropped
+     *     {@code extra.<key>}; empty when nothing is dropped. The plugin data is not listed here: a
+     *     consumer that cannot keep it asks {@link #dropped(boolean)}
      */
-    public record WorldData(dev.iyanz.sourbycraft.api.world.WorldProperties properties, List<String> dropped) {}
+    public record WorldData(dev.iyanz.sourbycraft.api.world.WorldProperties properties, CompoundTag pluginData,
+                            List<String> dropped) {
+
+        /** {@link #dropped()}, plus {@code extra.BukkitValues} when there is plugin data the consumer does not keep. */
+        public List<String> dropped(final boolean pluginDataKept) {
+            if (pluginDataKept || this.pluginData == null) return this.dropped;
+            final List<String> out = new ArrayList<>(this.dropped);
+            out.add("extra.BukkitValues");
+            java.util.Collections.sort(out);
+            return List.copyOf(out);
+        }
+    }
+
+    /**
+     * Merges a Slime world's plugin data into a world's persistent data container (what the
+     * world's {@code BukkitValues} held under AdvancedSlimePaper). Existing keys not in the data
+     * are kept; keys in both take the file's value. Call it where the container may be written
+     * (for a world, its global tick).
+     *
+     * @return whether anything was restored
+     */
+    public static boolean restorePluginData(final org.bukkit.persistence.PersistentDataContainer container,
+                                            final CompoundTag pluginData) throws IOException {
+        if (pluginData == null || pluginData.isEmpty()) return false;
+        final java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (DataOutputStream out = new DataOutputStream(bytes)) {
+            NbtIo.write(pluginData, out);
+        }
+        container.readFromBytes(bytes.toByteArray(), false);
+        return true;
+    }
 
     /** What an import wrote. */
     public record Result(int chunks, int entityChunks, int poiChunks, int dataVersion) {}
@@ -398,14 +431,16 @@ public final class SlimeImporter {
      * {@code difficulty} must name a difficulty; {@code pvp}, {@code allowMonsters} and
      * {@code allowAnimals} must be numeric (0 false) or the text {@code true}/{@code false};
      * {@code defaultBiome} must be a namespaced key. Everything else, including a mapped key with a
-     * value that does not fit, and every other extra-data compound ({@code BukkitValues}, the
-     * world's plugin data) is listed as dropped.
+     * value that does not fit, and every other extra-data key is listed as dropped. A
+     * {@code BukkitValues} compound (the world's plugin data) becomes {@link WorldData#pluginData()}.
      */
     static WorldData worldData(final CompoundTag extra) {
         final List<String> dropped = new ArrayList<>();
         final CompoundTag props = extra.getCompoundOrEmpty("properties");
+        final CompoundTag pluginData = extra.get("BukkitValues") instanceof CompoundTag values ? values : null;
         for (final String key : new java.util.TreeSet<>(extra.keySet())) {
-            if (!key.equals("properties")) dropped.add("extra." + key);
+            if (key.equals("properties") || key.equals("BukkitValues") && pluginData != null) continue;
+            dropped.add("extra." + key);
         }
         for (final String key : new java.util.TreeSet<>(props.keySet())) {
             if (!MAPPED.contains(key)) dropped.add("properties." + key);
@@ -447,7 +482,7 @@ public final class SlimeImporter {
             }
         }
         java.util.Collections.sort(dropped);
-        return new WorldData(out, List.copyOf(dropped));
+        return new WorldData(out, pluginData, List.copyOf(dropped));
     }
 
     private static Double number(final CompoundTag props, final String key) {

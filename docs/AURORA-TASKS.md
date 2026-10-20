@@ -172,7 +172,7 @@ collision candidate 0019 (feature patch 0018 after renumbering) passes arithmeti
 - [x] define minimal region access contract — `execution/region/RegionBackend` ([compat-boundary.md](architecture/compat-boundary.md))
 - [x] define minimal scheduler access contract — `execution/OwnerHandoff` ([execution-contract.md](architecture/execution-contract.md))
 - [x] define minimal engine config bridge contract — `config/upstream/UpstreamConfigBridge`
-- [ ] move large Sourby service bodies out of upstream classes
+- [-] move large Sourby service bodies out of upstream classes — slices done 2026-10-20: `AuroraCpu` (out of MC patch 0002), `AuroraCommandErrors` (0016), `AwfChunkNbt` (0021), `GliderSlots` (0007); remaining: 0005 `SnapshotPathRegion`, 0006/0013 splits, the AWF read/write/scan/flush/attach branches in 0021 (~60 code lines), 0026 timing
 - [x] retain direct NMS algorithm patches when external indirection would be worse — policy in [compat-boundary.md §1.2](architecture/compat-boundary.md) and ledger §2.1; applied to patch 0006 (rules extracted to `AsyncPathValidity`, algorithm left in place)
 - [x] active build-path dependency inventory — ledger §3–4 and AGENTS.md CI description
 - [x] determine whether active CI still requires legacy `sourbypatcher` — no: CI requires the private SourbyPatcher `paper-toolchain` adapter; the legacy Folia patcher is not used

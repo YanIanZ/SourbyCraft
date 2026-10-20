@@ -196,9 +196,7 @@ final class RedisStore implements AwfStore {
             throw new IllegalStateException("a " + this.role + " world in " + mode + " mode does not accept commits");
         }
         if (this.closed) throw new IOException("AWF store " + this.id + " is closed");
-        final List<Object> command = new ArrayList<>(8 + changed.size() * 2 + removed.size() + deleted.size());
-        command.add("EVAL");
-        command.add(COMMIT_SCRIPT);
+        final List<Object> command = new ArrayList<>(6 + changed.size() * 2 + removed.size() + deleted.size());
         command.add("5");
         command.add(this.chunksKey);
         command.add(this.deletedKey);
@@ -219,7 +217,7 @@ final class RedisStore implements AwfStore {
         }
         for (final ChunkKey key : removed) command.add(field(key));
         for (final ChunkKey key : deleted) command.add(field(key));
-        final List<?> reply = (List<?>) this.backend.client().call(command.toArray());
+        final List<?> reply = (List<?>) this.backend.client().eval(COMMIT_SCRIPT, command.toArray());
         final long generation = (Long) reply.get(0);
         this.knownGeneration = generation;
         if (reply.get(1) instanceof Long retaken && retaken == 1) this.backend.retaken(this);

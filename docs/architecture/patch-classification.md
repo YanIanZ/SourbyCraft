@@ -22,12 +22,12 @@ optimisation), COMPATIBILITY (keeps plugins/config working), SECURITY, BRANDING,
 | Patch | + lines | Category | Disposition | Reason |
 | --- | --- | --- | --- | --- |
 | 0001 boot hook in `DedicatedServer.initServer` | 7 | FOUNDATION | KEEP | The one call that starts SourbyCraft. Minimal already. |
-| 0002 region tick thread count / `aurora.cpu.cores` | 125 | INTEGRATION | MOVE TO SOURBY SOURCE | Adds `dev/iyanz/aurora/cpu/AuroraCpu.java` inside the patch. The class could live in Sourby source, leaving a one-line call in `TickRegions`. |
+| 0002 region tick thread count / `aurora.cpu.cores` | 24 | INTEGRATION | KEEP | Moved 2026-10-20 (M-2 slice): `AuroraCpu` now lives in Sourby source (`src/main/java/dev/iyanz/aurora/cpu/AuroraCpu.java`); the patch keeps only the `getTickThreads` default branch in `TickRegions` (call + startup log line, 3 code lines, plus the replaced upstream formula). |
 | 0003 skip provably capped spawn categories | 45 | PERFORMANCE | KEEP | Measured spawn-path saving; confined to `NaturalSpawner`. |
 | 0004 POI consistency scan without per-block lookups | 19 | PERFORMANCE | KEEP | Small, measured. |
 | 0005 `SnapshotPathRegion` immutable block snapshot | 200 | PERFORMANCE | MOVE TO SOURBY SOURCE | Largest patch; most of it is the new `dev/iyanz/aurora/level/SnapshotPathRegion.java`. Only the `PathNavigationRegion` hook needs to be a patch. |
 | 0006 async pathfinding offload | 135 | PERFORMANCE | SPLIT | Touches `Mob` and several navigation classes. Split the navigation hooks from the `Mob` scheduling so each can be rebased and reverted on its own. Validity rules are already in `perf/AsyncPathValidity`. |
-| 0007 elytra glide slot stream allocation | 17 | PERFORMANCE | KEEP | Small, local. |
+| 0007 elytra glide slot stream allocation | 9 | PERFORMANCE | KEEP | Hook since 2026-10-20: the pick is `entity/GliderSlots` (bit mask of glider slots, one `nextInt(count)`, n-th set bit) = vanilla's `Util.getRandom` slot and random draw for any number of glider slots (`GliderSlotsTest`, every 8-slot mask x 64 seeds). The earlier reservoir pick drew once per glider slot, so with two or more (datapack/plugin gliders) it shifted the entity's later random rolls. |
 | 0008 `Projectile` tick ticket typo | 22 | COMPATIBILITY | KEEP (upstream candidate) | An upstream bug fix. Offer it upstream; remove on the rebase that contains it. |
 | 0009 `Entity.lastKnownSpeed` as three doubles | 33 | PERFORMANCE | KEEP | Allocation removal. |
 | 0010 reuse `BlockPos` in `ServerLevel.optimiseRandomTick` | 24 | PERFORMANCE | KEEP | Allocation removal. |
@@ -36,7 +36,7 @@ optimisation), COMPATIBILITY (keeps plugins/config working), SECURITY, BRANDING,
 | 0013 custom tick metrics | 85 | INTEGRATION | SPLIT | Mixes tick telemetry (`TickData`, `TickRegions`), world shutdown and the `SourbyCraftBootstrap.close()` call. Split telemetry from lifecycle. |
 | 0014 skip spawn-state scan a region cannot use | 25 | PERFORMANCE | KEEP | Measured. |
 | 0015 reject a landed arrow before the tag lookup | 7 | COMPATIBILITY | KEEP (upstream candidate) | Upstream bug fix. |
-| 0016 refuse a cross-region block test | 45 | SECURITY | MOVE TO SOURBY SOURCE (partial) | Region-safety fix (PRD §108). The new `AuroraCommandErrors` class could move out; the `ExecuteCommand` check stays a patch. Known behaviour (audit ENG-11, 2026-10-14, from code, not a boot): in a chained `execute if/unless block <pos> <block> run ...` the condition is a fork, and Brigadier swallows a fork's error without a message (`BuildContexts`, `CommandSourceStack.handleError` with `forked=true`), so a cross-region refusal runs neither the `if` nor the `unless` chain and prints nothing. Only a terminal `execute if block ...` (no `run`) shows "Cannot test a block cross-region". Not changed: routing the test to the owning region cannot answer within the chain. |
+| 0016 refuse a cross-region block test | 18 | SECURITY | KEEP | Region-safety fix (PRD §108). Since 2026-10-20 `AuroraCommandErrors` lives in Sourby source (`src/main/java/dev/iyanz/aurora/command/`, message pinned by `AuroraCommandErrorsTest`); the `ExecuteCommand` check stays a patch (hook). Known behaviour (audit ENG-11, 2026-10-14, from code, not a boot): in a chained `execute if/unless block <pos> <block> run ...` the condition is a fork, and Brigadier swallows a fork's error without a message (`BuildContexts`, `CommandSourceStack.handleError` with `forked=true`), so a cross-region refusal runs neither the `if` nor the `unless` chain and prints nothing. Only a terminal `execute if block ...` (no `run`) shows "Cannot test a block cross-region". Not changed: routing the test to the owning region cannot answer within the chain. |
 | 0017 hoist query bounds out of the entity intersection loop | 28 | PERFORMANCE | KEEP | Moonrise `ChunkEntitySlices`; reviewed in `region-safety-review-0017-0019.md`. |
 | 0019 translate block collision boxes without allocating | 20 | PERFORMANCE | KEEP | Moonrise `CollisionUtil`; same review. |
 | 0020 commit AWF stores at shutdown | 1 | INTEGRATION | KEEP | One call; no-op without AWF worlds. |
@@ -61,6 +61,8 @@ review; added lines are `+` lines of the patch file today. Dispositions are prov
 | 0046 horizontal-movement predicate as a volatile boolean, float threshold | 17 | PERFORMANCE | KEEP | DEV-A re-review fix: atomic publication and the vanilla `1.0E-5F` threshold (`ScratchReentrancyTest`). |
 | 0047 invalidate in-flight async paths with a navigation generation | 28 | PERFORMANCE | KEEP | DEV-A F3 fix: a second `stop()` or a retarget can no longer re-arm an old solve (`AsyncPathPatchShapeTest`, `AsyncPathValidityTest`). |
 | 0048 unloaded chunks are not loaded for the snapshot's `*IfLoaded` reads | 33 | PERFORMANCE | KEEP | Restores vanilla's `null`/BLOCKED answer for unloaded chunks (`SnapshotPathRegionTest`). |
+| 0049 time how long region tasks wait in their queue | 4 | INTEGRATION | KEEP | Hook only (3 code lines): stamp on first `tryPush`, record before `executeTask` runs the task; the recorder is `perf/RegionTaskWaitLatency` (`RegionTaskWaitLatencyHookTest`). No view reads it yet. |
+| 0050 time region-file chunk loads for `/perf storage` | 15 | INTEGRATION | KEEP | Telemetry wrapper around the region-file part of `moonrise$readData` (found-data reads and failures; the external-stream retry calls the inner method so a retry stays one load); recorder `perf/RegionFileLoadLatency`, same ring as 0043 (`RegionFileLoadLatencyHookTest`). No view reads it yet. |
 
 ## Minecraft source patches (`minecraft-patches/sources/`)
 
@@ -118,4 +120,5 @@ review; added lines are `+` lines of the patch file today. Dispositions are prov
   the pinned revisions (CI run 445 applied them all).
 - **Regression tests before removal:** 0006 has `AsyncPathValidityTest`, 0013 has the
   metrics tests, 0016 and 0017/0019 have review docs, and AWF has its storage tests. The
-  allocation patches (0007, 0009–0012) have no dedicated tests; add them before changing those.
+  allocation patches (0009–0012) have no dedicated tests; add them before changing those. 0007
+  has `GliderSlotsTest` since 2026-10-20.

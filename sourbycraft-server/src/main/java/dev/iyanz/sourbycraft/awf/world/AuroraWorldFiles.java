@@ -222,9 +222,11 @@ public final class AuroraWorldFiles {
             final dev.iyanz.sourbycraft.api.world.WorldProperties properties = converted.world().properties();
             final Map<String, String> meta = metadata(new AuroraWorldRegistry.Entry(source, environment, null,
                 "void", null, null, false, properties), "slime " + source);
-            if (!converted.world().dropped().isEmpty()) {
+            // An .awf file does not carry a world's persistent data container yet, so the plugin data is dropped here.
+            final java.util.List<String> dropped = converted.world().dropped(false);
+            if (!dropped.isEmpty()) {
                 dev.iyanz.sourbycraft.util.SourbyLogger.warn("Aurora World Fabric: converting " + source
-                    + " did not keep " + converted.world().dropped() + " (not representable in AWF yet)");
+                    + " did not keep " + dropped + " (not representable in AWF yet)");
             }
             meta.put("data-version", Integer.toString(converted.dataVersion()));
             writer.finish(meta);

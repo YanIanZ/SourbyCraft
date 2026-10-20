@@ -226,7 +226,13 @@ implemented**.
   crash takes its own lease back at once; any other server waits for expiry. All of a server's
   renewals go out as one pipeline per pass (one round trip however many stores are open; until
   2026-10-14 they were serial, so N stores × `timeout-ms` could outlast the lease), and a pass
-  slower than half the renewal period is logged as a WARN (AWF-6). A store the engine opens and
+  slower than half the renewal period is logged as a WARN (AWF-6). Since 2026-10-20 every script
+  (acquire, renew, commit, release) is called by its SHA-1 (`EVALSHA`, `RedisClient.eval` /
+  `evalPipeline`), so the script text no longer travels with each commit or renewal; a call Redis
+  refuses with `NOSCRIPT` (it did not run: first use, Redis restart, `SCRIPT FLUSH`) is resent
+  once as `EVAL`, a second round trip only for that pass (`RedisBackendTest.scriptsRunByTheirSha…`
+  against a real Redis, `aPipelineOfScriptCallsResendsOnlyTheRefusedOnesByText`). Bytes or latency
+  saved are not measured. A store the engine opens and
   then does not use — prepared for a world whose creation failed (`AwfEngine.unprepare`), a
   duplicate open of an already-open folder, an export's read-only store — is closed, releasing
   its lease (AWF-5).
@@ -639,9 +645,14 @@ no performance effect is claimed.
   where the mapping is unambiguous: spawn x/y/z(+yaw), difficulty, pvp, allowMonsters/Animals
   and defaultBiome. `importSlime` reads only the file's header and extra data to set the new
   world's `WorldProperties`, and `convertSlime` writes them into the `.awf` file. Anything else
-  is logged once per import or conversion as dropped, for example the world's `BukkitValues`,
-  `environment`, `dragonBattle` and values that do not fit. The world PDC itself is not restored
-  yet. Tests: `SlimeImporterTest.worldPropertiesMapFromTypedValuesAndTheRestIsReportedDropped`,
+  is logged once per import or conversion as dropped, for example `environment`, `dragonBattle`
+  and values that do not fit. **World PDC (2026-10-20, unit-tested only):** `importSlime` merges
+  the file's `BukkitValues` compound into the new world's persistent data container
+  (`SlimeImporter.restorePluginData`, existing keys kept) when `start` completes on the global
+  tick, i.e. after `WorldLoadEvent` (a listener on that event does not see it yet); it reaches
+  `level.dat` at the world's next save. `convertSlime` still drops it and says so, because an
+  `.awf` file has no key for a world PDC (exported AWF worlds do not carry theirs either). Tests:
+  `SlimeImporterTest.theWorldsPluginDataIsRestoredIntoTheNewWorldsContainer`. Earlier tests: `SlimeImporterTest.worldPropertiesMapFromTypedValuesAndTheRestIsReportedDropped`,
   `theHeaderOnlyReaderSeesWhatAFullParseSees`, `slimeToAwfToImportKeepsTheProperties`. The service
   wiring (`AuroraWorldsService.importSlimeInternal`) has no unit test because it needs a running
   server.
@@ -747,6 +758,14 @@ gain measured locally.
   replayable. A chain-only ancestor stays on disk while a retained generation is chained to it and
   is pruned after the commit that drops the last such child. Object liveness is the union of the
   replayed states of the retained generations.
+- **Point-in-time rollback (2026-10-20, FILE backend, Java API only, unit-tested).**
+  `AwfWorldStore.rollbackPoints()` lists the retained generations that replay (newest first);
+  `rollbackTo(n)` reads back every object generation n references, then commits n's state as a new
+  full-index generation through the normal commit point. Nothing is rewritten, so the generations
+  after n stay retained (a rollback can be undone) until retention drops them; a missing or damaged
+  object fails it before the commit point. Only for a store no loaded world uses (a loaded world
+  would commit its dirty chunks over it). No `/awf` command, no Redis implementation, no world-level
+  coordination of the region/entities/poi stores yet (`AwfRollbackTest` 6).
 - **Crash consistency.** Unchanged commit order (objects forced, then generation, then `CURRENT`
   as the single commit point); a base is read and hash-linked before anything is written.
   Proved in-process with the recording `Durability` seam (`AwfDeltaGenerationTest` 15,

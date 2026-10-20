@@ -383,6 +383,10 @@ public final class SourbyCraftConfig {
             + "every store the server opens), or /awf compact all, which also prints full: yes/no per store. Such a "
             + "build then skips the retained delta generations and deletes the objects only they reference: those "
             + "rollback points are lost for good, so back up the .awf folders first if they matter.");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.COMMIT_DIRTY_BYTES_KEY, 0,
+            "AWF: start a commit as soon as a storage's unsaved chunks hold at least this many bytes, without waiting "
+            + "for commit-interval-seconds (RESTART_REQUIRED). 0 = off (interval only). A trigger, not a hard cap: "
+            + "the check runs once a second and one commit per storage runs at a time. 0-2147483647.");
         if (changed[0]) {
             f.save();
             SourbyLogger.info("seeded Aurora engine defaults into sourbycraft_config/aurora.toml");

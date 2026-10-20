@@ -188,6 +188,71 @@ public class RedisClient implements AutoCloseable {
         }
     }
 
+    /** Script SHA-1s, computed once per script text. */
+    private static final java.util.concurrent.ConcurrentMap<String, String> SHAS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The SHA-1 Redis names a script by ({@code SCRIPT LOAD}, {@code EVALSHA}): lowercase hex of its UTF-8 bytes. */
+    public static String sha1(final String script) {
+        return SHAS.computeIfAbsent(script, text -> {
+            try {
+                return java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest.getInstance("SHA-1").digest(text.getBytes(StandardCharsets.UTF_8)));
+            } catch (final java.security.NoSuchAlgorithmException missing) {
+                throw new IllegalStateException("the JDK has no SHA-1", missing);
+            }
+        });
+    }
+
+    /** Whether a reply is Redis saying it does not have the script ({@code NOSCRIPT}): the script did not run. */
+    static boolean noScript(final Object reply) {
+        return reply instanceof RedisError error && error.getMessage() != null && error.getMessage().startsWith("NOSCRIPT");
+    }
+
+    /**
+     * Runs a script by its SHA-1 ({@code EVALSHA}), so the script text is not sent with every call.
+     * When Redis does not have it cached (first use, after a restart or {@code SCRIPT FLUSH}), it is
+     * sent once with {@code EVAL}, which also caches it. An error reply is thrown as {@link RedisError}.
+     *
+     * @param keysAndArgs {@code numkeys}, the keys, then the arguments, as for {@code EVAL}
+     */
+    public Object eval(final String script, final Object... keysAndArgs) throws IOException {
+        final Object reply = evalPipeline(script, List.<Object[]>of(keysAndArgs)).getFirst();
+        if (reply instanceof RedisError error) throw new RedisError(error.getMessage());
+        return reply;
+    }
+
+    /**
+     * {@link #eval} for many calls of one script in one pipeline: one round trip while Redis has
+     * the script cached; when it does not, the calls Redis refused with {@code NOSCRIPT} (they did
+     * not run) are sent again with {@code EVAL} in a second pipeline. Replies are in order; error
+     * replies are values, as in {@link #pipeline}.
+     */
+    public List<Object> evalPipeline(final String script, final List<Object[]> calls) throws IOException {
+        final String sha = sha1(script);
+        final List<Object[]> bySha = new ArrayList<>(calls.size());
+        for (final Object[] call : calls) bySha.add(command("EVALSHA", sha, call));
+        final List<Object> replies = new ArrayList<>(pipeline(bySha));
+        final List<Integer> missing = new ArrayList<>();
+        for (int i = 0; i < replies.size(); i++) {
+            if (noScript(replies.get(i))) missing.add(i);
+        }
+        if (!missing.isEmpty()) {
+            final List<Object[]> byText = new ArrayList<>(missing.size());
+            for (final int i : missing) byText.add(command("EVAL", script, calls.get(i)));
+            final List<Object> retried = pipeline(byText);
+            for (int j = 0; j < missing.size(); j++) replies.set(missing.get(j), retried.get(j));
+        }
+        return replies;
+    }
+
+    private static Object[] command(final String name, final String script, final Object[] keysAndArgs) {
+        final Object[] command = new Object[keysAndArgs.length + 2];
+        command[0] = name;
+        command[1] = script;
+        System.arraycopy(keysAndArgs, 0, command, 2, keysAndArgs.length);
+        return command;
+    }
+
     private Connection connect() throws IOException {
         final Socket socket;
         if (this.endpoint.tls()) {

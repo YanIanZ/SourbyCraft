@@ -5,31 +5,23 @@ Subject: [PATCH] SourbyCraft - eliminate elytra glide-slot stream allocation
 
 
 diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
-index ef4da5aa9de55db1e7d4fc91355d88a6e3a0ab5a..7ba6fe1f72d2fb757b6418ca960063c23e8b5df3 100644
+index ef4da5aa9de55db1e7d4fc91355d88a6e3a0ab5a..9d9071d96354e2d3189e3502ebeff3728dab7da8 100644
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
-@@ -3915,8 +3915,23 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -3915,8 +3915,15 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
              if (checkFallFlyTicks % 10 == 0) {
                  int freeFallInterval = checkFallFlyTicks / 10;
                  if (freeFallInterval % 2 == 0) {
 -                    List<EquipmentSlot> slotsWithGliders = EquipmentSlot.VALUES.stream().filter(slot -> canGlideUsing(this.getItemBySlot(slot), slot)).toList();
 -                    EquipmentSlot slotToDamage = Util.getRandom(slotsWithGliders, this.random);
-+                    // SourbyCraft start - elytra glide: avoid the per-call List<EquipmentSlot> +
-+                    // stream + toList + Util.getRandom round-trip. EquipmentSlot.VALUES has only
-+                    // 6 entries and canGlideUsing() is a pure read of the entity's equipment map,
-+                    // so a single-pass reservoir-style pick is allocation-free and trivially
-+                    // equivalent in the only case the call site actually exercises (>= 1 elytra
-+                    // equipped: filter result has 0 or 1 element, Util.getRandom on empty would
-+                    // NPE just as the original; the nextInt(++count) == 0 reservoir pick is the
-+                    // uniform distribution Util.getRandom on N elements would have produced).
-+                    // Mirrors the existing for-each style already used in canGlide() above.
-+                    EquipmentSlot slotToDamage = null;
-+                    int gliderCount = 0;
-+                    for (final EquipmentSlot slot : EquipmentSlot.VALUES) {
-+                        if (canGlideUsing(this.getItemBySlot(slot), slot) && this.random.nextInt(++gliderCount) == 0) {
-+                            slotToDamage = slot;
-+                        }
++                    // SourbyCraft start - elytra glide: vanilla's pick (Util.getRandom over the glider slots:
++                    // one nextInt(count), same slot, same draw from this.random) without the per-call list
++                    // and stream; the selection lives in dev.iyanz.sourbycraft.entity.GliderSlots.
++                    int sourbyGliders = 0;
++                    for (int i = 0; i < EquipmentSlot.VALUES.size(); i++) {
++                        if (canGlideUsing(this.getItemBySlot(EquipmentSlot.VALUES.get(i)), EquipmentSlot.VALUES.get(i))) sourbyGliders = dev.iyanz.sourbycraft.entity.GliderSlots.with(sourbyGliders, i);
 +                    }
++                    EquipmentSlot slotToDamage = EquipmentSlot.VALUES.get(dev.iyanz.sourbycraft.entity.GliderSlots.nthSetBit(sourbyGliders, this.random.nextInt(dev.iyanz.sourbycraft.entity.GliderSlots.count(sourbyGliders))));
 +                    // SourbyCraft end
                      this.getItemBySlot(slotToDamage).hurtAndBreak(1, this, slotToDamage);
                  }

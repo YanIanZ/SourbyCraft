@@ -57,3 +57,7 @@ commit-attempts = 3
 # rolling back. A pre-AWF-7 build then skips the retained delta generations and DELETES the objects only
 # they reference: those rollback points are lost for good. Back up the <folder>.awf directories first.
 delta-generations = false
+# Start a commit as soon as a storage's unsaved chunks hold at least this many bytes, without waiting for
+# commit-interval-seconds. 0 = off (interval only). A trigger, not a cap: checked once a second, one commit per
+# storage at a time, deletions count as 0 bytes.
+commit-dirty-bytes = 0

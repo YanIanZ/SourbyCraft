@@ -92,6 +92,12 @@ this increment remains assigned to Claude.
   cancelled, as before. A repeating async task only skips that run: it stays scheduled, the run
   is counted (`skippedRuns` in the plugin's telemetry), and the log line is rate-limited. Before,
   one plugin filling the lane cancelled other plugins' timers for good.
+- **Fair lane, not wired (2026-10-20).** `execution/FairLane` is a per-owner lane: one total
+  queue plus a per-owner sub-queue limit, and queued work started in weighted round-robin over
+  owners (an owner's turn starts up to `weight` of its tasks). `BRIDGE_IO` still runs on the FIFO
+  `GovernedLane`, so one plugin's backlog still delays the others' tasks; switching it, the
+  setting names (per-plugin queue limit, weights) and their defaults are open, and nothing is
+  measured (`FairLaneTest` 8, unit only).
 - **Quarantine outlives a reload (ENG-12).** Re-admitting a quarantined plugin by name (a reload
   after disable) still admits it and still rejects every task it schedules; the bridge now logs
   that once per admission instead of saying nothing.

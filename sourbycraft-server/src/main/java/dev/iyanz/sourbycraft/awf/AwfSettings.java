@@ -36,9 +36,15 @@ import java.util.Set;
  *                         auto-updater's rollback restores such a build. Once deltas are written, a
  *                         rollback needs this off plus one commit per world first (see
  *                         {@link AwfWorldStore}).
+ * @param commitDirtyBytes start a commit once the unsaved chunks hold at least this many bytes, without
+ *                         waiting for {@code commitIntervalSeconds}; {@code 0} (the default) means only the
+ *                         interval applies. Bounds how much a crash can lose by size, not only by time. At
+ *                         most one commit per storage runs at a time and the check runs once a second, so
+ *                         this is a trigger threshold, not a hard cap on unsaved bytes.
  */
 public record AwfSettings(Set<String> worlds, Set<String> export, String backend, PersistenceMode persistence, int commitIntervalSeconds,
-                          int residentChunks, int retainedGenerations, int commitAttempts, boolean deltaGenerations) {
+                          int residentChunks, int retainedGenerations, int commitAttempts, boolean deltaGenerations,
+                          int commitDirtyBytes) {
 
     public static final String WORLDS_KEY = "aurora.awf.worlds";
     public static final String EXPORT_KEY = "aurora.awf.export";
@@ -49,11 +55,13 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
     public static final String RETAINED_GENERATIONS_KEY = "aurora.awf.retained-generations";
     public static final String COMMIT_ATTEMPTS_KEY = "aurora.awf.commit-attempts";
     public static final String DELTA_GENERATIONS_KEY = "aurora.awf.delta-generations";
+    public static final String COMMIT_DIRTY_BYTES_KEY = "aurora.awf.commit-dirty-bytes";
     static final List<String> KEYS = List.of(WORLDS_KEY, EXPORT_KEY, BACKEND_KEY, PERSISTENCE_KEY, COMMIT_INTERVAL_KEY,
-        RESIDENT_CHUNKS_KEY, RETAINED_GENERATIONS_KEY, COMMIT_ATTEMPTS_KEY, DELTA_GENERATIONS_KEY);
+        RESIDENT_CHUNKS_KEY, RETAINED_GENERATIONS_KEY, COMMIT_ATTEMPTS_KEY, DELTA_GENERATIONS_KEY,
+        COMMIT_DIRTY_BYTES_KEY);
 
     public static final AwfSettings DEFAULT =
-        new AwfSettings(Set.of(), Set.of(), "file", PersistenceMode.INCREMENTAL, 30, 1024, 3, 3, false);
+        new AwfSettings(Set.of(), Set.of(), "file", PersistenceMode.INCREMENTAL, 30, 1024, 3, 3, false, 0);
 
     /** Settings without an export list. */
     public AwfSettings(final Set<String> worlds, final PersistenceMode persistence, final int commitIntervalSeconds,
@@ -78,6 +86,14 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
             commitAttempts, false);
     }
 
+    /** Settings without a byte trigger (the default): commits start on the interval only. */
+    public AwfSettings(final Set<String> worlds, final Set<String> export, final String backend,
+                       final PersistenceMode persistence, final int commitIntervalSeconds, final int residentChunks,
+                       final int retainedGenerations, final int commitAttempts, final boolean deltaGenerations) {
+        this(worlds, export, backend, persistence, commitIntervalSeconds, residentChunks, retainedGenerations,
+            commitAttempts, deltaGenerations, 0);
+    }
+
     public AwfSettings {
         worlds = Set.copyOf(new LinkedHashSet<>(worlds));
         export = Set.copyOf(new LinkedHashSet<>(export));
@@ -90,6 +106,7 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
         if (commitIntervalSeconds < 1 || residentChunks < 1 || retainedGenerations < 1 || commitAttempts < 1) {
             throw new IllegalArgumentException("AWF numbers must be at least 1");
         }
+        if (commitDirtyBytes < 0) throw new IllegalArgumentException("commitDirtyBytes must not be negative");
     }
 
     /** Settings and the keys that were present but unusable. */
@@ -132,8 +149,10 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
         final int retained = whole(values, RETAINED_GENERATIONS_KEY, DEFAULT.retainedGenerations(), 1, 100, invalid);
         final int attempts = whole(values, COMMIT_ATTEMPTS_KEY, DEFAULT.commitAttempts(), 1, 100, invalid);
         final boolean deltas = flag(values, DELTA_GENERATIONS_KEY, DEFAULT.deltaGenerations(), invalid);
-        return new Parsed(new AwfSettings(worlds, export, backend, persistence, interval, resident, retained, attempts, deltas),
+        final int dirtyBytes = whole(values, COMMIT_DIRTY_BYTES_KEY, DEFAULT.commitDirtyBytes(), 0, Integer.MAX_VALUE,
             invalid);
+        return new Parsed(new AwfSettings(worlds, export, backend, persistence, interval, resident, retained, attempts,
+            deltas, dirtyBytes), invalid);
     }
 
     /** A list of plain folder names, or none at all when any entry is unusable. */

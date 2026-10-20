@@ -342,7 +342,8 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   TPS/MSPT region terburuk, CPU proses, heap; `PerformanceHistoryTest`)
 - [-] Telemetri sisa: latensi tunggu task, counter siklus hidup chunk, counter tick entity, log
   insiden (kejadian, bukan sampel per menit)
-  — log insiden selesai 2026-10-20: `/perf incidents` (`IncidentLog` ring 20, merge per kind+subject, 9 sinyal; watchdog dan pause GC STW tidak bersumber); latensi tunggu task, siklus hidup chunk, tick entity masih terbuka
+  — log insiden selesai 2026-10-20: `/perf incidents` (`IncidentLog` ring 20, merge per kind+subject, 9 sinyal; watchdog dan pause GC STW tidak bersumber); siklus hidup chunk dan tick entity masih terbuka
+  — latensi tunggu task tercatat 2026-10-20 (patch MC 0049 + `perf/RegionTaskWaitLatency`, per jenis tick/chunk sejak boot; `RegionTaskWaitLatencyTest` 8, `RegionTaskWaitLatencyHookTest` 4), tetapi belum ditampilkan (butuh baris di `/perf scheduler`), tanpa angka server, overhead belum di-benchmark
 - [x] Latensi save region-file (saat ini hanya ada latensi commit AWF)
   — selesai 2026-10-20: patch MC 0043 mengukur `moonrise$finishWrite` (tulis+hapus, sukses dan gagal) ke `perf/RegionFileSaveLatency` (ring lock-free 1024, p50/p99/max 60 s per world), tampil di `/perf storage`; overhead belum dibenchmark, belum ada angka server
 
@@ -509,9 +510,10 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [x] M-0: owner memilih target: lepas Canvas + Weaver, Paper tetap upstream
 - [-] M-1 Identitas: nama publik SourbyCraft/Aurora sudah ada; sisa: laporan crash memakai
   BuildInfo, profiler identity
-- [ ] M-2 Isolasi (T9 di `AURORA-FULL-TRANSITION.md`): pindahkan body service Sourby keluar dari
+- [-] M-2 Isolasi (T9 di `AURORA-FULL-TRANSITION.md`): pindahkan body service Sourby keluar dari
   class upstream; pecah patch campuran 0006/0013 dan pindahkan class dari 0002/0005/0016; isolasi
   bridge Spark Canvas; dokumentasikan setiap dependensi keras Canvas di `independence.md`
+  — sebagian 2026-10-20: `AuroraCpu` keluar dari patch 0002, `AuroraCommandErrors` dari 0016, `AwfChunkNbt` dari 0021, `GliderSlots` dari 0007 (plus tes regresi dan perbaikan bug undian acak); dependensi keras Canvas terdokumentasi (`independence.md` §2.2); BELUM: pindah `SnapshotPathRegion` (0005), pecah 0006/0013, cabang AWF di 0021, isolasi bridge Spark Canvas (menunggu keputusan owner adapter vs fork)
 - [x] M-3 Lepas Canvas sebagai upstream — selesai 2026-10-05. Bukti: tree hasil pipeline baru
   identik dengan pipeline lama (Minecraft 5.359 file, paper-server 1.549, paper-api 1.975; selisih
   hanya newline akhir file di 48 file), 10.096 tes Java + 222 tes Python lulus, boot test CI lulus
@@ -560,8 +562,9 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 ### Arsitektur patch
 - [x] Identifikasi optimasi yang duplikat dengan upstream
   — selesai 2026-10-20 (hanya pada `paperRef` yang di-pin 9240f586): baris `-` tiap feature patch PERFORMANCE (0004, 0005, 0007, 0009, 0010, 0012, 0014, 0017, 0018) masih kode upstream asli; 0003/0006/0011 adalah tambahan tanpa padanan upstream; tidak ada duplikat (`docs/architecture/patch-classification.md` Findings). Belum: bandingkan dengan Paper/Moonrise lebih baru (ulangi tiap bump `paperRef`), tanpa benchmark
-- [ ] Simpan implementasi di source milik Sourby bila memungkinkan; tambah tes regresi sebelum
+- [-] Simpan implementasi di source milik Sourby bila memungkinkan; tambah tes regresi sebelum
   sebuah patch dihapus
+  — aturan berlaku terus; irisan 2026-10-20: 0007 kini punya `GliderSlotsTest` (menemukan dan memperbaiki penyimpangan undian acak dari vanilla bila ada 2+ slot glider), `AuroraCommandErrorsTest` (0016), `AwfChunkNbtTest` (0021); patch 0009-0012 belum punya tes khusus
 - [ ] Runtime lifecycle authority, execution contract, scheduler contract, compatibility layer (ROADMAP)
 
 ### Startup
@@ -666,7 +669,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
   region saat save gagal; WorldRequestTest 3/3, WorldOperationGateTest 7/7, WorldSaveBarrierTest
   3/3; suite API/server tanpa kegagalan, 2026-10-06; SPEC §155 dan `docs/guides/developing-awf.md`.
 - [-] Tutup temuan review port ASP `dev/26.2` → AWF (2026-10-06). Per 2026-10-07 (unit test saja):
-  B77, B78, B79 FIXED; B76 sebagian (properti ter-mapping, PDC world belum)
+  B77, B78, B79 FIXED; B76 sebagian (properti ter-mapping; PDC world dipulihkan saat `/awf import` Slime 2026-10-20 (unit `SlimeImporterTest`), tetapi konversi ke `.awf` masih menjatuhkannya karena formatnya tak punya key; wiring layanan belum diuji di server)
   (`docs/architecture/aurora-world-fabric.md` *Robustness fixes 2026-10-07*). B80 dan B85 diperbaiki
   2026-10-13 (commit `e0c241e9`, CI run 38434258632 hijau; lihat item AWF create di P0). Temuan awal: metadata Slime/world PDC,
   pruning PDC/biome, fence commit sesudah discard, WorldProperties pada export/import,
@@ -679,8 +682,9 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [ ] Backend database AWF MongoDB/MySQL
 - [ ] Executor yang sudah ada dipindahkan ke bawah Resource Governor (ditunda; masing-masing sudah
   punya batas sendiri)
-- [ ] Namespace config `aurora.performance`, `aurora.chunk`, `aurora.memory`, `aurora.ai`,
+- [x] Namespace config `aurora.performance`, `aurora.chunk`, `aurora.memory`, `aurora.ai`,
   `aurora.world` (hanya ditambahkan bila sudah ada key yang benar-benar dipakai)
+  — n/a sampai ada key (2026-10-20: tidak ada key `aurora.{performance,chunk,memory,ai,world}` di `src/main`)
 
 ### Inovasi (proposal, belum direncanakan)
 Dari audit sistem 2026-10-14 §5 (`docs/audits/2026-10-14-system-audit.md`). Belum diterima dan
@@ -688,15 +692,18 @@ belum direncanakan, kecuali yang ditandai; hanya butir yang bertanda [x] sudah d
 - [x] Storage: generasi FILE ber-indeks delta dengan kompaksi (menutup AWF-7) — byte commit dan fsync
   sebanding dengan chunk kotor
   — diimplementasikan 2026-10-20 tetapi OPT-IN (`aurora.awf.delta-generations`, default false, RESTART_REQUIRED; lihat AWF-7): byte indeks per commit sebanding dengan chunk yang berubah, jumlah fsync TIDAK (tetap O(objek) + 6) dan tidak ada percepatan wall-time terukur
-- [ ] Storage: driver maintenance AWF dengan commit yang dipicu byte — jendela kehilangan terbatas
+- [-] Storage: driver maintenance AWF dengan commit yang dipicu byte — jendela kehilangan terbatas
   waktu dan byte, umur kotor maksimum di `/perf awf`
-- [ ] Storage: Redis `EVALSHA` + renewal ber-pipeline — satu round trip per pass renewal
-- [ ] Storage: API rollback point-in-time di atas generasi FILE yang disimpan, untuk pemulihan operator
+  — pemicu byte masuk opt-in 2026-10-20 (`aurora.awf.commit-dirty-bytes`=0 default, RESTART_REQUIRED; `AwfDirtyBytesCommitTest` 7); metrik umur kotor terbuka (butuh timestamp kotor per chunk + baris `/perf awf`); efek ke jendela kehilangan belum diukur
+- [x] Storage: Redis `EVALSHA` + renewal ber-pipeline — satu round trip per pass renewal
+  — selesai 2026-10-20: renewal ber-pipeline sudah ada (AWF-6); semua script kini lewat EVALSHA (`RedisClient.eval`/`evalPipeline`, NOSCRIPT dikirim ulang sekali sebagai EVAL); `RedisBackendTest` 21 (+2), butuh redis-server; byte/latensi yang dihemat belum diukur, Redis Cluster tidak dipertimbangkan
+- [-] Storage: API rollback point-in-time di atas generasi FILE yang disimpan, untuk pemulihan operator
+  — API tingkat store saja 2026-10-20 (`AwfWorldStore.rollbackPoints()`/`rollbackTo(long)`, `AwfRollbackTest` 6); BELUM: perintah operator (generasi region/entities/poi bernomor terpisah, butuh pemetaan, keputusan owner), backend Redis tak punya generasi
 - [ ] Storage: object store content-addressed dibagi satu keluarga template (dedup antar pulau; di
   belakang flag)
 - [x] Engine/bridge: konteks kepemilikan task bridged yang mengirim setiap hit guard ke quarantine
   tanpa mode THROW — selesai `1c57a736` (ENG-1)
-- [ ] Engine/bridge: lane I/O bridged yang adil — sub-antrean berbobot per plugin (belum); timer
+- [-] Engine/bridge: lane I/O bridged yang adil — sub-antrean berbobot per plugin (komponen `execution/FairLane` + `FairLaneTest` 8 ada 2026-10-20 tetapi BELUM dipasang ke `BRIDGE_IO`; setting dan bobot keputusan owner); timer
   lewati-bukan-batal selesai `1c57a736` (ENG-6)
 - [ ] Engine/bridge: antrean region yang aman saat unload — kuras cancel-only ada (`WorldUnloadDrain`,
   `1c57a736`, ENG-3); fixture CI yang mengantrekan task lalu unload belum ada

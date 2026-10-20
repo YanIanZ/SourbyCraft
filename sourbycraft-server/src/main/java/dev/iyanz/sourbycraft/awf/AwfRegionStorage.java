@@ -318,8 +318,9 @@ public final class AwfRegionStorage {
     }
 
     /**
-     * Starts a commit on the storage lane when writes have waited at least the commit interval and
-     * none is already running. Never waits for the commit to finish, but submitting it takes the
+     * Starts a commit on the storage lane when writes have waited at least the commit interval, or
+     * (when {@code aurora.awf.commit-dirty-bytes} is set) the unsaved chunks hold at least that many
+     * bytes, and none is already running. Never waits for the commit to finish, but submitting it takes the
      * storage lane's queue lock, and a commit the lane rejects at once logs its warning on the
      * calling thread. Called once a second by {@link AwfMaintenanceDriver}.
      *
@@ -328,7 +329,11 @@ public final class AwfRegionStorage {
     public boolean maintain(final long nowNanos) {
         if (this.discarding || this.closed.get() || this.world.dirtyCount() == 0 || this.world.pendingSaveCount() > 0) return false;
         final long last = this.lastCommitNanos.get();
-        if (nowNanos - last < this.settings.commitIntervalSeconds() * 1_000_000_000L) return false;
+        final boolean intervalPassed = nowNanos - last >= this.settings.commitIntervalSeconds() * 1_000_000_000L;
+        // The byte trigger (off at 0) lets a large backlog commit before the interval; it never skips
+        // the checks above (no commit already pending, not discarding or closed).
+        if (!intervalPassed && !(this.settings.commitDirtyBytes() > 0
+            && this.world.dirtyBytesAtLeast(this.settings.commitDirtyBytes()))) return false;
         if (!this.lastCommitNanos.compareAndSet(last, nowNanos)) return false;
         this.world.save(this.settings.persistence(), this.storageLane, this.settings.commitAttempts())
             .whenComplete((ok, failed) -> {

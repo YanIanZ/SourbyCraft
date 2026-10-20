@@ -276,24 +276,24 @@ Every line inside an upstream file is a line that can conflict on the next bump.
 From the script's output on 2026-10-07 (patch numbers updated to the 2026-10-13 numbering). "Logic" here means the heuristic found behaviour
 written inside an upstream file. It is **not** a judgement that the patch is wrong.
 Converting any of these is real work. Each conversion needs its own regression test before
-the patch changes, and the allocation patches 0007 and 0009–0012 have no dedicated tests yet
+the patch changes, and the allocation patches 0009–0012 have no dedicated tests yet (0007 has `GliderSlotsTest` and is a hook since 2026-10-20)
 (`patch-classification.md`). The compile-boundary caveat recorded there (classes written
 inside patches because of the package the upstream code imports) has to be checked per patch.
 
 | Patch | +/− | Why it is logic | Hook conversion |
 | --- | ---: | --- | --- |
-| MC 0002 tick-thread count | 137/7 | carries `AuroraCpu` as a new file | **Candidate:** move the class to Sourby source, one call left in `TickRegions` (MOVE TO SOURBY SOURCE) |
+| MC 0002 tick-thread count | 24/7 | replaces the upstream default formula (7 removed lines) | **Done 2026-10-20:** `AuroraCpu` moved to Sourby source; one call plus the log line left in `TickRegions`. Stays `logic` only because it removes upstream lines |
 | MC 0005 `SnapshotPathRegion` | 222/2 | carries the class | **Candidate:** move the class; hook stays in `PathNavigationRegion` (MOVE TO SOURBY SOURCE) |
-| MC 0016 cross-region block test | 49/2 | carries `AuroraCommandErrors` | **Candidate:** move the class; the `ExecuteCommand` check stays (partial move) |
+| MC 0016 cross-region block test | 18/2 | the `ExecuteCommand` ownership check | **Done 2026-10-20:** `AuroraCommandErrors` moved to Sourby source; the check stays and the patch is now a hook |
 | MC 0006 async pathfinding | 141/1 | 70 code lines over five files | **Candidate:** split per `patch-classification.md`, then push scheduling into `perf/AsyncPath*` |
 | MC 0013 tick metrics | 97/14 | 84 code lines over six files | **Candidate:** split telemetry from lifecycle. Most lines are already calls into `dev.iyanz.sourbycraft.perf` |
-| MC 0021 storage traffic counters | 108/0 | 84 code lines in `RegionFileStorage` | **Candidate:** counters into an owned class, one call per I/O site |
+| MC 0021 storage traffic counters + AWF routing | 94/0 | 72 code lines in `RegionFileStorage` (mostly the AWF read/write/scan/flush/close branches, not counters) | **Candidate:** AWF branches into an owned class, one call per I/O site. Started 2026-10-20: the chunk NBT codec moved to `awf/AwfChunkNbt` (`AwfChunkNbtTest`); `sourby$attachAwf` and the branches remain |
 | MC 0026 chunk-generation stage timing | 22/0 | 19 code lines | **Candidate:** timing into an owned class |
 | MC 0025 region watchdog off by default | 17/3 | property gate written into upstream | Possible: read the flag from an owned config class. Small gain |
 | MC 0003, 0014, 0023 spawn and worldgen rules | 47/0, 25/3, 25/0 | gameplay decisions inline | Possible: move the predicate to an owned static method. The upstream `if` stays either way |
 | Paper 0003, 0007 bridge admission and routing | 39/3, 43/1 | scheduler/provider logic in CraftBukkit | Possible: concentrate on `AuroraBridge` calls. `CraftScheduler` is the largest hot spot (six patches) |
 | Paper 0002 branded bootstrap line | 37/6 | formatting inline | Branding rule: render the line in an owned class from `BuildInfo` |
-| MC 0004, 0007, 0009–0012, 0015, 0017, 0018, 0022, 0027; Paper 0001, 0004, 0005, 0006, 0008, 0009; MC 0020 | small | they replace upstream statements in place (allocation removals, operand order, a gate, a removed registration) | **Not candidates.** A hook cannot replace an upstream statement. These stay as patches, or go upstream |
+| MC 0004, 0009–0012, 0015, 0017, 0018, 0022, 0027; Paper 0001, 0004, 0005, 0006, 0008, 0009; MC 0020 | small | they replace upstream statements in place (allocation removals, operand order, a gate, a removed registration) | **Not candidates.** A hook cannot replace an upstream statement. These stay as patches, or go upstream |
 
 The classifier's limits: it reads only `+`/`-` lines. It cannot tell a gameplay rule from a
 counter, and it uses fixed thresholds (≤ 10 added and ≤ 2 removed code lines plus a
