@@ -76,6 +76,93 @@ class ResourceGovernorTest {
         assertThrows(IllegalArgumentException.class, () -> new GovernedLane("x", "p-", 1, 0));
     }
 
+    @Test
+    void thePathfindingLaneKeepsTheAsyncPathBudgetPriorityAndThreadNames() throws Exception {
+        final ResourceGovernor governor = new ResourceGovernor();
+        final GovernedLane lane = governor.lane(ResourceGovernor.Lane.PATHFINDING);
+        try {
+            assertEquals(Math.max(1, Runtime.getRuntime().availableProcessors() / 4), lane.stats().threads());
+            assertEquals(ResourceGovernor.PATHFINDING_QUEUE, lane.stats().queueCapacity());
+            final AtomicReference<Thread> ranOn = new AtomicReference<>();
+            final CountDownLatch done = new CountDownLatch(1);
+            lane.execute(() -> { ranOn.set(Thread.currentThread()); done.countDown(); });
+            assertTrue(done.await(5, TimeUnit.SECONDS));
+            assertEquals("SourbyCraft-AsyncPath-1", ranOn.get().getName());
+            assertEquals(ExecutionLane.ASYNC_COMPUTE, ExecutionLane.of(ranOn.get().getName()));
+            assertEquals(Thread.NORM_PRIORITY - 1, ranOn.get().getPriority(), "yields to region tick threads");
+            assertTrue(ranOn.get().isDaemon());
+        } finally {
+            lane.shutdownNow();
+        }
+    }
+
+    @Test
+    void shutdownNowHandsBackTheQueuedTasksThemselvesUnrun() throws Exception {
+        final GovernedLane lane = new GovernedLane("t", "SourbyCraft-Storage-", 1, 4);
+        final CountDownLatch release = new CountDownLatch(1);
+        final CountDownLatch started = new CountDownLatch(1);
+        lane.execute(() -> { started.countDown(); await(release); });
+        assertTrue(started.await(5, TimeUnit.SECONDS));
+        final java.util.concurrent.FutureTask<String> queued = new java.util.concurrent.FutureTask<>(() -> "ran");
+        lane.execute(queued);
+        assertTrue(lane.hasCapacity());
+        final java.util.List<Runnable> pending = lane.shutdownNow();
+        release.countDown();
+        // The caller cancels what it submitted, so it must get its own objects back, not wrappers.
+        assertEquals(java.util.List.of(queued), pending);
+        assertTrue(lane.isShutdown());
+        assertTrue(!lane.hasCapacity(), "a stopped lane admits nothing");
+        assertTrue(!queued.isDone(), "a task handed back never ran");
+    }
+
+    @Test
+    void hasCapacityIsFalseOnceTheQueueIsFull() throws Exception {
+        final GovernedLane lane = new GovernedLane("c", "SourbyCraft-Storage-", 1, 1);
+        final CountDownLatch release = new CountDownLatch(1);
+        final CountDownLatch started = new CountDownLatch(1);
+        lane.execute(() -> { started.countDown(); await(release); });
+        assertTrue(started.await(5, TimeUnit.SECONDS));
+        assertTrue(lane.hasCapacity());
+        lane.execute(() -> {});
+        assertTrue(!lane.hasCapacity());
+        release.countDown();
+        assertTrue(lane.shutdown(5_000));
+    }
+
+    @Test
+    void restartReplacesOnlyAStoppedLane() {
+        final ResourceGovernor governor = new ResourceGovernor();
+        final GovernedLane first = governor.restart(ResourceGovernor.Lane.PATHFINDING);
+        assertSame(first, governor.restart(ResourceGovernor.Lane.PATHFINDING), "a live lane is kept");
+        assertSame(first, governor.lane(ResourceGovernor.Lane.PATHFINDING));
+        first.shutdownNow();
+        final GovernedLane second = governor.restart(ResourceGovernor.Lane.PATHFINDING);
+        assertNotEquals(first, second);
+        assertTrue(!second.isShutdown());
+        assertSame(second, governor.lane(ResourceGovernor.Lane.PATHFINDING));
+        second.shutdownNow();
+    }
+
+    @Test
+    void asyncPathSolvesRunOnTheGovernedPathfindingLane() throws Exception {
+        dev.iyanz.sourbycraft.perf.AsyncPathProcessor.ensureStarted();
+        try {
+            final long before = submittedOnPathfinding();
+            final String thread = dev.iyanz.sourbycraft.perf.AsyncPathProcessor
+                .submit(() -> Thread.currentThread().getName()).get(5, TimeUnit.SECONDS);
+            assertTrue(thread.startsWith(ResourceGovernor.Lane.PATHFINDING.threadPrefix()), thread);
+            assertEquals(before + 1, submittedOnPathfinding());
+        } finally {
+            dev.iyanz.sourbycraft.perf.AsyncPathProcessor.shutdown();
+        }
+    }
+
+    private static long submittedOnPathfinding() {
+        return ResourceGovernor.GLOBAL.stats().stream()
+            .filter(s -> s.name().equals(ResourceGovernor.Lane.PATHFINDING.display()))
+            .mapToLong(GovernedLane.Stats::submitted).findFirst().orElse(0L);
+    }
+
     private static void await(final CountDownLatch latch) {
         try {
             latch.await(5, TimeUnit.SECONDS);

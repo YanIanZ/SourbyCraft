@@ -6,10 +6,12 @@ import dev.iyanz.sourbycraft.perf.SchedulerQueueCollector.RegionProbe;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueCollector.RegionState;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueCollector.TickProbe;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueCollector.WorldProbe;
+import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.LateTicks;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.RunnerActivity;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.Scheduler;
 import io.canvasmc.canvas.region.WorldRegionizer;
 import io.papermc.paper.threadedregions.RegionizedServer;
+import io.papermc.paper.threadedregions.RegionizedTaskQueue;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.TickRegions;
@@ -104,6 +106,16 @@ final class LiveSchedulerSource implements SchedulerQueueCollector.Source {
         return out;
     }
 
+    @Override
+    public LateTicks lateTicks() {
+        // LongAdder sums, lock-free (feature patch). Late before started: both only grow and a late
+        // tick is counted as started first, so the late figure read here never exceeds the started one.
+        final long regionLate = TickRegionScheduler.sourbyLateRegionTicks();
+        final long globalLate = TickRegionScheduler.sourbyLateGlobalTicks();
+        return new LateTicks(TickRegionScheduler.sourbyRegionTicksStarted(), regionLate,
+            TickRegionScheduler.sourbyGlobalTicksStarted(), globalLate);
+    }
+
     private static TickProbe probe(final TickRegionScheduler.RegionScheduleHandle handle) {
         return new TickProbe() {
             @Override
@@ -141,10 +153,12 @@ final class LiveSchedulerSource implements SchedulerQueueCollector.Source {
         private final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
         // Read once so every answer comes from the same handle, even if the regioniser swaps it.
         private final TickRegionScheduler.RegionScheduleHandle handle;
+        private final RegionizedTaskQueue.RegionTaskQueueData taskQueues;   // final field of the region data
 
         LiveRegion(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
             this.region = region;
             this.handle = region.getData().tickHandle;
+            this.taskQueues = region.getData().getTaskQueueData();
         }
 
         @Override
@@ -168,6 +182,16 @@ final class LiveSchedulerSource implements SchedulerQueueCollector.Source {
             // Same peek the scheduler threads make for regions they do not own: two leaf queue
             // monitors (one isEmpty pass each) and an AtomicBoolean. Not a region lock.
             return this.handle.hasTasks();
+        }
+
+        @Override
+        public int queuedTickTasks() {
+            return this.taskQueues.sourbyQueuedTickTasks();    // volatile int, no queue monitor (feature patch)
+        }
+
+        @Override
+        public int queuedChunkTasks() {
+            return this.taskQueues.sourbyQueuedChunkTasks();   // volatile int, no queue monitor (feature patch)
         }
 
         @Override

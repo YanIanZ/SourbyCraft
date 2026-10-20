@@ -157,10 +157,27 @@ Creakings.
 ## Correctness notes
 - Latency: path ready next tick instead of same tick. Invisible for the ~20-tick recompute
   cadence; a 1-tick delay on first path request. Matches Airplane/Petal shipping behaviour.
-- A mob whose target chunk is unloaded still gets `PathType.BLOCKED` (Paper "don't load chunks
-  during pathfinding") — snapshot stores only loaded sections, same result.
-- Snapshot cost is charged to the region thread. Net win = A* cost − snapshot cost. Guarded:
-  only snapshot occupied sections; skip when the region is `allEmpty`.
+- **Unloaded chunks (divergence found 2026-10-20 by source read; fixed the same day in MC feature
+  patch 0048):** the synchronous path treats a chunk that was not loaded when the region was built
+  as `PathType.BLOCKED` (Paper "do not load chunks during pathfinding": `WalkNodeEvaluator.getPathTypeFromState`
+  maps a `null` from `getBlockStateIfLoaded` to BLOCKED; vanilla `PathNavigationRegion.getBlockStateIfLoaded` /
+  `getFluidIfLoaded` return `null` for an unloaded or out-of-grid chunk, at any height). Before 0048,
+  `SnapshotPathRegion` returned AIR there, i.e. `PathType.OPEN`, so with the flag on an off-thread
+  solve could route through unloaded terrain the synchronous solve refuses. 0048 keeps which grid
+  columns were loaded (a `null` column) and returns `null` from both `*IfLoaded` methods for an
+  unloaded or out-of-grid chunk before any height check, as vanilla does; a loaded chunk still
+  answers air / no fluid outside its sections, as `LevelChunk` does. The `getChunkForCollisions`
+  view keeps answering its `*IfLoaded` reads like its plain reads (non-null), because vanilla hands
+  out an `EmptyLevelChunk` there, whose `*IfLoaded` reads are its plain reads. Plain
+  `getBlockState`/`getFluidState` for an unloaded chunk answer AIR / EMPTY where vanilla answers
+  `VOID_AIR` / EMPTY: equivalent for the solve (`SnapshotPathRegionAuditTest`), not identical.
+  Pinned by `SnapshotPathRegionTest` (parity with vanilla `PathNavigationRegion` over the same
+  mocked level). Not verified by a flag-on server run; the feature is OFF by default
+  (`aurora.entity.async-pathfinding`).
+- Snapshot cost is charged to the region thread. Net win = A* cost − snapshot cost. Guarded only
+  by not copying sections that `hasOnlyAir()`. (An earlier sentence here also said the snapshot is
+  skipped when the region is `allEmpty`; it is not: `PathNavigationRegion.allEmpty` is written and
+  read by nothing on this branch, see `docs/architecture/async-path-snapshot-audit.md` finding 3.)
 
 ## Verification gate before default-on
 1. Compile + boot clean with flag OFF (zero behaviour delta). ← this session

@@ -100,9 +100,9 @@ collision candidate 0019 (feature patch 0018 after renumbering) passes arithmeti
 
 - [ ] profile chunk holder lookup
 - [ ] profile ticket processing
-- [-] measure generation latency — optional queue/run timing for generic stages in `/perf chunks`, feature patch 0026 (formerly 0027); sources written, not built or measured; dedicated lighting and full integration remain outside coverage
+- [-] measure generation latency — optional queue/run timing for generic stages in `/perf chunks`, feature patch 0026 (formerly 0027); built and unit-tested (`ChunkGenerationMetricsTest`, `ChunkGenerationMetricsEarlyConfigTest` 7, `PerfStartupAndChunkHintTest` 3) and booted on the demo with metrics off (RESTART_REQUIRED, default off); not measured on a live server with metrics on; dedicated lighting and full integration remain outside coverage
 - [ ] measure load/integration latency
-- [ ] measure save latency/backlog
+- [ ] measure save latency/backlog — instrumentation exists (`/perf storage`: per-world pending I/O and region-file save p50/p99/max from MC patch 0043, `RegionFileSaveLatencyTest` 8; AWF commit latency); no measurement taken on a booted server under a save workload
 - [ ] profile region-file I/O
 - [ ] profile player chunk tracking
 - [ ] profile chunk packet construction
@@ -116,8 +116,8 @@ collision candidate 0019 (feature patch 0018 after renumbering) passes arithmeti
 - [ ] profile encode/decode
 - [ ] profile compression
 - [ ] profile chunk-send path
-- [ ] inspect packet allocation/copy count
-- [ ] verify Netty event loops remain non-blocking
+- [x] inspect packet allocation/copy count — static code read 2026-10-20 (nothing measured): [network-allocation-copy-audit.md](architecture/network-allocation-copy-audit.md); natives + compression + encryption = 3 pooled buffers and 1 whole-body memcpy per packet per connection, the same packet object is encoded once per viewer, chunk packets are built per player per chunk; not done: any measurement, whether natives load on a given server
+- [-] verify Netty event loops remain non-blocking — static audit done 2026-10-20 (DEV-H): [region-io-audit.md](architecture/region-io-audit.md) (H1 fixed by MC 0035, H4/H5 by MC 0037, H2/H3/H6 = [PLUGIN-NETTY-GUIDANCE.md](development/PLUGIN-NETTY-GUIDANCE.md)), [engine-network.md](architecture/engine-network.md) §6, pinned by `BlockingIoBoundaryTest`; no runtime evidence (thread dump, blocked-loop profile, disk-stall test), third-party handlers not covered
 - [ ] implement first measured Aurora network optimization
 
 ## E. Scheduler / concurrency
@@ -128,14 +128,14 @@ collision candidate 0019 (feature patch 0018 after renumbering) passes arithmeti
 
 - [x] inventory all Sourby-owned executors — [executor-inventory.md](architecture/executor-inventory.md)
 - [x] audit implicit common-pool usage — [executor-inventory.md](architecture/executor-inventory.md)
-- [-] async pathfinding shutdown/cancellation work
-- [ ] complete async path snapshot correctness review
+- [-] async pathfinding shutdown/cancellation work — unit level done 2026-10-20 (`AsyncPathProcessor.shutdown()`, `AsyncPathCancellationTest` 17, `AsyncPathShutdownTest` 9, `AsyncPathPatchShapeTest`, `AsyncPathRefusalTest`); runtime pending: the patch 0006 lambda and a real `Mob` are not run, cancellation under a real region-thread shutdown order is untested
+- [x] complete async path snapshot correctness review — source audit 2026-10-20 (flag stays off): [async-path-snapshot-audit.md](architecture/async-path-snapshot-audit.md), `SnapshotPathRegionAuditTest` 3, `SnapshotPathRegionTest`; the unloaded-chunk divergence (AIR/OPEN instead of null/BLOCKED on `*IfLoaded`) is fixed in MC patch 0048; no flag-on run
 - [x] path result staleness test — `AsyncPathValidityTest` (rules used by patch 0006)
 - [x] queue saturation test — `AsyncPathQueueTelemetryTest`, `AsyncPathShutdownTest` (saturation refuses, never caller-runs)
 - [ ] sync-vs-async path benchmark
 - [ ] mob behavior compatibility soak
 - [x] collect worker queue depth/latency where useful — `/perf async` (queue depth, wait), `/perf governor` (governed lanes)
-- [-] verify no external I/O blocks region execution — static audit [region-io-audit.md](architecture/region-io-audit.md), pinned by `BlockingIoBoundaryTest` (network-file inventory only; Redis reads and global world-creation waits still require runtime-path review)
+- [-] verify no external I/O blocks region execution — static audit [region-io-audit.md](architecture/region-io-audit.md), pinned by `BlockingIoBoundaryTest` (network-file inventory only); Redis chunk-read paths traced statically 2026-10-20 (R1 chunk load on a WORLD_IO thread, which a tick thread parked in `syncLoad` waits on; R2 the structure scan runs on the caller, which can be a region thread via Dolphin, EnderEyeItem, ExplorationMapFunction or LocateCommand: single attempt, each Redis step capped by `timeout-ms`, cached per chunk; R3 other sync `RegionFileStorage.read` callers not traced); the global world-creation `ready.join()` is fixed (SPEC B80/B85); runtime evidence (Redis down/slow with a structure search on a region thread) still open
 
 ## F. Memory / GC
 
@@ -143,11 +143,11 @@ collision candidate 0019 (feature patch 0018 after renumbering) passes arithmeti
 - [x] GC tracker foundation
 - [ ] allocation MB/s validation against JFR
 - [ ] RSS/cgroup validation
-- [ ] top allocated classes workflow
+- [x] top allocated classes workflow — `scripts/rank_hotspots.py` `allocation_hotspots` (by class/site/thread, cross-checked against `jdk.ThreadAllocationStatistics`) over a `scripts/profile_server.py` JFR, workflow in [BASELINE.md](BASELINE.md) "Ranking hot spots"; `test_rank_hotspots.py` 37 OK; a certified real-run report does not exist yet
 - [x] cache ownership/bounds inventory — [cache-inventory.md](architecture/cache-inventory.md); `AwfWorld.owned` evicts clean chunks at the configured resident limit; dirty chunks stay pinned and can exceed it; limit 0 is unbounded
-- [ ] player-disconnect retention test
-- [ ] chunk-unload retention test
-- [ ] world-unload retention test
+- [x] player-disconnect retention test — unit level: `HudBarsRetentionTest` 17, `BridgeRetentionTest` 8, `SpeedtestRetentionTest` 4; no heap check on a live server
+- [x] chunk-unload retention test — unit level for the AWF layer: `AwfChunkUnloadRetentionTest` 4 (mutation-checked); not covered: Minecraft-side chunk unload (holders, entities, block entities), Redis backend, a live heap comparison
+- [x] world-unload retention test — unit level: `AnchorCacheRetentionTest` 6, `RegionMetricsRetentionTest` 4, `AwfEngineRetentionTest` 5, `AuroraWorldsUnloadRetentionTest` 3; not covered: a heap/GC check after a real unload on a running server, the engine's Minecraft-side holders
 - [x] completed future/task retention test — bridge one-shot tasks, async path accounting, AWF pending saves (tests named in cache-inventory.md)
 
 ## G. Spark / observability
@@ -158,7 +158,7 @@ collision candidate 0019 (feature patch 0018 after renumbering) passes arithmeti
 - [x] provide Sourby config group
 - [ ] verify Spark web-viewer config rendering
 - [x] add cheap Sourby runtime metadata — `SourbyMetadataProvider` via `createExtraMetadataProvider` ([SPARK.md](SPARK.md#aurora-runtime-metadata)); viewer rendering still unverified
-- [ ] improve region thread classification
+- [x] improve region thread classification — `SparkThreadClass`, `LabelledThreadDumper`, `sourbycraft-threads` metadata (`ThreadCensusMetadataProvider`); `SparkThreadClassTest` 9, `ThreadCensusMetadataProviderTest` 8, `RegionThreadDumperTest` 7; limits in [SPARK.md](SPARK.md) "Thread classification": global tick and region ticks share threads, virtual threads invisible; viewer rendering unverified
 - [x] expose useful slow-region context — `/perf region` names the slowest active region (world/region/generation ids, 5 s average and maximum MSPT); coordinates not tracked
 - [x] document Spark update procedure — [SPARK.md](SPARK.md#updating-spark)
 - [!] replace the upstream viewer text `engine async` with `Aurora Engine`: the current spark upload protocol serializes profiler engine as the fixed `JAVA`/`ASYNC` enum, and spark.lucko.me renders that enum itself; an exact custom label therefore requires a Sourby/Aurora viewer fork or compatible custom viewer layer rather than a server-only metadata patch
@@ -182,10 +182,10 @@ collision candidate 0019 (feature patch 0018 after renumbering) passes arithmeti
 
 ## I. SourbyClip / free-running requirement
 
-- [-] downloader timeout audit — historical utility whole-transfer deadline plus local SourbyClip 3.1.1 connect/read timeout tests; launcher whole-transfer deadline/size cap and pin rollout remain open ([bootstrap-download-audit.md](architecture/bootstrap-download-audit.md))
-- [-] retry/failure handling — 3 attempts with backoff, `.tmp` always cleaned; unit-tested
-- [-] SHA/cache validation audit — historical utility checks plus local SourbyClip 3.1.1 staged original-JAR verification/cache preservation; remote qualification and official pin rollout pending
-- [-] bounded concurrency audit — local SourbyClip 3.1.1 source/worker lifecycle tested with bounded parallelism; source audit complete, whole-transfer bounds and pin rollout pending
+- [-] downloader timeout audit — server-side `LibDownloader` has a whole-transfer deadline (10 min) and size bounds; SourbyClip 3.1.2 (`85b4dd70`, pinned in `5a3806f1`) bounds sockets with 30 s connect/read only; open: launcher whole-transfer deadline/size cap (private SourbyClip repo: change, release, re-pin; owner decision) ([bootstrap-download-audit.md](architecture/bootstrap-download-audit.md))
+- [-] retry/failure handling — server side: 3 attempts with 2 s then 4 s backoff, `.tmp` always cleaned; unit-tested; the launcher falls back between sources but does not retry a single source (e.g. the Mojang jar); a bounded retry belongs with the whole-transfer deadline work in the private repo
+- [-] SHA/cache validation audit — historical utility checks plus SourbyClip staged original-JAR verification/cache preservation; the official pin rolled out (3.1.2, `5a3806f1`); remote cold-download qualification pending
+- [-] bounded concurrency audit — SourbyClip 3.1.2 source audit re-verified 2026-10-20 (pool cap `sourbyclip.downloadThreads` 1-16, default 4; close() drains queued tasks); the pin rollout landed (`5a3806f1`); open: launcher whole-transfer bounds (private repo)
 - [x] first-boot failure recovery test — unit tests plus CI step "Bootstrap failure recovery and offline boot": no network fails fast with a download error and no partial files, then online reaches Done (green in run 450)
 - [x] offline-after-success test — same CI step: third boot with no network reached Done from the cache without downloading (run 450). Mojang public-key lookup fails and is logged; with online-mode=true player auth would of course need the network
 - [x] remote repository/fallback documentation — [bootstrap-download-audit.md](architecture/bootstrap-download-audit.md): SourbyClip has Maven mirror fallback; the historical utility manifest's single-URL behavior is a separate surface
@@ -215,33 +215,33 @@ Claude's build/tests/boot and the required release-specific evidence.
 ## K. Build 47 Aurora Nexus pillars
 
 See the status table in [releases/26.2-build-47-aurora-nexus.md](releases/26.2-build-47-aurora-nexus.md).
-`[-]` here means implemented and unit-tested but not compiled into a server or run.
+`[-]` here means implemented and unit-tested; several rows below have also booted in CI or on the demo (stated per row) but lack player-workflow or soak qualification.
 
 - [x] compatibility state model and `/plugins` palette (NATIVE/BRIDGED/FAILED/DISABLED)
 - [x] capture plugin enable failures for FAILED state
-- [-] Aurora Bridge admission (`aurora.bridge.mode`, Paper load-gate patches)
-- [-] bridge scheduler routing (sync → global region, async → governed `BRIDGE_IO`), cancellation, disable cleanup
-- [-] SAFE-mode violation counting, quarantine, per-plugin telemetry (`/plugins <name>`)
-- [-] entity-owner / region-owner routes with real callers — region-owner route for sync tasks scheduled from region context (`sync-route = "caller-region"`); entity-owner route not implemented (the scheduler call names no entity); CI fixture asserts a region-context runTask reads a block
+- [-] Aurora Bridge admission (`aurora.bridge.mode`, Paper load-gate patches) — implemented: `aurora.bridge.mode` (`AuroraConfig.BRIDGE_MODE_KEY`, RESTART_REQUIRED), `BridgeRuntime.admit`/`reopenAdmission`, Paper patches 0003 (admit and route) and 0012 (reopen on enable); boots in CI since run 485 and on the demo; bridge package 84 tests green (2026-10-20); open: real-plugin player workflows and soak
+- [-] bridge scheduler routing (sync → global region, async → governed `BRIDGE_IO`), cancellation, disable cleanup — unit level (`BridgeRuntimeTest` 35, `BridgeTargetRoutingTest` 9, `BridgeRetentionTest` 8, `BridgeReviewTest` 11); open: real-server evidence beyond the CI synthetic fixture and the demo post-boot sample, and a boot marker for re-enabling the same instance after disable (Paper 0012)
+- [-] SAFE-mode violation counting, quarantine, per-plugin telemetry (`/plugins <name>`) — implemented and unit-tested (`BridgeRuntimeTest` quarantine cases, `ViolationClassifierTest` 6, `PluginsCommandTest` 5; `aurora.bridge.quarantine-after` is LIVE); no CI or boot assertion that a plugin actually reaches quarantine (the legacy fixture has one deliberate fatal and is not quarantined by design)
+- [-] entity-owner / region-owner routes with real callers — region-owner route for sync tasks scheduled from region context (`sync-route = "caller-region"`); entity-owner route implemented for explicit `EntityTask` (V39, Paper 0011; precedence explicit entity > explicit region > caller-region/global), not inferred for legacy scheduler calls, which name no entity (inferring one is an owner decision); CI fixture asserts a region-context runTask reads a block; open: a real plugin using `EntityTask`/`RegionTask` on a booted server
 - [-] run representative legacy plugins through the bridge — synthetic fixture passes in CI; Vault and EssentialsX enabled on the demo panel at `9a15f51` with 0 bridge violations at the post-boot sample, but player workflows and soak remain open
 - [x] startup cache mechanics: fingerprints, environment key, per-entry integrity, atomic write
 - [x] plugin descriptor index on a bounded STARTUP lane, with boot diagnostics
 - [x] class index and compatibility scan (constant pool), dependency graph, startup profile
 - [ ] cold vs warm startup benchmark
-- [ ] transform output caching
+- [ ] transform output caching — blocked on an owner decision: no plugin bytecode transform exists in SourbyCraft to cache (the only class reader is the read-only constant-pool `BytecodeScanner`, already cached as the compatibility scan; Cherry mixin is external and off by default); a cache with no producer and no cold/warm benchmark would be an unmeasurable claim
 - [x] AWF: world roles, atomic generations, `.awf` lazy images, FULL/INCREMENTAL/CHECKPOINT/READ_ONLY, COW instances, metrics
 - [-] AWF integration with the engine's chunk load/save — FILE backend under `RegionFileStorage` for worlds in `aurora.awf.worlds` (off by default), `/perf awf`, tombstones; CI and demo-panel boot/read-back/export passed. Not qualified: server-level crash measured only locally (`verify_crash.py --awf` 56/56, 2026-10-13, headless clients); no sustained player load ([aurora-world-fabric.md](architecture/aurora-world-fabric.md#engine-integration-regionfilestorage))
 - [-] AWF export back to region files — `aurora.awf.export`, resumable, store kept; unit-tested, CI export boot added
 - [-] AWF qualification — storage layer in-process: crash at each commit stage, 200 load/unload cycles, shutdown with a pending commit, concurrent writers, 1/50/250/1000 storages, corrupt object (`AwfQualificationTest`). Open: server-level crash with players, backend disconnect, sustained load measurement, and investigation of the demo panel's 105.5-second initial 529-chunk commit
-- [-] AWF backend SPI (`AwfStore`, `AwfBackend`, `aurora.awf.backend`), FILE built in plus a `redis` backend (`awf/redis/RedisBackend`), no fallback on a missing backend
+- [x] AWF backend SPI (`AwfStore`, `AwfBackend`, `aurora.awf.backend`), FILE built in plus a `redis` backend (`awf/redis/RedisBackend`), no fallback on a missing backend — `AwfBackendTest` 5 (unregistered backend fails the load naming it, unlisted worlds keep region files), `RedisBackendTest` 19
 - [-] AWF database backends — Redis shipped (`awf/redis/`: own RESP client, Lua atomic commit, single-writer lease; backend-failure fixes `d97fe247`, 2026-10-14, local scenarios only); MongoDB/MySQL none
-- [-] SlimeLoader adapter — a Slime v12/v13 importer exists (`awf/world/SlimeImporter`, `/awf import`, `/awf convert` to `.awf`); no live SlimeLoader adapter. Untrusted-file limits open (audit AWF-9)
+- [-] SlimeLoader adapter — a Slime v12/v13 importer exists (`awf/world/SlimeImporter`, `/awf import`, `/awf convert` to `.awf`); no live SlimeLoader adapter (implementing ASP's SlimeLoader/SlimeWorld API surface is an owner decision). Untrusted-file limits are done (AWF-9, `ebb9c1fb`: `-Dsourbycraft.awf.slime.max-bytes`, default 256 MiB, checks before allocation; `SlimeImporterTest` 9)
 - [x] Resource Governor specification
-- [-] governed lanes with reject-not-caller-runs, `/perf governor`
+- [-] governed lanes with reject-not-caller-runs, `/perf governor` — implemented for the lanes that exist (`GovernedLane`: `ThreadPoolExecutor` + bounded queue + `AbortPolicy`; lanes BRIDGE_IO, STORAGE and, since 2026-10-20, PATHFINDING; callers do not run rejected work inline; `ResourceGovernorTest` 10, `UnboundedQueueAuditTest` 3); stays `[-]` because only three lanes are governed (pathfinding rejection falls back to the mob's sync path by design) and the `/perf governor` render itself has no test
 - [x] operator-configurable governor budgets (`[aurora.scheduler]`)
 - [ ] existing executors under the governor — deferred; each already has its own bound ([executor-inventory.md](architecture/executor-inventory.md))
-- [-] network counters: bytes/packets per direction, connections, `/perf network`
-- [-] vanilla save-queue / region-file storage metrics — `/perf storage`: chunk-system reads/writes/deletes (counted in the `RegionFileStorage` patch) and per-world pending I/O from Moonrise's controllers; no latency percentiles yet
+- [-] network counters: bytes/packets per direction, connections, `/perf network` — implemented and unit-tested (`NetworkCountersTest` 3, `perf/NetworkMetrics`; limits in [engine-network.md](architecture/engine-network.md): zero-player idle numbers only); stays `[-]`: no run with real clients to check counter accuracy against an external measure
+- [x] vanilla save-queue / region-file storage metrics — `/perf storage`: chunk-system reads/writes/deletes (counted in the `RegionFileStorage` patch), per-world pending I/O from Moonrise's controllers, and region-file save latency p50/p99/max over 60 s per world/type (MC patch 0043, `perf/RegionFileSaveLatency`; `RegionFileSaveLatencyTest` 8, `RegionFileSaveLatencyHookTest` 3); limits: times only the `.mca` write stage (not serialization/compression or the flush-regions-on-save flush), never AWF worlds; no boot sample of real values recorded and the overhead is not benchmarked
 
 ---
 

@@ -77,20 +77,41 @@ class AwfBulkWriteBenchmarkTest {
         final Map<ChunkKey, byte[]> changed = chunks(2L, CHANGED);
         final List<Double> bulk = new ArrayList<>();
         final List<Double> incremental = new ArrayList<>();
+        final List<Double> compaction = new ArrayList<>();
+        final List<Double> reopen = new ArrayList<>();
         long storedBytes = 0;
         long incrementalBytes = 0;
+        boolean secondWasDelta = false;
+        int commitsBeforeCompaction = 0;
         for (int run = 0; run <= RUNS; run++) {
             final Path root = this.dir.resolve("run-" + run);
             final long t0 = System.nanoTime();
-            final AwfWorldStore store = AwfWorldStore.open(root, WorldRole.VANILLA, 1);
+            final AwfWorldStore store = AwfWorldStore.open(root, WorldRole.VANILLA, 1, true); // deltas on: the AWF-7 path
             final AwfStore.CommitResult first = store.commit(initial, Set.of(), PersistenceMode.INCREMENTAL);
             final double bulkMs = (System.nanoTime() - t0) / 1e6;
             final long t1 = System.nanoTime();
             final AwfStore.CommitResult second = store.commit(changed, Set.of(), PersistenceMode.INCREMENTAL);
             final double incMs = (System.nanoTime() - t1) / 1e6;
+            secondWasDelta = !store.lastCommitCompacted();
+            // Keep committing fresh changes until the policy compacts (writes a full index); time that one.
+            double compactionMs = Double.NaN;
+            int more = 0;
+            for (long seed = 3L; Double.isNaN(compactionMs) && more < 64; seed++, more++) {
+                final long t2 = System.nanoTime();
+                store.commit(chunks(seed, CHANGED), Set.of(), PersistenceMode.INCREMENTAL);
+                if (store.lastCommitCompacted()) compactionMs = (System.nanoTime() - t2) / 1e6;
+            }
+            commitsBeforeCompaction = more;
+            // Reopen cost after the compaction (a full index) is the floor; after deltas it replays them.
+            store.commit(chunks(99L, CHANGED), Set.of(), PersistenceMode.INCREMENTAL);
+            final long t3 = System.nanoTime();
+            AwfWorldStore.open(root, WorldRole.READ_ONLY, 1);
+            final double reopenMs = (System.nanoTime() - t3) / 1e6;
             if (run > 0) { // run 0 is the warm-up
                 bulk.add(bulkMs);
                 incremental.add(incMs);
+                compaction.add(compactionMs);
+                reopen.add(reopenMs);
             }
             storedBytes = first.bytesWritten();
             incrementalBytes = second.bytesWritten();
@@ -102,11 +123,14 @@ class AwfBulkWriteBenchmarkTest {
                 + " then %d changed chunks, %d objects / %.1f MiB stored%n"
                 + "host: %s %s, %d cores, JDK %s, tmpdir %s; %d runs after one warm-up; uncertified local run%n"
                 + "bulk commit (open + commit of all %d chunks): %s%n"
-                + "incremental commit (%d changed chunks): %s%n",
+                + "incremental commit (%d changed chunks, %s): %s%n"
+                + "compaction commit (%d changed chunks + full index, the %dth delta-sized commit after the bulk): %s%n"
+                + "read-only reopen (full index + one delta replayed): %s%n",
             CHUNKS, RAW_BYTES, CHUNKS, storedBytes / 1048576.0, CHANGED, CHANGED, incrementalBytes / 1048576.0,
             System.getProperty("os.name"), System.getProperty("os.arch"), Runtime.getRuntime().availableProcessors(),
             System.getProperty("java.version"), System.getProperty("java.io.tmpdir"), RUNS,
-            CHUNKS, stats(bulk), CHANGED, stats(incremental));
+            CHUNKS, stats(bulk), CHANGED, secondWasDelta ? "a delta generation" : "a full index", stats(incremental),
+            CHANGED, commitsBeforeCompaction + 1, stats(compaction), stats(reopen));
         System.out.println(report);
         Files.writeString(Path.of(System.getProperty("java.io.tmpdir"), "awf-fsync-bench.out"), report, StandardCharsets.UTF_8);
     }

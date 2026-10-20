@@ -11,8 +11,13 @@ import static org.mockito.Mockito.withSettings;
 import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -21,21 +26,32 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.InvokeDynamicInsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LookupSwitchInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TableSwitchInsnNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
 
 /**
  * DEV-A: the entity-owned scalar scratch state the feature patches keep (0009's
  * {@code lastKnownSpeed*} doubles, 0012's {@code isInWallScratch}) against re-entry.
  * Evidence table: {@code docs/architecture/scratch-reentrancy-proof.md}.
  *
- * <p>Two kinds of proof. The bytecode tests pin the call surface of the methods that write and
- * read the scratch between its write and its read: a method that can only call a field getter
- * cannot be re-entered through a callback, an event or a listener, whatever a subclass or plugin
- * does. The behavioural tests run the real methods on a bare {@link Entity}.</p>
+ * <p>What the bytecode tests are, honestly: <b>direct-call guards</b>. They pin the set of call
+ * instructions in the method that holds the scratch live, so a call added there fails the test and
+ * reopens the proof. They do not follow the callees: that a listed callee (say {@code position()})
+ * acquires no callback is a separate, explicit check where one is made, and otherwise the manual
+ * audit in the proof document. The override check covers the four subclasses named, not every
+ * subclass. Publication (volatile) and control flow (every coordinate set on every path before a
+ * read) are checked separately; the behavioural tests run the real methods on a bare
+ * {@link Entity}.</p>
  */
 @org.bukkit.support.environment.VanillaFeature
 class ScratchReentrancyTest {
@@ -90,8 +106,9 @@ class ScratchReentrancyTest {
     void computeSpeedCannotBeReenteredBetweenItsStores() throws Exception {
         final ClassNode entity = entityClass();
         final Set<String> calls = calls(method(entity, "computeSpeed", "()V"));
-        assertEquals(Set.of("net/minecraft/world/entity/Entity.position()Lnet/minecraft/world/phys/Vec3;"), calls,
-            "the only call between the three stores is position(); nothing can re-enter from it");
+        assertEquals(Set.of("net/minecraft/world/entity/Entity.position()Lnet/minecraft/world/phys/Vec3;",
+                "java/lang/Math.sqrt(D)D"), calls,
+            "direct calls: position() and Math.sqrt; neither can re-enter (position() checked below, sqrt is an intrinsic)");
         assertEquals(Set.of(), calls(method(entity, "position", "()Lnet/minecraft/world/phys/Vec3;")),
             "position() is a field read: no callback, no event, no listener");
         final List<String> overrides = new ArrayList<>();
@@ -109,26 +126,39 @@ class ScratchReentrancyTest {
     }
 
     /**
-     * The reader another region's thread can reach must read ONE field: two separately stored
-     * doubles can be observed as x of one tick and z of another, which the Vec3 reference this
-     * replaced could never be.
+     * The reader another region's thread can reach must read ONE field, and that field must be
+     * atomically published: two separately stored doubles can be observed as x of one tick and z of
+     * another, and a plain double may itself tear (JLS 17.7). The Vec3 reference this replaced could
+     * do neither. So: one volatile boolean, read once.
      */
     @Test
     void theCrossRegionReaderReadsASingleField() throws Exception {
         final MethodNode reader = method(entityClass(), "hasMovedHorizontallyRecently", "()Z");
         final List<String> fieldReads = new ArrayList<>();
         for (final AbstractInsnNode insn : reader.instructions) {
-            if (insn instanceof org.objectweb.asm.tree.FieldInsnNode field && insn.getOpcode() == org.objectweb.asm.Opcodes.GETFIELD) {
-                fieldReads.add(field.name);
+            if (insn instanceof FieldInsnNode field && insn.getOpcode() == Opcodes.GETFIELD) {
+                fieldReads.add(field.name + ":" + field.desc);
             }
         }
-        assertEquals(List.of("lastKnownSpeedHorizontalSq"), fieldReads, "exactly one instance field, read once");
+        assertEquals(List.of("lastKnownMovedHorizontally:Z"), fieldReads, "exactly one boolean instance field, read once");
+    }
+
+    @Test
+    void theCrossRegionPredicateIsVolatile() throws Exception {
+        final Field published = field("lastKnownMovedHorizontally");
+        assertEquals(boolean.class, published.getType());
+        assertTrue(java.lang.reflect.Modifier.isVolatile(published.getModifiers()),
+            "a cross-thread reader needs an atomic, visible publication");
+        // The old derived double must be gone, not left behind as a second, plain publication.
+        for (final Field declared : Entity.class.getDeclaredFields()) {
+            assertFalse(declared.getName().equals("lastKnownSpeedHorizontalSq"), "stale plain-double publication still declared");
+        }
     }
 
     @Test
     void theReadersOfTheSpeedScalarsOnlyReadFields() throws Exception {
         final ClassNode entity = entityClass();
-        assertEquals(Set.of("java/lang/Math.sqrt(D)D"), calls(method(entity, "hasMovedHorizontallyRecently", "()Z")));
+        assertEquals(Set.of(), calls(method(entity, "hasMovedHorizontallyRecently", "()Z")), "a single field read, no call");
         final Set<String> known = calls(method(entity, "getKnownSpeed", "()Lnet/minecraft/world/phys/Vec3;"));
         assertTrue(known.contains("net/minecraft/world/entity/Entity.getControllingPassenger()Lnet/minecraft/world/entity/LivingEntity;"), known.toString());
         assertTrue(known.contains("net/minecraft/world/phys/Vec3.<init>(DDD)V"), known.toString());
@@ -156,6 +186,48 @@ class ScratchReentrancyTest {
         // idempotent for a stationary entity and recomputes from the latest position otherwise.
         computeSpeed(entity);
         assertEquals(Vec3.ZERO, entity.getKnownSpeed());
+    }
+
+    /** Upstream's predicate on the same displacement: {@code Math.abs(speed.horizontalDistance()) > 1.0E-5F}. */
+    private static boolean upstreamMoved(final double dx, final double dz) {
+        return Math.abs(new Vec3(dx, 0.0, dz).horizontalDistance()) > 1.0E-5F;
+    }
+
+    private static boolean movedAfter(final double dx, final double dz) throws Exception {
+        final Entity entity = bareEntity(new Vec3(0.0, 64.0, 0.0));
+        computeSpeed(entity);
+        field("position").set(entity, new Vec3(dx, 64.0, dz));
+        computeSpeed(entity);
+        return entity.hasMovedHorizontallyRecently();
+    }
+
+    @Test
+    void theMovementThresholdIsUpstreamsFloatAtTheBoundary() throws Exception {
+        final double floatThreshold = (double) 1.0E-5F;   // 9.999999747378752E-6
+        assertTrue(floatThreshold < 1.0E-5D, "the float literal widens below 1e-5");
+        // Exactly 1.0E-5: above the widened float threshold, so upstream says true. A double
+        // threshold (0009/0044 before the fix) said false here.
+        assertTrue(upstreamMoved(1.0E-5D, 0.0));
+        assertTrue(movedAfter(1.0E-5D, 0.0), "displacement exactly 1.0E-5 counts as moved, as upstream");
+        assertTrue(movedAfter(0.0, 1.0E-5D));
+        // At the widened threshold itself: not strictly greater, false in both.
+        assertFalse(upstreamMoved(floatThreshold, 0.0));
+        assertFalse(movedAfter(floatThreshold, 0.0));
+        assertTrue(movedAfter(Math.nextUp(floatThreshold), 0.0));
+        assertFalse(movedAfter(Math.nextDown(floatThreshold), 0.0));
+    }
+
+    @Test
+    void theMovementPredicateMatchesUpstreamOverManyDisplacements() throws Exception {
+        final Random random = new Random(0xDE7AL);
+        final double floatThreshold = (double) 1.0E-5F;
+        for (int i = 0; i < 2_000; ++i) {
+            // Mostly around the threshold, some far from it, both signs, both axes.
+            final double scale = random.nextInt(4) == 0 ? 10.0 : floatThreshold * 1.5;
+            final double dx = (random.nextDouble() * 2.0 - 1.0) * scale;
+            final double dz = random.nextBoolean() ? 0.0 : (random.nextDouble() * 2.0 - 1.0) * scale;
+            assertEquals(upstreamMoved(dx, dz), movedAfter(dx, dz), "dx=" + dx + " dz=" + dz);
+        }
     }
 
     /**
@@ -252,31 +324,145 @@ class ScratchReentrancyTest {
         assertEquals(Set.of(), unexpected, "a call that is not a scalar getter, a section lookup or a block-state query");
     }
 
+    /** The scratch reads in {@code isInWall}: the two block-state queries that take the scratch position. */
+    private static boolean isScratchRead(final AbstractInsnNode insn) {
+        return insn instanceof MethodInsnNode call
+            && call.owner.equals("net/minecraft/world/level/block/state/BlockState")
+            && (call.name.equals("isSuffocating") || call.name.equals("getCollisionShape"));
+    }
+
+    private static int setterBit(final AbstractInsnNode insn) {
+        if (insn instanceof MethodInsnNode call && call.owner.equals("net/minecraft/core/BlockPos$MutableBlockPos")) {
+            return switch (call.name) {
+                case "setX" -> 1;
+                case "setY" -> 2;
+                case "setZ" -> 4;
+                default -> 0;
+            };
+        }
+        return 0;
+    }
+
+    /** Control-flow successors of every instruction, including exception edges. */
+    private static Map<AbstractInsnNode, List<AbstractInsnNode>> successors(final MethodNode method) {
+        final Map<AbstractInsnNode, List<AbstractInsnNode>> out = new IdentityHashMap<>();
+        for (final AbstractInsnNode insn : method.instructions) {
+            final List<AbstractInsnNode> next = new ArrayList<>();
+            final int op = insn.getOpcode();
+            final boolean fallsThrough = !(op == Opcodes.GOTO || (op >= Opcodes.IRETURN && op <= Opcodes.RETURN)
+                || op == Opcodes.ATHROW || insn instanceof TableSwitchInsnNode || insn instanceof LookupSwitchInsnNode);
+            if (fallsThrough && insn.getNext() != null) {
+                next.add(insn.getNext());
+            }
+            if (insn instanceof JumpInsnNode jump) {
+                next.add(jump.label);
+            } else if (insn instanceof TableSwitchInsnNode table) {
+                next.add(table.dflt);
+                next.addAll(table.labels);
+            } else if (insn instanceof LookupSwitchInsnNode lookup) {
+                next.add(lookup.dflt);
+                next.addAll(lookup.labels);
+            }
+            out.put(insn, next);
+        }
+        for (final TryCatchBlockNode block : method.tryCatchBlocks) {
+            for (AbstractInsnNode insn = block.start; insn != null && insn != block.end; insn = insn.getNext()) {
+                out.get(insn).add(block.handler);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Must-analysis over the real control-flow graph of {@code isInWall}: for each instruction, the
+     * set of scratch coordinates (X, Y, Z) that every path from the method entry has set at least
+     * once. Every scratch read must see all three. That is the R1 property: within one activation no
+     * read can observe a coordinate left over from an earlier activation (or from another entity,
+     * were the field ever shared). It is not a proof that each read sees the current iteration's
+     * coordinates; that is the 0012 rewrite's functional correctness, covered by its own tests.
+     */
     @Test
-    void theScratchPositionIsOwnerConfinedAndFullySetBeforeEveryRead() throws Exception {
+    void everyPathSetsAllThreeScratchCoordinatesBeforeEachRead() throws Exception {
+        final MethodNode isInWall = method(entityClass(), "isInWall", "()Z");
+        final Map<AbstractInsnNode, List<AbstractInsnNode>> successors = successors(isInWall);
+        final Map<AbstractInsnNode, Integer> in = new IdentityHashMap<>();
+        final ArrayDeque<AbstractInsnNode> work = new ArrayDeque<>();
+        final AbstractInsnNode entry = isInWall.instructions.getFirst();
+        in.put(entry, 0);
+        work.add(entry);
+        while (!work.isEmpty()) {
+            final AbstractInsnNode insn = work.poll();
+            final int out = in.get(insn) | setterBit(insn);
+            for (final AbstractInsnNode next : successors.get(insn)) {
+                final Integer previous = in.get(next);
+                final int meet = previous == null ? out : previous & out;
+                if (previous == null || meet != previous) {
+                    in.put(next, meet);
+                    work.add(next);
+                }
+            }
+        }
+        int reads = 0;
+        final List<String> unset = new ArrayList<>();
+        int index = 0;
+        for (final AbstractInsnNode insn : isInWall.instructions) {
+            if (isScratchRead(insn)) {
+                reads++;
+                final Integer state = in.get(insn);
+                if (state != null && state != 7) {
+                    unset.add("read #" + index + " sees only coordinate mask " + state);
+                }
+            }
+            index++;
+        }
+        assertTrue(reads > 0, "isInWall still reads the scratch through a block-state query");
+        assertEquals(List.of(), unset, "a path reaches a scratch read without setting every coordinate");
+    }
+
+    @Test
+    void theMustAnalysisRejectsAPathThatSkipsASetter() {
+        // Control for the analysis above: a hand-built method whose branch skips setZ must fail it.
+        final MethodNode broken = new MethodNode(Opcodes.ACC_PUBLIC, "isInWall", "()Z", null, null);
+        final LabelNode skip = new LabelNode();
+        final String pos = "net/minecraft/core/BlockPos$MutableBlockPos";
+        final String setterDesc = "(I)L" + pos + ";";
+        broken.instructions.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, pos, "setX", setterDesc));
+        broken.instructions.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, pos, "setY", setterDesc));
+        broken.instructions.add(new JumpInsnNode(Opcodes.IFEQ, skip));
+        broken.instructions.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, pos, "setZ", setterDesc));
+        broken.instructions.add(skip);
+        broken.instructions.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "net/minecraft/world/level/block/state/BlockState",
+            "isSuffocating", "(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;)Z"));
+        broken.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.IRETURN));
+        final Map<AbstractInsnNode, List<AbstractInsnNode>> successors = successors(broken);
+        final Map<AbstractInsnNode, Integer> in = new HashMap<>();
+        final ArrayDeque<AbstractInsnNode> work = new ArrayDeque<>();
+        in.put(broken.instructions.getFirst(), 0);
+        work.add(broken.instructions.getFirst());
+        while (!work.isEmpty()) {
+            final AbstractInsnNode insn = work.poll();
+            final int out = in.get(insn) | setterBit(insn);
+            for (final AbstractInsnNode next : successors.get(insn)) {
+                final Integer previous = in.get(next);
+                final int meet = previous == null ? out : previous & out;
+                if (previous == null || meet != previous) {
+                    in.put(next, meet);
+                    work.add(next);
+                }
+            }
+        }
+        AbstractInsnNode read = broken.instructions.getFirst();
+        while (!isScratchRead(read)) {
+            read = read.getNext();
+        }
+        assertEquals(3, in.get(read), "X and Y only: the skipping branch is seen");
+    }
+
+    @Test
+    void theScratchPositionIsAnOwnerConfinedInstanceField() throws Exception {
         final Field scratch = field("isInWallScratch");
         assertTrue(java.lang.reflect.Modifier.isPrivate(scratch.getModifiers()));
         assertTrue(java.lang.reflect.Modifier.isFinal(scratch.getModifiers()));
         assertFalse(java.lang.reflect.Modifier.isStatic(scratch.getModifiers()));
-        // Within isInWall, each of setY, setZ, setX precedes the first read in instruction order:
-        // every iteration writes all three coordinates it reads, so no value survives from an
-        // earlier call. Checked on the bytecode so that a reordering of the loops reopens the proof.
-        final MethodNode isInWall = method(entityClass(), "isInWall", "()Z");
-        int firstRead = Integer.MAX_VALUE;
-        int lastSetBeforeRead = -1;
-        final Set<String> setsSeen = new TreeSet<>();
-        int index = 0;
-        for (final AbstractInsnNode insn : isInWall.instructions) {
-            if (insn instanceof MethodInsnNode call) {
-                if (call.owner.equals("net/minecraft/core/BlockPos$MutableBlockPos") && call.name.startsWith("set") && firstRead == Integer.MAX_VALUE) {
-                    setsSeen.add(call.name);
-                    lastSetBeforeRead = index;
-                }
-                if (call.name.equals("isSuffocating") && firstRead == Integer.MAX_VALUE) firstRead = index;
-            }
-            index++;
-        }
-        assertEquals(Set.of("setX", "setY", "setZ"), setsSeen, "all three coordinates are set before the first read");
-        assertTrue(lastSetBeforeRead < firstRead);
     }
 }

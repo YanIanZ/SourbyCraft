@@ -133,7 +133,12 @@ class HudBarsRetentionTest {
         }
     }
 
+    /** Every call made on any player proxy, so a test can prove a code path never touched the Player. */
+    private static final java.util.concurrent.atomic.AtomicInteger PLAYER_CALLS = new java.util.concurrent.atomic.AtomicInteger();
+
     private final SchedulerQueue server = new SchedulerQueue();
+    /** What {@code Bukkit::getPlayer} would return for the updater's refresh. */
+    private final Map<UUID, Player> online = new java.util.concurrent.ConcurrentHashMap<>();
     private UpdaterStub updater;
     private AutoCloseable restore;
 
@@ -141,7 +146,8 @@ class HudBarsRetentionTest {
     void install() {
         HudBars.close();
         this.updater = new UpdaterStub();
-        this.restore = HudBars.installForTesting(this.updater, new Metrics(), id -> null);
+        this.online.clear();
+        this.restore = HudBars.installForTesting(this.updater, new Metrics(), this.online::get);
     }
 
     @AfterEach
@@ -152,8 +158,12 @@ class HudBarsRetentionTest {
 
     /** A player proxy; its scheduler hands tasks to {@link #server}. */
     private Player player(final UUID id) {
+        return playerOn(id, this.server);
+    }
+
+    /** A player proxy whose entity scheduler is {@code queue}. */
+    private static Player playerOn(final UUID id, final SchedulerQueue queue) {
         final Map<NamespacedKey, Object> pdc = new HashMap<>();
-        final SchedulerQueue queue = this.server;
         final PersistentDataContainer container = (PersistentDataContainer) Proxy.newProxyInstance(
             PersistentDataContainer.class.getClassLoader(), new Class<?>[] {PersistentDataContainer.class},
             (p, method, args) -> switch (method.getName()) {
@@ -188,6 +198,8 @@ class HudBarsRetentionTest {
         final Player[] self = new Player[1];
         self[0] = (Player) Proxy.newProxyInstance(Player.class.getClassLoader(), new Class<?>[] {Player.class},
             (p, method, args) -> {
+                if (!method.getName().equals("hashCode") && !method.getName().equals("equals")
+                    && !method.getName().equals("toString")) PLAYER_CALLS.incrementAndGet();
                 switch (method.getName()) {
                     case "getUniqueId": return id;
                     case "getPersistentDataContainer": return container;
@@ -357,6 +369,115 @@ class HudBarsRetentionTest {
         assertEquals(Set.of("PERF_VIEWERS", "PERF_ACTIONBAR"), Set.copyOf(holding(id)));
 
         this.server.retireAll(); // the entity was removed before the task ran
+
+        assertEquals(List.of(), holding(id));
+    }
+
+    @Test
+    void aRetiredTpsOrRamTaskReleasesEveryStructureForEveryCombinationOfBarsAndModes() {
+        // The entity scheduler can be retired (entity removed) with the show/hide tasks still queued and
+        // without the quit handler having run: the viewer UUIDs must not stay behind until a quit.
+        final Player bystander = player(UUID.randomUUID());
+        enable(bystander, 7, HudBars.DisplayMode.ACTIONBAR);
+        final List<String> bystanderHolds = holding(bystander.getUniqueId());
+        for (int mask = 1; mask <= 7; mask++) {
+            for (final HudBars.DisplayMode mode : HudBars.DisplayMode.values()) {
+                final UUID id = UUID.randomUUID();
+                final SchedulerQueue own = new SchedulerQueue();
+                final Player scheduled = playerOn(id, own);
+                final List<String> expected = enable(scheduled, mask, mode);
+                assertEquals(Set.copyOf(expected), Set.copyOf(holding(id)), "mask " + mask + " " + mode + " before retire");
+
+                own.retireAll();
+
+                assertEquals(List.of(), holding(id), "mask " + mask + " " + mode + ": nothing may survive the retire");
+            }
+        }
+        assertEquals(bystanderHolds, holding(bystander.getUniqueId()), "another player's entries are untouched");
+    }
+
+    @Test
+    void aRetireAfterTheQuitIsHarmlessAndAQuitAfterTheRetireIsToo() {
+        final UUID id = UUID.randomUUID();
+        final Player player = player(id);
+        enable(player, 7, HudBars.DisplayMode.ACTIONBAR);
+        quit(player); // PlayerList.remove fires the quit event first and retires the scheduler after it
+        this.server.retireAll();
+        assertEquals(List.of(), holding(id));
+
+        final UUID other = UUID.randomUUID();
+        final Player second = player(other);
+        enable(second, 7, HudBars.DisplayMode.BOSSBAR);
+        this.server.retireAll();
+        quit(second);
+        assertEquals(List.of(), holding(other));
+        assertEquals(0, entries());
+    }
+
+    @Test
+    void aRetiredCallbackIsSafeFromAnyThreadAndNeverTouchesThePlayer() throws Exception {
+        final UUID id = UUID.randomUUID();
+        // the Player is only ever referenced inside this helper's frame, so the tracker is a real control
+        final Tracker tracker = enableTpsAndRamAndTrack(id);
+        tracker.assertStillReachable();
+        final int callsBefore = PLAYER_CALLS.get();
+        final Throwable[] failure = new Throwable[1];
+        final Thread other = new Thread(() -> {
+            try {
+                this.server.retireAll();
+            } catch (final Throwable t) {
+                failure[0] = t;
+            }
+        }, "not-a-tick-thread");
+        other.start();
+        other.join();
+        assertNull(failure[0]);
+        assertEquals(List.of(), holding(id));
+        assertEquals(callsBefore, PLAYER_CALLS.get(), "the retired callbacks made no call on the Player");
+        tracker.assertCollected();
+    }
+
+    private Tracker enableTpsAndRamAndTrack(final UUID id) {
+        final Player player = player(id);
+        enable(player, 3, HudBars.DisplayMode.ACTIONBAR); // no perf bar: its own callback must not be what clears these
+        return Reachability.track("Player proxy", player);
+    }
+
+    @Test
+    void aRetiredPerfTaskAlsoReleasesTheTpsAndRamEntriesOfAPlayerWhoseOtherTasksAlreadyRan() {
+        // A retire means the entity is gone: every bar of that player goes, not only the one whose
+        // task happened to be the last in the queue.
+        final UUID id = UUID.randomUUID();
+        final Player player = player(id);
+        enable(player, 3, HudBars.DisplayMode.ACTIONBAR);
+        this.server.runAll(); // the TPS and RAM show tasks ran; nothing of theirs is queued any more
+        HudBars.setPerf(player, true);
+        assertEquals(Set.of("TPS_VIEWERS", "RAM_VIEWERS", "TPS_ACTIONBAR", "RAM_ACTIONBAR", "ANY", "PERF_VIEWERS"),
+            Set.copyOf(holding(id)));
+
+        this.server.retireAll();
+
+        assertEquals(List.of(), holding(id));
+    }
+
+    @Test
+    void aRetiredRefreshTaskReleasesTheViewerToo() throws Exception {
+        // The updater queues a refresh per actionbar viewer on the viewer's own scheduler every second.
+        // Once the show task ran, a refresh is the only task left in the queue; if the entity is removed
+        // then, its retired callback is the only thing that can release the UUID before a quit.
+        final UUID id = UUID.randomUUID();
+        final Player player = player(id);
+        enable(player, 3, HudBars.DisplayMode.ACTIONBAR);
+        this.server.runAll();
+        this.online.put(id, player);
+        final Method refresh = HudBars.class.getDeclaredMethod("sendActionbars", Set.class, Map.class, Component.class);
+        refresh.setAccessible(true);
+        refresh.invoke(null, field("TPS_VIEWERS"), field("TPS_ACTIONBAR"), Component.text("tps"));
+        refresh.invoke(null, field("RAM_VIEWERS"), field("RAM_ACTIONBAR"), Component.text("ram"));
+        assertEquals(2, this.server.queued(), "one refresh per actionbar bar");
+        assertFalse(holding(id).isEmpty());
+
+        this.server.retireAll();
 
         assertEquals(List.of(), holding(id));
     }

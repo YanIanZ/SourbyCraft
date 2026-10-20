@@ -22,7 +22,10 @@ import java.util.Set;
  */
 public interface AwfStore extends ChunkSource {
 
-    /** What a commit did. */
+    /**
+     * What a commit did. {@code generation} is -1 when {@link AwfWorld} had nothing to commit and
+     * never called the store (an incremental save queued behind one that already committed).
+     */
     record CommitResult(long generation, int chunks, int objectsWritten, long bytesWritten, int objectsRemoved) {}
 
     /** Whether the committed state says anything about a chunk: bytes or a deletion. */
@@ -46,4 +49,22 @@ public interface AwfStore extends ChunkSource {
      * world. Called once, after the last commit. The FILE backend holds nothing.
      */
     default void close() throws IOException {}
+
+    /**
+     * Whether the committed state is self-contained on the backend (the FILE backend: a full
+     * index, readable by builds before AWF-7) rather than chained to earlier generations.
+     * Backends without generation chains answer {@code true}.
+     */
+    default boolean fullIndex() {
+        return true;
+    }
+
+    /**
+     * Writes the committed state as a new self-contained generation, changing nothing in it, so
+     * that {@link #fullIndex()} is true afterwards; a no-op returning {@code null} on backends
+     * without chains. Blocking, same rules as {@link #commit}.
+     */
+    default CommitResult compact() throws IOException {
+        return null;
+    }
 }

@@ -489,6 +489,80 @@ class AsyncPathCancellationTest {
     }
 
     @Test
+    void aStopInsideThePathfindEventThenALaterStopIsNotUndoneByTheResult() throws Exception {
+        // Codex DEV-A finding 2: the listener's stop() leaves the token null; a later stop() leaves
+        // it null too, so the path object cannot tell them apart. The generation can.
+        final var nav = navigation();
+        final var owner = new ManualOwner(nav.mob);
+        final Gate gate = gate();
+        assertTrue(nav.kick(gate.solve(new Route("async-result"), false), owner, nav::stop));
+        assertNull(nav.path, "the listener stopped the navigation before the token was taken");
+
+        nav.stop();   // a later, independent stop (another goal, a command, a plugin)
+
+        gate.release.countDown();
+        assertTrue(owner.awaitSubmission());
+        owner.tick();
+        assertNull(nav.path, "the later stop stays: the result is not installed");
+        assertEquals(0, nav.applied.get());
+        assertFalse(nav.pending.get());
+        assertOutstandingReturnsToBaseline("event-stop then stop");
+    }
+
+    @Test
+    void aStopInsideThePathfindEventAloneIsOverwrittenByTheResultAsUpstreamDoes() throws Exception {
+        // Upstream's synchronous createPath assigns its result after the event, so a stop() made
+        // inside the event is overwritten there too. Nothing invalidated the request afterwards.
+        final var nav = navigation();
+        final var owner = new ManualOwner(nav.mob);
+        final Gate gate = gate();
+        final Route result = new Route(TARGET_B);
+        assertTrue(nav.kick(gate.solve(result, false), owner, nav::stop));
+        gate.release.countDown();
+        assertTrue(owner.awaitSubmission());
+        owner.tick();
+        assertSame(result, nav.path);
+        assertEquals(1, nav.applied.get());
+    }
+
+    @Test
+    void aMoveToNullAfterAnEventStopAlsoInvalidatesTheResult() throws Exception {
+        final var nav = navigation();
+        final var owner = new ManualOwner(nav.mob);
+        final Gate gate = gate();
+        assertTrue(nav.kick(gate.solve(new Route("async-result"), false), owner, nav::stop));
+        nav.moveTo(null);
+        gate.release.countDown();
+        assertTrue(owner.awaitSubmission());
+        owner.tick();
+        assertNull(nav.path);
+        assertEquals(0, nav.applied.get());
+    }
+
+    @Test
+    void aRetargetWhoseRouteHasTheSameNodesStillMakesTheOldResultStale() throws Exception {
+        // Codex DEV-A re-review: Path.sameAs compares nodes only. moveTo(createPath(B)) with the same
+        // node list keeps the old path object, so only createPath's generation bump reveals the retarget.
+        final var nav = navigation();
+        final var owner = new ManualOwner(nav.mob);
+        final Gate gate = gate();
+        final Route following = nav.path;
+        assertTrue(nav.kick(gate.solve(new Route(TARGET_A), false), owner));
+
+        nav.moveTo(nav.createPath(new Route(TARGET_B, following.nodes())));
+        assertSame(following, nav.path, "sameAs: the old path object is kept");
+        assertEquals(TARGET_B, nav.targetPos);
+
+        gate.release.countDown();
+        assertTrue(owner.awaitSubmission());
+        owner.tick();
+        assertSame(following, nav.path);
+        assertEquals(TARGET_B, nav.targetPos, "the old request's result does not restore target A");
+        assertEquals(0, nav.applied.get());
+        assertFalse(nav.pending.get());
+    }
+
+    @Test
     void aPathStillBeingFollowedTakesTheResultAndItsTarget() throws Exception {
         final var nav = navigation();
         final var owner = new ManualOwner(nav.mob);

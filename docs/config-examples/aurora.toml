@@ -51,3 +51,9 @@ commit-interval-seconds = 30
 resident-chunks = 1024
 retained-generations = 3
 commit-attempts = 3
+# Delta-indexed generations (AWF-7). false = full index per commit, readable by builds before AWF-7
+# (the auto-updater's rollback jar). Once deltas exist: set false and restart (every store the server opens
+# is compacted at open), or run `/awf compact all` and check it prints "full: yes" for every store, before
+# rolling back. A pre-AWF-7 build then skips the retained delta generations and DELETES the objects only
+# they reference: those rollback points are lost for good. Back up the <folder>.awf directories first.
+delta-generations = false

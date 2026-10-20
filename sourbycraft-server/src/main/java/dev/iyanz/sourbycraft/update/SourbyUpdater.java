@@ -69,6 +69,11 @@ import java.util.zip.ZipFile;
  *       open as a ZIP/JAR, and — when this build ships a release public key — its detached
  *       Ed25519 signature asset must verify ({@link ReleaseSignatureVerifier}). A failing download
  *       is deleted and never staged.</li>
+ *   <li><b>Launcher gate (SEC-4).</b> The authentic jar must also declare an embedded SourbyClip
+ *       this server can hand over to ({@link LauncherCompatibility}: protocol 1, version at least
+ *       3.0.23, manifest and {@code META-INF/sourbyclip.properties} agreeing). Anything else,
+ *       including a jar with no launcher metadata, is deleted and answered with
+ *       {@link Outcome#CLIP_INCOMPATIBLE}.</li>
  *   <li><b>Safe apply modes.</b> {@code notify} (default) logs + op-notifies only; {@code stage}
  *       additionally downloads+verifies and places the jar in {@code auto_update/sourbycraft} plus
  *       writes {@code auto_update/core.path}; {@code auto} also swaps the launch jar and restarts
@@ -355,6 +360,11 @@ public final class SourbyUpdater {
                 return Outcome.APPLYING;
             }
             return Outcome.STAGED;
+        } catch (LauncherRefusedException e) {
+            SourbyLogger.warn("auto-updater: NOT staging " + latest.tagName + ": " + e.getMessage()
+                + " Moving to a different launcher is a manual upgrade; the downloaded copy was deleted and"
+                + " this server keeps running its current jar.");
+            return Outcome.CLIP_INCOMPATIBLE;
         } catch (Exception e) {
             SourbyLogger.warn("auto-updater: failed to stage " + latest.tagName + ": " + e.getMessage());
             return Outcome.STAGE_FAILED;
@@ -698,6 +708,8 @@ public final class SourbyUpdater {
         if (signatures.isActive()) {
             verifySignatureOrThrow(temp, info);
         }
+        // Authentic bytes are still not necessarily a jar this server can hand over to (SEC-4).
+        verifyLauncherOrThrow(temp, info);
 
         Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
         return target;
@@ -761,6 +773,37 @@ public final class SourbyUpdater {
         SourbyLogger.info("auto-updater: SHA-256 verified for " + info.assetName);
         if (!isValidZip(file)) {
             fail(file, "not a valid zip/jar: " + info.assetName);
+        }
+    }
+
+    /**
+     * The launcher gate: the jar's embedded SourbyClip must be one this server can hand over to
+     * ({@link LauncherCompatibility}). Runs after the integrity checks, so only authentic bytes are
+     * inspected; a refusal deletes the file and throws {@link LauncherRefusedException}, which
+     * {@link #check} maps to {@link Outcome#CLIP_INCOMPATIBLE}. Missing metadata fails closed.
+     */
+    private void verifyLauncherOrThrow(Path file, ReleaseInfo info) throws IOException {
+        LauncherCompatibility.Verdict verdict = LauncherCompatibility.inspect(file);
+        if (verdict.compatible()) {
+            SourbyLogger.info("auto-updater: SourbyClip " + verdict.version() + " (protocol "
+                + verdict.protocol() + ") in " + info.assetName + " is compatible.");
+            return;
+        }
+        try { Files.deleteIfExists(file); } catch (IOException ignored) {}
+        throw new LauncherRefusedException(verdict);
+    }
+
+    /** The staged jar carries a launcher this server cannot hand over to; see {@link LauncherCompatibility}. */
+    static final class LauncherRefusedException extends IOException {
+        private final LauncherCompatibility.Verdict verdict;
+
+        LauncherRefusedException(LauncherCompatibility.Verdict verdict) {
+            super("the release's launcher is not compatible [" + verdict.reason() + "]: " + verdict.detail() + ".");
+            this.verdict = verdict;
+        }
+
+        LauncherCompatibility.Verdict verdict() {
+            return verdict;
         }
     }
 
@@ -856,7 +899,12 @@ public final class SourbyUpdater {
         /** Inside a GitHub rate-limit backoff window; nothing was checked. */
         RATE_LIMITED,
         /** Newer release announced but it targets another Minecraft version; not staged. */
-        MC_VERSION_MISMATCH
+        MC_VERSION_MISMATCH,
+        /**
+         * The release is authentic but its embedded SourbyClip launcher declares a protocol or
+         * version this server cannot hand over to, or declares none (fails closed); not staged.
+         */
+        CLIP_INCOMPATIBLE
     }
 
     /**

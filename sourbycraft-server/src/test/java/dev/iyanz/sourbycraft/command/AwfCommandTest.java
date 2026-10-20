@@ -146,6 +146,47 @@ class AwfCommandTest {
     }
 
     @Test
+    void compactReportsEveryStoreWithFullYesOrNoThroughTheHop() throws Exception {
+        final java.util.Map<String, List<dev.iyanz.sourbycraft.awf.AwfEngine.CompactionReport>> answers = new java.util.HashMap<>();
+        answers.put("all", List.of(
+            new dev.iyanz.sourbycraft.awf.AwfEngine.CompactionReport("/srv/mc/world/region", false, 9L, true, null),
+            new dev.iyanz.sourbycraft.awf.AwfEngine.CompactionReport("/srv/mc/world/entities", true, 4L, true, null),
+            new dev.iyanz.sourbycraft.awf.AwfEngine.CompactionReport("/srv/mc/world/poi", false, -1L, false, "EIO on poi")));
+        answers.put("hub", List.of(new dev.iyanz.sourbycraft.awf.AwfEngine.CompactionReport("/srv/mc/hub/region", false, 2L, true, null)));
+        final List<String> asked = new java.util.ArrayList<>();
+        final AwfCommand compacting = new AwfCommand("awf", () -> this.worlds, this.hop, world -> {
+            asked.add(world);
+            return CompletableFuture.completedFuture(answers.getOrDefault(world, List.of()));
+        });
+        final BlockCommandSender block = this.hop.sender(BlockCommandSender.class, true);
+
+        compacting.execute(block, "awf", new String[] {"compact", "ALL"});
+        assertEquals("Working...", this.hop.next().text());
+        final ReplyProbe.Received region = this.hop.await("world/region");
+        assertTrue(region.throughHop(), "the report takes the hop like every other completion");
+        assertEquals("  mc/world/region: generation 9, full: yes (compacted)", region.text(), "the last three path elements, as /perf awf names a store");
+        assertEquals("  mc/world/entities: generation 4, full: yes (already)", this.hop.await("world/entities").text());
+        assertEquals("  mc/world/poi: full: no, failed: EIO on poi", this.hop.await("world/poi").text());
+        assertTrue(this.hop.await("Not every store").text().startsWith("Not every store of all is a full index; do not downgrade yet"));
+        assertEquals(List.of("all"), asked, "ALL is normalised");
+
+        compacting.execute(block, "awf", new String[] {"compact", "Hub"});
+        this.hop.next();
+        assertEquals("  mc/hub/region: generation 2, full: yes (compacted)", this.hop.await("hub/region").text());
+        final String summary = this.hop.await("Every open store").text();
+        assertTrue(summary.contains("Every open store of hub is a full index (1 store(s))"), summary);
+        assertTrue(summary.contains("back up the .awf folders first"), summary);
+        assertEquals(List.of("all", "hub"), asked);
+
+        compacting.execute(block, "awf", new String[] {"compact", "nowhere"});
+        this.hop.next();
+        assertTrue(this.hop.await("No AWF storage").text().contains("a world must be loaded to be compacted"));
+
+        compacting.execute(block, "awf", new String[] {"compact"});
+        assertTrue(texts().stream().anyMatch(t -> t.contains("/awf compact <world|all>")), "usage without a world: " + texts());
+    }
+
+    @Test
     void anUnloadResultTakesTheHopToo() throws Exception {
         when(this.worlds.unload("hub", true)).thenReturn(CompletableFuture.completedFuture(UnloadResult.SUCCESS));
         final BlockCommandSender block = this.hop.sender(BlockCommandSender.class, true);

@@ -39,6 +39,70 @@ class AsyncPathPatchShapeTest {
         return fail("feature patch 0006 (async pathfinding) not found from " + Path.of("").toAbsolutePath());
     }
 
+    /** Patch 0047: the navigation request generation that closes the null-token gap. */
+    private static String generationPatch() throws IOException {
+        Path dir = Path.of("").toAbsolutePath();
+        for (int up = 0; up < 6 && dir != null; up++, dir = dir.getParent()) {
+            for (final String base : List.of("minecraft-patches/features", "sourbycraft-server/minecraft-patches/features")) {
+                final Path features = dir.resolve(base);
+                if (Files.isDirectory(features)) {
+                    try (Stream<Path> files = Files.list(features)) {
+                        final Path found = files.filter(p -> p.getFileName().toString()
+                            .contains("-SourbyCraft-invalidate-in-flight-async-paths")).findFirst().orElse(null);
+                        if (found != null) {
+                            return Files.readString(found, StandardCharsets.UTF_8);
+                        }
+                    }
+                }
+            }
+        }
+        return fail("feature patch 0047 (navigation generation) not found from " + Path.of("").toAbsolutePath());
+    }
+
+    private static int count(final String text, final String needle) {
+        int count = 0;
+        for (int from = 0, i; (i = text.indexOf(needle, from)) >= 0; from = i + 1) {
+            count++;
+        }
+        return count;
+    }
+
+    @Test
+    void theGenerationIsTakenWithTheTokenAndCheckedAfterThePathBeforeTheContent() throws IOException {
+        final String patch = generationPatch();
+        final int token = at(patch, " final net.minecraft.world.level.pathfinder.Path requested = this.path;");
+        final int generation = at(patch, "+        final int requestedGeneration = this.sourbyNavigationGeneration;");
+        final int pending = at(patch, " this.sourbyAsyncPathPending = true;");
+        assertTrue(token < generation && generation < pending, "taken right after the token, before the flag");
+        final int path = at(patch, "AsyncPathValidity.stillRequested(this.path, requested)");
+        final int check = at(patch, "AsyncPathValidity.sameGeneration(this.sourbyNavigationGeneration, requestedGeneration)");
+        final int content = at(patch, " if (path != null && path.getTarget() != null) {");
+        assertTrue(path < check && check < content, "path token, then generation, then content");
+    }
+
+    @Test
+    void everyInvalidationAdvancesTheGenerationIncludingAStopOnANullPath() throws IOException {
+        final String patch = generationPatch();
+        final int stop = at(patch, " public void stop() {");
+        final int stopBump = patch.indexOf("+        ++this.sourbyNavigationGeneration;", stop);
+        final int stopClear = patch.indexOf(" this.path = null;", stop);
+        assertTrue(stopBump > stop && stopBump < stopClear, "stop() advances unconditionally, before clearing");
+        // stop, moveTo(null), moveTo(new path), createPath's new request, the synchronous recompute,
+        // and an applied delivery.
+        assertEquals(6, count(patch, "++this.sourbyNavigationGeneration;"), "an added or removed bump needs a new test");
+    }
+
+    @Test
+    void createPathAdvancesTheGenerationWhereItTakesANewTarget() throws IOException {
+        // moveTo keeps the old path object for a sameAs (nodes-only) route, so the retarget is only
+        // visible through this bump.
+        final String patch = generationPatch();
+        final int found = at(patch, " Path path = this.pathFinder.findPath(region, this.mob, targets, maxPathLength, reachRange, this.maxVisitedNodesMultiplier);");
+        final int bump = patch.indexOf("+            ++this.sourbyNavigationGeneration;", found);
+        final int target = patch.indexOf(" this.targetPos = path.getTarget();", found);
+        assertTrue(bump > found && bump < target, "bumped before targetPos/reachRange are replaced");
+    }
+
     private static int at(final String text, final String needle) {
         final int index = text.indexOf(needle);
         assertTrue(index >= 0, "patch 0006 no longer contains: " + needle);

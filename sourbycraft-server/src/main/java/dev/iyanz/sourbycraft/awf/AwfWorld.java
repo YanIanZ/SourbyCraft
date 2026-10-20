@@ -287,6 +287,35 @@ public final class AwfWorld {
     }
 
     /**
+     * Writes the store's committed state as a self-contained generation ({@link AwfStore#compact}),
+     * under the commit lock so it never interleaves with a commit and is refused once fenced.
+     * Dirty chunks are not part of it; a flush before or after carries them.
+     *
+     * @return what the store did, or {@code null} when it had nothing to compact
+     */
+    public AwfStore.CommitResult compact() throws IOException {
+        if (this.store == null || !this.role.acceptsCommits()) {
+            throw new IllegalStateException("a " + this.role + " world does not compact");
+        }
+        synchronized (this.commitLock) {
+            if (this.fenced) {
+                throw new FencedException("AWF world " + this.name + " was discarded or closed; no compaction");
+            }
+            return this.store.compact();
+        }
+    }
+
+    /** Whether the store's committed state is self-contained; see {@link AwfStore#fullIndex()}. */
+    public boolean fullIndex() {
+        return this.store == null || this.store.fullIndex();
+    }
+
+    /** The store's committed generation, 0 before the first commit or without a store. */
+    public long storeGeneration() throws IOException {
+        return this.store == null ? 0L : this.store.generation();
+    }
+
+    /**
      * Held from the snapshot of dirty chunks until the store has the commit, so commits reach the
      * store in snapshot order. Without it a periodic commit that snapshotted a chunk could lose
      * the race for the store to a flush that snapshotted the chunk's newer bytes, land last, and
@@ -323,6 +352,14 @@ public final class AwfWorld {
             else if (bytes != null) changed.put(entry.getKey(), bytes);
         }
         this.metrics.serialization.record(System.nanoTime() - prepared);
+        if (mode == PersistenceMode.INCREMENTAL && changed.isEmpty() && deleted.isEmpty()) {
+            // Nothing to commit: a save queued behind another one (region flushes racing on the
+            // pending-save check) must not cost the store an empty generation or a backend round
+            // trip. FULL and CHECKPOINT rewrite or verify what the store already holds, so they
+            // still run. Generation -1: no store generation was produced.
+            taken.forEach(this.dirty::remove);
+            return new AwfStore.CommitResult(-1L, 0, 0, 0L, 0);
+        }
         for (int attempt = 1; ; attempt++) {
             final long begun = System.nanoTime();
             try {

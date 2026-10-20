@@ -7,6 +7,7 @@ import dev.iyanz.sourbycraft.perf.SchedulerQueueCollector.RegionState;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueCollector.TickProbe;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueCollector.WorldProbe;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.GlobalTick;
+import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.LateTicks;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.RunnerActivity;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.Scheduler;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.WorldRegions;
@@ -93,6 +94,53 @@ class SchedulerQueueCollectorTest {
         assertEquals(0, world.withPendingTasks());
         assertEquals(0, world.tickInProgress());
         assertEquals(0, dead.taskPeeks, "a dead region's queues are never peeked");
+        assertEquals(0L, world.queuedTickTasks() + world.queuedChunkTasks());
+        assertEquals(0L, world.largestRegionQueue());
+    }
+
+    @Test
+    void queuedTasksAreSummedPerQueueAndTheLargestRegionIsTickPlusChunk() {
+        final WorldRegions world = SchedulerQueueCollector.world(world("w",
+            queued(region(RegionState.READY, NOW + MS, NO_TICK), 3, 10),
+            queued(region(RegionState.TICKING, NOW, NOW - MS), 9, 2),
+            queued(region(RegionState.TRANSIENT, NOT_SET, NO_TICK), 1, 1),
+            queued(region(RegionState.DEAD, NOT_SET, NO_TICK), 500, 500),   // never asked
+            region(RegionState.READY, NOW + MS, NO_TICK)), NOW);
+
+        assertEquals(13L, world.queuedTickTasks());
+        assertEquals(13L, world.queuedChunkTasks());
+        assertEquals(13L, world.largestRegionQueue(), "3 + 10 beats 9 + 2");
+    }
+
+    @Test
+    void aNegativeQueueReadIsNotSubtracted() {
+        // The engine counter is never negative; a broken probe must not shrink the world's total.
+        final WorldRegions world = SchedulerQueueCollector.world(world("w",
+            queued(region(RegionState.READY, NOW + MS, NO_TICK), -4, 2),
+            queued(region(RegionState.READY, NOW + MS, NO_TICK), 5, 0)), NOW);
+
+        assertEquals(5L, world.queuedTickTasks());
+        assertEquals(2L, world.queuedChunkTasks());
+        assertEquals(5L, world.largestRegionQueue());
+    }
+
+    @Test
+    void lateTickCountsArePassedThroughAndAMissingReadIsUnknownNotZero() {
+        final FakeSource source = new FakeSource();
+        source.late = new LateTicks(1000L, 12L, 50L, 1L);
+        assertEquals(new LateTicks(1000L, 12L, 50L, 1L), SchedulerQueueCollector.build(source, NOW).lateTicks());
+
+        source.late = null;
+        final LateTicks missing = SchedulerQueueCollector.build(source, NOW).lateTicks();
+        assertEquals(LateTicks.NONE, missing);
+        assertFalse(missing.known());
+        assertEquals(LateTicks.NONE, SchedulerQueueSnapshot.unavailable("x").lateTicks());
+    }
+
+    @Test
+    void theEngineAndTheViewShareOneLatenessThreshold() {
+        // Patch 0045 inlines this constant; the view's "past their tick start" uses the same one.
+        assertEquals(1_000_000L, SchedulerQueueCollector.OVERDUE_THRESHOLD_NANOS);
     }
 
     @Test
@@ -199,6 +247,12 @@ class SchedulerQueueCollectorTest {
         return region;
     }
 
+    private static FakeRegion queued(final FakeRegion region, final int tick, final int chunk) {
+        region.queuedTick = tick;
+        region.queuedChunk = chunk;
+        return region;
+    }
+
     private static TickProbe tick(final long start, final long active) {
         return new FakeRegion(RegionState.READY, start, active);
     }
@@ -225,6 +279,8 @@ class SchedulerQueueCollectorTest {
         boolean descheduled;
         boolean tasks;
         int taskPeeks;
+        int queuedTick;
+        int queuedChunk;
 
         FakeRegion(final RegionState state, final long start, final long active) {
             this.state = state;
@@ -237,6 +293,8 @@ class SchedulerQueueCollectorTest {
         @Override public boolean hasPendingTasks() { this.taskPeeks++; return this.tasks; }
         @Override public long scheduledStartNanos() { return this.start; }
         @Override public long activeTickStartNanos() { return this.active; }
+        @Override public int queuedTickTasks() { return this.queuedTick; }
+        @Override public int queuedChunkTasks() { return this.queuedChunk; }
     }
 
     private static final class FakeSource implements SchedulerQueueCollector.Source {
@@ -246,11 +304,13 @@ class SchedulerQueueCollectorTest {
         TickProbe global;
         List<WorldProbe> worlds = new ArrayList<>();
         final AtomicInteger worldsRead = new AtomicInteger();
+        LateTicks late = new LateTicks(0L, 0L, 0L, 0L);
 
         @Override public String unavailableReason() { return this.reason; }
         @Override public Scheduler scheduler() { return this.scheduler; }
         @Override public List<RunnerActivity> runners() { return this.runners; }
         @Override public TickProbe globalTick() { return this.global; }
         @Override public List<WorldProbe> worlds() { this.worldsRead.incrementAndGet(); return this.worlds; }
+        @Override public LateTicks lateTicks() { return this.late; }
     }
 }

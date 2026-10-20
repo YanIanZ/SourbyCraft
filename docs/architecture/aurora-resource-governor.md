@@ -42,6 +42,7 @@ Upstream sizes those; `/perf lanes` attributes their CPU.
 | --- | --- | --- | --- |
 | `BRIDGE_IO` | max(2, cores/4) threads, queue 256 | `SourbyCraft-BridgeIO-` → `PLUGIN_ASYNC` | Aurora Bridge: async tasks of bridged legacy plugins. Folia's async scheduler only times them. A rejection counts as the plugin's rejected operation. |
 | `STORAGE` | 1 thread, queue 64 | `SourbyCraft-Storage-` → `WORLD_IO` | Aurora World Fabric commits (`AwfWorld#save`, submitted by `awf/AwfEngine`). Idle when no world uses AWF. |
+| `PATHFINDING` | max(1, cores/4) threads at `NORM_PRIORITY - 1`, queue 1024 (`PATHFINDING_QUEUE`); not configurable | `SourbyCraft-AsyncPath-` → `ASYNC_COMPUTE` | Async pathfinding solves (`perf/AsyncPathProcessor`, started only when `aurora.entity.async-pathfinding` is on). A full queue is refused and the navigation recomputes synchronously; that refusal is counted once, as `/perf async` `refused`, and is excluded from the lane-rejection incident reading. Budget, priority and queue are the values the pool had before it moved here (2026-10-20). |
 
 `cores` is the JVM's available-processor count, read once when the lane is created.
 
@@ -50,8 +51,8 @@ Upstream sizes those; `/perf lanes` attributes their CPU.
 - ~~Operator-configurable budgets~~ — implemented as `aurora.scheduler.*`, RESTART_REQUIRED
   because a lane is created once and never resized (`config/AuroraConfig.Scheduler`; corrected
   2026-10-07).
-- Moving existing executors under the governor: `AsyncPathProcessor`, `BoundedIoExecutor` and
-  the startup-index pool. Each already has its own bound, documented in
+- Moving existing executors under the governor: `BoundedIoExecutor` and the startup-index pool
+  (`AsyncPathProcessor` moved to the `PATHFINDING` lane on 2026-10-20). Each already has its own bound, documented in
   [executor-inventory.md](executor-inventory.md).
 - Any cross-lane CPU arbitration. The governor bounds concurrency; it does not schedule CPU
   time.

@@ -29,8 +29,8 @@ Priority:
 - [x] **P0** audit remaining reusable mutable state / scratch buffers — scoped Sourby audit; [findings and remaining unknowns](architecture/reuse-audit.md)
 - [x] **P0** audit all `ThreadLocal` usage relevant to Sourby performance patches — no Sourby-owned mutable storage found; upstream internals outside scope
 - [x] **P0** audit remaining object pools — no Sourby-owned object recycler found; solver-state ownership reviewed
-- [x] **P0** validate entity-owned scratch reentrancy assumptions — retained collection reuse removed; scalar-position proof for SourbyCraft feature patches done 2026-10-20 (`docs/architecture/scratch-reentrancy-proof.md`, fix in MC 0044); engine-baseline scratch and runtime evidence not covered
-- [ ] **P0** full restart persistence test after performance changes
+- [x] **P0** validate entity-owned scratch reentrancy assumptions — retained collection reuse removed; scalar-position proof for SourbyCraft feature patches done 2026-10-20 (`docs/architecture/scratch-reentrancy-proof.md`, fix in MC 0044); the independent re-review findings (non-volatile derived double can tear, F3 stop resurrection incl. same-nodes retarget, 0009 threshold drift, ASM proof gaps) are fixed in MC patches 0046 and 0047; F3 is SAFE only for the enumerated invalidations (hand-written model, not the real patch lambda); engine-baseline scratch (`minecraft-patches/sources`) and runtime/soak evidence are not covered
+- [ ] **P0** full restart persistence test after performance changes — tools exist (`verify_persistence.py`, `verify_crash.py`); last ran on RC tree `cbef3fb9` (2026-10-13, release doc rows 100-101); needs a rerun, plain and `--awf`, on the current tree after the AWF/MC 0043-0048 changes (needs a booted server; CI does not run them)
 - [ ] **P0** multi-hour concurrency soak
 
 ---
@@ -50,7 +50,7 @@ Priority:
 - [ ] **P1** chunk-generation/load/unload baseline
 - [ ] **P1** gameplay network baseline
 - [ ] **P1** 2h+ soak baseline
-- [ ] **P1** post-load heap recovery measurement
+- [ ] **P1** post-load heap recovery measurement — tooling done 2026-10-20 (`run_baseline.py --recovery SECONDS`, `baseline_metrics.heap_recovery`, `docs/BASELINE.md` "Post-load heap recovery", `HeapRecoveryTest` 7); no recovery run recorded yet (needs a server)
 - [ ] **P1** rank top CPU hot spots from JFR
 - [ ] **P1** rank top allocation hot spots from JFR
 
@@ -83,7 +83,7 @@ No major new optimization batch should be accepted before the missing representa
 - [x] **P1** `/perf chunks` — per world, from Folia region counters
 - [x] **P1** `/perf entities` — per world, from Folia region counters
 - [x] **P1** `/perf network` — wire bytes/packets per direction, connections
-- [-] **P1** `/perf scheduler` — region scheduler view exists (2026-10-20: kind, threads, regions by state, late regions, longest tick); per-region queued task counts and late-tick history need a feature patch
+- [x] **P1** `/perf scheduler` — region scheduler view (kind, threads, regions by state, late regions, longest tick); per-region queued task counts (tick/chunk) and late-tick-start counters are real since MC patch 0045 (2026-10-20; `RegionTaskQueueDepthTest`, `TickLateStartCounterTest`, `PerfSchedulerViewTest`). Still `n/a`: the scheduler run queue and idle threads, the global task queue (private, no size accessor) and the world-wide global chunk-task queue; not yet observed on a live server
 - [x] **P1** `/perf plugins`
 - [x] **P1** `/perf health`
 - [x] **P1** bounded `/perf history` — 60 one-minute samples (`perf/PerformanceHistory`)
@@ -99,7 +99,7 @@ No major new optimization batch should be accepted before the missing representa
 - [-] **P1** verify SourbyCraft config renders correctly in Spark web report
 - [x] **P0** verify secret filtering for Sourby config — parser/provider regression tests; see [scope and limits](SPARK.md)
 - [x] **P1** add Sourby runtime metadata without duplicating expensive scans — `spark/SourbyMetadataProvider` (in-memory reads only)
-- [ ] **P1** improve region-thread classification
+- [x] **P1** improve region-thread classification — 2026-10-20: `SparkThreadClass` (REGION_TICK, CHUNK_WORKER, CHUNK_IO, SOURBY_LANE, ASYNC_PATH, AWF_MAINTENANCE, NETWORK, OTHER), `LabelledThreadDumper`, `sourbycraft-threads` metadata (`ThreadCensusMetadataProvider`); `SparkThreadClassTest` 9, `ThreadCensusMetadataProviderTest` 8; limits: global tick and region ticks share threads, virtual `SourbyCraft-IO-n` is invisible to spark, spark web-viewer rendering unverified (see [SPARK.md](SPARK.md))
 - [ ] **P1** expose useful region context to profiles where supported
 - [x] **P2** document upstream Spark version/update procedure — `SPARK.md`
 - [ ] **P2** decide adapter vs dedicated SourbySpark fork after requirements are proven
@@ -113,14 +113,14 @@ Do not create a deep Spark fork merely for naming/branding.
 
 - [x] **P0** bounded administrative I/O execution
 - [x] **P0** explicit administrative executor shutdown
-- [-] **P0** async pathfinding shutdown/cancellation repair
-- [ ] **P0** complete async pathfinding snapshot correctness audit
+- [x] **P0** async pathfinding shutdown/cancellation repair — 2026-10-20, unit level: `AsyncPathProcessor.shutdown()` (shutdownNow, queued futures completed, `start()` lifts the refusal); `AsyncPathShutdownTest` 9, `AsyncPathCancellationTest` (entity removal, world unload, moving target mid-solve), `AsyncPathPatchShapeTest`; the patch lambda and a real `Mob` on a live server are not run
+- [x] **P0** complete async pathfinding snapshot correctness audit — 2026-10-20, source audit (flag stays off): [async-path-snapshot-audit.md](architecture/async-path-snapshot-audit.md), `SnapshotPathRegionAuditTest` 3, `SnapshotPathRegionTest`; the one correctness divergence (unloaded chunk answered AIR/OPEN instead of null/BLOCKED on the `*IfLoaded` reads) is fixed in MC patch 0048; no flag-on run
 - [x] **P0** path result staleness validation — `AsyncPathValidity`, used by minecraft patch 0006; `AsyncPathValidityTest`
 - [x] **P0** queue saturation test — `AsyncPathQueueTelemetryTest.saturationRefusesInsteadOfRunningOnSubmittingThread`
 - [ ] **P1** synchronous-vs-async pathfinding benchmark
 - [ ] **P1** mob behavior compatibility soak
 - [x] **P1** inventory all Sourby-owned executors — `architecture/executor-inventory.md`
-- [ ] **P1** audit implicit common-pool usage
+- [x] **P1** audit implicit common-pool usage — 2026-10-20 re-audit in `architecture/executor-inventory.md` §2: no implicit common-pool use in Sourby/Aurora code (every `*Async` call passes an executor); one finding left unfixed by design: spark's `SamplerModule` (`whenCompleteAsync`/`thenAcceptAsync` without an executor, `handleUpload` blocking HTTP/file write once per profile, never on a region thread) — fixing it means diverging from the shadowed spark copy (owner decision); baseline patches and materialized sources not audited
 - [x] **P1** record queue depth/task latency for relevant workers — `/perf async`, `/perf governor`
 - [-] **P0** validate no region thread blocks on external I/O — static audit `architecture/region-io-audit.md` + `BlockingIoBoundaryTest`; no runtime proof
 
@@ -137,7 +137,7 @@ Do not create a deep Spark fork merely for naming/branding.
 - [ ] **P1** entity-tracker packet profile
 - [ ] **P1** item-entity merge/pickup profile
 - [ ] **P1** benchmark existing reusable entity buffers
-- [ ] **P0** retain region ownership and Bukkit/Paper semantics for all changes
+Standing rule for this section (not a task with a done state): every new entity or performance patch must retain region ownership and Bukkit/Paper semantics. It is enforced by `DEVELOPMENT.md` §4 (correctness outranks benchmark wins; ownership, reentrancy and persistence recorded per NMS change), `scripts/test_independence_policy.py` and `baseline_policy.py` on every patch, `GuardViolations` with `guard-severity: LOG` at runtime, and the per-patch proofs (`region-safety-review-0017-0019.md`, `scratch-reentrancy-proof.md`).
 
 Only measured hot spots should produce new performance patches.
 
@@ -147,13 +147,13 @@ Only measured hot spots should produce new performance patches.
 
 - [ ] **P1** chunk lookup/holder CPU profile
 - [ ] **P1** ticket processing profile
-- [ ] **P1** generation latency metric
+- [-] **P1** generation latency metric — metric implemented: `perf/ChunkGenerationMetrics` (queue and run time per generic generation stage, `/perf chunks`) fed by MC patch 0026; built, unit-tested (`ChunkGenerationMetricsTest`, `ChunkGenerationMetricsEarlyConfigTest`, `PerfStartupAndChunkHintTest`) and booted on the demo with metrics off; RESTART_REQUIRED, default off (`aurora.diagnostics.chunk-generation-metrics`); no run with metrics on, lighting and full-status integration not covered
 - [ ] **P1** load latency metric
-- [-] **P1** save latency/backlog metric — backlog: `/perf storage`; latency: AWF commits only
-- [ ] **P1** unload/reference-retention test
-- [ ] **P0** region-file write concurrency review
-- [ ] **P0** restart/crash persistence test for any async save changes
-- [ ] **P1** identify duplicate serialization/copies before optimizing
+- [x] **P1** save latency/backlog metric — backlog: `/perf storage` (`perf/StorageBacklog`); region-file save latency: MC patch 0043 times `RegionFileStorage.moonrise$finishWrite` into `perf/RegionFileSaveLatency` (p50/p99/max over 60 s per world/type, `/perf storage`; `RegionFileSaveLatencyTest` 8, `RegionFileSaveLatencyHookTest` 3); AWF commit latency as before. Not timed: serialization/compression and the flush-regions-on-save flush; AWF worlds not covered; no server numbers and the overhead is not benchmarked
+- [x] **P1** unload/reference-retention test — unit level, 2026-10-20: `retention/Reachability` helper plus 9 retention classes, 55 tests green (`AwfChunkUnloadRetentionTest` 4, `AwfEngineRetentionTest` 5, `AuroraWorldsUnloadRetentionTest` 3, `AnchorCacheRetentionTest` 6, `RegionMetricsRetentionTest` 4, `BridgeRetentionTest` 8, `SpeedtestRetentionTest` 4, `HudBarsRetentionTest` 17, `RedisLeaseRetentionTest` 4); not covered: GeoUtil cache, pearls engine, Minecraft-side holders, a heap comparison on a live server
+- [x] **P0** region-file write concurrency review — 2026-10-20 (DEV-G): section "Region-file write concurrency review" in `architecture/aurora-world-fabric.md` (4 findings); empty-INCREMENTAL-commit guard in `AwfWorld.commitInOrder`; `AwfConcurrentFlushTest` 3; unit level, no boot or soak
+- [x] **P0** restart/crash persistence test for any async save changes — 2026-10-20: `AwfAsyncSaveRestartTest` 5 (crash before/after the lane commit, at every fsync of the lane commit, failed lane commit carried by the next flush, `close()` racing a mid-fsync lane commit), mutation-checked; a `kill -9` during `save-all` on a live server is not run
+- [x] **P1** identify duplicate serialization/copies before optimizing — static identification 2026-10-20: [chunk-io-copy-audit.md](architecture/chunk-io-copy-audit.md) (region-file and AWF FILE paths, copies per step with file:line); nothing measured and nothing changed; a JFR allocation profile must precede any optimization
 
 ---
 
@@ -161,13 +161,13 @@ Only measured hot spots should produce new performance patches.
 
 - [x] **P1** packets/sec instrumentation where reliable — `NetworkCounters`, `/perf network`
 - [x] **P1** bytes/sec instrumentation where reliable — same
-- [ ] **P1** packet queue health instrumentation
+- [-] **P1** packet queue health instrumentation — `perf/ConnectionQueueHealth` (point sample: connections, closed, unwritable, pending outbound bytes sum/max) + `ConnectionQueueHealthTest` 4; not yet rendered in `/perf network` (rows pending a `PerfCommand` change) and no server numbers; the game-side `Connection.pendingActions` needs an AT or patch
 - [ ] **P1** encode/decode CPU profile
 - [ ] **P1** compression CPU profile
 - [ ] **P1** chunk-send CPU/bytes profile
-- [ ] **P0** verify Netty event loops never perform unrelated blocking I/O
-- [ ] **P0** preserve packet/security limits
-- [ ] **P0** no adaptive compression/config tuning
+- [x] **P0** verify Netty event loops never perform unrelated blocking I/O — static audit 2026-10-20: `architecture/region-io-audit.md` (handshake/status/login/configuration/game `handle*` paths) and `architecture/engine-network.md` §6 (SourbyCraft's own on-loop code); pinned by `BlockingIoBoundaryTest`, `HandshakeAddressesTest`, `AdmissionHookBytecodeTest`, `PacketDecoderHookTest`, `SecurityNbtHookTest`; no runtime (BlockHound-style) evidence, third-party handlers (ProtocolLib, Via) and upstream loop code not re-audited
+- [x] **P0** preserve packet/security limits — consumers rebuilt in SEC-1 (`41a444f5`); `SecurityLimitPinTest` 3 pins all 19 numeric limits plus `ipv6-prefix` 64 (code defaults == documented table == shipped `sourbycraft-security.yml`) and `SecurityGuardsTest` pins the key set and LOG modes, so a loosened limit fails the suite; no live-server re-verification
+- [x] **P0** no adaptive compression/config tuning — audit clean 2026-10-20 (no SourbyCraft source or feature-patch added line touches compression encoder/decoder/threshold; runtime config writes are only `/maxp`, `StartupProfile` and the default security YAML when absent; `KnobEnforcer`/`SelfTuneController`/`SimulationThrottle` do not exist) and pinned by `scripts/patch_policy.py` `network_compression_references()` (`NetworkCompressionTest` in `test_patch_policy.py`); AWF zstd storage compression is out of scope by design
 
 ---
 
@@ -177,11 +177,11 @@ Only measured hot spots should produce new performance patches.
 - [x] **P1** GC tracker foundation
 - [ ] **P1** allocation MB/s verification against JFR
 - [ ] **P1** RSS/container memory verification on Linux/cgroup environments
-- [ ] **P1** top allocated classes report workflow
+- [x] **P1** top allocated classes report workflow — `scripts/profile_server.py` (JFR `settings=profile`) + `scripts/rank_hotspots.py` `allocation_hotspots` (by class/site/thread, cross-checked against `jdk.ThreadAllocationStatistics`), documented in `BASELINE.md` "Ranking hot spots"; `test_rank_hotspots.py` 37 OK; a certified real-run report does not exist yet
 - [x] **P1** cache ownership/bounds inventory — `architecture/cache-inventory.md`
-- [ ] **P1** player-disconnect retention test
-- [ ] **P1** chunk-unload retention test
-- [ ] **P1** world-unload retention test
+- [x] **P1** player-disconnect retention test — unit level: `HudBarsRetentionTest` 17, `BridgeRetentionTest` 8, `SpeedtestRetentionTest` 4 (`retention/Reachability`); no heap check on a live server
+- [x] **P1** chunk-unload retention test — unit level for SourbyCraft-owned (AWF) state: `AwfChunkUnloadRetentionTest` 4 (dropped chunk arrays collectable vs kept chunks reachable, 50 load cycles stay at the resident limit; mutation-checked); not covered: Minecraft-side chunk unload (holders, entities, block entities), Redis backend, a live heap comparison
+- [x] **P1** world-unload retention test — unit level: `AnchorCacheRetentionTest` 6 (found and fixed the `FoliaRegionBackend` World leak), `RegionMetricsRetentionTest` 4, `AwfEngineRetentionTest` 5, `AuroraWorldsUnloadRetentionTest` 3; no field in `sourbycraft-server/src/main` holds a World/ServerLevel strongly; not covered: a heap/GC check after a real unload, the engine's Minecraft-side holders
 - [x] **P1** task/future retention test — tests named in `cache-inventory.md`
 
 ---
@@ -212,7 +212,7 @@ Only measured hot spots should produce new performance patches.
 - [x] **P2** initial patch inventory documentation
 - [x] **P2** classify all active patches: FOUNDATION / INTEGRATION / PERFORMANCE / COMPATIBILITY / SECURITY / BRANDING / LEGACY — `architecture/patch-classification.md`
 - [x] **P2** assign KEEP / SPLIT / MOVE TO SOURBY SOURCE / REPLACE / REMOVE / DEFER — same doc
-- [ ] **P2** identify duplicate upstream optimizations
+- [x] **P2** identify duplicate upstream optimizations — 2026-10-20, scoped to the pinned `paperRef`: none found among the PERFORMANCE patches (`architecture/patch-classification.md` Findings); not compared with newer Paper/Moonrise, no benchmark
 - [x] **P2** identify obsolete Folia-era patches — none found; all apply at the pinned revisions
 - [-] **P2** reduce giant mixed-responsibility patches — identified (0006, 0013 split; 0002, 0005, 0016 move classes out); not done
 - [ ] **P2** keep implementation in Sourby-owned source where possible
@@ -222,11 +222,11 @@ Only measured hot spots should produce new performance patches.
 
 # L. SourbyClip / bootstrap
 
-- [-] **P0** downloader timeout audit — historical utility audit plus local SourbyClip 3.1.1 connect/read timeouts tested; whole-transfer deadline/size cap and official pin rollout still open (`architecture/bootstrap-download-audit.md`)
-- [-] **P0** retry/failure behavior audit — SPEC B16 launcher exit status and transfer loop shipped in repo bootstrap 3.0.22; process and local multi-chunk/cache probes pass; remote cold-download qualification remains pending (see `BOOTSTRAP.md`)
-- [-] **P0** SHA/cache validation audit — local SourbyClip 3.1.1 original-JAR staging, failed-download preservation and offline/cache tests pass; remote qualification/pin rollout pending (`architecture/bootstrap-download-audit.md`)
-- [-] **P1** concurrency/boundedness audit — local SourbyClip 3.1.1 download worker capacity/lifecycle tests pass; whole-transfer size/deadline bounds and pin rollout remain open
-- [x] **P1** thread/executor ownership audit — local candidate source `5b6249c`: batch workers joined, location workers cancelled/joined, HTTP client closed; controlled lifecycle/process tests pass. Official pins still use the older launcher
+- [-] **P0** downloader timeout audit — historical utility audit plus SourbyClip connect/read timeouts tested; SourbyClip 3.1.2 (`85b4dd70`) is the official pin (`5a3806f1`); open: the launcher's whole-transfer deadline and size cap (private SourbyClip repo; sockets are bounded by 30 s connect/read only; needs a change there, a release and a re-pin) (`architecture/bootstrap-download-audit.md`)
+- [-] **P0** retry/failure behavior audit — SPEC B16 launcher exit status and transfer loop shipped in repo bootstrap 3.0.22; process and local multi-chunk/cache probes pass; server-side `LibDownloader` retries 3 attempts with 2 s then 4 s backoff, while the launcher falls back between sources but does not retry a single source (e.g. the Mojang jar); a bounded launcher retry belongs with the whole-transfer deadline work in the private repo; remote cold-download qualification remains pending (see `BOOTSTRAP.md`)
+- [-] **P0** SHA/cache validation audit — SourbyClip original-JAR staging, failed-download preservation and offline/cache tests pass; 3.1.2 is pinned (`5a3806f1`); remote cold-download qualification pending (`architecture/bootstrap-download-audit.md`)
+- [-] **P1** concurrency/boundedness audit — SourbyClip 3.1.2 download worker capacity/lifecycle tests pass (pool cap `sourbyclip.downloadThreads` 1-16, default 4; the only thread creators are `BootstrapWorkers.create`, `Downloader` `supplyAsync(..., worker)` and the ServerMain thread); 3.1.2 is pinned (`5a3806f1`); open: launcher whole-transfer size/deadline bounds (private repo, worst case bounded by per-socket 30 s timeouts only)
+- [x] **P1** thread/executor ownership audit — SourbyClip batch workers joined, location lookup removed in 3.1.2 (SEC-5), HTTP client closed; controlled lifecycle/process tests pass; the official pin is 3.1.2 (`5a3806f1`)
 - [x] **P1** first-boot failure recovery test — CI run 450
 - [x] **P1** offline-after-success test — CI run 450
 - [x] **P2** document required remote repositories and fallback order — `architecture/bootstrap-download-audit.md`, launcher cache/embedded/original/Maven order and historical utility scope kept explicit

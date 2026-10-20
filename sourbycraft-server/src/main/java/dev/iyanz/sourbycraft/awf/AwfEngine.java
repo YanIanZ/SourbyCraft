@@ -51,7 +51,13 @@ public final class AwfEngine {
     private volatile boolean warnedMissingBackend;
 
     AwfEngine(final AwfSettings settings, final Executor storageLane, final LongSupplier nanoClock) {
-        this(settings, storageLane, nanoClock, AwfBackend::named);
+        this(settings, storageLane, nanoClock, defaultBackends(settings));
+    }
+
+    /** The registered backends, with {@code file} honouring {@code aurora.awf.delta-generations}. */
+    private static java.util.function.Function<String, AwfBackend> defaultBackends(final AwfSettings settings) {
+        final AwfBackend file = settings.deltaGenerations() ? new AwfBackend.FileBackend(Path.of(""), true) : AwfBackend.FILE;
+        return name -> "file".equals(name) ? file : AwfBackend.named(name);
     }
 
     AwfEngine(final AwfSettings settings, final Executor storageLane, final LongSupplier nanoClock,
@@ -599,6 +605,51 @@ public final class AwfEngine {
 
     public AwfSettings settings() {
         return this.settings;
+    }
+
+    /** One storage's answer to {@link #compact}: {@code fullAfter} is what a pre-AWF-7 build needs. */
+    public record CompactionReport(String storage, boolean fullBefore, long generation, boolean fullAfter, String error) {}
+
+    /**
+     * Compacts every open storage of a world ({@code "all"}: every open storage), clean ones
+     * included, on the storage lane, and reports per storage whether its current generation is
+     * now self-contained — the check to run before downgrading to a build without the chain
+     * parser. A world that is not loaded has no open storage and is not touched.
+     */
+    public static java.util.concurrent.CompletableFuture<List<CompactionReport>> compact(final String world) {
+        final AwfEngine current = global;
+        if (current == null) return java.util.concurrent.CompletableFuture.completedFuture(List.of());
+        return current.compactStorages(world);
+    }
+
+    java.util.concurrent.CompletableFuture<List<CompactionReport>> compactStorages(final String world) {
+        final List<AwfRegionStorage> targets = "all".equalsIgnoreCase(world) ? List.copyOf(this.storages.values())
+            : storagesUnder(this, Path.of(world));
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            final List<CompactionReport> reports = new java.util.ArrayList<>();
+            for (final AwfRegionStorage storage : targets) {
+                final boolean before = storage.fullIndex();
+                String error = null;
+                long generation = -1L;
+                try {
+                    final AwfStore.CommitResult result = storage.compact();
+                    generation = result == null ? storage.storeGeneration() : result.generation();
+                } catch (final IOException | RuntimeException failed) {
+                    error = failed.getMessage() == null ? failed.getClass().getSimpleName() : failed.getMessage();
+                }
+                reports.add(new CompactionReport(storage.name(), before, generation, storage.fullIndex(), error));
+            }
+            return reports;
+        }, this.storageLane);
+    }
+
+    private static List<AwfRegionStorage> storagesUnder(final AwfEngine engine, final Path folder) {
+        final Path root = folder.toAbsolutePath().normalize();
+        final List<AwfRegionStorage> found = new java.util.ArrayList<>();
+        for (final AwfRegionStorage storage : engine.storages.values()) {
+            if (Path.of(storage.name()).startsWith(root)) found.add(storage);
+        }
+        return found;
     }
 
     public Collection<AwfRegionStorage> storages() {

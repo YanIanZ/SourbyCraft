@@ -12,6 +12,8 @@
 
 # Patch inventory and ownership audit (PRD Phase 1)
 
+> **Numbering (annotated 2026-10-20):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
+
 Every SourbyCraft patch on `release/26.2-canvas`, classified per PRD section 22 with
 the section 87 fields. Counts are added and removed lines in the patch file itself.
 

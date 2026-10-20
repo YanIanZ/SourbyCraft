@@ -1,5 +1,7 @@
 # Region-Safety Review — patches 0017, 0018, 0019
 
+> **Numbering (annotated 2026-10-20):** "0018" is the withdrawn tracker candidate, which has no file; "0019" (collision-box allocation) is feature patch 0018 today (`0018-SourbyCraft-translate-block-collision-boxes-without-.patch`); "0017" is still 0017. The file name keeps the original range. See AURORA.md contradiction 21.
+
 PRD §108 requires a region-thread safety review for every entity/NMS change. These three
 touch entity query, entity tracking and block collision, so they need one. Reviewed 2026-09-21,
 after the patches were written, which is later than it should have been.

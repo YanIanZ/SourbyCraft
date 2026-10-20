@@ -8,7 +8,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * The Aurora Resource Governor: fixed budgets for the work SourbyCraft itself puts on the machine,
  * as specified in {@code docs/architecture/aurora-resource-governor.md}.
  *
- * <p>It governs only lanes SourbyCraft owns. Region tick threads, chunk workers, Netty event loops
+ * <p>It governs only lanes SourbyCraft owns (bridge async I/O, AWF storage commits, async
+ * pathfinding). Region tick threads, chunk workers, Netty event loops
  * and the engine's background pool belong to upstream and are sized there; the governor neither
  * resizes nor reports them (lane CPU attribution in {@code /perf lanes} does that). Budgets are
  * static: nothing here watches load and adjusts itself, which the Aurora no-auto-tuning rule
@@ -24,7 +25,15 @@ public final class ResourceGovernor {
          */
         BRIDGE_IO("Bridge I/O", "SourbyCraft-BridgeIO-"),
         /** Aurora World Fabric commits. One thread by default: commits to one store are serialized anyway. */
-        STORAGE("Storage", "SourbyCraft-Storage-");
+        STORAGE("Storage", "SourbyCraft-Storage-"),
+        /**
+         * Async pathfinding solves ({@code perf/AsyncPathProcessor}): CPU-bound A* over an immutable
+         * snapshot. Budget max(1, processors / 4) threads below normal priority and a queue of
+         * {@link #PATHFINDING_QUEUE}; not operator-configurable. A full queue is refused and the
+         * navigation runs its synchronous recompute instead, so rejections here are routine
+         * backpressure, counted once as the async path's {@code refused}.
+         */
+        PATHFINDING("Pathfinding", "SourbyCraft-AsyncPath-");
 
         private final String display;
         private final String threadPrefix;
@@ -41,6 +50,14 @@ public final class ResourceGovernor {
         public String threadPrefix() {
             return this.threadPrefix;
         }
+    }
+
+    /** Queue capacity of the {@link Lane#PATHFINDING} lane. */
+    public static final int PATHFINDING_QUEUE = 1024;
+
+    /** Threads of the {@link Lane#PATHFINDING} lane: a quarter of the processors, at least one. */
+    public static int pathfindingThreads() {
+        return Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
     }
 
     /** The process's governor. */
@@ -65,13 +82,27 @@ public final class ResourceGovernor {
 
     /** The lane, created on first use with its configured budget. */
     public GovernedLane lane(final Lane lane) {
-        return this.lanes.computeIfAbsent(lane, l -> {
-            final var b = this.budgets;
-            return switch (l) {
-                case BRIDGE_IO -> new GovernedLane(l.display, l.threadPrefix, b.resolvedBridgeIoThreads(), b.bridgeIoQueue());
-                case STORAGE -> new GovernedLane(l.display, l.threadPrefix, b.resolvedStorageThreads(), b.storageQueue());
-            };
-        });
+        return this.lanes.computeIfAbsent(lane, this::create);
+    }
+
+    /**
+     * The lane, replaced by a fresh one with the current budget if it has been shut down. For an
+     * owner whose lifecycle restarts (async pathfinding can be stopped and started again); the
+     * other lanes stay terminal after {@link #shutdown}.
+     */
+    public GovernedLane restart(final Lane lane) {
+        return this.lanes.compute(lane, (l, existing) ->
+            existing != null && !existing.isShutdown() ? existing : this.create(l));
+    }
+
+    private GovernedLane create(final Lane l) {
+        final var b = this.budgets;
+        return switch (l) {
+            case BRIDGE_IO -> new GovernedLane(l.display, l.threadPrefix, b.resolvedBridgeIoThreads(), b.bridgeIoQueue());
+            case STORAGE -> new GovernedLane(l.display, l.threadPrefix, b.resolvedStorageThreads(), b.storageQueue());
+            case PATHFINDING -> new GovernedLane(l.display, l.threadPrefix, pathfindingThreads(), PATHFINDING_QUEUE,
+                Thread.NORM_PRIORITY - 1);
+        };
     }
 
     /** Stats for lanes that have been used, in declaration order. */

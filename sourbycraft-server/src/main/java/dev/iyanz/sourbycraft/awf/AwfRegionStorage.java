@@ -377,6 +377,33 @@ public final class AwfRegionStorage {
     }
 
     /**
+     * Forces the store's committed state into a self-contained generation (FILE: a full index),
+     * even when nothing is dirty — flush, maintenance and close skip a clean storage, this does
+     * not. Blocking; the engine runs it on the storage lane ({@link AwfEngine#compact}).
+     *
+     * @return the store's result, or {@code null} when it had nothing to compact
+     * @throws IOException when the commit fails; {@link IllegalStateException} once closed or discarding
+     */
+    public AwfStore.CommitResult compact() throws IOException {
+        if (this.discarding || this.closed.get()) {
+            throw new IllegalStateException("AWF storage " + this.name + " is closed or discarding");
+        }
+        final AwfStore.CommitResult result = this.world.compact();
+        if (result != null) this.lastCommitNanos.set(System.nanoTime());
+        return result;
+    }
+
+    /** Whether the store's current generation is self-contained; see {@link AwfStore#fullIndex()}. */
+    public boolean fullIndex() {
+        return this.world.fullIndex();
+    }
+
+    /** The store's committed generation. */
+    public long storeGeneration() throws IOException {
+        return this.world.storeGeneration();
+    }
+
+    /**
      * {@link #close} could not confirm its final commit: the chunks it names may be lost. (A close
      * whose commit succeeded but whose backend release failed does not throw; see
      * {@link #releaseFailed()}.)

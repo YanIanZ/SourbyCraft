@@ -111,6 +111,7 @@ public class UpdateCommand extends Command {
             case HELD       -> text("Updater is HELD after a rollback — see console; /update resume lifts it.", SourbyCraftColors.DANGER);
             case RATE_LIMITED -> text("GitHub rate limit — check skipped until the backoff window ends (see console).", SourbyCraftColors.DIM);
             case MC_VERSION_MISMATCH -> text("Update available but for another Minecraft version — not staged (see console).", SourbyCraftColors.PRIMARY);
+            case CLIP_INCOMPATIBLE -> text("Update available but its launcher cannot be handed over to — not staged (see console).", SourbyCraftColors.PRIMARY);
         };
     }
 

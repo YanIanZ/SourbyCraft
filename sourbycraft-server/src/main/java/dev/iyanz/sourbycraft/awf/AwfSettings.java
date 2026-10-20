@@ -30,9 +30,15 @@ import java.util.Set;
  * @param residentChunks clean committed chunks kept in memory per storage after a commit
  * @param retainedGenerations committed generations kept for recovery
  * @param commitAttempts attempts per commit before it fails and the chunks stay dirty
+ * @param deltaGenerations FILE backend: write each commit as a delta of the chunk index chained to
+ *                         the previous generation (compacted periodically) instead of a full index.
+ *                         Off by default: a full index is what builds before AWF-7 read, and the
+ *                         auto-updater's rollback restores such a build. Once deltas are written, a
+ *                         rollback needs this off plus one commit per world first (see
+ *                         {@link AwfWorldStore}).
  */
 public record AwfSettings(Set<String> worlds, Set<String> export, String backend, PersistenceMode persistence, int commitIntervalSeconds,
-                          int residentChunks, int retainedGenerations, int commitAttempts) {
+                          int residentChunks, int retainedGenerations, int commitAttempts, boolean deltaGenerations) {
 
     public static final String WORLDS_KEY = "aurora.awf.worlds";
     public static final String EXPORT_KEY = "aurora.awf.export";
@@ -42,11 +48,12 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
     public static final String RESIDENT_CHUNKS_KEY = "aurora.awf.resident-chunks";
     public static final String RETAINED_GENERATIONS_KEY = "aurora.awf.retained-generations";
     public static final String COMMIT_ATTEMPTS_KEY = "aurora.awf.commit-attempts";
+    public static final String DELTA_GENERATIONS_KEY = "aurora.awf.delta-generations";
     static final List<String> KEYS = List.of(WORLDS_KEY, EXPORT_KEY, BACKEND_KEY, PERSISTENCE_KEY, COMMIT_INTERVAL_KEY,
-        RESIDENT_CHUNKS_KEY, RETAINED_GENERATIONS_KEY, COMMIT_ATTEMPTS_KEY);
+        RESIDENT_CHUNKS_KEY, RETAINED_GENERATIONS_KEY, COMMIT_ATTEMPTS_KEY, DELTA_GENERATIONS_KEY);
 
     public static final AwfSettings DEFAULT =
-        new AwfSettings(Set.of(), Set.of(), "file", PersistenceMode.INCREMENTAL, 30, 1024, 3, 3);
+        new AwfSettings(Set.of(), Set.of(), "file", PersistenceMode.INCREMENTAL, 30, 1024, 3, 3, false);
 
     /** Settings without an export list. */
     public AwfSettings(final Set<String> worlds, final PersistenceMode persistence, final int commitIntervalSeconds,
@@ -61,6 +68,14 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
                        final int commitAttempts) {
         this(worlds, export, "file", persistence, commitIntervalSeconds, residentChunks, retainedGenerations,
             commitAttempts);
+    }
+
+    /** Settings with full-index generations (the default). */
+    public AwfSettings(final Set<String> worlds, final Set<String> export, final String backend,
+                       final PersistenceMode persistence, final int commitIntervalSeconds, final int residentChunks,
+                       final int retainedGenerations, final int commitAttempts) {
+        this(worlds, export, backend, persistence, commitIntervalSeconds, residentChunks, retainedGenerations,
+            commitAttempts, false);
     }
 
     public AwfSettings {
@@ -116,7 +131,9 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
         final int resident = whole(values, RESIDENT_CHUNKS_KEY, DEFAULT.residentChunks(), 1, 1_000_000, invalid);
         final int retained = whole(values, RETAINED_GENERATIONS_KEY, DEFAULT.retainedGenerations(), 1, 100, invalid);
         final int attempts = whole(values, COMMIT_ATTEMPTS_KEY, DEFAULT.commitAttempts(), 1, 100, invalid);
-        return new Parsed(new AwfSettings(worlds, export, backend, persistence, interval, resident, retained, attempts), invalid);
+        final boolean deltas = flag(values, DELTA_GENERATIONS_KEY, DEFAULT.deltaGenerations(), invalid);
+        return new Parsed(new AwfSettings(worlds, export, backend, persistence, interval, resident, retained, attempts, deltas),
+            invalid);
     }
 
     /** A list of plain folder names, or none at all when any entry is unusable. */
@@ -146,6 +163,16 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
             && number.longValue() >= min && number.longValue() <= max) {
             return number.intValue();
         }
+        invalid.add(key);
+        return fallback;
+    }
+
+    /** A TOML boolean; anything else (a string "true", a number) is invalid and falls back. */
+    private static boolean flag(final Map<String, Object> values, final String key, final boolean fallback,
+                                final List<String> invalid) {
+        final Object value = values.get(key);
+        if (value == null) return fallback;
+        if (value instanceof Boolean bool) return bool;
         invalid.add(key);
         return fallback;
     }

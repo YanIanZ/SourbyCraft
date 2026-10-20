@@ -535,6 +535,20 @@ public final class PerfCommand extends Command {
     }
 
     private static void renderAwf(final List<Component> lines) {
+        renderAwf(lines, dev.iyanz.sourbycraft.awf.Durability.degradedDirectoryForces(),
+            dev.iyanz.sourbycraft.awf.Durability.degradedReason());
+    }
+
+    /**
+     * The AWF rows. The degraded directory-force count is a parameter so the row can be tested on
+     * a platform that fsyncs directories fine; it is shown only while non-zero, since zero is the
+     * normal state and the row is a warning, not a statistic.
+     */
+    static void renderAwf(final List<Component> lines, final long degradedDirectoryForces, final String degradedReason) {
+        if (degradedDirectoryForces > 0) {
+            add(lines, "AWF directory fsyncs skipped", degradedDirectoryForces + " since start (" + degradedReason
+                + "); directory entries rely on the rename alone, commits are not fully durable against power loss here");
+        }
         final var engine = dev.iyanz.sourbycraft.awf.AwfEngine.ifStarted();
         final var storages = engine == null ? List.<dev.iyanz.sourbycraft.awf.AwfRegionStorage>of() : engine.storages();
         if (storages.isEmpty()) {

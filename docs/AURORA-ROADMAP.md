@@ -386,13 +386,13 @@ result
 
 ### Required completion work
 
-- [ ] migrate pool behind AuroraExecution
-- [ ] add explicit owner-context callback
+- [x] migrate pool behind AuroraExecution — 2026-10-20: the pool is `ResourceGovernor.Lane.PATHFINDING` (`GovernedLane`; the Resource Governor is the only Aurora execution fabric in code, there is no `AuroraExecution` class); threads, priority, queue 1024 reject, names and default-off unchanged; `ResourceGovernorTest` 10, `LiveIncidentSourcesTest` 1, `UnboundedQueueAuditTest` 3
+- [x] add explicit owner-context callback — `execution/OwnerHandoff`, `RegionOwnerHandoff`, `perf/AsyncPathCompletion`, used by MC patch 0006; `AsyncPathCompletionTest` 8
 - [x] add path freshness token — `AsyncPathValidity.stillRequested`
 - [x] validate entity/navigation version — `AsyncPathValidity.sameSubject`
 - [x] reject stale paths — `AsyncPathValidityTest`
-- [ ] test entity removal during solve
-- [ ] test world unload during solve
+- [x] test entity removal during solve — `AsyncPathCancellationTest` 17 over `AsyncPathNavigationModel` (model level; the patch lambda and a real `Mob` are not run)
+- [x] test world unload during solve — `AsyncPathCancellationTest` (model level, as above)
 - [ ] test target movement during solve
 - [x] test queue saturation — `AsyncPathQueueTelemetryTest`
 - [x] test shutdown cancellation — `AsyncPathShutdownTest`
@@ -467,7 +467,7 @@ Make Aurora telemetry the authoritative runtime truth.
 
 ### Add
 
-- [x] scheduler queue depth — `/perf governor` (Sourby lanes); region scheduler queues not exposed
+- [x] scheduler queue depth — `/perf governor` (Sourby lanes); per-region queued task counts (tick/chunk) in `/perf scheduler` since MC patch 0045 (2026-10-20); the scheduler run queue, the global task queue and the world-wide global chunk-task queue are still `n/a`
 - [ ] task wait latency
 - [x] async-path queue/solve latency — `/perf async`; see below
 - [ ] chunk lifecycle counters
@@ -475,7 +475,7 @@ Make Aurora telemetry the authoritative runtime truth.
 - [x] packet counters — `/perf network`
 - [x] bytes/sec — `/perf network`
 - [x] storage backlog — `/perf storage` (Moonrise pending I/O per world), `/perf awf`
-- [-] save latency — AWF commit p50/p95/p99 only; region-file save latency not measured
+- [-] save latency — AWF commit p50/p95/p99, and region-file save p50/p99/max over 60 s per world/type from MC patch 0043 (`perf/RegionFileSaveLatency`, `/perf storage`; times only the `.mca` write stage, never AWF worlds); no server numbers and overhead not benchmarked
 - [x] worker utilization — `/perf lanes` (CPU by execution lane)
 - [ ] incident history
 

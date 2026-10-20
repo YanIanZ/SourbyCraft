@@ -375,6 +375,14 @@ public final class SourbyCraftConfig {
             "AWF: committed generations kept for recovery (RESTART_REQUIRED).");
         seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.COMMIT_ATTEMPTS_KEY, 3,
             "AWF: attempts per commit before it fails and its chunks stay in memory for the next (RESTART_REQUIRED).");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.DELTA_GENERATIONS_KEY, false,
+            "AWF FILE backend: write each commit as a delta of the chunk index chained to the previous generation, "
+            + "compacted to a full index periodically (RESTART_REQUIRED). false = every commit writes a full index, "
+            + "which builds before AWF-7 (and the auto-updater's rollback jar) can read. Once deltas have been "
+            + "written, rolling back to such a build needs false here and a restart (a writable open then compacts "
+            + "every store the server opens), or /awf compact all, which also prints full: yes/no per store. Such a "
+            + "build then skips the retained delta generations and deletes the objects only they reference: those "
+            + "rollback points are lost for good, so back up the .awf folders first if they matter.");
         if (changed[0]) {
             f.save();
             SourbyLogger.info("seeded Aurora engine defaults into sourbycraft_config/aurora.toml");

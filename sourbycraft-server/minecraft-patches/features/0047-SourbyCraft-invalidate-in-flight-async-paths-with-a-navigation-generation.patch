@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 17:36:38 +0700
+Subject: [PATCH] SourbyCraft - invalidate in-flight async paths with a
+ navigation generation
+
+
+diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+index 89a384174ee88eb2a2081baa13d36c5bf2436bcf..0888215ce9930b596967ed498b1ffe50af669904 100644
+--- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+@@ -113,6 +113,7 @@ public abstract class PathNavigation {
+             // SourbyCraft end
+             this.path = null;
+             this.path = this.createPath(this.targetPos, this.reachRange);
++            ++this.sourbyNavigationGeneration; // SourbyCraft - async pathfinding: a synchronous recompute invalidates an in-flight solve
+             this.timeLastRecompute = this.tick; // Folia - region threading
+             this.hasDelayedRecomputation = false;
+         }
+@@ -120,6 +121,20 @@ public abstract class PathNavigation {
+ 
+     // SourbyCraft start - async pathfinding
+     private volatile boolean sourbyAsyncPathPending = false;
++    // Advanced by every operation that invalidates an in-flight solve: stop() (even when the path is
++    // already null), moveTo assigning or clearing a path, createPath computing a new request (it sets
++    // targetPos/reachRange; moveTo may then keep the old path object, since Path.sameAs compares nodes
++    // only), the synchronous recompute, and a delivery.
++    // The path object alone cannot see a stop() that finds the path already null (an
++    // EntityPathfindEvent listener stopped before the token was taken). Plain int: written and read
++    // only on the owning region thread (the delivery runs there via the owner handoff; the refused-
++    // handoff release only clears the pending flag).
++    private int sourbyNavigationGeneration;
++
++    /** The current navigation request generation; owner thread only. */
++    public final int sourbyNavigationGeneration() {
++        return this.sourbyNavigationGeneration;
++    }
+ 
+     /**
+      * Whether this navigation's node evaluator only reads the mob during a solve.
+@@ -215,6 +230,7 @@ public abstract class PathNavigation {
+         // only change inside createPath, whose caller assigns this.path in the same statement,
+         // so a retarget shows up here too. No epoch field is needed to see any of it.
+         final net.minecraft.world.level.pathfinder.Path requested = this.path;
++        final int requestedGeneration = this.sourbyNavigationGeneration;
+         this.sourbyAsyncPathPending = true;
+         final java.util.concurrent.CompletableFuture<net.minecraft.world.level.pathfinder.Path> solving =
+             dev.iyanz.sourbycraft.perf.AsyncPathProcessor
+@@ -242,7 +258,13 @@ public abstract class PathNavigation {
+                     if (!dev.iyanz.sourbycraft.perf.AsyncPathValidity.stillRequested(this.path, requested)) {
+                         return;
+                     }
++                    // A stop() that found the path already null (or any other invalidation) since the
++                    // token was taken: the path object cannot show it, the generation does.
++                    if (!dev.iyanz.sourbycraft.perf.AsyncPathValidity.sameGeneration(this.sourbyNavigationGeneration, requestedGeneration)) {
++                        return;
++                    }
+                     if (path != null && path.getTarget() != null) {
++                        ++this.sourbyNavigationGeneration;
+                         this.path = path;
+                         this.targetPos = path.getTarget();
+                         this.reachRange = reachRange;
+@@ -345,6 +367,10 @@ public abstract class PathNavigation {
+         PathNavigationRegion region = new PathNavigationRegion(this.level, fromPos.offset(-radius, -radius, -radius), fromPos.offset(radius, radius, radius));
+         Path path = this.pathFinder.findPath(region, this.mob, targets, maxPathLength, reachRange, this.maxVisitedNodesMultiplier);
+         if (path != null && path.getTarget() != null) {
++            // SourbyCraft start - async pathfinding: a new navigation request (target/reachRange) invalidates an
++            // in-flight solve even if moveTo later keeps the old path object because Path.sameAs (nodes only) holds
++            ++this.sourbyNavigationGeneration;
++            // SourbyCraft end
+             this.targetPos = path.getTarget();
+             this.reachRange = reachRange;
+             this.resetStuckTimeout();
+@@ -388,11 +414,13 @@ public abstract class PathNavigation {
+ 
+     public boolean moveTo(final @Nullable Path newPath, final double speedModifier) {
+         if (newPath == null) {
++            ++this.sourbyNavigationGeneration; // SourbyCraft - async pathfinding: invalidates an in-flight solve
+             this.path = null;
+             return false;
+         }
+ 
+         if (!newPath.sameAs(this.path)) {
++            ++this.sourbyNavigationGeneration; // SourbyCraft - async pathfinding: invalidates an in-flight solve
+             this.path = newPath;
+         }
+ 
+@@ -561,6 +589,7 @@ public abstract class PathNavigation {
+     }
+ 
+     public void stop() {
++        ++this.sourbyNavigationGeneration; // SourbyCraft - async pathfinding: invalidates an in-flight solve, even when the path is already null
+         this.path = null;
+     }
+ 

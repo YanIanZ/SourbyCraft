@@ -28,9 +28,13 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>A failed force is a failed commit: {@link #DISK} propagates every I/O error from a directory
  * force. The one tolerated case is a platform that cannot open a directory at all (Windows): there
  * the rename's own durability is all there is, the first occurrence is logged, and
- * {@link #degradedDirectoryForces()} stays non-zero so the gap is visible, never silent.</p>
+ * {@link #degradedDirectoryForces()} stays non-zero so the gap is visible, never silent ({@code /perf awf}
+ * shows the count and reason while it is non-zero).</p>
+ *
+ * <p>Public only for the two static degraded-state accessors; the primitives are the FILE
+ * backend's own.</p>
  */
-interface Durability {
+public interface Durability {
 
     /** Makes a file's content and metadata durable (fsync). */
     void forceFile(Path file) throws IOException;
@@ -41,6 +45,17 @@ interface Durability {
      * @throws IOException when the force fails; the caller's commit must fail with it
      */
     void forceDirectory(Path dir) throws IOException;
+
+    /**
+     * Publishes {@code from} under {@code to} by one atomic rename; the temporary file always sits
+     * next to its target. A filesystem that cannot rename atomically throws
+     * {@link java.nio.file.AtomicMoveNotSupportedException}, and the caller refuses the commit
+     * rather than copying: an object or a generation must appear whole under its name or not at
+     * all. On the seam so a test can model that refusal.
+     */
+    default void moveAtomically(final Path from, final Path to) throws IOException {
+        Files.move(from, to, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    }
 
     /**
      * Creates a directory and its missing ancestors, and makes the new entries durable: the parent

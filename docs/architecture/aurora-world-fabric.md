@@ -55,8 +55,13 @@ runtime evidence is described below; production qualification remains incomplete
   chunks are reported, never returned.
 - `GenerationStore`: the atomic commit primitive. Snapshot → `N.tmp` → read-back verify → publish →
   replace `CURRENT`. Recovery on open; retention; `readRetained`; blocking calls throw on region
-  threads.
-- `AwfWorldStore` (FILE backend): a chunk index per generation, and chunk bytes in a
+  threads. A generation is either a full `index` blob (manifest format 1, no header) or, only when
+  delta generations are on, a `delta` blob chained to a base generation by a hash-linked
+  `@format 2` / `@base` manifest (see *Delta generations* below). A manifest header this build does
+  not know is a corrupt generation, never ignored. A filesystem that refuses an atomic rename fails
+  the commit; nothing is published by copying.
+- `AwfWorldStore` (FILE backend): a chunk index per generation (a full index, or with
+  `aurora.awf.delta-generations` on a delta over a base generation), and chunk bytes in a
   content-addressed `ObjectStore`.
   - FULL rewrites every chunk.
   - INCREMENTAL writes only new objects (identical chunks share one).
@@ -147,8 +152,10 @@ backend (next section). MongoDB/MySQL backends are **planned, not implemented**.
 - **Command.** `/awf list | info <n> | create <n> [normal|nether|end] [void|flat|amplified|
   large_biomes] [generator=Plugin[:id]] [seed] [autoload] | create <n> from <template> [autoload] |
   load <n> | save <n> | unload <n> [nosave] | delete <n> confirm | autoload <n> on|off |
-  template list | template save <world> <template> | template delete <template> confirm`,
-  permission `sourbycraft.command.awf`.
+  template list | template save <world> <template> | template delete <template> confirm |
+  compact <world|all>`, permission `sourbycraft.command.awf`. `compact` forces every open store of
+  the world into a full index on the storage lane and prints `full: yes/no` per store (see
+  *Delta generations*).
 
 Verification (2026-10-06, local, macOS, JDK 25, 2 GiB heap, one server, no players): create →
 setblock → `/awf save` → unload → stores present and 0 `.mca` → load → block present → clean
@@ -514,7 +521,14 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
   does call them, also commit synchronously on the calling thread. A flush arriving on a region thread only starts an async
   commit, because region threads must not block on disk. **A crash loses the writes since the
   last commit**; region files lose less. `AwfRegionStorageTest.writesSinceTheLastCommitAreLostOnACrash`
-  pins this.
+  pins this. `AwfAsyncSaveRestartTest` (DEV-G restart/crash test for the asynchronous save path)
+  pins what a restart sees around a region-thread flush's lane commit: before the lane ran it,
+  only the previous commit; after it, everything it carried; a crash at any single fsync inside
+  it (13 crash points on the FILE backend, the `generations-root` directory force after the
+  pointer rename being the commit point) a whole previous or whole new generation, no leftover
+  `.tmp`, and the chunks still dirty for the next commit; and a `close` arriving while the lane
+  commit is mid-fsync with a newer region-thread write racing it ends in the newest bytes with
+  no generation rolled back (3 generations: flush, lane commit, close).
 - **Memory.** `aurora.awf.resident-chunks` (default 1024) clean chunks per storage stay in memory
   after a commit. Dirty chunks are never dropped, so a storage can exceed the limit by what is
   unsaved.
@@ -536,9 +550,12 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
 - **Commit cost.** Retained generations' object names are kept in memory. A commit only
   considers objects of the generation that fell out of retention, plus those a failed commit
   wrote, for deletion. The object directory is scanned once, when a writable store opens, for
-  objects a crash left behind. Still O(chunks in the storage) per commit: the whole chunk index is
-  rewritten. Unmeasured on large worlds. Every NBT write is serialized once more into a byte
-  array.
+  objects a crash left behind. By default (`aurora.awf.delta-generations = false`) a commit is still
+  O(chunks in the storage): the whole chunk index is rewritten, hashed and forced. With the opt-in
+  flag on, a commit writes a delta of the changed entries and compacts into a full index every 32
+  hops or once replaying the chain would cost as much as the full index (AWF-7, see *Delta
+  generations*). Either way the object forces are still O(objects) per commit. Unmeasured on large
+  worlds. Every NBT write is serialized once more into a byte array.
 - **Backends.** `AwfStore` is the backend contract: atomic commit, remembered deletions, caller
   owns arrays. `AwfBackend` selects where stores live: `aurora.awf.backend`, default `file`, the
   only one shipped. Another backend is server-internal code registered with
@@ -660,6 +677,108 @@ no performance effect is claimed.
   `level_overrides.dat` identical for all 10 worlds compared. A post-construction failure and a
   plugin generator were not run.
 
+### Region-file write concurrency review (DEV-G, 2026-10-20)
+
+Source review of the write/commit paths in `AwfRegionStorage` and `AwfWorld` as of this date,
+with the in-process tests that pin each finding. Unit-tested only; no server boot or soak is
+attributed to it. No performance effect is claimed.
+
+**The paths.** Region threads call `AwfRegionStorage.write` (read side of the transition lock,
+`AwfWorld.write`: `owned.put` then `dirty.put(version)`, both `ConcurrentHashMap`). Commits
+reach the store from three places: `maintain` (periodic, queued on the storage lane),
+`flush` (synchronous `saveNow` off the region threads; on a region thread it only queues a
+save through `maintain`) and `close` (synchronous). All three run `AwfWorld.commit` under
+`commitLock`, which serialises them and orders them by snapshot.
+
+**Findings.**
+
+1. *Write vs commit.* A commit snapshots the dirty versions, then reads the bytes. A write
+   racing it either lands its bytes before the read (the newer bytes are committed; the newer
+   version keeps the chunk dirty, so it is committed again) or after (the older bytes are
+   committed, the chunk stays dirty). Neither loses the write; the store never holds bytes older
+   than a version it cleared. Pinned by `AwfConcurrentFlushTest` (8 region-named threads, 40
+   rounds, a store that rejects any commit of older bytes over newer and any two commits inside
+   it at once) and `AwfCommitOrderTest` (the 2026-10-07 ordering fix).
+2. *Many regions flushing at once.* Each region-thread `flush` resets the commit clock and calls
+   `maintain`, which starts at most one save unless the "no save pending" check races the
+   `pendingSaves.offer` of another region's flush. Then a second save queues behind the first
+   and finds nothing dirty. Before this review it still called the store with empty maps: on
+   FILE that is a new (empty) generation plus the fsync of its commit, which also consumes one
+   of the `retained-generations` slots; on Redis a round trip. `AwfWorld.commitInOrder` now
+   returns without touching the store when an INCREMENTAL snapshot has nothing to commit
+   (`CommitResult.generation() == -1`); FULL and CHECKPOINT still run, since they rewrite or
+   verify what the store already holds. Pinned by
+   `AwfConcurrentFlushTest.anIncrementalCommitWithNothingDirtySkipsTheStore` and the
+   zero-empty-commit assertion of `flushesFromEveryRegionAtOnceLoseNoWriteAndNeverRegressTheStore`.
+3. *Foreground flush durability.* A `flush` off the region threads returns only after
+   `saveNow` committed a snapshot taken after every write that preceded the call (the write's
+   `dirty.put` happens-before the snapshot copy). Pinned by
+   `AwfConcurrentFlushTest.aForegroundFlushReturnsOnlyOnceEveryEarlierWriteIsInTheStore`,
+   which flushes from the test thread while region threads write and flush.
+4. *Bounded queueing.* `MAX_PENDING_SAVES` (16) refuses further saves; `maintain` logs that
+   refusal as a failed commit (`lastCommitFailed`). With the pending check in `maintain` the
+   duplicate from finding 2 is at most one extra save per racing region, so a world cannot reach
+   the cap through region flushes alone. Not tested beyond the pending-count assertions above.
+
+**Open.** The region-thread `flush` leaves the commit clock at 0 after its `maintain`, so the
+next periodic `maintain` commits as soon as anything is dirty instead of waiting a full
+interval (one extra commit after a `save-all`, by design: the flush asked for durability).
+A `close` racing a region-thread flush is covered by the lifecycle fence tests, not here.
+
+### Delta generations (AWF-7, 2026-10-20) — OPT-IN
+
+**Status.** Implemented and unit-tested; off by default; not booted with the flag on; no wall-time
+gain measured locally.
+
+- **Switch.** `aurora.awf.delta-generations` (TOML boolean, default `false`, RESTART_REQUIRED, read
+  early like the other `aurora.awf.*` keys; anything that is not a boolean is reported as an invalid
+  key and reads as `false`). Affects the `file` backend only.
+- **Flag off (default).** Every commit writes a full `index` blob under a format-1 manifest,
+  byte-identical to the writer of `12b1232c` (pinned by
+  `AwfDeltaGenerationTest.withDeltasOffEveryCommitIsAFullIndexInAManifestThePreviousBuildParses`,
+  which also runs the previous build's parser rules). Retention and object GC are exactly as before.
+- **Flag on.** A commit writes a `delta` blob (`x z <object>` new object, `x z -` tombstone that
+  shadows the region file, `x z drop` the chunk leaves the index) chained to the current generation
+  by `@base <M> <sha256 of M's manifest>`. The first commit, FULL mode, a chain already 32 hops long,
+  or a chain whose replay would reach the full index size writes a full index instead. Open cost is
+  at most one full index plus one index worth of delta entries. Format-1 stores open unchanged; the
+  migration is lazy.
+- **Retention.** `retained-generations` still means the newest R committed generations, each fully
+  replayable. A chain-only ancestor stays on disk while a retained generation is chained to it and
+  is pruned after the commit that drops the last such child. Object liveness is the union of the
+  replayed states of the retained generations.
+- **Crash consistency.** Unchanged commit order (objects forced, then generation, then `CURRENT`
+  as the single commit point); a base is read and hash-linked before anything is written.
+  Proved in-process with the recording `Durability` seam (`AwfDeltaGenerationTest` 15,
+  `AwfDurabilityTest` 14), which proves order and recovery logic, not what a disk kept.
+- **Measured (uncertified local A/B, `AwfBulkWriteBenchmarkTest`, Apple M2, APFS on a USB SSD,
+  3,364 synthetic chunks, 336 changed per commit, 5 runs, wall ms min/median).** Full-index commit
+  1,618 / 1,649; delta commit 1,665 / 1,688 (second sample 1,567 / 1,650); no wall-time win, because
+  the 336 object forces dominate. What shrank is the generation step: 238 KB → 23 KB per commit
+  here, and in an isolated 100,000-chunk probe 7.2 MB → 0.7 MB (50.3 → 31.5 ms for the step alone).
+  The force count did not change. Not a release claim.
+- **Why opt-in.** A format-2 manifest is unreadable by builds before AWF-7 (the previous parser
+  rejects a manifest line that is not exactly three tab-separated fields), so deltas break the
+  SEC-3 rollback to an older jar, and the measured benefit is index bytes, not wall time.
+- **Downgrade (with deltas on).** A pre-AWF-7 build skips the retained delta generations as
+  damaged, and its writable open deletes the objects only those generations reference,
+  irreversibly. Sequence: (1) back up every `<folder>.awf` directory if the retained delta rollback
+  points matter; (2) set `aurora.awf.delta-generations = false` and restart on the current build —
+  every store the server opens is compacted into a full index at open — or, without a restart, run
+  `/awf compact <world|all>` (worlds must be loaded); (3) check that `/awf compact all` prints
+  `full: yes` for every store; (4) only then start the older jar. The delta-only history older
+  than the compacted generation is lost at that point (the current state is intact). A store whose
+  world the server never opens keeps its chain until it loads on this build.
+- **Tests.** `AwfDeltaGenerationTest` 15 (including the loss model
+  `aPreAwf7WritableOpenDeletesTheObjectsOnlyRetainedDeltasReferenceIrreversibly`, which copies the
+  previous build's rules into `HeadBuildReader`), `AwfCompactionLifecycleTest` 2, `AwfSettingsTest`
+  9, `AwfCommandTest` 7, `AwfDurabilityTest` 14 (incl. an atomic-rename refusal); 263 `awf` tests
+  with only the 4 known suite initializationErrors. A Codex review found the default-off path clean
+  and two P2 problems on the flag-on rollback path, both fixed by the compaction at open and
+  `/awf compact`. Not done: a real pre-AWF-7 jar (its rules are modelled in the test), a rewrite of
+  retained deltas as full indexes (not crash-safe to do in place), conversion of stores never
+  opened.
+
 ### Audit fixes 2026-10-14 (AWF-1 … AWF-10)
 
 From a code audit of AWF; each finding was checked against the code before it was fixed, and each
@@ -698,7 +817,9 @@ unit tests plus one local boot (see the end of this list); no soak, no multi-ser
   NBT heap accounting (`SlimeImporterTest.aBlobOverTheLimitIsRefusedBeforeAllocation`).
 - **AWF-10 docs** — this section, the patch numbers and hook location above, and `WorldRole`'s
   javadoc (it said no world used a role; VANILLA, INSTANCE, TEMPLATE and READ_ONLY are used).
-- **Not done:** AWF-7 (delta generations) is roadmap only.
+- **AWF-7 (2026-10-20):** delta generations are implemented but OPT-IN, see *Delta generations*
+  below. Not done: a boot with the flag on, `/awf compact` on a live server, a wall-time gain
+  (none measured locally).
 - **Local boot, 2026-10-14** (slim jar from this tree, fresh flat world, offline, no players): six
   `save-all`/`save-all flush` in a row, `awf create t1 normal 5`, `awf save t1` ("Saved t1
   (committed)"), `save-all flush`, `awf unload t1` ("Unloaded t1"), `stop` → exit 0, no exception.

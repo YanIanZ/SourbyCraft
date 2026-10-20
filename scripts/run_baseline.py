@@ -420,6 +420,11 @@ def capture(jar, plan, output, args, tools):
     try:
         server = Server(command, output)
         record["provenance"]["startup_seconds"] = server.await_ready(STARTUP_TIMEOUT)
+        record["provenance"]["recovery_seconds"] = args.recovery
+        idle_live = None
+        if args.recovery:
+            idle_live, text = live_heap(jcmd, server.process.pid)
+            (output / "heap-recovery-idle.txt").write_text(text)
         print(f"[{plan.name}] ready in {record['provenance']['startup_seconds']:.1f}s; "
               f"applying {len(plan.setup)} setup commands", flush=True)
         before_setup = len(server.text)
@@ -501,6 +506,19 @@ def capture(jar, plan, output, args, tools):
             with (output / name).open("w") as target:
                 subprocess.run([str(jcmd), str(server.process.pid), diagnostic],
                                stdout=target, check=True)
+        if args.recovery:
+            # After the timed recording has closed, so none of these forced collections
+            # lands in the measured window.
+            loaded_live, text = live_heap(jcmd, server.process.pid)
+            (output / "heap-recovery-loaded.txt").write_text(text)
+            if swarm is not None:
+                swarm.stop()
+            print(f"[{plan.name}] load stopped; recovering {args.recovery}s", flush=True)
+            server.hold(args.recovery)
+            recovered_live, text = live_heap(jcmd, server.process.pid)
+            (output / "heap-recovery-recovered.txt").write_text(text)
+            record["heap_recovery"] = baseline_metrics.heap_recovery(
+                idle_live, loaded_live, recovered_live, args.recovery)
         server.send("save-all", "stop")
         shutdown = time.monotonic()
         server.process.stdin.close()
@@ -596,7 +614,19 @@ def certify(plan, record, args):
     return (not reasons), "; ".join(reasons) if reasons else "meets baseline requirements"
 
 
-def main():
+def live_heap(jcmd, pid, run=subprocess.run):
+    """Force a full collection, then read the used heap: the live set at this moment.
+
+    Returns (bytes or None, the raw ``GC.heap_info`` text). Only for points outside the
+    timed JFR window, because the forced collection is itself a pause.
+    """
+    run([str(jcmd), str(pid), "GC.run"], check=True, capture_output=True, text=True)
+    text = run([str(jcmd), str(pid), "GC.heap_info"], check=True, capture_output=True,
+               text=True).stdout
+    return baseline_metrics.heap_used_bytes(text), text
+
+
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("jar", type=Path)
@@ -632,9 +662,20 @@ def main():
     parser.add_argument("--allow-shared-machine", action="store_true",
                         help="Start even though another server is running. The run will not "
                              "be certified; use it for a quick check, never for a reference.")
+    parser.add_argument("--recovery", type=int, default=0, metavar="SECONDS",
+                        help="Measure post-load heap recovery: live heap (forced full GC) "
+                             "before setup, right after the measurement window, and again "
+                             "after the clients and network load stop and the server idles "
+                             "this long. Off (0) by default; the forced collections all fall "
+                             "outside the timed JFR window.")
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
-    if args.duration < 1 or args.warmup < 0:
-        parser.error("duration must be positive and warmup cannot be negative")
+    if args.duration < 1 or args.warmup < 0 or args.recovery < 0:
+        parser.error("duration must be positive; warmup and recovery cannot be negative")
     jar = args.jar.resolve(strict=True)
     tools = jdk_tools()
     if args.plugins_dir and not args.plugins_dir.is_dir():

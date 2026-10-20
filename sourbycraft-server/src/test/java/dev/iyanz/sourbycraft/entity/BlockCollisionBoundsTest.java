@@ -7,7 +7,7 @@ import net.minecraft.world.phys.AABB;
 import org.junit.jupiter.api.Test;
 
 /**
- * Arithmetic compatibility checks for collision patch 0019. The oracle is AABB.move,
+ * Arithmetic compatibility checks for collision patch 0018 (formerly 0019). The oracle is AABB.move,
  * followed by the original object overload. These tests cover numeric semantics, not
  * world traversal, predicates, or region ownership; those require integration coverage.
  */

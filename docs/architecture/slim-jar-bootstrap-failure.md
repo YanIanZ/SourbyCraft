@@ -1,5 +1,7 @@
 # Slim bootstrap incident — fixed in SourbyClip 3.0.26
 
+> **Numbering (annotated 2026-10-20):** "patch 0018" here is the tracker candidate of 2026-09-20, later withdrawn (no file); the collision patch it was stacked with is feature patch 0018 today, and the old 0017 is still 0017.
+
 Found 2026-09-20 while trying to verify patch 0018. Recorded because it affects releases, not
 just measurement, and because it contradicts a claim made earlier the same day.
 

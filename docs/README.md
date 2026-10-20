@@ -56,7 +56,7 @@ disagree, the code wins ([DEVELOPMENT.md](../DEVELOPMENT.md), truthfulness polic
 |---|---|
 | Entry point | [AURORA.md](architecture/AURORA.md), [aurora-engine-package.md](architecture/aurora-engine-package.md), [AURORA-ENGINE-SYSTEM.md](architecture/AURORA-ENGINE-SYSTEM.md), [AURORA-INDEPENDENT-ENGINE.md](architecture/AURORA-INDEPENDENT-ENGINE.md) |
 | Execution & threading | [execution-contract.md](architecture/execution-contract.md), [aurora-resource-governor.md](architecture/aurora-resource-governor.md), [executors.md](architecture/executors.md), [executor-inventory.md](architecture/executor-inventory.md), [threading.md](architecture/threading.md), [region-parallelism.md](architecture/region-parallelism.md), [chunk-workers.md](architecture/chunk-workers.md), [region-io-audit.md](architecture/region-io-audit.md) |
-| Engine ownership | [engine-chunk-world.md](architecture/engine-chunk-world.md), [engine-entity-ai.md](architecture/engine-entity-ai.md), [engine-network.md](architecture/engine-network.md), [engine-storage.md](architecture/engine-storage.md) |
+| Engine ownership | [engine-chunk-world.md](architecture/engine-chunk-world.md), [engine-entity-ai.md](architecture/engine-entity-ai.md), [engine-network.md](architecture/engine-network.md), [network-allocation-copy-audit.md](architecture/network-allocation-copy-audit.md), [engine-storage.md](architecture/engine-storage.md) |
 | World storage (AWF) | [aurora-world-fabric.md](architecture/aurora-world-fabric.md) |
 | Plugin compatibility | [aurora-plugin-bridge.md](architecture/aurora-plugin-bridge.md), [compat-boundary.md](architecture/compat-boundary.md), [compat-vs-performance.md](architecture/compat-vs-performance.md) |
 | Startup & bootstrap | [aurora-instant-startup.md](architecture/aurora-instant-startup.md), [bootstrap-download-audit.md](architecture/bootstrap-download-audit.md), [slim-jar-bootstrap-failure.md](architecture/slim-jar-bootstrap-failure.md), [BOOTSTRAP.md](BOOTSTRAP.md), [CDS.md](CDS.md) |
@@ -80,6 +80,7 @@ Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](d
 [REMOTE-REPOSITORIES.md](development/REMOTE-REPOSITORIES.md) (every remote the build, CI and first boot reach, fallback order, offline behaviour).
 [CONFIG-FILE-RENAME-PLAN.md](development/CONFIG-FILE-RENAME-PLAN.md) (PROPOSED plan to rename `canvas-server.yml`/`canvas-worlds.yml` without breaking existing servers; nothing implemented).
 [scratch-reentrancy-proof.md](architecture/scratch-reentrancy-proof.md) (DEV-A: every mutable scratch field the feature patches add, its re-entry paths and verdict).
+[async-path-snapshot-audit.md](architecture/async-path-snapshot-audit.md) (DEV-E: every region member an off-thread path solve reads, vanilla vs `SnapshotPathRegion` answer, verdict per member; source audit, no server run).
 [PLUGIN-NETTY-GUIDANCE.md](development/PLUGIN-NETTY-GUIDANCE.md) (for plugin authors and operators: which events run on a Netty event loop, why blocking there hurts, what to do instead; from a source audit, not a benchmark).
 
 ### Guides (`guides/`)

@@ -7,7 +7,7 @@ import java.util.Objects;
  * One reading of the region scheduler, taken from a command thread without any lock.
  *
  * <p>Every field is either a value the engine publishes for cross-thread reads, or a plain field
- * read racily and therefore labelled approximate by {@link SchedulerQueueView}. What the engine
+ * read racily and therefore labelled approximate by {@code PerfSchedulerView}. What the engine
  * keeps private to a scheduler lock or a region is not in here at all; the view prints those as
  * "n/a" with the reason, see {@link SchedulerQueueCollector}.</p>
  *
@@ -17,6 +17,7 @@ import java.util.Objects;
  * @param runners          what each scheduler thread was doing at the moment it was looked at
  * @param global           the global tick's lateness and in-progress tick
  * @param worlds           region counts per world, in server world order
+ * @param lateTicks        late tick starts since boot
  */
 public record SchedulerQueueSnapshot(
     boolean available,
@@ -24,7 +25,8 @@ public record SchedulerQueueSnapshot(
     Scheduler scheduler,
     Runners runners,
     GlobalTick global,
-    List<WorldRegions> worlds
+    List<WorldRegions> worlds,
+    LateTicks lateTicks
 ) {
 
     /** Marker for a nanosecond figure that could not be read or does not apply. */
@@ -36,10 +38,11 @@ public record SchedulerQueueSnapshot(
         Objects.requireNonNull(runners, "runners");
         Objects.requireNonNull(global, "global");
         worlds = List.copyOf(worlds);
+        Objects.requireNonNull(lateTicks, "lateTicks");
     }
 
     public static SchedulerQueueSnapshot unavailable(final String reason) {
-        return new SchedulerQueueSnapshot(false, reason, Scheduler.UNKNOWN, Runners.NONE, GlobalTick.NONE, List.of());
+        return new SchedulerQueueSnapshot(false, reason, Scheduler.UNKNOWN, Runners.NONE, GlobalTick.NONE, List.of(), LateTicks.NONE);
     }
 
     /**
@@ -90,6 +93,26 @@ public record SchedulerQueueSnapshot(
     }
 
     /**
+     * Tick starts counted by the engine since boot. A tick is late when it starts more than
+     * {@link SchedulerQueueCollector#OVERDUE_THRESHOLD_NANOS} after its scheduled start, i.e. it
+     * waited for a scheduler thread. A tick that overran pushes its next start to its own end, so
+     * an overrunning region is not counted unless it then also waited for a thread.
+     *
+     * @param regionStarted region ticks started; {@link #NONE} when unknown
+     * @param regionLate    of those, started late; {@link #NONE} when unknown
+     * @param globalStarted global ticks started; {@link #NONE} when unknown
+     * @param globalLate    of those, started late; {@link #NONE} when unknown
+     */
+    public record LateTicks(long regionStarted, long regionLate, long globalStarted, long globalLate) {
+        public static final LateTicks NONE = new LateTicks(SchedulerQueueSnapshot.NONE, SchedulerQueueSnapshot.NONE,
+            SchedulerQueueSnapshot.NONE, SchedulerQueueSnapshot.NONE);
+
+        public boolean known() {
+            return this.regionStarted >= 0L && this.regionLate >= 0L && this.globalStarted >= 0L && this.globalLate >= 0L;
+        }
+    }
+
+    /**
      * Region counts of one world.
      *
      * @param world             world name
@@ -104,6 +127,9 @@ public record SchedulerQueueSnapshot(
      * @param withPendingTasks  regions reporting queued intermediate tasks or packets
      * @param tickInProgress    regions with a tick in progress (task runs do not count)
      * @param longestTickNanos  the longest such in-progress tick so far; 0 when none
+     * @param queuedTickTasks   tick-task queue entries summed over the world's live regions
+     * @param queuedChunkTasks  chunk-task queue entries summed over the world's live regions
+     * @param largestRegionQueue the most entries (tick + chunk) queued in one region; 0 when none
      */
     public record WorldRegions(
         String world,
@@ -117,7 +143,10 @@ public record SchedulerQueueSnapshot(
         long worstOverdueNanos,
         int withPendingTasks,
         int tickInProgress,
-        long longestTickNanos
+        long longestTickNanos,
+        long queuedTickTasks,
+        long queuedChunkTasks,
+        long largestRegionQueue
     ) {
         public WorldRegions {
             Objects.requireNonNull(world, "world");

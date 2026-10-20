@@ -1,13 +1,13 @@
 # Aurora Instant Startup
 
-> **Role:** Aurora Instant Startup specification and implementation status. **Status:** Active; feature is PARTIAL (no transform/AWF-index caching, no cold/warm measurement).
+> **Role:** Aurora Instant Startup specification and implementation status. **Status:** Active; feature is PARTIAL (no AWF-index caching; no transform exists to cache; no cold/warm measurement).
 >
 > Entry point: [docs/architecture/AURORA.md](AURORA.md).
 
 Aurora Instant Startup removes repeated deterministic work from warm restarts without skipping plugin or world lifecycle semantics.
 
 ## Cacheable
-Plugin descriptor parsing, class index, compatibility analysis, transform outputs, dependency graph, AWF metadata/indexes and previous startup timing profile.
+Plugin descriptor parsing, class index, compatibility analysis, transform outputs (none exist today, see below), dependency graph, AWF metadata/indexes and previous startup timing profile.
 
 ## Never cache
 Plugin/ClassLoader instances, Bukkit services, worlds/entities, scheduler handles, open files, sockets/channels or database connections.
@@ -49,8 +49,12 @@ Do not automatically parallelize plugin onLoad/onEnable, service registration, e
   `/sys` shows the index, the startup profile and dependency problems.
   `-Daurora.startup.cache=false` disables the file (RESTART_REQUIRED).
 
-Not implemented: caching transform outputs and AWF indexes. No cold/warm startup measurement has
-been taken, so no startup-time improvement is claimed.
+Not implemented: caching AWF indexes. There is no transform output to cache: SourbyCraft rewrites
+no plugin bytecode (the only class reader is the read-only constant-pool scan, already cached as the
+compatibility scan; the Aurora Bridge routes at runtime through patched scheduler/provider classes;
+the Cherry mixin engine is external and off by default). Whether a transform is intended is an owner
+decision; a cache needs a producer first. No cold/warm startup measurement has been taken, so no
+startup-time improvement is claimed.
 
 ## Telemetry
 Measure total startup and phase times plus hit/miss/rebuild counts. Cold and warm startup are separate benchmark classes.

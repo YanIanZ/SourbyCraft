@@ -119,6 +119,7 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 - [x] **SEC-4** `SourbyBootstrap` kode mati (entry point = SourbyClip); grep guard download offline
   di CI tidak mungkin cocok — hapus atau sambungkan, tolak staging jar dengan versi clip berbeda, perbaiki grep CI dan docs (audit §3)
   — sebagian `db1be477` (2026-10-20): `SourbyBootstrap`/`CdsEnvironment`/`BootstrapManifest` + jalur `ensure()` mati di `LibDownloader` dihapus (transport seam untuk provisioning tetap), docs `CDS.md` + AGENTS.md "Boot-time network" dikoreksi ke SourbyClip; compileJava/compileTestJava hijau, LibDownloaderTest 2/2, test_plugin_provisioning.py 12 OK; BELUM: staging gate versi clip (snippet di AGENT-COORDINATION.md, area `update/**`) dan perbaikan grep CI offline (snippet; `build.yml` milik CI)
+  — sisa selesai 2026-10-20: gate launcher `update/LauncherCompatibility` (`Outcome.CLIP_INCOMPATIBLE`, dipanggil `SourbyUpdater.verifyLauncherOrThrow` setelah SHA-256/tanda tangan): `META-INF/MANIFEST.MF` (`Clip-Version`, `SourbyClip-Protocol`) dan `sourbyclip.properties` jar staged harus cocok, protocol 1 dan versi >= 3.0.23; metadata hilang/kosong/tak terbaca/tidak sepakat = ditolak (fail-closed), unduhan dihapus; `LauncherCompatibilityTest` (21 `@Test`) + 155 tes paket `update` (SourbyUpdaterCheckTest, UpdateCommandReplyTest). Grep offline di `build.yml` (langkah "Bootstrap failure recovery and offline boot") diganti ke string log SourbyClip nyata (`[Sourbyclip] Failed to download original jar`, `Classpath prepared: N entries`, `Done (`) dan diputar ulang terhadap log CI run 39398396573; belum teramati di run CI baru (jar `release/SourbyCraft-26.2-REL.jar` lama berisi `Clip-Version: 3.0.21` tanpa protocol dan kini akan ditolak)
 - [x] **OBS-1** Password Redis di `aurora.awf.redis.uri` bocor ke report spark — sembunyikan key,
   scrub userinfo URI di semua tempat (audit §4)
   — selesai `1b33fe1e` (2026-10-20): `aurora.awf.redis.uri` disembunyikan dan userinfo `scheme://user:pass@` di-scrub di seluruh nilai config spark; `SourbyServerConfigProviderTest` +3
@@ -217,11 +218,12 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   persis dengan sighting `/say` (`Commands.java:461` ← `RegionizedServer.globalTick:278`); jar dengan perbaikan
   ini 0/37 NPE, 37/37 dieksekusi di tick pertama setelah `Done`, stop bersih exit 0. Sighting `/say` saat
   reload di demo cocok dengan stack ini; waktunya tidak bisa dipastikan ulang dari log.
-- [-] Review konkurensi penulisan region-file (DEV-G), dimulai 2026-10-06. Diperbaiki: dua commit AWF
+- [x] Review konkurensi penulisan region-file (DEV-G), dimulai 2026-10-06. Diperbaiki: dua commit AWF
   bisa mendarat di store dalam urutan terbalik dari snapshot-nya, sehingga store menyimpan isi chunk
   lama (`AwfCommitOrderTest`); `AwfRegionStorage.write` vs `close` kini saling eksklusif
   (`AwfLifecycleFenceTest.aWriteAdmittedJustBeforeCloseIsCommittedByIt`, unit test 2026-10-07, belum
-  boot). Sisa: flush bersamaan dari banyak region, dan dokumen review
+  boot).
+  — selesai 2026-10-20 (unit, tanpa boot/soak): flush bersamaan dari banyak region ditelaah dan dokumennya ada di `aurora-world-fabric.md` "Region-file write concurrency review (DEV-G, 2026-10-20)" (4 temuan); temuan diperbaiki: dua flush region yang berpacu memasukkan save kedua ke antrean sehingga store menerima map kosong = generasi FILE kosong + fsync (makan slot `retained-generations`) / round trip Redis; `AwfWorld.commitInOrder` kini mengembalikan -1 tanpa menyentuh store bila snapshot INCREMENTAL tidak punya apa pun; `AwfConcurrentFlushTest` 3 (mutasi guard dimatikan: tes deterministik gagal), `AwfCommitOrderTest`, `AwfLifecycleFenceTest` 5, `AwfRegionStorageTest` 24 hijau; belum: soak multi-world, jalur penolakan `MAX_PENDING_SAVES` hanya ditelaah
 - [-] Bukti "tidak ada regresi kepemilikan region" dan "tidak ada regresi persistensi" (gate rilis):
   persistensi tree kandidat 20/20 di demo 2026-10-07 (`verify_persistence_panel.py`, 3 restart);
   kepemilikan region: fixture bridge 20 marker OK di CI 37515867230, soak 100 menit tanpa pelanggaran.
@@ -240,26 +242,32 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   tanpa plugin. Build 47: run `plugins-10` 2026-10-07 di demo ~100 menit dengan 10 bot (terputus
   oleh jaringan lokal; TIDAK tersertifikasi): TPS median 20, 2 dip, merge region 10 → 3–4
   (`docs/BASELINE.md`). Sisa: 2 jam penuh dari host yang stabil, seri heap
-- [ ] Audit lengkap kebenaran snapshot async pathfinding (DEV-E, ROADMAP M5)
+- [x] Audit lengkap kebenaran snapshot async pathfinding (DEV-E, ROADMAP M5)
+  — selesai 2026-10-20 di tingkat audit sumber (flag `aurora.entity.async-pathfinding` tetap OFF): sisi mob di `async-pathfinding-spec.md` (ENG-8, `MobPathSnapshotTest`); sisi blok di `docs/architecture/async-path-snapshot-audit.md` (tabel anggota `PathNavigationRegion` vs `SnapshotPathRegion`, 8 temuan) + `SnapshotPathRegionAuditTest` (3) + `SnapshotPathRegionTest`; satu-satunya divergensi kebenaran (chunk tak termuat: snapshot menjawab AIR/OPEN, vanilla `*IfLoaded` null/BLOCKED) diperbaiki di patch MC 0048; belum: run flag-on / soak, perbedaan `getBlockEntity`
 - [x] Pembatalan/shutdown async pathfinding: tes penghapusan entity, unload world, dan target
   bergerak saat solve sedang berjalan (ROADMAP M5)
   — selesai 2026-10-20: `AsyncPathCancellationTest` (17) atas model `AsyncPathNavigationModel` + `AsyncPathPatchShapeTest` (5) yang mengunci bentuk patch 0006; lambda patch sendiri dan `Mob` nyata belum dijalankan (butuh server)
 - [x] Bukti reentrancy scratch milik entity (posisi skalar) (DEV-A)
   — selesai 2026-10-20 untuk scratch feature patch: `docs/architecture/scratch-reentrancy-proof.md` (inventaris 0009/0012/0006/0039/0042 + 0003, semua SAFE dengan bukti); satu UNSAFE-benign diperbaiki di MC 0044 (`lastKnownSpeedX/Y/Z` bisa robek lintas thread via Dolphin `FollowPlayerRiddenEntityGoal`; kini satu field turunan), `ScratchReentrancyTest` 7; belum: scratch baseline engine, bukti runtime/soak
+  — DIBUKA LAGI 2026-10-20 (review Codex): field turunan 0044 `double` non-volatile masih bisa robek (JLS §17.7); F3 token validitas null bisa menghidupkan lagi navigasi setelah `stop()` kedua; tes ASM punya celah setelah rekompilasi; 0009 mengubah ambang `1.0E-5F` → `1.0E-5D` (deviasi vanilla). Perbaikan di papan
+  — ditutup 2026-10-20: temuan review ulang independen (Codex) diperbaiki di patch MC 0046 (predikat gerak horizontal dipublikasikan sebagai `volatile boolean` dengan ambang float `1.0E-5F`) dan 0047 (generasi navigasi membatalkan path async yang sedang berjalan, termasuk retarget dengan node yang sama); `ScratchReentrancyTest`, `AsyncPathPatchShapeTest`, `AsyncPathCancellationTest`, `AsyncPathValidityTest` diperbarui, mutasi R1-R3 tertangkap. Batas jujur: F3 di `scratch-reentrancy-proof.md` SAFE hanya untuk invalidasi yang terenumerasi (model tulisan tangan, bukan lambda patch nyata); TIDAK tercakup: scratch baseline engine (`minecraft-patches/sources`, 113 patch entity) dan bukti runtime/soak
 - [-] Bukti runtime bahwa thread region tidak pernah blok pada I/O eksternal (saat ini baru audit statis)
 
 ### Jaringan dan keamanan
 - [x] Verifikasi event loop Netty tidak melakukan I/O blocking yang tidak terkait (DEV-H)
   — audit sumber `41a444f5` (2026-10-20) di `region-io-audit.md`; H1 (MC 0035) dan H4/H5 (MC 0037) diperbaiki; H2/H3/H6 = panduan plugin `PLUGIN-NETTY-GUIDANCE.md`; tanpa bukti runtime
-- [ ] Pertahankan limit packet/security (`sourbycraft-security.yml`) di setiap perubahan network.
+- [x] Pertahankan limit packet/security (`sourbycraft-security.yml`) di setiap perubahan network.
   Catatan audit 2026-10-14: file itu tidak punya consumer sejak `6b774810`, jadi saat ini tidak ada
   limit yang ditegakkan — lihat **SEC-1** di bawah
+  — selesai 2026-10-20 (catatan audit di atas sudah usang): SEC-1 `41a444f5` membangun ulang consumer (`security/SecurityGuards`, 20 `Limit`, MC 0034/0036/0038/0040/0041); aturan "setiap key punya consumer" dikunci `SecurityGuardsTest.everyShippedYamlLeafHasAConsumerAndEveryGuardDefaultsToLog` (28 tes) dan `SecurityLimitPinTest` (3) mengunci 19 limit + `ipv6-prefix` 64 (default kode == tabel == YAML terkirim), jadi perubahan yang melonggarkan limit gagal di suite; belum: soak keamanan / boot proxy
 
 ### SourbyClip (sekarang bisa dikerjakan di repo `YanIanZ/SourbyClip` dengan Codex)
 - [-] Audit timeout downloader, retry/failure, validasi SHA/cache, dan konkurensi di dalam
   SourbyClip: kandidat lokal 3.1.1 sudah diperiksa dan diuji (29 tes Java; timeout connect/read,
-  staging SHA, mirror fallback, worker bounded). Whole-transfer deadline/size cap dan pin rilis
-  masih terbuka; bukti di `docs/architecture/bootstrap-download-audit.md` (DEV-L, AURORA-I)
+  staging SHA, mirror fallback, worker bounded). Pin rilis sudah masuk (SourbyClip 3.1.2 @ `85b4dd70`,
+  `5a3806f1`, SEC-5); masih terbuka: whole-transfer deadline dan size cap launcher (repo privat
+  SourbyClip: soket hanya dibatasi 30 s connect/read; butuh perubahan di repo itu, rilis, dan re-pin —
+  keputusan owner); bukti di `docs/architecture/bootstrap-download-audit.md` (DEV-L, AURORA-I)
 - [-] Kualifikasi cold-download dari remote (cold bootstrap pernah gagal cek hash Mojang dengan exit 0)
 
 ---
@@ -307,12 +315,14 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 ### Scheduler dan pathfinding
 - [ ] Benchmark pathfinding sync vs async
 - [ ] Soak kompatibilitas perilaku mob
-- [ ] Pindahkan pool async path ke belakang AuroraExecution dengan callback owner-context eksplisit (M5)
+- [x] Pindahkan pool async path ke belakang AuroraExecution dengan callback owner-context eksplisit (M5)
+  — selesai 2026-10-20 (menunggu commit): pool kini lane `ResourceGovernor.Lane.PATHFINDING` (`GovernedLane`, antrean 1024, menolak bukan caller-runs, thread `max(1, cores/4)`; "AuroraExecution" dibaca sebagai Resource Governor, satu-satunya execution fabric Aurora di kode — tidak ada kelas `AuroraExecution`); callback owner-context eksplisit sudah ada (`execution/OwnerHandoff`, `RegionOwnerHandoff`, `perf/AsyncPathCompletion`, dipakai MC 0006); `ResourceGovernorTest` 10, `LiveIncidentSourcesTest` 1, `UnboundedQueueAuditTest` 3, `AsyncPath*` hijau; default fitur tetap OFF; `/perf governor` dan metadata spark kini memuat lane "Pathfinding" saat async pathfinding menyala; belum: benchmark sync vs async, soak mob (butuh server)
 
 ### Memori
 - [ ] Verifikasi alokasi MB/s terhadap JFR
 - [ ] Verifikasi RSS/cgroup di Linux/container
-- [ ] Workflow laporan kelas yang paling banyak dialokasikan
+- [x] Workflow laporan kelas yang paling banyak dialokasikan
+  — selesai (alat + prosedur; terverifikasi 2026-10-20): `scripts/profile_server.py` merekam JFR `settings=profile` (termasuk `jdk.ObjectAllocationSample`); `scripts/rank_hotspots.py` `allocation_hotspots` meranking byte teralokasi per kelas / site / thread dan mencocokkan dengan `jdk.ThreadAllocationStatistics` (faktor overstatement dicetak); alur di `docs/BASELINE.md` "Ranking hot spots"; `test_rank_hotspots.py` 37 OK; belum: laporan dari run tersertifikasi (butuh server) — hasil nyata baru berupa bukti ranking di `hotspots-entity-ai.md` (run tak tersertifikasi)
 - [x] Tes retensi: player disconnect, chunk unload, world unload
   — selesai 2026-10-20: 46 tes retensi (bridge, anchor region, RegionMetricsRegistry, speedtest, AwfEngine, lease Redis, unload AuroraWorlds, HudBars) via `ReferenceQueue`; bocor diperbaiki: `FoliaRegionBackend.anchors` memegang World kuat → `AnchorCache` weak; belum: GeoUtil cache, pearls engine
 
@@ -321,9 +331,10 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   (sudah diimplementasikan, perlu validasi)
 - [x] `/ram` lengkap; `/perf region <world> <x> <z>`
   — selesai 2026-10-20: `/ram` sesuai PLAN.md (alokasi/GC young-old/last pause `n/a` jujur, belum diinstrumentasi); `/perf region <world> <x> <z>` via `RegionLocator` (lookup regioniser approximate, tanpa refresh generasi lain, nama world case-insensitive); belum diamati di server hidup
-- [-] View antrean region scheduler (sebagian 2026-10-20: `/perf scheduler` ada — jenis scheduler, thread configured/pool/alive, region per state READY/TRANSIENT/TICKING/DEAD, region terlambat, tick terlama; antrean task per region dan histori late-tick `n/a`, butuh feature patch. Teks lama: `/perf scheduler` tidak ada — view yang ada di
+- [x] View antrean region scheduler (sebagian 2026-10-20: `/perf scheduler` ada — jenis scheduler, thread configured/pool/alive, region per state READY/TRANSIENT/TICKING/DEAD, region terlambat, tick terlama; antrean task per region dan histori late-tick `n/a`, butuh feature patch — kini nyata lewat patch 0045, lihat catatan di bawah. Teks lama: `/perf scheduler` tidak ada — view yang ada di
   `PerfCommand.VIEWS`: `lanes` beban CPU per lane, `governor` antrean lane governed, `async`
   pool path; antrean milik region scheduler sendiri belum ditampilkan di mana pun)
+  — selesai 2026-10-20: patch MC 0045 menambah `LongAdder` lock-free untuk kedalaman antrean task region (tick/chunk) dan hitungan tick terlambat; `/perf scheduler` (`PerfSchedulerView`) menampilkan jumlah task antre per region dan hitungan late-tick-start sejak boot; `RegionTaskQueueDepthTest`, `TickLateStartCounterTest`, `SchedulerQueueCollectorTest`, `PerfSchedulerViewTest`. Tetap `n/a` (dengan alasan, tidak diperkirakan): run queue scheduler dan thread idle, antrean task global (antrean privat tanpa accessor ukuran), dan antrean chunk-task seluruh dunia (global); belum diamati di server hidup
 - [ ] Verifikasi config SourbyCraft/Aurora tampil benar di Spark web viewer
 - [x] Klasifikasi thread region yang lebih baik di Spark
   — selesai 2026-10-20: `SparkThreadClass` + metadata `sourbycraft-threads` di tiap laporan spark (region/global tick, chunk worker/IO, lane Sourby, async path, AWF maintenance, netty dapat dibedakan saat di-sample); tidak bisa: global vs region tick (thread sama) dan lane `SourbyCraft-IO-n` (virtual thread, tak terlihat spark); default dumper tidak berubah
@@ -362,7 +373,8 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   fingerprint kelas dan feature patch 0010 ditulis; regresi dispatch kini lulus (`BridgeTargetRoutingTest`
   9/9, paket bridge 61/61, 2026-10-07), NPE meta null diperbaiki (B87). Plugin itu sendiri sudah di-port ke Folia
   (repo eksternal `~/Sourby/ssb/SSB2`, diverifikasi di Sourby Demo 2026-10-06), jadi adapter hanya
-  berlaku untuk jar 2026.3 upstream yang tidak di-port. Adapter dengan jar nyata belum diuji;
+  berlaku untuk jar 2026.3 upstream yang tidak di-port. Adapter dengan jar nyata diuji tingkat unit 2026-10-20
+  (`SuperiorSpawnRealJarTest` 4/4 terhadap jar nyata, env-gated `SOURBY_SSB2_JAR`/`SOURBY_SSB2_FOLIA_JAR`, CI melewatinya; temuan: callback jar port-Folia memakai `BukkitExecutor.sync(Location, Runnable)` sehingga adapter mengembalikan null lewat cek bentuk, bukan penolakan fingerprint); belum ada run server;
   `docs/development/SUPERIORSKYBLOCK-BRIDGE.md`, SPEC B81/V36. Belum qualified seluruh plugin.
 - [-] Port scheduler global + disable cleanup dari LightingLuminol/Luminol (Bacteriawa);
   source adapter dan feature patch 0007 disiapkan 2026-10-06, credits/lisensi dipertahankan.
@@ -390,6 +402,7 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 - [ ] Tetap `release=pre` sampai semua gate di atas lulus
 - [-] Audit ulang klaim terukur di README/release notes sebelum tagging: audit 2026-10-07 dilakukan
   (release doc, README, SPEC §161); ulangi pada commit yang akan di-tag
+  — audit ulang parsial 2026-10-20 (tree kerja setelah `12b1232c`): klaim README dicek (angka bernama workload+tanggal atau tertaut bukti); dikoreksi satu kalimat soal enable-ulang instance yang sama (hanya boot/unit, tanpa marker; TODO bridge di atas) dan baris Build 47 soal limit `sourbycraft-security.yml` (SEC-1); sel ENG-1/3/4 di release doc diperbarui; gate tetap OPEN; belum: audit pada commit yang akan di-tag, SPEC §161
 
 ### Audit sistem 2026-10-14 — MEDIUM
 Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
@@ -402,10 +415,11 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [x] **AWF-6** Perpanjangan lease serial: stores × `timeout-ms` bisa melebihi lease pada Redis
   lambat (PLAUSIBLE) — pipeline renewal, WARN bila satu pass > period/2 (audit §1)
   — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): perpanjangan lease satu round trip ter-pipeline per putaran
-- [ ] **AWF-7** (roadmap) Biaya commit FILE O(dunia): indeks penuh ditulis ulang, di-hash dan
+- [x] **AWF-7** (roadmap) Biaya commit FILE O(dunia): indeks penuh ditulis ulang, di-hash dan
   di-fsync per commit; satu fsync per objek — generasi delta, fsync batch (audit §1; lihat item
   "AWF FILE: tulis massal lambat" di P3)
-  — separuh fsync selesai 2026-10-20: objek ditulis dulu lalu di-force satu pass sebelum index (`ObjectStore.sync`, `Durability`), direktori shard/`objects`/`N.tmp`/leluhur store kini di-fsync, kegagalan fsync direktori dipropagasi; A/B lokal tak tersertifikasi (M2, APFS USB SSD) bulk 3.364 chunk median 34,1 s → 7,9 s; jumlah force tetap O(objek). MASIH TERBUKA: generasi delta-index
+  — separuh fsync selesai 2026-10-20: objek ditulis dulu lalu di-force satu pass sebelum index (`ObjectStore.sync`, `Durability`), direktori shard/`objects`/`N.tmp`/leluhur store kini di-fsync, kegagalan fsync direktori dipropagasi; A/B lokal tak tersertifikasi (M2, APFS USB SSD) bulk 3.364 chunk median 34,1 s → 7,9 s; jumlah force tetap O(objek).
+  — selesai 2026-10-20: generasi delta-index diimplementasikan tetapi OPT-IN (`aurora.awf.delta-generations`, default false, RESTART_REQUIRED); flag mati menulis persis format pra-AWF-7 (manifest format 1, indeks penuh tiap commit, byte identik dengan penulis `12b1232c`, diuji); dengan delta menyala, downgrade ke build pra-AWF-7 butuh `/awf compact all` (atau flag dimatikan lalu restart: setiap store yang dibuka dikompaksi saat open) dan kehilangan riwayat tersimpan yang hanya ada di delta secara permanen (build lama menghapus objek yang hanya direferensikan generasi delta; backup dulu); tidak ada percepatan wall-time yang terukur lokal (A/B tak tersertifikasi, 3.364 chunk: commit 336 chunk median 1.649 ms penuh vs 1.688 ms delta; byte indeks per commit 238 KB → 23 KB, probe 100.000 chunk 7,2 MB → 0,7 MB; jumlah force tetap O(objek)). Alasan opt-in: manifest format 2 tidak terbaca build sebelumnya (merusak rollback SEC-3). Tes: `AwfDeltaGenerationTest` 15, `AwfCompactionLifecycleTest` 2, `AwfSettingsTest` 9, `AwfDurabilityTest` 14, `AwfCommandTest` 7, 263 tes `awf` hanya dengan 4 initializationError suite yang sudah dikenal; review Codex: default-off bersih, 2 temuan P2 jalur rollback diperbaiki; belum: boot dengan flag menyala, `/awf compact` di server hidup, jar pra-AWF-7 nyata (parser lama dimodelkan di `HeadBuildReader`)
 - [x] **ENG-5** Ticket save dilaporkan selesai saat region merge/split di tengah save; bagiannya
   tanpa ticket (flush AWF melewatkan chunk) — teruskan ticket saat merge, sebar saat split (audit §2)
   — selesai `1c57a736` (2026-10-20): MC 0031, `SaveAllTicket.split`/`TicketHolder.forwardTo`, `SaveTicketRegionChangeTest`
@@ -524,11 +538,12 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
   — kandidat lokal 3.1.0 memeriksa versi paperweight yang dimuat terhadap identitas di JAR;
   hash POM/dependency penuh tetap belum diimplementasikan
   — selesai `9147ce3b` (2026-10-20): `settings.gradle.kts` kini memverifikasi SHA-256 POM **dan** `.module` paper-toolchain (hilang/mismatch = gagal konfigurasi) + `paperweightVersion` dibaca dari properti; `scripts/private_toolchain.py` menuntut metadata ter-pin mendeklarasikan persis `paperweightVersion` (equality check, jalan di CI sebelum Gradle); 9 tes; BELUM: hash graph dependency paperweight transitif (artifact dari repo.papermc.io tetap tidak diverifikasi — di luar cakupan pin ini)
-- [-] Nomor feature patch punya celah (0018) dan akan dinomori ulang pada rebuild berikutnya;
+- [x] Nomor feature patch punya celah (0018) dan akan dinomori ulang pada rebuild berikutnya;
   perbarui rujukan nomor patch di docs/test saat itu terjadi. Celah 0018 tertutup oleh rebuild
   2026-10-06 (0019–0023 → 0018–0022, isi sama); rujukan lama baru dianotasi sebagian (AURORA.md
   kontradiksi 21); renumbering 0024–0027 berikutnya masih diprediksi `patch_surface.py`. 2026-10-13: 0024 lama dihapus
   dan 0025–0029 dinomori ulang menjadi 0024–0028; rujukan nomor di docs current-state diperbarui
+  — diverifikasi 2026-10-20: `patch_surface.py --check-rebuild` melaporkan MC 0001-0044 (kini 0001-0048 tanpa celah, `ls`), Paper 0001-0014, tanpa duplikat/celah/untracked; catatan penomoran lama→kini ditambahkan di bawah H1 `threading`/`reuse-audit`/`patches`/`hotspots-entity-ai`/`region-safety-review-0017-0019`/`slim-jar-bootstrap-failure`; komentar `IsInWallBoundsTest`/`BlockCollisionBoundsTest` dikoreksi; aturan tetap berlaku bila renumbering terjadi lagi; baris SPEC B30 dan `docs/releases/*.md` sengaja memakai nomor bertanggal
 - [ ] M-5 Opsional, paling berat: lepas Paper sebagai upstream (vanilla → SourbyCraft langsung).
   Artinya ~974 patch Paper menjadi milik SourbyCraft, dan setiap rilis Minecraft serta perbaikan
   keamanan Paper harus di-port sendiri.
@@ -543,7 +558,8 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
   — `docs/development/REMOTE-REPOSITORIES.md` (diperbarui 2026-10-20 dengan bukti file:line dan tabel verifikasi hash)
 
 ### Arsitektur patch
-- [ ] Identifikasi optimasi yang duplikat dengan upstream
+- [x] Identifikasi optimasi yang duplikat dengan upstream
+  — selesai 2026-10-20 (hanya pada `paperRef` yang di-pin 9240f586): baris `-` tiap feature patch PERFORMANCE (0004, 0005, 0007, 0009, 0010, 0012, 0014, 0017, 0018) masih kode upstream asli; 0003/0006/0011 adalah tambahan tanpa padanan upstream; tidak ada duplikat (`docs/architecture/patch-classification.md` Findings). Belum: bandingkan dengan Paper/Moonrise lebih baru (ulangi tiap bump `paperRef`), tanpa benchmark
 - [ ] Simpan implementasi di source milik Sourby bila memungkinkan; tambah tes regresi sebelum
   sebuah patch dihapus
 - [ ] Runtime lifecycle authority, execution contract, scheduler contract, compatibility layer (ROADMAP)
@@ -668,9 +684,10 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 
 ### Inovasi (proposal, belum direncanakan)
 Dari audit sistem 2026-10-14 §5 (`docs/audits/2026-10-14-system-audit.md`). Belum diterima dan
-belum direncanakan, kecuali yang ditandai; tidak ada yang diimplementasikan.
-- [ ] Storage: generasi FILE ber-indeks delta dengan kompaksi (menutup AWF-7) — byte commit dan fsync
+belum direncanakan, kecuali yang ditandai; hanya butir yang bertanda [x] sudah diimplementasikan.
+- [x] Storage: generasi FILE ber-indeks delta dengan kompaksi (menutup AWF-7) — byte commit dan fsync
   sebanding dengan chunk kotor
+  — diimplementasikan 2026-10-20 tetapi OPT-IN (`aurora.awf.delta-generations`, default false, RESTART_REQUIRED; lihat AWF-7): byte indeks per commit sebanding dengan chunk yang berubah, jumlah fsync TIDAK (tetap O(objek) + 6) dan tidak ada percepatan wall-time terukur
 - [ ] Storage: driver maintenance AWF dengan commit yang dipicu byte — jendela kehilangan terbatas
   waktu dan byte, umur kotor maksimum di `/perf awf`
 - [ ] Storage: Redis `EVALSHA` + renewal ber-pipeline — satu round trip per pass renewal

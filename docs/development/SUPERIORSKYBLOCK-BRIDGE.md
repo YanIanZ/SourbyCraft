@@ -37,6 +37,35 @@ Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md) (entries "SSB2 Spa
   refused without violation (`BridgeReviewTest`); missing resource, inaccessible capture, null world, island subclass, and the
   static/`Consumer` callbacks have no recorded test. **5** and **6** not run.
 
+## Status update 2026-10-20: accept path run against the real jar classes
+
+`SuperiorSpawnRealJarTest` (sourbycraft-server tests, `dev.iyanz.sourbycraft.bridge`) loads `SpawnIsland` and
+`SWorldPosition` from a real jar in a child-first loader (so the test stand-in cannot win), allocates the island
+without its constructor, sets the two final fields `getCenter(null)` reads (`center`, `spawnWorld`), and links the
+callback with the jar's own bootstrap method #2 arguments (`LambdaMetafactory.metafactory`, `REF_invokeSpecial
+lambda$new$0()V`, captured `SpawnIsland`) through a full-privilege lookup in the plugin loader's module — the same
+link the constructor's `invokedynamic` performs. The plugin is a proxy defined in that loader. It runs only when
+`SOURBY_SSB2_JAR` (and `SOURBY_SSB2_FOLIA_JAR` for the last case) name the jars; CI has neither, so CI skips it.
+
+Local run 2026-10-20 (opus-w2), `SOURBY_SSB2_JAR=/Volumes/Ext/Sourby/ssb/jars/SuperiorSkyblock2-2026.3.jar` (SHA-256
+`007bee17…f64ff597`; class hashes equal the table below) and `SOURBY_SSB2_FOLIA_JAR=…/jars/folia/SuperiorSkyblock2-2026.3.jar`
+(`19e559cb…dc68fb4f35a`; `SpawnIsland.class` `a2ce7ff3…07cb247`, `SWorldPosition.class` unchanged): 4/4 passed, 0 skipped,
+with `BridgeReviewTest` 11/11 in the same run.
+
+- **Acceptance case 1, unit level:** the audited bytes are accepted; a spawn at (-17.5, 100, 40.25) resolves to chunk
+  (-2, 2) in the spawn world; resolving the owner leaves `biome` null (the callback is not run). The same bytes with
+  version `2026.4`, or with a plugin from another classloader, are refused.
+- **Case 4, two more items:** a null spawn world is refused ("no world location"); the static `onSettingsUpdate`
+  Runnable (bootstrap #0, no capture) returns null and keeps normal routing.
+- **Folia-ported jar:** its constructor callback captures the island *and* a `Location` and is scheduled with
+  `BukkitExecutor.sync(Location, Runnable)`; the adapter returns null for it (not the audited single-capture shape),
+  so it neither reflects into it nor refuses it. The earlier expectation "different `SpawnIsland` bytes are expected
+  not to match" is therefore not what happens: the shape check stops it before the fingerprint check.
+
+Still not run: the plugin's real constructor and `BukkitExecutor`, the bridge scheduling the task onto the owning
+region on a server, the actual biome read, another world, an initially unloaded chunk, an island subclass,
+inaccessible capture, missing class resource. Cases 5 and 6 unchanged.
+
 ## Root cause and scope
 
 Task 35 executes on `{god-tick}` through `BridgeRuntime` and calls

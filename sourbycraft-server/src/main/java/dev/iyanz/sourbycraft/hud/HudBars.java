@@ -48,7 +48,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p><b>Actionbar sessions.</b> Each actionbar subscription maps the player to a session token drawn
  * from one process-wide counter that is never reset, so a token is never reused, not even after
  * {@link #close()}. Every player-owned transition (enable or re-select a mode, off, mode switch, quit,
- * close, a retired perf task) replaces or removes the entry, which invalidates all refreshes queued
+ * close, a retired show/hide or refresh task) replaces or removes the entry, which invalidates all refreshes queued
  * under the old token. The updater only reads the maps: it captures the token when it queues a
  * refresh, and the refresh, running on the player's own scheduler, sends only if the player is still a
  * viewer and the entry still holds that exact token. That check runs on the same thread as the
@@ -297,10 +297,7 @@ public final class HudBars {
                 player.hideBossBar(PERF_BAR);
                 if (wasActionbar) player.sendActionBar(Component.empty());
             }
-        }, () -> {
-            PERF_VIEWERS.remove(id);
-            PERF_ACTIONBAR.remove(id);
-        });
+        }, retiredCallback(id));
         ensureTask();
     }
 
@@ -337,7 +334,7 @@ public final class HudBars {
                 // A line left over from actionbar mode outlives the toggle by ~2-3 s; clear it now.
                 if (wasActionbar) player.sendActionBar(Component.empty());
             }
-        }, null);
+        }, retiredCallback(id));
         ensureTask();
         return show;
     }
@@ -367,6 +364,34 @@ public final class HudBars {
         if (TPS_VIEWERS.remove(id)) player.hideBossBar(TPS_BAR);
         if (RAM_VIEWERS.remove(id)) player.hideBossBar(RAM_BAR);
         // Viewer-side state dies with the connection; hiding explicitly is unnecessary.
+    }
+
+    /**
+     * The entity scheduler's "retired" callback for a HUD task: the entity was removed before the task
+     * ran. The only player removal path in the tree ({@code PlayerList.remove}) fires the quit event
+     * before it retires the scheduler, so there {@link #onQuit} has already run and this finds nothing.
+     * It is the defence for a retire that reaches the scheduler without the quit handler having cleaned
+     * up (the handler failed part-way, or something else retires a player's scheduler), which would
+     * otherwise leave the UUID in the viewer sets, the actionbar session maps and {@code ANY} until the
+     * next quit or {@link #close()}.
+     *
+     * <p>Captures the UUID only, never the {@link Player}: it sits in the scheduler's queue, and the
+     * retired callback is documented to run in critical code on the owning region, so it must touch
+     * nothing but the concurrent maps below (no Player call, no scheduling, no I/O).</p>
+     */
+    private static Runnable retiredCallback(final UUID id) {
+        return () -> evict(id);
+    }
+
+    /** Drops every trace of a player's HUD state. Idempotent and safe from any thread; never touches the Player. */
+    private static void evict(final UUID id) {
+        TPS_ACTIONBAR.remove(id);
+        RAM_ACTIONBAR.remove(id);
+        PERF_ACTIONBAR.remove(id);
+        TPS_VIEWERS.remove(id);
+        RAM_VIEWERS.remove(id);
+        PERF_VIEWERS.remove(id);
+        ANY.remove(id);
     }
 
     private static synchronized void ensureTask() {
@@ -446,7 +471,7 @@ public final class HudBars {
                 if (player == null) continue; // disconnecting or already gone
                 player.getScheduler().run(MinecraftInternalPlugin.INSTANCE, task -> {
                     if (stillSubscribed(viewers, actionbars, id, session)) player.sendActionBar(text);
-                }, null);
+                }, retiredCallback(id));
             } catch (Throwable ignored) {
                 // A single player's scheduler must not stop the other viewers' refresh.
             }

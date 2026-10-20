@@ -1007,5 +1007,80 @@ class ReadinessTest(unittest.TestCase):
             self.assertIn("Aurora boot summary: False", str(raised.exception))
 
 
+# Real `jcmd <pid> GC.heap_info` output from JDK 25.0.2 (macOS aarch64), one per collector.
+G1_HEAP_INFO = """80078:
+garbage-first heap   total reserved 262144K, committed 262144K, used 24702K [0x0000000120000000, 0x0000000130000000)
+ region size 1024K, 23 young (23552K), 0 survivors (0K)
+"""
+Z_HEAP_INFO = """80102:
+ZHeap            used 28M, capacity 256M, max capacity 256M
+ Cache           228M (2)
+  size classes   4M (1), 128M (1)
+"""
+PARALLEL_HEAP_INFO = """80200:
+PSYoungGen      total 76288K, used 27653K [0x000000012cb00000, 0x0000000132000000, 0x0000000132000000)
+ eden space 65536K, 42% used [0x000000012cb00000,0x000000012e6017e0,0x0000000130b00000)
+ from space 10752K, 0% used [0x0000000131580000,0x0000000131580000,0x0000000132000000)
+ to   space 10752K, 0% used [0x0000000130b00000,0x0000000130b00000,0x0000000131580000)
+ParOldGen       total 175104K, used 1150K [0x0000000122000000, 0x000000012cb00000, 0x000000012cb00000)
+ object space 175104K, 0% used [0x0000000122000000,0x000000012211f8b0,0x000000012cb00000)
+"""
+
+
+class HeapRecoveryTest(unittest.TestCase):
+    def test_reads_used_heap_for_each_collector_layout(self):
+        self.assertEqual(metrics.heap_used_bytes(G1_HEAP_INFO), 24702 * 1024)
+        self.assertEqual(metrics.heap_used_bytes(Z_HEAP_INFO), 28 * 1024 * 1024)
+        # Generational layouts: the generations are summed, the indented spaces inside
+        # them (whose "used" is a percentage) are not counted a second time.
+        self.assertEqual(metrics.heap_used_bytes(PARALLEL_HEAP_INFO), (27653 + 1150) * 1024)
+
+    def test_an_unrecognised_report_is_unknown_not_zero(self):
+        for text in ("", "80267:\nShenandoah Heap\n 256M max, 12M used\n", "garbage"):
+            with self.subTest(text=text):
+                self.assertIsNone(metrics.heap_used_bytes(text))
+
+    def test_reports_how_much_of_the_load_growth_was_released(self):
+        mib = 1024 * 1024
+        result = metrics.heap_recovery(400 * mib, 1400 * mib, 600 * mib, 120)
+        self.assertTrue(result["available"])
+        self.assertEqual(result["recovery_seconds"], 120)
+        self.assertEqual(result["released_bytes"], 800 * mib)
+        self.assertEqual(result["retained_over_idle_bytes"], 200 * mib)
+        self.assertAlmostEqual(result["released_fraction_of_growth"], 0.8)
+
+    def test_no_growth_has_no_release_fraction(self):
+        result = metrics.heap_recovery(500, 400, 450, 60)
+        self.assertTrue(result["available"])
+        self.assertIsNone(result["released_fraction_of_growth"])
+
+    def test_a_missing_point_makes_recovery_unavailable(self):
+        for points in ((None, 2, 1), (1, None, 1), (1, 2, None)):
+            with self.subTest(points=points):
+                result = metrics.heap_recovery(*points, 60)
+                self.assertFalse(result["available"])
+                self.assertIn("reason", result)
+
+    def test_live_heap_collects_before_it_reads(self):
+        calls = []
+
+        class Done:
+            def __init__(self, stdout):
+                self.stdout = stdout
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv[2])
+            return Done(G1_HEAP_INFO if argv[2] == "GC.heap_info" else "")
+
+        used, text = run_baseline.live_heap("jcmd", 42, run=fake_run)
+        self.assertEqual(calls, ["GC.run", "GC.heap_info"])
+        self.assertEqual(used, 24702 * 1024)
+        self.assertEqual(text, G1_HEAP_INFO)
+
+    def test_recovery_is_off_by_default(self):
+        self.assertEqual(run_baseline.build_parser().parse_args(
+            ["server.jar", "--output", "out"]).recovery, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

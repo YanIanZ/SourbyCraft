@@ -22,7 +22,7 @@ Severity: CRITICAL none; HIGH 14; MEDIUM 22; LOW 16; one owner decision (SEC-13)
 | AWF-4 | MEDIUM | Template names not validated in from-template / delete / read: path traversal including recursive delete | `AuroraWorldsService.java:338-348, 603-622`; `AuroraTemplates.java:66-140` | CONFIRMED | Validate names; confine resolution to the templates root |
 | AWF-5 | MEDIUM | Redis leases leaked by `unprepare` and the "already open" path; later a false "lost its Redis lease" error | `AwfEngine.java:276-281, 385-394` | CONFIRMED | Close stores on every removal/throw |
 | AWF-6 | MEDIUM | Lease renewal is serial: stores × `timeout-ms` can exceed the lease on a slow Redis | `RedisBackend.java:259-283` | PLAUSIBLE | Pipeline renewals; warn when a pass exceeds period/2 |
-| AWF-7 | MEDIUM | FILE commit cost is O(world): full index rewritten, hashed and fsynced per commit; one fsync per object | `AwfWorldStore.java:160-198`; `GenerationStore.java:141-150`; `ObjectStore.java:73-85` | CONFIRMED cost | Delta generations, batched fsync (roadmap). Batched fsync done 2026-10-20 (one force pass before the index; force count still O(objects)); delta generations open |
+| AWF-7 | MEDIUM | FILE commit cost is O(world): full index rewritten, hashed and fsynced per commit; one fsync per object | `AwfWorldStore.java:160-198`; `GenerationStore.java:141-150`; `ObjectStore.java:73-85` | CONFIRMED cost | Delta generations, batched fsync (roadmap). Batched fsync done 2026-10-20 (one force pass before the index; force count still O(objects)); delta generations implemented 2026-10-20 but OPT-IN (`aurora.awf.delta-generations`, default false, RESTART_REQUIRED): flag off writes the exact pre-AWF-7 format; with deltas on, a downgrade needs `/awf compact all` and loses delta-only retained history (back up first); no wall-time gain measured locally (index bytes per commit shrank, force count did not) |
 | AWF-8 | LOW | `WorldShutdownThread` can rethrow without calling the unload callback: the unload future never completes, lease held | `WorldShutdownThread.java:89-92, 180-202` | CONFIRMED path | Callback in `finally`; lease watchdog |
 | AWF-9 | LOW | Untrusted `.slime`: 1 GiB blob cap, unlimited NBT accounter, whole file in memory | `SlimeImporter.java:62, 276, 317` | CONFIRMED | Configurable cap (256 MiB), bounded accounter |
 | AWF-10 | LOW | Doc drift: patch number 0020 (is 0019), hook location vs patch policy, stale `WorldRole` javadoc | `aurora-world-fabric.md:455,468`; `WorldRole.java:7-8` | CONFIRMED | Fix docs |
@@ -96,7 +96,7 @@ offline mode refuses downloads; Via/ProtocolLib provisioning https-only, size-bo
 ## 5. Proposals (not implemented, not planned until accepted)
 
 Storage
-- Delta-indexed FILE generations with compaction (fixes AWF-7): commit bytes and fsyncs proportional to dirty chunks.
+- Delta-indexed FILE generations with compaction (fixes AWF-7): commit bytes and fsyncs proportional to dirty chunks. Implemented 2026-10-20 as OPT-IN (`aurora.awf.delta-generations`, default false, RESTART_REQUIRED); commit index bytes are proportional to changed chunks, the fsync count is not (still O(objects)); no wall-time gain measured locally; downgrade with deltas on needs `/awf compact all` and loses delta-only retained history (back up first).
 - AWF maintenance driver with byte-triggered commits: bounded loss window in time and bytes, max dirty age in `/perf awf`.
 - Redis `EVALSHA` + pipelined renewals: one round trip per renewal pass.
 - Point-in-time rollback API on retained FILE generations for operator recovery.

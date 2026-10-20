@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.perf;
 
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.GlobalTick;
+import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.LateTicks;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.RunnerActivity;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.Runners;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.Scheduler;
@@ -8,7 +9,6 @@ import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.WorldRegions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -43,19 +43,25 @@ import java.util.function.Consumer;
  *   <li>Scheduler type and configured thread count: {@code SchedulerUtil.getSchedulerInfo()},
  *       written once during startup before any command thread exists. Pool and alive threads:
  *       {@code getCoreThreads()}/{@code getAliveThreads()}. Tick rate: a volatile field.</li>
+ *   <li>Queued tasks per region: {@code RegionTaskQueueData.sourbyQueuedTickTasks()} /
+ *       {@code sourbyQueuedChunkTasks()} (feature patch), a volatile {@code int} per queue that is
+ *       only written while that queue's monitor is held, read here without the monitor. Each read is
+ *       a value the queue really had; the two queues and the regions are read at different instants,
+ *       and the figure counts deque entries, so a task cancelled or re-prioritised but not yet polled
+ *       still counts (the same figure the region's own drain uses as its budget): approximate.</li>
+ *   <li>Late tick starts since boot: {@code TickRegionScheduler.sourbyLateRegionTicks()} and its
+ *       siblings (feature patch), {@code LongAdder}s incremented by the scheduler thread as a tick
+ *       starts. Each is monotonic; {@code sum()} is not an atomic snapshot while ticks start. The late
+ *       figure is read before the started figure, so late never exceeds started: approximate.</li>
  * </ul>
  *
  * <h2>Not readable, shown as n/a</h2>
  * <ul>
- *   <li>Per-region queued task counts: {@code RegionizedTaskQueue.PrioritisedQueue.getScheduledTasks()}
- *       exists but its class is package-private in the materialized engine source; reaching it needs a
- *       feature patch, which this view does not add.</li>
  *   <li>The scheduler's own run queue (EDF heap, affinity global/local queues, work-stealing
  *       per-thread queues) and the affinity idle-thread set: private, and only consistent under the
  *       scheduler's lock, which a diagnostic command must not take.</li>
  *   <li>The global tick's task-queue depth: a private {@code MultiThreadedQueue} with no size accessor.</li>
- *   <li>A count of late ticks over time: no such counter is published by the engine. "Overdue" here
- *       is only the instantaneous state at read time.</li>
+ *   <li>The world-wide global chunk-task queue ({@code WorldRegionTaskData}): no counter.</li>
  * </ul>
  */
 public final class SchedulerQueueCollector {
@@ -64,7 +70,7 @@ public final class SchedulerQueueCollector {
      * A READY region whose start is at most this far in the past is not called overdue: a free
      * thread picks a due region up within microseconds, and the read itself is racy.
      */
-    public static final long OVERDUE_THRESHOLD_NANOS = TimeUnit.MILLISECONDS.toNanos(1L);
+    public static final long OVERDUE_THRESHOLD_NANOS = 1_000_000L;   // 1 ms; a compile-time constant the engine patch inlines
 
     /** Sentinel for "no deadline", equal to the engine's {@code TimeUtil.DEADLINE_NOT_SET}. */
     public static final long DEADLINE_NOT_SET = Long.MIN_VALUE;
@@ -93,6 +99,12 @@ public final class SchedulerQueueCollector {
         boolean descheduled();
 
         boolean hasPendingTasks();
+
+        /** Entries in the region's tick-task queue (lock-free, approximate). */
+        int queuedTickTasks();
+
+        /** Entries in the region's chunk-task queue (lock-free, approximate). */
+        int queuedChunkTasks();
     }
 
     /** One world's regions. */
@@ -115,6 +127,9 @@ public final class SchedulerQueueCollector {
         TickProbe globalTick();
 
         List<WorldProbe> worlds();
+
+        /** Late tick starts since boot, or null when the counters cannot be read. */
+        LateTicks lateTicks();
     }
 
     /** Reads the live engine. Never throws: an engine that is not running gives an unavailable snapshot. */
@@ -149,7 +164,8 @@ public final class SchedulerQueueCollector {
         for (final WorldProbe world : source.worlds()) {
             worlds.add(world(world, nowNanos));
         }
-        return new SchedulerQueueSnapshot(true, "", scheduler, runners, global, worlds);
+        final LateTicks late = Objects.requireNonNullElse(source.lateTicks(), LateTicks.NONE);
+        return new SchedulerQueueSnapshot(true, "", scheduler, runners, global, worlds, late);
     }
 
     static Runners countRunners(final List<RunnerActivity> activities) {
@@ -188,6 +204,7 @@ public final class SchedulerQueueCollector {
     static WorldRegions world(final WorldProbe world, final long nowNanos) {
         final int[] counts = new int[9];
         final long[] worst = new long[2];
+        final long[] queued = new long[3];   // tick entries, chunk entries, largest single region
         world.forEachRegion(region -> {
             counts[0]++;
             final RegionState state = region.state();
@@ -217,6 +234,11 @@ public final class SchedulerQueueCollector {
             if (region.hasPendingTasks()) {
                 counts[7]++;
             }
+            final long tick = Math.max(0, region.queuedTickTasks());
+            final long chunk = Math.max(0, region.queuedChunkTasks());
+            queued[0] += tick;
+            queued[1] += chunk;
+            queued[2] = Math.max(queued[2], tick + chunk);
             final long active = region.activeTickStartNanos();
             if (active != NO_ACTIVE_TICK) {
                 counts[8]++;
@@ -224,7 +246,7 @@ public final class SchedulerQueueCollector {
             }
         });
         return new WorldRegions(world.name(), counts[0], counts[1], counts[2], counts[3], counts[4],
-            counts[5], counts[6], worst[0], counts[7], counts[8], worst[1]);
+            counts[5], counts[6], worst[0], counts[7], counts[8], worst[1], queued[0], queued[1], queued[2]);
     }
 
     private static long lateness(final long scheduledStart, final long nowNanos) {

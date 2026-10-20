@@ -222,10 +222,44 @@ def translated_bounds(root):
     return results
 
 
+# DEV-H P0 "no adaptive compression/config tuning" (docs/DEVELOPMENT-TASKS.md, AURORA.md §16):
+# operator-visible compression settings stay operator-owned. No SourbyCraft patch or owned
+# source may touch the protocol compression setup — the threshold is `server.properties
+# network-compression-threshold`, applied by `Connection.setupCompression` through
+# `CompressionEncoder`/`CompressionDecoder` and announced by `ClientboundLoginCompressionPacket`.
+# Identifiers, not the word "compression": AWF's zstd and comments about wire bytes are not policy.
+NETWORK_COMPRESSION = re.compile(
+    r"\b(?:CompressionEncoder|CompressionDecoder|setupCompression|compressionThreshold|"
+    r"ClientboundLoginCompressionPacket)\b|network-compression-threshold")
+OWNED_SOURCE = "sourbycraft-server/src/main/java"
+
+
+def network_compression_references(root):
+    """Every added patch line and every owned-source line that reaches the protocol compression setup.
+
+    Returns (location, line) pairs; location is "<patch>" or "<source path>:<line number>".
+    """
+    found = []
+    for patch in patch_files(root):
+        for line in patch.read_text(errors="replace").splitlines():
+            if line.startswith("+") and not line.startswith("+++") and NETWORK_COMPRESSION.search(line):
+                found.append((patch.name, line[1:].rstrip()))
+    source = Path(root) / OWNED_SOURCE
+    if source.is_dir():
+        for path in sorted(source.rglob("*.java")):
+            for number, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+                if NETWORK_COMPRESSION.search(line):
+                    found.append((f"{path.relative_to(root).as_posix()}:{number}", line.rstrip()))
+    return found
+
+
 def violations(root):
     """Every rule break as one printable line; empty when the patch set is clean."""
     problems = [f"patch tree missing: {tree} -- the audit would silently shrink; restore it or "
                 f"update PATCH_TREES in scripts/patch_policy.py" for tree in missing_trees(root)]
+    for location, line in network_compression_references(root):
+        problems.append(f"{location}: touches the protocol compression setup ({line.strip()}); "
+                        f"compression settings are operator-owned (DEV-H P0 no adaptive compression)")
     for found in shared_mutable_fields(root):
         problems.append(f"{found['patch']}: reusable mutable state on a region-shared class: "
                         f"{found['file']}: {found['declaration']} (per-region state belongs in "

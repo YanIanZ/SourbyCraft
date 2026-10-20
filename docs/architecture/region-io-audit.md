@@ -35,10 +35,14 @@ connections fails the build until it is added here with its thread context.
 
 This inventory does not prove that region execution is free of network or disk waits.
 A cold AWF read uses the engine caller's thread; with Redis that operation can include network
-I/O. The caller context must be checked at each active engine path. `createAfter` also has a
-global-thread `ready.join()` path recorded as OPEN in the
-[ASP port review](../development/ASP-26.2-AWF-PORT-REVIEW.md); global tick waiting is a separate
-blocking boundary from a region tick. `/spec` reads a cgroup pseudo-file on its command thread.
+I/O. The caller context must be checked at each active engine path; the Redis read paths are traced
+in [Redis chunk-read paths](#redis-chunk-read-paths-static-trace-2026-10-20) below. The
+`createAfter` global-thread `ready.join()` (B80/B85) is **fixed** since 2026-10-13 (staged
+creation, [SPEC.md](../SPEC.md) B80/B85, [aurora-world-fabric.md](aurora-world-fabric.md) "Staged
+creation"); the [ASP port review](../development/ASP-26.2-AWF-PORT-REVIEW.md) text that calls it
+OPEN is the 2026-10-06 snapshot. `Bukkit.createWorld` itself is unchanged and still synchronous, and
+global tick waiting is a separate blocking boundary from a region tick. `/spec` reads a cgroup
+pseudo-file on its command thread.
 `BlockingIoBoundaryTest` pins a source inventory, not a proof of safe runtime scheduling.
 Runtime qualification remains pending; plugins and generated engine paths are not covered by
 that source test.
@@ -134,3 +138,34 @@ plugin listener) whose blocking behaviour this repository cannot see.
   behaviour, not re-read from the bundled jars.
 - Generated/obfuscated paths outside the listed files and the `aurora.engine` sources were not
   traced for loop entry.
+
+## Redis chunk-read paths (static trace, 2026-10-20)
+
+Question left open by the Result section: which threads reach `AwfRegionStorage.read` (and so the
+Redis backend, `aurora.awf.backend = "redis"`) and what bounds the wait. Static read of the
+materialized tree and `sourbycraft-server/src/main`; no server was started, no Redis latency was
+measured, and nothing here says a stall happens, only where one would land.
+
+Bounds that apply to every path: each blocking Redis step (free-connection wait, connect, socket
+read, stalled write) is capped by `aurora.awf.redis.timeout-ms` (default 5000, accepted range
+100-600000; `RedisSettings.DEFAULT`, `RedisClient` lines 157/205/206/168-174). How many such steps
+one command can take was not enumerated, so "one timeout" below means "per step".
+`AwfRegionStorage.readStored` retries only off region threads: up to `READ_ATTEMPTS` = 3 with
+100 ms and 400 ms pauses, no new attempt after `READ_RETRY_BUDGET_NANOS` = 5 s, and for
+`FAIL_FAST_NANOS` = 5 s after any read gave up every read gets a single attempt. A failed read is
+fenced, never "no data".
+
+| # | Path | Thread that blocks | Reaches AWF read as | Wait on a Redis stall |
+|---|---|---|---|---|
+| R1 | Chunk load: `ChunkIOTask` -> `RegionDataController.readData` -> `RegionFileStorage.moonrise$readData` (MoonriseRegionFileIO.java:1100, RegionFileStorage.java:224) | The chunk system's I/O pool (`... I/O Worker #n`, lane `WORLD_IO`), never a region thread; retries and sleeps are allowed here | `AwfRegionStorage.read` | The I/O worker is held for up to the retry budget plus one attempt. **Transitively** a tick thread parked in `ServerChunkCache.syncLoad` (`getChunk(x, z, status, true)` for a chunk it owns; `managedBlock(completable::isDone)`) waits for that task, so a region can stall on a stalled backend without ever calling Redis itself. Other tick-thread waits on the same I/O: `ChunkTaskScheduler.syncLoadNonFull` (`managedBlock`, used by `PlayerSpawnFinder`, `MinecraftServer` world creation) |
+| R2 | Structure scan: `StructureCheck.tryLoadFromStorage` -> `storageAccess.scanChunk(...).join()` (StructureCheck.java:155) -> `SimpleRegionStorage.chunkScanner()` (a lambda that scans **inline on the caller**, "TODO ChunkMap implementation?") -> `RegionFileStorage.scanChunk` | The **calling thread**. Region-thread callers exist: `Dolphin` treasure search, `EnderEyeItem`, `ExplorationMapFunction` (loot), `LocateCommand` via `ServerLevel.findNearestMapStructure` -> `ChunkGenerator.findNearestMapStructure` -> `StructureManager.checkStructurePresence` -> `StructureCheck.checkStart` | `AwfRegionStorage.read` (RegionFileStorage.java:440-449) | On a region thread: **one attempt, no sleep**, so the region tick is blocked for the steps of one command (up to the timeout per step) once per uncached chunk. `StructureCheck` caches the parsed result per chunk (`loadedChunksSafe`), so only the first check of a chunk reads. The FILE backend has the same shape with a disk read instead of a network read |
+| R3 | Synchronous `RegionFileStorage.read(ChunkPos)` (RegionFileStorage.java:~395) via `SimpleRegionStorage.read` and `IOWorker` (IOWorker.java:146) | Whoever calls it; in the Moonrise chunk system the chunk/POI/entity loads use R1 instead. Callers of `SimpleRegionStorage.read` outside R1 (`RegionStorageUpgrader`, `ChunkMap.upgradeChunkTag` path) were not traced | `AwfRegionStorage.read` | Not established for region threads |
+| R4 | Commits (`write`/`flush`) | `STORAGE` lane; refused on a region thread (`GenerationStore` throws, `flush` only starts an async commit) | n/a | Not a read path; unchanged from the File I/O table |
+
+Conclusions, all static: (1) the Redis backend adds network latency to R1 and R2 and nothing else
+in this repository reaches it; (2) R2 is the one path where a region tick can block **directly** on
+Redis, bounded per step by `timeout-ms` and cached after the first check of a chunk; R1 can stall a
+region only through an existing synchronous chunk wait; (3) the item is still open as a runtime
+question: a Redis-down or Redis-slow test with a structure search on a region thread and a sync
+chunk load on a region thread has not been run (`needs-server`), and plugin-driven
+`World#getChunkAt` on a region thread is the same R1 wait and was not separately traced.

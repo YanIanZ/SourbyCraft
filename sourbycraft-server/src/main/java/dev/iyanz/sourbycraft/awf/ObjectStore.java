@@ -141,9 +141,14 @@ final class ObjectStore {
             final Path target = path(object.getKey());
             this.dirtyShards.add(target.getParent());
             try {
-                Files.move(object.getValue(), target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                this.durability.moveAtomically(object.getValue(), target);
             } catch (final AtomicMoveNotSupportedException notAtomic) {
-                Files.move(object.getValue(), target, StandardCopyOption.REPLACE_EXISTING);
+                // The temporary file sits in the target's own shard, so a refusal here means the
+                // filesystem cannot rename atomically at all: an object must appear whole under
+                // its name or not at all, and a copy-and-delete would not promise that. The
+                // object stays pending and the commit fails.
+                throw new IOException("AWF needs an atomic rename to publish " + target + " and this filesystem refused one;"
+                    + " the commit is refused rather than published by copying", notAtomic);
             }
             it.remove();
             synced++;

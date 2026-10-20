@@ -1,10 +1,10 @@
 package dev.iyanz.sourbycraft.perf;
 
+import dev.iyanz.sourbycraft.execution.GovernedLane;
+import dev.iyanz.sourbycraft.execution.ResourceGovernor;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -31,6 +31,11 @@ import java.util.logging.Logger;
  *
  * <p>A stopped pool or failed/stopping runtime uses the same refusal contract. Work admitted
  * before shutdown follows {@link #shutdown()}'s disposal rules.</p>
+ *
+ * <p>The threads and queue are the Resource Governor's {@link ResourceGovernor.Lane#PATHFINDING}
+ * lane, so the budget is owned and reported ({@code /perf governor}) with the other SourbyCraft
+ * lanes. This class keeps the admission policy, the solve telemetry and the stop/start
+ * lifecycle; the result handoff to the entity owner is {@code AsyncPathCompletion}.</p>
  */
 public final class AsyncPathProcessor {
 
@@ -39,7 +44,7 @@ public final class AsyncPathProcessor {
     private AsyncPathProcessor() {}
 
     private static volatile boolean enabled = false;
-    private static volatile ThreadPoolExecutor pool;
+    private static volatile GovernedLane pool;
     /** Terminal until the pool is started again: admission is refused, not degraded to inline. */
     private static volatile boolean stopped = false;
     /** Solves admitted to the pool whose futures have not completed yet. */
@@ -107,14 +112,15 @@ public final class AsyncPathProcessor {
      */
     public static PathStats stats() {
         final long solved = SOLVED.get();
-        final ThreadPoolExecutor p = pool;
+        final GovernedLane p = pool;
         final boolean running = p != null && !p.isShutdown();
+        final GovernedLane.Stats lane = running ? p.stats() : null;
         return new PathStats(ADMITTED.get(), INLINE.get(), REFUSED.get(), OUTSTANDING.get(),
             solved == 0L ? Double.NaN : SOLVE_NANOS.get() / (double) solved / 1.0E6,
             SLOWEST_NANOS.get() / 1.0E6,
-            running ? p.getQueue().size() : -1,
-            running ? p.getActiveCount() : -1,
-            running ? p.getPoolSize() : -1,
+            running ? lane.queued() : -1,
+            running ? lane.active() : -1,
+            running ? p.poolSize() : -1,
             solved == 0L ? Double.NaN : WAIT_NANOS.get() / (double) solved / 1.0E6,
             SLOWEST_WAIT_NANOS.get() / 1.0E6);
     }
@@ -144,7 +150,7 @@ public final class AsyncPathProcessor {
 
     /** Worker threads the pool is sized to when it starts: a quarter of the processors, at least one. */
     public static int poolThreads() {
-        return Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
+        return ResourceGovernor.pathfindingThreads();
     }
 
     /** Idempotent. Sizes the pool to a quarter of the cores (min 1) — pathfinding is a background cost. */
@@ -153,24 +159,15 @@ public final class AsyncPathProcessor {
         if (pool != null && !pool.isShutdown()) {
             return;
         }
-        final int threads = poolThreads();
-        final AtomicInteger idx = new AtomicInteger();
-        // Bounded queue + AbortPolicy: path recomputes are periodic and the mob already has a live
-        // path, so saturation should defer work rather than push CPU-bound A* back onto the region
-        // thread. CallerRuns created a positive feedback loop under load: snapshot cost + rejected
-        // submission + full synchronous solve on the latency-critical owner thread.
-        final ThreadPoolExecutor p = new ThreadPoolExecutor(
-            threads, threads, 30L, TimeUnit.SECONDS,
-            new LinkedBlockingQueue<>(1024),
-            r -> {
-                final Thread t = new Thread(r, "SourbyCraft-AsyncPath-" + idx.incrementAndGet());
-                t.setDaemon(true);
-                t.setPriority(Thread.NORM_PRIORITY - 1); // yield to region tick threads under contention
-                return t;
-            },
-            new ThreadPoolExecutor.AbortPolicy());
-        p.allowCoreThreadTimeOut(true);
+        // The governed lane: bounded queue, rejection instead of CallerRuns. Path recomputes are
+        // periodic and the mob already has a live path, so saturation should defer work rather
+        // than push CPU-bound A* back onto the region thread. CallerRuns created a positive
+        // feedback loop under load: snapshot cost + rejected submission + full synchronous solve
+        // on the latency-critical owner thread. Threads run below normal priority so they yield
+        // to region tick threads under contention.
+        final GovernedLane p = ResourceGovernor.GLOBAL.restart(ResourceGovernor.Lane.PATHFINDING);
         pool = p;
+        final int threads = p.stats().threads();
         LOGGER.info("AsyncPath: worker pool started (" + threads + " thread(s))");
     }
 
@@ -201,9 +198,9 @@ public final class AsyncPathProcessor {
      */
     public static boolean hasCapacity() {
         if (stopped || dev.iyanz.sourbycraft.core.AuroraRuntime.stopping()) return false;
-        final ThreadPoolExecutor p = pool;
+        final GovernedLane p = pool;
         // Not started: trySubmit solves inline, as it always has.
-        return p == null || p.isShutdown() || p.getQueue().remainingCapacity() > 0;
+        return p == null || p.isShutdown() || p.hasCapacity();
     }
 
     /**
@@ -225,7 +222,7 @@ public final class AsyncPathProcessor {
             REFUSED.incrementAndGet();
             return null;
         }
-        final ThreadPoolExecutor p = pool;
+        final GovernedLane p = pool;
         if (p == null || p.isShutdown()) {
             // Not started — run inline so callers still get a result.
             try {
@@ -333,7 +330,7 @@ public final class AsyncPathProcessor {
     public static synchronized void shutdown() {
         enabled = false;
         stopped = true;
-        final ThreadPoolExecutor p = pool;
+        final GovernedLane p = pool;
         pool = null;
         if (p != null) {
             final int admitted = OUTSTANDING.get();

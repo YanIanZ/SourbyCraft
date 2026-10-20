@@ -29,8 +29,12 @@ public enum ExecutionLane {
      *
      * <p>Moonrise's {@code WORKER_POOL}, sized by {@code Paper.WorkerThreadCount}. This is the
      * lane that answers "how much does world load cost".</p>
+     *
+     * <p>Two names: {@code <brand> Common Worker #n} (the brand is {@code PlatformHooks.getBrand()},
+     * so any one word is accepted, see {@link #of}) and, with the aggressive chunk system
+     * ({@code Canvas.AggressiveChunkSystem}), {@code ls_wg worker #n}.</p>
      */
-    CHUNK_WORKER("Chunk workers", "Paper Common Worker"),
+    CHUNK_WORKER("Chunk workers", "Paper Common Worker", "ls_wg worker"),
 
     /**
      * The engine's general background pool, {@code Util.backgroundExecutor()}.
@@ -44,11 +48,21 @@ public enum ExecutionLane {
      */
     BACKGROUND("Engine background", "Worker-Main"),
 
-    /** Reading and writing world data. */
-    WORLD_IO("World I/O", "Dimension-Data-IO-Worker", "Paper I/O Worker", "SourbyCraft-IO", "SourbyCraft-Storage-"),
+    /**
+     * Reading and writing world data: the chunk I/O pool ({@code <brand> I/O Worker #n}, or
+     * {@code ls_wg/io worker #n} with the aggressive chunk system), the Sourby storage lanes, and the
+     * Aurora World Fabric's maintenance thread, which does no I/O itself but starts and watches the
+     * commits the storage lane performs.
+     */
+    WORLD_IO("World I/O", "Dimension-Data-IO-Worker", "Paper I/O Worker", "ls_wg/io worker", "SourbyCraft-IO",
+        "SourbyCraft-Storage-", "SourbyCraft-AWF-Maintenance"),
 
-    /** Packet encode, decode and socket work. */
-    NETWORK("Network", "Netty Epoll IO", "Netty Kqueue IO", "Netty NIO IO", "Netty Server IO"),
+    /**
+     * Packet encode, decode and socket work. {@code EventLoopGroupHolder} names the event loops
+     * {@code Netty <type> IO #n}; the types are NIO, Epoll, Kqueue, Local and, from Paper, Unix Domain Socket.
+     */
+    NETWORK("Network", "Netty Epoll IO", "Netty Kqueue IO", "Netty NIO IO", "Netty Server IO", "Netty Local IO",
+        "Netty Unix Domain Socket IO"),
 
     /** Plugin work that already runs off the region: async tasks and command completion. */
     PLUGIN_ASYNC("Plugin async", "Paper Async Task Handler", "Paper Async Command Builder",
@@ -88,6 +102,12 @@ public enum ExecutionLane {
     /**
      * The lane a thread belongs to, by name.
      *
+     * <p>Moonrise names its chunk pools {@code PlatformHooks.getBrand() + " Common Worker #n"} and
+     * {@code ... + " I/O Worker #n"}. The brand is whatever the platform hooks report ("Paper" in the
+     * current source), so besides the pinned "Paper ..." prefixes a single word in front of those
+     * suffixes is accepted. Only the region scheduler's threads are {@link #REGION_TICK}; none of
+     * the names above can ever resolve to it.</p>
+     *
      * @param threadName the thread's name, or {@code null}
      * @return the matching lane, or {@link #OTHER} when nothing matches
      */
@@ -102,8 +122,21 @@ public enum ExecutionLane {
                 }
             }
         }
+        // "<brand> Common Worker #n" / "<brand> I/O Worker #n" with a brand other than "Paper".
+        final int brandEnd = threadName.indexOf(' ');
+        if (brandEnd > 0) {
+            if (threadName.startsWith(COMMON_WORKER_SUFFIX, brandEnd)) {
+                return CHUNK_WORKER;
+            }
+            if (threadName.startsWith(IO_WORKER_SUFFIX, brandEnd)) {
+                return WORLD_IO;
+            }
+        }
         return OTHER;
     }
+
+    private static final String COMMON_WORKER_SUFFIX = " Common Worker #";
+    private static final String IO_WORKER_SUFFIX = " I/O Worker #";
 
     private static final ExecutionLane[] VALUES = values();
 }

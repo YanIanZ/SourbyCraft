@@ -7,7 +7,7 @@ import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Test;
 
 /**
- * The arithmetic contract patch 0017 inlines in {@code Entity#isInWall}.
+ * The arithmetic contract patch 0012 (formerly 0017) inlines in {@code Entity#isInWall}.
  *
  * <p>Upstream builds an eye box and then translates it per block:
  *

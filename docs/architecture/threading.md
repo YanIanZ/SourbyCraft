@@ -1,5 +1,7 @@
 # Scratch-buffer confinement review (PRD Phase 1, action 2)
 
+> **Numbering (annotated 2026-10-20):** patch numbers in this review are the build-45 numbers, before the 2026-09-14 cleanup. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
+
 PRD section 108 requires a region-thread safety review for any performance change
 touching entities, chunks, world, inventory or players. This is that review for the
 six patches that replace a per-call allocation with a reused scratch buffer.

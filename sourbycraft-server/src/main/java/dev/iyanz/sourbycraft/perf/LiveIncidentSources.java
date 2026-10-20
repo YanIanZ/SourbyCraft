@@ -34,6 +34,9 @@ final class LiveIncidentSources implements IncidentDetector.Sources {
     private static List<Counter> laneRejections() {
         final List<Counter> out = new ArrayList<>();
         for (final GovernedLane.Stats lane : ResourceGovernor.GLOBAL.stats()) {
+            if (lane.name().equals(ResourceGovernor.Lane.PATHFINDING.display())) {
+                continue; // already the async path's refused reading; counting it here doubles it
+            }
             out.add(new Counter(lane.name(), lane.rejected()));
         }
         return out;

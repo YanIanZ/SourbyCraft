@@ -86,19 +86,19 @@ public class UnboundedQueueAuditTest {
     }
 
     @Test
-    void theAsyncPathQueueStillDeclaresACapacity() throws IOException {
-        // The one bounded queue in Aurora's source, pinned by value rather than by shape: the
-        // pattern above cannot tell new LinkedBlockingQueue<>(1024) from a capacity someone
-        // widened to Integer.MAX_VALUE while meaning "unbounded, but quietly".
-        final String source = Files.readString(
-            sourceRoot().resolve("dev/iyanz/sourbycraft/perf/AsyncPathProcessor.java"));
-        final Matcher capacity = Pattern.compile(
-            "new\\s+LinkedBlockingQueue\\s*<[^>]*>\\s*\\(\\s*(\\d+)\\s*\\)").matcher(source);
-
-        assertTrue(capacity.find(), "the async path pool must construct a queue with a capacity");
-        final int bound = Integer.parseInt(capacity.group(1));
-        assertTrue(bound > 0 && bound <= 65_536,
-            "a capacity of " + bound + " is a bound in name only");
+    void theAsyncPathQueueStillDeclaresACapacity() {
+        // The async path pool is the governor's PATHFINDING lane. Pinned by value rather than by
+        // shape: the pattern above cannot tell a real capacity from one someone widened to
+        // Integer.MAX_VALUE while meaning "unbounded, but quietly".
+        final int bound = dev.iyanz.sourbycraft.execution.ResourceGovernor.PATHFINDING_QUEUE;
+        assertTrue(bound > 0 && bound <= 65_536, "a capacity of " + bound + " is a bound in name only");
+        final var lane = new dev.iyanz.sourbycraft.execution.ResourceGovernor()
+            .lane(dev.iyanz.sourbycraft.execution.ResourceGovernor.Lane.PATHFINDING);
+        try {
+            assertTrue(lane.stats().queueCapacity() == bound, "the lane must be built with that capacity");
+        } finally {
+            lane.shutdownNow();
+        }
     }
 
     @Test

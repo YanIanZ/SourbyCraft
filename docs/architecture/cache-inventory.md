@@ -45,5 +45,14 @@ heap-retention test under player churn is still open.
     (`AsyncPathShutdownTest` `everyAdmittedSolveIsAccountedForUntilItCompletes`).
   - AWF pending saves leave the deque on completion (`AwfWorldTest`
     `aWriteDuringASaveStaysDirty`).
-- Still open: player-disconnect, chunk-unload and world-unload retention need a live server and
-  a heap comparison. A source audit cannot close them.
+- AWF chunk-unload retention, unit level (2026-10-20): `AwfChunkUnloadRetentionTest` (4) tracks the
+  exact byte arrays the world hands to `AwfStore.commit` with weak references. Chunks the resident
+  limit drops (via `AwfWorld` and via `AwfRegionStorage` after `flush`) become collectable while the
+  chunks it keeps stay reachable (control); a rewritten chunk releases its previous bytes without an
+  eviction; 50 read-back cycles over evicted chunks leave the resident set at the limit with nothing
+  dirty or pending. Mutation check: making the eviction count a chunk without removing it fails three
+  of the four. It covers only the AWF layer, FILE backend: not the Minecraft side of an unload (chunk
+  holders, entities, block entities), the Redis backend, or a heap comparison on a running server.
+- Still open: player-disconnect (unit level: `HudBarsRetentionTest`, `BridgeRetentionTest`) and
+  world-unload (unit level: `AwfEngineRetentionTest`) retention on a live server, and chunk-unload
+  on a live server, all need a heap comparison. A source audit cannot close them.

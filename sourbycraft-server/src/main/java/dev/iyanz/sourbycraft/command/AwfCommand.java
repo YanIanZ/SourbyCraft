@@ -39,6 +39,7 @@ import static net.kyori.adventure.text.Component.text;
  * /awf unload &lt;name&gt; [nosave]
  * /awf delete &lt;name&gt; confirm
  * /awf autoload &lt;name&gt; on|off
+ * /awf compact &lt;world|all&gt;      (force every open store of the world into a full index; prints full: yes/no per store)
  * </pre>
  *
  * <p>Every world operation is asynchronous; the result is sent when it completes, through
@@ -51,10 +52,12 @@ import static net.kyori.adventure.text.Component.text;
 public class AwfCommand extends Command {
 
     private static final List<String> SUBCOMMANDS =
-        List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template", "import", "export", "convert", "clone", "set");
+        List.of("list", "info", "create", "load", "save", "unload", "delete", "autoload", "template", "import", "export", "convert", "clone", "set", "compact");
 
     private final Supplier<AuroraWorldsService> service;
     private final BiConsumer<CommandSender, Runnable> reply;
+    /** {@code /awf compact}: world name or "all" to the per-storage reports, run by the engine on its storage lane. */
+    private final java.util.function.Function<String, CompletableFuture<List<dev.iyanz.sourbycraft.awf.AwfEngine.CompactionReport>>> compactor;
 
     public AwfCommand(final String name) {
         this(name, AuroraWorldsRuntime::service, SourbyReply::run);
@@ -62,12 +65,19 @@ public class AwfCommand extends Command {
 
     /** The service and the reply hop injectable, so the command's own rules can be tested without a server. */
     AwfCommand(final String name, final Supplier<AuroraWorldsService> service, final BiConsumer<CommandSender, Runnable> reply) {
+        this(name, service, reply, dev.iyanz.sourbycraft.awf.AwfEngine::compact);
+    }
+
+    /** As above, with the compaction injectable too. */
+    AwfCommand(final String name, final Supplier<AuroraWorldsService> service, final BiConsumer<CommandSender, Runnable> reply,
+               final java.util.function.Function<String, CompletableFuture<List<dev.iyanz.sourbycraft.awf.AwfEngine.CompactionReport>>> compactor) {
         super(name);
         this.description = "Manage Aurora World Fabric worlds";
-        this.usageMessage = "/awf <list|info|create|load|save|unload|delete|autoload|template|import|export|convert>";
+        this.usageMessage = "/awf <list|info|create|load|save|unload|delete|autoload|template|import|export|convert|compact>";
         this.setPermission("sourbycraft.command.awf");
         this.service = service;
         this.reply = reply;
+        this.compactor = compactor;
     }
 
     @Override
@@ -97,6 +107,14 @@ public class AwfCommand extends Command {
         }
         if (sub.equals("convert")) {
             convert(s, worlds, args);
+            return true;
+        }
+        if (sub.equals("compact")) {
+            if (args.length < 2) {
+                usage(s);
+            } else {
+                compact(s, args[1]);
+            }
             return true;
         }
         if (sub.equals("export")) {
@@ -436,6 +454,43 @@ public class AwfCommand extends Command {
      * block's {@code sendMessage} writes block-entity state and throws off its region thread, and
      * this class used to call it from the storage lane.
      */
+    /**
+     * Forces every open store of a world (or of every world) into a full index, clean stores
+     * included, and prints per store whether its current generation is one — the check before a
+     * downgrade to a build without the delta parser. A store is named by its folder.
+     */
+    private void compact(final CommandSender s, final String world) {
+        final String target = world.equalsIgnoreCase("all") ? "all" : world.toLowerCase(Locale.ROOT);
+        s.sendMessage(text("Working...", SourbyCraftColors.DIM));
+        this.compactor.apply(target).whenComplete((reports, failed) -> this.reply.accept(s, () -> {
+            if (failed != null) {
+                fail(s, failed);
+                return;
+            }
+            if (reports.isEmpty()) {
+                s.sendMessage(text("No AWF storage is open for " + target + " (a world must be loaded to be compacted)",
+                    SourbyCraftColors.DANGER));
+                return;
+            }
+            boolean every = true;
+            for (final dev.iyanz.sourbycraft.awf.AwfEngine.CompactionReport r : reports) {
+                every &= r.fullAfter() && r.error() == null;
+                final String state = r.error() != null ? "full: " + (r.fullAfter() ? "yes" : "no") + ", failed: " + r.error()
+                    : "generation " + r.generation() + ", full: " + (r.fullAfter() ? "yes" : "no")
+                        + (r.fullBefore() ? " (already)" : " (compacted)");
+                s.sendMessage(text("  " + PerfCommand.shortStorageName(r.storage()) + ": " + state,
+                    r.fullAfter() && r.error() == null ? SourbyCraftColors.VALUE : SourbyCraftColors.DANGER));
+            }
+            if (every) {
+                ok(s, "Every open store of " + target + " is a full index (" + reports.size() + " store(s));"
+                    + " a build before AWF-7 can open them. Retained delta generations are skipped and their"
+                    + " objects deleted by such a build: back up the .awf folders first if those rollback points matter.");
+            } else {
+                s.sendMessage(text("Not every store of " + target + " is a full index; do not downgrade yet", SourbyCraftColors.DANGER));
+            }
+        }));
+    }
+
     private void report(final CommandSender s, final String success, final CompletableFuture<?> future) {
         s.sendMessage(text("Working...", SourbyCraftColors.DIM));
         future.whenComplete((ignored, failed) -> this.reply.accept(s, () -> {
@@ -472,6 +527,7 @@ public class AwfCommand extends Command {
         s.sendMessage(UiPanel.row("/awf autoload <name> on|off", "load at startup"));
         s.sendMessage(UiPanel.row("/awf clone <world> <new> [autoload]", "copy an unloaded world (an instance keeps its template)"));
         s.sendMessage(UiPanel.row("/awf set <world> <spawn|difficulty|pvp|monsters|animals|biome|bounds|prune> <value|none>", "world properties"));
+        s.sendMessage(UiPanel.row("/awf compact <world|all>", "force every open store into a full index; prints full: yes/no (before a downgrade)"));
         s.sendMessage(UiPanel.footer());
     }
 

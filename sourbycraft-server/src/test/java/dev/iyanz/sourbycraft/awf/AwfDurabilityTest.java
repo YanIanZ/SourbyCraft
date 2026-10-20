@@ -364,7 +364,8 @@ class AwfDurabilityTest {
             // The last force, of the root after the pointer rename, is past the commit point.
             final boolean pastCommitPoint = !crashed.file() && crashed.path().equals(root.resolve("generations-root"));
 
-            final AwfWorldStore reopened = AwfWorldStore.open(root, WorldRole.VANILLA, 1);
+            // Reopened with deltas on, as written: the flag-off open would compact a chained store.
+            final AwfWorldStore reopened = AwfWorldStore.open(root, WorldRole.VANILLA, 1, true);
             assertEquals(0, count(root, ".tmp"), where + ": no temporary file survives a reopen");
             if (pastCommitPoint) {
                 assertEquals(2L, reopened.generation(), where);
@@ -387,6 +388,131 @@ class AwfDurabilityTest {
         }
         // 5 object forces + their shards (+ root if a shard is new) + 3 files + 3 directories of the generation.
         assertTrue(crashes >= 5 + 1 + 6, "crashed at each of " + crashes + " forces");
+    }
+
+    /**
+     * A crash at every force of a delta commit, and of a compaction (the chain's hop limit reached),
+     * after a chain already exists: before the pointer rename the previous generation replays
+     * intact through its chain; after it the new one does; every leftover is gone on reopen.
+     */
+    @Test
+    void aCrashAtEveryForceOfADeltaCommitAndOfACompactionLeavesThePreviousGenerationIntact() throws Exception {
+        for (final boolean compaction : new boolean[] {false, true}) {
+            final Map<ChunkKey, byte[]> base = chunks(10, 1);
+            final Map<ChunkKey, byte[]> firstDelta = Map.of(new ChunkKey(0, 1), b("first-delta"), new ChunkKey(20, 1), b("added"));
+            final Map<ChunkKey, byte[]> change = new HashMap<>(chunks(4, 2));
+            change.put(new ChunkKey(1, 1), b("modified"));
+            // The crashing commit is the third: a delta on a delta, or the compaction a two-hop limit forces.
+            final AwfWorldStore.Compaction policy = new AwfWorldStore.Compaction(compaction ? 1 : 32);
+            final String kind = compaction ? "compaction" : "delta";
+            int crashes = 0;
+            for (int at = 0; ; at++) {
+                final Path root = this.dir.resolve(kind + "-crash-" + at);
+                final Recording recording = new Recording();
+                final AwfWorldStore store = AwfWorldStore.open(root, WorldRole.VANILLA, 1, stage -> {}, Durability.DISK, policy);
+                store.commit(base, Set.of(), PersistenceMode.INCREMENTAL);
+                final AwfWorldStore chained = AwfWorldStore.open(root, WorldRole.VANILLA, 1, stage -> {}, recording, policy);
+                chained.commit(firstDelta, Set.of(), Set.of(new ChunkKey(8, 1)), PersistenceMode.INCREMENTAL);
+                assertFalse(chained.lastCommitCompacted(), kind + ": generation 2 is a delta");
+                final long objectsBefore = count(root.resolve("objects"), "");
+                recording.reset();
+                recording.crashAt = at;
+                try {
+                    chained.commit(change, Set.of(new ChunkKey(20, 1)), Set.of(new ChunkKey(9, 1)), PersistenceMode.INCREMENTAL);
+                    assertEquals(compaction, chained.lastCommitCompacted(), kind);
+                    break; // past the last force: every crash point has been tried
+                } catch (final IOException crash) {
+                    crashes++;
+                }
+                final Event crashed = recording.events.get(at);
+                final String where = kind + ": crash at force #" + at + " " + crashed;
+                final boolean pastCommitPoint = !crashed.file() && crashed.path().equals(root.resolve("generations-root"));
+                // The generation blob that was being forced is the right kind.
+                if (crashed.file() && crashed.underGenerations() && !crashed.name().equals("manifest") && !crashed.name().equals("CURRENT.tmp")) {
+                    assertEquals(compaction ? "index" : "delta", crashed.name(), where);
+                }
+
+                final AwfWorldStore reopened = AwfWorldStore.open(root, WorldRole.VANILLA, 1, stage -> {}, Durability.DISK, policy);
+                assertEquals(0, count(root, ".tmp"), where + ": no temporary file survives a reopen");
+                if (pastCommitPoint) {
+                    assertEquals(3L, reopened.generation(), where);
+                    assertEquals(compaction ? 0 : 2, reopened.chainLength(), where);
+                    assertArrayEquals(b("modified"), reopened.read(new ChunkKey(1, 1)).orElseThrow(), where);
+                    assertArrayEquals(b("first-delta"), reopened.read(new ChunkKey(0, 1)).orElseThrow(), where);
+                    assertTrue(reopened.read(new ChunkKey(20, 1)).isEmpty() && !reopened.has(new ChunkKey(20, 1)), where + ": dropped");
+                    assertEquals(Set.of(new ChunkKey(8, 1), new ChunkKey(9, 1)), reopened.deleted(), where);
+                    continue;
+                }
+                assertEquals(2L, reopened.generation(), where);
+                assertEquals(1, reopened.chainLength(), where + ": the previous generation's chain is intact");
+                assertArrayEquals(b("first-delta"), reopened.read(new ChunkKey(0, 1)).orElseThrow(), where);
+                assertArrayEquals(b("added"), reopened.read(new ChunkKey(20, 1)).orElseThrow(), where);
+                for (final Map.Entry<ChunkKey, byte[]> chunk : base.entrySet()) {
+                    if (chunk.getKey().equals(new ChunkKey(0, 1)) || chunk.getKey().equals(new ChunkKey(8, 1))) continue;
+                    assertArrayEquals(chunk.getValue(), reopened.read(chunk.getKey()).orElseThrow(), where);
+                }
+                for (final ChunkKey key : chunks(4, 2).keySet()) assertTrue(reopened.read(key).isEmpty(), where);
+                assertEquals(Set.of(new ChunkKey(8, 1)), reopened.deleted(), where);
+                assertEquals(objectsBefore, count(root.resolve("objects"), ""), where + ": unreferenced objects are gone");
+                // Only generations 1 and 2 are on disk: no half-published third.
+                try (Stream<Path> dirs = Files.list(root.resolve("generations-root").resolve("generations"))) {
+                    assertEquals(Set.of("1", "2"), dirs.map(p -> p.getFileName().toString()).collect(java.util.stream.Collectors.toSet()), where);
+                }
+
+                // And a later commit works, chains or compacts as the policy says, and is durable on its own.
+                reopened.commit(change, Set.of(), PersistenceMode.INCREMENTAL);
+                assertEquals(compaction, reopened.lastCommitCompacted(), where);
+                assertArrayEquals(b("modified"), AwfWorldStore.open(root, WorldRole.READ_ONLY, 1)
+                    .read(new ChunkKey(1, 1)).orElseThrow(), where);
+            }
+            // 5 object forces + their shards (+ root if a shard is new) + 3 files + 3 directories of the generation.
+            assertTrue(crashes >= 5 + 1 + 6, kind + ": crashed at each of " + crashes + " forces");
+        }
+    }
+
+    /** A seam whose rename refuses to be atomic, as a filesystem without atomic rename would. */
+    private static Durability refusingAtomicMoves(final boolean[] refuse) {
+        return new Durability() {
+            @Override public void forceFile(final Path file) throws IOException { Durability.DISK.forceFile(file); }
+            @Override public void forceDirectory(final Path dir) throws IOException { Durability.DISK.forceDirectory(dir); }
+            @Override public void moveAtomically(final Path from, final Path to) throws IOException {
+                if (refuse[0]) throw new java.nio.file.AtomicMoveNotSupportedException(from.toString(), to.toString(), "not atomic here");
+                Durability.DISK.moveAtomically(from, to);
+            }
+        };
+    }
+
+    @Test
+    void aFilesystemThatRefusesAnAtomicRenameFailsTheCommitInsteadOfCopying() throws Exception {
+        final boolean[] refuse = {true};
+        // ObjectStore: the object stays pending under its temporary name; nothing appears under its name.
+        final ObjectStore objects = new ObjectStore(this.dir.resolve("objects"), refusingAtomicMoves(refuse));
+        final String name = objects.put(b("chunk"), false).name();
+        final IOException refused = assertThrows(IOException.class, objects::sync);
+        assertTrue(refused.getCause() instanceof java.nio.file.AtomicMoveNotSupportedException, String.valueOf(refused.getCause()));
+        assertTrue(refused.getMessage().contains("atomic rename") && refused.getMessage().contains("refused"), refused.getMessage());
+        assertEquals(1, objects.pending(), "still pending, not copied into place");
+        assertFalse(objects.contains(name));
+        assertEquals(1, count(this.dir.resolve("objects"), ".tmp"));
+        refuse[0] = false;
+        assertEquals(1, objects.sync(), "the same object publishes once renames are atomic again");
+        assertTrue(objects.contains(name));
+
+        // GenerationStore: the generation directory is never published and CURRENT never moves.
+        refuse[0] = true;
+        final GenerationStore generations = GenerationStore.open(this.dir.resolve("gens"), WorldRole.VANILLA, 1, stage -> {}, refusingAtomicMoves(refuse));
+        final IOException refusedGeneration = assertThrows(IOException.class, () -> generations.commit(Map.of("index", b("x"))));
+        assertTrue(refusedGeneration.getCause() instanceof java.nio.file.AtomicMoveNotSupportedException);
+        assertEquals(0L, generations.currentGeneration());
+        assertFalse(Files.exists(this.dir.resolve("gens").resolve("generations").resolve("1")), "not published by a copy");
+        assertEquals(0L, GenerationStore.open(this.dir.resolve("gens"), WorldRole.VANILLA, 1).currentGeneration());
+        assertEquals(0, count(this.dir.resolve("gens"), ".tmp"), "a reopen removes the unpublished directory");
+
+        // Through the world store: the commit fails, the previous generation stays, and the chunk is not visible.
+        final AwfWorldStore store = AwfWorldStore.open(this.dir.resolve("store"), WorldRole.VANILLA, 1, stage -> {}, refusingAtomicMoves(refuse));
+        assertThrows(IOException.class, () -> store.commit(chunks(2, 1), Set.of(), PersistenceMode.INCREMENTAL));
+        assertEquals(0L, store.generation());
+        assertTrue(store.keys().isEmpty());
     }
 
     @Test

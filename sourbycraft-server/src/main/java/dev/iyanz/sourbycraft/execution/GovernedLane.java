@@ -1,5 +1,7 @@
 package dev.iyanz.sourbycraft.execution;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -36,6 +38,16 @@ public final class GovernedLane implements Executor {
      * @param threadPrefix thread name prefix, which {@link ExecutionLane} uses for attribution
      */
     public GovernedLane(final String name, final String threadPrefix, final int threads, final int queueCapacity) {
+        this(name, threadPrefix, threads, queueCapacity, Thread.NORM_PRIORITY);
+    }
+
+    /**
+     * @param threadPrefix   thread name prefix, which {@link ExecutionLane} uses for attribution
+     * @param threadPriority priority of the lane's threads; a background CPU lane passes less than
+     *                       {@link Thread#NORM_PRIORITY} so it yields to region tick threads
+     */
+    public GovernedLane(final String name, final String threadPrefix, final int threads, final int queueCapacity,
+                        final int threadPriority) {
         if (threads < 1 || queueCapacity < 1) {
             throw new IllegalArgumentException("a lane needs at least one thread and one queue slot");
         }
@@ -47,6 +59,7 @@ public final class GovernedLane implements Executor {
             new ArrayBlockingQueue<>(queueCapacity), task -> {
                 final Thread thread = new Thread(task, threadPrefix + next.getAndIncrement());
                 thread.setDaemon(true);
+                thread.setPriority(threadPriority);
                 return thread;
             }, new ThreadPoolExecutor.AbortPolicy());
         // Idle lanes hold no threads.
@@ -57,20 +70,29 @@ public final class GovernedLane implements Executor {
     public void execute(final Runnable task) {
         this.submitted.incrementAndGet();
         try {
-            this.pool.execute(() -> {
-                try {
-                    task.run();
-                    this.completed.incrementAndGet();
-                } catch (final Throwable thrown) {
-                    this.failed.incrementAndGet();
-                    throw thrown;
-                }
-            });
+            this.pool.execute(new Counted(task));
         } catch (final RejectedExecutionException full) {
             this.rejected.incrementAndGet();
             throw full;
         }
         this.peakQueued.accumulateAndGet(this.pool.getQueue().size(), Math::max);
+    }
+
+    /**
+     * Whether a task offered now would be queued rather than rejected. Best effort: another
+     * submitter can take the last slot in between.
+     */
+    public boolean hasCapacity() {
+        return !this.pool.isShutdown() && this.pool.getQueue().remainingCapacity() > 0;
+    }
+
+    public boolean isShutdown() {
+        return this.pool.isShutdown();
+    }
+
+    /** Threads the lane holds right now (idle threads time out, so this can be below the budget). */
+    public int poolSize() {
+        return this.pool.getPoolSize();
     }
 
     public Stats stats() {
@@ -79,9 +101,42 @@ public final class GovernedLane implements Executor {
             this.completed.get(), this.failed.get());
     }
 
+    /**
+     * Stops accepting work, interrupts running tasks and returns the queued ones without running
+     * them. The returned objects are the ones passed to {@link #execute}, so a caller that queued a
+     * {@code FutureTask} can cancel it. Does not wait for running tasks to finish.
+     */
+    public List<Runnable> shutdownNow() {
+        final List<Runnable> pending = new ArrayList<>();
+        for (final Runnable queued : this.pool.shutdownNow()) {
+            pending.add(queued instanceof Counted counted ? counted.task : queued);
+        }
+        return pending;
+    }
+
     /** Stops accepting work and waits up to {@code timeoutMillis} for queued work to finish. */
     public boolean shutdown(final long timeoutMillis) throws InterruptedException {
         this.pool.shutdown();
         return this.pool.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS);
+    }
+
+    /** Counts the outcome of one task; keeps the submitted task so {@link #shutdownNow} can return it. */
+    private final class Counted implements Runnable {
+        private final Runnable task;
+
+        Counted(final Runnable task) {
+            this.task = task;
+        }
+
+        @Override
+        public void run() {
+            try {
+                this.task.run();
+                GovernedLane.this.completed.incrementAndGet();
+            } catch (final Throwable thrown) {
+                GovernedLane.this.failed.incrementAndGet();
+                throw thrown;
+            }
+        }
     }
 }

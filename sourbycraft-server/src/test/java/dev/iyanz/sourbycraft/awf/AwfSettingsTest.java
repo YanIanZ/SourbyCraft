@@ -32,10 +32,25 @@ class AwfSettingsTest {
             AwfSettings.COMMIT_INTERVAL_KEY, 10,
             AwfSettings.RESIDENT_CHUNKS_KEY, 256,
             AwfSettings.RETAINED_GENERATIONS_KEY, 5,
-            AwfSettings.COMMIT_ATTEMPTS_KEY, 4));
+            AwfSettings.COMMIT_ATTEMPTS_KEY, 4,
+            AwfSettings.DELTA_GENERATIONS_KEY, true));
         assertEquals(List.of(), parsed.invalidKeys());
-        assertEquals(new AwfSettings(Set.of("lobby", "arena"), Set.of("old"), "mongodb", PersistenceMode.CHECKPOINT, 10, 256, 5, 4),
+        assertEquals(new AwfSettings(Set.of("lobby", "arena"), Set.of("old"), "mongodb", PersistenceMode.CHECKPOINT, 10, 256, 5, 4, true),
             parsed.settings());
+    }
+
+    @Test
+    void deltaGenerationsAreOffUnlessATomlBooleanTurnsThemOn() {
+        assertTrue(!AwfSettings.DEFAULT.deltaGenerations(), "off by default: the rollback jar must read every store");
+        assertTrue(!AwfSettings.parse(Map.of()).settings().deltaGenerations());
+        assertTrue(AwfSettings.parse(Map.of(AwfSettings.DELTA_GENERATIONS_KEY, true)).settings().deltaGenerations());
+        assertTrue(!AwfSettings.parse(Map.of(AwfSettings.DELTA_GENERATIONS_KEY, false)).settings().deltaGenerations());
+        for (final Object wrong : List.of("true", 1, List.of(true))) {
+            final AwfSettings.Parsed parsed = AwfSettings.parse(Map.of(AwfSettings.DELTA_GENERATIONS_KEY, wrong));
+            assertEquals(List.of(AwfSettings.DELTA_GENERATIONS_KEY), parsed.invalidKeys(), String.valueOf(wrong));
+            assertTrue(!parsed.settings().deltaGenerations(), "a wrong type reads as false: " + wrong);
+        }
+        assertTrue(AwfSettings.KEYS.contains(AwfSettings.DELTA_GENERATIONS_KEY), "read from the TOML like the other keys");
     }
 
     @Test

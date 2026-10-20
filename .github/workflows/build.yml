@@ -399,13 +399,25 @@ jobs:
           boot first-offline.log offline || status=$?
           elapsed=$(( $(date +%s) - start ))
           echo "----- first boot without network (${elapsed}s) -----"
-          grep -E 'SourbyBootstrap|Sourbyclip|Failed to download' first-offline.log | head -12 || true
+          grep -E '\[Sourbyclip\]|Cannot prepare original JAR' first-offline.log | head -12 || true
           test "$status" -ne 0 || { echo "a first boot with no network must fail"; exit 1; }
           test "$elapsed" -lt 120 || { echo "the failing first boot took ${elapsed}s"; exit 1; }
-          # Whichever launcher stage needs the network first must say what it could not fetch.
-          # On a fresh directory that is SourbyClip (the Mojang server jar), before SourbyBootstrap.
-          grep -Eq 'Failed to download|download the libraries manually' first-offline.log \
-            || { cat first-offline.log | head -30; echo "the failure does not say what could not be downloaded"; exit 1; }
+          # SourbyClip 3.1.2 is the only launcher stage that needs the network on a fresh directory
+          # (it fetches the Mojang server jar before any library). Its strings, as compiled into the
+          # packaged launcher: Sourbyclip.getDownloadContextFromMojang logs
+          # "[Sourbyclip] Failed to download original jar" at ERROR and exits 1, followed by the
+          # stack trace of the IOException built in DownloadContext.download:
+          # "Cannot prepare original JAR <file> at <path>; source: <url>".
+          grep -Eq 'ERROR\]: \[Sourbyclip\] Failed to download original jar' first-offline.log \
+            || { head -40 first-offline.log; echo "the failed first boot does not carry SourbyClip's download error"; exit 1; }
+          grep -Eq 'Cannot prepare original JAR [^ ]+ at .+; source: https://' first-offline.log \
+            || { head -40 first-offline.log; echo "the failure does not name the file and URL it could not fetch"; exit 1; }
+          # Canary for the no-download assertions after the online boot: the same fresh-directory
+          # boot printed SourbyClip's INFO line announcing the attempt
+          # ("[HH:mm:ss INFO]: [Sourbyclip] Downloading <file>", DownloadContext.download). The
+          # pattern used below to prove "no download" must match this real line, else it is vacuous.
+          grep -Eq 'INFO\]: \[Sourbyclip\] Downloading [^ ]+\.jar' first-offline.log \
+            || { head -40 first-offline.log; echo "the failed first boot shows no SourbyClip download line; the offline no-download check would be vacuous"; exit 1; }
           test -z "$(find . -name '*.tmp' 2>/dev/null)" || { find . -name '*.tmp'; echo "partial downloads were left behind"; exit 1; }
 
           boot online.log online
@@ -413,9 +425,17 @@ jobs:
 
           boot second-offline.log offline
           echo "----- boot without network after a successful one -----"
-          grep -E 'SourbyBootstrap|Done \(' second-offline.log | head -8 || true
+          grep -E '\[Sourbyclip\]|Classpath prepared|auto-provision|Done \(' second-offline.log | head -12 || true
+          grep -Eq 'Classpath prepared: [0-9]+ entries' second-offline.log \
+            || { head -40 second-offline.log; echo "no SourbyClip bootstrap summary (BootstrapConsole.prepared) in the cached offline boot"; exit 1; }
           grep -q 'Done (' second-offline.log || { tail -40 second-offline.log; echo "the cached offline boot did not reach Done"; exit 1; }
-          if grep -q 'SourbyBootstrap\] downloaded' second-offline.log; then echo "the offline boot tried to download"; exit 1; fi
+          # Launcher: any download attempt or failure (the patterns are SourbyClip's own; a bare
+          # "Failed to download" is not used because server code may log that for unrelated reasons). Server side (PluginProvisioner,
+          # ProtocolLibProvisioner): provisioning is disabled in this directory's config, so neither a
+          # successful nor a failed plugin download may appear.
+          if grep -En 'INFO\]: \[Sourbyclip\] Downloading |Failed to download (original jar|jar with the selected|from all repositories)|Cannot prepare original JAR|^Failed from |auto-provision: downloaded|auto-provision: failed to provision|ProtocolLib installation failed' second-offline.log; then
+            echo "the offline boot tried to download"; exit 1
+          fi
           echo "First boot without network failed cleanly; online boot succeeded; later boot ran offline from the cache."
 
       - name: Boot with the Aurora Bridge and a legacy plugin

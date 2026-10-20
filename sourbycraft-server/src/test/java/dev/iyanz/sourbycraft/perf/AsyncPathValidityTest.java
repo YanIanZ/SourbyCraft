@@ -25,6 +25,13 @@ class AsyncPathValidityTest {
         assertTrue(AsyncPathValidity.stillRequested(requested, requested));
         assertFalse(AsyncPathValidity.stillRequested(new Object(), requested), "recomputed or retargeted");
         assertFalse(AsyncPathValidity.stillRequested(null, requested), "stopped");
-        assertTrue(AsyncPathValidity.stillRequested(null, null), "no path before, none now: still the same request");
+        assertTrue(AsyncPathValidity.stillRequested(null, null), "no path before, none now: the path alone cannot tell");
+    }
+
+    @Test
+    void anyInvalidationSinceTheRequestMakesTheResultStale() {
+        assertTrue(AsyncPathValidity.sameGeneration(7, 7));
+        assertFalse(AsyncPathValidity.sameGeneration(8, 7), "a stop(), moveTo or recompute since the request");
+        assertFalse(AsyncPathValidity.sameGeneration(Integer.MIN_VALUE, Integer.MAX_VALUE), "wrapped, still different");
     }
 }

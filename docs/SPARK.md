@@ -26,6 +26,30 @@ Every value is an in-memory read. No configuration strings are included, so ther
 for secret filtering to catch. Whether spark.lucko.me renders extra platform metadata, and how,
 is part of the open web-viewer verification.
 
+## Thread classification
+
+Status: IMPLEMENTED and unit-tested; the web-viewer rendering is NOT verified (see *Verification*).
+It reads thread names only and needs no restart switch: it is part of the Spark platform adapter.
+
+- `SparkThreadClass` (`aurora.engine.spark`) maps a thread name to one of: region and global tick
+  (`Folia Region Scheduler Thread #n`), chunk workers, chunk I/O, Sourby lanes (storage, bridge I/O,
+  startup), the async path pool, the AWF maintenance driver, network (Netty event loops) or other.
+  An unknown name is `OTHER`, never folded into a neighbour. `SparkThreadClassTest` pins the names
+  against the factories that create them and compares `poolOf` with Spark's own `BY_POOL` rule.
+- `LabelledThreadDumper` wraps `RegionThreadDumper` as the default game-thread dumper
+  (`FoliaSparkPlugin` constructor). Selection is unchanged; the report metadata says `REGEX` with the
+  region-tick pattern, or `SPECIFIC` with the pinned thread's id during a region profile, instead of
+  `SPECIFIC` with no ids.
+- `ThreadCensusMetadataProvider` adds `sourbycraft-threads` to the extra metadata (combined with
+  `SourbyMetadataProvider`): per class, the live platform-thread count and the pool labels a viewer
+  shows. One walk of the thread groups, no stack traces.
+
+Limits, stated by the code: Spark identifies a thread by id and name only, so the global tick and the
+region ticks (same threads) cannot be told apart, and virtual threads (the Sourby I/O lane) are not
+visible to Spark. Sampling itself is not changed: classification does not add threads to a profile.
+Evidence: `SparkThreadClassTest` 9, `ThreadCensusMetadataProviderTest` 8, `RegionThreadDumperTest` 7,
+`FoliaSparkPluginTest` 1 (0 failures, 2026-10-20). No live profile was taken.
+
 ## Secret filtering
 
 The provider inherits Spark's `BASE_HIDDEN_PATHS`, including management-server

@@ -248,6 +248,55 @@ def drift(samples, label):
             "peak": max(samples)}
 
 
+_HEAP_USED = re.compile(r"\bused (\d+)([KMG])\b")
+_HEAP_UNITS = {"K": 1024, "M": 1024 ** 2, "G": 1024 ** 3}
+
+
+def heap_used_bytes(heap_info):
+    """Used heap from a ``jcmd <pid> GC.heap_info`` report, or None for a layout not known.
+
+    Only top-level lines count: G1's ``garbage-first heap``, ZGC's ``ZHeap``, and each
+    generation of Parallel/Serial (summed). The indented lines inside a generation are its
+    spaces, whose "used" is a percentage of the same bytes. Shenandoah prints a different
+    shape and is reported as unknown rather than guessed.
+    """
+    total, seen = 0, False
+    for line in (heap_info or "").splitlines():
+        if not line or line[0].isspace():
+            continue
+        match = _HEAP_USED.search(line)
+        if match:
+            total += int(match.group(1)) * _HEAP_UNITS[match.group(2)]
+            seen = True
+    return total if seen else None
+
+
+def heap_recovery(idle_bytes, loaded_bytes, recovered_bytes, recovery_seconds):
+    """How much of the heap the load grew was given back once the load stopped.
+
+    Each point is the live set after a forced full collection (``jcmd GC.run``), so it
+    measures what is still reachable rather than when the collector last ran: ``idle``
+    before the workload setup, ``loaded`` right after the measurement window, and
+    ``recovered`` after the load (clients, network load) stopped and the server sat for
+    ``recovery_seconds``. What the workload placed in the world (entities, forceloaded
+    chunks) stays loaded, so ``retained_over_idle_bytes`` includes that population and is
+    not by itself a leak.
+    """
+    points = {"idle": idle_bytes, "loaded": loaded_bytes, "recovered": recovered_bytes}
+    missing = [name for name, value in points.items() if value is None]
+    if missing:
+        return dict(UNAVAILABLE, reason=f"live-heap point(s) not read: {', '.join(missing)}")
+    growth = loaded_bytes - idle_bytes
+    released = loaded_bytes - recovered_bytes
+    return {"available": True, "source": "jcmd GC.run + GC.heap_info",
+            "recovery_seconds": recovery_seconds,
+            "idle_live_bytes": idle_bytes, "loaded_live_bytes": loaded_bytes,
+            "recovered_live_bytes": recovered_bytes,
+            "released_bytes": released,
+            "retained_over_idle_bytes": recovered_bytes - idle_bytes,
+            "released_fraction_of_growth": released / growth if growth > 0 else None}
+
+
 def collect(jfr_tool, recording, window_seconds, rss_samples_kib):
     """Assemble the full baseline metric set for one workload run."""
     return {

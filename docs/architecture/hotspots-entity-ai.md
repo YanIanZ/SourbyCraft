@@ -1,5 +1,7 @@
 # CPU and Allocation Hot Spots Under Real AI Load
 
+> **Numbering (annotated 2026-10-20):** "patch 0018" (tracker effective range) is the withdrawn candidate, which has no file; "patch 0019" (collision-box allocation) is feature patch 0018 today (`0018-SourbyCraft-translate-block-collision-boxes-without-.patch`); "0017" is still 0017 (hoist query bounds). See AURORA.md contradiction 21.
+
 Roadmap items *"rank JFR CPU hot spots"* and *"rank JFR allocation hot spots"*
 (`docs/AURORA-TASKS.md`). Captured 2026-09-20.
 

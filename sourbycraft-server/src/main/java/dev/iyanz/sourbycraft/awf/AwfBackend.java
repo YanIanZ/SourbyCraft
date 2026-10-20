@@ -11,9 +11,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>This is a server-internal SPI, not part of {@code sourbyapi}: a backend is code compiled
  * against the server jar and registered with {@link #register} before any listed world loads (a
- * plugin's {@code onLoad} with {@code load: STARTUP}). SourbyCraft ships no database backend and no
- * database driver. If the configured backend is not registered when a listed world loads, the
- * world fails to load; it never falls back to another backend.</p>
+ * plugin's {@code onLoad} with {@code load: STARTUP}). SourbyCraft itself registers {@link #FILE} and
+ * the {@code redis} backend ({@code awf.redis.RedisBackend}, its own RESP client, no database driver);
+ * it ships no MongoDB or MySQL backend. If the configured backend is not registered when a listed world
+ * loads, the world fails to load; it never falls back to another backend.</p>
  *
  * <p>Storage ids are region folders relative to the server directory with {@code /} separators,
  * for example {@code world/region} or {@code world/entities}.</p>
@@ -72,9 +73,16 @@ public interface AwfBackend {
     /** Stores as directories: {@code <root>/<id>.awf}. */
     final class FileBackend implements AwfBackend {
         private final java.nio.file.Path root;
+        /** {@code aurora.awf.delta-generations}; the built-in {@link #FILE} writes full indexes. */
+        private final boolean deltaGenerations;
 
         public FileBackend(final java.nio.file.Path root) {
+            this(root, false);
+        }
+
+        public FileBackend(final java.nio.file.Path root, final boolean deltaGenerations) {
             this.root = Objects.requireNonNull(root, "root");
+            this.deltaGenerations = deltaGenerations;
         }
 
         /**
@@ -101,7 +109,7 @@ public interface AwfBackend {
         @Override
         public AwfStore open(final String storageId, final WorldRole role, final int retainedGenerations)
             throws IOException {
-            return AwfWorldStore.open(directory(storageId), role, retainedGenerations);
+            return AwfWorldStore.open(directory(storageId), role, retainedGenerations, this.deltaGenerations);
         }
 
         @Override

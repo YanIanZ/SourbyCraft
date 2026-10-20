@@ -58,8 +58,51 @@ In order, `SourbyUpdater.downloadAndStage` / `verifyOrThrow`:
 3. **SHA-256 equals the GitHub asset `digest`** — mandatory; a release without a digest is refused.
 4. Opens as a ZIP.
 5. **Ed25519 signature** — only when this build ships a public key (next section).
+6. **Embedded launcher** (SEC-4) — see "Launcher gate" below. Runs last, so only authentic bytes are inspected.
 
-A failing download is deleted and never staged (`Outcome.STAGE_FAILED`).
+A failing download is deleted and never staged (`Outcome.STAGE_FAILED`); a jar whose launcher this
+server cannot hand over to is deleted and answered with `Outcome.CLIP_INCOMPATIBLE`.
+
+## Launcher gate (SEC-4) — `LauncherCompatibility`
+
+The staged jar becomes the `-jar` argument of the next boot, so the SourbyClip launcher **inside it**
+decides how that boot starts, while the operator's start command stays unchanged. `SourbyUpdater`
+therefore reads two small entries (each bounded to 16 KiB) of the verified jar and refuses it
+unless they describe a launcher this server can hand over to:
+
+| Source | Keys | Written by |
+| --- | --- | --- |
+| `META-INF/MANIFEST.MF` | `Clip-Version`, `SourbyClip-Protocol` | SourbyClip's `build.gradle.kts` (3.1.2: `3.1.2`, `1`) |
+| `META-INF/sourbyclip.properties` | `version`, `protocol` | SourbyClip's `build.gradle.kts` identity task; what `--sourbyclip-info` prints |
+
+Both were read from `build/libs/SourbyCraft-slim.jar` (clip 3.1.2) on 2026-10-20 and match
+`clipVersion=3.1.2` in `gradle.properties`. The rules, all in code constants:
+
+- **Protocol must equal `SUPPORTED_PROTOCOL = 1`.** SourbyClip's `AGENTS.md` ties a protocol bump to a
+  SourbyPatcher release (`VerifySourbyClip` hard-codes `"1"`), i.e. it is a launch-contract change, not a
+  routine update.
+- **Version must be at least `MIN_VERSION = 3.0.23`**, the first SourbyClip release with the manifest
+  protocol (SourbyClip `readme.md`). Compared numerically (`3.10.0 > 3.9.0`); anything that is not a
+  dotted number (`3.1.2-SNAPSHOT`, `latest`) is refused as unreadable.
+- **Manifest and properties must agree** (same build wrote both); a disagreement means a hand-made repack.
+- **Missing metadata fails closed.** `release/SourbyCraft-26.2-REL.jar` (Clip-Version 3.0.21) has only the
+  manifest version and no protocol and no properties file; that shape is refused. Reason: a staged jar is
+  executed unattended, the updater already refuses an unverifiable digest the same way, and a wrong refusal
+  costs one WARN line plus a manual jar swap while a wrong acceptance costs a restart into an unchecked
+  launcher (the rollback guard only helps after that boot has already failed). Every jar built from this
+  tree carries both entries.
+
+A refusal logs `auto-updater: NOT staging <tag>: the release's launcher is not compatible [<REASON>]: ...`,
+deletes the download, writes no `core.path`/`latest.path`, and returns `Outcome.CLIP_INCOMPATIBLE`
+(`/update` prints a distinct line; `UpdateCommand.describe`). Reasons: `METADATA_MISSING`,
+`METADATA_UNREADABLE`, `METADATA_INCONSISTENT`, `PROTOCOL_UNSUPPORTED`, `VERSION_TOO_OLD`.
+
+Limits: the gate reads declared metadata; it does not execute the launcher (`--sourbyclip-info` is not
+run) and cannot detect a launcher whose class files disagree with its metadata. It also does not compare
+against the *running* launcher, so a later minimum bump needs a code change here. Tests:
+`LauncherCompatibilityTest`, and in `SourbyUpdaterCheckTest` `aReleaseWithACompatibleLauncherIsStaged`,
+`aReleaseWhoseLauncherSpeaksAnotherProtocolIsRefusedAndDeleted`, `aReleaseWithNoLauncherMetadataFailsClosed`
+and the others in the "SEC-4: launcher gate" section.
 
 ## Same-Minecraft-version gate (SEC-3)
 

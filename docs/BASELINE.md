@@ -357,6 +357,26 @@ to stop. A shutdown that stalls no longer throws away the run: `profile.jfr` is 
 before the stop command, so the metrics are still collected and `certify()` refuses the
 run as a comparison reference instead.
 
+### Post-load heap recovery (`--recovery SECONDS`)
+
+Drift asks whether the heap climbs during the load. Recovery asks whether it comes back
+once the load is gone. With `--recovery N` (off by default) `run_baseline.py` reads the
+live heap three times, each as `jcmd GC.run` (a forced full collection) followed by
+`GC.heap_info`: before the workload setup (`idle`), right after the measurement window
+(`loaded`), and after the clients and the network load have stopped and the server has
+idled N seconds (`recovered`). `baseline.json` gets a `heap_recovery` block
+(`baseline_metrics.heap_recovery`: the three live sets, `released_bytes`,
+`retained_over_idle_bytes`, `released_fraction_of_growth`), and the raw reports go to
+`heap-recovery-{idle,loaded,recovered}.txt`.
+
+Read it with three caveats. The forced collections are pauses, so all of them fall
+outside the timed JFR window (the first before warmup, the other two after the recording
+has closed), and none of them changes a metric above. What the workload put in the world
+(summoned entities, forceloaded chunks) stays loaded, so retained-over-idle includes that
+population and is not by itself a leak. The parser knows the G1, ZGC, Parallel and Serial
+layouts of `GC.heap_info` on JDK 25; any other layout (Shenandoah) is reported as
+unavailable, not as zero. Tooling only: no run with `--recovery` has been recorded yet.
+
 ### First soak — 50 players, two hours, 6 GiB (NOT CERTIFIED)
 
 Three failures with one cause.

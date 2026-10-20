@@ -75,7 +75,7 @@ write. The bridge documents do not yet say this as a design limit; §6 below ask
   for JFR ([qualification-readiness.md](qualification-readiness.md) §6–7).
 - [Release 46](../releases/46.md) withdrew two published results: every baseline had measured
   world generation, and the chunk-worker A/B reversed when entities were present. The reuse
-  patches 0009/0013/0014/0015 were removed because *"no benchmark ever justified the reuse"*
+  patches 0009/0013/0014/0015 (build-45 numbers; none of those four exists at those numbers today, see the numbering note in [threading.md](threading.md)) were removed because *"no benchmark ever justified the reuse"*
   ([reuse-audit.md](reuse-audit.md), [threading.md](threading.md)).
 - The chunk-worker question now has three documented answers for three workloads:
 

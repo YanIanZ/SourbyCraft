@@ -24,13 +24,17 @@ conclusion.
 
 | Service | Owns | Not |
 |---|---|---|
-| `execution/ExecutionLane.WORLD_IO` | Attribution of reading and writing world data, by thread name: `Dimension-Data-IO-Worker`, `Paper I/O Worker`, `SourbyCraft-IO` | — |
+| `execution/ExecutionLane.WORLD_IO` | Attribution of reading and writing world data, by thread name: `Dimension-Data-IO-Worker`, `Paper I/O Worker`, `ls_wg/io worker`, `SourbyCraft-IO`, `SourbyCraft-Storage-`, `SourbyCraft-AWF-Maintenance` | — |
 | `util/BoundedIoExecutor` | **Administrative** blocking I/O: virtual threads named `SourbyCraft-IO-`, fixed admission bound, no queue, never blocks the caller | **Not** world saving, region-file writes, or chunk serialization |
 
 `BoundedIoExecutor` exists so administrative work (updater downloads, provisioning, config
 reads) cannot block a region thread. It carries no world data. The `WORLD_IO` lane attributes
 its threads alongside upstream's I/O workers only because they share the lane's purpose —
-*reading and writing data off the tick* — not because Aurora handles persistence.
+*reading and writing data off the tick* — not because Aurora handles persistence. Since
+2026-10-20 the AWF maintenance thread and the `ls_wg` worldgen I/O worker (and the Netty Local and
+Unix Domain Socket loops, under `NETWORK`) are attributed to their lanes instead of `OTHER`, so
+`/perf lanes` and JFR/spark lane shares are not comparable with earlier recordings
+(`ExecutionLaneTest` 13).
 
 **Three feature patches touch storage:** 0019 commits AWF stores at shutdown
 (`MinecraftServer`), 0021 counts chunk-system storage traffic and routes AWF worlds in

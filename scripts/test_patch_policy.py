@@ -301,6 +301,62 @@ class ScannedRootTest(unittest.TestCase):
             self.assertIn("planted", stderr.getvalue())
 
 
+class NetworkCompressionTest(unittest.TestCase):
+    """DEV-H P0: no adaptive compression. Nothing SourbyCraft ships may reach the protocol
+    compression setup; the threshold stays the operator's `network-compression-threshold`."""
+
+    CONNECTION = "net/minecraft/network/Connection.java"
+
+    def test_the_repository_touches_no_protocol_compression_setup(self):
+        self.assertEqual(patch_policy.network_compression_references(REPO), [],
+                         "a patch or owned source reaches CompressionEncoder/Decoder, "
+                         "setupCompression or the compression threshold; compression settings "
+                         "are operator-owned")
+
+    def test_detects_an_adaptive_threshold_in_a_patch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_patch(root, "0001-fixture.patch", patch_for(
+                self.CONNECTION,
+                "+        if (lagging) this.setupCompression(threshold / 2, false); // SourbyCraft"))
+            found = patch_policy.network_compression_references(root)
+            self.assertEqual([location for location, _ in found], ["0001-fixture.patch"])
+
+    def test_detects_a_threshold_rewrite_in_owned_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / patch_policy.OWNED_SOURCE / "dev/iyanz/sourbycraft/perf/Tuner.java"
+            source.parent.mkdir(parents=True)
+            source.write_text("class Tuner {\n    void tune() {\n"
+                              "        properties.setProperty(\"network-compression-threshold\", \"512\");\n"
+                              "    }\n}\n")
+            found = patch_policy.network_compression_references(root)
+            self.assertEqual([location for location, _ in found],
+                             ["sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/perf/Tuner.java:3"])
+
+    def test_a_removed_line_and_a_comment_about_wire_bytes_are_not_violations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_patch(root, "0001-fixture.patch", patch_for(
+                self.CONNECTION,
+                "-        this.setupCompression(threshold, false);",
+                "+        counters.bytesOut(n); // wire bytes, after compression"))
+            self.assertEqual(patch_policy.network_compression_references(root), [])
+
+    def test_the_command_fails_a_fixture_violation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for tree in patch_policy.PATCH_TREES:
+                (root / tree).mkdir(parents=True)
+            write_patch(root, "0001-fixture.patch", patch_for(
+                self.CONNECTION, "+        this.setupCompression(64, false);"))
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = patch_policy.main(["--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("operator-owned", stderr.getvalue())
+
+
 class RepositoryTest(unittest.TestCase):
     def test_the_committed_patch_set_holds_no_shared_mutable_buffer(self):
         violations = patch_policy.shared_mutable_fields(REPO)

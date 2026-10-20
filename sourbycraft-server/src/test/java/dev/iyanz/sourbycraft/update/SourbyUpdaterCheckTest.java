@@ -35,6 +35,7 @@ import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -262,6 +263,66 @@ class SourbyUpdaterCheckTest {
         assertEquals(List.of(LISTING, JAR_URL), transport.urls());
     }
 
+    // ------------------------------------------------------------------ SEC-4: launcher gate
+
+    private Outcome stageJar(byte[] jar) throws Exception {
+        transport.enqueue(LISTING, ok(listing(release("v26.2-r48", jar.length, sha256(jar), false)), Map.of()));
+        transport.enqueue(JAR_URL, ok(jar, Map.of()));
+        return updater().check(ApplyMode.STAGE);
+    }
+
+    private void assertNothingStaged() {
+        assertFalse(Files.exists(root.resolve("auto_update/sourbycraft/SourbyCraft-slim.jar")));
+        assertFalse(Files.exists(root.resolve("auto_update/sourbycraft/SourbyCraft-slim.jar.part")));
+        assertFalse(Files.exists(root.resolve("auto_update/core.path")), "core.path must not point at a refused jar");
+        assertFalse(Files.exists(root.resolve("auto_update/sourbycraft/latest.path")));
+    }
+
+    @Test
+    void aReleaseWithACompatibleLauncherIsStaged() throws Exception {
+        assertEquals(Outcome.STAGED, stageJar(launcherJar("3.1.2", "1")));
+        assertTrue(Files.isRegularFile(root.resolve("auto_update/sourbycraft/SourbyCraft-slim.jar")));
+    }
+
+    @Test
+    void aNewerPatchLauncherOnTheSameProtocolIsStaged() throws Exception {
+        assertEquals(Outcome.STAGED, stageJar(launcherJar("3.2.0", "1")));
+    }
+
+    @Test
+    void aReleaseWhoseLauncherSpeaksAnotherProtocolIsRefusedAndDeleted() throws Exception {
+        assertEquals(Outcome.CLIP_INCOMPATIBLE, stageJar(launcherJar("3.1.2", "2")));
+        assertNothingStaged();
+    }
+
+    @Test
+    void aReleaseWhoseLauncherPredatesTheProtocolIsRefused() throws Exception {
+        assertEquals(Outcome.CLIP_INCOMPATIBLE, stageJar(launcherJar("3.0.22", "1")));
+        assertNothingStaged();
+    }
+
+    @Test
+    void aReleaseWithNoLauncherMetadataFailsClosed() throws Exception {
+        // The shape of release/SourbyCraft-26.2-REL.jar (Clip-Version 3.0.21, no protocol, no properties).
+        byte[] oldShape = jar("Manifest-Version: 1.0\nClip-Version: 3.0.21\n", null);
+        assertEquals(Outcome.CLIP_INCOMPATIBLE, stageJar(oldShape));
+        assertNothingStaged();
+    }
+
+    @Test
+    void aLauncherRefusalIsDistinctFromADownloadFailure() throws Exception {
+        assertNotEquals(Outcome.STAGE_FAILED, stageJar(launcherJar("3.1.2", "2")));
+    }
+
+    @Test
+    void theLauncherGateRunsAfterTheDigestSoATamperedJarIsStillAStageFailure() throws Exception {
+        byte[] jar = launcherJar("3.1.2", "2");
+        transport.enqueue(LISTING, ok(listing(release("v26.2-r48", jar.length, "00".repeat(32), false)), Map.of()));
+        transport.enqueue(JAR_URL, ok(jar, Map.of()));
+        assertEquals(Outcome.STAGE_FAILED, updater().check(ApplyMode.STAGE));
+        assertNothingStaged();
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     static String release(String tag, long size, String sha, boolean withSig) {
@@ -292,11 +353,41 @@ class SourbyUpdaterCheckTest {
         return new ByteArrayInputStream(new byte[0]);
     }
 
+    /** A minimal release jar that declares the launcher the real build embeds (SourbyClip 3.1.2, protocol 1). */
     static byte[] tinyJar() throws IOException {
+        return launcherJar("3.1.2", "1");
+    }
+
+    /**
+     * A jar whose manifest and {@code META-INF/sourbyclip.properties} declare the given launcher;
+     * a {@code null} version/protocol leaves that key out of BOTH entries.
+     */
+    static byte[] launcherJar(String version, String protocol) throws IOException {
+        StringBuilder manifest = new StringBuilder("Manifest-Version: 1.0\n");
+        if (version != null) manifest.append("Clip-Version: ").append(version).append('\n');
+        if (protocol != null) manifest.append("SourbyClip-Protocol: ").append(protocol).append('\n');
+        StringBuilder props = new StringBuilder();
+        if (version != null) props.append("version=").append(version).append('\n');
+        if (protocol != null) props.append("protocol=").append(protocol).append('\n');
+        return jar(manifest.toString(), props.toString());
+    }
+
+    /** A jar with exactly these two metadata entries; a {@code null} argument omits that entry. */
+    static byte[] jar(String manifest, String properties) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
-            zip.putNextEntry(new ZipEntry("META-INF/MANIFEST.MF"));
-            zip.write("Manifest-Version: 1.0\n".getBytes(StandardCharsets.UTF_8));
+            if (manifest != null) {
+                zip.putNextEntry(new ZipEntry("META-INF/MANIFEST.MF"));
+                zip.write(manifest.getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+            if (properties != null) {
+                zip.putNextEntry(new ZipEntry("META-INF/sourbyclip.properties"));
+                zip.write(properties.getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+            zip.putNextEntry(new ZipEntry("version.json"));
+            zip.write("{}".getBytes(StandardCharsets.UTF_8));
             zip.closeEntry();
         }
         return bytes.toByteArray();

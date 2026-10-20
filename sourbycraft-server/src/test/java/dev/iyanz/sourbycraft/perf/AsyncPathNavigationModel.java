@@ -12,19 +12,34 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * A stand-in for the part of {@code PathNavigation} that minecraft feature patch 0006 adds
- * ({@code sourbyKickAsyncRecompute} and the periodic-recompute guard), written against the real
+ * A hand-written model (not a line-by-line copy) of the part of {@code PathNavigation} that minecraft feature patch 0006 adds
+ * ({@code sourbyKickAsyncRecompute} and the periodic-recompute guard) and patch 0047 extends with the
+ * navigation request generation, written against the real
  * {@link AsyncPathProcessor}, {@link AsyncPathCompletion} and {@link AsyncPathValidity}.
  *
  * <p>The patched lambda itself cannot run here: it lives in {@code net.minecraft} code that needs a
  * bootstrapped server and a real {@code Mob}. So the pieces it is built from are the real ones and
- * the glue is mirrored line by line; {@link AsyncPathPatchShapeTest} pins the patch text so that
- * this mirror cannot drift silently. Nothing here claims to exercise the patch's own bytecode.</p>
+ * the glue is modelled by hand; {@link AsyncPathPatchShapeTest} pins selected patch text (check
+ * order, where the token and generation are taken, the generation bumps), which narrows but does not
+ * remove drift: the first version modelled moveTo with reference inequality instead of
+ * {@code Path.sameAs} and missed a retarget. Nothing here exercises the patch's own bytecode.</p>
  */
 final class AsyncPathNavigationModel {
 
-    /** What a solve returns: only the target matters to the apply rule. */
-    record Route(Object target) {
+    /**
+     * What a solve returns. {@code nodes} stands for {@code Path.nodes}: {@link #sameAs} compares only
+     * those, as {@code Path.sameAs} does, so two routes to different targets can be "the same".
+     */
+    record Route(Object target, Object nodes) {
+        /** A route with nodes of its own (never {@code sameAs} another). */
+        Route(final Object target) {
+            this(target, new Object());
+        }
+
+        /** {@code Path.sameAs}: node lists only, the target is ignored. */
+        boolean sameAs(final Route other) {
+            return other != null && this.nodes.equals(other.nodes);
+        }
     }
 
     /** The mob this navigation belongs to; identity is what {@link AsyncPathValidity#sameSubject} compares. */
@@ -34,6 +49,8 @@ final class AsyncPathNavigationModel {
     volatile Route path;
     /** {@code PathNavigation.targetPos}. */
     volatile Object targetPos;
+    /** {@code PathNavigation.sourbyNavigationGeneration} (patch 0047): advanced by every invalidation. */
+    int generation;
     /** {@code PathNavigation.sourbyAsyncPathPending}. */
     final AtomicBoolean pending = new AtomicBoolean();
     /** How many results were applied. */
@@ -60,18 +77,64 @@ final class AsyncPathNavigationModel {
             return true;
         }
         this.path = synchronousSolve.get();
+        ++this.generation;
         if (this.path != null) {
             this.targetPos = this.path.target();
         }
         return false;
     }
 
+    /** {@code PathNavigation.stop()}: advances the generation even when the path is already null. */
+    void stop() {
+        ++this.generation;
+        this.path = null;
+    }
+
+    /**
+     * {@code PathNavigation.createPath} once the finder returned {@code computed}: a new request, so
+     * the generation advances and the target is taken, whether or not a later {@code moveTo} keeps it.
+     */
+    Route createPath(final Route computed) {
+        if (computed != null && computed.target() != null) {
+            ++this.generation;
+            this.targetPos = computed.target();
+        }
+        return computed;
+    }
+
+    /**
+     * {@code PathNavigation.moveTo(Path, double)}: a cleared path, or one that is not {@code sameAs}
+     * the current one, advances the generation; a {@code sameAs} path keeps the current object.
+     */
+    void moveTo(final Route newPath) {
+        if (newPath == null) {
+            ++this.generation;
+            this.path = null;
+            return;
+        }
+        if (!newPath.sameAs(this.path)) {
+            ++this.generation;
+            this.path = newPath;
+        }
+    }
+
     /** Mirrors {@code sourbyKickAsyncRecompute} from the capacity check onward. */
     boolean kick(final Supplier<Route> solve, final OwnerHandoff<Object> handoff) {
+        return this.kick(solve, handoff, () -> {});
+    }
+
+    /**
+     * As {@link #kick(Supplier, OwnerHandoff)}, with {@code pathfindEvent} standing for the
+     * {@code EntityPathfindEvent} listeners, which run on the owner after the capacity check and
+     * before the validity token is taken.
+     */
+    boolean kick(final Supplier<Route> solve, final OwnerHandoff<Object> handoff, final Runnable pathfindEvent) {
         if (!AsyncPathProcessor.hasCapacity()) {
             return false;
         }
+        pathfindEvent.run();
         final Route requested = this.path;
+        final int requestedGeneration = this.generation;
         this.pending.set(true);
         final CompletableFuture<Route> solving = AsyncPathProcessor.trySubmit(solve);
         if (solving == null) {
@@ -85,7 +148,11 @@ final class AsyncPathNavigationModel {
             if (!AsyncPathValidity.stillRequested(this.path, requested)) {
                 return;
             }
+            if (!AsyncPathValidity.sameGeneration(this.generation, requestedGeneration)) {
+                return;
+            }
             if (result != null && result.target() != null) {
+                ++this.generation;
                 this.path = result;
                 this.targetPos = result.target();
                 this.applied.incrementAndGet();

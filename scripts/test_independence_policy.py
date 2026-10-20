@@ -215,6 +215,10 @@ class SchedulerCouplingTest(unittest.TestCase):
         "io.papermc.paper.threadedregions.TickRegions",
         "ThreadedRegionizer",
         "TickRegions",
+        # /perf scheduler queued tasks per region (recorded 2026-10-20, MC feature patch 0045):
+        # RegionTaskQueueData's volatile per-queue entry counts, read without the queue monitor.
+        # Read-only; the view queues, runs and cancels nothing.
+        "io.papermc.paper.threadedregions.RegionizedTaskQueue",
     }
 
     def test_the_backend_is_named_only_inside_the_adapters(self):
