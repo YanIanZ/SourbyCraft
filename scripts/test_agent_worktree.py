@@ -65,7 +65,8 @@ class WorktreeTestBase(unittest.TestCase):
         self.out = io.StringIO()
         self.cfg = aw.Config(main=self.main, root=self.tmp / "wts", file_locks=self.tmp / "filelocks",
                              gradle_lock_root=self.tmp / "gradle-locks", tmp_root=self.tmp / "agent-tmp",
-                             mc_lock=self.tmp / "mc.lock", out=self.out, daemon_lister=lambda: [])
+                             mc_lock=self.tmp / "mc.lock", apply_lock_root=self.tmp / "apply-locks",
+                             out=self.out, daemon_lister=lambda: [])
 
     def run_cli(self, *argv):
         self.out.seek(0)
