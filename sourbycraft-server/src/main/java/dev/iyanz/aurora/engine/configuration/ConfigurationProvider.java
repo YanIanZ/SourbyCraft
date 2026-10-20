@@ -345,7 +345,7 @@ public class ConfigurationProvider {
         final C defaultObject,
         final String... header
     ) {
-        LOGGER.info("{} doesn't exist, using flood fill", absolutePath.getFileName());
+        LOGGER.info("{} not found; writing the default configuration", absolutePath.getFileName()); // SourbyCraft - plain wording
 
         final Node defaultRepresentation = YAML.represent(defaultObject);
         Token.injectComments(defaultObject.getClass(), defaultRepresentation, wrapLimit);

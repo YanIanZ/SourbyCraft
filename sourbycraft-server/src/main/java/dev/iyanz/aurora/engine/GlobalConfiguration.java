@@ -159,10 +159,9 @@ public class GlobalConfiguration extends Part {
                 LOGGER.info("SIMD operations detected as functional. Will replace some operations with faster versions.");
             }
             else {
-                LOGGER.warn("SIMD operations are available for your server, but are not configured!");
-                LOGGER.warn("To enable additional optimizations, add \"--add-modules=jdk.incubator.vector\" to your startup flags, BEFORE the \"-jar\".");
-                LOGGER.warn("If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.");
-                LOGGER.warn("Debug: Java: {}, test run: {}", System.getProperty("java.version"), SIMDDetection.testRun);
+                // SourbyCraft - one advisory line instead of four; the Java/test-run detail is DEBUG.
+                LOGGER.warn("SIMD is off: add \"--add-modules=jdk.incubator.vector\" to the startup flags, before \"-jar\", to enable it (if the flag is already there, this JVM or CPU does not support SIMD).");
+                LOGGER.debug("SIMD detection: Java {}, test run: {}", System.getProperty("java.version"), SIMDDetection.testRun);
             }
 
             final Path logsDirectoryPath = Path.of("logs");
@@ -203,8 +202,7 @@ public class GlobalConfiguration extends Part {
         // days, like who tf would use time units like "1 week"??
         AUTOSAVE_SPAN.swapValue((_) -> TimeSpan.parse(configuration.autosave.autosaveFrequency).verifyIsntLargeUnit());
 
-        broadcast("Server will autosave enabled selection every " + configuration.autosave.autosaveFrequency, INFO);
-        broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
+        broadcast("Autosave every " + configuration.autosave.autosaveFrequency + "; default tick rate " + configuration.regionScheduler.defaultTickRate + " TPS", INFO); // SourbyCraft - one line
     }
 
     public static GlobalConfiguration getInstance() {

@@ -45,7 +45,7 @@ import static net.kyori.adventure.text.Component.text;
  * Folia has no global main thread to bounce it through.
  */
 public class SpeedtestCommand extends Command {
-    private static final Logger LOG = LoggerFactory.getLogger("SourbyCraft:Speedtest");
+    private static final Logger LOG = LoggerFactory.getLogger("SourbyCraft/Speedtest");
     private static final String OOKLA_BASE_URL = "https://install.speedtest.net/app/cli/";
 
     private static final String OS_NAME = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT);

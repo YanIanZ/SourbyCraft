@@ -90,6 +90,7 @@ entries; it is not repeated per row.
 | `Metrics.java` remove bStats phone-home | 800-security | Paper metrics | +24 −13 | KEEP | None. |
 | `PaperBootstrap` brand the boot line | 900-branding | Paper bootstrap | +36 −6 | KEEP | None. |
 | `log4j2.xml` colour the SourbyCraft prefix | 900-branding | Paper resources | +5 | KEEP | None. |
+| `log4j2.xml` short logger tags, ANSI only on a terminal, repeat filter (paper 0016) | 900-branding | Paper resources | +9 −8 | KEEP | Removes 0004's `%style` line; the two could be squashed. Logic lives in `src/log4jPlugins` (`%scLogger`, `%ansiIfTerminal`, `RepeatedMessageFilter`). |
 
 ## Recommended actions, in priority order
 

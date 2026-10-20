@@ -20,7 +20,7 @@ class PluginProvisioningTest(unittest.TestCase):
         cls.java = str(Path(java_home) / "bin/java") if java_home else shutil.which("java")
         javac = str(Path(java_home) / "bin/javac") if java_home else shutil.which("javac")
         names = ("PluginProvisioner", "ProtocolLibProvisioner", "BootstrapPluginSettings",
-                 "LibDownloader", "Sha256Verifier")
+                 "LibDownloader", "Sha256Verifier", "BootLog")
         subprocess.run([javac, "--release", "25", "-d", cls.classes.name,
                         *[str(PACKAGE / (name + ".java")) for name in names],
                         str(ROOT / "scripts/fixtures/PluginProvisioningProbe.java")],

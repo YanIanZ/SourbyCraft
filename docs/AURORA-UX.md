@@ -13,18 +13,23 @@ The UI does not establish performance improvement or feature qualification.
 The new banner separates release, Minecraft/channel, Java, JVM-visible processors and
 maximum heap into labelled rows. Long build identities are preserved.
 
-Aurora prints a `START` line before each of its 14 bootstrap service stages (`TOTAL_STAGES` in
-`core/SourbyCraftBootstrap`; the sample below was captured when there were 13), followed by a
-16-cell progress gauge, stage result and monotonic elapsed time. Each completion is logged
-immediately; a blocked stage therefore leaves its name visible. Output is append-only, with
-no cursor movement, artificial waits or guessed time remaining.
+Aurora prints one line per bootstrap service stage when the stage finishes (14 stages,
+`TOTAL_STAGES` in `core/SourbyCraftBootstrap`): a 16-cell progress gauge, `OK` or `FAIL`, the
+stage name and its elapsed time. A stage still running after 10 seconds also gets one WARN,
+`Stage N/14 "<name>" is still running after 10000 ms`, so a hang names its stage without extra
+logging. The `START N/14 <name>` line before each stage is a log4j DEBUG event on the `Aurora`
+logger and is not printed by default; to see it, start the server with a copy of `log4j2.xml`
+that adds `<Logger name="Aurora" level="debug"/>` inside `<Loggers>`
+(`-Dlog4j.configurationFile=<file>`). The stages run in this fixed order: metrics runtime,
+network counters, configuration, aurora worlds, plugin provisioning, banner, plugin diagnostics,
+startup index, commands, messages, player slots, virtual executor, auto updater, gc tracker.
+Output is append-only, with no cursor movement, artificial waits or guessed time remaining.
 
 ```text
-START 8/13  commands
- 8/13  62% [==========......]  OK    commands  (4ms)
+[Aurora]  9/14  64% [==========......]  OK    commands  (14ms)
 ...
-COMPLETE | 13/13 stages completed without error | 0 failed | 137ms
-Minecraft continues loading; wait for the server-ready message before connecting.
+[Aurora] COMPLETE | 14/14 stages completed without error | 0 failed | 61ms
+[Aurora] Minecraft continues loading; wait for the server-ready message before connecting.
 ```
 
 A caught stage exception prints `FAIL`, keeps the accumulated failure count visible on later
@@ -37,6 +42,33 @@ server-ready marker. `/aurora status` retains those stage results for inspection
 when `System.console()` is available, otherwise plain. These renderers emit ASCII progress bars and no ANSI in plain mode. Other loggers retain their own formatting. `-Dsourbycraft.console=rich` is available for panels whose terminal support is not
 reported to the JVM. `NO_COLOR` and `TERM=dumb` disable ANSI even in rich mode. The startup
 panel and JVM advisor use a UTF-8 stream. Changes affect the next startup.
+
+## Log format
+
+`log4j2.xml` (paper feature patch 0016) prints the logger through `%scLogger`
+(`sourbycraft-server/src/log4jPlugins`). Only a fixed list of server-internal namespaces is
+shortened: `dev.iyanz.sourbycraft.*` prints as `SourbyCraft/<Class>`, `dev.iyanz.aurora.*` and
+`io.canvasmc.*` as `Aurora/<Class>`, `ca.spottedleaf.dataconverter.*` as `DataConverter`,
+`oshi.*` as `OSHI`, and `io.papermc.*`, `ca.spottedleaf.*`, `net.minecraft.*`,
+`org.bukkit.craftbukkit.*`, `com.mojang.*`, `com.destroystokyo.paper.*` as the simple class name.
+Every other logger name, including plugin and library names with dots, is printed unchanged.
+
+Escape codes: in `logs/latest.log` the whole rendered message and exception text go through
+`%plainText`, which removes ANSI escape sequences (`ESC [ ... letter`). On the console the same
+part goes through `%ansiIfTerminal`, which keeps colours only when TerminalConsoleAppender reports
+ANSI support (a real terminal) and strips them otherwise (panels, `> server.log`, `docker logs`);
+`%scLogger` colours the `SourbyCraft`/`Aurora` tags only on such a terminal and below WARN. This
+covers lines written through log4j. It does not cover text written straight to stdout: the startup
+banner (console only, by design; plain unless `ui.console-style` resolves to rich), SourbyClip's
+launcher lines before log4j starts, and JVM warnings such as the `sun.misc.Unsafe` notice from
+joml.
+
+`RepeatedMessageFilter` prints two known repeated startup lines once: OSHI's WARN
+`Unable to parse version ... to a codename` and the INFO `Region tick threads: ...` (configured as logger prefix `Tick`, so the patch names no scheduler class). Only the
+configured level is considered; the same text at another level, any ERROR or FATAL, any line with
+a stack trace, and any line with different text is always printed. SourbyCraft's own loggers are
+named `SourbyCraft`, `SourbyCraft/<area>` (for example `SourbyCraft/AsyncPath`, `SourbyCraft/AWF`)
+and `Aurora`.
 
 ## Commands
 

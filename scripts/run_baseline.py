@@ -43,7 +43,7 @@ RSS_INTERVAL = 1.0
 STARTUP_FAILURES = ("Failed to start the minecraft server", "Perhaps a server is already running",
                     "crash report has been saved", "FAILED TO BIND TO PORT")
 
-# The Aurora boot summary. SourbyCraftBootstrap logs it on the "Aurora Engine" logger once its
+# The Aurora boot summary. SourbyCraftBootstrap logs it on the "Aurora" logger once its
 # service stages have run, built by AuroraBoot.summary():
 #     COMPLETE | 14/14 stages completed without error | 0 failed | 812ms
 # followed by "Minecraft continues loading; wait for the server-ready message before connecting."

@@ -31,6 +31,7 @@ import org.junit.jupiter.api.parallel.Resources;
  * pin's SHA-256 is used to observe WHICH downloads are attempted.
  */
 @ResourceLock(Resources.SYSTEM_PROPERTIES)
+@ResourceLock(Resources.SYSTEM_OUT)
 class ProtocolLibProvisionerTest {
 
     @TempDir Path root;
@@ -260,6 +261,25 @@ class ProtocolLibProvisionerTest {
             assertArrayEquals(operator, Files.readAllBytes(this.plugins.resolve(via.filename())), via.filename());
         }
         assertFalse(names(this.plugins).stream().anyMatch(n -> n.endsWith(".disabled")));
+    }
+
+    @Test
+    void provisioningMessagesGoThroughTheServerLoggerNotStdout() throws Exception {
+        // Phase 1 used System.out/err: no timestamp on the console and nothing in logs/latest.log.
+        toml(false, false);
+        final List<String> logged = new ArrayList<>();
+        final java.io.PrintStream out = System.out;
+        final java.io.ByteArrayOutputStream stdout = new java.io.ByteArrayOutputStream();
+        System.setOut(new java.io.PrintStream(stdout, true));
+        try (AutoCloseable capture = BootLog.captureForTesting((level, message) -> logged.add(level + " " + message))) {
+            PluginProvisioner.provisionJars(this.plugins, this.config, refusing());
+        } finally {
+            System.setOut(out);
+        }
+        assertEquals("", stdout.toString(StandardCharsets.UTF_8));
+        assertTrue(logged.stream().anyMatch(line -> line.startsWith("INFO ViaVersion auto-provision disabled")), logged.toString());
+        assertTrue(logged.stream().noneMatch(line -> line.contains("[SourbyCraft]")),
+            "the logger already tags the line; a second [SourbyCraft] would print twice: " + logged);
     }
 
     @Test

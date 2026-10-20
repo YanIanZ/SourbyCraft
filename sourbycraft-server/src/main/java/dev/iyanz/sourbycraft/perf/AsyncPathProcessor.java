@@ -39,7 +39,7 @@ import java.util.logging.Logger;
  */
 public final class AsyncPathProcessor {
 
-    private static final Logger LOGGER = Logger.getLogger("SourbyCraft:AsyncPath");
+    private static final Logger LOGGER = Logger.getLogger("SourbyCraft/AsyncPath");
 
     private AsyncPathProcessor() {}
 

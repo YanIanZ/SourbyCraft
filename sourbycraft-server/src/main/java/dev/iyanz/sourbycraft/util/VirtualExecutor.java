@@ -16,7 +16,7 @@ import java.util.logging.Logger;
  */
 public final class VirtualExecutor {
 
-    private static final Logger LOGGER = Logger.getLogger("SourbyCraft:VirtualExecutor");
+    private static final Logger LOGGER = Logger.getLogger("SourbyCraft/VirtualExecutor");
     private static volatile ExecutorService EXECUTOR;
     private static boolean stopped;
 

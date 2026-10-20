@@ -94,7 +94,7 @@ public final class PluginProvisioner {
 
     /**
      * Download + SHA-256-verify the pinned Via jars into {@code plugins/}. JDK-only (uses
-     * {@code System.out}/{@code err}, not any server class). Best-effort: a fetch failure logs and
+     * {@link BootLog} over the log4j API, no server class). Best-effort: a fetch failure logs and
      * continues so the server still boots (just without that legacy-client bridge).
      *
      * <p>When the toggle is {@code false} this is NOT a plain no-op: any pinned jar that WE
@@ -116,7 +116,7 @@ public final class PluginProvisioner {
     static void provisionJars(Path pluginsDir, Path config, LibDownloader.Transport transport) {
         ProtocolLibProvisioner.provision(pluginsDir, config, transport);
         if (!BootstrapPluginSettings.enabled(config, "viaversion", true)) {
-            System.out.println("[SourbyCraft] ViaVersion auto-provision disabled "
+            BootLog.info("ViaVersion auto-provision disabled "
                 + "(viaversion.auto-provision=false) — old clients will not be bridged.");
             quarantineProvisionedJars(pluginsDir, PINS);
             return;
@@ -124,7 +124,7 @@ public final class PluginProvisioner {
         try {
             Files.createDirectories(pluginsDir);
         } catch (IOException e) {
-            System.err.println("[SourbyCraft] ViaVersion auto-provision: cannot create plugins/ dir: "
+            BootLog.warn("ViaVersion auto-provision: cannot create plugins/ dir: "
                 + e.getMessage());
             return;
         }
@@ -132,7 +132,7 @@ public final class PluginProvisioner {
             try {
                 ensureJar(pin, pluginsDir, transport);
             } catch (IOException e) {
-                System.err.println("[SourbyCraft] ViaVersion auto-provision: failed to provision "
+                BootLog.warn("ViaVersion auto-provision: failed to provision "
                     + pin.plugin() + " from " + pin.downloadUrl() + ": " + e.getMessage()
                     + " — old clients will not be bridged. Install it manually into plugins/ if needed.");
             }
@@ -155,16 +155,16 @@ public final class PluginProvisioner {
                     if (Files.exists(disabled) && !Sha256Verifier.matches(disabled, pin.sha256()))
                         throw new IOException("Existing quarantine differs; preserved " + disabled);
                     Files.move(jar, disabled, StandardCopyOption.REPLACE_EXISTING);
-                    System.out.println("[SourbyCraft] " + pin.plugin() + " auto-provision: quarantined "
+                    BootLog.info(pin.plugin() + " auto-provision: quarantined "
                         + pin.fileName() + " -> " + disabled.getFileName()
                         + " (we provisioned it on an earlier boot; auto-provision is now false). "
                         + "Enable auto-provision for " + pin.plugin() + " to restore it.");
                 } else if (anyPluginJarPresent(pluginsDir, pin)) {
-                    System.err.println("[SourbyCraft] " + pin.plugin()
+                    BootLog.warn(pin.plugin()
                         + " auto-provision is off, but an operator-installed jar remains and can still load.");
                 }
             } catch (IOException e) {
-                System.err.println("[SourbyCraft] " + pin.plugin() + " auto-provision: could not quarantine "
+                BootLog.warn(pin.plugin() + " auto-provision: could not quarantine "
                     + pin.fileName() + ": " + e.getMessage() + " — remove it from plugins/ manually.");
             }
         }
@@ -185,19 +185,19 @@ public final class PluginProvisioner {
         if (Files.isRegularFile(dest)) {
             Path corrupt = Files.createTempFile(pluginsDir, dest.getFileName() + ".", ".corrupt");
             Files.move(dest, corrupt, StandardCopyOption.REPLACE_EXISTING);
-            System.err.println("[SourbyCraft] " + pin.plugin() + " auto-provision: " + pin.fileName()
+            BootLog.warn(pin.plugin() + " auto-provision: " + pin.fileName()
                 + " failed SHA-256 verification — moved to " + corrupt.getFileName() + " and re-downloading.");
         }
         // Idempotency 2: ANY same-prefix jar present (operator build or other pinned version) -> respect it.
         if (anyPluginJarPresent(pluginsDir, pin)) {
-            System.out.println("[SourbyCraft] " + pin.plugin() + " auto-provision: existing operator jar preserved.");
+            BootLog.info(pin.plugin() + " auto-provision: existing operator jar preserved.");
             return;
         }
         // Idempotency 3: we quarantined this exact jar while the toggle was off -> restore, no re-download.
         Path quarantined = dest.resolveSibling(dest.getFileName() + ".disabled");
         if (Files.isRegularFile(quarantined) && Sha256Verifier.matches(quarantined, pin.sha256())) {
             Files.move(quarantined, dest, StandardCopyOption.REPLACE_EXISTING);
-            System.out.println("[SourbyCraft] " + pin.plugin() + " auto-provision: restored quarantined "
+            BootLog.info(pin.plugin() + " auto-provision: restored quarantined "
                 + pin.fileName() + " (SHA-256 re-verified; loads this boot).");
             return;
         }
@@ -233,14 +233,14 @@ public final class PluginProvisioner {
         // Do not replace an operator jar that appeared while the download was in progress.
         try {
             if (anyPluginJarPresent(pluginsDir, pin)) {
-                System.out.println("[SourbyCraft] " + pin.plugin() + ": a plugin appeared during download; existing jar preserved.");
+                BootLog.info(pin.plugin() + ": a plugin appeared during download; existing jar preserved.");
                 return;
             }
             Files.move(tmp, dest);
         } finally {
             Files.deleteIfExists(tmp);
         }
-        System.out.println("[SourbyCraft] " + pin.plugin() + " auto-provision: downloaded + SHA-256-verified "
+        BootLog.info(pin.plugin() + " auto-provision: downloaded + SHA-256-verified "
             + pin.fileName() + " (" + (pin.sizeBytes() / 1024 / 1024) + "M) into plugins/ "
             + "(Folia-supported; loads this boot).");
     }
@@ -302,8 +302,7 @@ public final class PluginProvisioner {
             try {
                 ensureConfig(pin, pluginsDir);
             } catch (IOException e) {
-                System.err.println(
-                    "ViaVersion auto-provision: could not write default config for "
+                BootLog.warn("ViaVersion auto-provision: could not write default config for "
                         + pin.plugin() + ": " + e.getMessage());
             }
         }
@@ -317,8 +316,7 @@ public final class PluginProvisioner {
         byte[] data;
         try (InputStream in = PluginProvisioner.class.getResourceAsStream(pin.configResource())) {
             if (in == null) {
-                System.err.println(
-                    "ViaVersion auto-provision: default config resource "
+                BootLog.warn("ViaVersion auto-provision: default config resource "
                         + pin.configResource() + " missing from jar — " + pin.plugin()
                         + " will generate its own default (no 1.20 floor pre-set).");
                 return;
@@ -327,8 +325,7 @@ public final class PluginProvisioner {
         }
         Files.createDirectories(cfgDir);
         Files.write(cfg, data);
-        System.out.println(
-            "[SourbyCraft] ViaVersion auto-provision: wrote default " + cfg
+        BootLog.info("ViaVersion auto-provision: wrote default " + cfg
                 + ("ViaVersion".equals(pin.plugin()) ? " (oldest client floor pinned to 1.20)." : "."));
     }
 }

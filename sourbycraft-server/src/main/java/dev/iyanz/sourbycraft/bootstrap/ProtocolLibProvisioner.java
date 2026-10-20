@@ -23,7 +23,7 @@ final class ProtocolLibProvisioner {
             if (enabled) PluginProvisioner.ensureJar(PIN, plugins, transport);
             else PluginProvisioner.quarantineProvisionedJars(plugins, java.util.List.of(PIN));
         } catch (IOException failure) {
-            System.err.println("[SourbyCraft] ProtocolLib installation failed: " + failure.getMessage()
+            BootLog.warn("ProtocolLib installation failed: " + failure.getMessage()
                 + ". Source: " + PIN.downloadUrl() + "; target: " + plugins.resolve(PIN.fileName())
                 + ". Expected SHA-256: " + PIN.sha256() + ". Packet-dependent plugins may not load.");
         }

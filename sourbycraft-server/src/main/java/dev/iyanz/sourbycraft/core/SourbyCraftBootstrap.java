@@ -33,6 +33,27 @@ public final class SourbyCraftBootstrap {
 
     private static volatile boolean started = false;
 
+    /** The engine's console tag: stage results, the boot summary and the thread ledger print as {@code [Aurora]}. */
+    static final java.util.logging.Logger AURORA = java.util.logging.Logger.getLogger("Aurora");
+    /** Same logger through the log4j API, for real DEBUG events. */
+    private static final org.apache.logging.log4j.Logger AURORA_DEBUG = org.apache.logging.log4j.LogManager.getLogger("Aurora");
+
+    /** A stage running longer than this gets one "still running" WARN (the watchdog covers longer hangs). */
+    private static volatile long slowStageMillis = 10_000L;
+    private static volatile java.util.function.Consumer<String> slowStageSink = AURORA::warning;
+
+    /** Test seam: replaces the slow-stage threshold and sink until closed. */
+    static AutoCloseable slowStageWarningForTesting(final long millis, final java.util.function.Consumer<String> sink) {
+        final long previousMillis = slowStageMillis;
+        final java.util.function.Consumer<String> previousSink = slowStageSink;
+        slowStageMillis = millis;
+        slowStageSink = sink;
+        return () -> {
+            slowStageMillis = previousMillis;
+            slowStageSink = previousSink;
+        };
+    }
+
     private SourbyCraftBootstrap() {}
 
     /**
@@ -161,14 +182,16 @@ public final class SourbyCraftBootstrap {
         });
 
         publishBootStages();
-        java.util.logging.Logger.getLogger("Aurora Engine")
-            .info(dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
-                TOTAL_STAGES, failureCount, (System.nanoTime() - begun) / 1_000_000L));
+        // One log call per line, so the readiness hint after the summary gets its own timestamp.
+        for (final String line : dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
+                TOTAL_STAGES, failureCount, (System.nanoTime() - begun) / 1_000_000L).split("\n")) {
+            AURORA.info(line);
+        }
         // Configured thread ceilings per pool against the processors (audit ENG-9). Report only.
         try {
             for (final String line : dev.iyanz.sourbycraft.execution.ThreadLedger.format(
                 dev.iyanz.sourbycraft.execution.ThreadLedger.collect(), Runtime.getRuntime().availableProcessors())) {
-                java.util.logging.Logger.getLogger("Aurora Engine").info(line);
+                AURORA.info(line);
             }
         } catch (final RuntimeException unavailable) {
             SourbyLogger.debug("thread ledger unavailable: " + unavailable);
@@ -237,8 +260,23 @@ public final class SourbyCraftBootstrap {
      * the progress line cannot read healthy while something is broken.</p>
      */
     static void stage(final String name, final Runnable body) {
-        java.util.logging.Logger.getLogger("Aurora Engine").info("START " + (stageCount + 1) + "/" + TOTAL_STAGES + "  " + name);
+        // The console gets one line per stage, written when it finishes (OK or FAIL). START is a
+        // log4j DEBUG event (JUL FINE would arrive as TRACE), shown with a log4j config that sets
+        // <Logger name="Aurora" level="debug"/>. A stage still running after SLOW_STAGE_MILLIS
+        // gets a WARN naming it, so a hang is visible without DEBUG.
+        AURORA_DEBUG.debug("START {}/{}  {}", stageCount + 1, TOTAL_STAGES, name);
         final long stageBegun = System.nanoTime();
+        final java.util.concurrent.atomic.AtomicBoolean finished = new java.util.concurrent.atomic.AtomicBoolean();
+        final java.util.function.Consumer<String> slowSink = slowStageSink;
+        final long slowAfter = slowStageMillis;
+        final String slowMessage = "Stage " + (stageCount + 1) + "/" + TOTAL_STAGES + " \"" + name
+            + "\" is still running after " + slowAfter + " ms";
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            if (!finished.get()) {
+                slowSink.accept(slowMessage);
+            }
+        }, java.util.concurrent.CompletableFuture.delayedExecutor(slowAfter, java.util.concurrent.TimeUnit.MILLISECONDS,
+            Runnable::run));
         boolean successful = true;
         try {
             body.run();
@@ -246,13 +284,15 @@ public final class SourbyCraftBootstrap {
             failureCount++;
             successful = false;
             SourbyLogger.error(name + " failed during Aurora boot", failure);
+        } finally {
+            finished.set(true);
         }
         dev.iyanz.sourbycraft.startup.StartupTimeline.phase("boot:" + name, System.nanoTime() - stageBegun);
         stageCount++;
         var result = new dev.iyanz.sourbycraft.brand.AuroraBoot.Stage(name, successful,
             (System.nanoTime() - stageBegun) / 1_000_000L);
         progress.add(result);
-        java.util.logging.Logger.getLogger("Aurora Engine").info(dev.iyanz.sourbycraft.brand.AuroraBoot.render(
+        AURORA.info(dev.iyanz.sourbycraft.brand.AuroraBoot.render(
             stageCount, TOTAL_STAGES, result, failureCount, dev.iyanz.sourbycraft.brand.ConsoleStyle.current()));
     }
 }
