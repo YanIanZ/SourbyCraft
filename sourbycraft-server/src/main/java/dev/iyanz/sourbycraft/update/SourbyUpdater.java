@@ -138,6 +138,7 @@ public final class SourbyUpdater {
     private final AtomicBoolean checkRunning = new AtomicBoolean(false);
     private final List<ScheduledTask> scheduledChecks = new ArrayList<>();
     private UpdateNotifier.JoinListener joinListener;
+    private volatile int scheduledIntervalMinutes = -1;
 
     /** The server's updater: live GitHub transport, this jar's build info, wall clock. */
     public SourbyUpdater() {
@@ -236,9 +237,25 @@ public final class SourbyUpdater {
         // picked up within minutes, not at the next daily slot.
         track(Bukkit.getAsyncScheduler().runDelayed(owner, task -> checkSafely(), 2, TimeUnit.MINUTES));
 
-        int intervalMin = Config.checkIntervalMinutes();
+        scheduleIntervalCheck(owner, Bukkit.getAsyncScheduler(), Config.checkIntervalMinutes());
+
+        SourbyLogger.info("auto-updater started: repo=" + Config.repo()
+            + " channel=" + resolveChannel().suffix()
+            + " mode=" + mode.name().toLowerCase(Locale.ROOT)
+            + " times=" + times
+            + (scheduledIntervalMinutes > 0 ? " interval=" + scheduledIntervalMinutes + "m" : "")
+            + " signatures=" + (signatures.isActive() ? "enforced" : "not enforced")
+            + " (AsyncScheduler)");
+    }
+
+    /**
+     * Builds the every-N-minutes check (none for 0) and remembers N as the interval this process runs,
+     * so {@code /update status} can tell it apart from a value a later reload left in the config.
+     */
+    synchronized void scheduleIntervalCheck(Plugin owner, io.papermc.paper.threadedregions.scheduler.AsyncScheduler scheduler,
+                                            int intervalMin) {
         if (intervalMin > 0) {
-            track(Bukkit.getAsyncScheduler().runAtFixedRate(
+            track(scheduler.runAtFixedRate(
                 owner,
                 task -> checkSafely(),
                 TimeUnit.MINUTES.toMillis(intervalMin),
@@ -246,14 +263,15 @@ public final class SourbyUpdater {
                 TimeUnit.MILLISECONDS
             ));
         }
+        scheduledIntervalMinutes = Math.max(0, intervalMin);
+    }
 
-        SourbyLogger.info("auto-updater started: repo=" + Config.repo()
-            + " channel=" + resolveChannel().suffix()
-            + " mode=" + mode.name().toLowerCase(Locale.ROOT)
-            + " times=" + times
-            + (Config.checkIntervalMinutes() > 0 ? " interval=" + Config.checkIntervalMinutes() + "m" : "")
-            + " signatures=" + (signatures.isActive() ? "enforced" : "not enforced")
-            + " (AsyncScheduler)");
+    /**
+     * The check interval of the schedule this updater is running, in minutes (0 = daily times only), or
+     * -1 when it has built no schedule in this process (disabled, mode off, stopped). Not the config value.
+     */
+    public int runningIntervalMinutes() {
+        return scheduledIntervalMinutes;
     }
 
     void track(ScheduledTask task) {
@@ -266,6 +284,7 @@ public final class SourbyUpdater {
             task.cancel();
         }
         scheduledChecks.clear();
+        scheduledIntervalMinutes = -1;
         if (joinListener != null) HandlerList.unregisterAll(joinListener);
         joinListener = null;
     }

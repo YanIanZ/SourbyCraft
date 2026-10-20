@@ -32,7 +32,8 @@ import java.util.List;
  * next check uses the new value (LIVE). {@code enabled}, {@code check_times} and
  * {@code check_interval_minutes} shape the schedule {@link SourbyUpdater#start()} builds once at
  * boot, and {@code apply_mode=off} skips that schedule entirely, so turning the updater on or off,
- * or changing its cadence, is RESTART_REQUIRED.
+ * or changing its cadence, is RESTART_REQUIRED. {@code /update status} therefore shows the interval the
+ * running schedule uses and, when a reload changed it, the pending one ({@link #intervalSummary}).
  *
  * <p>{@link #startUpdater()} also runs the {@link UpdateRollbackGuard} boot step before anything
  * else, even when the updater is disabled: a rollback owed from an earlier apply must still happen.
@@ -112,6 +113,16 @@ public final class AutoUpdateSettings {
         restartDelaySeconds = Math.max(5, SourbyCraftConfig.cfgInt("misc.auto_update.restart_delay_seconds", 60));
         allowPrerelease = SourbyCraftConfig.cfgBool("misc.auto_update.allow_prerelease", false);
         viaAutoUpdate = SourbyCraftConfig.cfgBool("misc.auto_update.via_auto_update", true);
+    }
+
+    /**
+     * The interval for {@code /update status}: the one the running schedule uses, plus the configured
+     * one when a reload changed it (it only applies after a restart). {@code running < 0} means this
+     * process built no schedule, so only the configured value exists.
+     */
+    public static String intervalSummary(int running, int configured) {
+        if (running < 0 || running == configured) return (running < 0 ? configured : running) + "m";
+        return running + "m (pending restart: " + configured + "m)";
     }
 
     private static String valueOr(String v, String def) {

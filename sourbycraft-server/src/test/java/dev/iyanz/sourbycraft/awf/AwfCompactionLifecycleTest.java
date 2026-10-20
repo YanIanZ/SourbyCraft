@@ -83,7 +83,7 @@ class AwfCompactionLifecycleTest {
 
         // /awf compact <world>: every open store of the world, clean ones included, on the storage lane.
         final List<AwfEngine.CompactionReport> reports =
-            on.compactStorages(this.dir.resolve("q").toString()).get();
+            on.compactStorages(this.dir.resolve("q")).get();
         assertEquals(3, reports.size());
         for (final AwfEngine.CompactionReport report : reports) {
             assertNull(report.error(), report.toString());
@@ -97,11 +97,11 @@ class AwfCompactionLifecycleTest {
             final String kind = Path.of(storage.name()).getFileName().toString();
             assertEquals(20, HeadBuildReader.decodeIndex(HeadBuildReader.read(generationsRoot(folder(kind)))).size(), storage.name());
         }
-        assertEquals(List.of(), on.compactStorages(this.dir.resolve("elsewhere").toString()).get(), "no storage under another folder");
-        assertEquals(3, on.compactStorages("all").get().size());
+        assertEquals(List.of(), on.compactStorages(this.dir.resolve("elsewhere")).get(), "no storage under another folder");
+        assertEquals(3, on.compactStorages((Path) null).get().size());
         // The dirty chunks are still the storage's: a compaction carries no writes, a flush does.
         region.write(5, 0, b("dirty"));
-        assertEquals(1, on.compactStorages("all").get().stream().filter(r -> r.storage().endsWith("region")).count());
+        assertEquals(1, on.compactStorages((Path) null).get().stream().filter(r -> r.storage().endsWith("region")).count());
         assertTrue(region.fullIndex());
         assertArrayEquals(b("dirty"), region.read(5, 0));
         region.flush();
@@ -124,10 +124,57 @@ class AwfCompactionLifecycleTest {
         assertArrayEquals(b("dirty"), region2.read(5, 0));
         assertArrayEquals(b("r3"), region2.read(1, 0));
         assertArrayEquals(b("e2"), entities2.read(0, 0));
-        final List<AwfEngine.CompactionReport> already = off.compactStorages("all").get();
+        final List<AwfEngine.CompactionReport> already = off.compactStorages((Path) null).get();
         assertTrue(already.stream().allMatch(r -> r.fullBefore() && r.fullAfter() && r.error() == null), already.toString());
         // And a store that is never opened by the server keeps whatever it has: only opened stores convert.
         assertEquals(0, off.closeEvery());
+    }
+
+    /** A dimension key without touching Level, whose class init needs a bootstrapped registry. */
+    private static net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> key(final String path) {
+        return net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,
+            net.minecraft.resources.Identifier.withDefaultNamespace(path));
+    }
+
+    /** A 26.2 dimension folder, built by the function the server's storage source uses. */
+    private Path dimension(final net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> key) {
+        return AwfWorldFolders.dimensionFolder(this.dir.resolve("world"), key);
+    }
+
+    @Test
+    void compactingANamedWorldTakesOnlyThatWorldsDimensionStoresInThe262Layout() throws Exception {
+        // server-w2 awf4: every dimension lives under world/dimensions/<ns>/<name>/; "/awf compact w2a"
+        // found nothing and "/awf compact world" compacted all 12 stores.
+        final AwfEngine engine = new AwfEngine(new AwfSettings(Set.of("world", "w2a"), Set.of(), "file",
+            PersistenceMode.INCREMENTAL, 1, 8, 3, 3, false), Runnable::run, this.clock::get);
+        final var w2a = key("w2a");
+        final List<Path> dimensions = List.of(dimension(key("overworld")),
+            dimension(key("the_nether")), dimension(key("the_end")), dimension(w2a));
+        for (final Path dimension : dimensions) {
+            for (final String kind : List.of("region", "entities", "poi")) {
+                Files.createDirectories(dimension.resolve(kind));
+                engine.open(dimension.resolve(kind)).write(0, 0, b(kind));
+            }
+        }
+        assertTrue(dimensions.get(3).endsWith(Path.of("world", "dimensions", "minecraft", "w2a")), dimensions.get(3).toString());
+        // Bukkit world name -> that loaded world's dimension folder, as AwfWorldFolders resolves it on a server.
+        final Path level = this.dir.resolve("world");
+        final Map<String, net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>> loaded = Map.of(
+            "world", key("overworld"), "world_nether", key("the_nether"),
+            "world_the_end", key("the_end"), "w2a", w2a);
+        final java.util.function.Function<String, Path> folders = name -> loaded.containsKey(name)
+            ? AwfWorldFolders.dimensionFolder(level, loaded.get(name)) : null;
+        final List<AwfEngine.CompactionReport> overworld = engine.compactStorages("world", folders).get();
+        assertEquals(3, overworld.size(), "\"world\" is the overworld's stores only: " + overworld);
+        assertTrue(overworld.stream().allMatch(r -> Path.of(r.storage()).getParent().equals(dimensions.get(0))), overworld.toString());
+        final List<AwfEngine.CompactionReport> named = engine.compactStorages("w2a", folders).get();
+        assertEquals(3, named.size(), "w2a's stores: " + named);
+        assertTrue(named.stream().allMatch(r -> Path.of(r.storage()).getParent().equals(dimensions.get(3))), named.toString());
+        assertEquals(3, engine.compactStorages("world_nether", folders).get().size());
+        assertEquals(12, engine.compactStorages("all", folders).get().size());
+        assertEquals(List.of(), engine.compactStorages("w2", folders).get(), "not loaded: nothing, never a prefix match");
+        assertEquals(List.of(), engine.compactStorages("w2", name -> AwfWorldFolders.dimensionFolder(level, key("w2"))).get(), "a sibling whose name is a prefix is another world");
+        assertEquals(0, engine.closeEvery());
     }
 
     @Test

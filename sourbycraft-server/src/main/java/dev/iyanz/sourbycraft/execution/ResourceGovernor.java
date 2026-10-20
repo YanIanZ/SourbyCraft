@@ -66,18 +66,48 @@ public final class ResourceGovernor {
     private final Map<Lane, GovernedLane> lanes = new ConcurrentHashMap<>();
     private volatile dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler budgets =
         dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler.DEFAULT;
+    /** The value the last configure call read; differs from {@link #budgets} after a reload edit. */
+    private volatile dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler latest = this.budgets;
+    private boolean configured;
 
     /**
-     * Sets the budgets lanes are created with. A lane that already exists keeps its budget until
-     * restart (RESTART_REQUIRED); the config reload summary says so.
+     * Records the scheduler budgets the configuration holds. The first call (boot) sets the budgets
+     * of this process; every later call ({@code /sourbycraft reload}) is only remembered as the value
+     * pending a restart. {@code aurora.scheduler.*} is RESTART_REQUIRED, so a reload must not
+     * reach lanes already running, lanes created later in this process, or what {@code /perf
+     * governor} reports as running: before this, a reload changed all but the first.
      */
-    public void configure(final dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler scheduler) {
-        this.budgets = java.util.Objects.requireNonNull(scheduler, "scheduler");
+    public synchronized void configure(final dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler scheduler) {
+        java.util.Objects.requireNonNull(scheduler, "scheduler");
+        if (!this.configured) {
+            this.budgets = scheduler;
+            this.configured = true;
+        }
+        this.latest = scheduler;
     }
 
-    /** The budgets lanes are (or will be) created with. */
+    /** The budgets of this process: lanes are (or will be) created with them until restart. */
     public dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler budgets() {
         return this.budgets;
+    }
+
+    /**
+     * The scheduler keys a reload changed and a restart would apply, as
+     * {@code "<key>: <running> -> <pending>"} in key order; empty when nothing is pending.
+     */
+    public List<String> pendingRestart() {
+        final var running = this.budgets;
+        final var pending = this.latest;
+        final List<String> changes = new java.util.ArrayList<>(4);
+        pending(changes, dev.iyanz.sourbycraft.config.AuroraConfig.BRIDGE_IO_THREADS_KEY, running.bridgeIoThreads(), pending.bridgeIoThreads());
+        pending(changes, dev.iyanz.sourbycraft.config.AuroraConfig.BRIDGE_IO_QUEUE_KEY, running.bridgeIoQueue(), pending.bridgeIoQueue());
+        pending(changes, dev.iyanz.sourbycraft.config.AuroraConfig.STORAGE_THREADS_KEY, running.storageThreads(), pending.storageThreads());
+        pending(changes, dev.iyanz.sourbycraft.config.AuroraConfig.STORAGE_QUEUE_KEY, running.storageQueue(), pending.storageQueue());
+        return List.copyOf(changes);
+    }
+
+    private static void pending(final List<String> changes, final String key, final int running, final int pending) {
+        if (running != pending) changes.add(key + ": " + running + " -> " + pending);
     }
 
     /** The lane, created on first use with its configured budget. */

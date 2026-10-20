@@ -16,7 +16,7 @@ latest, because the EDF patch `ade3b24` (then 0028, now parked) was stacked on i
 metrics were never enabled on the demo, so `/perf chunks` stage samples do not exist. Nothing here is
 measured by 0027. A TOML switch (`aurora.diagnostics.chunk-generation-metrics` in `sourbycraft_config/aurora.toml`)
 is **in progress** by another agent (log, owner instruction 2026-10-07 ~02:00, agent "codex-items"); the working
-tree already references the key in `SourbyCraftConfig`, `AuroraConfig` and `PerfCommand`, but no test or boot of it
+tree already references the key in `SourbyCraftConfig`, `AuroraConfig` and `PerfChunksView` (the `/perf chunks` view, formerly inside `PerfCommand`), but no test or boot of it
 is recorded. The "Enable" section below still describes only the JVM property, which is the 0027 contract until
 that work lands and is tested. The handoff list below carries a per-item status.
 

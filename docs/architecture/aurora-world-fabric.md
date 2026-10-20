@@ -373,8 +373,13 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
   `RepeatedReadFailure` with the same message, and summarised once ("failed N time(s) in the last
   10 s ... first error: ..."), from `maintain` or close. Fencing and refusals are unchanged. Harness
   `opus-w6-redisflood-1`: SourbyCraft read ERRORs 731 → 3, stack frames 40 936 → 164, log of the
-  flood 6.29 MB → 1.23 MB; Moonrise still logs two ERROR lines per failed chunk (Paper code, needs a
-  patch). The recovery INFO "read … again" is still one line per position.) Not covered: a POI or entity store whose
+  flood 6.29 MB → 1.23 MB. Moonrise's own two ERROR lines per failed chunk (MoonriseRegionFileIO,
+  ChunkLoadTask) are dropped for repeats, without a feature patch, by `RepeatedReadFailureLogFilter`: a
+  configuration-wide log4j2 filter installed by the first repeat, re-added on every log4j2
+  reconfiguration, that DENYs only records whose throwable (or a cause) is a `RepeatedReadFailure` and
+  whose logger is not SourbyCraft's (the cause search goes at most 8 levels deep); the first failure of a window still logs in full, and the summary counts the repeats but does not list their positions. Harness
+  `patch-w4-redisflood-1`, same scenario: Moonrise ERRORs 1458 → 4, all ERRORs 1461 → 7, lines
+  3099 → 190, bytes 1.23 MB → 24.9 KB. The recovery INFO "read … again" is still one line per position. The POI read path was not exercised live (unit/code-path only).) Not covered: a POI or entity store whose
   read succeeded while the chunk store's failed keeps committing (derived from its own stored data).
 - **D2** (`RedisStore.COMMIT_SCRIPT` :54, `RedisBackend.RENEW_SCRIPT` :59): every commit writes its
   lease token to `<prefix>{id}:writer`; a free lease is taken back when the generation is unchanged
@@ -586,7 +591,9 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
   fallback. Storage ids are region folders relative to the server directory (`world/region`).
 - **Observability.** `/perf awf` shows resident, dirty and evicted chunks, pending commits and the
   oldest one's age, commit p50/p95/p99, reads versus region-file fall-throughs and deletes,
-  retries, failures and bytes written, per storage.
+  retries, failures and bytes written, per storage. While non-zero it also shows
+  `Chunk-system read errors collapsed`, the number of repeat read failures whose chunk-system log lines
+  `RepeatedReadFailureLogFilter` dropped since start (LIVE: read at command time, a count since JVM start).
 - **Evidence.** Unit tests in `awf/`: `AwfRegionStorageTest`, `AwfSettingsTest`, `AwfBackendTest`,
   and the tombstone and garbage-collection tests in `AwfWorldStoreTest` and `AwfWorldTest`.
   `AwfQualificationTest` (below). CI step "Boot twice with Aurora World Fabric storing the world"

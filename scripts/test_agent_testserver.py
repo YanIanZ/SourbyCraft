@@ -320,7 +320,8 @@ class HarnessCase(TempCase):
         self.harness = ats.Harness(base=self.root / "servers", lock_path=self.root / "ts.lock",
                                    jar=self.jar, min_free=0,
                                    java=lambda: (sys.executable, "fake 25"), git=fake_git,
-                                   hardware=no_hardware)
+                                   hardware=no_hardware, memory=lambda: 8 * 1024 ** 3,
+                                   gradle_builds=lambda: 0, exclusive_poll=0.05)
         self.addCleanup(self._kill_leftovers)
 
     def _kill_leftovers(self):
@@ -372,14 +373,18 @@ class LifecycleTest(HarnessCase):
         self.assertFalse(ats.pid_alive(final["jvm_pid"]))
         self.assertIn("say hello", (workdir / "commands.log").read_text())
 
-    def test_a_second_start_is_refused_while_one_runs(self):
+    def test_a_third_start_is_refused_while_two_run(self):
         self.start("a")
-        with self.assertRaises(ats.LockBusy):
-            self.start("b")
-        self.assertFalse((self.root / "servers" / "b").exists())
-        self.harness.stop("a", timeout=10)
         self.start("b")
+        with self.assertRaises(ats.SlotsBusy) as busy:
+            self.start("c")
+        self.assertIn("slot 1: name=a", str(busy.exception))
+        self.assertIn("slot 2: name=b", str(busy.exception))
+        self.assertFalse((self.root / "servers" / "c").exists())
+        self.harness.stop("a", timeout=10)
+        self.assertEqual(self.start("c")["slot"]["number"], 1)
         self.harness.stop("b", timeout=10)
+        self.harness.stop("c", timeout=10)
 
     def test_an_existing_workdir_is_never_reused(self):
         self.start("a")
@@ -461,6 +466,201 @@ class LifecycleTest(HarnessCase):
             time.sleep(0.1)
         self.assertFalse(ats.pid_alive(jvm))
         self.harness.stop("b", timeout=10)
+
+
+class SlotTest(HarnessCase):
+    """Two functional slots, the --exclusive mode, old-lock compatibility, resource checks."""
+
+    def slot_paths(self):
+        return ats.slot_lock_paths(self.harness.lock_path, 2)
+
+    def wait_until(self, predicate, timeout=15):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.05)
+        return False
+
+    def test_slot_paths_keep_the_historical_lock_as_slot_1(self):
+        self.assertEqual(ats.slot_lock_paths(ats.LOCK_PATH, 2),
+                         [Path("/private/tmp/claude-501/sourby-testserver.lock"),
+                          Path("/private/tmp/claude-501/sourby-testserver-slot-2.lock")])
+        self.assertEqual(ats.exclusive_lock_path(ats.LOCK_PATH),
+                         Path("/private/tmp/claude-501/sourby-testserver-exclusive.lock"))
+        self.assertEqual((ats.redis_port(1), ats.redis_port(2)), (6401, 6402))
+
+    def test_two_runs_get_their_own_slot_lock_port_workdir_and_redis_port(self):
+        a, b = self.start("a"), self.start("b")
+        self.assertEqual((a["slot"]["number"], b["slot"]["number"]), (1, 2))
+        self.assertEqual((a["slot"]["redis_port"], b["slot"]["redis_port"]), (6401, 6402))
+        self.assertNotEqual(a["server"]["port"], b["server"]["port"])
+        self.assertNotEqual(a["workdir"], b["workdir"])
+        self.assertEqual(a["lock"]["paths"], [str(self.slot_paths()[0])])
+        self.assertEqual(b["lock"]["paths"], [str(self.slot_paths()[1])])
+        owners = [ats.MachineLock(p).read() for p in self.slot_paths()]
+        self.assertEqual([o["name"] for o in owners], ["a", "b"])
+        self.assertEqual([o["role"] for o in owners], ["supervisor", "supervisor"])
+        self.assertEqual(owners[1]["port"], b["server"]["port"])
+        status = self.harness.status()
+        self.assertEqual([s["owner"]["name"] for s in status["slots"]], ["a", "b"])
+        self.assertEqual((status["free_slots"], status["lock"]["name"]), ([], "a"))
+        self.assertEqual(self.harness.stop("b", timeout=10)["lock_released"], True)
+        self.assertFalse(self.slot_paths()[1].exists())
+        self.assertTrue(self.slot_paths()[0].exists())     # Only b's slot was freed.
+        self.assertEqual(self.harness.status()["free_slots"], [2])
+        self.harness.stop("a", timeout=10)
+        self.assertEqual(self.harness.status()["free_slots"], [1, 2])
+
+    def test_a_stale_slot_is_broken_on_its_own(self):
+        a = self.start("a")
+        self.start("b")
+        os.kill(self.run_json("b")["supervisor_pid"], signal.SIGKILL)
+        self.assertTrue(self.wait_until(lambda: not ats.pid_alive(self.run_json("b")["supervisor_pid"])))
+        c = self.start("c")                     # Breaks slot 2 only; a keeps slot 1.
+        self.assertEqual(c["slot"]["number"], 2)
+        self.assertEqual(ats.MachineLock(self.slot_paths()[0]).read()["name"], "a")
+        self.assertTrue(self.wait_until(lambda: not ats.pid_alive(self.run_json("b")["jvm_pid"])))
+        self.assertTrue(ats.pid_alive(a["jvm_pid"]))
+        self.harness.stop("a", timeout=10)
+        self.harness.stop("c", timeout=10)
+
+    def test_an_old_single_lock_still_means_slot_1_busy(self):
+        # A supervisor from before slots existed holds only the historical lock path.
+        old = ats.MachineLock(self.harness.lock_path)
+        old.acquire(name="old-run", workdir="/w/old", role="supervisor", max_lifetime_s=600)
+        run = self.start("new")
+        self.assertEqual(run["slot"]["number"], 2)
+        self.assertEqual(old.read()["name"], "old-run")
+        with self.assertRaises(ats.SlotsBusy):
+            self.start("third")
+        self.assertEqual(self.harness.status()["slots"][0]["owner"]["name"], "old-run")
+        self.harness.stop("new", timeout=10)
+        self.assertTrue(self.harness.lock_path.exists())    # Never touched by the new run.
+
+    def test_old_cli_supervisor_arguments_still_parse(self):
+        args = ats.build_parser().parse_args(["_supervise", "--workdir", "/w", "--lock", "/l",
+                                              "--token", "t"])
+        self.assertEqual(args.lock, ["/l"])
+
+    def test_exclusive_waits_for_every_slot_and_blocks_new_starts(self):
+        self.start("a")
+        self.start("b")
+        result = {}
+
+        def exclusive():
+            try:
+                result["run"] = self.start("x", exclusive=True, exclusive_wait_s=60)
+            except BaseException as problem:    # noqa: BLE001  (reported to the test thread)
+                result["error"] = problem
+        waiter = threading.Thread(target=exclusive)
+        waiter.start()
+        self.addCleanup(waiter.join, 30)
+        reservation = ats.exclusive_lock_path(self.harness.lock_path)
+        self.assertTrue(self.wait_until(reservation.exists))
+        self.harness.stop("a", timeout=10)
+        # Slot 1 is free but reserved: the waiter takes it, and nobody else may start.
+        self.assertTrue(self.wait_until(
+            lambda: (ats.MachineLock(self.slot_paths()[0]).read() or {}).get("name") == "x"))
+        with self.assertRaises(ats.ExclusiveBusy):
+            self.start("c")
+        self.assertFalse((self.root / "servers" / "c").exists())
+        self.assertNotIn("run", result)               # Still waiting for b.
+        self.assertFalse((self.root / "servers" / "x" / "run.json").exists())
+        self.harness.stop("b", timeout=10)
+        waiter.join(30)
+        self.assertNotIn("error", result)
+        run = result["run"]
+        self.assertEqual(run["slot"], dict(run["slot"], exclusive=True, slots_held=2,
+                                           redis_port=6401))
+        held = [ats.MachineLock(p).read() for p in [reservation, *self.slot_paths()]]
+        self.assertEqual([h["name"] for h in held], ["x", "x", "x"])
+        self.assertEqual([h["role"] for h in held], ["supervisor"] * 3)
+        self.assertEqual(held[1]["max_lifetime_s"], held[2]["max_lifetime_s"])
+        self.assertLess(held[1]["max_lifetime_s"], 60 + 120 + 30 + ats.STOP_TIMEOUT_S + 1)
+        with self.assertRaises(ats.ExclusiveBusy):
+            self.start("d")
+        self.assertTrue(self.harness.status()["any_busy"])
+        final = self.harness.stop("x", timeout=10)
+        self.assertTrue(final["lock_released"])
+        for path in [reservation, *self.slot_paths()]:
+            self.assertFalse(path.exists(), path)
+        self.start("e")
+        self.harness.stop("e", timeout=10)
+
+    def test_exclusive_gives_up_after_its_wait_and_releases_what_it_took(self):
+        self.start("a")
+        with self.assertRaisesRegex(ats.HarnessError, "gave up"):
+            self.start("x", exclusive=True, exclusive_wait_s=0.3)
+        self.assertFalse(ats.exclusive_lock_path(self.harness.lock_path).exists())
+        self.assertFalse(self.slot_paths()[1].exists())
+        self.assertEqual(ats.MachineLock(self.slot_paths()[0]).read()["name"], "a")
+        self.assertFalse((self.root / "servers" / "x").exists())
+        self.harness.stop("a", timeout=10)
+
+    def test_a_dead_exclusive_waiter_does_not_block_forever(self):
+        ats.MachineLock(ats.exclusive_lock_path(self.harness.lock_path)).acquire(
+            name="ghost", pid=999999, max_lifetime_s=600)
+        run = self.start("a")                   # Dead owner pid: the reservation is broken.
+        self.assertEqual(run["slot"]["number"], 1)
+        self.assertFalse(ats.exclusive_lock_path(self.harness.lock_path).exists())
+        self.harness.stop("a", timeout=10)
+
+    def test_low_ram_is_refused_and_frees_the_slot(self):
+        self.harness._memory = lambda: int(2.9 * 1024 ** 3)
+        with self.assertRaisesRegex(ats.HarnessError, r"only 2\.90 GiB RAM available"):
+            self.start()
+        self.assertFalse(self.harness.lock_path.exists())
+        self.assertFalse((self.root / "servers" / "t").exists())
+        self.harness._memory = lambda: int(3.1 * 1024 ** 3)
+        run = self.start()
+        self.assertEqual(run["resources_at_start"]["available_ram_gib"], 3.1)
+        self.harness.stop("t", timeout=10)
+
+    def test_more_than_two_gradle_builds_are_refused(self):
+        self.harness._gradle_builds = lambda: 3
+        with self.assertRaisesRegex(ats.HarnessError, "3 Gradle builds"):
+            self.start()
+        self.assertFalse(self.harness.lock_path.exists())
+        self.harness._gradle_builds = lambda: 2
+        self.assertEqual(self.start()["resources_at_start"]["gradle_builds_running"], 2)
+        self.harness.stop("t", timeout=10)
+
+
+class ResourceProbeTest(unittest.TestCase):
+    VM_STAT = textwrap.dedent("""\
+        Mach Virtual Memory Statistics: (page size of 16384 bytes)
+        Pages free:                                    11200.
+        Pages active:                                 187566.
+        Pages inactive:                               184601.
+        Pages speculative:                              2257.
+        Pages throttled:                                   0.
+        Pages wired down:                             145534.
+        Pages purgeable:                                2566.
+        File-backed pages:                            111954.
+        """)
+
+    def test_vm_stat_counts_free_inactive_speculative_and_purgeable_pages(self):
+        self.assertEqual(ats.parse_vm_stat(self.VM_STAT), (11200 + 184601 + 2257 + 2566) * 16384)
+        self.assertIsNone(ats.parse_vm_stat("garbage"))
+
+    def test_available_memory_uses_vm_stat_on_darwin(self):
+        def run(command, **_kwargs):
+            self.assertEqual(command, ["vm_stat"])
+            return subprocess.CompletedProcess(command, 0, stdout=self.VM_STAT, stderr="")
+        self.assertEqual(ats.available_memory(run=run, system=lambda: "Darwin"),
+                         ats.parse_vm_stat(self.VM_STAT))
+
+    def test_gradle_clients_are_builds_and_daemons_are_not(self):
+        listing = "\n".join([
+            "java -cp gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain test",
+            "java org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.1",
+            "java -cp x org.gradle.launcher.GradleMain build",
+            "python3 something"])
+
+        def run(command, **_kwargs):
+            return subprocess.CompletedProcess(command, 0, stdout=listing, stderr="")
+        self.assertEqual(ats.running_gradle_builds(run=run), 2)
 
 
 class WorldReuseAndKillTest(HarnessCase):

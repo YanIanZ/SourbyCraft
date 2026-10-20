@@ -2,7 +2,9 @@
 
 Status: **Active** (2026-10-20). `scripts/agent_testserver.py` is the only sanctioned way for an
 agent to boot a server (owner decision 2026-10-20: isolated, outside the repository, time-limited,
-localhost, one at a time). Tests: `scripts/test_agent_testserver.py` (fake server process, no JVM).
+localhost). At most **2 functional servers** run at once (one per slot); `--exclusive` holds both
+slots for anything performance-related (board task testserver-slots, 2026-10-20). Tests:
+`scripts/test_agent_testserver.py` (fake server process, no JVM).
 
 ## What it guarantees
 
@@ -10,7 +12,10 @@ localhost, one at a time). Tests: `scripts/test_agent_testserver.py` (fake serve
 | --- | --- |
 | Isolation | Run directory `/Volumes/Ext/Sourby/agent-testservers/<name>/`, created fresh (an existing name is refused). Refused: names that are not `[A-Za-z0-9._-]`, anything inside the repository or `$HOME`, anything else under `/Volumes/Ext/Sourby` (the owner's servers). `eula=true` is written only there. |
 | Jar | `build/libs/SourbyCraft-slim.jar`, copied into the run directory, so a rebuild cannot change a running server. Missing jar (or `--rebuild-jar`): `slimServerJar` through the shared `gradle_locked.sh`. `run.json` records its SHA-256, mtime and `older_than_head_commit`; the harness does not know which commit built the jar, `/ver`'s `Git:` line does. |
-| One server | `mkdir` lock `/private/tmp/claude-501/sourby-testserver.lock` with `owner.json` (token, pid, JVM pid, workdir, lifetime). Broken when the owner pid is dead or the lock is older than its lifetime + 300 s; the dead run's JVM is killed first (only if its command line names that run directory). |
+| Slots | Two `mkdir` slot locks, each with `owner.json` (token, pid, JVM pid, workdir, port, Redis port, lifetime): slot 1 = `/private/tmp/claude-501/sourby-testserver.lock` (the historical single-server lock, so a supervisor started before slots existed still counts as "slot 1 busy"), slot 2 = `sourby-testserver-slot-2.lock` beside it. `start` takes the first free slot; with both busy it is refused (exit 2) naming both holders. Each slot lock is broken on its own when its owner pid is dead or it is older than its lifetime + 300 s; the dead run's JVM is killed first (only if its command line names that run directory). |
+| Exclusive | `--exclusive` first takes `sourby-testserver-exclusive.lock` (from then on every functional `start` is refused with "an --exclusive run holds or waits for every slot"), then waits for slot 1 and slot 2 in turn (default up to 3600 s, `--exclusive-wait`), and holds all three locks for the whole run; the supervisor releases them together. Giving up releases whatever it had taken. While waiting, the locks carry lifetime + wait so they are not broken as stale; a dead waiter's locks are broken by the next start. Use it for anything performance-related. It still does not make the machine quiet (Gradle builds, other agents and the owner's servers keep running): not a certified baseline. |
+| Per-slot ports | Server port: a random free localhost port, excluding the other slot's port and the Redis ports. Redis convention for a scenario that starts its own `redis-server`: **slot N uses port 6400 + N** (slot 1 = 6401, slot 2 = 6402; an exclusive run uses 6401). `run.json` `slot.redis_port` and `status` show it; the harness itself never starts Redis. Each run has its own workdir (`<name>/`) as before. |
+| Resources | Before a server starts (after its slot is taken; released again on refusal): refused when less than **3 GiB RAM** is available or **more than 2 Gradle builds** run. RAM on macOS: `vm_stat` (free + inactive + speculative + purgeable pages) × page size; active, wired and compressor pages are not counted, so it is lower than `memory_pressure`'s "free percentage" (one sample on 2026-10-20: vm_stat 2.78–3.0 GiB vs memory_pressure 35 %). Linux: `MemAvailable`. Gradle builds: running Gradle client processes (`GradleWrapperMain` / `GradleMain`); idle daemons do not count. Both are one point sample recorded in `run.json` `resources_at_start`, not a reservation. |
 | Network | `server-ip=127.0.0.1`, random free port, `online-mode=false`, rcon/query off; these properties cannot be overridden. ViaVersion/ProtocolLib provisioning and auto-update off. |
 | Size | `view-distance=4`, `simulation-distance=5`, 2048 MiB heap, `minecraft:normal`, seed 440044, all overridable. |
 | Lifetime | Default 20 min (`--max-lifetime`, 60 s to 3 h). A watchdog thread in the supervisor sends `stop` at the deadline and kills the JVM process group 30 s later. |
@@ -32,7 +37,8 @@ python3 $S cmd --name my-check "ver" --expect "Build"   # prints the log text th
 python3 $S cmd --name my-check "perf chunks"
 python3 $S wait-for --name my-check "Saved all worlds" --new --timeout 60
 python3 $S log --name my-check --lines 80
-python3 $S status --name my-check
+python3 $S status --name my-check            # every slot: owner, port, redis_port; free_slots; exclusive
+python3 $S start --name perf-1 --exclusive   # waits for both slots, blocks new starts (measurements)
 python3 $S stop --name my-check             # console stop; kill after --timeout (180 s)
 python3 $S kill --name my-check             # crash test: SIGKILL, no console stop, no save
 python3 $S start --name my-check-2 --world-from my-check   # boot again over my-check's world
@@ -49,8 +55,13 @@ source's `sourbycraft_config/aurora.toml` is carried over unless `--aurora-toml`
 world stored through AWF comes back through AWF. `kill` exits 0 when the server was SIGKILLed on
 request (`stop_reason` "killed on request") and the lock was released.
 
+`status` keeps `lock`/`lock_path` meaning slot 1 (the old single lock) and adds `slots` (number,
+lock path, busy, owner, redis_port), `free_slots`, `exclusive` and `any_busy`. `run.json` has
+`slot` (number, exclusive, slots_held, redis_port, lock_paths), `lock.paths` and `resources_at_start`.
+
 Exit codes: 0 ok; 1 the check failed (expect not matched, no line, unclean stop); 2 refused
-(lock busy, bad name/path, low disk, startup failure). `stop`, `restart` and `end` are refused as
+(both slots busy, exclusive run active, bad name/path, low disk, low RAM, too many Gradle
+builds, `--exclusive` wait timeout, startup failure). `stop`, `restart` and `end` are refused as
 console commands: lifecycle goes through `stop`.
 
 ## Scenario file
@@ -78,8 +89,9 @@ hardware, git, jar), `hardware.json`, `run.json`, `server.log`, `commands.log`.
 
 ## What the output is not
 
-A harness run is functional evidence (it boots, a command answers, it stops cleanly). It is **not**
-a baseline: no JFR window, no certification, a shared machine (load average is recorded in
+A harness run is functional evidence (it boots, a command answers, it stops cleanly). Two
+functional runs share the machine with each other; a timing taken while another slot runs is not
+even comparable between runs, so take timings only with `--exclusive`. It is **not** a baseline: no JFR window, no certification, a shared machine (load average is recorded in
 `hardware.json`; other agents and the owner's servers may be running), and usually a dirty tree and
 a jar that predates HEAD. Never turn a number from it into a release or performance claim; use
 `run_baseline.py` and [BASELINE.md](../BASELINE.md). Workloads that need connected players run with

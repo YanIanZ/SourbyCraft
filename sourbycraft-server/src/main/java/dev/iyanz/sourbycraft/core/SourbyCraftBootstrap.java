@@ -7,6 +7,7 @@ import dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics;
 import dev.iyanz.sourbycraft.brand.StartupBanner;
 import dev.iyanz.sourbycraft.command.SourbyCraftCommands;
 import dev.iyanz.sourbycraft.lang.SourbyJoinLeaveListener;
+import dev.iyanz.sourbycraft.lang.SourbyMotd;
 import dev.iyanz.sourbycraft.maxplayers.MaxPlayersBypass;
 import dev.iyanz.sourbycraft.maxplayers.MaxPlayersConfig;
 import dev.iyanz.sourbycraft.update.AutoUpdateSettings;
@@ -131,8 +132,11 @@ public final class SourbyCraftBootstrap {
             SourbyCraftCommands.registerAll();
         });
 
-        stage("join listener", () -> {
+        // Both read messages.*: the join/quit broadcasts, and the server-list MOTD (set in memory only,
+        // server.properties is not rewritten; motd = [] keeps the server.properties MOTD).
+        stage("messages", () -> {
             SourbyJoinLeaveListener.register(owner);
+            SourbyMotd.apply(org.bukkit.Bukkit::motd);
         });
 
         // Persisted /maxp value, then the opt-in full-server bypass.

@@ -52,6 +52,14 @@ public class SourbyCraftBootstrapTest {
     }
 
     @Test
+    void bootstrapAppliesTheConfiguredMotd() throws IOException {
+        // messages.motd is seeded as "applied at startup"; the only reader is SourbyMotd, so the boot
+        // sequence must call it (init() itself needs a server, hence the source check).
+        assertTrue(source().contains("SourbyMotd.apply("),
+            "SourbyCraftBootstrap no longer applies messages.motd; the seeded key would be dead again");
+    }
+
+    @Test
     void verdictIsRunningDegradedOrFailed() {
         assertEquals(AuroraRuntime.State.RUNNING, SourbyCraftBootstrap.verdict(0, 14));
         assertEquals(AuroraRuntime.State.DEGRADED, SourbyCraftBootstrap.verdict(1, 14));

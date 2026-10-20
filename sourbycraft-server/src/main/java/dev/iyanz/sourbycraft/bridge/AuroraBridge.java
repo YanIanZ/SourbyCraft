@@ -285,6 +285,25 @@ public final class AuroraBridge {
         return current == null ? java.util.List.of() : current.telemetry().snapshot();
     }
 
+    /**
+     * Test seam: forgets the lazily started runtime and the early settings read with it, and does so again
+     * when closed. The runtime is process-wide and otherwise stays started for the rest of the JVM, so a
+     * test that starts it (rendering {@code /perf plugins}) makes every later "not started" assertion
+     * depend on test order. Not for production code.
+     */
+    public static synchronized AutoCloseable resetRuntimeForTesting() {
+        resetRuntime();
+        return AuroraBridge::resetRuntime;
+    }
+
+    private static synchronized void resetRuntime() {
+        runtime = null;
+        earlyQuarantineAfter = AuroraConfig.Bridge.DEFAULT.quarantineAfter();
+        earlySyncRoute = AuroraConfig.Bridge.DEFAULT.syncRoute();
+        earlyMaxPendingTasks = AuroraConfig.Bridge.DEFAULT.maxPendingTasksPerPlugin();
+        earlyMaxRunningAsyncTasks = AuroraConfig.Bridge.DEFAULT.maxRunningAsyncTasksPerPlugin();
+    }
+
     /** The bridge mode, or {@code null} when nothing has asked the bridge anything yet. */
     public static AuroraConfig.BridgeMode modeIfStarted() {
         final BridgeRuntime current = runtime;

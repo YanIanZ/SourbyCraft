@@ -150,7 +150,7 @@ public class UpdateCommand extends Command {
             .append(text("Updater: ", SourbyCraftColors.LABEL))
             .append(text((AutoUpdateSettings.enabled ? "enabled" : "disabled")
                 + " mode=" + AutoUpdateSettings.applyMode
-                + " interval=" + AutoUpdateSettings.checkIntervalMinutes + "m"
+                + " interval=" + AutoUpdateSettings.intervalSummary(runningInterval(), AutoUpdateSettings.checkIntervalMinutes)
                 + " repo=" + AutoUpdateSettings.repo, SourbyCraftColors.VALUE))
             .build());
         appendMarker(s, "Applied", Path.of("auto_update", "applied.tag"));
@@ -163,6 +163,12 @@ public class UpdateCommand extends Command {
             .append(text(st.phase() + " " + st.tag() + (st.note().isBlank() ? "" : " — " + st.note()),
                 guard.isHeld() ? SourbyCraftColors.DANGER : SourbyCraftColors.VALUE))
             .build()));
+    }
+
+    /** The interval of the schedule built at boot, or -1 when none runs in this process. */
+    private int runningInterval() {
+        final SourbyUpdater updater = updaterSource.get();
+        return updater == null ? -1 : updater.runningIntervalMinutes();
     }
 
     private static void appendMarker(CommandSender s, String label, Path file) {

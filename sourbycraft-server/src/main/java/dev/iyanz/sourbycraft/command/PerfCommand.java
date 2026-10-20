@@ -1,16 +1,10 @@
 package dev.iyanz.sourbycraft.command;
 
 import dev.iyanz.sourbycraft.SourbyCraftColors;
-import dev.iyanz.sourbycraft.api.metrics.MetricState;
-import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
 import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
-import dev.iyanz.sourbycraft.api.metrics.RuntimeMetrics;
 import dev.iyanz.sourbycraft.api.metrics.SourbyMetrics;
-import dev.iyanz.sourbycraft.execution.LanePortions;
 import dev.iyanz.sourbycraft.perf.MetricsRuntime;
 import dev.iyanz.sourbycraft.perf.RegionLocator;
-import dev.iyanz.sourbycraft.perf.RegionTickMetrics;
-import dev.iyanz.sourbycraft.util.ContainerMemory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -18,47 +12,45 @@ import net.kyori.adventure.text.Component;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 
-/** Read-only diagnostics: one immutable generation per invocation, no world/OS queries. */
+/**
+ * Read-only diagnostics: one immutable generation per invocation, no world/OS queries.
+ *
+ * <p>This class owns the frame (header, freshness, actions, footer), the argument dispatch and
+ * the {@code /ram} alias. Each view is its own {@link PerfView} class, registered with one line
+ * in {@link PerfViews}; add a view there, not here.</p>
+ */
 public final class PerfCommand extends Command {
-    static final List<String> VIEWS =
-        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "scheduler", "incidents", "storage", "awf", "plugins", "history", "player", "chunks", "entities", "region", "health");
+    static final List<String> VIEWS = PerfViews.DEFAULT.names();
+
+    private final PerfViews views;
 
     public PerfCommand(final String name) {
+        this(name, PerfViews.DEFAULT);
+    }
+
+    PerfCommand(final String name, final PerfViews views) {
         super(name);
+        this.views = views;
         this.description = "SourbyCraft performance diagnostics";
-        this.usageMessage = "/" + name + (name.equals("ram") ? "" : " [" + String.join("|", VIEWS) + "]");
+        this.usageMessage = "/" + name + (name.equals("ram") ? "" : " [" + String.join("|", views.names()) + "]");
         this.setPermission("sourbycraft.command." + name);
     }
 
     @Override
     public boolean execute(final CommandSender sender, final String alias, final String[] args) {
         if (!this.testPermission(sender)) return true;
-        final String view = getName().equals("ram") ? "memory"
-            : args.length == 0 ? "overview" : args[0].toLowerCase(Locale.ROOT);
-        if (view.equals("player")) {
-            if (args.length != 2) {
-                sender.sendMessage(Component.text("/" + getName() + " player <name>", SourbyCraftColors.DIM));
-            } else {
-                renderPlayer(sender, args[1]);
-            }
+        final boolean ram = getName().equals("ram");
+        final String name = ram ? "memory" : args.length == 0 ? "overview" : args[0].toLowerCase(Locale.ROOT);
+        final PerfView view = this.views.find(name, sender);
+        // Views that take arguments (player, region) answer every form of their own.
+        if (view != null && !ram && view.execute(sender, getName(), args)) {
             return true;
         }
-        if (view.equals("region") && args.length > 1) {
-            // Bare "/perf region" is the overview below; every location form is handled here, so a
-            // malformed one names its own usage instead of the generic view list.
-            if (args.length == 4) {
-                renderRegionAt(sender, args[1], args[2], args[3]);
-            } else {
-                sendRegionUsage(sender);
-            }
-            return true;
-        }
-        if (args.length > (getName().equals("ram") ? 0 : 1)
-            || !(view.equals("overview") || VIEWS.contains(view))) {
+        if (args.length > (ram ? 0 : 1) || view == null) {
             sender.sendMessage(Component.text(this.usageMessage, SourbyCraftColors.DIM));
             return true;
         }
-        render(MetricsRuntime.provider(), view).forEach(sender::sendMessage);
+        render(MetricsRuntime.provider(), view, name).forEach(sender::sendMessage);
         return true;
     }
 
@@ -67,122 +59,26 @@ public final class PerfCommand extends Command {
         if (!testPermissionSilent(sender) || getName().equals("ram")) return List.of();
         if (args.length == 1) {
             final String prefix = args[0].toLowerCase(Locale.ROOT);
-            return VIEWS.stream().filter(view -> view.startsWith(prefix)).toList();
+            return this.views.listed(sender).stream().map(PerfView::name).filter(view -> view.startsWith(prefix)).toList();
         }
-        if (args.length == 2 && args[0].equalsIgnoreCase("region")) {
-            final String prefix = args[1].toLowerCase(Locale.ROOT);
-            return org.bukkit.Bukkit.getWorlds().stream()
-                .map(org.bukkit.World::getName)
-                .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                .toList();
+        if (args.length >= 2) {
+            final PerfView view = this.views.findIgnoreCase(args[0], sender);
+            return view == null ? List.of() : view.complete(args);
         }
         return List.of();
     }
 
+    /** The lines of {@code view}; an unknown name renders the frame with no body. */
     public static List<Component> render(final SourbyMetrics metrics, final String view) {
+        return render(metrics, PerfViews.DEFAULT.find(view), view);
+    }
+
+    private static List<Component> render(final SourbyMetrics metrics, final PerfView view, final String name) {
         final PerformanceSnapshot snapshot = metrics.snapshot();
-        final var runtime = snapshot.runtime();
-        final var tick = snapshot.window(MetricWindow.FIVE_SECONDS);
         final List<Component> lines = new ArrayList<>();
-        lines.add(UiPanel.header(view.equals("memory") ? "Memory" : "Performance / " + view));
-        if (view.equals("overview") || view.equals("tick")) {
-            lines.add(UiPanel.section("Ticks"));
-            add(lines, "Target TPS", TpsCommand.value(snapshot.targetTps(), 2));
-            add(lines, "Worst region TPS", TpsCommand.value(TpsCommand.cappedTps(tick.worstTps(), snapshot.targetTps()), 2));
-            add(lines, "Worst average MSPT", TpsCommand.ms(tick.worstAverageMspt()));
-            add(lines, "Estimated p95 / p99", TpsCommand.ms(tick.estimatedP95Mspt()) + " / "
-                + TpsCommand.ms(tick.estimatedP99Mspt()) + " (approximate)");
-            add(lines, "Recent maximum", TpsCommand.ms(tick.maximumMspt()));
-        }
-        if (view.equals("overview") || view.equals("cpu")) {
-            lines.add(UiPanel.section("CPU"));
-            add(lines, "Process CPU / system CPU", percent(runtime.processCpuPercent()) + " / "
-                + percent(runtime.systemCpuPercent()));
-            add(lines, "Available processors / live platform threads", count(runtime.availableProcessors())
-                + " / " + count(runtime.liveThreadCount()));
-            add(lines, "Uptime", runtime.uptimeMillis() < 0 ? "unavailable" : runtime.uptimeMillis() / 1000 + "s");
-        }
-        if (view.equals("overview") || view.equals("memory")) {
-            lines.add(UiPanel.section("Memory"));
-            add(lines, "Heap used / committed / maximum", bytes(runtime.heapUsedBytes()) + " / "
-                + bytes(runtime.heapCommittedBytes()) + " / " + bytes(runtime.heapMaxBytes()));
-            add(lines, "Heap usage", heapUsage(runtime));
-            add(lines, "Non-heap", bytes(runtime.nonHeapUsedBytes()));
-            add(lines, "Process RSS", bytes(runtime.processRssBytes()));
-            add(lines, "Container memory usage", percent(runtime.rssPercent()));
-            add(lines, "Allocation rate", "n/a (allocation rate is not collected)");
-        }
-        if (view.equals("overview") || view.equals("gc") || view.equals("memory")) {
-            lines.add(UiPanel.section("Garbage collection"));
-            add(lines, "GC collections / cumulative collection time", count(runtime.gcCollectionCount()) + " / "
-                + (runtime.gcCollectionTimeMillis() < 0 ? "unavailable" : runtime.gcCollectionTimeMillis() + "ms"));
-            add(lines, "GC collections/min", TpsCommand.value(runtime.gcCollectionsPerMinute(), 1));
-            add(lines, "GC young / old collections", "n/a (all pools are aggregated)");
-            add(lines, "Last GC pause", "n/a (only the mean per cycle is collected)");
-            add(lines, "Pause distribution / allocation samples", "use JFR or /spark profiler start");
-            add(lines, "GC scope", "MXBean collection time is not stop-the-world pause time");
-        }
-        if (view.equals("lanes")) {
-            renderLanes(lines, MetricsRuntime.lanePortions());
-        }
-        if (view.equals("async")) {
-            renderAsyncPath(lines);
-        }
-        if (view.equals("network")) {
-            renderNetwork(lines);
-            PerfTelemetryRows.renderConnectionQueues(lines);
-        }
-        if (view.equals("governor")) {
-            renderGovernor(lines);
-        }
-        if (view.equals("storage")) {
-            renderStorage(lines);
-        }
-        if (view.equals("awf")) {
-            renderAwf(lines);
-        }
-        if (view.equals("chunks") || view.equals("entities")) {
-            renderPopulation(lines, view.equals("chunks"));
-        }
-        if (view.equals("chunks")) {
-            renderChunkGeneration(lines);
-            PerfTelemetryRows.renderChunkLifecycle(lines);
-        }
-        if (view.equals("entities")) {
-            PerfTelemetryRows.renderEntityTicks(lines);
-        }
-        if (view.equals("plugins")) {
-            renderPlugins(lines);
-        }
-        if (view.equals("history")) {
-            renderHistory(lines);
-        }
-        if (view.equals("scheduler")) {
-            PerfSchedulerView.render(lines);
-            PerfTelemetryRows.renderTaskWait(lines);
-        }
-        if (view.equals("incidents")) {
-            PerfIncidentsView.render(lines);
-        }
-        if (view.equals("overview") || view.equals("region")) {
-            lines.add(UiPanel.section("Regions"));
-            final boolean known = snapshot.freshness().state() != MetricState.UNAVAILABLE;
-            add(lines, "Active regions / retained generations", known
-                ? snapshot.activeRegionCount() + " / " + snapshot.retainedGenerationCount() : "unavailable");
-            add(lines, "Worst / median / aggregate average MSPT", TpsCommand.ms(tick.worstAverageMspt()) + " / "
-                + TpsCommand.ms(tick.medianAverageMspt()) + " / " + TpsCommand.ms(tick.aggregateAverageMspt()));
-            final dev.iyanz.sourbycraft.perf.SlowRegion slow = MetricsRuntime.slowestRegion();
-            add(lines, "Slowest region (5s)", slow == null ? "none measured"
-                : "world #" + slow.worldId() + " region #" + slow.regionId() + " gen " + slow.generationId()
-                    + ": " + TpsCommand.ms(slow.averageMspt()) + " avg, " + TpsCommand.ms(slow.maximumMspt())
-                    + " max over " + slow.samples() + " ticks");
-            add(lines, "Per-location region metrics", "/perf region <world> <x> <z>");
-            add(lines, "Region coordinates / queues", "not instrumented");
-        }
-        if (view.equals("overview") || view.equals("health")) {
-            lines.add(UiPanel.section("Health"));
-            add(lines, "Tick health", health(snapshot));
-            add(lines, "Diagnostics", "settings are operator-owned; /spark profiler start for samples");
+        lines.add(UiPanel.header(view == null ? "Performance / " + name : view.title()));
+        if (view != null) {
+            view.render(snapshot, lines);
         }
         lines.add(TpsCommand.freshness(snapshot.freshness()));
         lines.add(UiPanel.actions(List.of("/perf", "/perf lanes", "/perf network", "/perf plugins")));
@@ -190,433 +86,41 @@ public final class PerfCommand extends Command {
         return List.copyOf(lines);
     }
 
-    /**
-     * Where the machine's time went, by execution lane.
-     *
-     * <p>Two facts are reported rather than one number, because they answer different questions.
-     * A lane holding most of what was used is the thing to fix; a machine that is actually spent
-     * is the only state where moving threads between lanes is the right kind of move. A server
-     * can be the first without being the second, and that is exactly when adding threads to the
-     * busy lane looks obvious and measures worse.</p>
-     */
-    private static void renderLanes(final List<Component> lines, final LanePortions.Report report) {
-        if (!report.available()) {
-            add(lines, "Lane load", "unavailable — " + report.reason());
-            return;
-        }
-        for (final LanePortions.Portion portion : report.portions()) {
-            if (portion.cores() < 0.005) {
-                continue;                 // Below the noise the sampler can distinguish.
-            }
-            add(lines, "  " + portion.lane().display(),
-                TpsCommand.value(portion.cores(), 2) + " cores ("
-                    + percent(portion.shareOfUsed() * 100.0) + " of used)");
-        }
-        add(lines, "Used / idle / cores", TpsCommand.value(report.usedCores(), 2) + " / "
-            + TpsCommand.value(report.idleCores(), 2) + " / " + report.machineCores());
-        add(lines, "Shape", (report.isConcentrated()
-                ? "concentrated in " + report.dominant().display() : "spread across lanes")
-            + (report.isSaturated() ? ", machine saturated" : ", machine has headroom"));
+    public static String health(final PerformanceSnapshot snapshot) {
+        return PerfHealthView.health(snapshot);
     }
 
-    /**
-     * What the async-path pool has been doing, when it is on.
-     *
-     * <p>Saturation is visible as refused work. Periodic path recomputes are deliberately dropped
-     * when the queue is full so the mob keeps its current path rather than forcing CPU-bound A*
-     * back onto the region thread. The inline counter is retained only for compatibility with
-     * older telemetry and should stay zero.</p>
-     */
-    private static void renderAsyncPath(final List<Component> lines) {
-        if (!dev.iyanz.sourbycraft.perf.AsyncPathProcessor.isEnabled()) {
-            add(lines, "Async pathfinding", "disabled (aurora.entity.async-pathfinding)");
-            return;
-        }
-        final var stats = dev.iyanz.sourbycraft.perf.AsyncPathProcessor.stats();
-        add(lines, "Solves admitted / outstanding",
-            count(stats.admitted()) + " / " + count(stats.outstanding()));
-        add(lines, "Solve time mean / slowest", Double.isNaN(stats.meanMillis()) ? "no solves yet"
-            : TpsCommand.ms(stats.meanMillis()) + " / " + TpsCommand.ms(stats.slowestMillis()));
-        // Queue wait separates "the A* is expensive" from "the pool is too small for the arrival
-        // rate". A short solve behind a long wait still reaches the entity late.
-        add(lines, "Queue wait mean / slowest", Double.isNaN(stats.meanWaitMillis())
-            ? "no solves yet"
-            : TpsCommand.ms(stats.meanWaitMillis()) + " / " + TpsCommand.ms(stats.slowestWaitMillis()));
-        add(lines, "Queue depth / active workers / pool", stats.poolSize() < 0 ? "pool not running"
-            : count(stats.queueDepth()) + " / " + count(stats.activeWorkers())
-                + " / " + count(stats.poolSize()));
-        add(lines, "Legacy caller-run solves", count(stats.inline())
-            + (stats.inline() > 0 ? "  — unexpected on this build" : ""));
-        add(lines, "Refused (saturation / shutdown)", count(stats.refused()));
+    // Entry points kept for existing callers and tests; the bodies live in the view classes.
+
+    static List<Component> renderRegion(final SourbyMetrics metrics, final String world, final int x,
+                                        final int z, final RegionLocator.Result result) {
+        return PerfRegionView.renderRegion(metrics, world, x, z, result);
     }
 
-    /** Wire and packet rates from the network counters; totals since start beside them. */
-    private static void renderNetwork(final List<Component> lines) {
-        final var counters = dev.iyanz.sourbycraft.perf.NetworkCounters.GLOBAL;
-        final var rates = counters.rates();
-        final var totals = counters.totals(System.nanoTime());
-        if (!rates.available()) {
-            add(lines, "Network rates", "unavailable until two collector samples exist");
-        } else {
-            add(lines, "Bytes in / out per second", bytes((long)rates.bytesInPerSecond()) + " / "
-                + bytes((long)rates.bytesOutPerSecond()) + " (wire, after compression)");
-            add(lines, "Packets in / out per second", TpsCommand.value(rates.packetsInPerSecond(), 1) + " / "
-                + TpsCommand.value(rates.packetsOutPerSecond(), 1));
-        }
-        add(lines, "Total bytes in / out", bytes(totals.bytesIn()) + " / " + bytes(totals.bytesOut()));
-        add(lines, "Total packets in / out", count(totals.packetsIn()) + " / " + count(totals.packetsOut()));
-        add(lines, "Connections opened", count(totals.connections()));
-    }
-
-    /** Budgets and counters for each Resource Governor lane that has been used. */
-    private static void renderGovernor(final List<Component> lines) {
-        renderThreadLedger(lines);
-        final var stats = dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.stats();
-        if (stats.isEmpty()) {
-            add(lines, "Resource Governor", "no governed lane has been used yet");
-            return;
-        }
-        for (final var lane : stats) {
-            add(lines, lane.name() + " budget", lane.threads() + " threads, queue " + lane.queueCapacity());
-            add(lines, lane.name() + " active / queued / peak queued",
-                lane.active() + " / " + lane.queued() + " / " + lane.peakQueued());
-            add(lines, lane.name() + " submitted / completed / failed / rejected", lane.submitted() + " / "
-                + lane.completed() + " / " + lane.failed() + " / " + lane.rejected());
-        }
-    }
-
-    /** Configured platform threads per pool against the processors; ceilings, not load. */
-    private static void renderThreadLedger(final List<Component> lines) {
-        final var pools = dev.iyanz.sourbycraft.execution.ThreadLedger.collect();
-        final int processors = Runtime.getRuntime().availableProcessors();
-        lines.add(UiPanel.section("Thread ledger"));
-        add(lines, "Summary", dev.iyanz.sourbycraft.execution.ThreadLedger.format(pools, processors).get(0)
-            .replaceFirst("^Thread ledger: ", ""));
-        for (final var pool : pools) {
-            add(lines, pool.name(), (pool.threads() < 0 ? "?" : pool.threads() == 0 ? "off" : pool.threads())
-                + " (" + pool.source() + ")");
-        }
-        lines.add(UiPanel.section("Resource Governor lanes"));
-    }
-
-    private static final dev.iyanz.sourbycraft.execution.region.RegionPopulation POPULATION =
-        new dev.iyanz.sourbycraft.execution.region.FoliaRegionBackend();
-
-    private static void renderPopulation(final List<Component> lines, final boolean chunks) {
-        final var worlds = POPULATION.population();
-        if (worlds.isEmpty()) {
-            add(lines, chunks ? "Loaded chunks" : "Entities", "no world loaded");
-            return;
-        }
-        long total = 0;
-        for (final var world : worlds) {
-            total += chunks ? world.chunks() : world.entities();
-            add(lines, world.world() + (chunks ? " chunks / regions" : " entities / players"),
-                chunks ? world.chunks() + " / " + world.regions() : world.entities() + " / " + world.players());
-        }
-        add(lines, chunks ? "Total loaded chunks" : "Total entities", total + " (each region's own count, up to one tick old)");
-    }
-
-    static void renderChunkGeneration(final List<Component> lines) {
-        lines.add(UiPanel.section("World generation stages"));
-        if (!dev.iyanz.sourbycraft.perf.ChunkGenerationMetrics.ENABLED) {
-            add(lines, "Generation timing", "disabled; set aurora.diagnostics.chunk-generation-metrics = true in "
-                + "sourbycraft_config/aurora.toml (or -Dsourbycraft.chunk-generation-metrics.enabled=true) and restart");
-            return;
-        }
-        final var stages = dev.iyanz.sourbycraft.perf.ChunkGenerationMetrics.GLOBAL.snapshot();
-        if (stages.isEmpty()) {
-            add(lines, "Generation timing", "no completed non-empty generic generation stage measured");
-            return;
-        }
-        for (final var stage : stages) {
-            add(lines, stage.name() + " queue p95 / p99",
-                TpsCommand.ms(stage.queue().p95()) + " / " + TpsCommand.ms(stage.queue().p99()));
-            add(lines, stage.name() + " run p95 / p99",
-                TpsCommand.ms(stage.execution().p95()) + " / " + TpsCommand.ms(stage.execution().p99())
-                    + " (" + stage.execution().samples() + " recent samples; " + stage.completedRuns() + " runs)");
-        }
-        add(lines, "Timing scope", "process-wide wall time; run includes future waits/callbacks; failed runs included");
-        add(lines, "Coverage", "completed generic generation stages only; light, full integration and cancelled queued tasks excluded");
-    }
-
-    private static void renderPlugins(final List<Component> lines) {
-        final var plugins = org.bukkit.Bukkit.getPluginManager().getPlugins();
-        final java.util.Map<dev.iyanz.sourbycraft.bridge.CompatibilityState, Integer> counts =
-            new java.util.EnumMap<>(dev.iyanz.sourbycraft.bridge.CompatibilityState.class);
-        for (final var plugin : plugins) counts.merge(PluginsCommand.stateOf(plugin), 1, Integer::sum);
-        final StringBuilder summary = new StringBuilder();
-        for (final var state : dev.iyanz.sourbycraft.bridge.CompatibilityState.values()) {
-            if (summary.length() > 0) summary.append(" / ");
-            summary.append(state.name().toLowerCase(Locale.ROOT)).append(' ').append(counts.getOrDefault(state, 0));
-        }
-        add(lines, "Plugins by state", summary.toString());
-        add(lines, "Aurora Bridge mode", String.valueOf(dev.iyanz.sourbycraft.bridge.AuroraBridge.runtimeMode()).toLowerCase(Locale.ROOT));
-        renderSlowestStartups(lines, dev.iyanz.sourbycraft.startup.PluginTimings.GLOBAL);
-        for (final var stats : dev.iyanz.sourbycraft.bridge.AuroraBridge.allStats()) {
-            add(lines, stats.plugin() + " redirects / handoffs / rejected / violations",
-                stats.schedulerRedirects() + " / " + stats.ownerHandoffs() + " / " + stats.rejectedOperations()
-                    + " / " + stats.fatalViolations() + (stats.quarantined() ? " (quarantined)" : ""));
-            final var region = stats.bodyTimes().region();
-            final var global = stats.bodyTimes().global();
-            add(lines, stats.plugin() + " sync body total / p99 (region; global)", region.count() + global.count() == 0
-                ? "none yet"
-                : TpsCommand.ms(region.totalMillis()) + " / " + TpsCommand.ms(region.p99Millis()) + "; "
-                    + TpsCommand.ms(global.totalMillis()) + " / " + TpsCommand.ms(global.p99Millis()));
-        }
-    }
-
-    /** The five slowest plugins by onLoad + onEnable wall time, this run. */
-    static void renderSlowestStartups(final List<Component> lines, final dev.iyanz.sourbycraft.startup.PluginTimings timings) {
-        final var slowest = timings.slowest(5);
-        if (slowest.isEmpty()) {
-            add(lines, "Slowest plugin startup", "none recorded");
-            return;
-        }
-        for (int i = 0; i < slowest.size(); i++) {
-            final var timing = slowest.get(i);
-            add(lines, "Slowest startup #" + (i + 1) + " " + timing.plugin(), timing.describe());
-        }
-        if (timings.dropped() > 0) {
-            add(lines, "Startup timings not kept", timings.dropped() + " plugin name(s) past the "
-                + dev.iyanz.sourbycraft.startup.PluginTimings.MAX_PLUGINS + " limit");
-        }
-    }
-
-    private static void renderHistory(final List<Component> lines) {
-        final var samples = dev.iyanz.sourbycraft.perf.PerformanceHistory.GLOBAL.samples();
-        if (samples.isEmpty()) {
-            add(lines, "History", "no minute recorded yet");
-            return;
-        }
-        add(lines, "Minutes kept", samples.size() + " of " + dev.iyanz.sourbycraft.perf.PerformanceHistory.CAPACITY
-            + " (worst region TPS / MSPT over each minute, process CPU, heap)");
-        final java.time.format.DateTimeFormatter clock = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
-            .withZone(java.time.ZoneId.systemDefault());
-        // Newest first, at most 15 lines: chat is not a chart.
-        for (int i = samples.size() - 1, shown = 0; i >= 0 && shown < 15; i--, shown++) {
-            final var s = samples.get(i);
-            add(lines, clock.format(java.time.Instant.ofEpochMilli(s.epochMillis())),
-                TpsCommand.value(s.worstTps(), 2) + " TPS / " + TpsCommand.ms(s.worstMspt()) + " / "
-                    + percent(s.processCpuPercent()) + " CPU / " + bytes(s.heapUsedBytes()) + " of "
-                    + bytes(s.heapMaxBytes()));
-        }
-    }
-
-    /**
-     * The player's own view, gathered on the thread that owns the player (their entity
-     * scheduler): a command thread may not read an entity it does not own.
-     */
-    private static void renderPlayer(final CommandSender sender, final String name) {
-        final org.bukkit.entity.Player player = org.bukkit.Bukkit.getPlayerExact(name);
-        if (player == null) {
-            sender.sendMessage(Component.text(name + " is not online", SourbyCraftColors.DIM));
-            return;
-        }
-        renderPlayer(sender, player, dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin.INSTANCE, SourbyReply::run);
-    }
-
-    /**
-     * Gathers the view on {@code player}'s entity thread and sends it back through {@code reply}.
-     * When the sender is the player, that thread already owns them both and the lines go straight
-     * out. Any other sender -- the console, another player, a command block -- is not owned by
-     * that thread, and messaging a command block from it throws (OBS-8); so the view takes the
-     * sender's own hop, as every other off-thread reply does.
-     */
     static void renderPlayer(final CommandSender sender, final org.bukkit.entity.Player player,
                              final org.bukkit.plugin.Plugin owner,
                              final java.util.function.BiConsumer<CommandSender, Runnable> reply) {
-        final String name = player.getName();
-        final var scheduled = player.getScheduler().run(owner,
-            task -> {
-                final List<Component> lines = new ArrayList<>();
-                final org.bukkit.Location at = player.getLocation();
-                add(lines, "Player", name);
-                add(lines, "World / block", at.getWorld().getName() + " / " + at.getBlockX() + ", " + at.getBlockY()
-                    + ", " + at.getBlockZ());
-                add(lines, "Chunk", (at.getBlockX() >> 4) + ", " + (at.getBlockZ() >> 4));
-                add(lines, "Ping", player.getPing() + " ms");
-                add(lines, "View / simulation distance", player.getViewDistance() + " / "
-                    + player.getSimulationDistance());
-                add(lines, "Owning thread", Thread.currentThread().getName());
-                if (sender == player) {
-                    lines.forEach(sender::sendMessage);
-                } else {
-                    reply.accept(sender, () -> lines.forEach(sender::sendMessage));
-                }
-            }, () -> reply.accept(sender,
-                () -> sender.sendMessage(Component.text(name + " left before the view was taken", SourbyCraftColors.DIM))));
-        if (scheduled == null) {
-            sender.sendMessage(Component.text(name + " is being removed", SourbyCraftColors.DIM));
-        }
+        PerfPlayerView.renderPlayer(sender, player, owner, reply);
     }
 
-    /** {@code /perf region <world> <x> <z>}: the region owning the chunk at that block. */
-    private void sendRegionUsage(final CommandSender sender) {
-        sender.sendMessage(Component.text("/" + getName() + " region <world> <x> <z>", SourbyCraftColors.DIM));
-    }
-
-    private void renderRegionAt(final CommandSender sender, final String world, final String xArg, final String zArg) {
-        final int x;
-        final int z;
-        try {
-            x = Integer.parseInt(xArg);
-            z = Integer.parseInt(zArg);
-        } catch (final NumberFormatException invalid) {
-            sendRegionUsage(sender);
-            return;
-        }
-        final RegionLocator.Result result = RegionLocator.locate(world, x, z, System.nanoTime());
-        renderRegion(MetricsRuntime.provider(), world, x, z, result).forEach(sender::sendMessage);
-    }
-
-    /**
-     * Renders a resolved per-location region. Read-only: the region was located from published
-     * snapshots, and the {@code metrics} snapshot supplies only the freshness line.
-     */
-    static List<Component> renderRegion(final SourbyMetrics metrics, final String world, final int x,
-                                        final int z, final RegionLocator.Result result) {
-        final PerformanceSnapshot snapshot = metrics.snapshot();
-        final List<Component> lines = new ArrayList<>();
-        lines.add(UiPanel.header("Performance / region"));
-        add(lines, "World / block", world + " / " + x + ", " + z);
-        switch (result.status()) {
-            case FOUND -> {
-                add(lines, "Chunk", result.chunkX() + ", " + result.chunkZ());
-                add(lines, "Region", "world #" + result.worldId() + " region #" + result.regionId()
-                    + " gen " + result.generationId() + (result.active() ? "" : " (inactive)"));
-                renderRegionWindows(lines, result.snapshot());
-            }
-            case NO_REGION_AT_CHUNK -> add(lines, "Region", "no region resolved for chunk " + result.chunkX() + ", "
-                + result.chunkZ() + " (approximate lookup: the region may be merging or splitting, or the chunk is not loaded)");
-            case UNKNOWN_WORLD -> add(lines, "Region", "unknown world '" + world + "'");
-            case NO_SERVER -> add(lines, "Region", "no server running");
-            case NO_TELEMETRY -> add(lines, "Region", "world #" + result.worldId() + " region #"
-                + result.regionId() + " has no recorded tick metrics yet");
-        }
-        lines.add(TpsCommand.freshness(snapshot.freshness()));
-        lines.add(UiPanel.footer());
-        return List.copyOf(lines);
-    }
-
-    private static void renderRegionWindows(final List<Component> lines, final RegionTickMetrics.Snapshot snapshot) {
-        final RegionTickMetrics.WindowSnapshot five = snapshot.fiveSeconds();
-        final RegionTickMetrics.WindowSnapshot minute = snapshot.oneMinute();
-        add(lines, "TPS (5s / 1m)", TpsCommand.value(five.tps(), 2) + " / " + TpsCommand.value(minute.tps(), 2));
-        add(lines, "Average MSPT (5s / 1m)", TpsCommand.ms(five.mspt()) + " / " + TpsCommand.ms(minute.mspt()));
-        add(lines, "Maximum MSPT (5s)", five.sampleCount() > 0L
-            ? TpsCommand.ms(five.maximumNanos() / 1_000_000.0) : "unavailable");
-        add(lines, "Samples (5s)", five.sampleCount() + " ticks");
-        if (five.truncated()) {
-            add(lines, "Window", "truncated (ring overflow)");
-        }
-    }
-
-    private static void renderStorage(final List<Component> lines) {
-        final var totals = dev.iyanz.sourbycraft.perf.RegionIoCounters.GLOBAL.totals();
-        add(lines, "Chunk-system reads / writes / deletes", totals.reads() + " / " + totals.writes() + " / "
-            + totals.deletes() + " since start");
-        PerfTelemetryRows.renderSaves(lines);
-        PerfTelemetryRows.renderLoads(lines);
-        final var queues = dev.iyanz.sourbycraft.perf.RegionIoQueue.INSTANCE.sample();
-        if (queues.isEmpty()) {
-            add(lines, "Pending storage I/O", "no world loaded");
-            return;
-        }
-        for (final var queue : queues) {
-            add(lines, queue.world() + " pending I/O (chunk / poi / entity)",
-                queue.chunk() + " / " + queue.poi() + " / " + queue.entity());
-        }
-    }
-
-    private static void renderAwf(final List<Component> lines) {
-        renderAwf(lines, dev.iyanz.sourbycraft.awf.Durability.degradedDirectoryForces(),
-            dev.iyanz.sourbycraft.awf.Durability.degradedReason());
-    }
-
-    /**
-     * The AWF rows. The degraded directory-force count is a parameter so the row can be tested on
-     * a platform that fsyncs directories fine; it is shown only while non-zero, since zero is the
-     * normal state and the row is a warning, not a statistic.
-     */
     static void renderAwf(final List<Component> lines, final long degradedDirectoryForces, final String degradedReason) {
-        if (degradedDirectoryForces > 0) {
-            add(lines, "AWF directory fsyncs skipped", degradedDirectoryForces + " since start (" + degradedReason
-                + "); directory entries rely on the rename alone, commits are not fully durable against power loss here");
-        }
-        final var engine = dev.iyanz.sourbycraft.awf.AwfEngine.ifStarted();
-        final var storages = engine == null ? List.<dev.iyanz.sourbycraft.awf.AwfRegionStorage>of() : engine.storages();
-        if (storages.isEmpty()) {
-            add(lines, "Aurora World Fabric", "no world is stored in AWF (aurora.awf.worlds)");
-            return;
-        }
-        add(lines, "AWF settings", engine.settings().persistence() + ", commit every "
-            + engine.settings().commitIntervalSeconds() + "s, " + engine.settings().residentChunks() + " resident chunks per storage");
-        for (final var storage : storages) {
-            final var stats = storage.stats();
-            final var world = stats.world();
-            final String name = shortStorageName(stats.name());
-            add(lines, name + " resident / dirty / evicted",
-                world.residentChunks() + " / " + world.dirtyChunks() + " / " + stats.evicted());
-            add(lines, name + " pending commits / oldest", world.saveQueueDepth() + " / " + world.oldestPendingSaveMillis() + " ms");
-            final var commit = world.backend();
-            add(lines, name + " commit p50 / p95 / p99", commit.samples() == 0 ? "no commit yet"
-                : ms(commit.p50()) + " / " + ms(commit.p95()) + " / " + ms(commit.p99())
-                    + " (last " + commit.samples() + " commits)");
-            add(lines, name + " reads / from region files / deletes",
-                stats.reads() + " / " + stats.baseFallthroughs() + " / " + stats.deletes());
-            add(lines, name + " retries / failures / written", world.retries() + " / " + world.failures() + " / "
-                + (world.bytesWritten() / 1024) + " KiB");
-            if (stats.readFailures() > 0 || stats.readRetries() > 0) {
-                add(lines, name + " read retries / failed reads / unreadable / refused writes", stats.readRetries()
-                    + " / " + stats.readFailures() + " / " + stats.unreadable() + " / " + stats.refusedWrites());
-            }
-        }
+        PerfAwfView.renderAwf(lines, degradedDirectoryForces, degradedReason);
     }
 
-    /** The last three path elements: world/dimension/region rather than the whole absolute path. */
+    static void renderAwf(final List<Component> lines, final long degradedDirectoryForces, final String degradedReason,
+                          final long collapsedReadErrors) {
+        PerfAwfView.renderAwf(lines, degradedDirectoryForces, degradedReason, collapsedReadErrors);
+    }
+
     static String shortStorageName(final String path) {
-        final String[] parts = path.replace('\\', '/').split("/");
-        final int from = Math.max(0, parts.length - 3);
-        return String.join("/", java.util.Arrays.copyOfRange(parts, from, parts.length));
+        return PerfAwfView.shortStorageName(path);
     }
 
-    private static String ms(final double millis) {
-        return String.format(java.util.Locale.ROOT, "%.1f ms", millis);
+    static void renderSlowestStartups(final List<Component> lines, final dev.iyanz.sourbycraft.startup.PluginTimings timings) {
+        PerfPluginsView.renderSlowestStartups(lines, timings);
     }
 
-    public static String health(final PerformanceSnapshot snapshot) {
-        if (snapshot.freshness().state() != MetricState.AVAILABLE) return snapshot.freshness().state().name();
-        final var tick = snapshot.window(MetricWindow.FIVE_SECONDS);
-        final double target = snapshot.targetTps();
-        final double mspt = tick.worstAverageMspt();
-        final double tps = tick.worstTps();
-        if (!Double.isFinite(target) || target <= 0 || !Double.isFinite(tps) || !Double.isFinite(mspt)) {
-            return "UNAVAILABLE";
-        }
-        final double budget = 1000.0 / target;
-        if (tps < target * 0.85 || mspt >= budget) return "CRITICAL";
-        if (tps < target * 0.95 || mspt >= budget * 0.8) return "WARNING";
-        if (mspt >= budget * 0.5) return "GOOD";
-        return "EXCELLENT";
-    }
-
-    private static void add(final List<Component> lines, final String label, final String value) {
-        lines.add(Component.text("  " + label + ": ", SourbyCraftColors.LABEL)
-            .append(Component.text(value, SourbyCraftColors.VALUE)));
-    }
-
-    /** Heap used as a percentage of the maximum, or the unavailable sentinel. */
-    private static String heapUsage(final RuntimeMetrics runtime) {
-        final long used = runtime.heapUsedBytes();
-        final long max = runtime.heapMaxBytes();
-        if (max <= 0L || used < 0L) return "unavailable";
-        return TpsCommand.value(100.0 * used / max, 1) + "% of maximum";
-    }
-
-    private static String bytes(final long value) { return value < 0 ? "unavailable" : ContainerMemory.fmt(value); }
-    private static String count(final long value) { return value < 0 ? "unavailable" : Long.toString(value); }
-    private static String percent(final double value) {
-        return Double.isFinite(value) ? TpsCommand.value(value, 1) + "%" : "unavailable";
+    static void renderChunkGeneration(final List<Component> lines) {
+        PerfChunksView.renderChunkGeneration(lines);
     }
 }

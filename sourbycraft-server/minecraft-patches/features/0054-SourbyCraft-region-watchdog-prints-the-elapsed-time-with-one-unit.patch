@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 22:20:54 +0700
+Subject: [PATCH] SourbyCraft - region watchdog prints the elapsed time with
+ one unit
+
+
+diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+index 2483551fbaebefd46e48be376ca4e644e2177fae..c07947927fb9722be6418bb5ff81ab1e140868a3 100644
+--- a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
++++ b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+@@ -91,12 +91,12 @@ public final class FoliaWatchdogThread extends Thread {
+                 final String totalElapsedS = Util.formatNanosToLargestDecimalUnit(now - tick.start); // Canvas - region threading
+ 
+                 if (tick.handle instanceof TickRegions.ConcreteRegionTickHandle region) {
+-                    LOGGER.error("Tick region located in world '{}' around chunk '{}' has not responded in {}s:",
++                    LOGGER.error("Tick region located in world '{}' around chunk '{}' has not responded in {}:", // SourbyCraft - the formatted time already ends in its unit
+                         region.region.world.getWorld().getName(), region.region.region.getCenterChunk(), totalElapsedS
+                     );
+                 } else {
+                     // assume global
+-                    LOGGER.error("Global region has not responded in {}s:", totalElapsedS);
++                    LOGGER.error("Global region has not responded in {}:", totalElapsedS); // SourbyCraft - the formatted time already ends in its unit
+                 }
+ 
+                 // Canvas start - more detailed watchdog output

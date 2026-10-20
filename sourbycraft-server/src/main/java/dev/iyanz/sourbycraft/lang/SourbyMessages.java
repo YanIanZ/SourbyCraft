@@ -239,7 +239,7 @@ public final class SourbyMessages {
         }
         // Per-key comments (only if not already commented).
         maybeComment(f, SECTION + "." + SERVER_FULL, "Kick line shown when a non-bypass player hits a full server (KICK_FULL).");
-        maybeComment(f, SECTION + "." + MOTD, "Server-list MOTD. \\n splits two lines. RESTART_REQUIRED: one variant applied at startup.");
+        maybeComment(f, SECTION + "." + MOTD, "Server-list MOTD, one variant picked at random per boot and applied in memory (server.properties is not rewritten). \\n splits two lines. [] (empty list) = keep the server.properties motd. RESTART_REQUIRED.");
         maybeComment(f, SECTION + "." + JOIN, "Broadcast when a player joins. <player> = their name. [] (empty list) = no join message; remove the key to restore the built-in variants. LIVE (/sourbycraft reload).");
         maybeComment(f, SECTION + "." + LEAVE, "Broadcast when a player leaves. <player> = their name. [] (empty list) = no leave message; remove the key to restore the built-in variants. LIVE (/sourbycraft reload).");
     }

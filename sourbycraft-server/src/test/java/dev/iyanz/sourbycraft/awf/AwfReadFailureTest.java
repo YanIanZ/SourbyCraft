@@ -257,6 +257,14 @@ class AwfReadFailureTest {
             assertTrue(repeat.getMessage().contains("stored chunk is kept"), repeat.getMessage());
             assertEquals(0, repeat.getStackTrace().length, "no stack trace for the chunk system to print again");
         }
+        // A repeat installed the log4j2 filter that drops the chunk system's records of repeats.
+        try {
+            assertTrue(RepeatedReadFailureLogFilter.contains(((org.apache.logging.log4j.core.LoggerContext)
+                org.apache.logging.log4j.LogManager.getContext(false)).getConfiguration().getFilter()),
+                "the first repeated failure installs RepeatedReadFailureLogFilter");
+        } finally {
+            RepeatedReadFailureLogFilter.uninstall();
+        }
 
         // Data safety is unchanged: every position is fenced and a regenerated chunk is never saved.
         assertEquals(keys, storage.unreadable());

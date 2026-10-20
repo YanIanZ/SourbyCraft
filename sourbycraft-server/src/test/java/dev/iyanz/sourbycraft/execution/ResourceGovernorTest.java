@@ -71,6 +71,36 @@ class ResourceGovernorTest {
     }
 
     @Test
+    void aReloadAfterBootNeverChangesTheBudgetsOfThisProcessAndIsShownAsPendingRestart() {
+        // server-w2: storage-threads 1 -> 2 then /sourbycraft reload. The reload calls configure
+        // again; /perf governor showed 2 and lanes created afterwards got 2 threads.
+        final ResourceGovernor governor = new ResourceGovernor();
+        final var boot = new dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler(0, 64, 1, 32);
+        final var edited = new dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler(0, 64, 2, 32);
+        governor.configure(boot);
+        assertEquals(java.util.List.of(), governor.pendingRestart(), "nothing pending at boot");
+        governor.configure(edited);                       // the reload
+        assertEquals(boot, governor.budgets(), "the boot budgets keep running");
+        assertEquals(1, governor.lane(ResourceGovernor.Lane.STORAGE).stats().threads(),
+            "a lane created after the reload still gets the boot budget");
+        assertEquals(java.util.List.of("aurora.scheduler.storage-threads: 1 -> 2"), governor.pendingRestart());
+        governor.configure(boot);                         // reverted on disk and reloaded again
+        assertEquals(java.util.List.of(), governor.pendingRestart());
+    }
+
+    @Test
+    void everyPendingSchedulerKeyIsListedWithItsRunningAndPendingValue() {
+        final ResourceGovernor governor = new ResourceGovernor();
+        governor.configure(new dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler(0, 64, 0, 32));
+        governor.configure(new dev.iyanz.sourbycraft.config.AuroraConfig.Scheduler(3, 65, 4, 33));
+        assertEquals(java.util.List.of(
+            "aurora.scheduler.bridge-io-threads: 0 -> 3",
+            "aurora.scheduler.bridge-io-queue: 64 -> 65",
+            "aurora.scheduler.storage-threads: 0 -> 4",
+            "aurora.scheduler.storage-queue: 32 -> 33"), governor.pendingRestart());
+    }
+
+    @Test
     void aBudgetNeedsAThreadAndAQueueSlot() {
         assertThrows(IllegalArgumentException.class, () -> new GovernedLane("x", "p-", 0, 1));
         assertThrows(IllegalArgumentException.class, () -> new GovernedLane("x", "p-", 1, 0));

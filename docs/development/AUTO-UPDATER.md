@@ -40,7 +40,7 @@ below, not as the previous live value: deleting `apply_mode` and reloading gives
 | `repo` | `YanIanZ/SourbyCraft` | LIVE (next check) |
 | `channel` | `""` = from the build version | LIVE (next check) |
 | `apply_mode` | `notify` | LIVE between `notify`/`stage`/`auto` (next check); switching from or to `off` is RESTART_REQUIRED because `off` skips the schedule in `start()` |
-| `check_times`, `check_interval_minutes` | `["06:00"]`, `30` | RESTART_REQUIRED (schedule built in `start()`) |
+| `check_times`, `check_interval_minutes` | `["06:00"]`, `30` | RESTART_REQUIRED (schedule built in `start()`); `/update status` prints the interval the running schedule uses, plus `(pending restart: Nm)` when a reload changed it |
 | `restart_mode`, `restart_delay_seconds` | `auto`, `60` | LIVE (read when an apply is scheduled) |
 | `allow_prerelease` | `false` | LIVE (next check) |
 | `via_auto_update` | `true` | LIVE: recover missing reviewed Via pins; installed jars require restart |

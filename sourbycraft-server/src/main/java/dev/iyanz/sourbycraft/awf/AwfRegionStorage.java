@@ -320,9 +320,11 @@ public final class AwfRegionStorage {
         // One chunk load reads hundreds of positions and the chunk system logs each failure with
         // the exception's stack (twice: MoonriseRegionFileIO and ChunkLoadTask). The first failure
         // of a window is logged here with its stack and thrown with its cause; the rest are counted
-        // and thrown without a stack, so the chunk system prints their message, not ~35 lines each.
-        // Fencing above is the same either way.
+        // and thrown without a stack; RepeatedReadFailureLogFilter (installed by the first repeat)
+        // drops the chunk system's records of those, so a burst logs the first failure and one
+        // summary. Fencing above is the same either way.
         if (this.failureLog.failed(message, failed)) return new IOException(message, failed);
+        RepeatedReadFailureLogFilter.ensureInstalled();
         return new RepeatedReadFailure(message + " [" + failed + "; stack trace omitted, see the first AWF read"
             + " failure of this window]");
     }

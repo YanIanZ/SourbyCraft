@@ -1,0 +1,795 @@
+## VIEWS
+tick,cpu,memory,gc,lanes,async,network,governor,scheduler,incidents,storage,awf,plugins,history,player,chunks,entities,region,health
+## perf usage / permission / description
+/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|plugins|history|player|chunks|entities|region|health]
+sourbycraft.command.perf
+SourbyCraft performance diagnostics
+## ram usage / permission / description
+/ram
+sourbycraft.command.ram
+SourbyCraft performance diagnostics
+## tab perf []
+[tick, cpu, memory, gc, lanes, async, network, governor, scheduler, incidents, storage, awf, plugins, history, player, chunks, entities, region, health]
+## tab perf [p]
+[plugins, player]
+## tab perf [REG]
+[region]
+## tab perf [s]
+[scheduler, storage]
+## tab perf [overview]
+[]
+## tab perf [x]
+[]
+## tab perf [region ]
+[world, World_Nether]
+## tab perf [region WOR]
+[world, World_Nether]
+## tab perf [REGION world_n]
+[World_Nether]
+## tab perf [player ]
+[]
+## tab perf [tick ]
+[]
+## tab perf [region world ]
+[]
+## tab perf []
+[]
+## tab perf denied
+[]
+## tab ram
+[]
+## execute /perf [tick extra] -> true
+{"color":"#64748B","text":"/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|plugins|history|player|chunks|entities|region|health]"}
+## execute /perf [no-such-view] -> true
+{"color":"#64748B","text":"/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|plugins|history|player|chunks|entities|region|health]"}
+## execute /perf [overview extra] -> true
+{"color":"#64748B","text":"/perf [tick|cpu|memory|gc|lanes|async|network|governor|scheduler|incidents|storage|awf|plugins|history|player|chunks|entities|region|health]"}
+## execute /perf [player] -> true
+{"color":"#64748B","text":"/perf player <name>"}
+## execute /perf [PLAYER a b] -> true
+{"color":"#64748B","text":"/perf player <name>"}
+## execute /perf [region world] -> true
+{"color":"#64748B","text":"/perf region <world> <x> <z>"}
+## execute /perf [region world 16] -> true
+{"color":"#64748B","text":"/perf region <world> <x> <z>"}
+## execute /perf [Region world 16 -32 extra] -> true
+{"color":"#64748B","text":"/perf region <world> <x> <z>"}
+## execute /perf [region world x -32] -> true
+{"color":"#64748B","text":"/perf region <world> <x> <z>"}
+## execute /perf [region world 16 z] -> true
+{"color":"#64748B","text":"/perf region <world> <x> <z>"}
+## execute /ram [memory] -> true
+{"color":"#64748B","text":"/ram"}
+## execute /ram [player Steve] -> true
+{"color":"#64748B","text":"/ram"}
+## execute /ram [region world 1 2] -> true
+{"color":"#64748B","text":"/ram"}
+## execute /perf [region world 16 -32] -> true
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"world / 16, -32"}],"text":"  World / block: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"no server running"}],"text":"  Region: "}
+<live provider freshness line>
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## execute /perf [tick] denied -> true
+"no permission"
+## execute /perf [player Steve] -> true
+{"color":"#64748B","text":"Steve is not online"}
+## render snapshot#0 overview
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / overview"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Ticks"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Target TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Worst region TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Worst average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable (approximate)"}],"text":"  Estimated p95 / p99: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Recent maximum: "}
+{"bold":true,"color":"#C084FC","text":"  CPU"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
+{"bold":true,"color":"#C084FC","text":"  Memory"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable / unavailable"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Heap usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Container memory usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"bold":true,"color":"#C084FC","text":"  Regions"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Active regions / retained generations: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable / unavailable"}],"text":"  Worst / median / aggregate average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"none measured"}],"text":"  Slowest region (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"/perf region <world> <x> <z>"}],"text":"  Per-location region metrics: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"not instrumented"}],"text":"  Region coordinates / queues: "}
+{"bold":true,"color":"#C084FC","text":"  Health"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"UNAVAILABLE"}],"text":"  Tick health: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"settings are operator-owned; /spark profiler start for samples"}],"text":"  Diagnostics: "}
+{"color":"#64748B","text":"  Freshness: UNAVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#0 tick
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / tick"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Ticks"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Target TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Worst region TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Worst average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable (approximate)"}],"text":"  Estimated p95 / p99: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Recent maximum: "}
+{"color":"#64748B","text":"  Freshness: UNAVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#0 cpu
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / cpu"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  CPU"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
+{"color":"#64748B","text":"  Freshness: UNAVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#0 memory
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Memory"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Memory"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable / unavailable"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Heap usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Container memory usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"color":"#64748B","text":"  Freshness: UNAVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#0 gc
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / gc"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"color":"#64748B","text":"  Freshness: UNAVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#0 region
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Regions"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Active regions / retained generations: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable / unavailable"}],"text":"  Worst / median / aggregate average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"none measured"}],"text":"  Slowest region (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"/perf region <world> <x> <z>"}],"text":"  Per-location region metrics: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"not instrumented"}],"text":"  Region coordinates / queues: "}
+{"color":"#64748B","text":"  Freshness: UNAVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#0 health
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / health"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Health"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"UNAVAILABLE"}],"text":"  Tick health: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"settings are operator-owned; /spark profiler start for samples"}],"text":"  Diagnostics: "}
+{"color":"#64748B","text":"  Freshness: UNAVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#0 no-such-view
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / no-such-view"}],"text":"╭─ "}
+{"color":"#64748B","text":"  Freshness: UNAVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## health snapshot#0
+UNAVAILABLE
+## render snapshot#1 overview
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / overview"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Ticks"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Target TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Worst region TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8.00ms"}],"text":"  Worst average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"9.60ms / 12.0ms (approximate)"}],"text":"  Estimated p95 / p99: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"16.0ms"}],"text":"  Recent maximum: "}
+{"bold":true,"color":"#C084FC","text":"  CPU"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
+{"bold":true,"color":"#C084FC","text":"  Memory"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"40.0%"}],"text":"  Container memory usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"2.0"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"bold":true,"color":"#C084FC","text":"  Regions"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3 / 4"}],"text":"  Active regions / retained generations: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8.00ms / 8.00ms / 8.00ms"}],"text":"  Worst / median / aggregate average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"none measured"}],"text":"  Slowest region (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"/perf region <world> <x> <z>"}],"text":"  Per-location region metrics: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"not instrumented"}],"text":"  Region coordinates / queues: "}
+{"bold":true,"color":"#C084FC","text":"  Health"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"EXCELLENT"}],"text":"  Tick health: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"settings are operator-owned; /spark profiler start for samples"}],"text":"  Diagnostics: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#1 tick
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / tick"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Ticks"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Target TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Worst region TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8.00ms"}],"text":"  Worst average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"9.60ms / 12.0ms (approximate)"}],"text":"  Estimated p95 / p99: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"16.0ms"}],"text":"  Recent maximum: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#1 cpu
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / cpu"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  CPU"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#1 memory
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Memory"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Memory"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"40.0%"}],"text":"  Container memory usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"2.0"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#1 gc
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / gc"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"2.0"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#1 region
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Regions"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3 / 4"}],"text":"  Active regions / retained generations: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8.00ms / 8.00ms / 8.00ms"}],"text":"  Worst / median / aggregate average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"none measured"}],"text":"  Slowest region (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"/perf region <world> <x> <z>"}],"text":"  Per-location region metrics: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"not instrumented"}],"text":"  Region coordinates / queues: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#1 health
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / health"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Health"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"EXCELLENT"}],"text":"  Tick health: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"settings are operator-owned; /spark profiler start for samples"}],"text":"  Diagnostics: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#1 no-such-view
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / no-such-view"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## health snapshot#1
+EXCELLENT
+## render snapshot#2 overview
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / overview"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Ticks"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Target TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Worst region TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"12.0ms"}],"text":"  Worst average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"14.4ms / 18.0ms (approximate)"}],"text":"  Estimated p95 / p99: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"24.0ms"}],"text":"  Recent maximum: "}
+{"bold":true,"color":"#C084FC","text":"  CPU"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
+{"bold":true,"color":"#C084FC","text":"  Memory"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"40.0%"}],"text":"  Container memory usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"2.0"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"bold":true,"color":"#C084FC","text":"  Regions"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3 / 4"}],"text":"  Active regions / retained generations: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"12.0ms / 12.0ms / 12.0ms"}],"text":"  Worst / median / aggregate average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"none measured"}],"text":"  Slowest region (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"/perf region <world> <x> <z>"}],"text":"  Per-location region metrics: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"not instrumented"}],"text":"  Region coordinates / queues: "}
+{"bold":true,"color":"#C084FC","text":"  Health"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"EXCELLENT"}],"text":"  Tick health: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"settings are operator-owned; /spark profiler start for samples"}],"text":"  Diagnostics: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#2 tick
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / tick"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Ticks"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Target TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Worst region TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"12.0ms"}],"text":"  Worst average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"14.4ms / 18.0ms (approximate)"}],"text":"  Estimated p95 / p99: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"24.0ms"}],"text":"  Recent maximum: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#2 cpu
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / cpu"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  CPU"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#2 memory
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Memory"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Memory"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"40.0%"}],"text":"  Container memory usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"2.0"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#2 gc
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / gc"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"2.0"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#2 region
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Regions"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3 / 4"}],"text":"  Active regions / retained generations: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"12.0ms / 12.0ms / 12.0ms"}],"text":"  Worst / median / aggregate average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"none measured"}],"text":"  Slowest region (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"/perf region <world> <x> <z>"}],"text":"  Per-location region metrics: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"not instrumented"}],"text":"  Region coordinates / queues: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#2 health
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / health"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Health"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"EXCELLENT"}],"text":"  Tick health: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"settings are operator-owned; /spark profiler start for samples"}],"text":"  Diagnostics: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#2 no-such-view
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / no-such-view"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## health snapshot#2
+EXCELLENT
+## render snapshot#3 overview
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / overview"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Ticks"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Target TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"16.00"}],"text":"  Worst region TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"60.0ms"}],"text":"  Worst average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"72.0ms / 90.0ms (approximate)"}],"text":"  Estimated p95 / p99: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"120.0ms"}],"text":"  Recent maximum: "}
+{"bold":true,"color":"#C084FC","text":"  CPU"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"87.3% / 93.0%"}],"text":"  Process CPU / system CPU: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8 / 97"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3725s"}],"text":"  Uptime: "}
+{"bold":true,"color":"#C084FC","text":"  Memory"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3.0G / 4.0G / 6.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"300M"}],"text":"  Non-heap: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"5.0G"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"71.5%"}],"text":"  Container memory usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"1234 / 5678ms"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3.5"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"bold":true,"color":"#C084FC","text":"  Regions"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3 / 4"}],"text":"  Active regions / retained generations: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"60.0ms / 60.0ms / 60.0ms"}],"text":"  Worst / median / aggregate average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"none measured"}],"text":"  Slowest region (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"/perf region <world> <x> <z>"}],"text":"  Per-location region metrics: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"not instrumented"}],"text":"  Region coordinates / queues: "}
+{"bold":true,"color":"#C084FC","text":"  Health"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"CRITICAL"}],"text":"  Tick health: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"settings are operator-owned; /spark profiler start for samples"}],"text":"  Diagnostics: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#3 tick
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / tick"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Ticks"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Target TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"16.00"}],"text":"  Worst region TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"60.0ms"}],"text":"  Worst average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"72.0ms / 90.0ms (approximate)"}],"text":"  Estimated p95 / p99: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"120.0ms"}],"text":"  Recent maximum: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#3 cpu
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / cpu"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  CPU"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"87.3% / 93.0%"}],"text":"  Process CPU / system CPU: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8 / 97"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3725s"}],"text":"  Uptime: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#3 memory
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Memory"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Memory"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3.0G / 4.0G / 6.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"300M"}],"text":"  Non-heap: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"5.0G"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"71.5%"}],"text":"  Container memory usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"1234 / 5678ms"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3.5"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#3 gc
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / gc"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"1234 / 5678ms"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3.5"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#3 region
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Regions"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3 / 4"}],"text":"  Active regions / retained generations: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"60.0ms / 60.0ms / 60.0ms"}],"text":"  Worst / median / aggregate average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"none measured"}],"text":"  Slowest region (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"/perf region <world> <x> <z>"}],"text":"  Per-location region metrics: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"not instrumented"}],"text":"  Region coordinates / queues: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#3 health
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / health"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Health"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"CRITICAL"}],"text":"  Tick health: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"settings are operator-owned; /spark profiler start for samples"}],"text":"  Diagnostics: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#3 no-such-view
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / no-such-view"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## health snapshot#3
+CRITICAL
+## render snapshot#4 overview
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / overview"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Ticks"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Target TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Worst region TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8.00ms"}],"text":"  Worst average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"9.60ms / 12.0ms (approximate)"}],"text":"  Estimated p95 / p99: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"16.0ms"}],"text":"  Recent maximum: "}
+{"bold":true,"color":"#C084FC","text":"  CPU"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
+{"bold":true,"color":"#C084FC","text":"  Memory"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"40.0%"}],"text":"  Container memory usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"2.0"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"bold":true,"color":"#C084FC","text":"  Regions"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3 / 4"}],"text":"  Active regions / retained generations: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8.00ms / 8.00ms / 8.00ms"}],"text":"  Worst / median / aggregate average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"none measured"}],"text":"  Slowest region (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"/perf region <world> <x> <z>"}],"text":"  Per-location region metrics: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"not instrumented"}],"text":"  Region coordinates / queues: "}
+{"bold":true,"color":"#C084FC","text":"  Health"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"STALE"}],"text":"  Tick health: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"settings are operator-owned; /spark profiler start for samples"}],"text":"  Diagnostics: "}
+{"color":"#64748B","text":"  Freshness: STALE (12000ms old): collector late"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#4 tick
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / tick"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Ticks"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Target TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"20.00"}],"text":"  Worst region TPS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8.00ms"}],"text":"  Worst average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"9.60ms / 12.0ms (approximate)"}],"text":"  Estimated p95 / p99: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"16.0ms"}],"text":"  Recent maximum: "}
+{"color":"#64748B","text":"  Freshness: STALE (12000ms old): collector late"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#4 cpu
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / cpu"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  CPU"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Process CPU / system CPU: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  Available processors / live platform threads: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Uptime: "}
+{"color":"#64748B","text":"  Freshness: STALE (12000ms old): collector late"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#4 memory
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Memory"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Memory"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"512M / unavailable / 1.0G"}],"text":"  Heap used / committed / maximum: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"50.0% of maximum"}],"text":"  Heap usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Non-heap: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable"}],"text":"  Process RSS: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"40.0%"}],"text":"  Container memory usage: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (allocation rate is not collected)"}],"text":"  Allocation rate: "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"2.0"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"color":"#64748B","text":"  Freshness: STALE (12000ms old): collector late"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#4 gc
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / gc"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Garbage collection"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unavailable / unavailable"}],"text":"  GC collections / cumulative collection time: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"2.0"}],"text":"  GC collections/min: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (all pools are aggregated)"}],"text":"  GC young / old collections: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"n/a (only the mean per cycle is collected)"}],"text":"  Last GC pause: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"use JFR or /spark profiler start"}],"text":"  Pause distribution / allocation samples: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"MXBean collection time is not stop-the-world pause time"}],"text":"  GC scope: "}
+{"color":"#64748B","text":"  Freshness: STALE (12000ms old): collector late"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#4 region
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Regions"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"3 / 4"}],"text":"  Active regions / retained generations: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8.00ms / 8.00ms / 8.00ms"}],"text":"  Worst / median / aggregate average MSPT: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"none measured"}],"text":"  Slowest region (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"/perf region <world> <x> <z>"}],"text":"  Per-location region metrics: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"not instrumented"}],"text":"  Region coordinates / queues: "}
+{"color":"#64748B","text":"  Freshness: STALE (12000ms old): collector late"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#4 health
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / health"}],"text":"╭─ "}
+{"bold":true,"color":"#C084FC","text":"  Health"}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"STALE"}],"text":"  Tick health: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"settings are operator-owned; /spark profiler start for samples"}],"text":"  Diagnostics: "}
+{"color":"#64748B","text":"  Freshness: STALE (12000ms old): collector late"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render snapshot#4 no-such-view
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / no-such-view"}],"text":"╭─ "}
+{"color":"#64748B","text":"  Freshness: STALE (12000ms old): collector late"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## health snapshot#4
+STALE
+## health without a positive target
+UNAVAILABLE
+## health warning window
+WARNING
+## renderRegion FOUND active=true
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"world / 16, -32"}],"text":"  World / block: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"1, -2"}],"text":"  Chunk: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"world #3 region #7 gen 11"}],"text":"  Region: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"19.99 / 19.99"}],"text":"  TPS (5s / 1m): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8.00ms / 8.00ms"}],"text":"  Average MSPT (5s / 1m): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"16.0ms"}],"text":"  Maximum MSPT (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"100 ticks"}],"text":"  Samples (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"truncated (ring overflow)"}],"text":"  Window: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## renderRegion FOUND active=false
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"world / 16, -32"}],"text":"  World / block: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"1, -2"}],"text":"  Chunk: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"world #3 region #7 gen 11 (inactive)"}],"text":"  Region: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"19.99 / 19.99"}],"text":"  TPS (5s / 1m): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"8.00ms / 8.00ms"}],"text":"  Average MSPT (5s / 1m): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"16.0ms"}],"text":"  Maximum MSPT (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"100 ticks"}],"text":"  Samples (5s): "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"truncated (ring overflow)"}],"text":"  Window: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## renderRegion NO_REGION_AT_CHUNK active=false
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"world / 16, -32"}],"text":"  World / block: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"no region resolved for chunk 1, -2 (approximate lookup: the region may be merging or splitting, or the chunk is not loaded)"}],"text":"  Region: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## renderRegion UNKNOWN_WORLD active=false
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"world / 16, -32"}],"text":"  World / block: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"unknown world 'world'"}],"text":"  Region: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## renderRegion NO_SERVER active=false
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"world / 16, -32"}],"text":"  World / block: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"no server running"}],"text":"  Region: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## renderRegion NO_TELEMETRY active=true
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / region"}],"text":"╭─ "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"world / 16, -32"}],"text":"  World / block: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"world #3 region #7 has no recorded tick metrics yet"}],"text":"  Region: "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## renderPlayer asSender=true RUNS hops=0
+direct   Player: Steve
+direct   World / block: world / 17, 64, -34
+direct   Chunk: 1, -3
+direct   Ping: 42 ms
+direct   View / simulation distance: 10 / 8
+direct   Owning thread: <thread>
+## renderPlayer asSender=true RETIRES hops=1
+hop Steve left before the view was taken
+## renderPlayer asSender=true REFUSES hops=0
+direct Steve is being removed
+## renderPlayer asSender=false RUNS hops=1
+hop   Player: Steve
+hop   World / block: world / 17, 64, -34
+hop   Chunk: 1, -3
+hop   Ping: 42 ms
+hop   View / simulation distance: 10 / 8
+hop   Owning thread: <thread>
+## renderPlayer asSender=false RETIRES hops=1
+hop Steve left before the view was taken
+## renderPlayer asSender=false REFUSES hops=0
+direct Steve is being removed
+## renderAwf 0 forces (no engine)
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"no world is stored in AWF (aurora.awf.worlds)"}],"text":"  Aurora World Fabric: "}
+## renderAwf 7 forces (no engine)
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"7 since start (UnsupportedOperationException: directories cannot be opened); directory entries rely on the rename alone, commits are not fully durable against power loss here"}],"text":"  AWF directory fsyncs skipped: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"no world is stored in AWF (aurora.awf.worlds)"}],"text":"  Aurora World Fabric: "}
+## renderAwf 1458 collapsed read errors (no engine)
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"1458 since start (repeats of an AWF read failure that AWF already counted; their chunk-system log lines were dropped)"}],"text":"  Chunk-system read errors collapsed: "}
+{"color":"#94A3B8","extra":[{"color":"#F1F5F9","text":"no world is stored in AWF (aurora.awf.worlds)"}],"text":"  Aurora World Fabric: "}
+## shortStorageName
+world/DIM-1/region world/entities srv/world/poi region
+## render frame lanes (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / lanes"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame async (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / async"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame network (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / network"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame governor (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / governor"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame scheduler (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / scheduler"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame incidents (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / incidents"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame storage (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / storage"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame awf (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / awf"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame plugins (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / plugins"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame history (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / history"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame chunks (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / chunks"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}
+## render frame entities (body not compared)
+{"color":"#64748B","extra":[{"bold":true,"color":"#22D3EE","text":"SourbyCraft"},{"color":"#64748B","text":" / "},{"color":"#F1F5F9","text":"Performance / entities"}],"text":"╭─ "}
+{"color":"#4ADE80","text":"  Freshness: AVAILABLE"}
+{"extra":[{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf"}},"text":"[/perf]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf lanes"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf lanes"}},"text":"[/perf lanes]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf network"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf network"}},"text":"[/perf network]"},{"color":"#64748B","text":"  "},{"color":"#22D3EE","click_event":{"action":"suggest_command","command":"/perf plugins"},"hover_event":{"action":"show_text","value":{"color":"#F1F5F9","text":"Open this view\n/perf plugins"}},"text":"[/perf plugins]"},{"color":"#64748B","text":"  "}],"text":"  "}
+{"color":"#64748B","text":"╰─ ────────────────────────────"}

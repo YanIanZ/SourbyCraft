@@ -68,7 +68,9 @@ def _identity(root):
     if not (root / '.git').exists():
         raise ValueError('Source root lacks Git metadata')
     commit = git(root, 'rev-parse', 'HEAD').decode().strip()
-    dirty = bool(git(root, 'status', '--porcelain', '--untracked-files=all').strip())
+    # Only tracked state (worktree and index vs HEAD) makes the root dirty: an untracked scratch file such
+    # as AGENT-COORDINATION.md must not label the build "-dirty". Untracked files are still hashed below.
+    dirty = bool(git(root, 'status', '--porcelain', '--untracked-files=no').strip())
     nested = ('paper-api', 'paper-server', 'sourbycraft-server/src/minecraft/java',
               'sourbycraft-server/src/minecraft/resources')
     paths = set(git(root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard').split(b'\0')) - {b''}
@@ -78,6 +80,8 @@ def _identity(root):
             continue
         if not (checkout / '.git').exists():
             raise ValueError(f'Materialized checkout lacks Git metadata: {name}')
+        # A materialized repo is not root-tracked state: a file there that no commit holds is compiled
+        # into the jar, so untracked files in it still count.
         status = git(checkout, 'status', '--porcelain', '--untracked-files=all')
         dirty = dirty or bool(status.strip())
         entries = git(checkout, 'ls-files', '-z', '--cached', '--others', '--exclude-standard')

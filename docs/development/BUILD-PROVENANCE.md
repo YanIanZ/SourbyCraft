@@ -9,7 +9,14 @@ The hash covers relative paths, file bytes, executable bits and symlink targets 
 tracked and non-ignored untracked files, including staged changes/deletions. It also
 covers all four materialized Git working copies: `paper-api`, `paper-server`,
 `sourbycraft-server/src/minecraft/java` and `sourbycraft-server/src/minecraft/resources`.
-Dirty state includes these nested repos. Both generated build files,
+The `dirty` flag counts tracked changes only: worktree or index differing from `HEAD`
+(`git status --porcelain --untracked-files=no`). An untracked file in the root, such as
+`AGENT-COORDINATION.md`, does not add `-dirty`, although it still enters `treeHash`, so a
+tree with untracked files has a different hash from a clean checkout of the same commit.
+Because of that, an untracked source file that compiles into the jar is not flagged dirty;
+the publication gate is unaffected (CI builds a clean checkout). Dirty state includes the
+nested repos, and there untracked files do count (the nested repos are not root-tracked
+state; a file no patch commit holds is compiled into the jar). Both generated build files,
 `sourbyapi/build.gradle.kts` and `sourbycraft-server/build.gradle.kts`, are hashed.
 Each is compared with the tracked module `build.gradle.kts.patch` applied strictly
 to the upstream build file at `paperRef`, read from the Paper cache Git object database
@@ -48,7 +55,7 @@ UP-TO-DATE outputs; manifest generation reads the same helper during configurati
 Settings are build-time only and require a new JAR/restart.
 
 Verification: `PYTHONPATH=scripts python3 -m unittest scripts/test_build_identity.py`.
-The fixture tests include untracked/modified/deleted files, nested materialized edits,
+The fixture tests include untracked (hash changes, dirty does not)/modified/staged/deleted files, nested materialized edits,
 index byte preservation, resource changes, generated API/server drift, missing Git,
 untracked nested repositories, unknown local provenance, dirty labels, wrong commits and divergent hashes. Current build
 and packaged-JAR evidence is recorded in `AGENT-COORDINATION.md`.

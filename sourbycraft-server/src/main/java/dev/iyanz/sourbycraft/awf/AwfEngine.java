@@ -611,7 +611,8 @@ public final class AwfEngine {
     public record CompactionReport(String storage, boolean fullBefore, long generation, boolean fullAfter, String error) {}
 
     /**
-     * Compacts every open storage of a world ({@code "all"}: every open storage), clean ones
+     * Compacts every open storage of a loaded world, found by its dimension folder
+     * ({@link AwfWorldFolders#loaded}; {@code "all"}: every open storage), clean ones
      * included, on the storage lane, and reports per storage whether its current generation is
      * now self-contained — the check to run before downgrading to a build without the chain
      * parser. A world that is not loaded has no open storage and is not touched.
@@ -619,12 +620,27 @@ public final class AwfEngine {
     public static java.util.concurrent.CompletableFuture<List<CompactionReport>> compact(final String world) {
         final AwfEngine current = global;
         if (current == null) return java.util.concurrent.CompletableFuture.completedFuture(List.of());
-        return current.compactStorages(world);
+        return current.compactStorages(world, AwfWorldFolders::loaded);
     }
 
-    java.util.concurrent.CompletableFuture<List<CompactionReport>> compactStorages(final String world) {
-        final List<AwfRegionStorage> targets = "all".equalsIgnoreCase(world) ? List.copyOf(this.storages.values())
-            : storagesUnder(this, Path.of(world));
+    /**
+     * As {@link #compact}, with the world-name lookup injected: {@code folders} maps a loaded
+     * world's name to its dimension folder ({@code null} when it is not loaded). A name is never a
+     * path: on 26.2 {@code <server>/<name>} is either nothing (a managed world) or the level folder
+     * holding every dimension ({@code world}), which compacted the stores of all of them.
+     */
+    java.util.concurrent.CompletableFuture<List<CompactionReport>> compactStorages(final String world,
+            final java.util.function.Function<String, Path> folders) {
+        if ("all".equalsIgnoreCase(world)) return compactStorages((Path) null);
+        final Path folder = folders.apply(world);
+        if (folder == null) return java.util.concurrent.CompletableFuture.completedFuture(List.of());
+        return compactStorages(folder);
+    }
+
+    /** Compacts every open storage under {@code folder}; {@code null} = every open storage. */
+    java.util.concurrent.CompletableFuture<List<CompactionReport>> compactStorages(final Path folder) {
+        final List<AwfRegionStorage> targets = folder == null ? List.copyOf(this.storages.values())
+            : storagesUnder(this, folder);
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             final List<CompactionReport> reports = new java.util.ArrayList<>();
             for (final AwfRegionStorage storage : targets) {

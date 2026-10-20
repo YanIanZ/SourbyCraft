@@ -61,7 +61,8 @@ public final class SourbyMetadataProvider implements MetadataProvider {
             o.addProperty("asyncPathfinding", aurora.entity().asyncPathfinding());
             o.addProperty("laneSampling", aurora.diagnostics().laneSampling());
             o.addProperty("networkCounters", aurora.network().counters());
-            o.addProperty("cpuCores", aurora.cpu().cores());
+            // RESTART_REQUIRED: the budget this process runs with, read once at boot, not a reloaded edit.
+            o.addProperty("cpuCores", dev.iyanz.aurora.cpu.AuroraCpu.configuredCores());
         });
         section(root, "startup", o -> {
             final var profile = dev.iyanz.sourbycraft.startup.StartupTimeline.last();

@@ -60,6 +60,64 @@ class BuildIdentityTest(unittest.TestCase):
             (root / 'source').unlink()
             self.assertNotEqual(dirty['treeHash'], identity(root)['treeHash'])
 
+    def test_dirty_counts_tracked_and_staged_changes_but_not_untracked_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            git = self.fixture_repo(root)
+            (root / 'source').write_text('original')
+            git('add', 'source')
+            git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'source')
+            clean = identity(root)
+            self.assertEqual('false', clean['dirty'])
+            # An untracked file (AGENT-COORDINATION.md, scratch notes) is not a tracked change...
+            (root / 'AGENT-COORDINATION.md').write_text('notes')
+            untracked = identity(root)
+            self.assertEqual('false', untracked['dirty'])
+            # ...but it is still hashed as a source input, so the fingerprint is not a clean checkout's.
+            self.assertNotEqual(clean['treeHash'], untracked['treeHash'])
+            # A tracked modification is dirty.
+            (root / 'source').write_text('changed')
+            self.assertEqual('true', identity(root)['dirty'])
+            # A staged modification (worktree equal to the index) is dirty.
+            git('add', 'source')
+            self.assertEqual('true', identity(root)['dirty'])
+            # Back to the committed content in both index and worktree: clean again.
+            (root / 'source').write_text('original')
+            git('add', 'source')
+            self.assertEqual('false', identity(root)['dirty'])
+            # A newly staged file is a tracked change; a deleted tracked file too.
+            (root / 'added').write_text('x')
+            git('add', 'added')
+            self.assertEqual('true', identity(root)['dirty'])
+            git('rm', '-q', '--cached', 'added')
+            (root / 'added').unlink()
+            self.assertEqual('false', identity(root)['dirty'])
+            (root / 'source').unlink()
+            self.assertEqual('true', identity(root)['dirty'])
+
+    def test_untracked_files_in_a_materialized_repo_still_mark_the_build_dirty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(where, *args):
+                return subprocess.check_output(['git', '-C', str(where), *args])
+            git(root, 'init', '-q')
+            (root / '.gitignore').write_text('paper-api/\n')
+            git(root, 'add', '.gitignore')
+            git(root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture')
+            nested = root / 'paper-api'
+            nested.mkdir()
+            git(nested, 'init', '-q')
+            (nested / 'source').write_text('original')
+            git(nested, 'add', 'source')
+            git(nested, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'source')
+            self.assertEqual('false', identity(root)['dirty'])
+            (root / 'root-notes').write_text('untracked in the root: ignored by the flag')
+            self.assertEqual('false', identity(root)['dirty'])
+            # The materialized repo is not root-tracked state; a file there that no patch commit holds
+            # is compiled into the jar, so it keeps marking the build dirty (behaviour before this change).
+            (nested / 'NewClass.java').write_text('class NewClass {}')
+            self.assertEqual('true', identity(root)['dirty'])
+
     def test_materialized_working_copy_content_and_dirty_state_are_included(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
