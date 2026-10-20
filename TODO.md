@@ -11,6 +11,8 @@ sini **dan** di dokumen sumbernya, sertakan bukti (run CI, commit, laporan) sesu
 Plan lama (era v6/v12/Folia, Mei–Juli 2026, dulu di `docs/superpowers/`, dihapus 2026-10-13) tidak dimasukkan; isinya
 sudah digantikan dokumen di atas.
 
+Rencana rilis Build 47–50 (item per build, gate per build): [`docs/releases/ROADMAP-47-50.md`](docs/releases/ROADMAP-47-50.md).
+
 Status: `[ ]` belum · `[-]` sebagian / perlu validasi · `[!]` terblokir keputusan owner
 
 ---
@@ -131,6 +133,12 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   `Git-Commit`) — `-dirty`, tree hash, cek `--commit $GITHUB_SHA` (audit §4)
 
 ### Keputusan owner
+- [x] **Rencana rilis 4 tahap** (keputusan owner 2026-10-21): **Build 47** rilis saat ini (Aurora
+  Nexus, gate yang masih terbuka di bawah), **Build 48** penyempurnaan (log startup, guard warisan
+  jadi keputusan/implementasi SourbyCraft sendiri, polish, temuan audit), **Build 49** full stable
+  (semua gate stabilitas/persistensi/keamanan, `release=true`, tanpa fitur baru), **Build 50**
+  pengoptimalan (baseline tersertifikasi lalu optimasi terukur, termasuk keputusan default
+  async pathfinding). Pembagian item: `docs/releases/ROADMAP-47-50.md`.
   — selesai `d4269dcb` (2026-10-20): tree hash + flag dirty (repo materialisasi termasuk minecraft/resources, file build tergenerasi), `--commit $GITHUB_SHA` di CI; CI run berikutnya adalah bukti pertama di runner
 - [!] **Lisensi:** repo memakai PolyForm Noncommercial, sementara jar yang didistribusikan berisi kode
   server Paper berlisensi GPLv3. Perlu keputusan apakah kombinasi ini memenuhi GPLv3
@@ -320,6 +328,7 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 ### Scheduler dan pathfinding
 - [ ] Benchmark pathfinding sync vs async
 - [ ] Soak kompatibilitas perilaku mob
+  — parsial 2026-10-21 (fungsional, bukan sertifikasi): `asyncpath-soak-2` flag ON, churn blok di rute mob, 204 solve async diterima / 0 ditolak / 0 outstanding, 0 exception, stop bersih; belum: villager ke workstation di jalur async, atribusi per tipe mob, soak berjam-jam (`docs/async-pathfinding-spec.md` "Gate 2 status")
 - [x] Pindahkan pool async path ke belakang AuroraExecution dengan callback owner-context eksplisit (M5)
   — selesai 2026-10-20 (menunggu commit): pool kini lane `ResourceGovernor.Lane.PATHFINDING` (`GovernedLane`, antrean 1024, menolak bukan caller-runs, thread `max(1, cores/4)`; "AuroraExecution" dibaca sebagai Resource Governor, satu-satunya execution fabric Aurora di kode — tidak ada kelas `AuroraExecution`); callback owner-context eksplisit sudah ada (`execution/OwnerHandoff`, `RegionOwnerHandoff`, `perf/AsyncPathCompletion`, dipakai MC 0006); `ResourceGovernorTest` 10, `LiveIncidentSourcesTest` 1, `UnboundedQueueAuditTest` 3, `AsyncPath*` hijau; default fitur tetap OFF; `/perf governor` dan metadata spark kini memuat lane "Pathfinding" saat async pathfinding menyala; belum: benchmark sync vs async, soak mob (butuh server)
 

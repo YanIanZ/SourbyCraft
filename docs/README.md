@@ -96,6 +96,7 @@ patches, plus proposals; a dated snapshot — fix status is tracked in [TODO.md]
 *Audit sistem 2026-10-14*)
 
 ### Releases (`releases/`)
+[Release roadmap 47–50](releases/ROADMAP-47-50.md) (owner plan 2026-10-21: 47 ship, 48 refinement, 49 full stable, 50 optimization; gates in [48](releases/26.2-build-48.md), [49](releases/26.2-build-49.md), [50](releases/26.2-build-50.md)) ·
 [Build 47 — Aurora Nexus](releases/26.2-build-47-aurora-nexus.md) (current candidate and its gates) ·
 [46](releases/46.md) · [45](releases/45.md) · [44](releases/44.md)
 

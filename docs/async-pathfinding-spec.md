@@ -185,6 +185,31 @@ Creakings.
    chase, pathing across water/fences), no async-access crash in logs over a soak.
 3. Spark A/B: region-thread pathfinding frames drop; worst-region MSPT under a mob-heavy crowd.
 
+### Gate 2 status (2026-10-21, functional only, PARTIAL)
+
+Two flag-ON runs on the agent test server (`scripts/agent_testserver.py`, shared Apple-silicon
+machine, Build 47-dirty from `c0ab0cc4` plus a dirty tree, flat world, no player connected, so
+`spigot.yml` `entity-activation-range.*: 0` was installed with `--config-file` to keep mob AI active;
+this fixture does not cover player activation, region transitions, unloaded borders or saturation).
+
+- `asyncpath-soak-1` (static arena, noon): **0 solves admitted** over a ~9.5 min soak window. Expected from the code:
+  the offload runs only from `PathNavigation.recomputePath()` with a live unfinished path, which
+  vanilla calls when a block changes near a path (`ServerLevel` navigation update) or from
+  `FlyingPathNavigation`; initial path creation stays synchronous. Villagers still took jobs
+  (synchronous path). Not evidence for the async path.
+- `asyncpath-soak-2` (midnight, no golems, invulnerable villager targets, walls/fences/glass/stone
+  toggled on mob routes from the console (each route on/off roughly every 12 s, ~25 s per cycle) for ~10 min — command blocks do not run on this
+  engine: `CommandBlock.tick` starts with an inherited `if (true) return;`; the ledger
+  `docs/architecture/inherited-guards.md` is being written): `/perf async` **204 solves admitted, 0
+  outstanding, 0 refused**, solve mean 0.39 ms / slowest 7.26 ms, queue wait mean 0.24 ms; zero
+  exception/guard lines in `server.log` (one boot `ERROR: No key layers in MapLike[{}]`, the vanilla
+  message for a flat world with empty `generator-settings`); clean stop (exit 0). Zombies, striders, bees and Creakings
+  changed position between probes.
+- NOT shown: villagers walking to workstations on the async path (they sleep at midnight; 16/16
+  jobless), which mob types produced the 204 solves (no per-type counter), chase/arrival outcomes,
+  amphibious controls (axolotl/drowned/frog refuse the offload by design), saturation, and anything
+  multi-hour. Item 2 stays open; item 3 (spark A/B) not started.
+
 
 ## Saturation contract
 
