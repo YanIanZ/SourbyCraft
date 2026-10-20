@@ -140,7 +140,7 @@ new files; message variants are not replaced in existing deployments.
 UI regression tests cover plain/rich rendering, failure summaries, alias registration,
 search/filter/page boundaries, typed defaults, file preservation and restart comparison.
 Compile, server-suite, policy and isolated boot evidence is recorded with this change's
-entry in `TODO.md`. These are functional checks; release qualification remains separate.
+entry in `docs/TODO.md`. These are functional checks; release qualification remains separate.
 
 Animated consoles, predicted remaining time, profiler controls and automatically suggested
 hardware tuning are not implemented by this UI change.

@@ -69,7 +69,7 @@ Inventory of the reusable state inspected in `dev.iyanz.sourbycraft`; this is no
 | S10 | `RegionTickMetrics current` cell | `perf/RegionTickMetricsHolder.java:23`, replaced at `:60` | One per region tick handle; replaced only after retirement | **KEEP** |
 | S11 | GC ring buffers `ringCount` / `ringTimeMs` / `ringNanos` (21 slots, `static`) | `perf/GcTracker.java:21-23` | `GcTracker.class` monitor (`sampleOnce` `:72`, `stop` `:57`); reset by `stop()` | **KEEP** |
 | S12 | Three shared `BossBar` instances | `hud/HudBars.java:74-79` | Mutated by the global-region updater task `update` `:394-418`; shown/hidden from player region threads in `applyShown` `:331-340` and `applyPerf` `:287-303` | **KEEP** (see U3) |
-| S13 | `TPS_VIEWERS` / `RAM_VIEWERS` / `PERF_VIEWERS` / `ANY`, actionbar maps `TPS_ACTIONBAR` / `RAM_ACTIONBAR` / `PERF_ACTIONBAR`, and the `SESSIONS` counter | `hud/HudBars.java:61-72` | Process-wide; keys are `UUID`s, the actionbar maps also hold a `Long` session token, and no `Player` is stored; `SESSIONS` is a single never-reset `AtomicLong`. Evicted in `onQuit` `:360-370`; cleared in `close()` `:378-392`; actionbar entries also removed on toggle-off and mode switch in `applyShown` `:320-327` and on perf retirement `:300-303` | **KEEP** — satisfies the "no player reference leak after disconnect" rule in `DEVELOPMENT.md` §14 |
+| S13 | `TPS_VIEWERS` / `RAM_VIEWERS` / `PERF_VIEWERS` / `ANY`, actionbar maps `TPS_ACTIONBAR` / `RAM_ACTIONBAR` / `PERF_ACTIONBAR`, and the `SESSIONS` counter | `hud/HudBars.java:61-72` | Process-wide; keys are `UUID`s, the actionbar maps also hold a `Long` session token, and no `Player` is stored; `SESSIONS` is a single never-reset `AtomicLong`. Evicted in `onQuit` `:360-370`; cleared in `close()` `:378-392`; actionbar entries also removed on toggle-off and mode switch in `applyShown` `:320-327` and on perf retirement `:300-303` | **KEEP** — satisfies the "no player reference leak after disconnect" rule in `docs/DEVELOPMENT.md` §14 |
 | S14 | `Map<String,String> cache` (GeoIP) | `util/GeoUtil.java:53` | Process-wide; hard cap 1024 with half-eviction `:115-123` | **KEEP** (see F4) |
 | S15 | `List<Entry> ENTRIES` (plugin-load failures) | `brand/PluginLoadDiagnostics.java:30` | JUL handler thread; capped at 16 `:63-66` | **KEEP** (see F3) |
 | S16 | `Set<String> WARNED_KEYS` | `SourbyCraftConfig.java:281` | Process-wide; bounded by the config key space | **KEEP** |
@@ -86,7 +86,7 @@ load-bearing; S9–S19 are bookkeeping where reuse is incidental.
 `PerformanceCollector` allocates a fresh `ImmutableWindowMetrics[]` pair and a fresh
 `ImmutablePerformanceSnapshot` every second (`:122-148`). That is ten small records
 per second for the whole process and it is what makes the "one immutable snapshot
-per refresh" contract in `DEVELOPMENT.md` §12 hold. It should stay allocated, not
+per refresh" contract in `docs/DEVELOPMENT.md` §12 hold. It should stay allocated, not
 pooled.
 
 ---
@@ -183,7 +183,7 @@ region-thread CPU for a full `PathFinder` + `NodeEvaluator` + `BinaryHeap`
 allocation on every ~20-tick recompute, per mob, *plus* an uncached
 `PathfindingContext` (0007 disables the shared `PathTypeCache` off-region, so every
 off-region solve recomputes path types from scratch). Whether that is a net win is
-exactly the kind of claim `DEVELOPMENT.md` §4.1 forbids asserting without
+exactly the kind of claim `docs/DEVELOPMENT.md` §4.1 forbids asserting without
 measurement. The feature is default-off, which is the right state until the section
 E benchmark exists.
 
@@ -374,7 +374,7 @@ scans over 61 + 169 slots, `:452-466`) plus five histogram merges (`:143-147`). 
 region thread finishing a tick in that window blocks on the monitor.
 
 The work is bounded and the cadence is 1 Hz, so this is very likely far below the
-0.5 % telemetry budget in `DEVELOPMENT.md` §12 — but "very likely" is not a
+0.5 % telemetry budget in `docs/DEVELOPMENT.md` §12 — but "very likely" is not a
 measurement, and this is the only place where Sourby telemetry can block a region
 tick. It belongs in the section B overhead measurement, not in a correctness
 finding.
@@ -392,7 +392,7 @@ assertions are disabled — but that is a production-code change and out of scop
 here.
 
 **U2 — No benchmark exists for any reuse in this audit.** Every KEEP above is a
-correctness verdict. `DEVELOPMENT.md` §4.3 warns that allocation reuse is not
+correctness verdict. `docs/DEVELOPMENT.md` §4.3 warns that allocation reuse is not
 automatically faster on Java 25, and section F's "benchmark existing reusable entity
 buffers" is still open. The three entity-scratch patches trade one allocation per
 call for one permanently retained collection per entity — a trade whose sign is

@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
  */
 class SecurityLimitPinTest {
 
-    /** The documented defaults (`sourbycraft-security.yml`). Changing one is a security decision. */
+    /** The documented defaults (`build-data/sourbycraft-security.yml`). Changing one is a security decision. */
     private static final Map<String, Long> DOCUMENTED = documented();
 
     private static Map<String, Long> documented() {
@@ -51,10 +51,10 @@ class SecurityLimitPinTest {
 
     private static YamlConfiguration shippedYaml() throws Exception {
         Path root = Path.of("").toAbsolutePath();
-        while (root != null && !Files.isRegularFile(root.resolve("sourbycraft-security.yml"))) root = root.getParent();
-        assertNotNull(root, "sourbycraft-security.yml is checked in at the repository root");
+        while (root != null && !Files.isRegularFile(root.resolve("build-data/sourbycraft-security.yml"))) root = root.getParent();
+        assertNotNull(root, "build-data/sourbycraft-security.yml is checked in");
         final YamlConfiguration yaml = new YamlConfiguration();
-        yaml.load(root.resolve("sourbycraft-security.yml").toFile());
+        yaml.load(root.resolve("build-data/sourbycraft-security.yml").toFile());
         return yaml;
     }
 

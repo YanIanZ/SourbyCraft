@@ -1,12 +1,12 @@
 # Aurora Task Matrix
 
-> **Role:** Aurora task checklist with evidence links. **Status:** Active checklist; priorities live in [TODO.md](../TODO.md). Two baseline/soak ticks in §C disagree with [BASELINE.md](BASELINE.md) — see *Open contradictions* in the entry point.
+> **Role:** Aurora task checklist with evidence links. **Status:** Active checklist; priorities live in [TODO.md](TODO.md). Two baseline/soak ticks in §C disagree with [BASELINE.md](BASELINE.md) — see *Open contradictions* in the entry point.
 >
 > Entry point: [docs/architecture/AURORA.md](architecture/AURORA.md).
 
 This checklist supplements `docs/DEVELOPMENT-TASKS.md`. It does not replace existing unfinished tasks; it groups the next work around Aurora configuration ownership, deep Minecraft optimization, stability, and independence.
 
-Current focus (2026-10-06): persistence and plugin ownership gates in [TODO.md](../TODO.md),
+Current focus (2026-10-06): persistence and plugin ownership gates in [TODO.md](TODO.md),
 plus the user's new-terrain generation stutter report. Optional generic generation-stage timing
 is written, with build/runtime acceptance assigned to Claude; see
 [CHUNK-GENERATION-STUTTER.md](development/CHUNK-GENERATION-STUTTER.md).

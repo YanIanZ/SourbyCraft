@@ -146,10 +146,10 @@ class SecurityGuardsTest {
 
     @Test void everyShippedYamlLeafHasAConsumerAndEveryGuardDefaultsToLog() throws Exception {
         Path root = Path.of("").toAbsolutePath();
-        while (root != null && !Files.isRegularFile(root.resolve("sourbycraft-security.yml"))) root = root.getParent();
+        while (root != null && !Files.isRegularFile(root.resolve("build-data/sourbycraft-security.yml"))) root = root.getParent();
         assertNotNull(root);
         var yaml = new YamlConfiguration();
-        yaml.load(root.resolve("sourbycraft-security.yml").toFile());
+        yaml.load(root.resolve("build-data/sourbycraft-security.yml").toFile());
         Set<String> leaves = new TreeSet<>();
         for (String key : yaml.getKeys(true)) if (!yaml.isConfigurationSection(key)) leaves.add(key);
         assertEquals(SecurityGuards.consumedKeys(), leaves);

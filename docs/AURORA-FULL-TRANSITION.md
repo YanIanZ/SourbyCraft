@@ -71,7 +71,7 @@ Examples include:
 - independent Entity/Chunk/Network/Storage engine contracts remain unfinished,
 - the [dependency ledger](architecture/dependency-ledger.md) exists and must stay synchronized with runtime changes.
 
-The latest prioritized work is in [TODO.md](../TODO.md). New-terrain stutter investigation
+The latest prioritized work is in [TODO.md](TODO.md). New-terrain stutter investigation
 and its unexecuted acceptance handoff are documented in
 [CHUNK-GENERATION-STUTTER.md](development/CHUNK-GENERATION-STUTTER.md).
 

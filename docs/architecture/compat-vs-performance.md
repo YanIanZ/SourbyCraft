@@ -21,7 +21,7 @@ balancing them. None of this is a defect in either program; it is a gap between 
 - [qualification-readiness.md](qualification-readiness.md) §2 lists the plugin-heavy
   representative workload as missing: *"no representative plugin set defined"*.
 - No metric attributes tick time to a plugin. [Build 47](../releases/26.2-build-47-aurora-nexus.md)
-  records *"No per-plugin onLoad/onEnable timing"*; DEVELOPMENT.md §19 "Plugin Cost Visibility"
+  records *"No per-plugin onLoad/onEnable timing"*; docs/DEVELOPMENT.md §19 "Plugin Cost Visibility"
   describes the intent, and nothing implements it. The bridge records how many tasks it routed
   (Essentials 5 redirects, Vault 2 on `9a15f51`) and never how long they ran.
 - The one run with legacy plugins present and MSPT recorded is the demo `players-10` bench
@@ -87,7 +87,7 @@ write. The bridge documents do not yet say this as a design limit; §6 below ask
 
   None is wrong. They measure different products. The project has not decided which workload
   represents its players, so the documents cannot converge on a recommendation, and the
-  "no thread-count folklore" rule (DEVELOPMENT.md §6) was read as a prohibition where the
+  "no thread-count folklore" rule (docs/DEVELOPMENT.md §6) was read as a prohibition where the
   single-player case needed the change.
 
 ## 5. The safety order ranks them
@@ -114,7 +114,7 @@ both are true, because the limit is one thread or one pool, which averages hide.
    window) on the region and global threads, shown by `/plugins <name>` and `/perf plugins`
    next to the existing counts. LIVE, no configuration.
 3. **An owner decision on the product workload** — "one player exploring new terrain" versus
-   "ten settled players" — recorded in TODO.md like the licence decision, because the worker
+   "ten settled players" — recorded in docs/TODO.md like the licence decision, because the worker
    recommendation and several patches depend on it.
 4. **The bridge's limit stated** in its documents: it is a safety and diagnosis layer; full
    compatibility means a native port.

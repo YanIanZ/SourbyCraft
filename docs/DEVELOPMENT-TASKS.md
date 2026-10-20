@@ -1,6 +1,6 @@
 # SourbyCraft 26.2 — Development Task Matrix
 
-This file is the actionable checklist for `DEVELOPMENT.md`.
+This file is the actionable checklist for `docs/DEVELOPMENT.md`.
 
 Status values:
 
@@ -137,7 +137,7 @@ Do not create a deep Spark fork merely for naming/branding.
 - [ ] **P1** entity-tracker packet profile
 - [ ] **P1** item-entity merge/pickup profile
 - [ ] **P1** benchmark existing reusable entity buffers
-Standing rule for this section (not a task with a done state): every new entity or performance patch must retain region ownership and Bukkit/Paper semantics. It is enforced by `DEVELOPMENT.md` §4 (correctness outranks benchmark wins; ownership, reentrancy and persistence recorded per NMS change), `scripts/test_independence_policy.py` and `baseline_policy.py` on every patch, `GuardViolations` with `guard-severity: LOG` at runtime, and the per-patch proofs (`region-safety-review-0017-0019.md`, `scratch-reentrancy-proof.md`).
+Standing rule for this section (not a task with a done state): every new entity or performance patch must retain region ownership and Bukkit/Paper semantics. It is enforced by `docs/DEVELOPMENT.md` §4 (correctness outranks benchmark wins; ownership, reentrancy and persistence recorded per NMS change), `scripts/test_independence_policy.py` and `baseline_policy.py` on every patch, `GuardViolations` with `guard-severity: LOG` at runtime, and the per-patch proofs (`region-safety-review-0017-0019.md`, `scratch-reentrancy-proof.md`).
 
 Only measured hot spots should produce new performance patches.
 

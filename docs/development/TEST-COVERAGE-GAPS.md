@@ -5,7 +5,7 @@ Status: **a list of tests to write, none of them written here.** Audit row OBS-1
 `lang`, `update` and `bootstrap`, and timing-sensitive tests. This page turns that row into a
 prioritised backlog with file evidence, verified 2026-10-20 against `sourbycraft-server/src/test/java`
 (115 `*Test.java` files, 124 Java files in all, against 275 main-source files). It complements the
-release-level matrix in `DEVELOPMENT.md` §20, which lists *what* a candidate must cover, not *which
+release-level matrix in `docs/DEVELOPMENT.md` §20, which lists *what* a candidate must cover, not *which
 unit tests are missing*. When a test below lands, move its line to a "closed" section with the test
 class name; do not delete it.
 

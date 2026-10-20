@@ -1,10 +1,11 @@
 # SourbyCraft 26.2 — docker compose reference.
-#   docker compose up -d --build
+#   docker compose -f docker/docker-compose.yml up -d --build   (from the repository root)
 #   docker attach sourbycraft         # console (Ctrl-P Ctrl-Q to detach)
 services:
   sourbycraft:
     build:
-      context: .
+      context: ..
+      dockerfile: docker/Dockerfile
       args:
         JAR: release/SourbyCraft-26.2-REL.jar
     # Or pull a published image instead of building:
@@ -21,5 +22,5 @@ services:
     ports:
       - "25565:25565"
     volumes:
-      - ./data:/data
+      - ../data:/data   # repository-root data/ (relative paths resolve from docker/)
     mem_limit: 8g      # keep MEMORY comfortably under this (heap + off-heap + CDS)

@@ -4,13 +4,13 @@ Start here. The first section is the order a new developer should read and do th
 is an index of every active document. Role and status of each Aurora document (Active, Plan,
 Proposal, Historical) and the known contradictions between documents are kept in one place:
 the document map in [architecture/AURORA.md](architecture/AURORA.md). Where a document and the code
-disagree, the code wins ([DEVELOPMENT.md](../DEVELOPMENT.md), truthfulness policy).
+disagree, the code wins ([DEVELOPMENT.md](DEVELOPMENT.md), truthfulness policy).
 
 ## Developer path
 
 1. **Orientation.** [README.md](../README.md) for what the project is, then
    [AGENTS.md](../AGENTS.md) for the build, the patch model and the rules that are easy to miss.
-   Read the truthfulness policy in [DEVELOPMENT.md](../DEVELOPMENT.md) before writing any status,
+   Read the truthfulness policy in [DEVELOPMENT.md](DEVELOPMENT.md) before writing any status,
    benchmark or release text.
 2. **Set up the toolchain.** JDK 25 and Python 3.11+. The private SourbyPatcher/SourbyClip tools
    must be in Maven Local before Gradle configures:
@@ -33,10 +33,10 @@ disagree, the code wins ([DEVELOPMENT.md](../DEVELOPMENT.md), truthfulness polic
    (region ownership and hand-off). Then the subsystem you are touching (index below).
 5. **Configuration.** [AURORA-CONFIG.md](AURORA-CONFIG.md) lists every implemented key with its
    default and whether it is LIVE or RESTART_REQUIRED.
-6. **Test.** Gradle and Python suites (commands in [CLAUDE.md](../CLAUDE.md) / AGENTS.md); AWF and
+6. **Test.** Gradle and Python suites (commands in [AGENTS.md](../AGENTS.md#running-tests)); AWF and
    legacy-plugin guides under [guides/](guides/). Performance claims need the evidence rules in
    [BASELINE.md](BASELINE.md) and [PROFILING.md](PROFILING.md).
-7. **Track and release.** Priorities live only in [TODO.md](../TODO.md); per-area checklist in
+7. **Track and release.** Priorities live only in [TODO.md](TODO.md); per-area checklist in
    [AURORA-TASKS.md](AURORA-TASKS.md). A build is declared STABLE only after the gates in its release doc under
    [releases/](releases/) pass; the owner decides the channel (Build 47 ships `release=true`
    without the STABLE label, see [ROADMAP-47-50.md](releases/ROADMAP-47-50.md)).
@@ -46,7 +46,7 @@ disagree, the code wins ([DEVELOPMENT.md](../DEVELOPMENT.md), truthfulness polic
 ### Project direction
 | Document | About |
 |---|---|
-| [../DEVELOPMENT.md](../DEVELOPMENT.md) | Active development contract, governing rules, testing matrix |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | Active development contract, governing rules, testing matrix |
 | [PRD.md](PRD.md) · [SPEC.md](SPEC.md) · [PLAN.md](PLAN.md) | Requirements, modernization spec (numbered contracts), next-generation plan |
 | [AURORA-ROADMAP.md](AURORA-ROADMAP.md) · [AURORA-FULL-TRANSITION.md](AURORA-FULL-TRANSITION.md) · [AURORA-DEVELOPMENT.md](AURORA-DEVELOPMENT.md) | Aurora plans (plan role: checkboxes are snapshots) |
 | [AURORA-TASKS.md](AURORA-TASKS.md) · [DEVELOPMENT-TASKS.md](DEVELOPMENT-TASKS.md) | Task matrices with evidence links |
@@ -93,7 +93,7 @@ Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](d
 Handoff of the audit fix work: [development/HANDOFF-2026-10-14.md](development/HANDOFF-2026-10-14.md).
 [2026-10-14 system audit](audits/2026-10-14-system-audit.md) (AWF, region engine/bridge,
 boot/distribution/security, observability/tooling: findings AWF-/ENG-/SEC-/OBS-n with proposed
-patches, plus proposals; a dated snapshot — fix status is tracked in [TODO.md](../TODO.md)
+patches, plus proposals; a dated snapshot — fix status is tracked in [TODO.md](TODO.md)
 *Audit sistem 2026-10-14*)
 
 ### Releases (`releases/`)

@@ -2,7 +2,7 @@
 
 Status: **every entity-owned row is SAFE with the evidence and limits stated below, after three
 fixes (F1 publication, F1 threshold, F3 validity); the task owner decides whether that closes
-`docs/DEVELOPMENT-TASKS.md:32` / `TODO.md:245`.** What is NOT covered is listed in §3. Written
+`docs/DEVELOPMENT-TASKS.md:32` / `docs/TODO.md:245`.** What is NOT covered is listed in §3. Written
 2026-10-20 by fable-fsync against feature patches `0001`–`0043` (F1 fix = patch 0044); revised the
 same day by opus-q after an independent Codex review found four problems (§4), fixed in MC feature
 patches **0046** (MC `ae724d6`, F1) and **0047** (MC `6d0eabb`, F3; amended after a Codex

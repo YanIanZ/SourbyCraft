@@ -895,7 +895,7 @@ kill the checkpoint is flushed and every storage reports 0 dirty chunks and 0 pe
 After every crash the server boots, the checkpoint is exact (64/64 blocks, 24/24 entities), every
 store holding data points at a committed generation, and no region file is written: 53/53 checks.
 The world's game time rewinds to the last boot, which is not AWF's doing (see the level.dat
-finding in TODO.md); it fails the same way on region files.
+finding in docs/TODO.md); it fails the same way on region files.
 
 Still open: backend timeout/disconnect (no network backend exists) and any measurement under
 sustained real chunk load.

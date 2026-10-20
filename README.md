@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/SourbyCraft.png" alt="SourbyCraft" width="380">
+  <img src=".github/assets/SourbyCraft.png" alt="SourbyCraft" width="380">
 </p>
 
 <h1 align="center">SourbyCraft — 26.2 Aurora</h1>
@@ -153,7 +153,7 @@ Startup reports the engine coming up stage by stage, as a bar whose percentage i
 finished over stages declared — never elapsed time. A stage that fails is named, and the closing
 line reads *degraded*, not *online*.
 
-See **[DEVELOPMENT.md](DEVELOPMENT.md)** and **[Development Task Matrix](docs/DEVELOPMENT-TASKS.md)**.
+See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** and **[Development Task Matrix](docs/DEVELOPMENT-TASKS.md)**.
 
 ---
 
@@ -434,7 +434,7 @@ The active architecture/development set is:
 - **[PRD.md](docs/PRD.md)** — product/performance requirements
 - **[SPEC.md](docs/SPEC.md)** — technical implementation rules
 - **[PLAN.md](docs/PLAN.md)** — performance/observability roadmap
-- **[DEVELOPMENT.md](DEVELOPMENT.md)** — unified continuation contract
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** — unified continuation contract
 - **[Aurora Architecture](docs/architecture/AURORA.md)** — deep engine/configuration architecture
 - **[Aurora Independent Engine](docs/architecture/AURORA-INDEPENDENT-ENGINE.md)** — the phased roadmap beyond Folia constraints
 - **[Execution Contract](docs/architecture/execution-contract.md)** — what SourbyCraft needs from whatever schedules it
@@ -482,7 +482,7 @@ The plugin bridge includes an adaptation of **Luminol / [LightingLuminol](https:
 
 Cherry incorporates work inspired by/derived from projects including **[LeavesMC](https://github.com/LeavesMC)** and **[CraftCanvasMC/Horizon](https://github.com/CraftCanvasMC/Horizon)** where applicable. Profiling integration uses **[spark](https://spark.lucko.me)**.
 
-SourbyCraft project licensing is described in [`LICENSE`](LICENSE). Third-party components remain subject to their respective licenses.
+SourbyCraft project licensing is described in [`LICENSE.md`](LICENSE.md). Third-party components remain subject to their respective licenses.
 
 ## Maintainer build access
 

@@ -103,4 +103,4 @@ cumulation may add a merge copy for frames split across reads (not read in this 
   per-chunk packet body across players (correctness: Anti-Xray and per-player light/ready state).
 * To turn this into numbers: a certified `network-stress` run with clients reading
   `PooledByteBufAllocator.DEFAULT.metric()` (allocations, arena churn) and JFR allocation
-  profiling, with hardware, config and noise state recorded per `DEVELOPMENT.md`.
+  profiling, with hardware, config and noise state recorded per `docs/DEVELOPMENT.md`.

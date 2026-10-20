@@ -3,7 +3,7 @@
 Read-only audit of branch `26.2` at `d97fe247`, in four areas, each by an independent reviewer
 (Claude Fable 5.1). Every finding was traced in code (CONFIRMED) or is marked PLAUSIBLE where only a
 runtime test can settle it. Line numbers are as of `d97fe247`. Status of each fix is tracked in
-`TODO.md` (section *Audit 2026-10-14*); this file records the findings, proposed patches and the
+`docs/TODO.md` (section *Audit 2026-10-14*); this file records the findings, proposed patches and the
 proposals, and is not updated as fixes land.
 
 Owner decisions taken on the day: rebuild the packet/crash guards behind `sourbycraft-security.yml`
@@ -65,8 +65,8 @@ after the D2/D3 fixes; credential redaction in AWF logs; Redis TLS hostname veri
 | SEC-9 | LOW | `exit` restart mode halts from a shutdown hook | `UpdateApplier.java:152-154` | PLAUSIBLE | Exit after shutdown completes |
 | SEC-10 | LOW | Updater download unbounded before size check; unauthenticated polling every 30 min | `SourbyUpdater.java:151-160, 420-421` | PLAUSIBLE | Bound copy; ETag / Retry-After |
 | SEC-11 | LOW | Folia baseline drops Paper login guards (`max-joins-per-tick`, sync pre-login, duplicate profile) — inherited, undocumented | `Connection.java.patch:261-266` | PLAUSIBLE | Document; connection-rate limit |
-| SEC-12 | LOW | Docker base image not pinned by digest; licence label | `Dockerfile:11,15` | CONFIRMED | Pin digest; label after SEC-13 |
-| SEC-13 | owner | Distributed jar is a derivative of GPLv3 Paper code under a noncommercial-only licence; no GPL text or source offer in the jar | `LICENSE`; jar `META-INF/license/` | CONFIRMED facts | Owner decision (not legal advice) |
+| SEC-12 | LOW | Docker base image not pinned by digest; licence label | `Dockerfile:11,15` (now `docker/Dockerfile`) | CONFIRMED | Pin digest; label after SEC-13 |
+| SEC-13 | owner | Distributed jar is a derivative of GPLv3 Paper code under a noncommercial-only licence; no GPL text or source offer in the jar | `LICENSE.md`; jar `META-INF/license/` | CONFIRMED facts | Owner decision (not legal advice) |
 
 Verified sound: SourbyClip library downloads are SHA-256 pinned; Mojang jar and patch hash-checked;
 offline mode refuses downloads; Via/ProtocolLib provisioning https-only, size-bounded, verify-then-move;

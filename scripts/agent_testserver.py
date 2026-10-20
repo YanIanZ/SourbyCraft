@@ -614,7 +614,7 @@ def _sysctl(key, run):
 
 
 def hardware_context(java_version=None, run=subprocess.run, system=platform.system):
-    """CPU model, cores, RAM, OS and JDK of the machine the run used (DEVELOPMENT.md:
+    """CPU model, cores, RAM, OS and JDK of the machine the run used (docs/DEVELOPMENT.md:
     a number without its hardware is not evidence). Also the load average at capture,
     because this machine is shared with other agents and the owner's own servers."""
     info = {"platform": platform.platform(), "machine": platform.machine(),

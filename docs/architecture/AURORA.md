@@ -13,7 +13,7 @@
 > **This is the entry point for every Aurora document.** The four sections below (document map,
 > verified current state, open contradictions, deepening candidates) were added on 2026-10-07.
 > Sections 1–23 further down are the architecture principles and are unchanged. Where any Aurora
-> document disagrees with the code, the code wins (DEVELOPMENT.md, truthfulness policy §1) and the
+> document disagrees with the code, the code wins (docs/DEVELOPMENT.md, truthfulness policy §1) and the
 > disagreement is listed under *Open contradictions* until its source is corrected.
 
 ## Document map
@@ -28,7 +28,7 @@ read for evidence and reasoning, not for current numbers.
 | `docs/architecture/AURORA.md` (this file) | Entry point; architecture principles (§1–23) | Active | Where to start; what exists now; the rules every Aurora change follows | §2 diagram and §3 file layout predate the 2026-10-05 migration and `aurora.toml` (see contradictions) |
 | `docs/AURORA-CONFIG.md` | Effective configuration contract | Active | Every implemented `aurora.*` key: type, default, LIVE/RESTART_REQUIRED, consumer; boot order of `aurora.toml` | Checked against `config/AuroraConfig.java` and `awf/AwfSettings.java`; omits two bridge keys (contradictions) |
 | `docs/AURORA-UX.md` | Operator console and command surface | Active | Startup banner, stage lines, `/aurora`, `/perf` presentation | Stage count corrected 2026-10-07 |
-| `docs/AURORA-TASKS.md` | Task checklist grouped by Aurora area | Active (checklist) | Per-item state with evidence links | Priorities live in `TODO.md`; two baseline ticks disagree with `docs/BASELINE.md` |
+| `docs/AURORA-TASKS.md` | Task checklist grouped by Aurora area | Active (checklist) | Per-item state with evidence links | Priorities live in `docs/TODO.md`; two baseline ticks disagree with `docs/BASELINE.md` |
 | `docs/architecture/execution-contract.md` | Execution contract and measured coupling inventory | Active | `OwnerHandoff`/`Admission`, region system, which files name the region backend, async-path invalidation trace | Adapter-file count corrected 2026-10-07; supersedes the status notes in AURORA-INDEPENDENT-ENGINE.md §38 Phase 2 |
 | `docs/architecture/aurora-resource-governor.md` | Resource Governor specification | Active | The two governed lanes, budgets, rejection policy, what is out of scope | Configurable budgets and STORAGE use corrected 2026-10-07 |
 | `docs/architecture/aurora-instant-startup.md` | Instant Startup cache specification and status | Active | What is cached, never cached, fingerprints, what is not implemented | — |
@@ -39,10 +39,10 @@ read for evidence and reasoning, not for current numbers.
 | `docs/architecture/engine-storage.md` | T5 ownership: Storage | Active | Durability rule; what Aurora does not own in persistence | AWF wiring sentence corrected 2026-10-07; AWF detail is in `aurora-world-fabric.md` |
 | `docs/architecture/independence.md` | Independence levels, rules, build work items | Active (levels and rules); §2 ledger qualitative | Independence levels 0–5, B1–B5 build items | Counted coupling corrected 2026-10-07; the authoritative ledger is `dependency-ledger.md` |
 | `docs/AURORA-FULL-TRANSITION.md` | Transition plan, gates T0–T11 | Plan; T-gate numbering is the one other documents cite (T5, T7, T10) | Gate definitions; §4 transition principles (§4.5 measured-only) | Its T1–T4 "status" paragraphs are partly stale (notes added 2026-10-07) |
-| `docs/AURORA-ROADMAP.md` | Milestone roadmap M0–M28 | Plan | Milestone gates and dependency graph | §3 "Current Baseline" is a stale snapshot; current state is this file and `TODO.md` |
+| `docs/AURORA-ROADMAP.md` | Milestone roadmap M0–M28 | Plan | Milestone gates and dependency graph | §3 "Current Baseline" is a stale snapshot; current state is this file and `docs/TODO.md` |
 | `docs/architecture/AURORA-ENGINE-SYSTEM.md` | Engine design guide | Plan | Path A/B/C (direct NMS patch / Aurora service / adapter), patch innovation pipeline, per-domain metric lists | §23 scheduler path (AuroraScheduler adapter) superseded by FULL-TRANSITION T4 and `execution-contract.md` |
 | `docs/architecture/AURORA-INDEPENDENT-ENGINE.md` | Independence design argument | Proposal (self-described "Active architecture proposal") | Execution domains, hybrid scheduling, snapshot work, stale-result protection, replacement policy (§39) | Phase 0/2 status notes and §31 Canvas relationship are stale; current statements are in `execution-contract.md`, `dependency-ledger.md` and this file |
-| `docs/AURORA-DEVELOPMENT.md` | The 26.2 continuation brief that started the Aurora phase | Historical | Original intent and track list | Its "immediate next tasks" (config model, key migration, typed snapshots) are done; work tracking moved to `TODO.md` and `AURORA-TASKS.md` |
+| `docs/AURORA-DEVELOPMENT.md` | The 26.2 continuation brief that started the Aurora phase | Historical | Original intent and track list | Its "immediate next tasks" (config model, key migration, typed snapshots) are done; work tracking moved to `docs/TODO.md` and `AURORA-TASKS.md` |
 | `docs/architecture/aurora-task-d-validation.md` | Entity/AI Task D validation record, 2026-09-21 | Historical | Why tracker candidate 0018 was withdrawn; collision arithmetic coverage | Patch numbers shifted after renumbering (note added) |
 
 Related documents owned elsewhere: `aurora-plugin-bridge.md` (Bridge), `aurora-world-fabric.md`
@@ -59,7 +59,7 @@ they are the ones `qualification-readiness.md` and the `engine-*.md` documents c
 ## Current state (verified 2026-10-07)
 
 > Ruling 2026-10-07 (owner): defaults derived once at boot from the processor count — region tick
-> threads, `BRIDGE_IO`, the async-path pool — are **not** auto-tuning under DEVELOPMENT.md §2.2;
+> threads, `BRIDGE_IO`, the async-path pool — are **not** auto-tuning under docs/DEVELOPMENT.md §2.2;
 > only values that change under load are. Rows below that mention `processors/N` are therefore
 > compliant as stated.
 
@@ -130,17 +130,17 @@ Constraints that bind **every** row:
 
 - **Measured only** — AURORA-FULL-TRANSITION §4.5: no deep engine optimization without CPU,
   allocation, MSPT, I/O or reproducible workload evidence; uncertified runs guide investigation
-  only (DEVELOPMENT.md truthfulness policy §3).
-- **No automatic performance configuration of any kind** — DEVELOPMENT.md §2.2. Nothing on this
+  only (docs/DEVELOPMENT.md truthfulness policy §3).
+- **No automatic performance configuration of any kind** — docs/DEVELOPMENT.md §2.2. Nothing on this
   list may resize pools, change view/simulation distance, mob limits, AI, compression, JVM flags
   or any other setting in response to load. Diagnostics may warn and recommend; the operator
   decides.
-- **Region ownership is authoritative** — DEVELOPMENT.md §2.3: region-local state, immutable
+- **Region ownership is authoritative** — docs/DEVELOPMENT.md §2.3: region-local state, immutable
   publication, owner handoff; no shared mutable scratch (§12 of this file).
 - **The product workload is undecided** — `compat-vs-performance.md` §4/§6.3: "one player
   exploring new terrain" and "ten settled players" give opposite answers (for example on chunk
   workers). A candidate whose benefit depends on that choice cannot be justified until the owner
-  records it in TODO.md.
+  records it in docs/TODO.md.
 
 | Candidate area | What Aurora has today | Not owned (source) | Evidence needed before any change | Extra constraint |
 |---|---|---|---|---|

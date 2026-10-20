@@ -61,14 +61,22 @@ for (name in listOf("sourbyapi", "sourbycraft-server")) {
     file(name).mkdirs()
 }
 
-optionalInclude("test-plugin")
-optionalInclude("legacy-test-plugin")
+// Opt-in projects, Paper-style: each has a git-ignored <name>.settings.gradle.kts, generated
+// commented out on first configuration; uncomment its include to keep it on locally.
+// -PincludeTestPlugin=true (what CI passes) includes both regardless of those local files.
+// legacy-test-plugin is a Bukkit plugin without folia-supported that CI boots with
+// aurora.bridge.mode = "safe".
+val includeTestPlugins = providers.gradleProperty("includeTestPlugin").map(String::toBoolean).getOrElse(false)
+optionalInclude("test-plugin", includeTestPlugins)
+optionalInclude("legacy-test-plugin", includeTestPlugins)
 
-fun optionalInclude(name: String, op: (ProjectDescriptor.() -> Unit)? = null) {
+fun optionalInclude(name: String, forced: Boolean = false, op: (ProjectDescriptor.() -> Unit)? = null) {
     val settingsFile = file("$name.settings.gradle.kts")
+    if (forced) {
+        include(":$name")
+    }
     if (settingsFile.exists()) {
         apply(from = settingsFile)
-        findProject(":$name")?.let { op?.invoke(it) }
     } else {
         settingsFile.writeText(
             """
@@ -78,6 +86,7 @@ fun optionalInclude(name: String, op: (ProjectDescriptor.() -> Unit)? = null) {
             """.trimIndent()
         )
     }
+    findProject(":$name")?.let { op?.invoke(it) }
 }
 
 // SourbyCraft — derive the clean channel version (e.g. "26.2-REL") from the git branch, matching

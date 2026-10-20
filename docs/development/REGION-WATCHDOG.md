@@ -46,7 +46,7 @@ the demo jars; both `RunningTick` call sites are in the patch (inspected 2026-10
 
 Still unverified: that the flag-off JVM has no watchdog thread, that the flag-on path still prints the
 diagnostics, and that disabling the diagnostic leaves guard, shutdown and bridge-quarantine behaviour unchanged.
-`TODO.md` and `SPEC.md` §158 are owned by another agent and are not edited here.
+`docs/TODO.md` and `SPEC.md` §158 are owned by another agent and are not edited here.
 
 ## Behavior and lifecycle
 

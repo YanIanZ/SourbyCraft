@@ -7,7 +7,7 @@ import java.util.function.LongSupplier;
  *
  * <p>A chunk load makes the chunk system read every chunk within the ticket's radius: one
  * {@code forceload add} reads a 27x27 square, a player joining far more. While the backend is
- * down every one of those reads fails. On the harness (TODO.md:58, server-w1-redis-1) that was 731
+ * down every one of those reads fails. On the harness (docs/TODO.md:58, server-w1-redis-1) that was 731
  * ERROR lines in one second from AWF alone. So per storage:</p>
  * <ul>
  *   <li>the first failure of a window is logged at once with its stack trace (never silenced);</li>

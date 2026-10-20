@@ -1,0 +1,8 @@
+# Runtime image context (repository root): keep private tools, credentials and build caches out.
+# BuildKit reads this file because it sits next to docker/Dockerfile (<Dockerfile>.dockerignore).
+**
+!docker/Dockerfile
+!docker/
+!docker/entrypoint.sh
+!release/
+!release/*.jar
