@@ -207,6 +207,8 @@ val sourbycraftSuffixProvider: Provider<String> = sourbycraftBranchProvider.map 
     val releaseMajor = releaseVersionFull.substringBefore('-')
     val codename = providers.gradleProperty("codename").getOrElse("dev")
     val suffix = when {
+        // CI publishes releases from 26.2 and passes -PsourbyChannel=REL for that build only.
+        providers.gradleProperty("sourbyChannel").orNull == "REL" -> "REL"
         branch.startsWith("experimental/") || branch.startsWith("feat/") -> "EXP"
         branch.startsWith("release/") -> "REL"
         branch.contains("-dev") || branch.contains("develop") -> "DEV"

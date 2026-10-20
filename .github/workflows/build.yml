@@ -2,9 +2,9 @@ name: Official Build, Boot & Release
 
 on:
   push:
-    branches: [ '26.2', release/26.2-canvas, main ]
+    branches: [ '26.2', main ]
   pull_request:
-    branches: [ '26.2', release/26.2-canvas, main ]
+    branches: [ '26.2', main ]
   workflow_dispatch:
 
 # The default token can read the repository and nothing else. Only the release job, which
@@ -87,6 +87,7 @@ jobs:
       channel: ${{ steps.relnum.outputs.channel }}
       number: ${{ steps.relnum.outputs.number }}
       tag: ${{ steps.relnum.outputs.tag }}
+      publish: ${{ steps.relnum.outputs.publish }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
@@ -184,14 +185,24 @@ jobs:
             refs/heads/release/*) channel=REL ;;
             refs/heads/feat/*|refs/heads/experimental/*) channel=EXP ;;
           esac
-          echo "channel=$channel" >> "$GITHUB_OUTPUT"
-          # Only publication needs an unused release number. PRs and development
-          # builds must remain testable after the configured build was released.
-          if [ "$GITHUB_REF" = 'refs/heads/release/26.2-canvas' ] && [ "$GITHUB_EVENT_NAME" != 'pull_request' ]; then
-            python3 scripts/release_version.py >> "$GITHUB_OUTPUT"
+          # Releases are published from 26.2 (owner decision 2026-10-21; release/26.2-canvas retired).
+          # A push to 26.2 publishes only while gradle.properties has release=true|pre and the
+          # configured sourbyBuild has no v26.2-rN tag yet; every other push is a development build
+          # of the same branch, so 26.2 keeps building after a release without a bump.
+          mode=$(sed -n 's/^release=//p' gradle.properties | tr -d '[:space:]')
+          publish=false
+          if [ "$GITHUB_REF" = 'refs/heads/26.2' ] && [ "$GITHUB_EVENT_NAME" != 'pull_request' ] \
+              && [ "$mode" != false ] && python3 scripts/release_version.py > relnum.out 2> relnum.err; then
+            publish=true
+            channel=REL
+            cat relnum.out >> "$GITHUB_OUTPUT"
           else
+            [ -s relnum.err ] && echo "not publishing: $(cat relnum.err)"
             python3 scripts/release_version.py --development >> "$GITHUB_OUTPUT"
           fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish channel=$channel release=$mode"
 
       - name: Build slim server jar (SourbyLoader)
         run: |
@@ -200,7 +211,7 @@ jobs:
           #
           # The private SourbyPatcher paper-toolchain adapter applies paperweight with Paper as the
           # only upstream; slimServerJar (root build.gradle.kts) strips libraries from its paperclip jar.
-          ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.number }}
+          ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ steps.relnum.outputs.number }} ${{ steps.relnum.outputs.publish == 'true' && '-PsourbyChannel=REL' || '' }}
           mkdir -p release
           # --source-root: the provenance hashes in the jar (patch directories, engine baseline,
           # toolchain lock and pins) must equal this checkout's.
@@ -844,7 +855,7 @@ jobs:
           retention-days: 7
 
       - name: Hand the verified jar to the release job
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/release/26.2-canvas'
+        if: steps.relnum.outputs.publish == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
         with:
           name: SourbyCraft-26.2-release
@@ -859,7 +870,7 @@ jobs:
     needs: build
     # success() is implicit only when a job has no if of its own; spelled out so a failed or
     # skipped build never publishes. A pull request never reaches here.
-    if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/release/26.2-canvas'
+    if: success() && needs.build.outputs.publish == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/26.2'
     runs-on: ubuntu-24.04
     # The one job that writes to the repository: it creates the tag and the GitHub release.
     permissions:
@@ -949,7 +960,7 @@ jobs:
           {
             echo "**SourbyCraft 26.2 Build ${next}** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
             echo
-            echo "Auto-published from \`release/26.2-canvas\` after a green build + boot test."
+            echo "Auto-published from \`26.2\` after a green build + boot test."
             echo
             # Build 47+ notes are named docs/releases/26.2-build-N-<codename>.md.
             for notes in "docs/releases/$next.md" docs/releases/26.2-build-"$next"-*.md; do

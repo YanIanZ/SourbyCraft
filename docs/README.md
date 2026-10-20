@@ -37,8 +37,9 @@ disagree, the code wins ([DEVELOPMENT.md](../DEVELOPMENT.md), truthfulness polic
    legacy-plugin guides under [guides/](guides/). Performance claims need the evidence rules in
    [BASELINE.md](BASELINE.md) and [PROFILING.md](PROFILING.md).
 7. **Track and release.** Priorities live only in [TODO.md](../TODO.md); per-area checklist in
-   [AURORA-TASKS.md](AURORA-TASKS.md). A build ships only after the gates in its release doc under
-   [releases/](releases/) pass; keep `release=pre` until then.
+   [AURORA-TASKS.md](AURORA-TASKS.md). A build is declared STABLE only after the gates in its release doc under
+   [releases/](releases/) pass; the owner decides the channel (Build 47 ships `release=true`
+   without the STABLE label, see [ROADMAP-47-50.md](releases/ROADMAP-47-50.md)).
 
 ## Index
 

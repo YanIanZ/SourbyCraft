@@ -109,7 +109,7 @@
      testImplementation("org.mockito:mockito-core:5.22.0")
      mockitoAgent("org.mockito:mockito-core:5.22.0") { isTransitive = false } // Configure mockito agent that is needed in newer java versions
      testImplementation("org.ow2.asm:asm-tree:9.9.1")
-@@ -164,23 +_,66 @@
+@@ -164,23 +_,67 @@
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
          val build = System.getenv("BUILD_NUMBER") ?: null
@@ -134,6 +134,7 @@
 +        val releaseMajor = releaseVersionFull.substringBefore('-')
 +        val codename = rootProject.providers.gradleProperty("codename").getOrElse("dev")
 +        val suffix = when {
++            rootProject.providers.gradleProperty("sourbyChannel").orNull == "REL" -> "REL" // CI release from 26.2
 +            gitBranch.startsWith("experimental/") || gitBranch.startsWith("feat/") -> "EXP"
 +            gitBranch.startsWith("release/") -> "REL"
 +            gitBranch.contains("-dev") || gitBranch.contains("develop") -> "DEV"

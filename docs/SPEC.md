@@ -2682,10 +2682,10 @@ the release doc as of 2026-10-14. The EDF patch (parked 0028) is HELD (B84).
 | Gate | State (2026-10-07, consistency pass 2026-10-14) |
 | --- | --- |
 | compile | PASS — CI on every push since 37515867230 (latest 38445246566, `d97fe247`) |
-| unit/integration | PASS — Java + Python suites in CI since 37515867230 (latest 38445246566); earlier RC-tree local: Gradle 10,152/10,152 (2026-10-06), bridge 61/61, AWF 151 run/0 failed, Python 327/327 (2026-10-07). Gaps: zstd tests can skip, PR CI never runs (audit OBS-9) |
+| unit/integration | PASS — Java + Python suites in CI since 37515867230 (latest 38445246566); earlier RC-tree local: Gradle 10,152/10,152 (2026-10-06), bridge 61/61, AWF 151 run/0 failed, Python 327/327 (2026-10-07). Gaps at 2026-10-14: zstd tests could skip, PR CI never ran (audit OBS-9; closed by `52cce4b8` `SOURBY_REQUIRE_ZSTD` and the `PR checks` job, first green run 39477530705 on `14e60da6`, 2026-10-20 — that job runs no Java build or test) |
 | patch regeneration | PASS — reordered and rebuilt with no content diff, patch files committed (2026-10-07); `applyAllPatches` + `patch_surface.py --check` in CI |
 | plugin compatibility | PARTIAL — synthetic CI fixture incl. the 0007/0010/0011 and disable markers (CI since 37515867230); Vault/EssentialsX on Sourby Demo; uncertified `plugins-10`; no player workflow or plugin soak |
-| region ownership | OPEN — `/say` and console-after-`Done` NPEs reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`, B88; local boot + CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13)); 0025 (watchdog off) built and booted in CI since 37515867230, watchdog-specific acceptance open (`REGION-WATCHDOG.md`); audit ENG-1/3/4 open |
+| region ownership | OPEN — `/say` and console-after-`Done` NPEs reproduced and fixed 2026-10-13 (MC 0028 `rebind-early-console-command-sources`, B88; local boot + CI run 38427215968 (head `8c70b53c`, run as `4275912f` before a message-only rewrite, 2026-10-13)); 0025 (watchdog off) built and booted in CI since 37515867230, watchdog-specific acceptance open (`REGION-WATCHDOG.md`); audit ENG-1/3/4 fixed `1c57a736` (2026-10-20, unit-tested) |
 | world load/unload/save | PASS (local RC run, laptop, not the deployment server) — `verify_persistence.py` 105/105 on RC tree `cbef3fb9`, jar `975d3bda…`, 2026-10-13 (3 restarts, last stop under 6 clients); earlier 104/104 local, 20/20 demo (2026-10-05); still open: AWF unload with players online / `nosave` with dirty chunks; AWF boots in every CI run; B80/B85 fixed 2026-10-13 (`e0c241e9`, CI run 38434258632 green) |
 | crash recovery | PASS (local RC run, laptop, not the deployment server) — `verify_crash.py` region 52/52, `--awf` 56/56 on RC tree `cbef3fb9`, jar `975d3bda…`, 2026-10-13 (3 SIGKILLs each, no corruption); game-time check now XPASS (fixed by MC 0027; script XFAIL entry removed in `3cd33b3f`); earlier 49/49, 53/53 (2026-10-05) |
 | cache corruption | PARTIAL — unit tests only |
@@ -2703,3 +2703,9 @@ evidence exists, CI/boot acceptance does not. `release=pre` stays.
 2026-10-14: B80 and B85 FIXED (`e0c241e9`, CI 38434258632); B89–B93 FIXED (`d97fe247`, CI
 38445246566; scenario evidence local only). The 2026-10-14 system audit (`docs/audits/2026-10-14-system-audit.md`)
 opens new findings tracked in `TODO.md`.
+2026-10-21 (consistency pass, OBS-10): owner decision — Build 47 is published as a full release
+(`release=true`) but NOT labelled STABLE, and unsigned (SEC-2 key not configured); STABLE is
+reserved for Build 49. Gate states above are unchanged by the decision; the open ones move to
+Build 49/50 (`docs/releases/ROADMAP-47-50.md`, release doc *What did not pass and where it goes*).
+Latest green push CI 39456620331 (`c0ab0cc4`); `patch_surface.py --check` and `--check-rebuild`
+pass on `14e60da6` (MC 0001–0054, Paper 0001–0016).

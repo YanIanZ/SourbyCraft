@@ -7,7 +7,7 @@ stable, 50 pengoptimalan".
 
 | Build | Theme | Channel | Gate document |
 | --- | --- | --- | --- |
-| 47 — Aurora Nexus | ship what is done | prerelease (`release=pre`) | [26.2-build-47-aurora-nexus.md](26.2-build-47-aurora-nexus.md) |
+| 47 — Aurora Nexus | ship what is done | full release (`release=true`), not STABLE, unsigned (owner 2026-10-21) | [26.2-build-47-aurora-nexus.md](26.2-build-47-aurora-nexus.md) |
 | 48 — codename TBD (owner) | refinement (*penyempurnaan*) | prerelease (`release=pre`) | [26.2-build-48.md](26.2-build-48.md) |
 | 49 — codename TBD (owner) | full stable | STABLE (`release=true`) | [26.2-build-49.md](26.2-build-49.md) |
 | 50 — codename TBD (owner) | optimization (*pengoptimalan*) | per its gates | [26.2-build-50.md](26.2-build-50.md) |
@@ -17,8 +17,9 @@ Rules that apply to every build:
 - Status words, evidence and performance claims follow
   [DEVELOPMENT.md](../../DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy).
   A gate is PASS only when its evidence covers the tree being released.
-- `release=true` is set for the first time in Build 49. Builds 47 and 48 stay `release=pre`
-  (the auto-updater skips prereleases unless `allow_prerelease` is set).
+- Build 47 is published with `release=true` (owner decision 2026-10-21) but is not labelled
+  STABLE; Build 48 is planned as a prerelease (`release=pre`); Build 49 is the first build
+  declared STABLE.
 - An item is allocated to exactly one build. When a later build depends on an earlier one, that
   is listed under *Dependencies across builds*, not by listing the item twice.
 - References: `TODO.md:N` is the line of the item's checkbox in `TODO.md` as read on 2026-10-21
@@ -32,8 +33,11 @@ Rules that apply to every build:
 
 ## Build 47 — Aurora Nexus (ship what is done)
 
-**Theme.** Publish the current feature set as a prerelease. No new work enters 47; anything
-committed after the tag commit belongs to 48.
+**Theme.** Publish the current feature set as a full release (`release=true`, owner decision
+2026-10-21), honestly listing the gates that did not pass; not labelled STABLE, unsigned. No new
+work enters 47; anything committed after the tag commit belongs to 48. Tag commit candidate:
+`origin/26.2` head `14e60da6`, or the PM's commit on top of it that only sets `release=true` and
+adds the release docs.
 
 **Entry.** Feature set closed (it has been since 2026-10-07); latest green CI on the branch head:
 run 39456620331 on `c0ab0cc4` (2026-10-20).
@@ -47,16 +51,17 @@ run 39456620331 on `c0ab0cc4` (2026-10-20).
 | `patch_surface.py --check-rebuild` on the tag commit: no renumbering, no untracked patches | command output in the release doc |
 | Claims audit at the tag commit: README, release doc, SPEC §161, `qualification-readiness.md` agree (OBS-10) and contain measured claims only | dated audit note in the release doc |
 | EDF patch still parked, not built | `minecraft-patches/parked/` listing; patch absent from `features/` |
-| Build 47 release doc updated: channel prerelease, deferred gates point to 49/50 (this roadmap) | doc diff |
+| Build 47 release doc updated: full release, not STABLE, unsigned; *What did not pass and where it goes* points to 49/50 (done 2026-10-21) | doc diff |
+| Push CI green on the tag commit (39477522388 on `14e60da6` was running on 2026-10-21) with `release=true` (releases publish from `26.2`, owner decision 2026-10-21) | CI run id; branch ref |
 
 **Out of scope.** Every stability gate that needs a soak, real clients, a stable host or an owner
 decision (moved to 49); every certified baseline and optimization (moved to 50); new features.
 
-**DECISION (owner).** Confirm that Build 47 publishes as a prerelease with the Build 47 doc's
-open gates (region ownership, plugin compatibility, stress, soak, cache corruption, backend
-failure D4/D6, licence) carried to Build 49 or 50 as listed below. The Build 47 doc says it
-"MUST NOT be declared STABLE" until they pass; under this plan it never is — Build 49 is the
-first STABLE build.
+**DECISION — resolved 2026-10-21 (owner).** Build 47 ships as a **full release**
+(`release=true`). The STABLE label stays reserved for Build 49. The release notes state which
+gates did not pass (region ownership, plugin compatibility partial, stress/soak, cache corruption
+partial, licence open) and that they move to 49/50; the release is unsigned because SEC-2 is not
+configured (the workflow allows that).
 
 **Allocated items.**
 
@@ -64,7 +69,7 @@ first STABLE build.
 | --- | --- | --- |
 | EDF patch stays parked; release without it (owner 2026-10-07) | TODO.md:39 | task_3882d2ebf2b4f45a |
 | Re-audit measured claims in README/release notes at the tag commit | TODO.md:419; DEVELOPMENT-TASKS.md:252 | task_e4ef1b04c1e39a79 |
-| OBS-9 CI gates: remaining piece is the evidence from a CI run (the `pr-checks` job has never run, no PR has been opened since it was added) | TODO.md:487 | task_912dd35a61a064cd |
+| OBS-9 CI gates: evidence from a CI run — `PR checks` first green run 39477530705 on `14e60da6` (2026-10-20) | TODO.md:487 | task_912dd35a61a064cd |
 | OBS-10 consistency pass release doc / SPEC / README at tagging | TODO.md:493 | task_27fc2bfbcf8aeacd |
 | This plan | — | task_18e9b47280fa745b |
 
@@ -132,7 +137,7 @@ architecture programs (Later).
 | M-1 identity: crash reports from `BuildInfo`, profiler identity; source identity cleanup | TODO.md:527; AURORA-ROADMAP.md:83 | task_5135dd7a47e1fe90, task_6801badcef4b6f5d |
 | M-2 isolation: move `SnapshotPathRegion` out of 0005, split 0006/0013, AWF branch in 0021; isolate the Canvas Spark bridge — **DECISION**: adapter vs fork for the Spark part | TODO.md:529; DEVELOPMENT-TASKS.md:199, 217; AURORA-ROADMAP.md:87 | task_77d34473082b955a, task_ef25c196aa768279, task_439f5d43873f5adf |
 | Keep implementation in Sourby-owned source; regression tests before a patch is removed (0009–0012 still have none) | TODO.md:581 | — |
-| Release branch name `release/26.2-canvas` (publication workflow and auto-updater) — **DECISION**, needed before 49 publishes | TODO.md:548 | task_e8fd9c62594cb59b |
+| Release branch name — RESOLVED 2026-10-21: releases publish from `26.2` | TODO.md:548 | task_e8fd9c62594cb59b |
 
 *Tooling and harness*
 
@@ -241,7 +246,7 @@ in writing in the gate doc.
 | Reproducibility from a clean checkout | TODO.md:572; AURORA-TASKS.md:179; DEVELOPMENT-TASKS.md:203 | task_84c17bc8625b4def, task_2ce4850b635db6b7, task_188edf0fca6cd34f |
 | Reproducible slim jar with an independent rebuild job | TODO.md:736 | task_affc958f7a89dfc2 |
 | Licence: PolyForm Noncommercial vs GPLv3 Paper server code in the jar (SEC-13; Docker label SEC-12 waits on it) — **DECISION** | TODO.md:28, 143; AURORA-TASKS.md:212; DEVELOPMENT-TASKS.md:251 | task_ea0e5cef6500a22b, task_21901c62e3078576, task_69899e64f3d8c503, task_ad90c0ad2b1ba31d |
-| Keep `release=pre` until every gate passes; then `release=true` — **DECISION** (owner flips it) | TODO.md:418 | task_e134ba42bdc51922 |
+| Declare STABLE only after every gate passes (Build 47 already used `release=true` without the STABLE label, owner 2026-10-21) — **DECISION** (owner declares STABLE) | TODO.md:418 | task_e134ba42bdc51922 |
 
 ---
 
@@ -378,7 +383,7 @@ TODO.md items (open, partial or blocked checkboxes, plus stale ones listed above
 (build-tags.json); 47: 5 · 48: 24 · 49: 47 · 50: 116 · Later: 45 (237 tasks) at the time of
 writing. Tasks added to the board later need a tag when they are created.
 
-Items needing an owner decision: 47: 1 (prerelease channel and gate re-scoping) · 48: 6 (guard
+Items needing an owner decision: 47: 0 (channel decided 2026-10-21: full release, not STABLE) · 48: 6 (guard
 decisions incl. ENG-11, command-block default, FairLane weights, Spark-bridge adapter vs fork,
 release-branch name, private toolchain re-pin) · 49: 5 (licence, SEC-2 key, rollout percentage,
 SourbyClip transfer bounds, `release=true`) · 50: 3 (representative workload, EDF unpark,
