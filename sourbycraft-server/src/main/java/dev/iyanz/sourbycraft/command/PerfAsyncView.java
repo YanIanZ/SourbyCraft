@@ -17,6 +17,8 @@ import net.kyori.adventure.text.Component;
  */
 final class PerfAsyncView implements PerfView {
 
+    private static final int TOP_TYPES = 8;
+
     @Override public String name() { return "async"; }
 
     @Override
@@ -41,5 +43,15 @@ final class PerfAsyncView implements PerfView {
         add(lines, "Legacy caller-run solves", count(stats.inline())
             + (stats.inline() > 0 ? "  — unexpected on this build" : ""));
         add(lines, "Refused (saturation / shutdown)", count(stats.refused()));
+        final var types = dev.iyanz.sourbycraft.perf.AsyncPathTypeStats.top(TOP_TYPES);
+        if (types.isEmpty()) {
+            add(lines, "Top mob types", "none yet");
+        } else {
+            // Busiest first by admitted + refused; "other" folds every type past the tracking cap.
+            for (final var type : types) {
+                add(lines, "  " + type.type(), "admitted " + count(type.admitted())
+                    + " / solved " + count(type.solved()) + " / refused " + count(type.refused()));
+            }
+        }
     }
 }

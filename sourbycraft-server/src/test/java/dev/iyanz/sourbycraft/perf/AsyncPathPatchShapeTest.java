@@ -103,6 +103,42 @@ class AsyncPathPatchShapeTest {
         assertTrue(bump > found && bump < target, "bumped before targetPos/reachRange are replaced");
     }
 
+    /** Patch 0039: the immutable mob snapshot; it is also where the per-type counters get their type. */
+    private static String snapshotPatch() throws IOException {
+        Path dir = Path.of("").toAbsolutePath();
+        for (int up = 0; up < 6 && dir != null; up++, dir = dir.getParent()) {
+            for (final String base : List.of("minecraft-patches/features", "sourbycraft-server/minecraft-patches/features")) {
+                final Path features = dir.resolve(base);
+                if (Files.isDirectory(features)) {
+                    try (Stream<Path> files = Files.list(features)) {
+                        final Path found = files.filter(p -> p.getFileName().toString()
+                            .contains("-SourbyCraft-immutable-mob-snapshot-for-async-pathfinding")).findFirst().orElse(null);
+                        if (found != null) {
+                            return Files.readString(found, StandardCharsets.UTF_8);
+                        }
+                    }
+                }
+            }
+        }
+        return fail("feature patch 0039 (mob snapshot) not found from " + Path.of("").toAbsolutePath());
+    }
+
+    @Test
+    void theMobIsCapturedOnTheSubmittingThreadRightBeforeTheSubmitForPerTypeCounters() throws IOException {
+        // AsyncPathTypeStats hands the entity type from MobPathSnapshot.captureDetached to the next
+        // AsyncPathProcessor.trySubmit on the same thread. That only holds while the patch captures
+        // and submits in one straight line: nothing between them may submit, capture or return.
+        final String patch = snapshotPatch();
+        final int capture = at(patch, "MobPathSnapshot.captureDetached(mob)");
+        final int submit = at(patch, ".trySubmit(() -> solver.findPath(snapshot, subject, targets");
+        assertTrue(capture < submit, "capture before submit");
+        final String between = patch.substring(capture, submit);
+        assertFalse(between.substring("captureDetached(mob)".length()).contains("captureDetached("),
+            "no second capture between them");
+        assertFalse(between.contains("return"), "no early exit between capture and submit");
+        assertFalse(between.contains("hasCapacity"), "capacity is checked before the capture");
+    }
+
     private static int at(final String text, final String needle) {
         final int index = text.indexOf(needle);
         assertTrue(index >= 0, "patch 0006 no longer contains: " + needle);

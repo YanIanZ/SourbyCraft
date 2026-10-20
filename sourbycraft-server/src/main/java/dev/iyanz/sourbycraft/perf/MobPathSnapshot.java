@@ -72,6 +72,7 @@ public final class MobPathSnapshot {
     private final ItemStack heldItem;
     private final RandomSource random;
     private final EntityCollisionContext collisionContext;
+    private final String entityTypeKey;
 
     private MobPathSnapshot(final double x, final double y, final double z, final int blockY,
                             final BlockPos blockPosition, final AABB boundingBox,
@@ -79,7 +80,8 @@ public final class MobPathSnapshot {
                             final boolean inWater, final boolean onGround, final boolean descending,
                             final float maxUpStep, final int maxFallDistance, final int seaLevel,
                             final float[] pathfindingMalus, final boolean[] standsOnFluid,
-                            final ItemStack heldItem, final RandomSource random) {
+                            final ItemStack heldItem, final RandomSource random, final String entityTypeKey) {
+        this.entityTypeKey = entityTypeKey;
         this.x = x;
         this.y = y;
         this.z = z;
@@ -115,10 +117,31 @@ public final class MobPathSnapshot {
      * so the worker never touches the mob's own, non-thread-safe source.
      */
     public static MobPathSnapshot captureDetached(final Mob mob) {
-        return capture(mob, RandomSource.create(mob.getRandom().nextLong()));
+        // Per-type /perf async counters. Forget whatever an earlier capture left on this thread, build
+        // the snapshot, and only once that succeeded note its type for the submit that follows (the
+        // unchanged navigation patch hands the snapshot to a lambda, not to trySubmit; see
+        // AsyncPathTypeStats). The snapshot also carries the key for trySubmit(MobPathSnapshot, ..).
+        AsyncPathTypeStats.clearSubject();
+        final String typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).toString();
+        final MobPathSnapshot snapshot = capture(mob, RandomSource.create(mob.getRandom().nextLong()), typeKey);
+        AsyncPathTypeStats.noteSubject(typeKey);
+        return snapshot;
+    }
+
+    /**
+     * Registry key of the captured mob's type ({@code minecraft:zombie}) for {@link #captureDetached}
+     * snapshots; {@link AsyncPathTypeStats#UNKNOWN} for the synchronous capture, which is never
+     * submitted.
+     */
+    public String entityTypeKey() {
+        return this.entityTypeKey;
     }
 
     private static MobPathSnapshot capture(final Mob mob, final RandomSource random) {
+        return capture(mob, random, AsyncPathTypeStats.UNKNOWN);
+    }
+
+    private static MobPathSnapshot capture(final Mob mob, final RandomSource random, final String typeKey) {
         final PathType[] types = PathType.values();
         final float[] malus = new float[types.length];
         for (final PathType type : types) {
@@ -138,7 +161,7 @@ public final class MobPathSnapshot {
             mob.isInWater(), mob.onGround(), mob.isDescending(),
             mob.maxUpStep(), mob.getMaxFallDistance(), mob.level().getSeaLevel(),
             malus, stands,
-            mob.getMainHandItem().copy(), random);
+            mob.getMainHandItem().copy(), random, typeKey);
     }
 
     private static List<Fluid> fluidTable() {

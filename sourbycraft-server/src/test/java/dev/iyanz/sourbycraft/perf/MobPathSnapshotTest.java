@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.perf;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -132,6 +133,7 @@ class MobPathSnapshotTest {
                 case "getMaxFallDistance" -> s.maxFall;
                 case "level" -> s.level;
                 case "getRandom" -> s.random;
+                case "getType" -> net.minecraft.world.entity.EntityTypes.ZOMBIE;
                 case "getMainHandItem" -> ItemStack.EMPTY;
                 case "canStandOnFluid" -> s.standsOnLava && ((FluidState) invocation.getArgument(0)).is(FluidTags.LAVA);
                 case "getPathfindingMalus" -> {
@@ -187,6 +189,76 @@ class MobPathSnapshotTest {
             out.add(path.getNode(i).toString() + ":" + path.getNode(i).type);
         }
         return out;
+    }
+
+    @Test
+    void aDetachedSnapshotCarriesTheEntityTypeKeyAndOnlyAfterTheCaptureSucceeded() {
+        AsyncPathTypeStats.resetForTest();
+        try {
+            final MobPathSnapshot snapshot = MobPathSnapshot.captureDetached(new FakeMob().mob);
+            assertEquals("minecraft:zombie", snapshot.entityTypeKey());
+            assertEquals("minecraft:zombie", AsyncPathTypeStats.takeSubject(), "fallback hand-off for the unchanged patch");
+            // the synchronous capture runs on the owner and never submits: no type, no hand-off
+            assertEquals(AsyncPathTypeStats.UNKNOWN, MobPathSnapshot.capture(new FakeMob().mob).entityTypeKey());
+            assertEquals(AsyncPathTypeStats.UNKNOWN, AsyncPathTypeStats.takeSubject());
+        } finally {
+            AsyncPathTypeStats.resetForTest();
+        }
+    }
+
+    @Test
+    void aCaptureThatThrowsLeavesNoStaleTypeAndClearsAnAbandonedOne() {
+        AsyncPathTypeStats.resetForTest();
+        try {
+            AsyncPathTypeStats.noteSubject("minecraft:abandoned"); // an earlier capture never submitted
+            final FakeMob sealed = new FakeMob();
+            sealed.sealed.set(true);                                // every mob read now throws
+            assertThrows(AssertionError.class, () -> MobPathSnapshot.captureDetached(sealed.mob));
+            assertEquals(AsyncPathTypeStats.UNKNOWN, AsyncPathTypeStats.takeSubject(),
+                "neither the abandoned type nor the failed capture's may reach the next submit");
+        } finally {
+            AsyncPathTypeStats.resetForTest();
+        }
+    }
+
+    @Test
+    void anExplicitSnapshotSubmitIsAttributedToItsOwnTypeWhateverIsAmbient() throws Exception {
+        AsyncPathTypeStats.resetForTest();
+        AsyncPathProcessor.shutdown();
+        try {
+            AsyncPathProcessor.setEnabled(true);
+            final MobPathSnapshot a = MobPathSnapshot.captureDetached(new FakeMob().mob);
+            AsyncPathTypeStats.noteSubject("minecraft:intruder"); // ambient state from something else
+            final var done = AsyncPathProcessor.trySubmit(a, () -> "ok");
+            assertEquals("ok", done.get(5, java.util.concurrent.TimeUnit.SECONDS));
+            final var rows = AsyncPathTypeStats.top(100);
+            assertEquals(1, rows.stream().filter(r -> r.type().equals("minecraft:zombie") && r.admitted() == 1).count());
+            assertEquals(0, rows.stream().filter(r -> r.type().equals("minecraft:intruder")).count());
+            assertEquals(AsyncPathTypeStats.UNKNOWN, AsyncPathTypeStats.takeSubject(), "the ambient hand-off was cleared");
+        } finally {
+            AsyncPathProcessor.shutdown();
+            AsyncPathTypeStats.resetForTest();
+        }
+    }
+
+    @Test
+    void nestedCapturesAreNeverAttributedToTheWrongSubmit() throws Exception {
+        AsyncPathTypeStats.resetForTest();
+        AsyncPathProcessor.shutdown();
+        try {
+            AsyncPathProcessor.setEnabled(true);
+            MobPathSnapshot.captureDetached(new FakeMob().mob);   // outer capture ...
+            MobPathSnapshot.captureDetached(new FakeMob().mob);   // ... re-entered before its submit
+            AsyncPathProcessor.trySubmit(() -> 1).get(5, java.util.concurrent.TimeUnit.SECONDS);
+            AsyncPathProcessor.trySubmit(() -> 2).get(5, java.util.concurrent.TimeUnit.SECONDS);
+            final var rows = AsyncPathTypeStats.top(100);
+            assertEquals(1, rows.stream().filter(r -> r.type().equals("minecraft:zombie") && r.admitted() == 1).count());
+            assertEquals(1, rows.stream().filter(r -> r.type().equals(AsyncPathTypeStats.UNKNOWN) && r.admitted() == 1).count(),
+                "the second submit has no capture of its own: unknown, not the first one's type again");
+        } finally {
+            AsyncPathProcessor.shutdown();
+            AsyncPathTypeStats.resetForTest();
+        }
     }
 
     @Test

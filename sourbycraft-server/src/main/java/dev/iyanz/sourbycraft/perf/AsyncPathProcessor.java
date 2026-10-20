@@ -82,12 +82,13 @@ public final class AsyncPathProcessor {
      * overload policy never executes a rejected solve on the submitting thread, so this counter
      * should remain zero. Saturation is represented by {@code refused} instead.</p>
      *
-     * @param admitted      executor submission attempts, including saturation fallback and attempts
-     *                      rejected by a concurrent shutdown; excludes pre-start inline solves
+     * @param admitted      solves the executor accepted; a submission it rejected (saturation or a
+     *                      concurrent shutdown) is counted in {@code refused} only; excludes
+     *                      pre-start inline solves
      * @param inline        legacy caller-run count; should remain zero with current backpressure policy
      * @param refused       submissions declined because the queue was saturated, the pool stopped,
      *                      the runtime failed/stopped, or executor admission raced with shutdown;
-     *                      may overlap with admitted
+     *                      disjoint from admitted
      * @param outstanding   admitted solves that have not completed
      * @param meanMillis    mean solve duration, or NaN before anything has solved
      * @param slowestMillis the slowest single solve seen
@@ -210,6 +211,22 @@ public final class AsyncPathProcessor {
      * @return the result future, or {@code null} when the solve was refused and never ran
      */
     public static <T> CompletableFuture<T> trySubmit(final Supplier<T> solve) {
+        // Type of the mob captured just before this call on this thread (AsyncPathTypeStats fallback).
+        return trySubmit(AsyncPathTypeStats.takeSubject(), solve);
+    }
+
+    /**
+     * As {@link #trySubmit(Supplier)}, attributing the solve to the entity type the snapshot
+     * carries instead of relying on the per-thread hand-off (which this clears).
+     */
+    public static <T> CompletableFuture<T> trySubmit(final MobPathSnapshot subject, final Supplier<T> solve) {
+        AsyncPathTypeStats.clearSubject();
+        return trySubmit(subject.entityTypeKey(), solve);
+    }
+
+    private static <T> CompletableFuture<T> trySubmit(final String type, final Supplier<T> solve) {
+        // One bucket per request: admission, completion and refusal all charge the same counters.
+        final AsyncPathTypeStats.Slot slot = AsyncPathTypeStats.slotFor(type);
         // The pool's own flag covers its lifecycle; the runtime's covers the server's. A solve
         // arriving while the server is going down must not start, even if this pool has not been
         // told to stop yet -- shutdown runs in an order, and this is not first.
@@ -220,6 +237,7 @@ public final class AsyncPathProcessor {
             // still receives a completed future, so its pending bookkeeping is released and no
             // request is left outstanding.
             REFUSED.incrementAndGet();
+            slot.refused();
             return null;
         }
         final GovernedLane p = pool;
@@ -252,6 +270,7 @@ public final class AsyncPathProcessor {
                 final long took = clock.getAsLong() - began;
                 SOLVE_NANOS.addAndGet(took);
                 SOLVED.incrementAndGet();
+                slot.solved();
                 SLOWEST_NANOS.accumulateAndGet(took, Math::max);
             }
         }) {
@@ -266,6 +285,7 @@ public final class AsyncPathProcessor {
         };
         OUTSTANDING.incrementAndGet();
         ADMITTED.incrementAndGet();
+        slot.admitted();
         future.whenComplete((result, failure) -> {
             OUTSTANDING.decrementAndGet();
             if (future.isCancelled()) task.cancel(true);
@@ -277,7 +297,12 @@ public final class AsyncPathProcessor {
             // recompute: keep the mob's existing live path, release pending bookkeeping, and let
             // a later recompute try again. Never run A* on the rejecting region thread.
             // The task never ran and its future is dropped; release the outstanding count here.
+            // A rejected execution is a refusal and not also an admission: roll the admission back
+            // so admitted + refused counts each submission once.
+            ADMITTED.decrementAndGet();
+            slot.admissionRolledBack();
             REFUSED.incrementAndGet();
+            slot.refused();
             OUTSTANDING.decrementAndGet();
             return null;
         }

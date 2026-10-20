@@ -223,6 +223,7 @@ class AsyncPathEvaluatorIsolationTest {
                 case "getMaxFallDistance" -> 3;
                 case "level" -> level;
                 case "getRandom" -> random;
+                case "getType" -> net.minecraft.world.entity.EntityTypes.ZOMBIE;
                 case "getMainHandItem" -> ItemStack.EMPTY;
                 case "getPathfindingMalus" -> {
                     final PathType type = invocation.getArgument(0);
