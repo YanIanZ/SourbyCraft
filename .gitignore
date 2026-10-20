@@ -490,3 +490,6 @@ __pycache__/
 
 # Private maintainer build-tool checkouts; never archive or cache in public CI.
 .private-toolchain/
+
+# Release signing private key (SEC-2): generated outside the repo by scripts/release_signing_key.py; never commit it
+sourbycraft-release.key

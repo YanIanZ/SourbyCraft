@@ -166,9 +166,16 @@ but unparseable keeps enforcement on and failing closed. Tests: `ReleaseSignatur
 
 1. Generate the pair offline; the private key never enters the repository:
    ```bash
-   openssl genpkey -algorithm Ed25519 -out sourbycraft-release.key
-   openssl pkey -in sourbycraft-release.key -pubout -out sourbycraft-release.pub
+   python3 scripts/release_signing_key.py --install-pub
    ```
+   It needs OpenSSL 3+ (macOS's LibreSSL lacks `pkeyutl -rawin`; Homebrew's is found
+   automatically), writes the pair to `~/.sourbycraft/release-signing/` (key mode 0600, refuses a
+   path inside the repository and refuses to overwrite an existing key), signs and verifies a probe
+   with the same `openssl pkeyutl -rawin` commands as the CI step below, prints the SHA-256
+   fingerprint of the public key, copies the public key to the resource in step 2, and prints the
+   `gh secret set` command for step 3. It uploads nothing. By hand, the equivalent is
+   `openssl genpkey -algorithm Ed25519 -out sourbycraft-release.key` then
+   `openssl pkey -in sourbycraft-release.key -pubout -out sourbycraft-release.pub`.
 2. Add the **public** key as `sourbycraft-server/src/main/resources/META-INF/sourbycraft-release.pub`
    (PEM or bare base64 both parse) and update the test above to assert the opposite.
 3. Store the PEM private key as the GitHub Actions secret `SOURBYCRAFT_RELEASE_SIGNING_KEY`.
