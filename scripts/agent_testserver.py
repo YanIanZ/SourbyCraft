@@ -25,6 +25,7 @@ run_baseline.py on benchmark hardware for a performance claim (docs/BASELINE.md)
 See docs/development/AGENT-TEST-SERVER.md.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -1087,6 +1088,11 @@ class Harness:
         installed = []
         for dest, source, text in configs:
             (workdir / dest).parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(text, bytes):
+                (workdir / dest).write_bytes(text)
+                installed.append({"dest": dest, "source": source,
+                                  "sha256": hashlib.sha256(text).hexdigest()})
+                continue
             (workdir / dest).write_text(text)
             installed.append({"dest": dest, "source": source, "text": text})
         seeded = []
@@ -1177,6 +1183,24 @@ class Harness:
                                    "location (top-level *.yml, config/, plugins/, "
                                    "sourbycraft_config/ except the harness TOMLs)")
             path = Path(source)
+            if rel.suffix == ".jar":
+                # A plugin jar (e.g. the test plugin with its probes) goes straight into plugins/,
+                # copied as bytes and recorded by hash, never as text.
+                if len(rel.parts) != 2 or rel.parts[0] != "plugins":
+                    raise HarnessError(f"config file destination {dest!r}: a jar may only go "
+                                       "directly into plugins/")
+                if path.is_symlink():
+                    raise HarnessError(f"plugin jar {path} is a symlink; pass the real file")
+                limit = f"{PLUGIN_JAR_MAX_BYTES // (1024 * 1024)} MiB"
+                if not path.is_file():
+                    raise HarnessError(f"plugin jar {path} is not a file under {limit}")
+                # One open, at most cap + 1 bytes read: the cap holds even if the file grows.
+                with open(path, "rb") as handle:
+                    data = handle.read(PLUGIN_JAR_MAX_BYTES + 1)
+                if len(data) > PLUGIN_JAR_MAX_BYTES:
+                    raise HarnessError(f"plugin jar {path} is not a file under {limit}")
+                configs.append((rel.as_posix(), str(path), data))
+                continue
             if not path.is_file() or path.stat().st_size > 64 * 1024:
                 raise HarnessError(f"config file {path} is not a file under 64 KiB")
             configs.append((rel.as_posix(), str(path), path.read_text()))
@@ -1464,6 +1488,8 @@ STEP_KEYS = {
 }
 COMMON_KEYS = {"label", "continue_on_failure"}
 CONFIG_FILE_DIRS = ("config", "plugins", "sourbycraft_config")
+# A plugin jar installed with --config-file plugins/<name>.jar=FILE (copied as bytes).
+PLUGIN_JAR_MAX_BYTES = 8 * 1024 * 1024
 RESERVED_CONFIG_FILES = ("sourbycraft_config/aurora.toml",
                          "sourbycraft_config/sourbycraft_global_config.toml")
 SETTINGS_KEYS = {"view_distance": int, "simulation_distance": int, "heap_mib": int,
