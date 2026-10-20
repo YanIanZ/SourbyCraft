@@ -83,6 +83,9 @@ class AsyncPathCancellationTest {
         AsyncPathProcessor.shutdown();
         AsyncPathProcessor.setEnabled(true);
         AsyncPathProcessor.resetFailureLogForTest();
+        // A solve from an earlier test that ignored interruption can still be unwinding after
+        // shutdown(); taking the baseline before it decrements makes every count here off by one.
+        awaitDrained();
         this.baseline = AsyncPathProcessor.outstanding();
     }
 
@@ -92,6 +95,15 @@ class AsyncPathCancellationTest {
         AsyncPathProcessor.shutdown();
         AsyncPathProcessor.resetFailureLogForTest();
         resetRuntime();
+        awaitDrained();
+    }
+
+    /** Waits (bounded) for in-flight solves of earlier tests to release their count. */
+    private static void awaitDrained() {
+        final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (AsyncPathProcessor.outstanding() != 0 && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
     }
 
     private static void resetRuntime() throws Exception {
