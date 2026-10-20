@@ -7,7 +7,6 @@ import dev.iyanz.aurora.engine.spark.plugin.FoliaTickReporter;
 import dev.iyanz.aurora.engine.spark.plugin.FoliaTickStatistics;
 import dev.iyanz.aurora.engine.spark.provider.FoliaClassSourceLookup;
 import dev.iyanz.aurora.engine.spark.provider.FoliaPlayerPingProvider;
-import dev.iyanz.aurora.engine.spark.provider.FoliaServerConfigProvider;
 import dev.iyanz.aurora.engine.spark.provider.FoliaWorldInfoProvider;
 import dev.iyanz.aurora.engine.threadedregions.profiler.RegionThreadDumper;
 import java.nio.file.Path;

@@ -54,7 +54,7 @@ Out of scope, called out so it is not forgotten:
 | Reload entry (supported) | `/sourbycraft reload` (`SourbyCraftCommand.java:41-46`) → `SourbyCraftConfig.reloadDetailed()` (`SourbyCraftConfig.java:214-254`) → `applyLiveConfig` → `CanvasConfigBridge.reload()` (`SourbyCraftConfig.java:281-292`, `CanvasConfigBridge.java:6,15-28`) | `GlobalConfiguration.reload()` then `WorldConfig.reload()`. Failures are collected into a list and not thrown. Each reload step keeps its own previous instance only when that step itself fails validation (section 2.3, "Reload-failure guarantee"). There is no rollback across steps. |
 | Reload entry (legacy, unreachable) | `ReloadSubCommand.java:37-38` | Calls the same two `reload()` methods, but the `/canvas` command tree is no longer registered (`commands/CanvasCommands.java` build call removed; see the comment at `sourbycraft-server/src/minecraft/java/net/minecraft/commands/Commands.java:304-305`). Not a supported operator path; do not rely on it. |
 | Spark config dump | `SourbyServerConfigProvider.java:57` (group `canvas/`), `:272-301` | Reads `config/canvas-server.yml` (`:295`) and `config/canvas-worlds.yml` (`:296`), plus each world's `canvas-patch.yml` under `world.getWorldFolder()` (`:298`) on every Spark report. JSON keys: `canvas-server.yml`, `world-defaults.yml`, `<world>.yml`. |
-| Spark (duplicate provider) | `aurora/engine/spark/provider/FoliaServerConfigProvider.java:143-146` | Same reader, but the class is **not instantiated anywhere**; only an unused import at `FoliaSparkPlugin.java:10` references it. The active provider is `SourbyServerConfigProvider` (`FoliaSparkPlugin.java:195`). Do not let a future cleanup resurrect the stale one. |
+| Spark (duplicate provider) | ~~`aurora/engine/spark/provider/FoliaServerConfigProvider.java`~~ | **Deleted 2026-10-20** (never instantiated; it also lacked the live provider's secret hiding). The only Spark reader is `SourbyServerConfigProvider`. |
 | Operator view | `SourbyCraftCommand.java:87` | `/sourbycraft config` prints `config/canvas-server.yml + config/canvas-worlds.yml`. |
 | Validation message | `TimeSpanValidation.java:18,33` | Error text hard-codes `(config/canvas-server.yml)`; reachable only from `GlobalConfiguration` (`Part.java:183` → `logs.cleanerTimeSpan`, `autosave.autosaveFrequency`). |
 | Docker | `docker/entrypoint.sh:10` (`cd "$DATA"`), `docker-compose.yml:23-25` (`./data:/data`) | The files are `/data/config/*.yml` inside the container. No Docker change is required for a rename; only the relative path inside `config/` changes. |
@@ -339,9 +339,8 @@ on the next boot `current` exists, so `choose` never looks at `legacy` again.
 - `TimeSpanValidation` (`:33`): either take the active path from a supplier, or (transitional,
   recommended) word the message as `config/aurora-server.yml (formerly
   config/canvas-server.yml)`, so an operator who still has the old file is not confused.
-- `FoliaServerConfigProvider` (`:143-146`) is dead code. Decide in the same PR: update it (so a
-  future resurrection is correct) or delete it with its unused import
-  (`FoliaSparkPlugin.java:10`). Do not leave two different path lists.
+- `FoliaServerConfigProvider` was dead code and was deleted on 2026-10-20 with its unused
+  import, so only one Spark path list remains (`spark/SourbyServerConfigProvider.java`).
 
 ### 5.5 Escape hatch (PROPOSED, optional)
 
@@ -392,7 +391,7 @@ rule 5.
 | `…/sourbycraft/SourbyCraftConfig.java:214-254, 281-292` | reload report + bridge wiring | unchanged; optionally report the resolved file in reload output (`:249` mentions "legacy engine keys") |
 | `…/sourbycraft/command/SourbyCraftCommand.java:87` | `/sourbycraft config` file row | resolved names |
 | `…/sourbycraft/spark/SourbyServerConfigProvider.java:57, 293-301` | Spark group + paths | resolved paths; keys unchanged (recommended) |
-| `…/aurora/engine/spark/provider/FoliaServerConfigProvider.java:143-146` | dead duplicate | update or delete |
+| ~~`…/aurora/engine/spark/provider/FoliaServerConfigProvider.java`~~ | dead duplicate | deleted 2026-10-20 |
 | `…/aurora/engine/spark/FoliaSparkPlugin.java:10` | unused import | delete with the class |
 | `…/aurora/engine/subcommands/ReloadSubCommand.java:37-38` | dead reload path | optional cleanup; not required |
 | `…/minecraft/java/net/minecraft/commands/Commands.java:304-305` | comment explaining `/canvas` removal | unchanged |
@@ -609,7 +608,7 @@ Expect the known `*TestSuite > initializationError` filter artifacts (four suite
 | Q4 | How long is the legacy name read? | Owner decision. Record the end build number in the docs when P4 is scheduled; R4 (auto-updater rollback) must be reviewed first. |
 | Q5 | Escape-hatch property (5.5)? | Only if the owner wants one; otherwise the hard failure in rule 5 plus the error text is enough. |
 | Q6 | Read-only config directories | Not a new risk: the loader already writes on every load (2.2). Mention in the release note. |
-| Q7 | Dead `FoliaServerConfigProvider` | Update or delete in the same PR; leaving it stale is how the next person gets the wrong path. |
+| Q7 | Dead `FoliaServerConfigProvider` | Resolved 2026-10-20: deleted. |
 | Q8 | Concurrent-agent ownership | Todos: tests under `dev/iyanz/aurora/engine/` are `eng-sonnet`'s; `docs/README.md`, `TODO.md` and `TEST-COVERAGE-GAPS.md` are PM's; `awf/perf` is `awf3-opus`'s. Sequence P1/P2 after those blocks close, or hand the tests to their owner. |
 | Q9 | **Pre-existing:** every ordinary load truncates and rewrites the live file (`ConfigurationProvider.java:397`). A crash mid-write can leave an empty or partial `aurora-*.yml`, and an empty file is then flood-filled with defaults. This plan makes only the migration atomic (rule 9). | Owner decision: make every write atomic (temp file + `ATOMIC_MOVE`). Recommended as a separate change; it is not caused by the rename. |
 | Q10 | **Spark path mismatch:** the runtime resolves the per-world override under the dimension storage directory (`WorldConfig.java:127`), while the Spark reader uses `world.getWorldFolder()` (`SourbyServerConfigProvider.java:298`). For non-overworld dimensions these can differ, so Spark can report a different file than the one applied. | Pre-existing; fix in the Spark change of P2 by resolving through the same helper as the runtime, or note it. Verify on a Nether/End world before choosing. |
@@ -640,7 +639,7 @@ Non-generated hits are exactly the rows in section 6. Everything else was
 `configuration/validation/TimeSpanValidation.java`, `config/upstream/CanvasConfigBridge.java`,
 `config/upstream/UpstreamConfigBridge.java`, `SourbyCraftConfig.java` (reload section),
 `command/SourbyCraftCommand.java`, `spark/SourbyServerConfigProvider.java`,
-`aurora/engine/spark/provider/FoliaServerConfigProvider.java`, `aurora/engine/spark/FoliaSparkPlugin.java`,
+`aurora/engine/spark/FoliaSparkPlugin.java`,
 `util/migration/{Migration,CanvasFileMigration}.java`, `subcommands/ReloadSubCommand.java`,
 `src/minecraft/java/.../commands/Commands.java`, `.../Level.java.patch`,
 `.../TickRegionScheduler.java`, `.../RegionizedServer.java`, `.../TickGuard.java`,
