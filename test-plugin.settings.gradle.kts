@@ -1,3 +1,2 @@
-if (providers.gradleProperty("includeTestPlugin").map(String::toBoolean).getOrElse(false)) {
-    include(":test-plugin")
-}
+// Uncomment to enable the 'test-plugin' project
+// include(":test-plugin")

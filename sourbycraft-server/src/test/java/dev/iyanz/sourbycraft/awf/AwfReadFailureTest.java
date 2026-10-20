@@ -216,7 +216,7 @@ class AwfReadFailureTest {
     }
 
     /**
-     * TODO.md:58 (server-w1-redis-1, 2026-10-20): a forceload ticket loads its 27x27 chunk border
+     * docs/TODO.md:58 (server-w1-redis-1, 2026-10-20): a forceload ticket loads its 27x27 chunk border
      * (ticket level 31, chunks loaded up to level 44), and with Redis down every stored one fails.
      * The log keeps the first failure of the window with its stack and one summary; every position
      * is still fenced and its writes refused, exactly as before.

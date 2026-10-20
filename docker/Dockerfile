@@ -3,7 +3,10 @@
 # Build the slim release jar first:
 #   ./gradlew applyAllPatches slimServerJar
 #   cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-REL.jar
-#   docker build --build-arg JAR=release/SourbyCraft-26.2-REL.jar -t sourbycraft:26.2 .
+#   docker build -f docker/Dockerfile --build-arg JAR=release/SourbyCraft-26.2-REL.jar -t sourbycraft:26.2 .
+#
+# Run from the repository root: the build context is the root, and BuildKit applies
+# docker/Dockerfile.dockerignore to it.
 #
 # First boot needs internet once (SourbyLoader fetches externalized libs into the
 # paperclip cache); afterwards it runs offline. Persist /data to keep worlds, the

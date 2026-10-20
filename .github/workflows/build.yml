@@ -815,11 +815,11 @@ jobs:
             run/boot.jfr
           retention-days: 7
 
-      - name: Build image (Dockerfile + entrypoint COPY paths)
+      - name: Build image (docker/Dockerfile + entrypoint COPY paths)
         run: |
           jar=release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
           echo "Building image with $jar"
-          docker build --build-arg JAR="$jar" -t sourbycraft:ci .
+          docker build -f docker/Dockerfile --build-arg JAR="$jar" -t sourbycraft:ci .
 
       - name: Inspect image (non-root user + entrypoint present)
         run: |

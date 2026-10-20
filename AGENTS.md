@@ -25,6 +25,30 @@ The CI workflow `.github/workflows/build.yml` has three jobs (audit SEC-8/OBS-9;
 4. Boot test in the same job: boots with the test plugin, `online-mode=false`, `level-type=minecraft:normal`, waits up to 240s for `Done (` plus the metrics markers, sends `stop`, and fails on timeout or unclean exit.
 5. Publication (the `release` job) runs only for pushes/dispatches on `release/26.2-canvas` and downloads the jar the build job uploaded as the `SourbyCraft-26.2-release` artifact. `release=` in `gradle.properties` decides: `true` normal release, `pre` prerelease (skipped by the auto-updater unless `allow_prerelease`), `false` no release. The auto-updater defaults to `apply_mode=notify` since 2026-10-20 (audit SEC-2; servers whose TOML still says `auto` keep applying automatically, with `<jar>.prev` kept and restored if the next boot does not reach ready — see `docs/development/AUTO-UPDATER.md`).
 
+## Running tests
+
+```bash
+# Gradle suites (what CI runs; test-plugin modules need the flag)
+./gradlew -PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test
+
+# One server test class / method
+./gradlew :sourbycraft-server:test --tests 'dev.iyanz.sourbycraft.awf.AwfRegionStorageTest'
+./gradlew :sourbycraft-server:test --tests '*AwfRegionStorageTest.someMethod'
+
+# Python policy/tooling suite (scripts/test_*.py), and a single file
+python3 -m unittest discover -s scripts -p 'test_*.py'
+python3 -m unittest discover -s scripts -p 'test_patch_policy.py'
+```
+
+The AWF Redis backend tests start their own `redis-server` and skip without it; CI installs it so they must run there.
+
+## Where code lives
+
+- `sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/` — SourbyCraft-owned services: `awf` (Aurora World Fabric: region-aware world storage/templates/instances, attached from `RegionFileStorage`; see `docs/architecture/aurora-world-fabric.md`), `bootstrap`/`startup`, `config`, `perf`/`hud`/`spark` (observability), `update` (auto-updater), `bridge`, `command`, `brand`.
+- `sourbycraft-server/src/main/java/dev/iyanz/aurora/engine/` — the region-threading engine (former Canvas/Folia internals: `threadedregions`, engine configuration behind `config/canvas-*.yml`).
+- Changes to Minecraft or Paper classes cannot be made in these sources; they go through feature patches (`sourbycraft-server/{minecraft,paper}-patches/features/`, numbered `NNNN-SourbyCraft-*.patch`). Rebuild them from the materialized repos with `rebuildMinecraftFeaturePatches` / `rebuildPaperServerPatches` after committing there.
+- `scripts/` — Python release, benchmark, policy (`*_policy.py`) tooling, each with a `test_*.py`.
+
 ## Module layout
 
 - `:sourbyapi` — branded API artifact `dev.iyanz.sourbycraft:sourbyapi`. Publishes `paper-api` (with `sourbyapi/paper-patches`) plus its own `sourbyapi/src` (the former Canvas API, `io.canvasmc.*`, and the SourbyCraft metrics API) under the SourbyCraft group id (see `sourbyapi/README.md`). Its build file is materialized from `paper-api/build.gradle.kts` via the `upstreams.paper { patchFile { ... } }` block in root `build.gradle.kts`.
@@ -53,7 +77,7 @@ Configuration surfaces (do not conflate, and verify boot-order consumers before 
 - **SourbyCraft utility layer** → `sourbycraft_config/sourbycraft_global_config.toml` (nightconfig). Messages, `/maxp` persistence, auto-updater, ViaVersion auto-provision.
 - **Region-threading engine** (formerly Canvas; file names kept so existing servers keep their settings) → `config/canvas-server.yml` + `config/canvas-worlds.yml` (region-scheduler options such as `guard-severity`, tick rate, autosave). Default `region-scheduler.guard-severity: LOG` (not Canvas's crash-prone `THROW`); pinned with the other engine defaults in `scripts/test_patch_policy.py`. With LOG, a cross-region access inside a bridged plugin's task counts toward that plugin's Aurora Bridge quarantine (`GuardViolations`).
 - **Region scheduler sizing** → `config/paper-global.yml` `threaded-regions` (`threads`, `grid-exponent`, `scheduler`), not the canvas files. `threads: -1` resolves through MC patch 0002 to every available processor or `aurora.cpu.cores`. Startup logs a thread ledger of every pool against the processor count (also `/perf governor`); it reports, it changes no default.
-- **Crash-prevention + packet-guard limits** → `sourbycraft-security.yml` (checked in; sampled at `sourbycraft-security.yml`).
+- **Crash-prevention + packet-guard limits** → `sourbycraft-security.yml` in the server directory (seeded by the server; the checked-in sample whose values `SecurityLimitPinTest` pins is `build-data/sourbycraft-security.yml`).
 
 ## Cherry mixin engine
 
@@ -71,9 +95,11 @@ Offline: `-Dsourbyclip.offline=true` refuses launcher downloads and IP lookup; v
 ## Docker
 
 ```bash
-docker build --build-arg JAR=release/SourbyCraft-26.2-REL.jar -t sourbycraft:26.2 .
-docker compose up -d --build
+docker build -f docker/Dockerfile --build-arg JAR=release/SourbyCraft-26.2-REL.jar -t sourbycraft:26.2 .
+docker compose -f docker/docker-compose.yml up -d --build
 ```
+
+All Docker files live in `docker/`; run both commands from the repository root (the build context is the root, and BuildKit applies `docker/Dockerfile.dockerignore` to it; the legacy non-BuildKit builder ignores that file). Compose mounts the root `data/` directory.
 
 Image: `eclipse-temurin:25-jre` (NOT jdk), non-root user `sourby`, `/data` volume, `LANG=C.UTF-8` (without this, stdout.encoding defaults to US-ASCII and garbles the branded box-drawing banner). `mem_limit: 8g` in compose with `MEMORY: 6144` MiB heap.
 
@@ -96,13 +122,25 @@ Wait for `Done (` in console. Build 47+ `/ver` reports a SourbyCraft-owned ident
 - `applyAllPatches` is config-cache friendly but `writeBuildInfo` is opted out (`notCompatibleWithConfigurationCache`) because it reads git branch via `providers.exec` at execution time.
 
 
+## Documentation map
+
+- `docs/README.md` — developer reading path and index of every active doc. Pre-Aurora plans/specs (formerly `docs/superpowers/`) were removed; they are only in git history.
+- `docs/architecture/AURORA.md` — entry point for all Aurora architecture docs, current state verified against code, and known contradictions between docs.
+- `docs/DEVELOPMENT.md` — governing rules (truthfulness policy, performance evidence requirements, stability budget, testing matrix).
+- `docs/TODO.md` — the single prioritized to-do list; `docs/releases/` — per-build release gates and evidence.
+- Repository root follows PaperMC/Paper's layout: Docker files in `docker/`, the README image in `.github/assets/`, the security-limits sample in `build-data/`. `CLAUDE.md`, `opencode.json`, `.run/` and the `*.settings.gradle.kts` opt-in files are local and git-ignored; a local `CLAUDE.md` should import this file (`@AGENTS.md`) rather than copy it.
+
+## Concurrent agents
+
+When `AGENT-COORDINATION.md` exists (untracked, never committed), another agent is editing the same working tree. Read it first, don't edit files another agent owns, keep edits to shared files small and targeted, and record your own owned/shared files there.
+
 ## Project to-do list
 
-`TODO.md` is the single prioritized (P0–P3) to-do list. When a task closes, tick it there and in its source doc with evidence.
+`docs/TODO.md` is the single prioritized (P0–P3) to-do list. When a task closes, tick it there and in its source doc with evidence.
 
 ## Non-misleading development rules
 
-Agents working on this branch MUST follow `DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy`.
+Agents working on this branch MUST follow `docs/DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy`.
 
 In short:
 

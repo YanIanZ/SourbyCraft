@@ -134,7 +134,7 @@ Create a reliable baseline of the current 26.2 engine before changing runtime ow
 ### Tasks
 
 - [x] capture current branch head — per release in `releases/26.2-build-47-aurora-nexus.md` (CI run/commit per gate)
-- [x] record Java/JVM version — Java 25 (Temurin) in AGENTS.md, CI and Dockerfile
+- [x] record Java/JVM version — Java 25 (Temurin) in AGENTS.md, CI and docker/Dockerfile
 - [x] record upstream revision — Paper only, pinned by `paperRef` in `gradle.properties`; private tools pinned separately in `build-data/private-toolchain.lock.json`; former Canvas/Folia baseline owned locally since 2026-10-05; `architecture/rebase-log.md`
 - [x] record build number — `sourbyBuild` in `gradle.properties`; verified by `scripts/verify_build_identity.py` in CI
 - [x] record patch count — `architecture/dependency-ledger.md` §2

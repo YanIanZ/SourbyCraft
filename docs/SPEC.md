@@ -2702,4 +2702,4 @@ B85 OPEN; B86, B87 FIXED (unit-tested). §156 T-BRIDGE-2/3/4 and §157 T-BRIDGE-
 evidence exists, CI/boot acceptance does not. `release=pre` stays.
 2026-10-14: B80 and B85 FIXED (`e0c241e9`, CI 38434258632); B89–B93 FIXED (`d97fe247`, CI
 38445246566; scenario evidence local only). The 2026-10-14 system audit (`docs/audits/2026-10-14-system-audit.md`)
-opens new findings tracked in `TODO.md`.
+opens new findings tracked in `docs/TODO.md`.

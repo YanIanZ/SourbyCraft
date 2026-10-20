@@ -126,7 +126,7 @@ three is wrong, and none answers the question for the others.
 
 **Which recommendation applies depends on which workload represents the product**
 ("one player exploring new terrain" versus "ten settled players"). That is an owner
-decision, recorded as open in [TODO.md](../../TODO.md) P0 *Keputusan owner*; until it is
+decision, recorded as open in [docs/TODO.md](../TODO.md) P0 *Keputusan owner*; until it is
 taken this file makes no product-wide recommendation.
 
 Current state, so nobody has to infer it:
@@ -141,7 +141,7 @@ Interpretation rule, as in *What follows*: worker count is an operator trade, no
 change. Quote each row only for its own workload, metric and evidence state; do not carry
 the single-player delivery times over to a swarm, or the swarm's MSPT over to an exploring
 player. A shipped-default change needs a measurement on the workload the owner names as
-representative, with certification state, CPU accounting across lanes (DEVELOPMENT.md §6)
+representative, with certification state, CPU accounting across lanes (docs/DEVELOPMENT.md §6)
 and the same statistic on both sides.
 
 ## Contention, measured on the same recordings

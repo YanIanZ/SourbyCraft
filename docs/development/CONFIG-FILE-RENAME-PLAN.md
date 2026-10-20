@@ -3,11 +3,11 @@
 > **Role:** plan (design + migration contract). **Status: PLANNED / PROPOSED — nothing in this
 > document is implemented.** No code, test, CI step, Docker file or documentation outside this
 > page was changed by this plan. Proposed names are marked **PROPOSED** and need the owner's
-> decision. Per [DEVELOPMENT.md](../../DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy),
+> decision. Per [docs/DEVELOPMENT.md](../DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy),
 > every statement below is tagged with what was actually verified.
 >
-> Source: [TODO.md](../../TODO.md) — *"Rencana migrasi nama file konfigurasi
-> `config/canvas-server.yml` / `canvas-worlds.yml`"* (`TODO.md:507`).
+> Source: [docs/TODO.md](../TODO.md) — *"Rencana migrasi nama file konfigurasi
+> `config/canvas-server.yml` / `canvas-worlds.yml`"* (`docs/TODO.md:507`).
 > Written 2026-10-20 by `oc-deepseek-flash`; read-only investigation, one Gradle test run
 > (section 11). Revised 2026-10-20 after an independent read-only Codex review: all 11 findings
 > applied (section 13).
@@ -57,7 +57,7 @@ Out of scope, called out so it is not forgotten:
 | Spark (duplicate provider) | ~~`aurora/engine/spark/provider/FoliaServerConfigProvider.java`~~ | **Deleted 2026-10-20** (never instantiated; it also lacked the live provider's secret hiding). The only Spark reader is `SourbyServerConfigProvider`. |
 | Operator view | `SourbyCraftCommand.java:87` | `/sourbycraft config` prints `config/canvas-server.yml + config/canvas-worlds.yml`. |
 | Validation message | `TimeSpanValidation.java:18,33` | Error text hard-codes `(config/canvas-server.yml)`; reachable only from `GlobalConfiguration` (`Part.java:183` → `logs.cleanerTimeSpan`, `autosave.autosaveFrequency`). |
-| Docker | `docker/entrypoint.sh:10` (`cd "$DATA"`), `docker-compose.yml:23-25` (`./data:/data`) | The files are `/data/config/*.yml` inside the container. No Docker change is required for a rename; only the relative path inside `config/` changes. |
+| Docker | `docker/entrypoint.sh:10` (`cd "$DATA"`), `docker-compose.yml:23-25` (`./data:/data`; now `docker/docker-compose.yml`, `../data:/data`) | The files are `/data/config/*.yml` inside the container. No Docker change is required for a rename; only the relative path inside `config/` changes. |
 | CI | `.github/workflows/build.yml:179-180, 365-366, 427-435, 629-636` | CI boot directories create only `sourbycraft_config/*.toml`; the engine YAML is created by the server on first boot. No CI step names the engine files today. |
 
 ### 2.2 Upgrade semantics (what a load does to the file)
@@ -174,7 +174,7 @@ Alternatives considered:
 
 | Option | Assessment |
 |---|---|
-| Keep the current names | Status quo. Zero migration risk, but the TODO's independence goal (Stage C, `DEVELOPMENT.md` §8) stays open and operators keep seeing a third-party name for SourbyCraft-owned settings. |
+| Keep the current names | Status quo. Zero migration risk, but the TODO's independence goal (Stage C, `docs/DEVELOPMENT.md` §8) stays open and operators keep seeing a third-party name for SourbyCraft-owned settings. |
 | `config/aurora/server.yml`, `config/aurora/worlds.yml` | Cleaner namespace, but moves files into a new subdirectory: Spark path resolution, docs, operator muscle memory and every example change, for no functional gain. Defer. |
 | `config/region-engine.yml` | Describes the subsystem, not the product; would need another rename when the product layer changes. Reject. |
 
@@ -427,7 +427,7 @@ section 11.1). In particular nothing in `sourbyapi`, `paper-server`, `paper-api`
 | `docs/architecture/execution-contract.md:24` | engine-config row (generic wording today) |
 | `scripts/test_patch_policy.py:130` | comment "Operators can restore THROW in config/canvas-server.yml" |
 | `docs/development/TEST-COVERAGE-GAPS.md:37` | item 8 mentions `canvas-server.yml` (**PM-owned — do not edit**) |
-| `TODO.md:507` | tick when implemented (**PM-owned**) |
+| `docs/TODO.md:507` | tick when implemented (**PM-owned**) |
 | `docs/README.md` | add the index line for this page (**PM-owned — not edited by this plan**) |
 
 ### 6.4 CI / packaging
@@ -436,7 +436,7 @@ section 11.1). In particular nothing in `sourbyapi`, `paper-server`, `paper-api`
 |---|---|
 | `.github/workflows/build.yml:179-180, 365-366, 427-435, 629-636` | no existing step names the engine files; add one boot assertion (section 9.3). CI owner only. |
 | `upload-artifact` / release job | no change (the YAML files are runtime state, not artifacts). |
-| `Dockerfile`, `docker-compose.yml`, `docker/entrypoint.sh` | no change (2.1). |
+| `docker/Dockerfile`, `docker/docker-compose.yml`, `docker/entrypoint.sh` | no change (2.1). |
 | `slimServerJar` / `applyAllPatches` / patches | **no change**: the file names live in plain engine source (`src/main/java`), not in a Minecraft/Paper patch. Verified by search across both patch trees. |
 
 ---
@@ -609,7 +609,7 @@ Expect the known `*TestSuite > initializationError` filter artifacts (four suite
 | Q5 | Escape-hatch property (5.5)? | Only if the owner wants one; otherwise the hard failure in rule 5 plus the error text is enough. |
 | Q6 | Read-only config directories | Not a new risk: the loader already writes on every load (2.2). Mention in the release note. |
 | Q7 | Dead `FoliaServerConfigProvider` | Resolved 2026-10-20: deleted. |
-| Q8 | Concurrent-agent ownership | Todos: tests under `dev/iyanz/aurora/engine/` are `eng-sonnet`'s; `docs/README.md`, `TODO.md` and `TEST-COVERAGE-GAPS.md` are PM's; `awf/perf` is `awf3-opus`'s. Sequence P1/P2 after those blocks close, or hand the tests to their owner. |
+| Q8 | Concurrent-agent ownership | Todos: tests under `dev/iyanz/aurora/engine/` are `eng-sonnet`'s; `docs/README.md`, `docs/TODO.md` and `TEST-COVERAGE-GAPS.md` are PM's; `awf/perf` is `awf3-opus`'s. Sequence P1/P2 after those blocks close, or hand the tests to their owner. |
 | Q9 | **Pre-existing:** every ordinary load truncates and rewrites the live file (`ConfigurationProvider.java:397`). A crash mid-write can leave an empty or partial `aurora-*.yml`, and an empty file is then flood-filled with defaults. This plan makes only the migration atomic (rule 9). | Owner decision: make every write atomic (temp file + `ATOMIC_MOVE`). Recommended as a separate change; it is not caused by the rename. |
 | Q10 | **Spark path mismatch:** the runtime resolves the per-world override under the dimension storage directory (`WorldConfig.java:127`), while the Spark reader uses `world.getWorldFolder()` (`SourbyServerConfigProvider.java:298`). For non-overworld dimensions these can differ, so Spark can report a different file than the one applied. | Pre-existing; fix in the Spark change of P2 by resolving through the same helper as the runtime, or note it. Verify on a Nether/End world before choosing. |
 | Q11 | Engine YAML keys have no pending-restart reporting (B5). | Owner decision: add engine pending-key tracking to the proposed scope, or keep the current generic caveat. This plan assumes the second. |
@@ -645,12 +645,12 @@ Non-generated hits are exactly the rows in section 6. Everything else was
 `.../TickRegionScheduler.java`, `.../RegionizedServer.java`, `.../TickGuard.java`,
 `src/test/.../ConfigurationUpgradeTest.java`, `TimeSpanValidationTest.java`,
 `TimeSpanOptionValidationTest.java`, `GlobalConfigurationDocumentationTest.java`,
-`.github/workflows/build.yml` (config-related lines), `docker/entrypoint.sh`, `docker-compose.yml`,
+`.github/workflows/build.yml` (config-related lines), `docker/entrypoint.sh`, `docker/docker-compose.yml`,
 plus the docs listed in 6.3. The 2026-10-20 review additionally traced the lifecycle cells marked
 "review-traced" in section 2.3.
 
 No source, doc, config or patch file was modified while investigating (Gradle wrote only its own
-`build/` outputs). `TODO.md`, `docs/README.md`,
+`build/` outputs). `docs/TODO.md`, `docs/README.md`,
 `TEST-COVERAGE-GAPS.md`, `.github/workflows/build.yml`, build files, patch trees and all
 `awf/`, `perf/` and `aurora/engine` tests were not touched.
 
@@ -697,7 +697,7 @@ evidence. The earlier recommendation to disable T8 is withdrawn.
 - No file under `config/` was created, renamed, copied or deleted; no server was booted.
 - No decision was made on the proposed names, the Spark key rename, the deprecation end (P4), the
   escape-hatch property, or the open questions in section 10 — all are marked PROPOSED / open.
-- `docs/README.md`, `TODO.md`, `TEST-COVERAGE-GAPS.md`, `.github/workflows/build.yml`, build
+- `docs/README.md`, `docs/TODO.md`, `TEST-COVERAGE-GAPS.md`, `.github/workflows/build.yml`, build
   files, patch trees, `awf/`, `perf/` and `aurora/engine` tests were not edited.
 - The 15/15 green state of `ConfigurationUpgradeTest` is not claimed. Section 11.4 is historical.
 

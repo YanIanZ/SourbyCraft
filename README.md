@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/SourbyCraft.png" alt="SourbyCraft" width="380">
+  <img src=".github/assets/SourbyCraft.png" alt="SourbyCraft" width="380">
 </p>
 
 <h1 align="center">SourbyCraft — 26.2 Aurora</h1>
@@ -138,7 +138,7 @@ A single workload, machine, percentile or profiler sample must never be generali
 | Aurora Compatibility Bridge | **IMPLEMENTED, UNQUALIFIED** — `aurora.bridge.mode = off` by default. Unit-tested (bridge package 61/61, 2026-10-07) and booted with a synthetic legacy plugin in CI (runs 440–485); Vault/EssentialsX enabled through it on Sourby Demo, and one uncertified `plugins-10` bench (2026-10-06). The 2026-10-07 additions (`RegionTask`/`EntityTask` owner routing, per-plugin limits, body timing, LightingLuminol global-scheduler port, same-instance re-enable hook) are committed; their fixture markers pass in CI since run 37515867230, except the same-instance re-enable hook, which only boots there (unit-tested; no marker or boot exercises a re-enable yet). No player-workflow or soak qualification; a native port is the route to full compatibility |
 | Aurora World Fabric | **EXPERIMENTAL, OFF BY DEFAULT** — FILE and Redis backends under region storage for worlds in `aurora.awf.worlds` or managed by `/awf` (`/perf awf`); templates, copy-on-write instances, Slime import, `.awf` files; crash test 56/56 is MEASURED (local laptop, 2026-10-13; 53/53 on 2026-10-05); Redis backend-failure fixes committed (`d97fe247`), failure scenarios run locally only; unqualified, a crash loses writes since the last commit; no MongoDB/MySQL backends |
 | Fully independent Aurora scheduler | **RESEARCH / PLANNED**, not current runtime |
-| Build 47 — Aurora Nexus release | **NOT READY for `release=true`** — `release=pre`. Gate state (release doc, consistency pass 2026-10-14): compile, unit/integration, patch regeneration, startup and shutdown PASS in CI (latest run 38445246566); world load/save and crash recovery PASS on local laptop runs of the RC tree (plus earlier Sourby Demo runs), backend failure PASS on local laptop scenarios only; plugin compatibility, cache corruption and soak PARTIAL; region ownership and licence OPEN; certified stress NOT RUN. Other findings of the [2026-10-14 system audit](docs/audits/2026-10-14-system-audit.md) are tracked in TODO.md; the `sourbycraft-security.yml` no-consumer finding (SEC-1) was fixed in `41a444f5` (2026-10-20: guards in `dev.iyanz.sourbycraft.security`, every limit defaults to LOG; unit-tested, no security soak or proxy boot yet) ([gates](docs/releases/26.2-build-47-aurora-nexus.md#release-readiness-audited-2026-10-07)) |
+| Build 47 — Aurora Nexus release | **NOT READY for `release=true`** — `release=pre`. Gate state (release doc, consistency pass 2026-10-14): compile, unit/integration, patch regeneration, startup and shutdown PASS in CI (latest run 38445246566); world load/save and crash recovery PASS on local laptop runs of the RC tree (plus earlier Sourby Demo runs), backend failure PASS on local laptop scenarios only; plugin compatibility, cache corruption and soak PARTIAL; region ownership and licence OPEN; certified stress NOT RUN. Other findings of the [2026-10-14 system audit](docs/audits/2026-10-14-system-audit.md) are tracked in docs/TODO.md; the `sourbycraft-security.yml` no-consumer finding (SEC-1) was fixed in `41a444f5` (2026-10-20: guards in `dev.iyanz.sourbycraft.security`, every limit defaults to LOG; unit-tested, no security soak or proxy boot yet) ([gates](docs/releases/26.2-build-47-aurora-nexus.md#release-readiness-audited-2026-10-07)) |
 
 ### Aurora engine, and where it lives
 
@@ -153,7 +153,7 @@ Startup reports the engine coming up stage by stage, as a bar whose percentage i
 finished over stages declared — never elapsed time. A stage that fails is named, and the closing
 line reads *degraded*, not *online*.
 
-See **[DEVELOPMENT.md](DEVELOPMENT.md)** and **[Development Task Matrix](docs/DEVELOPMENT-TASKS.md)**.
+See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** and **[Development Task Matrix](docs/DEVELOPMENT-TASKS.md)**.
 
 ---
 
@@ -434,7 +434,7 @@ The active architecture/development set is:
 - **[PRD.md](docs/PRD.md)** — product/performance requirements
 - **[SPEC.md](docs/SPEC.md)** — technical implementation rules
 - **[PLAN.md](docs/PLAN.md)** — performance/observability roadmap
-- **[DEVELOPMENT.md](DEVELOPMENT.md)** — unified continuation contract
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** — unified continuation contract
 - **[Aurora Architecture](docs/architecture/AURORA.md)** — deep engine/configuration architecture
 - **[Aurora Independent Engine](docs/architecture/AURORA-INDEPENDENT-ENGINE.md)** — the phased roadmap beyond Folia constraints
 - **[Execution Contract](docs/architecture/execution-contract.md)** — what SourbyCraft needs from whatever schedules it
@@ -482,7 +482,7 @@ The plugin bridge includes an adaptation of **Luminol / [LightingLuminol](https:
 
 Cherry incorporates work inspired by/derived from projects including **[LeavesMC](https://github.com/LeavesMC)** and **[CraftCanvasMC/Horizon](https://github.com/CraftCanvasMC/Horizon)** where applicable. Profiling integration uses **[spark](https://spark.lucko.me)**.
 
-SourbyCraft project licensing is described in [`LICENSE`](LICENSE). Third-party components remain subject to their respective licenses.
+SourbyCraft project licensing is described in [`LICENSE.md`](LICENSE.md). Third-party components remain subject to their respective licenses.
 
 ## Maintainer build access
 

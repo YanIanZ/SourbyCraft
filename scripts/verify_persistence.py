@@ -116,7 +116,7 @@ def await_console(server, timeout=60):
     Fabric, the first console commands sent right after "Done" failed with a
     NullPointerException in Commands.executeCommandInContext (the console CommandSourceStack had
     no level) for about two seconds; a probe that sends its setup at "Done" then measures
-    nothing. Tracked in TODO.md as its own finding.
+    nothing. Tracked in docs/TODO.md as its own finding.
     """
     started = time.monotonic()
     while time.monotonic() - started < timeout:
