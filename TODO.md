@@ -89,9 +89,10 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 - [x] **AWF-2** `TicketHolder.pop()` membaca di luar monitor dan race dengan `propagate()`: ticket
   save hilang, `save-all`/`AuroraWorlds.save` tidak pernah selesai — pop atomik, gabungkan ticket kedua (audit §1)
   — selesai `ebb9c1fb` (2026-10-14, CI 38450393598 hijau): `TicketHolder.pop` baca+kosongkan di bawah satu lock; propagate kedua di-coalesce
-- [ ] **AWF-3** Commit periodik AWF menumpang collector metrik dan terlewat saat koleksi telat, janji
+- [x] **AWF-3** Commit periodik AWF menumpang collector metrik dan terlewat saat koleksi telat, janji
   "hilang maksimal satu interval" tidak berlaku di bawah beban — driver maintenance AWF sendiri (audit §1)
   — sebagian `ebb9c1fb`: maintenance storage jalan pertama di tiap koleksi dalam try/catch sendiri (`PerformanceCollectorTest.lateSlowOrFailingCollectionsStillRunStorageMaintenance`); `46cbbefd` (OBS-4, 2026-10-20): housekeeping pasca-publish diisolasi try/catch sendiri sehingga tidak menurunkan snapshot segar ke STALE; MASIH TERBUKA: driver maintenance AWF yang sepenuhnya terpisah dari thread metrik (commit periodik tetap bisa terlewat saat koleksi telat)
+  — selesai 2026-10-20: `awf/AwfMaintenanceDriver` (thread daemon `SourbyCraft-AWF-Maintenance`, fixed delay 1 s, tiap langkah try/catch sendiri, log ter-rate-limit, close idempoten dan menunggu pass berjalan) dimulai/dihentikan `MetricsRuntime`; collector tidak lagi memanggil AWF (`AwfMaintenanceIndependenceTest`, `AwfMaintenanceDriverTest` 14); `commit-interval-seconds` RESTART_REQUIRED; batas kehilangan = interval + ≤1 s + waktu commit; unit test saja, belum ada bukti server berbeban
 - [x] **ENG-1** `guard-severity: LOG` (default) membiarkan akses lintas region; pelanggaran plugin
   bridged tidak pernah sampai ke quarantine — sink guard yang mengatribusi ke plugin + rate limit log (audit §2)
   — selesai `1c57a736` (2026-10-20): `GuardViolations` + `BridgeRuntime` (satu pelanggaran per run body, log per (plugin, alasan)/60 s); unit test, belum ada fixture boot
@@ -240,9 +241,11 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
   oleh jaringan lokal; TIDAK tersertifikasi): TPS median 20, 2 dip, merge region 10 → 3–4
   (`docs/BASELINE.md`). Sisa: 2 jam penuh dari host yang stabil, seri heap
 - [ ] Audit lengkap kebenaran snapshot async pathfinding (DEV-E, ROADMAP M5)
-- [-] Pembatalan/shutdown async pathfinding: tes penghapusan entity, unload world, dan target
+- [x] Pembatalan/shutdown async pathfinding: tes penghapusan entity, unload world, dan target
   bergerak saat solve sedang berjalan (ROADMAP M5)
-- [-] Bukti reentrancy scratch milik entity (posisi skalar) (DEV-A)
+  — selesai 2026-10-20: `AsyncPathCancellationTest` (17) atas model `AsyncPathNavigationModel` + `AsyncPathPatchShapeTest` (5) yang mengunci bentuk patch 0006; lambda patch sendiri dan `Mob` nyata belum dijalankan (butuh server)
+- [x] Bukti reentrancy scratch milik entity (posisi skalar) (DEV-A)
+  — selesai 2026-10-20 untuk scratch feature patch: `docs/architecture/scratch-reentrancy-proof.md` (inventaris 0009/0012/0006/0039/0042 + 0003, semua SAFE dengan bukti); satu UNSAFE-benign diperbaiki di MC 0044 (`lastKnownSpeedX/Y/Z` bisa robek lintas thread via Dolphin `FollowPlayerRiddenEntityGoal`; kini satu field turunan), `ScratchReentrancyTest` 7; belum: scratch baseline engine, bukti runtime/soak
 - [-] Bukti runtime bahwa thread region tidak pernah blok pada I/O eksternal (saat ini baru audit statis)
 
 ### Jaringan dan keamanan
@@ -310,22 +313,27 @@ aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) te
 - [ ] Verifikasi alokasi MB/s terhadap JFR
 - [ ] Verifikasi RSS/cgroup di Linux/container
 - [ ] Workflow laporan kelas yang paling banyak dialokasikan
-- [ ] Tes retensi: player disconnect, chunk unload, world unload
+- [x] Tes retensi: player disconnect, chunk unload, world unload
+  — selesai 2026-10-20: 46 tes retensi (bridge, anchor region, RegionMetricsRegistry, speedtest, AwfEngine, lease Redis, unload AuroraWorlds, HudBars) via `ReferenceQueue`; bocor diperbaiki: `FoliaRegionBackend.anchors` memegang World kuat → `AnchorCache` weak; belum: GeoUtil cache, pearls engine
 
 ### Observability
 - [-] `/tps`, `/mspt`, `/perf`, `/perfbar`, `/tpsbar`, `/rambar` disatukan dengan Sourby metrics
   (sudah diimplementasikan, perlu validasi)
-- [ ] `/ram` lengkap; `/perf region <world> <x> <z>`
-- [ ] View antrean region scheduler (DIRENCANAKAN; `/perf scheduler` tidak ada — view yang ada di
+- [x] `/ram` lengkap; `/perf region <world> <x> <z>`
+  — selesai 2026-10-20: `/ram` sesuai PLAN.md (alokasi/GC young-old/last pause `n/a` jujur, belum diinstrumentasi); `/perf region <world> <x> <z>` via `RegionLocator` (lookup regioniser approximate, tanpa refresh generasi lain, nama world case-insensitive); belum diamati di server hidup
+- [-] View antrean region scheduler (sebagian 2026-10-20: `/perf scheduler` ada — jenis scheduler, thread configured/pool/alive, region per state READY/TRANSIENT/TICKING/DEAD, region terlambat, tick terlama; antrean task per region dan histori late-tick `n/a`, butuh feature patch. Teks lama: `/perf scheduler` tidak ada — view yang ada di
   `PerfCommand.VIEWS`: `lanes` beban CPU per lane, `governor` antrean lane governed, `async`
   pool path; antrean milik region scheduler sendiri belum ditampilkan di mana pun)
 - [ ] Verifikasi config SourbyCraft/Aurora tampil benar di Spark web viewer
-- [ ] Klasifikasi thread region yang lebih baik di Spark
+- [x] Klasifikasi thread region yang lebih baik di Spark
+  — selesai 2026-10-20: `SparkThreadClass` + metadata `sourbycraft-threads` di tiap laporan spark (region/global tick, chunk worker/IO, lane Sourby, async path, AWF maintenance, netty dapat dibedakan saat di-sample); tidak bisa: global vs region tick (thread sama) dan lane `SourbyCraft-IO-n` (virtual thread, tak terlihat spark); default dumper tidak berubah
 - [x] Telemetri histori: `/perf history` (`PerformanceHistory`, ring 60 menit, satu sampel per menit:
   TPS/MSPT region terburuk, CPU proses, heap; `PerformanceHistoryTest`)
-- [ ] Telemetri sisa: latensi tunggu task, counter siklus hidup chunk, counter tick entity, log
+- [-] Telemetri sisa: latensi tunggu task, counter siklus hidup chunk, counter tick entity, log
   insiden (kejadian, bukan sampel per menit)
-- [-] Latensi save region-file (saat ini hanya ada latensi commit AWF)
+  — log insiden selesai 2026-10-20: `/perf incidents` (`IncidentLog` ring 20, merge per kind+subject, 9 sinyal; watchdog dan pause GC STW tidak bersumber); latensi tunggu task, siklus hidup chunk, tick entity masih terbuka
+- [x] Latensi save region-file (saat ini hanya ada latensi commit AWF)
+  — selesai 2026-10-20: patch MC 0043 mengukur `moonrise$finishWrite` (tulis+hapus, sukses dan gagal) ke `perf/RegionFileSaveLatency` (ring lock-free 1024, p50/p99/max 60 s per world), tampil di `/perf storage`; overhead belum dibenchmark, belum ada angka server
 
 ### Optimasi NMS terukur (hanya setelah baseline ada)
 - [ ] Profil Entity/LivingEntity/Mob tick, GoalSelector, Brain/Sensor, navigasi, merge/pickup item
@@ -397,6 +405,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [ ] **AWF-7** (roadmap) Biaya commit FILE O(dunia): indeks penuh ditulis ulang, di-hash dan
   di-fsync per commit; satu fsync per objek — generasi delta, fsync batch (audit §1; lihat item
   "AWF FILE: tulis massal lambat" di P3)
+  — separuh fsync selesai 2026-10-20: objek ditulis dulu lalu di-force satu pass sebelum index (`ObjectStore.sync`, `Durability`), direktori shard/`objects`/`N.tmp`/leluhur store kini di-fsync, kegagalan fsync direktori dipropagasi; A/B lokal tak tersertifikasi (M2, APFS USB SSD) bulk 3.364 chunk median 34,1 s → 7,9 s; jumlah force tetap O(objek). MASIH TERBUKA: generasi delta-index
 - [x] **ENG-5** Ticket save dilaporkan selesai saat region merge/split di tengah save; bagiannya
   tanpa ticket (flush AWF melewatkan chunk) — teruskan ticket saat merge, sebar saat split (audit §2)
   — selesai `1c57a736` (2026-10-20): MC 0031, `SaveAllTicket.split`/`TicketHolder.forwardTo`, `SaveTicketRegionChangeTest`
@@ -409,6 +418,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [x] **ENG-8** Worker path membaca state mob hidup di luar owner — snapshot immutable yang diambil
   di owner (audit §2; terkait audit snapshot M5 di P0 *Konkurensi*)
   — selesai `41a444f5` (2026-10-20): MC 0039 `MobPathSnapshot` diambil di owner; worker tidak menyentuh Mob hidup (`MobPathSnapshotTest`); fitur tetap default off, soak flag-on masih terbuka (papan)
+  — lanjutan 2026-10-20: MC 0042 Creaking — home position di-snapshot di owner saat solver isolasi dibuat, evaluator tahu mode snapshot lewat flag eksplisit (bukan `mob == null`), sehingga query owner tetap membaca home hidup; offload Creaking kini diizinkan (`AsyncPathEvaluatorIsolationTest` 8)
 - [x] **ENG-9** Oversubscription CPU secara default (thread region = semua prosesor ditambah pool
   chunk, async, Netty, path, bridge) — ledger thread saat boot; ubah default hanya dengan bukti A/B (audit §2)
   — ledger saja, selesai `1c57a736` (2026-10-20): `ThreadLedger` di log boot dan `/perf governor` (boot lokal: 22 thread / 8 prosesor, 2.8x); default TIDAK diubah
@@ -504,10 +514,12 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
   Ternyata dipakai: `ClientV2` memanggil `canvasmc.io/api/v2` dari `/version` dan setelah config
   dimuat jika `Build-Number` terisi (tidak pernah di build CI). Panggilan itu ikut dihapus.
 - [ ] Putuskan nama branch rilis `release/26.2-canvas` (dipakai workflow publikasi dan auto-updater)
-- [ ] Rencana migrasi nama file konfigurasi `config/canvas-server.yml` / `canvas-worlds.yml`
+- [x] Rencana migrasi nama file konfigurasi `config/canvas-server.yml` / `canvas-worlds.yml`
   (sekarang sengaja tetap, agar konfigurasi server yang sudah ada tetap terbaca)
-- [ ] Pengaman agar baseline engine (`minecraft-patches/sources`, `paper-patches/files`) tidak
+  — rencana PROPOSED 2026-10-20: `docs/development/CONFIG-FILE-RENAME-PLAN.md` (direview Codex, 11 temuan diterapkan); belum diimplementasikan
+- [x] Pengaman agar baseline engine (`minecraft-patches/sources`, `paper-patches/files`) tidak
   diedit diam-diam: perubahan Sourby wajib lewat feature patch supaya terlihat oleh policy
+  — sudah ada (diverifikasi 2026-10-20): `scripts/baseline_policy.py` + `build-data/engine-baseline.sha256` (726 file, 3 root) dan langkah CI "Engine baseline guard"; edit baseline tanpa marker yang juga menulis ulang manifest hanya tertangkap di review
 - [x] Pin SHA-256 SourbyPatcher hanya mencakup jar, tidak POM tempat versi paperweight ditentukan
   — kandidat lokal 3.1.0 memeriksa versi paperweight yang dimuat terhadap identitas di JAR;
   hash POM/dependency penuh tetap belum diimplementasikan
@@ -527,7 +539,8 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [ ] Tes reproduktibilitas dari clean checkout
 - [ ] Validasi boot cached/offline sebagai gate independensi
 - [ ] Hapus dependensi build legacy hanya setelah ada bukti clean build
-- [ ] Dokumentasikan repository remote yang dibutuhkan dan urutan fallback-nya
+- [x] Dokumentasikan repository remote yang dibutuhkan dan urutan fallback-nya
+  — `docs/development/REMOTE-REPOSITORIES.md` (diperbarui 2026-10-20 dengan bukti file:line dan tabel verifikasi hash)
 
 ### Arsitektur patch
 - [ ] Identifikasi optimasi yang duplikat dengan upstream
@@ -592,7 +605,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 - [x] **OBS-13** Jalur `getTPS()` mengalokasi dan mengurutkan di bawah monitor region — layani dari
   snapshot yang sudah dipublikasikan (audit §4)
   — selesai `46cbbefd` (2026-10-20): `tps()`/`mspt()` melayani rata-rata lewat helper `sumsFor` tanpa alokasi/sort (mirip resolusi targetless `report()`); tes bytecode `tpsAndMsptServeAveragesWithoutAllocatingOrSorting`; catatan: `MSPTData.rawData()` kini kosong (tidak ada konsumen produksi)
-- [ ] **OBS-14** Lubang cakupan tes (engine, hud, maxplayers, lang, update, bootstrap); tes sensitif
+- [x] **OBS-14** Lubang cakupan tes (engine, hud, maxplayers, lang, update, bootstrap); tes sensitif
   waktu — tes berprioritas; clock yang diinjeksi (audit §4)
   — daftar prioritas `65dba8fb` (2026-10-20) di `docs/development/TEST-COVERAGE-GAPS.md` (P1–P3 + 10 test sensitif waktu dengan seam clock); test Java-nya belum ditulis
   — 86 test P1 `b5766689` (2026-10-20) untuk hud/maxplayers/lang/engine util; sisa seam (SourbyCraftConfig, HudBars scheduler, PearlsMigration) di papan
@@ -600,6 +613,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
   — baris 4 (stage count bootstrap) selesai 2026-10-20: `SourbyCraftBootstrapTest` + seam `verdict()`/`publishBootStages()`
   — baris 1 (update/) dan 7 (command/) selesai 2026-10-20: 81 + 55 tes; bug diperbaiki: `HttpTransport` ClassCastException pada URL non-HTTP, `/ping` melempar RejectedExecutionException saat executor I/O penuh/berhenti, `AutoUpdateSettings` reload mempertahankan nilai lama (mis. `apply_mode=auto`) saat key dihapus — kini default terdokumentasi, `/ver` tidak lagi membuat runtime bridge sebagai efek samping. Full suite server 10707/0
   — baris 2 (bootstrap/, 71 tes) dan konversi clock (6 tes; RedisBackendTest 13,1 s → 4,5 s) selesai 2026-10-20; full suite server 10778/0. Sisa OBS-14: P3 baris 8 (engine) dan 9 (sourbyapi)
+  — baris 8 dan 9 selesai 2026-10-20: engine 157 + spark 53 tes (bug diperbaiki: `BalancedChunkSystem` ArrayStoreException → ledger -1, codec `RegionResourceBar` melempar pada placement tak dikenal, YAML komentar saja crash di `NodeDiff`, versi spark basi 1.10.172, deskripsi datapack kosong di laporan spark); sourbyapi 58 tes `io.canvasmc`
 - [x] **OBS-15** `averageGcPauseMs` adalah waktu koleksi, bukan pause STW — caveat di javadoc (audit §4)
   — selesai `65dba8fb` (2026-10-20): caveat javadoc `RuntimeMetrics.averageGcPauseMs()`/`gcTimePercent()` dan `GcTracker` (waktu koleksi, bukan pause STW)
 - [x] **OBS-16** Kesiapan baseline berpatokan `Done (`, yang kini bisa mendahului terrain spawn
@@ -615,7 +629,8 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
   243 tes Python, identitas server/API, boot command dan reload terisolasi lulus;
   detail/batas bukti di `docs/AURORA-UX.md#local-validation-2026-10-06`.
 
-- [ ] Mode HUD actionbar
+- [x] Mode HUD actionbar
+  — selesai 2026-10-20: `/tpsbar|/rambar|/perfbar actionbar|bossbar`, default bossbar, mode per pemain di PDC (LIVE); refresh basi dibuang lewat token sesi; belum diamati di klien nyata
 - [!] Label `Aurora Engine` di Spark viewer (butuh viewer sendiri karena enum engine dirender oleh
   spark.lucko.me) dan desain presentasi viewer Aurora
 - [x] API dunia AWF runtime (`AuroraWorlds` di sourbyapi, `/awf`, registry
@@ -643,7 +658,8 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
   testing oleh Claude. Bukti source dan skenario: `docs/development/ASP-26.2-AWF-PORT-REVIEW.md`;
   SPEC B76–B80. Hasil tes sebelumnya tidak menutup temuan ini.
 - [ ] AWF Redis lewat jaringan: tiap baca chunk = satu round trip; prefetch/pipelining tetangga
-- [ ] AWF FILE: tulis massal lambat (fsync per objek chunk; 3.364 chunk = 14,9 s) — batch fsync
+- [x] AWF FILE: tulis massal lambat (fsync per objek chunk; 3.364 chunk = 14,9 s) — batch fsync
+  — selesai 2026-10-20 (lihat AWF-7): force satu pass setelah semua tulis; A/B lokal tak tersertifikasi
 - [ ] Backend database AWF MongoDB/MySQL
 - [ ] Executor yang sudah ada dipindahkan ke bawah Resource Governor (ditunda; masing-masing sudah
   punya batas sendiri)

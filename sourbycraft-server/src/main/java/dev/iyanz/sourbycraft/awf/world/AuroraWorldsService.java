@@ -51,9 +51,19 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     private final Set<String> unloadWithoutSaving = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final WorldOperationGate operations = new WorldOperationGate(AuroraWorldsService::onGlobalTick);
 
+    /** A world's dimension folder; the server's storage source in production. */
+    private final java.util.function.Function<String, Path> folders;
+
     public AuroraWorldsService(final AuroraWorldRegistry registry, final AuroraTemplates templates) {
+        this(registry, templates, AuroraWorldsService::folder);
+    }
+
+    /** As above with the folder lookup injected, for tests that run without a server. */
+    AuroraWorldsService(final AuroraWorldRegistry registry, final AuroraTemplates templates,
+                        final java.util.function.Function<String, Path> folders) {
         this.registry = registry;
         this.templates = templates;
+        this.folders = folders;
     }
 
     /**
@@ -697,7 +707,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
             // The engine always saves on unload (its save flag is ignored); without saving, the
             // world's AWF storages discard what the unload writes instead. Marked here, applied in
             // discardOnUnload only once the engine has accepted the unload.
-            if (!save) this.unloadWithoutSaving.add(name);
+            if (!save) markUnloadWithoutSaving(name);
             try {
                 Bukkit.getServer().unloadWorldAsync(world, save, outcome -> {
                     this.unloadWithoutSaving.remove(name);
@@ -709,6 +719,16 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
             }
         });
         return result;
+    }
+
+    /** Remembers that the unload of {@code name} must discard what it writes; see {@link #discardOnUnload}. */
+    void markUnloadWithoutSaving(final String name) {
+        this.unloadWithoutSaving.add(name);
+    }
+
+    /** Whether an unload of {@code name} is still waiting to discard its writes. */
+    boolean unloadWithoutSavingPending(final String name) {
+        return this.unloadWithoutSaving.contains(name);
     }
 
     private CompletableFuture<Void> deleteInternal(final String name) {
@@ -741,7 +761,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
     public void discardOnUnload(final io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent event) {
         final String name = event.getWorld().getName();
         if (!this.unloadWithoutSaving.remove(name)) return;
-        final int storages = AwfEngine.discardUnder(folder(name));
+        final int storages = AwfEngine.discardUnder(this.folders.apply(name));
         SourbyLogger.info("Aurora World Fabric: unloading " + name + " without saving (" + storages
             + " storages discard their writes)");
     }

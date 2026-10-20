@@ -29,7 +29,7 @@ Priority:
 - [x] **P0** audit remaining reusable mutable state / scratch buffers — scoped Sourby audit; [findings and remaining unknowns](architecture/reuse-audit.md)
 - [x] **P0** audit all `ThreadLocal` usage relevant to Sourby performance patches — no Sourby-owned mutable storage found; upstream internals outside scope
 - [x] **P0** audit remaining object pools — no Sourby-owned object recycler found; solver-state ownership reviewed
-- [-] **P0** validate entity-owned scratch reentrancy assumptions — retained collection reuse removed; scalar-position reentrancy proof remains open
+- [x] **P0** validate entity-owned scratch reentrancy assumptions — retained collection reuse removed; scalar-position proof for SourbyCraft feature patches done 2026-10-20 (`docs/architecture/scratch-reentrancy-proof.md`, fix in MC 0044); engine-baseline scratch and runtime evidence not covered
 - [ ] **P0** full restart persistence test after performance changes
 - [ ] **P0** multi-hour concurrency soak
 
@@ -68,7 +68,7 @@ No major new optimization batch should be accepted before the missing representa
 - [x] **P1** runtime sampler foundation
 - [-] **P1** `/tps` unified with Sourby metrics
 - [-] **P1** `/mspt` unified with Sourby metrics
-- [ ] **P1** `/ram` complete first-party command if not yet feature-complete
+- [x] **P1** `/ram` complete first-party command if not yet feature-complete — PLAN.md fields; allocation/GC split/last pause `n/a` (not instrumented)
 - [-] **P1** `/perf` base command
 - [-] **P1** `/perfbar`
 - [-] **P1** `/tpsbar`
@@ -78,16 +78,16 @@ No major new optimization batch should be accepted before the missing representa
 - [x] **P1** `/perf memory`
 - [x] **P1** `/perf gc`
 - [x] **P1** `/perf region` — region count, MSPT spread, slowest region
-- [ ] **P1** `/perf region <world> <x> <z>`
+- [x] **P1** `/perf region <world> <x> <z>` — `RegionLocator`, approximate regioniser lookup; not yet observed on a live server
 - [x] **P1** `/perf player <player>` — gathered on the player's entity scheduler
 - [x] **P1** `/perf chunks` — per world, from Folia region counters
 - [x] **P1** `/perf entities` — per world, from Folia region counters
 - [x] **P1** `/perf network` — wire bytes/packets per direction, connections
-- [-] **P1** `/perf scheduler` — `/perf governor` (Sourby lanes) and `/perf async`; the region scheduler's own queues are not shown
+- [-] **P1** `/perf scheduler` — region scheduler view exists (2026-10-20: kind, threads, regions by state, late regions, longest tick); per-region queued task counts and late-tick history need a feature patch
 - [x] **P1** `/perf plugins`
 - [x] **P1** `/perf health`
 - [x] **P1** bounded `/perf history` — 60 one-minute samples (`perf/PerformanceHistory`)
-- [ ] **P3** actionbar HUD mode
+- [x] **P3** actionbar HUD mode — `/tpsbar|/rambar|/perfbar actionbar|bossbar`, per-player, LIVE
 
 ---
 

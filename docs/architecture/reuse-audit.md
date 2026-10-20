@@ -66,8 +66,8 @@ Inventory of the reusable state inspected in `dev.iyanz.sourbycraft`; this is no
 | S9 | `ConcurrentHashMap<Long, Generation> generations` | `perf/RegionMetricsRegistry.java:21` | Process-wide; entries expire 15 min + 1 s after retirement (`:124-132`), swept during `forEachUnexpired` `:111-122` | **KEEP** |
 | S10 | `RegionTickMetrics current` cell | `perf/RegionTickMetricsHolder.java:23`, replaced at `:60` | One per region tick handle; replaced only after retirement | **KEEP** |
 | S11 | GC ring buffers `ringCount` / `ringTimeMs` / `ringNanos` (21 slots, `static`) | `perf/GcTracker.java:21-23` | `GcTracker.class` monitor (`sampleOnce` `:72`, `stop` `:57`); reset by `stop()` | **KEEP** |
-| S12 | Three shared `BossBar` instances | `hud/HudBars.java:47-52` | Mutated by the global-region updater task `:170-184`; shown/hidden from player region threads `:106-109`, `:122-123` | **KEEP** (see U3) |
-| S13 | `TPS_VIEWERS` / `RAM_VIEWERS` / `PERF_VIEWERS` / `ANY` | `hud/HudBars.java:42-45` | Process-wide; hold `UUID`s only, evicted in `onQuit` `:143-150` and cleared in `close()` `:160-168` | **KEEP** — satisfies the "no player reference leak after disconnect" rule in `DEVELOPMENT.md` §14 |
+| S12 | Three shared `BossBar` instances | `hud/HudBars.java:74-79` | Mutated by the global-region updater task `update` `:394-418`; shown/hidden from player region threads in `applyShown` `:331-340` and `applyPerf` `:287-303` | **KEEP** (see U3) |
+| S13 | `TPS_VIEWERS` / `RAM_VIEWERS` / `PERF_VIEWERS` / `ANY`, actionbar maps `TPS_ACTIONBAR` / `RAM_ACTIONBAR` / `PERF_ACTIONBAR`, and the `SESSIONS` counter | `hud/HudBars.java:61-72` | Process-wide; keys are `UUID`s, the actionbar maps also hold a `Long` session token, and no `Player` is stored; `SESSIONS` is a single never-reset `AtomicLong`. Evicted in `onQuit` `:360-370`; cleared in `close()` `:378-392`; actionbar entries also removed on toggle-off and mode switch in `applyShown` `:320-327` and on perf retirement `:300-303` | **KEEP** — satisfies the "no player reference leak after disconnect" rule in `DEVELOPMENT.md` §14 |
 | S14 | `Map<String,String> cache` (GeoIP) | `util/GeoUtil.java:53` | Process-wide; hard cap 1024 with half-eviction `:115-123` | **KEEP** (see F4) |
 | S15 | `List<Entry> ENTRIES` (plugin-load failures) | `brand/PluginLoadDiagnostics.java:30` | JUL handler thread; capped at 16 `:63-66` | **KEEP** (see F3) |
 | S16 | `Set<String> WARNED_KEYS` | `SourbyCraftConfig.java:281` | Process-wide; bounded by the config key space | **KEEP** |
@@ -397,8 +397,8 @@ call for one permanently retained collection per entity — a trade whose sign i
 unknown at scale and which D1–D3 currently make worse than it needs to be.
 
 **U3 — Adventure `BossBar` thread-safety was not verified.** S12 is mutated by the
-global-region updater (`HudBars.java:170-184`) while player region threads add and
-remove viewers (`:106-109`, `:122-123`). Whether Adventure's `BossBar`
+global-region updater (`HudBars.java:394-418`, `update`) while player region threads add and
+remove viewers (`applyShown` `:313-343`, `applyPerf` `:276-305`). Whether Adventure's `BossBar`
 implementation tolerates that is a property of the Adventure library, which this
 audit did not read. Nothing observed suggests a problem and the failure mode would
 be cosmetic, but the claim is unverified.

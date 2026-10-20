@@ -18,7 +18,7 @@ metrics, plugin compatibility, and completed tests remain in place.
 | Async path completion | `perf/AsyncPathCompletion.java` depends on `OwnerHandoff`; `execution/RegionOwnerHandoff` is the only backend adapter | Defer mutation to the current entity owner; handle rejection and retirement; release pending state | **Done** — owner identity delivered and checked; epoch and target validation outstanding |
 | Path computation | `perf/AsyncPathProcessor.java`, bounded platform-thread pool | Snapshot-only CPU work; defined saturation, cancellation, shutdown | Separate CPU admission contract; do not conflate with owner dispatch |
 | Player replies | `command/SourbyReply.java`, player scheduler | Deliver on current player owner; handle disconnect | Public compatibility API remains until a shared handoff contract proves useful |
-| HUD | `hud/HudBars.java`, global periodic task plus player schedulers | One shared snapshot cadence; player-owned show/hide/preferences; cancellation on close | Separate aggregation cadence from player mutation |
+| HUD | `hud/HudBars.java`, global periodic task plus player schedulers (boss-bar show/hide, actionbar sends) | One shared snapshot cadence; player-owned show/hide/preferences and actionbar mode; cancellation on close | Separate aggregation cadence from player mutation |
 | Metrics collection | `perf/PerformanceCollector.java`, direct `RegionizedServer` and `TickRegionScheduler` reads | Read counters/tick-rate cheaply; immutable publication; lifecycle-owned collector | Metrics-source adapter, not task dispatcher |
 | Updater | `update/SourbyUpdater.java`, `UpdateApplier.java`, `UpdateNotifier.java`, public async/player schedulers | Blocking network/admin work away from gameplay; owner-bound player notification; shutdown cancellation | External I/O and notification contracts stay distinct |
 | Engine configuration | `SourbyCraftConfig.java`, concrete Canvas global/world reloads | Explicit operator reload; preserve cached-setting caveats | Config bridge, not scheduling API |
@@ -295,20 +295,31 @@ Step 5 asks whether the owner handoff should be reused for the HUD. It should no
 reasons are the contract's own requirements failing to apply rather than a preference.
 
 `HudBars` runs one global task every twenty ticks that reads a metrics snapshot and updates three
-shared boss bars, and separately mutates per-player visibility on each player's own scheduler.
+shared boss bars. Per-player work runs on each player's own scheduler: boss-bar visibility changes,
+and in actionbar mode the line sent to each actionbar viewer on every refresh.
 Against the nine requirements:
 
 * There is no **pending bookkeeping** to release. Async pathfinding needed the contract because
   `sourbyAsyncPathPending` gates the next submission and a lost callback strands the mob forever.
   Nothing in the HUD is gated on a callback arriving.
-* There is no **stale result** to invalidate. The HUD recomputes from the newest snapshot every
-  tick; a delivery that arrives late simply carries what was true when it left, and one second
-  later it is replaced anyway. The path-identity check exists because a path applies to a route
-  the mob may have abandoned. A boss bar has no equivalent.
-* **Retirement is benign.** `player.getScheduler().run(..., null)` passes no retirement callback
-  and ignores the returned task, so a player who leaves before the task runs is silently skipped.
-  For gameplay that would be a defect; for showing a bar to someone who has gone, it is the
-  correct outcome. This is understood, not overlooked.
+* For the boss bars there is no **stale result** to invalidate. They recompute from the newest
+  snapshot every tick; a delivery that arrives late simply carries what was true when it left, and
+  one second later it is replaced anyway. The path-identity check exists because a path applies to
+  a route the mob may have abandoned. A boss bar has no equivalent.
+  Actionbar mode does have a stale delivery. A refresh is queued on the player's scheduler and can
+  run after the player turned the bar off, switched mode, quit or the HUD closed, and would then
+  restore a line that was just cleared. Each actionbar subscription therefore carries a session
+  token from the `SESSIONS` counter. The updater captures the token when it queues the send, and the
+  queued task sends only if the player is still a viewer and the entry still holds that token
+  (`stillSubscribed`). Every transition replaces or removes the entry, so an older refresh fails the
+  check. The check runs on the player's own scheduler, the same thread the player's commands use.
+* **Retirement is benign for the boss bars.** `applyShown` passes no retirement callback to
+  `player.getScheduler().run(..., null)` and ignores the returned task, so a player who leaves
+  before the show/hide task runs is silently skipped. `applyPerf` is the exception: its retirement
+  callback removes the player from `PERF_VIEWERS` and `PERF_ACTIONBAR`. Actionbar sends also pass
+  `null`, and a send to a player who has left is skipped the same way. For gameplay that would be
+  a defect; for showing a bar to someone who has gone, it is the correct outcome. This is
+  understood, not overlooked.
 * **Current identity** does not bite. The contract delivers the live owner because a dimension
   transfer replaces the underlying entity. Players are not replaced that way, and a player who
   reconnects is a new session that re-reads its own preferences.

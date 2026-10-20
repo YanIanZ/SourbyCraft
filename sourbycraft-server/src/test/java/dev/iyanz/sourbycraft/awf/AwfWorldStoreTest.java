@@ -28,6 +28,12 @@ class AwfWorldStoreTest {
         }
     }
 
+    /** An object in place under its name, as a commit that reached its sync leaves it. */
+    private static void putInPlace(final ObjectStore objects, final byte[] raw) throws Exception {
+        objects.put(raw, false);
+        objects.sync();
+    }
+
     @Test
     void incrementalWritesOnlyNewObjectsButCommitsTheWholeWorld() throws Exception {
         final AwfWorldStore store = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 2);
@@ -108,7 +114,7 @@ class AwfWorldStoreTest {
         final AwfWorldStore store = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1);
         store.commit(Map.of(new ChunkKey(0, 0), b("a")), Set.of(), PersistenceMode.INCREMENTAL);
         // An object written by a commit that never reached its generation swap.
-        new ObjectStore(this.dir.resolve("objects")).put(b("orphan"), false);
+        putInPlace(new ObjectStore(this.dir.resolve("objects")), b("orphan"));
         assertEquals(2, objectFiles(this.dir));
         final AwfWorldStore reopened = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1);
         assertEquals(Set.of(new ChunkKey(0, 0)), reopened.keys(), "the orphan is not part of the world");
@@ -188,7 +194,7 @@ class AwfWorldStoreTest {
         final AwfWorldStore store = AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1);
         store.commit(Map.of(new ChunkKey(0, 0), b("a")), Set.of(), PersistenceMode.INCREMENTAL);
         final ObjectStore objects = new ObjectStore(this.dir.resolve("objects"));
-        objects.put(b("crash-leftover"), false);
+        putInPlace(objects, b("crash-leftover"));
         AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1);
         assertTrue(!objects.contains(ObjectStore.name(b("crash-leftover"))));
         assertTrue(objects.contains(ObjectStore.name(b("a"))));
@@ -199,7 +205,7 @@ class AwfWorldStoreTest {
         AwfWorldStore.open(this.dir, WorldRole.VANILLA, 1)
             .commit(Map.of(new ChunkKey(0, 0), b("a")), Set.of(), PersistenceMode.INCREMENTAL);
         final ObjectStore objects = new ObjectStore(this.dir.resolve("objects"));
-        objects.put(b("stray"), false);
+        putInPlace(objects, b("stray"));
         AwfWorldStore.open(this.dir, WorldRole.READ_ONLY, 1);
         assertTrue(objects.contains(ObjectStore.name(b("stray"))));
     }

@@ -15,11 +15,14 @@ import java.util.TreeMap;
  * A world's committed chunks on the FILE backend: a chunk index per generation in a
  * {@link GenerationStore}, chunk bytes in a content-addressed {@link ObjectStore}.
  *
- * <p>Commit sequence, for every mode: write objects (each forced and moved into place) → read back
- * and verify the objects this commit wrote (CHECKPOINT: every object the new index references) →
- * commit the index as a new generation, which is the single commit point → drop objects no
- * retained generation references. A crash anywhere before the generation commit leaves the
- * previous generation authoritative; the new objects are unreferenced and are removed later.</p>
+ * <p>Commit sequence, for every mode: write objects (each to a temporary file in its shard) → read
+ * back and verify the objects this commit wrote (CHECKPOINT: every object the new index
+ * references) → {@link ObjectStore#sync} (one pass of forces over the new objects, then each moved
+ * into place, then each touched directory forced once) → commit the index as a new generation,
+ * which is the single commit point → drop objects no retained generation references. No index is
+ * forced before every object it references has been; a crash anywhere before the generation
+ * commit leaves the previous generation authoritative, and the new objects are unreferenced and
+ * are removed later.</p>
  *
  * <p>Blocking; must not run on a region thread ({@link GenerationStore} refuses). {@link AwfWorld}
  * calls it from a storage executor.</p>
@@ -70,9 +73,15 @@ public final class AwfWorldStore implements AwfStore {
     /** As {@link #open(Path, WorldRole, int)}, with a crash-injection hook for tests. */
     static AwfWorldStore open(final Path root, final WorldRole role, final int retainedGenerations,
                               final GenerationStore.StageHook hook) throws IOException {
+        return open(root, role, retainedGenerations, hook, Durability.DISK);
+    }
+
+    /** As above, with the durability seam both stores force through, for tests of the order. */
+    static AwfWorldStore open(final Path root, final WorldRole role, final int retainedGenerations,
+                              final GenerationStore.StageHook hook, final Durability durability) throws IOException {
         final GenerationStore generations = GenerationStore.open(root.resolve("generations-root"), role,
-            retainedGenerations, hook);
-        final ObjectStore objects = new ObjectStore(root.resolve("objects"));
+            retainedGenerations, hook, durability);
+        final ObjectStore objects = new ObjectStore(root.resolve("objects"), durability);
         final GenerationStore.Generation current = generations.read();
         final SortedMap<ChunkKey, String> index = current == null ? new TreeMap<>() : decodeIndex(current);
         final AwfWorldStore store = new AwfWorldStore(generations, objects, role, retainedGenerations,
@@ -194,6 +203,9 @@ public final class AwfWorldStore implements AwfStore {
             for (final String name : toVerify) {
                 this.objects.get(name);
             }
+            // Every object the index will reference is made durable and named here, in one pass,
+            // before anything that references it is written.
+            this.objects.sync();
 
             generation = this.generations.commit(Map.of(INDEX_BLOB, encodeIndex(next)));
         } catch (final IOException | RuntimeException failed) {

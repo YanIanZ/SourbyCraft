@@ -3,8 +3,6 @@ package dev.iyanz.sourbycraft.execution.region;
 import dev.iyanz.sourbycraft.perf.RegionTickMetrics;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * {@link RegionBackend}, {@link CurrentRegion}, {@link RegionPopulation} and {@link EnginePools} over
@@ -18,8 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, RegionPopulation, EnginePools {
 
     private static final int MAX_CACHED_ANCHORS = 4096;
-    /** Anchors by region id; recomputed when the cached chunk has left the region. */
-    private final Map<Long, RegionAnchor> anchors = new ConcurrentHashMap<>();
+    /** Anchors by region id; recomputed when the cached chunk has left the region. World held weakly. */
+    private final AnchorCache anchors = new AnchorCache(MAX_CACHED_ANCHORS);
 
     @Override
     public RegionTickMetrics.Snapshot globalTickMetrics(final long nowNanos) {
@@ -40,15 +38,14 @@ public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, R
     public RegionAnchor anchor() {
         final var region = TickRegionScheduler.getCurrentRegion();
         if (region == null) return null;
-        final RegionAnchor cached = this.anchors.get(region.id);
-        if (cached != null && org.bukkit.Bukkit.isOwnedByCurrentRegion((org.bukkit.World)cached.world(),
-            cached.chunkX(), cached.chunkZ())) {
+        final RegionAnchor cached = this.anchors.get(region.id, anchor -> org.bukkit.Bukkit.isOwnedByCurrentRegion(
+            (org.bukkit.World) anchor.world(), anchor.chunkX(), anchor.chunkZ()));
+        if (cached != null) {
             return cached;
         }
         final net.minecraft.world.level.ChunkPos center = region.getCenterChunk();
         if (center == null) return null;
         final RegionAnchor anchor = new RegionAnchor(region.regioniser.world.getWorld(), center.x(), center.z());
-        if (this.anchors.size() >= MAX_CACHED_ANCHORS) this.anchors.clear();
         this.anchors.put(region.id, anchor);
         return anchor;
     }

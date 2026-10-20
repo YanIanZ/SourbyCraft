@@ -92,7 +92,7 @@ be read without upstream, and that is enforced by test rather than by directory 
 | `onlyLedgeredFilesReachIntoUpstreamInternals` | a new file reaching into internals |
 | `everyLedgeredFileStillEarnsItsPlace` | a ledger entry that outlived its dependency |
 | `everyUpstreamDependencyIsBehindAnAuroraInterfaceOrADocumentedPatchSeam` | **direction** — core → upstream coupling with no interface and no seam |
-| `canvasIsReachableFromExactlyOnePlace` | Canvas gaining a second doorway |
+| `canvasIsReachableOnlyThroughItsRecordedDoorways` | Canvas or the engine gaining a doorway beyond the three recorded in `dependency-ledger.md` |
 | `aPatchSeamThatStoppedTouchingUpstreamIsNotStillExcused` | an exception outliving its reason |
 | `publicUpstreamApiIsNotTreatedAsALeak` | the pattern drifting onto supported API |
 | `theLedgerDocumentExists` | the document the failures point at going missing |

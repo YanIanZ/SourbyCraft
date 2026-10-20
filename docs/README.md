@@ -78,6 +78,8 @@ Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](d
 [LOGIN-GUARDS.md](development/LOGIN-GUARDS.md) (Paper login guards the Folia baseline drops or re-purposes; documentation only),
 [TEST-COVERAGE-GAPS.md](development/TEST-COVERAGE-GAPS.md) (prioritised list of missing unit tests and timing-sensitive tests to convert).
 [REMOTE-REPOSITORIES.md](development/REMOTE-REPOSITORIES.md) (every remote the build, CI and first boot reach, fallback order, offline behaviour).
+[CONFIG-FILE-RENAME-PLAN.md](development/CONFIG-FILE-RENAME-PLAN.md) (PROPOSED plan to rename `canvas-server.yml`/`canvas-worlds.yml` without breaking existing servers; nothing implemented).
+[scratch-reentrancy-proof.md](architecture/scratch-reentrancy-proof.md) (DEV-A: every mutable scratch field the feature patches add, its re-entry paths and verdict).
 [PLUGIN-NETTY-GUIDANCE.md](development/PLUGIN-NETTY-GUIDANCE.md) (for plugin authors and operators: which events run on a Netty event loop, why blocking there hurts, what to do instead; from a source audit, not a benchmark).
 
 ### Guides (`guides/`)

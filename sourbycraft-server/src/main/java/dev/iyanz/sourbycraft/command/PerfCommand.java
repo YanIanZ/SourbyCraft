@@ -4,9 +4,12 @@ import dev.iyanz.sourbycraft.SourbyCraftColors;
 import dev.iyanz.sourbycraft.api.metrics.MetricState;
 import dev.iyanz.sourbycraft.api.metrics.MetricWindow;
 import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
+import dev.iyanz.sourbycraft.api.metrics.RuntimeMetrics;
 import dev.iyanz.sourbycraft.api.metrics.SourbyMetrics;
 import dev.iyanz.sourbycraft.execution.LanePortions;
 import dev.iyanz.sourbycraft.perf.MetricsRuntime;
+import dev.iyanz.sourbycraft.perf.RegionLocator;
+import dev.iyanz.sourbycraft.perf.RegionTickMetrics;
 import dev.iyanz.sourbycraft.util.ContainerMemory;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +21,7 @@ import org.bukkit.command.CommandSender;
 /** Read-only diagnostics: one immutable generation per invocation, no world/OS queries. */
 public final class PerfCommand extends Command {
     static final List<String> VIEWS =
-        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "storage", "awf", "plugins", "history", "player", "chunks", "entities", "region", "health");
+        List.of("tick", "cpu", "memory", "gc", "lanes", "async", "network", "governor", "scheduler", "incidents", "storage", "awf", "plugins", "history", "player", "chunks", "entities", "region", "health");
 
     public PerfCommand(final String name) {
         super(name);
@@ -40,6 +43,16 @@ public final class PerfCommand extends Command {
             }
             return true;
         }
+        if (view.equals("region") && args.length > 1) {
+            // Bare "/perf region" is the overview below; every location form is handled here, so a
+            // malformed one names its own usage instead of the generic view list.
+            if (args.length == 4) {
+                renderRegionAt(sender, args[1], args[2], args[3]);
+            } else {
+                sendRegionUsage(sender);
+            }
+            return true;
+        }
         if (args.length > (getName().equals("ram") ? 0 : 1)
             || !(view.equals("overview") || VIEWS.contains(view))) {
             sender.sendMessage(Component.text(this.usageMessage, SourbyCraftColors.DIM));
@@ -51,9 +64,19 @@ public final class PerfCommand extends Command {
 
     @Override
     public List<String> tabComplete(final CommandSender sender, final String alias, final String[] args) {
-        if (!testPermissionSilent(sender) || getName().equals("ram") || args.length != 1) return List.of();
-        final String prefix = args[0].toLowerCase(Locale.ROOT);
-        return VIEWS.stream().filter(view -> view.startsWith(prefix)).toList();
+        if (!testPermissionSilent(sender) || getName().equals("ram")) return List.of();
+        if (args.length == 1) {
+            final String prefix = args[0].toLowerCase(Locale.ROOT);
+            return VIEWS.stream().filter(view -> view.startsWith(prefix)).toList();
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("region")) {
+            final String prefix = args[1].toLowerCase(Locale.ROOT);
+            return org.bukkit.Bukkit.getWorlds().stream()
+                .map(org.bukkit.World::getName)
+                .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
+                .toList();
+        }
+        return List.of();
     }
 
     public static List<Component> render(final SourbyMetrics metrics, final String view) {
@@ -83,15 +106,19 @@ public final class PerfCommand extends Command {
             lines.add(UiPanel.section("Memory"));
             add(lines, "Heap used / committed / maximum", bytes(runtime.heapUsedBytes()) + " / "
                 + bytes(runtime.heapCommittedBytes()) + " / " + bytes(runtime.heapMaxBytes()));
+            add(lines, "Heap usage", heapUsage(runtime));
             add(lines, "Non-heap", bytes(runtime.nonHeapUsedBytes()));
             add(lines, "Process RSS", bytes(runtime.processRssBytes()));
             add(lines, "Container memory usage", percent(runtime.rssPercent()));
+            add(lines, "Allocation rate", "n/a (allocation rate is not collected)");
         }
         if (view.equals("overview") || view.equals("gc") || view.equals("memory")) {
             lines.add(UiPanel.section("Garbage collection"));
             add(lines, "GC collections / cumulative collection time", count(runtime.gcCollectionCount()) + " / "
                 + (runtime.gcCollectionTimeMillis() < 0 ? "unavailable" : runtime.gcCollectionTimeMillis() + "ms"));
             add(lines, "GC collections/min", TpsCommand.value(runtime.gcCollectionsPerMinute(), 1));
+            add(lines, "GC young / old collections", "n/a (all pools are aggregated)");
+            add(lines, "Last GC pause", "n/a (only the mean per cycle is collected)");
             add(lines, "Pause distribution / allocation samples", "use JFR or /spark profiler start");
             add(lines, "GC scope", "MXBean collection time is not stop-the-world pause time");
         }
@@ -125,6 +152,12 @@ public final class PerfCommand extends Command {
         if (view.equals("history")) {
             renderHistory(lines);
         }
+        if (view.equals("scheduler")) {
+            PerfSchedulerView.render(lines);
+        }
+        if (view.equals("incidents")) {
+            PerfIncidentsView.render(lines);
+        }
         if (view.equals("overview") || view.equals("region")) {
             lines.add(UiPanel.section("Regions"));
             final boolean known = snapshot.freshness().state() != MetricState.UNAVAILABLE;
@@ -137,6 +170,7 @@ public final class PerfCommand extends Command {
                 : "world #" + slow.worldId() + " region #" + slow.regionId() + " gen " + slow.generationId()
                     + ": " + TpsCommand.ms(slow.averageMspt()) + " avg, " + TpsCommand.ms(slow.maximumMspt())
                     + " max over " + slow.samples() + " ticks");
+            add(lines, "Per-location region metrics", "/perf region <world> <x> <z>");
             add(lines, "Region coordinates / queues", "not instrumented");
         }
         if (view.equals("overview") || view.equals("health")) {
@@ -411,10 +445,84 @@ public final class PerfCommand extends Command {
         }
     }
 
+    /** {@code /perf region <world> <x> <z>}: the region owning the chunk at that block. */
+    private void sendRegionUsage(final CommandSender sender) {
+        sender.sendMessage(Component.text("/" + getName() + " region <world> <x> <z>", SourbyCraftColors.DIM));
+    }
+
+    private void renderRegionAt(final CommandSender sender, final String world, final String xArg, final String zArg) {
+        final int x;
+        final int z;
+        try {
+            x = Integer.parseInt(xArg);
+            z = Integer.parseInt(zArg);
+        } catch (final NumberFormatException invalid) {
+            sendRegionUsage(sender);
+            return;
+        }
+        final RegionLocator.Result result = RegionLocator.locate(world, x, z, System.nanoTime());
+        renderRegion(MetricsRuntime.provider(), world, x, z, result).forEach(sender::sendMessage);
+    }
+
+    /**
+     * Renders a resolved per-location region. Read-only: the region was located from published
+     * snapshots, and the {@code metrics} snapshot supplies only the freshness line.
+     */
+    static List<Component> renderRegion(final SourbyMetrics metrics, final String world, final int x,
+                                        final int z, final RegionLocator.Result result) {
+        final PerformanceSnapshot snapshot = metrics.snapshot();
+        final List<Component> lines = new ArrayList<>();
+        lines.add(UiPanel.header("Performance / region"));
+        add(lines, "World / block", world + " / " + x + ", " + z);
+        switch (result.status()) {
+            case FOUND -> {
+                add(lines, "Chunk", result.chunkX() + ", " + result.chunkZ());
+                add(lines, "Region", "world #" + result.worldId() + " region #" + result.regionId()
+                    + " gen " + result.generationId() + (result.active() ? "" : " (inactive)"));
+                renderRegionWindows(lines, result.snapshot());
+            }
+            case NO_REGION_AT_CHUNK -> add(lines, "Region", "no region resolved for chunk " + result.chunkX() + ", "
+                + result.chunkZ() + " (approximate lookup: the region may be merging or splitting, or the chunk is not loaded)");
+            case UNKNOWN_WORLD -> add(lines, "Region", "unknown world '" + world + "'");
+            case NO_SERVER -> add(lines, "Region", "no server running");
+            case NO_TELEMETRY -> add(lines, "Region", "world #" + result.worldId() + " region #"
+                + result.regionId() + " has no recorded tick metrics yet");
+        }
+        lines.add(TpsCommand.freshness(snapshot.freshness()));
+        lines.add(UiPanel.footer());
+        return List.copyOf(lines);
+    }
+
+    private static void renderRegionWindows(final List<Component> lines, final RegionTickMetrics.Snapshot snapshot) {
+        final RegionTickMetrics.WindowSnapshot five = snapshot.fiveSeconds();
+        final RegionTickMetrics.WindowSnapshot minute = snapshot.oneMinute();
+        add(lines, "TPS (5s / 1m)", TpsCommand.value(five.tps(), 2) + " / " + TpsCommand.value(minute.tps(), 2));
+        add(lines, "Average MSPT (5s / 1m)", TpsCommand.ms(five.mspt()) + " / " + TpsCommand.ms(minute.mspt()));
+        add(lines, "Maximum MSPT (5s)", five.sampleCount() > 0L
+            ? TpsCommand.ms(five.maximumNanos() / 1_000_000.0) : "unavailable");
+        add(lines, "Samples (5s)", five.sampleCount() + " ticks");
+        if (five.truncated()) {
+            add(lines, "Window", "truncated (ring overflow)");
+        }
+    }
+
     private static void renderStorage(final List<Component> lines) {
         final var totals = dev.iyanz.sourbycraft.perf.RegionIoCounters.GLOBAL.totals();
         add(lines, "Chunk-system reads / writes / deletes", totals.reads() + " / " + totals.writes() + " / "
             + totals.deletes() + " since start");
+        final var saves = dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.GLOBAL.snapshot();
+        if (saves.isEmpty()) {
+            add(lines, "Region-file saves", "none timed yet (AWF worlds never write region files)");
+        }
+        for (final var save : saves) {
+            final String name = save.world() + " " + save.type();
+            add(lines, name + " region-file saves / failed", save.saves() + " / " + save.failures() + " since start");
+            add(lines, name + " save p50 / p99 / max", save.windowSamples() == 0
+                ? "no save in the last " + dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.WINDOW_SECONDS + "s"
+                : String.format(java.util.Locale.ROOT, "%.2f / %.2f / %.2f ms (%d saves, last %ds; max ever %.2f ms)",
+                    save.p50Millis(), save.p99Millis(), save.maxMillis(), save.windowSamples(),
+                    dev.iyanz.sourbycraft.perf.RegionFileSaveLatency.WINDOW_SECONDS, save.maxEverMillis()));
+        }
         final var queues = dev.iyanz.sourbycraft.perf.RegionIoQueue.INSTANCE.sample();
         if (queues.isEmpty()) {
             add(lines, "Pending storage I/O", "no world loaded");
@@ -487,6 +595,14 @@ public final class PerfCommand extends Command {
     private static void add(final List<Component> lines, final String label, final String value) {
         lines.add(Component.text("  " + label + ": ", SourbyCraftColors.LABEL)
             .append(Component.text(value, SourbyCraftColors.VALUE)));
+    }
+
+    /** Heap used as a percentage of the maximum, or the unavailable sentinel. */
+    private static String heapUsage(final RuntimeMetrics runtime) {
+        final long used = runtime.heapUsedBytes();
+        final long max = runtime.heapMaxBytes();
+        if (max <= 0L || used < 0L) return "unavailable";
+        return TpsCommand.value(100.0 * used / max, 1) + "% of maximum";
     }
 
     private static String bytes(final long value) { return value < 0 ? "unavailable" : ContainerMemory.fmt(value); }

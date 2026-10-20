@@ -106,9 +106,24 @@ Still refused rather than snapshotted (the navigation runs the synchronous recom
 - `AmphibiousPathNavigation.sourbyAsyncSolveSafe() == false` — `AmphibiousNodeEvaluator.prepare`
   writes three malus entries on the live mob; `done()` is now guarded for a null mob but the
   offload stays refused.
-- `Creaking.CreakingPathNavigation.sourbyAsyncSolveSafe() == false` (new) — `HomeNodeEvaluator`
-  reads `Creaking.this.getHomePos()` (synched entity data on the outer instance) during the
-  solve, which the snapshot does not carry.
+
+Not held in `MobPathSnapshot` itself, but captured the same way (on the owner, read only by the
+off-thread solve) is the Creaking's home position (ENG-8 follow-up, MC feature patch 0042):
+
+- `Creaking.CreakingPathNavigation.createPathFinder` writes `Creaking.this.getHomePos()` onto the
+  new `HomeNodeEvaluator.sourbyHomePos`. `sourbyKickAsyncRecompute` calls it on the owning thread
+  through `sourbyIsolatedPathFinder` for every submission, so each off-thread solve gets a fresh
+  evaluator carrying the home as of that submission; the live evaluator is not touched.
+- `HomeNodeEvaluator` overrides `prepare(region, MobPathSnapshot)` to set a `sourbySnapshotSolve`
+  flag and `done()` to clear it; `getPathType` reads `sourbyHomePos` only while that flag is set,
+  and calls `getHomePos()` live otherwise. The snapshot overload of `prepare` is reached only from
+  `PathFinder.findPath(region, MobPathSnapshot, …)`, whose one caller is the async submission; the
+  flag lives on an evaluator confined to the worker that runs that solve. The first version keyed
+  this on `this.mob == null`, which is also true on the live evaluator after `done()` and before any
+  `prepare`, so owner-thread queries without a prepare (`MoveControl.isWalkable` →
+  `getPathType(Mob, BlockPos)`) read the construction-time capture instead of the current home.
+- That was the one synched member outside the `Mob` API the solve reads, so
+  `CreakingPathNavigation` no longer overrides `sourbyAsyncSolveSafe()` to refuse the offload.
 
 Known approximations of the off-thread path (the synchronous path has none of these):
 
@@ -125,7 +140,19 @@ Evidence: `MobPathSnapshotTest` (a `Mob` fake sealed after capture fails on any 
 thread; the worker solve completes with zero calls; the queued solve's node list is unchanged
 after the mob moves, grows and blocks `WALKABLE`, while a fresh capture differs; `findPath(region,
 mob, …)` equals `findPath(region, capture(mob), …)`; fluid table; border test from the captured
-position). `AsyncPathEvaluatorIsolationTest` and `AsyncPathRefusalTest` remain green.
+position). `AsyncPathEvaluatorIsolationTest` covers the Creaking home over a stubbed flat floor
+with real A* solves (a mocked `Creaking` supplies only `getHomePos()`; solvers are built through
+`sourbyIsolatedPathFinder`, not through `sourbyKickAsyncRecompute`; no server, no real Creaking
+entity, no goal or `MoveControl` path): the navigation no longer refuses the offload; two isolated
+solvers built after the home changes each capture the home current at their build while the live
+evaluator, its capture and the synchronous `PathFinder` stay unchanged; solves on a worker thread
+prepared with a `MobPathSnapshot` follow the captured home (reachable target with no home
+captured, unreachable with a far one) while any live `getHomePos()` call fails the test; the
+synchronous solve follows home changes made after construction; and the live evaluator's
+`getPathType` on the owner reads the current home both before any prepare and after a synchronous
+and a snapshot solve. The last two tests fail when the discriminator is reverted to
+`this.mob == null`. `AsyncPathRefusalTest` remains green. Not covered: a flag-on server soak with
+Creakings.
 
 ## Correctness notes
 - Latency: path ready next tick instead of same tick. Invisible for the ~20-tick recompute

@@ -19,6 +19,16 @@ public final class MetricsRuntime {
     private static boolean running;
     private static ServicesManager registeredWith;
     private static boolean cleanupNeeded;
+    /**
+     * Aurora World Fabric's periodic commits, on their own thread (audit AWF-3). Started and
+     * stopped with metrics so shutdown keeps its order (stopped before the storage lane shuts
+     * down and long before {@code AwfEngine.closeAll()}'s final commit), but independent of the
+     * collector: a metrics startup failure leaves it running, and a stalled collection cannot
+     * delay it. Guarded by the class lock.
+     */
+    private static dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver awfMaintenance;
+    private static java.util.function.Supplier<dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver> awfMaintenanceFactory =
+        dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver::standard;
 
     private MetricsRuntime() {}
 
@@ -51,6 +61,7 @@ public final class MetricsRuntime {
     public static synchronized void start(final ServicesManager services, final Plugin owner) {
         Objects.requireNonNull(services, "services");
         Objects.requireNonNull(owner, "owner");
+        startAwfMaintenance();
         if (running) {
             return;
         }
@@ -88,6 +99,7 @@ public final class MetricsRuntime {
     public static synchronized void close(final ServicesManager services) {
         Objects.requireNonNull(services, "services");
         running = false;
+        stopAwfMaintenance();
         final PerformanceCollector closing = collector;
         collector = null;
         if (closing != null) {
@@ -101,6 +113,56 @@ public final class MetricsRuntime {
         } catch (final Throwable failure) {
             SourbyLogger.error("Metrics provider unregister failed; cleanup will be retried", failure);
         }
+    }
+
+    /** Starts the AWF maintenance driver unless it runs; a failure is logged, never thrown. */
+    private static void startAwfMaintenance() {
+        if (awfMaintenance != null) {
+            return;
+        }
+        dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver driver = null;
+        try {
+            driver = awfMaintenanceFactory.get();
+            driver.start();
+            awfMaintenance = driver;
+        } catch (final Throwable failure) {
+            if (driver != null) {
+                try {
+                    driver.close();
+                } catch (final Throwable closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+            }
+            SourbyLogger.error("Aurora World Fabric maintenance could not start; periodic AWF commits will not"
+                + " run (the final commit at shutdown still does)", failure);
+        }
+    }
+
+    private static void stopAwfMaintenance() {
+        final dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver stopping = awfMaintenance;
+        awfMaintenance = null;
+        if (stopping == null) {
+            return;
+        }
+        try {
+            stopping.close();
+        } catch (final Throwable failure) {
+            SourbyLogger.error("Aurora World Fabric maintenance did not stop cleanly", failure);
+        }
+    }
+
+    /** The running AWF maintenance driver, or {@code null}. */
+    static synchronized dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver awfMaintenanceForTesting() {
+        return awfMaintenance;
+    }
+
+    /** Replaces how the driver is made; returns the previous factory. Tests only. */
+    static synchronized java.util.function.Supplier<dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver>
+            awfMaintenanceFactoryForTesting(
+                final java.util.function.Supplier<dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver> factory) {
+        final var previous = awfMaintenanceFactory;
+        awfMaintenanceFactory = Objects.requireNonNull(factory, "factory");
+        return previous;
     }
 
     private static void cleanupBeforeStart() {

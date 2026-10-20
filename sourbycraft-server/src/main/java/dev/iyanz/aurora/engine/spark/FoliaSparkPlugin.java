@@ -40,6 +40,9 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
 
 public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
+    /** Test seam: the literal {@link #getVersion()} reports (behaviour unchanged). */
+    static final String SPARK_VERSION = "1.10.180"; // the spark-paper dependency in sourbycraft-server/build.gradle.kts; FoliaSparkPluginTest checks them against each other
+
     private final Server server;
     private final Logger logger;
     private final PaperScheduler scheduler;
@@ -58,7 +61,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
         this.classLookup = classLookup;
         this.tickHook = new FoliaTickHook();
         this.tickReporter = new FoliaTickReporter();
-        this.gameThreadDumper = new RegionThreadDumper();
+        this.gameThreadDumper = new LabelledThreadDumper(new RegionThreadDumper());
         this.platform = new SparkPlatform(this);
     }
 
@@ -110,7 +113,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
 
     @Override
     public String getVersion() {
-        return "1.10.172";
+        return SPARK_VERSION;
     }
 
     @Override
@@ -197,7 +200,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
 
     @Override
     public me.lucko.spark.paper.common.platform.MetadataProvider createExtraMetadataProvider() {
-        return new dev.iyanz.sourbycraft.spark.SourbyMetadataProvider(); // SourbyCraft - Aurora runtime metadata
+        return ThreadCensusMetadataProvider.combine(new dev.iyanz.sourbycraft.spark.SourbyMetadataProvider(), new ThreadCensusMetadataProvider()); // SourbyCraft - Aurora runtime metadata and thread census
     }
 
     @Override

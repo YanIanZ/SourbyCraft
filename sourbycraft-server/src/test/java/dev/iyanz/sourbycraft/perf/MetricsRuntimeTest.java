@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,6 +27,10 @@ class MetricsRuntimeTest {
     @AfterEach
     void closeRuntime() {
         MetricsRuntime.close(this.services);
+        // So a driver thread still unwinding is never counted by the next test.
+        for (final Thread worker : threads(dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver.THREAD_NAME)) {
+            assertDoesNotThrow(() -> worker.join(10_000L));
+        }
     }
 
     @Test
@@ -93,6 +98,66 @@ class MetricsRuntimeTest {
         this.services.failUnregister = false;
         assertDoesNotThrow(() -> MetricsRuntime.close(this.services));
         assertEquals(2, this.services.unregistrations);
+    }
+
+    @Test
+    void startRunsAwfMaintenanceOnItsOwnThreadAndCloseStopsItIdempotently() {
+        MetricsRuntime.start(this.services, plugin());
+        MetricsRuntime.start(this.services, plugin());
+        final dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver driver = MetricsRuntime.awfMaintenanceForTesting();
+        assertTrue(driver != null && driver.running());
+        assertEquals(1L, liveThreads(dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver.THREAD_NAME),
+            "a second start does not start a second driver");
+
+        final List<Thread> workers = threads(dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver.THREAD_NAME);
+        MetricsRuntime.close(this.services);
+        assertFalse(driver.running());
+        // The executor reports termination as its worker finishes; let the thread unwind.
+        for (final Thread worker : workers) {
+            assertDoesNotThrow(() -> worker.join(10_000L));
+        }
+        assertEquals(0L, liveThreads(dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver.THREAD_NAME),
+            "the driver's thread ended");
+        assertSame(null, MetricsRuntime.awfMaintenanceForTesting());
+        assertDoesNotThrow(() -> MetricsRuntime.close(this.services));
+    }
+
+    @Test
+    void aMetricsStartupFailureLeavesAwfMaintenanceRunning() {
+        this.services.failAfterRegister = true;
+        assertThrows(IllegalStateException.class, () -> MetricsRuntime.start(this.services, plugin()));
+
+        final dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver driver = MetricsRuntime.awfMaintenanceForTesting();
+        assertTrue(driver != null && driver.running(), "periodic AWF commits do not depend on metrics starting");
+
+        this.services.failAfterRegister = false;
+        MetricsRuntime.start(this.services, plugin());
+        assertSame(driver, MetricsRuntime.awfMaintenanceForTesting(), "the retry keeps the running driver");
+        assertEquals(1L, liveThreads(dev.iyanz.sourbycraft.awf.AwfMaintenanceDriver.THREAD_NAME));
+    }
+
+    @Test
+    void anAwfMaintenanceStartupFailureDoesNotStopMetrics() {
+        final var previous = MetricsRuntime.awfMaintenanceFactoryForTesting(() -> {
+            throw new IllegalStateException("no thread for you");
+        });
+        try {
+            assertDoesNotThrow(() -> MetricsRuntime.start(this.services, plugin()));
+            assertEquals(1, this.services.registrations);
+            assertSame(null, MetricsRuntime.awfMaintenanceForTesting());
+        } finally {
+            MetricsRuntime.awfMaintenanceFactoryForTesting(previous);
+        }
+    }
+
+    private static List<Thread> threads(final String name) {
+        return Thread.getAllStackTraces().keySet().stream()
+            .filter(thread -> thread.isAlive() && thread.getName().equals(name)).toList();
+    }
+
+    private static long liveThreads(final String name) {
+        return Thread.getAllStackTraces().keySet().stream()
+            .filter(thread -> thread.isAlive() && thread.getName().equals(name)).count();
     }
 
     private static Plugin plugin() {

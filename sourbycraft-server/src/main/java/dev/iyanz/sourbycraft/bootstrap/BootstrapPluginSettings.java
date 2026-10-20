@@ -12,7 +12,11 @@ final class BootstrapPluginSettings {
         if (!Files.exists(config)) return fallback;
         String table = "";
         try {
+            boolean first = true;
             for (String raw : Files.readAllLines(config)) {
+                // readAllLines keeps a UTF-8 byte order mark ("UTF-8 with BOM" editors) on line one.
+                if (first && raw.startsWith("\uFEFF")) raw = raw.substring(1);
+                first = false;
                 String line = raw.split("#", 2)[0].trim();
                 if (line.startsWith("[") && line.endsWith("]")) {
                     table = unquote(line.substring(1, line.length() - 1).trim());

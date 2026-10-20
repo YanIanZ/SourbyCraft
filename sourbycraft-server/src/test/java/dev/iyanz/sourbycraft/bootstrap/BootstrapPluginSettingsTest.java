@@ -110,6 +110,22 @@ class BootstrapPluginSettingsTest {
     }
 
     @Test
+    void aUtf8ByteOrderMarkBeforeTheFirstLineIsIgnored() throws IOException {
+        // Editors on Windows save "UTF-8 with BOM"; readAllLines keeps U+FEFF on the first line.
+        assertFalse(on("\uFEFF[protocollib]\nauto-provision = false\n", "protocollib", true));
+        assertFalse(on("\uFEFFprotocollib.auto-provision = false\n", "protocollib", true));
+        assertFalse(on("\uFEFF# settings\n[protocollib]\nauto-provision = false\n", "protocollib", true));
+        assertTrue(on("\uFEFF", "protocollib", true));
+        assertFalse(on("\uFEFF", "protocollib", false));
+    }
+
+    @Test
+    void onlyTheFirstLinesByteOrderMarkIsStripped() throws IOException {
+        // U+FEFF later in the file is not a BOM; the key stays unrecognised and the fallback applies.
+        assertTrue(on("[protocollib]\n\uFEFFauto-provision = false\n", "protocollib", true));
+    }
+
+    @Test
     void invalidValueDisablesInstallationAndWarns() throws IOException {
         Path cfg = toml("[protocollib]\nauto-provision = maybe\n");
         boolean[] result = new boolean[1];

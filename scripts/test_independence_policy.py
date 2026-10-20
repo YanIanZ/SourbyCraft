@@ -36,17 +36,23 @@ class CanvasSourceCouplingTest(unittest.TestCase):
         "dev.iyanz.aurora.engine.util.ticket.SaveAllTicket",
         "io.canvasmc.canvas.WorldUnloadResult",
         "io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent",
+        # /perf scheduler (dependency-ledger.md section 1.2, recorded 2026-10-20): the configured
+        # scheduler kind and thread count, and the READY/TRANSIENT region split. Read-only;
+        # declared here rather than reached around by matching class names as strings.
+        "dev.iyanz.aurora.engine.threadedregions.SchedulerUtil",
+        "io.canvasmc.canvas.region.WorldRegionizer",
     }
 
     ADAPTER = ("sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/config/upstream/"
                "CanvasConfigBridge.java")
     WORLDS = "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java"
+    SCHEDULER_VIEW = "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/perf/LiveSchedulerSource.java"
 
     def test_canvas_is_named_only_inside_its_bridge(self):
         # Same rule as the region backend: replacing the implementation should be an edit to a
         # known file, not a search. The reload path above it names no engine at all.
         files = {site["file"] for site in policy.canvas_source_sites(REPO)}
-        self.assertEqual(files, {self.ADAPTER, self.WORLDS},
+        self.assertEqual(files, {self.ADAPTER, self.WORLDS, self.SCHEDULER_VIEW},
                          "Canvas is named outside its bridge; route it through UpstreamConfigBridge")
 
     def test_sourby_code_reaches_canvas_only_where_recorded(self):
@@ -202,6 +208,13 @@ class SchedulerCouplingTest(unittest.TestCase):
         # The one adapter behind the Aurora owner-handoff contract. Everything that hands
         # work to an entity's owner goes through OwnerHandoff, so this is the only name.
         "io.papermc.paper.threadedregions.EntityScheduler",
+        # /perf scheduler and /perf region <world> <x> <z> (dependency-ledger.md section 1.2,
+        # recorded 2026-10-20): the region table and region identity, read without a lock from
+        # a command thread. Read-only; neither view schedules or mutates anything.
+        "io.papermc.paper.threadedregions.ThreadedRegionizer",
+        "io.papermc.paper.threadedregions.TickRegions",
+        "ThreadedRegionizer",
+        "TickRegions",
     }
 
     def test_the_backend_is_named_only_inside_the_adapters(self):
@@ -214,6 +227,9 @@ class SchedulerCouplingTest(unittest.TestCase):
             "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/execution/RegionOwnerHandoff.java",
             "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/execution/region/FoliaRegionBackend.java",
             "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java",
+            # Read-only diagnostics views (dependency-ledger.md section 1.2).
+            "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/perf/LiveSchedulerSource.java",
+            "sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/perf/RegionLocator.java",
         }, "the region backend is named outside the adapters; route it through a contract")
 
     def test_sourby_code_reaches_the_scheduler_only_where_recorded(self):

@@ -177,21 +177,22 @@ class HudBarCommandsTest {
 
     @Test
     void badArgumentsPrintUsageAndChangeNothing() throws Exception {
-        final String[][] bad = {{"maybe"}, {"1"}, {"toggle"}, {"on", "off"}, {"on", "extra"}, {""}};
+        final String[][] bad = {{"maybe"}, {"1"}, {"toggle"}, {"sidebar"}, {"on", "off"}, {"on", "extra"}, {""}};
         for (final String[] args : bad) {
             final ReplyProbe probe = new ReplyProbe();
             final Rig rig = new Rig(probe, true);
             probe.captureStrings(rig.player);
 
             new HudBarCommand("rambar", false).execute(rig.player, "rambar", args);
-            assertEquals("/rambar [on|off]", probe.next().text(), java.util.Arrays.toString(args));
+            assertEquals("/rambar [on|off|bossbar|actionbar]", probe.next().text(), java.util.Arrays.toString(args));
 
             new PerfBarCommand().execute(rig.player, "perfbar", args);
-            assertEquals("/perfbar [on|off]", probe.next().text(), java.util.Arrays.toString(args));
+            assertEquals("/perfbar [on|off|bossbar|actionbar]", probe.next().text(), java.util.Arrays.toString(args));
 
             rig.flush();
             verify(rig.player, never()).showBossBar(any(BossBar.class));
             verify(rig.player, never()).hideBossBar(any(BossBar.class));
+            verify(rig.player, never()).sendActionBar(any(net.kyori.adventure.text.Component.class));
             verifyNoInteractions(rig.pdc);
         }
         assertEquals(0, scheduledUpdaters.get());
@@ -240,7 +241,62 @@ class HudBarCommandsTest {
         verify(rig.player, times(1)).hideBossBar(any(BossBar.class));
     }
 
+    @Test
+    void actionbarArgumentSendsTheBarAsAnActionbarAndStoresTheMode() throws Exception {
+        final ReplyProbe probe = new ReplyProbe();
+        final Rig rig = new Rig(probe, true);
+
+        assertTrue(new HudBarCommand("tpsbar", true).execute(rig.player, "tpsbar", new String[] {"ActionBar"}));
+        assertEquals("TPS bar shown (actionbar)", probe.next().text());
+        verify(rig.pdc).set(eq(new NamespacedKey("sourbycraft", "hud_tps_mode")),
+            eq(PersistentDataType.STRING), eq("actionbar"));
+        verify(rig.player, never()).showBossBar(any(BossBar.class));
+
+        rig.flush();
+        verify(rig.player, times(1)).hideBossBar(any(BossBar.class));
+        verify(rig.player, times(1)).sendActionBar(any(net.kyori.adventure.text.Component.class));
+        assertEquals(1, scheduledUpdaters.get(), "the shared updater is still the only task");
+    }
+
+    @Test
+    void bossbarArgumentReturnsAnActionbarPlayerToTheDefaultMode() throws Exception {
+        final ReplyProbe probe = new ReplyProbe();
+        final Rig rig = new Rig(probe, true);
+        final HudBarCommand command = new HudBarCommand("tpsbar", true);
+
+        command.execute(rig.player, "tpsbar", new String[] {"actionbar"});
+        rig.flush();
+        assertEquals("TPS bar shown (actionbar)", probe.next().text());
+
+        assertTrue(command.execute(rig.player, "tpsbar", new String[] {"bossbar"}));
+        assertEquals("TPS bar shown (bossbar)", probe.next().text());
+        verify(rig.pdc).remove(eq(new NamespacedKey("sourbycraft", "hud_tps_mode")));
+
+        rig.flush();
+        verify(rig.player, times(1)).showBossBar(any(BossBar.class));
+        // One send from the actionbar mode show, one empty send that clears the leftover line.
+        verify(rig.player, times(2)).sendActionBar(any(net.kyori.adventure.text.Component.class));
+    }
+
     // ------------------------------------------------------------------------------- /perfbar
+
+    @Test
+    void perfbarActionbarArgumentSendsTheCombinedLineAndSkipsTheBossbar() throws Exception {
+        final ReplyProbe probe = new ReplyProbe();
+        final Rig rig = new Rig(probe, true);
+        probe.captureStrings(rig.player);
+
+        assertTrue(new PerfBarCommand().execute(rig.player, "perfbar", new String[] {"actionbar"}));
+        assertEquals("SourbyCraft performance bar shown (actionbar)", probe.next().text());
+        verify(rig.pdc).set(eq(new NamespacedKey("sourbycraft", "hud_perf_mode")),
+            eq(PersistentDataType.STRING), eq("actionbar"));
+        verify(rig.pdc).set(eq(new NamespacedKey("sourbycraft", "hud_perf_enabled")),
+            eq(PersistentDataType.BYTE), eq((byte) 1));
+
+        rig.flush();
+        verify(rig.player, never()).showBossBar(any(BossBar.class));
+        verify(rig.player, times(1)).sendActionBar(any(net.kyori.adventure.text.Component.class));
+    }
 
     @Test
     void perfbarTogglesAndPersistsThePreferenceOnThePlayer() throws Exception {

@@ -103,7 +103,7 @@ The table above is qualitative. This is the counted version, produced by
 
 | Surface | Count | What it is |
 | --- | ---: | --- |
-| Engine/Canvas symbols reached from SourbyCraft-owned code | **5** | `GlobalConfiguration.reload()` and `WorldConfig.reload()` in `config/upstream/CanvasConfigBridge`; `SaveAllTicket`, `WorldUnloadResult` and `WorldUnloadAsyncEvent` in `awf/world/AuroraWorldsService` (recounted 2026-10-07; was 2, both in `SourbyCraftConfig`) |
+| Engine/Canvas symbols reached from SourbyCraft-owned code | **7** | `GlobalConfiguration.reload()` and `WorldConfig.reload()` in `config/upstream/CanvasConfigBridge`; `SaveAllTicket`, `WorldUnloadResult` and `WorldUnloadAsyncEvent` in `awf/world/AuroraWorldsService`; `SchedulerUtil` and `WorldRegionizer` in `perf/LiveSchedulerSource` (read-only `/perf scheduler`, added 2026-10-20; recounted 2026-10-07 at 5; was 2, both in `SourbyCraftConfig`) |
 | `io.canvasmc` calls added by feature patches (`minecraft-patches/features` + `paper-patches/features`, scanned since 2026-10-20, audit OBS-7) | **2** | Paper feature 0014 (staged `createWorld`) returns `WorldUnloadResult.SUCCESS` / `FAIL_UNKNOWN`, the retained plugin-API enum CraftServer's unload path already returns; recorded in `PATCH_APPROVED`. No engine internal is called from a patch |
 | Engine baseline (`minecraft-patches/sources`, former Canvas sources) | — | Excluded from the measure: since the 2026-10-05 migration this is the SourbyCraft-owned engine Aurora integrates with, not a dependency of it |
 
@@ -116,7 +116,7 @@ from the Folia lineage rather than originating:
 
 | Namespace | Sites | Used for |
 | --- | ---: | --- |
-| `io.papermc.paper.threadedregions` (internal) | 11 | in three adapter files only: `RegionizedServer`/`TickRegionScheduler` in `execution/region/FoliaRegionBackend`, `EntityScheduler` in `execution/RegionOwnerHandoff`, `RegionizedServer` in `awf/world/AuroraWorldsService` (recounted 2026-10-07; was 4 sites in `PerformanceCollector`, `HudBars`, `AsyncPathCompletion`) |
+| `io.papermc.paper.threadedregions` (internal) | 11 | in three adapter files plus two read-only diagnostics views: `RegionizedServer`/`TickRegionScheduler` in `execution/region/FoliaRegionBackend`, `EntityScheduler` in `execution/RegionOwnerHandoff`, `RegionizedServer` in `awf/world/AuroraWorldsService`; `ThreadedRegionizer`/`TickRegions` (and the scheduler classes) in `perf/LiveSchedulerSource` and `perf/RegionLocator` for `/perf scheduler` and `/perf region <world> <x> <z>` (added 2026-10-20; site count not recounted; recounted 2026-10-07; was 4 sites in `PerformanceCollector`, `HudBars`, `AsyncPathCompletion`) |
 | `ca.spottedleaf.common.time` | 2 | `TickData` and `TickTime` in `RegionTickMetrics` and its holder |
 
 So the real independence question is not "how do we stop depending on Canvas" — that

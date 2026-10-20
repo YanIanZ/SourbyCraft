@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Tue, 20 Oct 2026 15:41:52 +0700
+Subject: [PATCH] SourbyCraft - read the horizontal speed from one field
+
+hasMovedHorizontallyRecently is the one reader of Entity#lastKnownSpeed that
+another region's thread can reach (FollowPlayerRiddenEntityGoal reads the
+entity it follows at any distance). Reading two separately stored doubles
+there could mix x of one tick with z of another, which the Vec3 reference
+0009 replaced could not. computeSpeed now also stores x^2 + z^2 and the
+reader reads that one field; same arithmetic, same threshold.
+
+See docs/architecture/scratch-reentrancy-proof.md (DEV-A).
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index a65e6b188668893e947f56bbb7114c0e1e6b5487..4e5bd99c018f5cc0d6836350edc0cc876c6deb3e 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -407,6 +407,12 @@ public abstract class Entity
+     // (caller allocates a fresh Vec3 from the Player, SulfurCube, or KineticWeapon call
+     // site), so no per-tick alloc from the per-tick field change.
+     private double lastKnownSpeedX, lastKnownSpeedY, lastKnownSpeedZ;
++    // x^2 + z^2 of the speed above, stored by computeSpeed. hasMovedHorizontallyRecently is the one
++    // reader another region's thread can reach (FollowPlayerRiddenEntityGoal reads the entity it
++    // follows, at any distance); reading one field there cannot mix x of one tick with z of another
++    // the way reading two fields could, which the former Vec3 reference could not do either.
++    // See docs/architecture/scratch-reentrancy-proof.md (DEV-A).
++    private double lastKnownSpeedHorizontalSq;
+     private @Nullable Vec3 lastKnownPosition;
+     // SourbyCraft end
+     public net.kyori.adventure.util.TriState visualFire = net.kyori.adventure.util.TriState.NOT_SET; // Paper - improve visual fire API
+@@ -1034,9 +1040,13 @@ public abstract class Entity
+             this.lastKnownPosition = this.position();
+         }
+         final Vec3 pos = this.position();
+-        this.lastKnownSpeedX = pos.x - this.lastKnownPosition.x;
+-        this.lastKnownSpeedY = pos.y - this.lastKnownPosition.y;
+-        this.lastKnownSpeedZ = pos.z - this.lastKnownPosition.z;
++        final double speedX = pos.x - this.lastKnownPosition.x;
++        final double speedY = pos.y - this.lastKnownPosition.y;
++        final double speedZ = pos.z - this.lastKnownPosition.z;
++        this.lastKnownSpeedX = speedX;
++        this.lastKnownSpeedY = speedY;
++        this.lastKnownSpeedZ = speedZ;
++        this.lastKnownSpeedHorizontalSq = speedX * speedX + speedZ * speedZ;
+         this.lastKnownPosition = pos;
+         // SourbyCraft end
+     }
+@@ -1517,7 +1527,8 @@ public abstract class Entity
+         // SourbyCraft start - read from 3-double lastKnownSpeed directly. horizontalDistance is
+         // sqrt(x^2 + z^2); we keep the same threshold (1.0E-5F, which means any movement faster
+         // than 1.0E-5 blocks per tick triggers true, identical to the old Vec3-based check).
+-        return Math.sqrt(this.lastKnownSpeedX * this.lastKnownSpeedX + this.lastKnownSpeedZ * this.lastKnownSpeedZ) > 1.0E-5D;
++        // One field read, same arithmetic: the sum was formed from the same two doubles in computeSpeed.
++        return Math.sqrt(this.lastKnownSpeedHorizontalSq) > 1.0E-5D;
+         // SourbyCraft end
+     }
+ 

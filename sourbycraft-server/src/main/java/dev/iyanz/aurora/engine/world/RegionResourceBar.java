@@ -61,7 +61,15 @@ public abstract class RegionResourceBar {
 
     public enum Placement {
         ACTION_BAR, BOSS_BAR;
-        public static final Codec<Placement> CODEC = Codec.STRING.comapFlatMap((string) -> DataResult.success(Placement.valueOf(string)), Enum::name);
+        public static final Codec<Placement> CODEC = Codec.STRING.comapFlatMap((string) -> {
+            try {
+                return DataResult.success(Placement.valueOf(string));
+            } catch (final IllegalArgumentException unknown) {
+                // a placement this build does not know is a codec error the caller can fall back from,
+                // not an exception out of the player's data load
+                return DataResult.error(() -> "Unknown region bar placement: " + string);
+            }
+        }, Enum::name);
     }
 
     public interface DisplayManager {

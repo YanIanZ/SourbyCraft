@@ -54,12 +54,14 @@ these supply today's implementation of it. This is the set the ledger test pins.
 | `perf/RegionTickMetricsHolder.java` | `ca.spottedleaf.common.time.TickTime` | Generation ownership for the above. |
 | `perf/RegionIoQueue.java` | `ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO` (`getControllerFor`, `getTotalWorkingTasks`) | `perf/StorageBacklog` — `/perf storage` backlog: reads Moonrise's per-world I/O task counters instead of keeping a second count. |
 | `awf/world/AuroraWorldsService.java` | `io.papermc.paper.threadedregions.RegionizedServer` (global tick task queue), `dev.iyanz.aurora.engine.util.ticket.SaveAllTicket` (per-region save ticket), `io.canvasmc.canvas.WorldUnloadResult` (the engine's unload outcome), `io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent` (the point after which an unload is certain) | `api/world/AuroraWorlds` — runtime AWF world lifecycle. World creation and unloading must run on the global tick, and a durable save has to wait for every region of the world to save before the AWF stores commit; the engine exposes neither as public API. The engine's unload outcome is mapped to the API's own `UnloadResult`, so plugins never see a Canvas type. The engine ignores its unload save flag, so an unload without saving makes the world's AWF storages discard once the unload event has passed. |
+| `perf/LiveSchedulerSource.java` | `io.papermc.paper.threadedregions.TickRegions` (`hasStarted`, `getScheduler`, `getRegionChunkShift`), `TickRegionScheduler` (`scheduler`, `getTotalThreadCount`, `getTickRate`, `TickThreadRunner.currentTickingTask`, `RegionScheduleHandle` scheduled start / `hasTasks` / non-schedulable flag / `sourbyTickMetrics`), `RegionizedServer.getGlobalTickData`, `ThreadedRegionizer` (`computeForAllRegionsUnsynchronised`, `ThreadedRegion.getState()`); `ca.spottedleaf.concurrentutil.scheduler.{Scheduler, SchedulableTick}`; **engine/Canvas:** `dev.iyanz.aurora.engine.threadedregions.SchedulerUtil` (`getSchedulerInfo()`: scheduler kind and configured threads), `io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion.State` (READY vs TRANSIENT) | `perf/SchedulerQueueCollector.Source` — `/perf scheduler`: scheduler kind/threads, runner activity, per-world region counts by state, lateness and pending tasks, read lock-free (racy reads labelled approximate; what needs a lock is shown as n/a). The third declared Canvas/engine doorway (§5). Report only, writes nothing. |
+| `perf/RegionLocator.java` | `io.papermc.paper.threadedregions.ThreadedRegionizer` (`getRegionAtUnsynchronised`, `ThreadedRegion.getData()`), `TickRegions.TickRegionData.id` | `RegionLocator.Topology` / `RegionLocator.WorldHandle` (nested `LiveTopology`, `LiveWorld`) — `/perf region <world> <x> <z>`: the world (matched case-insensitively, like Bukkit) and the region id owning a chunk, read from the single-writer/multi-reader region table without the write lock (one re-read when a merge/split has the owner unpublished). Telemetry comes from `RegionMetricsRegistry.forEachUnexpiredOf`, which reads published snapshots without refreshing any generation. |
 
 ### 1.3 `COMPATIBILITY_ONLY`
 
 | File | Dependency | Reason |
 |---|---|---|
-| `config/upstream/CanvasConfigBridge.java` | `dev.iyanz.aurora.engine.GlobalConfiguration`, `WorldConfig` (formerly `io.canvasmc.canvas`) | Reloads the engine config so an existing deployment's `canvas-server.yml` keeps working. No Aurora behaviour reads it; it sits behind `config/upstream/UpstreamConfigBridge`. This is the **only** engine-config reference in Aurora's own source. The only other engine doorway is `awf/world/AuroraWorldsService.java` (§1.2), for world lifecycle. |
+| `config/upstream/CanvasConfigBridge.java` | `dev.iyanz.aurora.engine.GlobalConfiguration`, `WorldConfig` (formerly `io.canvasmc.canvas`) | Reloads the engine config so an existing deployment's `canvas-server.yml` keeps working. No Aurora behaviour reads it; it sits behind `config/upstream/UpstreamConfigBridge`. This is the **only** engine-config reference in Aurora's own source. The other engine doorways are `awf/world/AuroraWorldsService.java` (§1.2), for world lifecycle, and `perf/LiveSchedulerSource.java` (§1.2), for read-only `/perf scheduler` diagnostics. |
 | `perf/NetworkMetrics.java` | `io.papermc.paper.network.ChannelInitializeListenerHolder`, Netty `ChannelPipeline` | The only hook for adding a handler to every connection's pipeline. Paper marks it unofficial. If it disappears, the `network counters` boot stage fails in isolation and `/perf network` reports nothing. It is not a threaded-regions internal, so the ledger test does not pin it; it is listed here by hand. |
 | `engine/threadedregions/scheduler/AuroraEdfScheduler.java` | LeafPile `Scheduler`, public SourbyCraft `SchedulableTick` fields/methods, `LinkedSortedSet`, `ConcurrentUtil`, `TimeUtil`, `LazyRunnable` | Source-owned derivative of LeafPile v1.2.0. The parked EDF patch (`minecraft-patches/parked/0028-…`, held since 2026-10-07, not built) would select it for EDF and publish task state through a compatible public volatile field. Existing EDF worker budget, parking and region thread factory retained. GPL/credits in `NOTICE_LEAFPILE`; source acceptance pending, not an independent scheduler. |
 
@@ -158,12 +160,16 @@ build dependency; the Canvas adapter and the Folia implementation remain archive
 
 ## 5. What this ledger says about independence
 
-Aurora's own source touches upstream **internals** in exactly four files (§1.2), and Canvas
-specifically in exactly one (§1.3). Everything else is either public API the product needs, a
-patch against vanilla behaviour, or build tooling.
+Aurora's own source touches upstream **internals** in exactly nine files: the eight in §1.2 and
+the one in §1.3. The Canvas/engine packages (`io.canvasmc`, `dev.iyanz.aurora.engine`) are reached
+from exactly three of them: `config/upstream/CanvasConfigBridge.java` (§1.3, engine config),
+`awf/world/AuroraWorldsService.java` (§1.2, world lifecycle) and `perf/LiveSchedulerSource.java`
+(§1.2, `/perf scheduler` diagnostics, read-only). Everything else is either public API the product
+needs, a patch against vanilla behaviour, or build tooling.
 
-That is the shape §25 asks for. The upstream implementation is replaceable at four seams
-without redesigning anything above them — which is the claim, and now the test.
+That is the shape §25 asks for. The upstream implementation is replaceable at the contracts listed
+in §1.2 and §1.3 without redesigning anything above them — which is the claim, and now the test
+(`UpstreamDependencyLedgerTest`).
 
 ---
 

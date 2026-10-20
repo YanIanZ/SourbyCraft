@@ -114,6 +114,29 @@ public final class RegionMetricsRegistry {
         this.forEachUnexpired(nowNanos, consumer, false);
     }
 
+    /**
+     * Read-only lookup for diagnostics ({@code /perf region}): the unexpired generations of one
+     * (world, region), each with the snapshot its metrics last published (lock-free, normally the
+     * collector's once-a-second publication). Unlike {@link #forEachUnexpired}, it never calls the
+     * synchronized {@code refreshSnapshot()} on any generation and never removes an expired one:
+     * filtering happens first, and nothing is written.
+     */
+    public void forEachUnexpiredOf(final long worldId, final long regionId, final long nowNanos,
+                                   final Consumer<GenerationView> consumer) {
+        Objects.requireNonNull(consumer, "consumer");
+        for (final Generation generation : this.generations.values()) {
+            if (generation.worldId != worldId || generation.regionId != regionId) {
+                continue;
+            }
+            final boolean active = generation.isActive();
+            if (!active && expired(nowNanos, generation.retiredAtNanos)) {
+                continue;
+            }
+            consumer.accept(new GenerationView(generation.generationId, generation.worldId,
+                generation.regionId, active, generation.metrics, generation.metrics.snapshot(nowNanos)));
+        }
+    }
+
     private void forEachUnexpired(final long nowNanos, final Consumer<GenerationView> consumer,
                                   final boolean refresh) {
         Objects.requireNonNull(consumer, "consumer");

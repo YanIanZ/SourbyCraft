@@ -21,8 +21,8 @@ import org.junit.jupiter.api.Test;
  * The dependency ledger, enforced.
  *
  * <p>{@code docs/architecture/dependency-ledger.md} says Aurora's own source reaches into
- * upstream internals in four files and into Canvas in one. Written down, that claim decays: the
- * next file to import a Folia scheduler internal does so in a review nobody connects to a
+ * upstream internals only in the files it lists, and into Canvas/the engine through three.
+ * Written down, that claim decays: the next file to import a Folia scheduler internal does so in a review nobody connects to a
  * document. Here it fails a test instead.</p>
  *
  * <p>This deliberately does not forbid upstream <i>public</i> API. Bukkit, the Paper plugin
@@ -52,7 +52,11 @@ public class UpstreamDependencyLedgerTest {
         "dev/iyanz/sourbycraft/perf/RegionTickMetricsHolder.java",
         "dev/iyanz/sourbycraft/perf/RegionIoQueue.java",
         "dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java",
-        "dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java");
+        "dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java",
+        // /perf scheduler: reads the region scheduler's published/racy fields lock-free (§1.2).
+        "dev/iyanz/sourbycraft/perf/LiveSchedulerSource.java",
+        // /perf region: the region id owning a chunk, from the SWMR region table (§1.2).
+        "dev/iyanz/sourbycraft/perf/RegionLocator.java");
 
     private static final String LEDGER = "docs/architecture/dependency-ledger.md";
 
@@ -208,18 +212,22 @@ public class UpstreamDependencyLedgerTest {
     }
 
     @Test
-    void canvasIsReachableFromExactlyOnePlace() throws IOException {
+    void canvasIsReachableOnlyThroughItsRecordedDoorways() throws IOException {
         // "core runtime can be reasoned about without reading Canvas service classes" is the T6
-        // gate's last line. It holds only while Canvas has one doorway.
+        // gate's last line. It holds only while every Canvas/engine doorway is a recorded one.
         final List<String> touching = leaks(sourceRoot()).stream()
             .filter(leak -> leak.symbols().stream().anyMatch(s -> s.startsWith("io.canvasmc.") || s.startsWith("dev.iyanz.aurora.engine.")))
             .map(Leak::file)
             .toList();
 
-        // Two doorways: the config bridge, and the world-lifecycle adapter behind AuroraWorlds
-        // (dependency-ledger.md section 1.2), which needs the engine's unload outcome.
+        // Three doorways: the config bridge; the world-lifecycle adapter behind AuroraWorlds
+        // (dependency-ledger.md section 1.2), which needs the engine's unload outcome; and the
+        // /perf scheduler reader (section 1.2), which needs the engine's scheduler kind and
+        // configured thread count (SchedulerUtil) and the region READY/TRANSIENT split (the
+        // Canvas region-state type). Declared here rather than reached around by string matching.
         assertEquals(java.util.Set.of("dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java",
-                "dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java"),
+                "dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java",
+                "dev/iyanz/sourbycraft/perf/LiveSchedulerSource.java"),
             new java.util.HashSet<>(touching), "Canvas should be reachable only through its recorded doorways");
     }
 

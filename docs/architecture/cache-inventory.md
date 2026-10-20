@@ -8,6 +8,8 @@ heap-retention test under player churn is still open.
 | Owner | Collection | Owned by / cleared when | Bound |
 | --- | --- | --- | --- |
 | `hud/HudBars` | `TPS_VIEWERS`, `RAM_VIEWERS`, `PERF_VIEWERS`, `ANY` (UUID) | Removed in `onQuit` (quit listener) and on toggle-off; cleared on shutdown | Online players |
+| `hud/HudBars` | `TPS_ACTIONBAR`, `RAM_ACTIONBAR`, `PERF_ACTIONBAR` (UUID → session token) | Set with a fresh token on each actionbar enable or mode re-select; removed on toggle-off, switch to boss bar, perf retirement, `onQuit` and `close()` | Online players |
+| `hud/HudBars` | `SESSIONS` (`AtomicLong` token counter) | Never reset, not even by `close()`; each actionbar subscription takes the next value | One `long`; no per-player storage |
 | `util/GeoUtil` | `cache` (IP → location) | Cleared on shutdown | `MAX_CACHE` 1024; halves when full |
 | `brand/PluginLoadDiagnostics` | `ENTRIES` (load failures) | Never cleared (process lifetime) | 16, oldest evicted |
 | `brand/PluginLoadDiagnostics` | `ENABLE_FAILURES` (display names) | Never cleared | Plugins that failed to enable in this run |

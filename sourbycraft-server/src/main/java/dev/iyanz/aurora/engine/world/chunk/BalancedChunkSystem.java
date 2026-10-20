@@ -8,7 +8,6 @@ import ca.spottedleaf.concurrentutil.list.COWArrayList;
 import ca.spottedleaf.concurrentutil.util.LazyRunnable;
 import ca.spottedleaf.concurrentutil.util.Priority;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -50,15 +49,21 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
     }
 
     public Thread[] getAliveThreads() {
-        final WorkerThread[] threads = this.aliveThreads.getArray();
-
-        return Arrays.copyOf(threads, threads.length, Thread[].class);
+        return threadsOf(this.aliveThreads.getArray());
     }
 
     public Thread[] getCoreThreads() {
-        final WorkerThread[] threads = this.threads.getArray();
+        return threadsOf(this.threads.getArray());
+    }
 
-        return Arrays.copyOf(threads, threads.length, Thread[].class);
+    // a WorkerThread is a QueueExecutorRunnable wrapping a Thread, not a Thread: Arrays.copyOf(.., Thread[].class)
+    // threw ArrayStoreException whenever the pool had a worker (so the thread ledger read the pools as unknown)
+    private static Thread[] threadsOf(final WorkerThread[] workers) {
+        final Thread[] out = new Thread[workers.length];
+        for (int i = 0; i < workers.length; ++i) {
+            out[i] = workers[i].thread;
+        }
+        return out;
     }
 
     /**

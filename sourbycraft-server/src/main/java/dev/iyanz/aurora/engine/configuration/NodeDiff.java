@@ -148,7 +148,10 @@ public class NodeDiff {
     }
 
     private static void applyChange(final Change change, final int wrapLimit) {
-        final List<NodeTuple> tuples = change.fileParent().getValue();
+        // SnakeYAML hands out an immutable (empty) tuple list for a mapping that holds only comments, and the
+        // changes below add and remove tuples: work on a mutable copy and put it back on the node
+        final List<NodeTuple> tuples = new ArrayList<>(change.fileParent().getValue());
+        change.fileParent().setValue(tuples);
 
         switch (change.type()) {
             case ADD -> {

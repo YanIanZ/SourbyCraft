@@ -5,12 +5,18 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
-/** Combined HUD preference is changed only on the command player's owning region. */
+import java.util.Locale;
+
+/**
+ * Combined TPS/MSPT/RAM/CPU HUD toggle. Like {@code /tpsbar} and {@code /rambar} it supports a
+ * per-player {@code bossbar} (default) or {@code actionbar} delivery mode; the choice is stored in
+ * the player's data and survives a rejoin.
+ */
 public final class PerfBarCommand extends Command {
     public PerfBarCommand() {
         super("perfbar");
         this.description = "Toggle the combined TPS/MSPT/RAM/CPU HUD";
-        this.usageMessage = "/perfbar [on|off]";
+        this.usageMessage = "/perfbar [on|off|bossbar|actionbar]";
         setPermission("sourbycraft.command.perfbar");
     }
 
@@ -20,13 +26,28 @@ public final class PerfBarCommand extends Command {
             sender.sendMessage("Players only: /perfbar is a client HUD.");
             return true;
         }
-        if (args.length > 1 || args.length == 1
-            && !args[0].equalsIgnoreCase("on") && !args[0].equalsIgnoreCase("off")) {
+        if (args.length > 1) {
             sender.sendMessage(usageMessage);
             return true;
         }
-        final boolean shown = HudBars.setPerf(player, args.length == 0 ? null : args[0].equalsIgnoreCase("on"));
-        sender.sendMessage("SourbyCraft performance bar " + (shown ? "shown" : "hidden"));
+        final boolean shown;
+        String suffix = "";
+        if (args.length == 0) {
+            shown = HudBars.setPerf(player, null);
+        } else {
+            final String argument = args[0].toLowerCase(Locale.ROOT);
+            final HudBars.DisplayMode mode = HudBars.DisplayMode.parse(argument);
+            if (mode != null) {
+                shown = HudBars.setPerfMode(player, mode);
+                suffix = " (" + argument + ")";
+            } else if (argument.equals("on") || argument.equals("off")) {
+                shown = HudBars.setPerf(player, argument.equals("on"));
+            } else {
+                sender.sendMessage(usageMessage);
+                return true;
+            }
+        }
+        sender.sendMessage("SourbyCraft performance bar " + (shown ? "shown" : "hidden") + suffix);
         return true;
     }
 }

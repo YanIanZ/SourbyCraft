@@ -202,10 +202,14 @@ public final class AwfEngine {
 
     /** Stops treating a world as managed. Called after the world is deleted. */
     public static void release(final String worldName) {
-        global().managed.remove(worldName);
-        global().templateOf.remove(worldName);
-        global().pruning.remove(worldName);
-        global().bounds.remove(worldName);
+        global().releaseWorld(worldName);
+    }
+
+    void releaseWorld(final String worldName) {
+        this.managed.remove(worldName);
+        this.templateOf.remove(worldName);
+        this.pruning.remove(worldName);
+        this.bounds.remove(worldName);
     }
 
     /** Where templates are kept: one folder per template, holding one store per storage folder. */
@@ -566,7 +570,13 @@ public final class AwfEngine {
         return failed;
     }
 
-    /** Starts due commits. Called once a second by the metrics collector; never blocks. */
+    /**
+     * Starts due commits. Called once a second by {@link AwfMaintenanceDriver} on its own thread.
+     * Does no I/O and does not wait for a commit, but is not lock-free: handing a commit to the
+     * storage lane takes the lane queue's lock, and a commit rejected at once logs its warning on
+     * the calling thread. Safe to call concurrently (each storage claims its commit with a CAS),
+     * but the driver never does.
+     */
     public static void maintainAll() {
         final AwfEngine current = global;
         if (current == null) return;

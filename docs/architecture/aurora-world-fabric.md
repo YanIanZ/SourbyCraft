@@ -456,7 +456,7 @@ reading every chunk:
 | FILE store (`region.awf/` directory) | 11.9 ms | 254.4 ms | 75.6 µs |
 | Redis store, loopback, AOF everysec | 2.5 ms | 96.2 ms | 28.6 µs |
 
-Writing all 3,364 chunks once: FILE 14.9 s (an fsync per chunk object), Redis 1.6 s (one commit,
+Writing all 3,364 chunks once: FILE 14.9 s (an fsync per chunk object, measured before 2026-10-20; FILE now forces all new objects in one pass before the index — local uncertified A/B on another disk, 34.1 s → 7.9 s median), Redis 1.6 s (one commit,
 one `WAITAOF`). For one real island (6 chunks): reading every chunk from `.slime` (inflate +
 parse + convert to chunk NBT) 0.95 ms against 0.07 ms from the same island as `.awf`, but the
 `.awf` file was larger (12,118 vs 8,091 bytes): per-chunk compression loses what a whole-blob
@@ -497,14 +497,16 @@ Sourby side: `AwfEngine`, `AwfRegionStorage`, `AwfSettings`.
   deletes afterwards belongs to AWF; untouched chunks are still read from the region file.
   Region files under an AWF store are never written or cleared.
 - **Durability.** A write is held in memory. A commit starts on the governed `STORAGE` lane once
-  written chunks have waited `aurora.awf.commit-interval-seconds` (checked once a second by the
-  metrics collector thread, which stops early in shutdown). The check runs first on every pass,
-  in its own `try`, before the metrics are collected: until 2026-10-14 it ran after them and was
-  skipped whenever a collection ran late (over one period), took over one period, or threw, i.e.
-  under exactly the load where commits matter, so "the writes since the last interval" could be
-  many intervals (AWF-3; `PerformanceCollectorTest.lateSlowOrFailingCollectionsStillRunStorageMaintenance`).
-  The guarantee is still bounded by that one thread: if the collector thread itself stalls, so do
-  periodic commits. At shutdown, feature patch 0019 commits and
+  written chunks have waited `aurora.awf.commit-interval-seconds` (RESTART_REQUIRED; read once when
+  the AWF engine is first created). A daemon thread of its own, `SourbyCraft-AWF-Maintenance`
+  (`AwfMaintenanceDriver`, started and stopped by `MetricsRuntime`), checks once a second, one second
+  after each pass ends. Worst-case loss bound: commit interval + up to 1 s pass delay + commit time.
+  Until 2026-10-14 this check ran on the metrics collector thread after the metrics were collected,
+  and was skipped whenever a collection ran late, took over one period, or threw, i.e. under exactly
+  the load where commits matter, so "the writes since the last interval" could be many intervals
+  (AWF-3). Each driver step has its own `try`/`catch`, and a stalled collector no longer stops commits
+  (`AwfMaintenanceIndependenceTest`, `AwfMaintenanceDriverTest`). Periodic commits still stop if the
+  driver thread itself stalls. At shutdown, feature patch 0019 commits and
   closes every open storage in `MinecraftServer.stopServer`, right after
   `MoonriseRegionFileIO.flush(server)`, the point where every chunk save has reached its storage.
   This is needed because Folia's shutdown never calls `RegionFileStorage.flush()`/`close()`; CI
@@ -687,7 +689,7 @@ unit tests plus one local boot (see the end of this list); no soak, no multi-ser
   `WorldUnloadCompletion`: `FAIL_UNKNOWN` on a throw (still rethrown, so the thread's handler stops
   the server as before), `SUCCESS` otherwise (`WorldUnloadCompletionTest`). The world operation
   gate now also logs, once, any operation holding its world over 5 minutes, checked once a second
-  with the AWF commits (`WorldOperationGateTest.aLeaseHeldPastTheThresholdIsReportedOnceAndAReleasedOneNever`).
+  on the AWF maintenance thread (`WorldOperationGateTest.aLeaseHeldPastTheThresholdIsReportedOnceAndAReleasedOneNever`).
 - **AWF-9 Slime import memory.** Blobs up to 1 GiB, unlimited NBT accounting and a whole-file
   `readAllBytes` let a crafted file exhaust the heap. Now one limit, JVM property
   `-Dsourbycraft.awf.slime.max-bytes` (default 256 MiB, read at each import, so LIVE for the next

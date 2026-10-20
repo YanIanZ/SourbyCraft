@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import me.lucko.spark.paper.common.platform.world.CountMap;
 import me.lucko.spark.paper.common.platform.world.WorldInfoProvider;
-import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -41,7 +41,12 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
     private final Server server;
 
     public FoliaWorldInfoProvider() {
-        this.server = Bukkit.getServer();
+        this(Bukkit.getServer());
+    }
+
+    /** Test seam: a provider over a given server instead of the process-wide {@code Bukkit.getServer()}. */
+    FoliaWorldInfoProvider(final Server server) {
+        this.server = server;
     }
 
     @Override
@@ -130,7 +135,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
         return this.server.getDatapackManager().getEnabledPacks().stream()
             .map(pack -> new DataPackInfo(
                 pack.getName(),
-                Component.text().append(pack.getDescription()).content(),
+                PlainTextComponentSerializer.plainText().serialize(pack.getDescription()), // was Component.text().append(..).content(), which is always ""
                 pack.getSource().toString().toLowerCase(Locale.ROOT).replace("_", "")
             )).toList();
     }

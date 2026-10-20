@@ -151,7 +151,9 @@ public class ConfigurationProvider {
             final Node fileRepresentation = composeFromFile(absolutePath);
             final Node objectRepresentation = YAML.represent(defaultObj);
 
-            // file representation can be null if the user completely empties the config
+            // file representation can be null if the user completely empties the config. A file holding
+            // only comments composes to a mapping with an empty (immutable) tuple list, which NodeDiff
+            // now copies before mutating
             if (fileRepresentation == null) {
                 floodFill(absolutePath, wrapLimit, resolver, defaultObj, header);
                 return;

@@ -36,6 +36,15 @@ import java.util.regex.Pattern;
  * crash at any earlier step leaves the previous generation authoritative, and leftovers are removed
  * the next time the store is opened.</p>
  *
+ * <p>Durability order within a commit: a directory chain created for the first commit is made
+ * durable first (each new directory's parent forced); every blob and the manifest are written,
+ * then forced in one pass, then the temporary generation directory is forced (their entries);
+ * after verification the directory is renamed and {@code generations/} forced; the pointer is
+ * written, forced, renamed and the root forced. Whatever a snapshot references (for
+ * {@link AwfWorldStore}, its objects) must be durable before {@link #commit} is called: this store
+ * forces nothing on the caller's behalf. A directory force that fails fails the commit
+ * ({@link Durability#DISK}).</p>
+ *
  * <p>Scope: this commits whole snapshots of small blobs. {@link AwfWorldStore} builds the FILE
  * backend on it: the per-generation blob is the chunk index, and chunk bytes live in its
  * content-addressed object store, which is where INCREMENTAL, CHECKPOINT and FULL differ.</p>
@@ -76,6 +85,7 @@ public final class GenerationStore {
     private final WorldRole role;
     private final int retainedGenerations;
     private final StageHook hook;
+    private final Durability durability;
 
     /**
      * Opens a store, removing anything an interrupted commit left behind.
@@ -91,14 +101,20 @@ public final class GenerationStore {
 
     static GenerationStore open(final Path root, final WorldRole role, final int retainedGenerations,
                                 final StageHook hook) throws IOException {
+        return open(root, role, retainedGenerations, hook, Durability.DISK);
+    }
+
+    /** As {@link #open(Path, WorldRole, int)}, with a crash hook and a durability seam for tests. */
+    static GenerationStore open(final Path root, final WorldRole role, final int retainedGenerations,
+                                final StageHook hook, final Durability durability) throws IOException {
         refuseRegionThread();
-        final GenerationStore store = new GenerationStore(root, role, retainedGenerations, hook);
+        final GenerationStore store = new GenerationStore(root, role, retainedGenerations, hook, durability);
         store.recover();
         return store;
     }
 
     private GenerationStore(final Path root, final WorldRole role, final int retainedGenerations,
-                            final StageHook hook) {
+                            final StageHook hook, final Durability durability) {
         this.root = Objects.requireNonNull(root, "root");
         this.role = Objects.requireNonNull(role, "role");
         if (retainedGenerations < 1) {
@@ -106,6 +122,7 @@ public final class GenerationStore {
         }
         this.retainedGenerations = retainedGenerations;
         this.hook = hook;
+        this.durability = Objects.requireNonNull(durability, "durability");
     }
 
     /** The committed generation number, or {@code 0} when nothing has been committed. */
@@ -130,20 +147,28 @@ public final class GenerationStore {
         final long next = Math.max(previous == null ? 0L : previous.generation, highestGenerationDir()) + 1;
 
         final Path generations = this.root.resolve(GENERATIONS);
-        Files.createDirectories(generations);
+        // A fresh store: the entries naming generations/, the root and any ancestor are made
+        // durable before the generation that depends on them is.
+        this.durability.createDirectoriesDurably(generations);
         final Path temp = generations.resolve(next + ".tmp");
         deleteTree(temp);
         Files.createDirectory(temp);
 
-        // 1. Snapshot -> temporary generation.
+        // 1. Snapshot -> temporary generation: write every blob and the manifest, then make them
+        //    durable in one pass — the files, then the directory that holds their entries.
         final StringBuilder manifest = new StringBuilder();
         for (final Map.Entry<String, byte[]> blob : blobs.entrySet()) {
-            writeDurably(temp.resolve(blob.getKey()), blob.getValue());
+            write(temp.resolve(blob.getKey()), blob.getValue());
             manifest.append(blob.getKey()).append('\t').append(blob.getValue().length).append('\t')
                 .append(sha256(blob.getValue())).append('\n');
         }
         final byte[] manifestBytes = manifest.toString().getBytes(StandardCharsets.UTF_8);
-        writeDurably(temp.resolve(MANIFEST), manifestBytes);
+        write(temp.resolve(MANIFEST), manifestBytes);
+        for (final String name : blobs.keySet()) {
+            this.durability.forceFile(temp.resolve(name));
+        }
+        this.durability.forceFile(temp.resolve(MANIFEST));
+        this.durability.forceDirectory(temp);
         this.hook.reached(Stage.SNAPSHOT_WRITTEN);
 
         // 2. Verify by reading back what the filesystem actually holds.
@@ -153,14 +178,15 @@ public final class GenerationStore {
         // 3. Publish the generation directory under its final name. Still not authoritative.
         final Path published = generations.resolve(Long.toString(next));
         moveAtomically(temp, published);
-        forceDirectory(generations);
+        this.durability.forceDirectory(generations);
         this.hook.reached(Stage.GENERATION_PUBLISHED);
 
         // 4. Commit: replace the pointer. Before this line the previous generation is current.
         final Path pointerTemp = this.root.resolve(CURRENT + ".tmp");
-        writeDurably(pointerTemp, (next + "\t" + sha256(manifestBytes) + "\n").getBytes(StandardCharsets.UTF_8));
+        write(pointerTemp, (next + "\t" + sha256(manifestBytes) + "\n").getBytes(StandardCharsets.UTF_8));
+        this.durability.forceFile(pointerTemp);
         moveAtomically(pointerTemp, this.root.resolve(CURRENT));
-        forceDirectory(this.root);
+        this.durability.forceDirectory(this.root);
         this.hook.reached(Stage.COMMITTED);
 
         prune(next);
@@ -338,14 +364,14 @@ public final class GenerationStore {
         return blobs;
     }
 
-    private static void writeDurably(final Path file, final byte[] bytes) throws IOException {
+    /** Writes a file completely; durability comes from the force pass that follows. */
+    private static void write(final Path file, final byte[] bytes) throws IOException {
         try (FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE,
             StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
             final java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(bytes);
             while (buffer.hasRemaining()) {
                 channel.write(buffer);
             }
-            channel.force(true);
         }
     }
 
@@ -354,18 +380,6 @@ public final class GenerationStore {
             Files.move(from, to, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (final AtomicMoveNotSupportedException notAtomic) {
             Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
-
-    /**
-     * Makes a rename durable where the platform allows it. Linux accepts fsync on a directory;
-     * Windows refuses to open one, and there the rename's own durability is all there is.
-     */
-    private static void forceDirectory(final Path dir) {
-        try (FileChannel channel = FileChannel.open(dir, StandardOpenOption.READ)) {
-            channel.force(true);
-        } catch (final IOException | UnsupportedOperationException unsupported) {
-            // Best effort by design; see above.
         }
     }
 

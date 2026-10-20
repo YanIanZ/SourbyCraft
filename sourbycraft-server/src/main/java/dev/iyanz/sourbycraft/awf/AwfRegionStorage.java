@@ -319,7 +319,9 @@ public final class AwfRegionStorage {
 
     /**
      * Starts a commit on the storage lane when writes have waited at least the commit interval and
-     * none is already running. Never blocks; called once a second.
+     * none is already running. Never waits for the commit to finish, but submitting it takes the
+     * storage lane's queue lock, and a commit the lane rejects at once logs its warning on the
+     * calling thread. Called once a second by {@link AwfMaintenanceDriver}.
      *
      * @return whether a commit was started
      */
