@@ -509,7 +509,7 @@
 +        spawnPosComplete.addWaiter((spawnLoc, _) -> {
 +            // Canvas start - region threading
 +            // call event, update pos and velocity
-+            final io.canvasmc.canvas.event.PlayerRespawnAsyncEvent respawnEvent = new io.canvasmc.canvas.event.PlayerRespawnAsyncEvent(
++            final PlayerRespawnAsyncEvent respawnEvent = new PlayerRespawnAsyncEvent(
 +                ServerPlayer.this.getBukkitEntity(),
 +                spawnLoc,
 +                respawnArgs.isBedSpawn,
@@ -567,7 +567,7 @@
 +                    }
 +                    // Canvas start - region threading
 +
-+                    new io.canvasmc.canvas.event.PlayerPostRespawnAsyncEvent(
++                    new PlayerPostRespawnAsyncEvent(
 +                        ServerPlayer.this.getBukkitEntity(),
 +                        spawnLoc,
 +                        respawnArgs.isBedSpawn,
@@ -887,7 +887,7 @@
 +            // the end credits, or else we get the player stuck in the
 +            // void, and they can't escape...
 +            this.canvas$isDisplayingEndCredits = !this.seenCredits && !this.level().paperConfig().misc.disableEndCredits; // ensure we respect paper config
-+            io.canvasmc.canvas.event.PlayerViewEndCreditsEvent viewEndCreditsEvent = new io.canvasmc.canvas.event.PlayerViewEndCreditsEvent(
++            PlayerViewEndCreditsEvent viewEndCreditsEvent = new PlayerViewEndCreditsEvent(
 +                getBukkitEntity(), this.canvas$isDisplayingEndCredits
 +            );
 +            viewEndCreditsEvent.callEvent();

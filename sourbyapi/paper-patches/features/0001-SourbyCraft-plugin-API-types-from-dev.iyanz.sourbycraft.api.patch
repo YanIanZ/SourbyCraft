@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 01:52:24 +0700
+Subject: [PATCH] SourbyCraft - plugin API types from dev.iyanz.sourbycraft.api
+
+The region-threading plugin API (formerly Canvas's API package) moved to
+dev.iyanz.sourbycraft.api in Build 48 (owner decision 2026-10-21, no
+compatibility shim). The engine baseline names these types by their
+simple names only, because a baseline line may not name a SourbyCraft
+package; this patch supplies the imports.
+
+diff --git a/src/main/java/io/papermc/paper/datapack/Datapack.java b/src/main/java/io/papermc/paper/datapack/Datapack.java
+index b6be0ed3cfc379827ec38415c0a13b3cf0b7280b..fef0e0ab31666a04ef4af5025ac1f57c835e0508 100644
+--- a/src/main/java/io/papermc/paper/datapack/Datapack.java
++++ b/src/main/java/io/papermc/paper/datapack/Datapack.java
+@@ -4,6 +4,7 @@ import net.kyori.adventure.text.Component;
+ import org.jetbrains.annotations.ApiStatus;
+ import org.jetbrains.annotations.Contract;
+ import org.jspecify.annotations.NullMarked;
++import dev.iyanz.sourbycraft.api.Unsupported;
+ 
+ /**
+  * This is a snapshot of a datapack on the server. It
+diff --git a/src/main/java/org/bukkit/Server.java b/src/main/java/org/bukkit/Server.java
+index 44e65a550e80b811e08b61d37bdbef10b294ad87..34d8c0d8db15c639503647c9abeb76474f25e4f7 100644
+--- a/src/main/java/org/bukkit/Server.java
++++ b/src/main/java/org/bukkit/Server.java
+@@ -67,6 +67,10 @@ import org.jetbrains.annotations.ApiStatus;
+ import org.jetbrains.annotations.Contract;
+ import org.jetbrains.annotations.NotNull;
+ import org.jetbrains.annotations.Nullable;
++import dev.iyanz.sourbycraft.api.region.RegionThreadingTickManager;
++import dev.iyanz.sourbycraft.api.region.RegionTickData;
++import dev.iyanz.sourbycraft.api.Unsupported;
++import dev.iyanz.sourbycraft.api.world.WorldUnloadResult;
+ 
+ /**
+  * Represents a server implementation.
+diff --git a/src/main/java/org/bukkit/ServerTickManager.java b/src/main/java/org/bukkit/ServerTickManager.java
+index 13d25a4ac8d13426a975109b0d1270f4a20ee98b..86ad1c75f3992e067395cba76b09b9e6d144349f 100644
+--- a/src/main/java/org/bukkit/ServerTickManager.java
++++ b/src/main/java/org/bukkit/ServerTickManager.java
+@@ -2,6 +2,7 @@ package org.bukkit;
+ 
+ import org.bukkit.entity.Entity;
+ import org.jetbrains.annotations.NotNull;
++import dev.iyanz.sourbycraft.api.Unsupported;
+ 
+ /**
+  * Manages ticking within a server.
+diff --git a/src/main/java/org/bukkit/World.java b/src/main/java/org/bukkit/World.java
+index 6e4f2be2b01bbc32587781652bf6c16f9b6aa841..802d75e24a26a78a436e969ef220fa17aead2cdf 100644
+--- a/src/main/java/org/bukkit/World.java
++++ b/src/main/java/org/bukkit/World.java
+@@ -51,6 +51,8 @@ import org.jetbrains.annotations.ApiStatus;
+ import org.jetbrains.annotations.Contract;
+ import org.jetbrains.annotations.NotNull;
+ import org.jetbrains.annotations.Nullable;
++import dev.iyanz.sourbycraft.api.Unsupported;
++import dev.iyanz.sourbycraft.api.region.WorldRegionizer;
+ 
+ /**
+  * Represents a world, which may contain entities, chunks and blocks
+diff --git a/src/main/java/org/bukkit/entity/Entity.java b/src/main/java/org/bukkit/entity/Entity.java
+index 52d3e49712e9d6e0adcadde12b272f37d519c465..8fc4806645ea8c0a79971e4c4d60b4b1b0b6e98d 100644
+--- a/src/main/java/org/bukkit/entity/Entity.java
++++ b/src/main/java/org/bukkit/entity/Entity.java
+@@ -36,6 +36,7 @@ import org.jetbrains.annotations.ApiStatus;
+ import org.jetbrains.annotations.Contract;
+ import org.jetbrains.annotations.NotNull;
+ import org.jetbrains.annotations.Nullable;
++import dev.iyanz.sourbycraft.api.Unsupported;
+ 
+ /**
+  * Represents a base entity in the world
+diff --git a/src/main/java/org/bukkit/map/MapPalette.java b/src/main/java/org/bukkit/map/MapPalette.java
+index 9588aa3f50c939da48d2f4b36186ac1ad5572ad0..e2deb3c15c0f54f66d6f0d0c7dffea491b917197 100644
+--- a/src/main/java/org/bukkit/map/MapPalette.java
++++ b/src/main/java/org/bukkit/map/MapPalette.java
+@@ -7,6 +7,8 @@ import java.awt.Image;
+ import java.awt.image.BufferedImage;
+ import org.jetbrains.annotations.NotNull;
+ import org.jetbrains.annotations.Nullable;
++import dev.iyanz.sourbycraft.api.simd.SIMDDetection;
++import dev.iyanz.sourbycraft.api.simd.VectorMapPalette;
+ 
+ /**
+  * Represents the palette that map items use.
+diff --git a/src/main/java/org/bukkit/scheduler/BukkitScheduler.java b/src/main/java/org/bukkit/scheduler/BukkitScheduler.java
+index 011d9af81224b92c9df9e3e529a903ba5af294d7..2d56855faddd5e74f31e7ba66d06328cdcf5038d 100644
+--- a/src/main/java/org/bukkit/scheduler/BukkitScheduler.java
++++ b/src/main/java/org/bukkit/scheduler/BukkitScheduler.java
+@@ -6,6 +6,7 @@ import java.util.concurrent.Future;
+ import java.util.function.Consumer;
+ import org.bukkit.plugin.Plugin;
+ import org.jetbrains.annotations.NotNull;
++import dev.iyanz.sourbycraft.api.Unsupported;
+ 
+ // Folia start - add new schedulers
+ /**

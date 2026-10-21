@@ -4,7 +4,7 @@
      /**
       * @return The amount of tickable block entities in this world
       */
-+    @io.canvasmc.canvas.Unsupported // Canvas - region threading
++    @Unsupported // Canvas - region threading
      int getTickableTileEntityCount();
  
      /**
@@ -19,6 +19,6 @@
 +     * @return the regionizer
 +     */
 +    @NotNull
-+    io.canvasmc.canvas.region.WorldRegionizer getRegionizer();
++    WorldRegionizer getRegionizer();
 +    // Canvas end - region threading
  }

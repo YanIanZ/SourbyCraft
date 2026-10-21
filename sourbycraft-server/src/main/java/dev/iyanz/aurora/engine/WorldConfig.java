@@ -552,9 +552,7 @@ public class WorldConfig extends Part {
     {
         option("waypointUpdateScale")
             .docs(
-                "Controls how quickly Canvas' waypoints system falls off with distance between players.",
-                "You can read more about how this new system works and play around with this configuration",
-                "here: https://docs.canvasmc.io/canvas/info/waypoints/"
+                "Controls how quickly waypoint updates fall off with distance between players."
             );
         option("disableCriterionTrigger").docs("Disables all criterion triggers. Advancements will not work!");
         option("cactusCheckSurvivalBeforeGrowth").docs("Check if a cactus can survive before growing. Heavily optimizes cacti farms");

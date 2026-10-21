@@ -513,7 +513,7 @@ Laporan dan konteks: blok *Audit sistem 2026-10-14* di P0.
 Sejak 2026-10-05 build berjalan: vanilla → Paper (`paperRef` 9240f586) → SourbyCraft, lewat
 paperweight resmi (SourbyPatcher `paper-toolchain` 3.0.0). Seluruh perubahan yang dulu datang dari
 Canvas/Folia sekarang milik SourbyCraft: baseline engine di `minecraft-patches/sources` (476 file),
-`paper-patches/files` (234), `sourbyapi/paper-patches/files` (16), dan source `io.canvasmc` di
+`paper-patches/files` (234), `sourbyapi/paper-patches/files` (16), dan source `dev.iyanz.aurora.engine` serta `dev.iyanz.sourbycraft.api` di
 `src/main/java`. Perubahan buatan Sourby ada di feature patch (`minecraft-patches/features` 29,
 `paper-patches/features` 14, dihitung 2026-10-14; 22/4 pada 2026-10-05). Batasan yang tidak bisa dihindari:
 
@@ -540,9 +540,9 @@ Tahapan yang diusulkan, dari yang paling kecil risikonya:
 - [x] M-4 Lepas Weaver — selesai 2026-10-05: SourbyPatcher `paper-toolchain` 3.0.0 menerapkan
   paperweight 2.0.0-beta.24; jar reproducible dari clone bersih; gate sama dengan M-3.
 - [x] Rename package internal `io.canvasmc.canvas.*` menjadi `dev.iyanz.aurora.engine.*` (2026-10-05).
-  API plugin tetap `io.canvasmc.canvas` (`event`, `region`, `simd`, `Unsupported`,
-  `WorldUnloadResult`, di `sourbyapi`). Plugin yang memakai class internal Canvas (bukan API)
-  harus diperbarui.
+  API plugin kemudian pindah ke `dev.iyanz.sourbycraft.api` pada Build 48 (2026-10-21),
+  tanpa shim; `WorldUnloadResult` ada di subpackage `world` (lihat `sourbyapi/README.md`).
+  Plugin yang memakai package lama harus dibangun ulang.
 - [x] Hapus dependency `io.canvasmc.httpclient` beserta repo Maven `maven.canvasmc.io` (2026-10-05).
   Ternyata dipakai: `ClientV2` memanggil `canvasmc.io/api/v2` dari `/version` dan setelah config
   dimuat jika `Build-Number` terisi (tidak pernah di build CI). Panggilan itu ikut dihapus.

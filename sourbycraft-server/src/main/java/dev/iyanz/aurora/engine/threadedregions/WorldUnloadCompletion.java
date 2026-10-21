@@ -1,7 +1,7 @@
 package dev.iyanz.aurora.engine.threadedregions;
 
 import dev.iyanz.aurora.engine.util.ticket.UnloadTicket;
-import io.canvasmc.canvas.WorldUnloadResult;
+import dev.iyanz.sourbycraft.api.world.WorldUnloadResult;
 import java.util.Objects;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;

@@ -28,6 +28,14 @@ public class TestPlugin extends JavaPlugin implements Listener {
     public void onEnable() {
         this.requireMetrics("SOURBY_METRICS_ONENABLE_OK");
         Bukkit.getPluginManager().registerEvents(this, this);
+        // Test-server probes for the owned Entity#teleport and PlayerSpawnLocationEvent; CI boots without them.
+        final boolean probes = Boolean.getBoolean("sourby.testplugin.probes");
+        final TeleportProbe teleportProbe = probes ? new TeleportProbe(this) : null;
+        if (probes) {
+            Bukkit.getPluginManager().registerEvents(teleportProbe, this);
+            Bukkit.getPluginManager().registerEvents(new SpawnLocationProbe(), this);
+            Bukkit.getPluginManager().registerEvents(new PearlTeleportProbe(), this);
+        }
         // A Paper plugin must register commands through the lifecycle COMMANDS event.
         // JavaPlugin#getCommand throws UnsupportedOperationException during startup here.
         this.getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
@@ -36,6 +44,9 @@ public class TestPlugin extends JavaPlugin implements Listener {
                 new StressCommands(this, "massspawn"));
             registrar.register("flyspeed", "Set a player's fly speed for extreme-range testing.",
                 new StressCommands(this, "flyspeed"));
+            if (teleportProbe != null) {
+                registrar.register("tpprobe", "Drive Entity#teleport through each owned route (test server).", teleportProbe);
+            }
             this.getLogger().info("SOURBY_STRESS_COMMANDS_OK");
         });
         this.awaitSampledMetrics(1);

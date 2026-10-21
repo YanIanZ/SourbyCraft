@@ -4,7 +4,7 @@
       * @return true if successful, false otherwise
       * @throws IllegalStateException when {@link #isTickingWorlds() isTickingWorlds} is true
       */
-+    @io.canvasmc.canvas.Unsupported // Canvas - region threading
++    @Unsupported // Canvas - region threading
      public boolean unloadWorld(@NotNull String name, boolean save);
  
      /**
@@ -12,7 +12,7 @@
       * @return true if successful, false otherwise
       * @throws IllegalStateException when {@link #isTickingWorlds() isTickingWorlds} is true
       */
-+    @io.canvasmc.canvas.Unsupported // Canvas - region threading
++    @Unsupported // Canvas - region threading
      public boolean unloadWorld(@NotNull World world, boolean save);
 +    // Canvas start - region threading
 +
@@ -23,7 +23,7 @@
 +     * @param save whether to save the chunks before unloading
 +     * @param callback the result consumer for when the world unload is completed
 +     */
-+    void unloadWorldAsync(@NotNull String name, boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback);
++    void unloadWorldAsync(@NotNull String name, boolean save, final @NotNull Consumer<WorldUnloadResult> callback);
 +
 +    /**
 +     * Unloads a world asynchronously with an optional callback result
@@ -32,7 +32,7 @@
 +     * @param save whether to save the chunks before unloading
 +     * @param callback the result consumer for when the world unload is completed
 +     */
-+    void unloadWorldAsync(@NotNull World world, boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback);
++    void unloadWorldAsync(@NotNull World world, boolean save, final @NotNull Consumer<WorldUnloadResult> callback);
 +    // Canvas end - region threading
  
      /**
@@ -41,14 +41,14 @@
      /**
       * Reloads the server, refreshing settings and plugin information.
       */
-+    @io.canvasmc.canvas.Unsupported // Canvas - region threading
++    @Unsupported // Canvas - region threading
      public void reload();
  
      /**
       * Reload only the Minecraft data for the server. This includes custom
       * advancements and loot tables.
       */
-+    @io.canvasmc.canvas.Unsupported // Canvas - region threading
++    @Unsupported // Canvas - region threading
      public void reloadData();
  
      // Paper start - update reloadable data
@@ -56,7 +56,7 @@
      /**
       * Restarts the server. If the server administrator has not configured restarting, the server will stop.
       */
-+    @io.canvasmc.canvas.Unsupported // Canvas - region threading
++    @Unsupported // Canvas - region threading
      void restart();
  
      void reloadPermissions(); // Paper
@@ -160,22 +160,22 @@
 +     * @return a new regionized data instance
 +     * @param <T> the generic type of your regionized data
 +     */
-+    <T> io.canvasmc.canvas.region.RegionTickData.IRegionizedData<@NotNull T> createRegionizedData(final @NotNull java.util.function.BiFunction<io.canvasmc.canvas.region.RegionTickData, org.bukkit.World, T> supplier, final io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<@NotNull T> callback);
++    <T> RegionTickData.IRegionizedData<@NotNull T> createRegionizedData(final @NotNull java.util.function.BiFunction<RegionTickData, org.bukkit.World, T> supplier, final RegionTickData.IRegionizedData.IRegionizedCallback<@NotNull T> callback);
 +
 +    /**
-+     * Gets or creates the current thread regionized data based off the {@link io.canvasmc.canvas.region.RegionTickData.IRegionizedData} provided
++     * Gets or creates the current thread regionized data based off the {@link RegionTickData.IRegionizedData} provided
 +     * @param regionizedData the regionized data
 +     * @return the fetched or created regionized data
 +     * @param <T> the generic type of your regionized data
 +     * @throws java.lang.IllegalStateException if not on a tick thread runner, or if the current tick runner doesn't own a region
 +     */
-+    <T> @NotNull T getLocalRegionizedData(final @NotNull io.canvasmc.canvas.region.RegionTickData.IRegionizedData<T> regionizedData);
++    <T> @NotNull T getLocalRegionizedData(final @NotNull RegionTickData.IRegionizedData<T> regionizedData);
 +
 +    /**
 +     * Gets the region threading tick rate manager. This offers the same capabilities as {@link Bukkit#getServerTickManager()}
 +     * but is compatible with Folia's region threading structure
 +     * @return the server region threading tick manager
 +     */
-+    @NotNull io.canvasmc.canvas.region.RegionThreadingTickManager getRegionThreadingTickRateManager();
++    @NotNull RegionThreadingTickManager getRegionThreadingTickRateManager();
 +    // Canvas end - region threading
  }

@@ -47,6 +47,8 @@ public class UpstreamDependencyLedgerTest {
     /** Every file permitted to touch the above, as §1.2 and §1.3 of the ledger list them. */
     private static final Set<String> LEDGERED = Set.of(
         "dev/iyanz/sourbycraft/execution/region/FoliaRegionBackend.java",
+        // Ownership queries and chunk-load priority translation behind Aurora contracts (§1.2).
+        "dev/iyanz/sourbycraft/execution/region/MoonriseRegionOwnership.java",
         "dev/iyanz/sourbycraft/execution/RegionOwnerHandoff.java",
         "dev/iyanz/sourbycraft/perf/RegionTickMetrics.java",
         "dev/iyanz/sourbycraft/perf/RegionTickMetricsHolder.java",
@@ -223,8 +225,9 @@ public class UpstreamDependencyLedgerTest {
         // Three doorways: the config bridge; the world-lifecycle adapter behind AuroraWorlds
         // (dependency-ledger.md section 1.2), which needs the engine's unload outcome; and the
         // /perf scheduler reader (section 1.2), which needs the engine's scheduler kind and
-        // configured thread count (SchedulerUtil) and the region READY/TRANSIENT split (the
-        // Canvas region-state type). Declared here rather than reached around by string matching.
+        // configured thread count (SchedulerUtil); its region READY/TRANSIENT split now reads the
+        // SourbyCraft plugin API's region-state type (dev.iyanz.sourbycraft.api.region, Build 48;
+        // io.canvasmc no longer exists). Declared here rather than reached around by string matching.
         assertEquals(java.util.Set.of("dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java",
                 "dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java",
                 "dev/iyanz/sourbycraft/perf/LiveSchedulerSource.java"),

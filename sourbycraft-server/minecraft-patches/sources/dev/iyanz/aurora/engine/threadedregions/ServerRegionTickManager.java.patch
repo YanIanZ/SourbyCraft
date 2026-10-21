@@ -1,9 +1,8 @@
 --- /dev/null
 +++ b/dev/iyanz/aurora/engine/threadedregions/ServerRegionTickManager.java
-@@ -1,0 +_,87 @@
+@@ -1,0 +_,86 @@
 +package dev.iyanz.aurora.engine.threadedregions;
 +
-+import io.canvasmc.canvas.region.RegionThreadingTickManager;
 +import dev.iyanz.aurora.engine.util.Util;
 +import io.papermc.paper.threadedregions.RegionizedServer;
 +import io.papermc.paper.threadedregions.TickRegionScheduler;

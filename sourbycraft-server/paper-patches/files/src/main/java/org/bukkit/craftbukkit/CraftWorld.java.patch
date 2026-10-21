@@ -350,7 +350,7 @@
 +    // Canvas start - region threading
 +
 +    @Override
-+    public io.canvasmc.canvas.region.@org.jspecify.annotations.NonNull WorldRegionizer getRegionizer() {
++    public @org.jspecify.annotations.NonNull WorldRegionizer getRegionizer() {
 +        return this.world.regioniser;
 +    }
 +    // Canvas end - region threading

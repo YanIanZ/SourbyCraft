@@ -5,7 +5,7 @@ import java.util.Objects;
 
 /** Typed, immutable settings for implemented Aurora behavior only. Parsing never writes config. */
 public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Bridge bridge, Scheduler scheduler,
-                           Network network) {
+                           Network network, World world) {
     public static final String ASYNC_PATH_KEY = "aurora.entity.async-pathfinding";
     public static final String LEGACY_ASYNC_PATH_KEY = "perf.ai.async-pathfinding";
     public static final String LANE_SAMPLING_KEY = "aurora.diagnostics.lane-sampling";
@@ -21,9 +21,10 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     public static final String STORAGE_THREADS_KEY = "aurora.scheduler.storage-threads";
     public static final String STORAGE_QUEUE_KEY = "aurora.scheduler.storage-queue";
     public static final String NETWORK_COUNTERS_KEY = "aurora.network.counters";
+    public static final String COMMAND_BLOCKS_KEY = "aurora.world.command-blocks";
     public static final AuroraConfig DEFAULT =
         new AuroraConfig(new Entity(false), new Diagnostics(true), new Cpu(Cpu.AUTO), Bridge.DEFAULT,
-            Scheduler.DEFAULT, Network.DEFAULT);
+            Scheduler.DEFAULT, Network.DEFAULT, World.DEFAULT);
     public static final Setting ASYNC_PATH = new Setting(ASYNC_PATH_KEY, Lifecycle.LIVE);
     public static final Setting LANE_SAMPLING = new Setting(LANE_SAMPLING_KEY, Lifecycle.LIVE);
     // ChunkGenerationMetrics.ENABLED is a static final read once at class init, which the chunk
@@ -43,6 +44,9 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     // Governed lanes are created once with their budget and never resized.
     public static final Setting SCHEDULER_BUDGETS = new Setting("aurora.scheduler.*", Lifecycle.RESTART_REQUIRED);
     public static final Setting NETWORK_COUNTERS = new Setting(NETWORK_COUNTERS_KEY, Lifecycle.LIVE);
+    // Read on every command-block tick, interaction and edit packet. A repeating block whose tick
+    // was dropped while the switch was off stays idle until something re-arms it (see World).
+    public static final Setting COMMAND_BLOCKS = new Setting(COMMAND_BLOCKS_KEY, Lifecycle.LIVE);
 
     public AuroraConfig {
         Objects.requireNonNull(entity, "entity");
@@ -51,6 +55,13 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         Objects.requireNonNull(bridge, "bridge");
         Objects.requireNonNull(scheduler, "scheduler");
         Objects.requireNonNull(network, "network");
+        Objects.requireNonNull(world, "world");
+    }
+
+    /** Settings without a world section, which then takes its defaults. */
+    public AuroraConfig(final Entity entity, final Diagnostics diagnostics, final Cpu cpu, final Bridge bridge,
+                        final Scheduler scheduler, final Network network) {
+        this(entity, diagnostics, cpu, bridge, scheduler, network, World.DEFAULT);
     }
 
     /** Settings without bridge, scheduler or network sections, which then take their defaults. */
@@ -87,6 +98,21 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         public int resolvedStorageThreads() {
             return this.storageThreads > 0 ? this.storageThreads : 1;
         }
+    }
+
+    /**
+     * World behaviour SourbyCraft owns instead of inheriting from the region-threading base.
+     *
+     * <p>{@code commandBlocks}: the base hard-disabled command blocks and command-block minecarts.
+     * {@code true} runs them under SourbyCraft's region rules ({@code dev.iyanz.sourbycraft.commandblock},
+     * {@code docs/architecture/command-blocks.md}): execute only on the region that owns the block
+     * or minecart, entity selectors see only that region's entities, block targets outside it fail
+     * with a message. Off by default until there is evidence beyond functional runs. LIVE, with one
+     * caveat: a repeating block whose tick was dropped while off stays idle until re-armed (redstone
+     * change, re-placement, GUI save or chunk reload).</p>
+     */
+    public record World(boolean commandBlocks) {
+        public static final World DEFAULT = new World(false);
     }
 
     /** Network measurement settings. {@code counters} stops the per-packet increments (LIVE). */
@@ -223,7 +249,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         // Malformed namespace containers must not expose a legacy true underneath them.
         for (final String parent : List.of("aurora", "aurora.entity", "aurora.diagnostics",
                                           "aurora.cpu", "aurora.bridge", "aurora.scheduler",
-                                          "aurora.network")) {
+                                          "aurora.network", "aurora.world")) {
             if (values.containsKey(parent)) return new Parsed(DEFAULT, List.of(parent), List.of());
         }
         final boolean modern = values.containsKey(ASYNC_PATH_KEY);
@@ -326,12 +352,24 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
             }
         }
 
+        // Off on a typo: running command blocks is the direction that needs the operator's intent.
+        boolean commandBlocks = World.DEFAULT.commandBlocks();
+        final Object commandBlocksValue = values.get(COMMAND_BLOCKS_KEY);
+        if (commandBlocksValue != null) {
+            if (commandBlocksValue instanceof Boolean enabled) {
+                commandBlocks = enabled;
+            } else {
+                invalid.add(COMMAND_BLOCKS_KEY);
+            }
+        }
+
         // Each key falls back on its own. A typo in one setting must not silently revert another
         // the operator set deliberately -- only a malformed namespace container, handled above,
         // discards everything, because then nothing underneath it can be trusted.
         return new Parsed(new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling, chunkGenerationMetrics),
             new Cpu(cores), new Bridge(bridgeMode, quarantineAfter, syncRoute, maxPendingTasks, maxRunningAsyncTasks),
-            new Scheduler(bridgeIoThreads, bridgeIoQueue, storageThreads, storageQueue), new Network(networkCounters)),
+            new Scheduler(bridgeIoThreads, bridgeIoQueue, storageThreads, storageQueue), new Network(networkCounters),
+            new World(commandBlocks)),
             List.copyOf(invalid), deprecated);
     }
 
@@ -358,6 +396,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         if (bridge.maxPendingTasksPerPlugin() != previous.bridge.maxPendingTasksPerPlugin()) changed++;
         if (bridge.maxRunningAsyncTasksPerPlugin() != previous.bridge.maxRunningAsyncTasksPerPlugin()) changed++;
         if (network.counters() != previous.network.counters()) changed++;
+        if (world.commandBlocks() != previous.world.commandBlocks()) changed++;
         return changed;
     }
 

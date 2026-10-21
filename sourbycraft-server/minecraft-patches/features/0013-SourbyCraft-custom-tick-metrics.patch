@@ -105,7 +105,7 @@ index 099b4dbabeac184d009354f3e0af62d5945a7f17..b6425ee44f76e9fc41680164d1a1b6f4
              return null;
          }
 diff --git a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
-index d700846716fb69e0c3f56ffe1a8ef51f83a5de32..246834cb62738dc16f7d30765115272aaecfd622 100644
+index cbd4b1c002808a2deda700a1a6cec36d458f7151..a02c2e7563ee1b102873452613d446c3d83b448b 100644
 --- a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
 +++ b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
 @@ -191,6 +191,8 @@ public class WorldShutdownThread extends RegionShutdownThread {
@@ -175,7 +175,7 @@ index fcedc6814850c9c41482df468246738cce6ae1dc..c6fc3f6b882c9fce3cf79d53a8b961fb
          }
  
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 9cfcedd6fb759646ad54c7192806148be714b29e..aa0418219db400a05d8af99d744482da7a48ba46 100644
+index 4d4fa380e52f83d107a9a8a24c825d4439208bea..ab34149c5d0f8fd30c29c61513b294b0a69a5653 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
 @@ -4,6 +4,7 @@ import ca.spottedleaf.common.util.TimeUtil;
@@ -183,10 +183,10 @@ index 9cfcedd6fb759646ad54c7192806148be714b29e..aa0418219db400a05d8af99d744482da
  import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
  import com.mojang.logging.LogUtils;
 +import dev.iyanz.sourbycraft.perf.RegionMetricsRegistry;
- import io.canvasmc.canvas.region.RegionThreadingTickManager;
- import io.canvasmc.canvas.region.RegionTickData;
- import io.canvasmc.canvas.region.WorldRegionizer;
-@@ -38,6 +39,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+ import dev.iyanz.aurora.engine.threadedregions.SchedulerUtil;
+ import dev.iyanz.aurora.engine.threadedregions.ServerRegionTickManager;
+ import dev.iyanz.aurora.engine.util.ticket.SaveAllTicket;
+@@ -35,6 +36,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
  
      private static final Logger LOGGER = LogUtils.getClassLogger(); // Canvas - region threading
      private static int regionShift = 31;
@@ -195,7 +195,7 @@ index 9cfcedd6fb759646ad54c7192806148be714b29e..aa0418219db400a05d8af99d744482da
  
      public static int getRegionChunkShift() {
          return regionShift;
-@@ -122,6 +125,29 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -119,6 +122,29 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          return new TickRegionData(region);
      }
  
@@ -225,7 +225,7 @@ index 9cfcedd6fb759646ad54c7192806148be714b29e..aa0418219db400a05d8af99d744482da
      @Override
      public TickRegionSectionData createNewSectionData(final int sectionX, final int sectionZ, final int sectionShift) {
          return null;
-@@ -136,6 +162,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -133,6 +159,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
  
      @Override
      public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
@@ -233,7 +233,7 @@ index 9cfcedd6fb759646ad54c7192806148be714b29e..aa0418219db400a05d8af99d744482da
          // nothing for now
          dev.iyanz.aurora.engine.threadedregions.SchedulerUtil.getHandle().onRegionDestroy(region); // Canvas - region profiler
          // Canvas start - region threading
-@@ -156,6 +183,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -153,6 +180,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
      @Override
      public void onRegionActive(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
          final TickRegionData data = region.getData();
@@ -241,7 +241,7 @@ index 9cfcedd6fb759646ad54c7192806148be714b29e..aa0418219db400a05d8af99d744482da
  
          data.tickHandle.checkInitialSchedule();
          scheduler.scheduleRegion(data.tickHandle);
-@@ -166,6 +194,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -163,6 +191,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          final TickRegionData data = region.getData();
  
          scheduler.descheduleRegion(data.tickHandle);
@@ -249,7 +249,7 @@ index 9cfcedd6fb759646ad54c7192806148be714b29e..aa0418219db400a05d8af99d744482da
          // we call inactive here, since unpinning needs to occur before copying, or else this will cause issues
          dev.iyanz.aurora.engine.threadedregions.SchedulerUtil.getHandle().onRegionInactive(region); // Canvas - region profiler
          // old handle cannot be scheduled anymore, copy to a new handle
-@@ -175,13 +204,14 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -172,13 +201,14 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
      @Override
      public void preMerge(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
                           final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
@@ -266,7 +266,7 @@ index 9cfcedd6fb759646ad54c7192806148be714b29e..aa0418219db400a05d8af99d744482da
      }
  
      public static final class TickRegionSectionData implements ThreadedRegionizer.ThreadedRegionSectionData {}
-@@ -531,6 +561,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -528,6 +558,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          public void mergeInto(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
              // note: merge target is always a region being released from ticking
              final TickRegionData data = into.getData();
@@ -274,7 +274,7 @@ index 9cfcedd6fb759646ad54c7192806148be714b29e..aa0418219db400a05d8af99d744482da
              final long currentTickTo = data.getCurrentTick();
              final long currentTickFrom = this.getCurrentTick();
  
-@@ -577,6 +608,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -574,6 +605,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
  
          @NonNull
          private ConcreteRegionTickHandle copy() {

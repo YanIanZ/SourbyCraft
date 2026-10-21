@@ -6,7 +6,7 @@ Subject: [PATCH] SourbyCraft - staged createWorld that prefetches the spawn
 
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index 88044ae59f6697a7379fd01dbe052f43d7cd5bd4..06058d61e6c3de61cab712d86d558608fed615f5 100644
+index b4c71419c4c30e8e372156bd3c8d469f9ee2aa12..c28670e81063e12b9b83783bb87a5aa71aca8005 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 @@ -1198,6 +1198,28 @@ public final class CraftServer implements Server {
@@ -168,7 +168,7 @@ index 88044ae59f6697a7379fd01dbe052f43d7cd5bd4..06058d61e6c3de61cab712d86d558608
 +        final String name = level.getWorld().getName();
 +        try {
 +            this.unloadWorldAsync(level.getWorld(), false, outcome -> {
-+                if (outcome != io.canvasmc.canvas.WorldUnloadResult.SUCCESS) {
++                if (outcome != WorldUnloadResult.SUCCESS) {
 +                    this.getLogger().warning("Could not unload " + name + " after its creation failed: " + outcome);
 +                }
 +                result.completeExceptionally(failed);
@@ -183,13 +183,13 @@ index 88044ae59f6697a7379fd01dbe052f43d7cd5bd4..06058d61e6c3de61cab712d86d558608
  
      // note: we need to check these things:
 @@ -1369,6 +1514,13 @@ public final class CraftServer implements Server {
-     public void unloadWorldAsync(@NotNull final World world, final boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback) {
+     public void unloadWorldAsync(@NotNull final World world, final boolean save, final @NotNull Consumer<WorldUnloadResult> callback) {
          io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Can only unload worlds on global tick"); // Canvas - region threading
          ServerLevel handle = ((CraftWorld) world).getHandle();
 +        // SourbyCraft start - staged world creation
 +        if (this.sourbycraft$stagedLevels.contains(handle)) {
 +            this.getLogger().warning("Refusing to unload " + world.getName() + " while it is still being created");
-+            callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNKNOWN);
++            callback.accept(WorldUnloadResult.FAIL_UNKNOWN);
 +            return;
 +        }
 +        // SourbyCraft end - staged world creation

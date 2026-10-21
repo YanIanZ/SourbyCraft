@@ -7,7 +7,7 @@ import dev.iyanz.sourbycraft.awf.AwfBackend;
 import dev.iyanz.sourbycraft.awf.AwfEngine;
 import dev.iyanz.sourbycraft.awf.AwfRegionStorage;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
-import io.canvasmc.canvas.WorldUnloadResult;
+import dev.iyanz.sourbycraft.api.world.WorldUnloadResult;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -772,7 +772,7 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
      * present would otherwise leave a loaded world dropping its writes.
      */
     @org.bukkit.event.EventHandler(priority = org.bukkit.event.EventPriority.MONITOR, ignoreCancelled = true)
-    public void discardOnUnload(final io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent event) {
+    public void discardOnUnload(final dev.iyanz.sourbycraft.api.event.world.WorldUnloadAsyncEvent event) {
         final String name = event.getWorld().getName();
         if (!this.unloadWithoutSaving.remove(name)) return;
         final int storages = AwfEngine.discardUnder(this.folders.apply(name));

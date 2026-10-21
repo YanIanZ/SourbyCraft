@@ -118,12 +118,12 @@
 +    //                                teleportation and also portaling between dimensions
 +
 +    @Override
-+    public void unloadWorldAsync(@NotNull final String name, final boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback) {
++    public void unloadWorldAsync(@NotNull final String name, final boolean save, final @NotNull Consumer<WorldUnloadResult> callback) {
 +        unloadWorldAsync(Preconditions.checkNotNull(this.worlds.get(name), "Unknown world with name " + name), save, callback);
 +    }
 +
 +    @Override
-+    public void unloadWorldAsync(@NotNull final World world, final boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback) {
++    public void unloadWorldAsync(@NotNull final World world, final boolean save, final @NotNull Consumer<WorldUnloadResult> callback) {
 +        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Can only unload worlds on global tick"); // Canvas - region threading
 +        ServerLevel handle = ((CraftWorld) world).getHandle();
 +        try {
@@ -137,15 +137,15 @@
 +            // - no players in the world
 +
 +            if (handle.canvas$unloadTicket.isPresent()) {
-+                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_ALREADY_UNLOADING);
++                callback.accept(WorldUnloadResult.FAIL_ALREADY_UNLOADING);
 +                return;
 +            }
 +            if (handle.dimension() == net.minecraft.world.level.Level.OVERWORLD) {
-+                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_IS_OVERWORLD);
++                callback.accept(WorldUnloadResult.FAIL_IS_OVERWORLD);
 +                return;
 +            }
 +            if (this.console.hasStartedShutdownThread.get()) {
-+                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_IS_SHUTDOWN);
++                callback.accept(WorldUnloadResult.FAIL_IS_SHUTDOWN);
 +                return;
 +            }
 +
@@ -154,7 +154,7 @@
 +            // in limbo on login if they are joining an unloading world
 +
 +            if (!handle.canvas$joiningPlayers.isEmpty()) {
-+                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_JOINING);
++                callback.accept(WorldUnloadResult.FAIL_PLAYERS_JOINING);
 +                return;
 +            }
 +
@@ -164,15 +164,15 @@
 +
 +            for (final net.minecraft.server.level.ServerPlayer player : console.getPlayerList().getPlayers()) {
 +                if (player.level() == handle) {
-+                    callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_PRESENT);
++                    callback.accept(WorldUnloadResult.FAIL_PLAYERS_PRESENT);
 +                    return;
 +                }
 +            }
 +
 +            // call unload async event
 +
-+            if (!new io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent(handle.getWorld()).callEvent()) {
-+                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNLOAD_EVENT);
++            if (!new WorldUnloadAsyncEvent(handle.getWorld()).callEvent()) {
++                callback.accept(WorldUnloadResult.FAIL_UNLOAD_EVENT);
 +                return;
 +            }
 +
@@ -218,7 +218,7 @@
 +            worldShutdownThread.start();
 +        } catch (final Throwable thrown) {
 +            MinecraftServer.LOGGER.error("Failed to prepare unload for world", thrown);
-+            callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNKNOWN);
++            callback.accept(WorldUnloadResult.FAIL_UNKNOWN);
 +        } finally {
 +            handle.canvas$releaseWorldStageLock();
 +        }
@@ -436,12 +436,12 @@
 +
 +    // note: in impl the world is provided, same as 'getWorld()'
 +    @Override
-+    public <T> io.canvasmc.canvas.region.RegionTickData.@NotNull IRegionizedData<T> createRegionizedData(final java.util.function.@NotNull BiFunction<io.canvasmc.canvas.region.RegionTickData, org.bukkit.World, T> supplier, final io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<T> callback) {
++    public <T> RegionTickData.@NotNull IRegionizedData<T> createRegionizedData(final java.util.function.@NotNull BiFunction<RegionTickData, org.bukkit.World, T> supplier, final RegionTickData.IRegionizedData.IRegionizedCallback<T> callback) {
 +        return io.papermc.paper.threadedregions.TickRegions.TickRegionData.createRegionizedDataApiHandle(supplier, callback);
 +    }
 +
 +    @Override
-+    public <T> T getLocalRegionizedData(final @NotNull io.canvasmc.canvas.region.RegionTickData.IRegionizedData<T> regionizedData) {
++    public <T> T getLocalRegionizedData(final @NotNull RegionTickData.IRegionizedData<T> regionizedData) {
 +        io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>
 +            region = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion();
 +        if (region == null) throw new IllegalStateException("Must be on a tick thread runner that currently owns a region");
@@ -449,7 +449,7 @@
 +    }
 +
 +    @Override
-+    public io.canvasmc.canvas.region.RegionThreadingTickManager getRegionThreadingTickRateManager() {
++    public RegionThreadingTickManager getRegionThreadingTickRateManager() {
 +        return dev.iyanz.aurora.engine.threadedregions.ServerRegionTickManager.API_INSTANCE;
 +    }
 +    // Canvas end - region threading

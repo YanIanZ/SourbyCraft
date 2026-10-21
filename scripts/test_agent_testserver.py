@@ -1,4 +1,5 @@
 """Unit tests for agent_testserver.py. No JVM: a small Python program stands in for the server."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import textwrap
 import threading
 import time
 import unittest
+from unittest import mock
 
 import agent_testserver as ats
 
@@ -890,6 +892,58 @@ class WorldReuseAndKillTest(HarnessCase):
         big.write_text("x" * (64 * 1024 + 1))
         with self.assertRaisesRegex(ats.HarnessError, "under 64 KiB"):
             self.start("b", config_files={"spigot.yml": big})
+        self.assertFalse((self.root / "servers" / "b").exists())
+
+    def test_a_plugin_jar_is_copied_as_bytes_and_recorded_by_hash(self):
+        jar = self.root / "probe.jar"
+        payload = b"PK\x03\x04\xb2\x00binary"
+        jar.write_bytes(payload)
+        workdir = Path(self.start("a", config_files={"plugins/Probe.jar": jar})["workdir"])
+        self.harness.stop("a", timeout=10)
+        self.assertEqual((workdir / "plugins/Probe.jar").read_bytes(), payload)
+        entry = self.run_json("a")["config_files"][0]
+        self.assertEqual(entry["dest"], "plugins/Probe.jar")
+        self.assertEqual(entry["sha256"], hashlib.sha256(payload).hexdigest())
+        self.assertNotIn("text", entry)
+        for dest in ("plugins/sub/Probe.jar", "Probe.jar", "config/Probe.jar"):
+            with self.assertRaisesRegex(ats.HarnessError, "config file"):
+                self.start("b", config_files={dest: jar})
+        big = self.root / "big.jar"
+        big.write_bytes(b"x" * (ats.PLUGIN_JAR_MAX_BYTES + 1))
+        with self.assertRaisesRegex(ats.HarnessError, "plugin jar"):
+            self.start("b", config_files={"plugins/Big.jar": big})
+        link = self.root / "link.jar"
+        link.symlink_to(jar)
+        with self.assertRaisesRegex(ats.HarnessError, "symlink"):
+            self.start("b", config_files={"plugins/Link.jar": link})
+
+    def test_a_plugin_jar_is_read_once_and_never_past_the_cap(self):
+        # A file that grows after a size check must not be read unbounded: the cap is enforced on
+        # the bytes actually read from one open file.
+        jar = self.root / "grow.jar"
+        jar.write_bytes(b"x" * 10)
+        reads = []
+        real_open = open
+
+        class Spy:
+            def __init__(self, handle):
+                self.handle = handle
+            def read(self, n=-1):
+                reads.append(n)
+                return b"x" * (ats.PLUGIN_JAR_MAX_BYTES + 1)
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                self.handle.close()
+
+        def fake_open(path, mode="r", *args, **kwargs):
+            handle = real_open(path, mode, *args, **kwargs)
+            return Spy(handle) if str(path) == str(jar) and "b" in mode else handle
+
+        with mock.patch("builtins.open", fake_open):
+            with self.assertRaisesRegex(ats.HarnessError, "plugin jar"):
+                ats.Harness.config_files({"plugins/Grow.jar": str(jar)})
+        self.assertEqual(reads, [ats.PLUGIN_JAR_MAX_BYTES + 1])
         self.assertFalse((self.root / "servers" / "b").exists())
 
     def test_cli_forwards_config_files(self):

@@ -8,7 +8,7 @@ import net.minecraft.network.chat.Component;
  *
  * <p>Region threading gives commands a failure mode vanilla has no vocabulary for: the work is
  * legal, the arguments are valid, and the thread running it simply does not own the data. Canvas
- * defines an equivalent, but a Minecraft patch reaching into {@code io.canvasmc} would put a
+ * defines an equivalent, but a Minecraft patch reaching into the engine's plugin API would put a
  * direct engine call in a vanilla class, which is the coupling the independence policy exists to
  * prevent -- engine access belongs behind something SourbyCraft owns.</p>
  *

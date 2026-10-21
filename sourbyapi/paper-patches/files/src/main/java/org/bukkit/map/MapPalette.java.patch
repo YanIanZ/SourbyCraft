@@ -14,12 +14,12 @@
  
          byte[] result = new byte[temp.getWidth() * temp.getHeight()];
 +        // Pufferfish start - SIMD
-+        if (!io.canvasmc.canvas.simd.SIMDDetection.isEnabled) {
++        if (!SIMDDetection.isEnabled) {
          for (int i = 0; i < pixels.length; i++) {
              result[i] = matchColor(new Color(pixels[i], true));
          }
 +        } else {
-+            io.canvasmc.canvas.simd.VectorMapPalette.matchColorVectorized(pixels, result);
++            VectorMapPalette.matchColorVectorized(pixels, result);
 +        }
 +        // Pufferfish end - SIMD
          return result;

@@ -1,6 +1,6 @@
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -1,10 +_,647 @@
+@@ -1,10 +_,644 @@
  package io.papermc.paper.threadedregions;
  
 -// placeholder class for Folia
@@ -10,9 +10,6 @@
 +import ca.spottedleaf.moonrise.common.util.TickThread;
 +import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
 +import com.mojang.logging.LogUtils;
-+import io.canvasmc.canvas.region.RegionThreadingTickManager;
-+import io.canvasmc.canvas.region.RegionTickData;
-+import io.canvasmc.canvas.region.WorldRegionizer;
 +import dev.iyanz.aurora.engine.threadedregions.SchedulerUtil;
 +import dev.iyanz.aurora.engine.threadedregions.ServerRegionTickManager;
 +import dev.iyanz.aurora.engine.util.ticket.SaveAllTicket;

@@ -118,6 +118,7 @@ public final class SourbyCraftConfig {
         dev.iyanz.sourbycraft.execution.LaneCpuSampler.setEnabled(parsed.config().diagnostics().laneSampling());
         dev.iyanz.sourbycraft.execution.ResourceGovernor.GLOBAL.configure(parsed.config().scheduler());
         dev.iyanz.sourbycraft.perf.NetworkCounters.GLOBAL.setEnabled(parsed.config().network().counters());
+        dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.setEnabled(parsed.config().world().commandBlocks());
         loaded = new LoadedConfig(utility, parsed.config());
         for (final String key : parsed.deprecatedKeys()) {
             SourbyLogger.warn("Deprecated config key '" + key + "'; use '"

@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 02:13:57 +0700
+Subject: [PATCH] SourbyCraft - owned refusal messages for main-thread-only
+ server calls
+
+The MinecraftServer methods region threading refuses (submit, execute, schedule, executeBlocking, executeIfPossible, the task-loop internals, processPacketsAndTick, addTickable, getTickCount) threw a bare 'Unsupported in region threading'. They now throw dev.iyanz.sourbycraft.guards.RegionRefusal messages that keep that prefix and name the supported alternative (region/global/async schedulers, Server#getCurrentTick). No call is newly allowed or refused.
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index bfc3088469ec4b7e7863d55d38ce49a04430ed2f..c7908321bd0dcca8158393895aecfdabe83e6ea6 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -483,7 +483,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     @Override
+     public <V> CompletableFuture<V> submit(java.util.function.Supplier<V> task) {
+         if (true) {
+-            throw new UnsupportedOperationException("Unsupported in region threading");
++            throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // SourbyCraft - owned refusal message
+         }
+         return super.submit(task);
+     }
+@@ -491,7 +491,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     @Override
+     public CompletableFuture<Void> submit(Runnable task) {
+         if (true) {
+-            throw new UnsupportedOperationException("Unsupported in region threading");
++            throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // SourbyCraft - owned refusal message
+         }
+         return super.submit(task);
+     }
+@@ -499,7 +499,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     @Override
+     public void schedule(TickTask task) {
+         if (true) {
+-            throw new UnsupportedOperationException("Unsupported in region threading");
++            throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // SourbyCraft - owned refusal message
+         }
+         super.schedule(task);
+     }
+@@ -507,7 +507,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     @Override
+     public void executeBlocking(Runnable runnable) {
+         if (true) {
+-            throw new UnsupportedOperationException("Unsupported in region threading");
++            throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // SourbyCraft - owned refusal message
+         }
+         super.executeBlocking(runnable);
+     }
+@@ -515,7 +515,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     @Override
+     public void execute(Runnable runnable) {
+         if (true) {
+-            throw new UnsupportedOperationException("Unsupported in region threading");
++            throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // SourbyCraft - owned refusal message
+         }
+         super.execute(runnable);
+     }
+@@ -1538,21 +1538,21 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     @Override
+     // Paper start - anything that does try to post to main during watchdog crash, run on watchdog
+     public TickTask wrapRunnable(Runnable runnable) {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading
+     }
+ 
+     @Override
+     protected boolean shouldRun(final TickTask task) {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading
+     }
+ 
+     @Override
+     protected boolean pollTask() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading
+     }
+ 
+     private boolean pollTaskInternal() {
+-        if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
++        if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading
+         if (super.pollTask()) {
+             this.moonrise$executeMidTickTasks(); // Paper - rewrite chunk system
+             return true;
+@@ -1572,7 +1572,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+     @Override
+     protected void doRunTask(final TickTask task) {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading
+     }
+ 
+     private Optional<ServerStatus.Favicon> loadStatusIcon() {
+@@ -1758,7 +1758,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         this.tickFrame.start();
+         // Paper - improve tick loop - moved into runAllTasksAtTickStart
+         this.runAllTasksAtTickStart(); // Paper - improve tick loop
+-        if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
++        if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_LOOP.error(); // Folia - region threading
+         // Paper start - rewrite chunk system
+         final Throwable crash = this.chunkSystemCrash;
+         if (crash != null) {
+@@ -1973,7 +1973,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     }
+ 
+     public void addTickable(final Runnable tickable) {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.ADD_TICKABLE.error(); // Canvas - region threading
+     }
+ 
+     protected void setId(final String serverId) {
+@@ -2276,7 +2276,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     }
+ 
+     public int getTickCount() {
+-        throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
++        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_COUNT.error(); // Folia - region threading
+     }
+ 
+     public boolean isUnderSpawnProtection(final ServerLevel level, final BlockPos pos, final Player player) {
+@@ -2335,7 +2335,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+     @Override
+     public void executeIfPossible(final Runnable command) {
+-        if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
++        if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.SERVER_QUEUE.error(); // Folia - region threading
+         if (this.isStopped()) {
+             throw new io.papermc.paper.util.ServerStopRejectedExecutionException("Server already shutting down"); // Paper - do not prematurely disconnect players on stop
+         }

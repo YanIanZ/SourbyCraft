@@ -200,7 +200,7 @@
 +
 +        LOGGER.info("Completed {} unload", getWorldName());
 +
-+        this.level.canvas$unloadTicket.getOrThrow().callback().accept(io.canvasmc.canvas.WorldUnloadResult.SUCCESS);
++        this.level.canvas$unloadTicket.getOrThrow().callback().accept(WorldUnloadResult.SUCCESS);
 +    }
 +
 +    private static void teleportPlayer(final ServerPlayer entityPlayer, final ServerLocation target) {

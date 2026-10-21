@@ -1,0 +1,83 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 21:24:26 +0700
+Subject: [PATCH] SourbyCraft - tick scheduled functions on the global tick
+
+Drain per-level timers through ScheduledFunctionTicker after global game-time advancement. Register schedule and serialize queue mutations and completions on the global thread; keep the per-region drain disabled.
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index f04fc11ac622afe30921438a045046c4653ee17a..6adb194f13a8e58d29f153270aa3c6abd4daa35e 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -654,6 +654,7 @@ public final class RegionizedServer {
+         if (!getGlobalTickData().getTickManager().doesRunGameElements()) return; // Canvas - region threading
+         if (world.tickTime) {
+             world.serverLevelData.setGameTime(world.serverLevelData.getGameTime() + tickCount);
++            dev.iyanz.sourbycraft.world.ScheduledFunctionTicker.tick(world); // SourbyCraft - once per world on the global tick
+         }
+     }
+ 
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index 99b9fe50fe334fc8110dc57ac2280fad21969045..bcec962312e5d819d7b677c63774db69ee0d515a 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -236,7 +236,7 @@ public class Commands {
+         RideCommand.register(this.dispatcher);
+         RotateCommand.register(this.dispatcher);
+         SayCommand.register(this.dispatcher);
+-        //ScheduleCommand.register(this.dispatcher); // Folia - region threading
++        ScheduleCommand.register(this.dispatcher); // SourbyCraft - queue access routed to the global tick
+         ScoreboardCommand.register(this.dispatcher, context);
+         SeedCommand.register(this.dispatcher, commandSelection != Commands.CommandSelection.INTEGRATED);
+         VersionCommand.register(this.dispatcher, commandSelection != Commands.CommandSelection.INTEGRATED);
+diff --git a/net/minecraft/server/commands/ScheduleCommand.java b/net/minecraft/server/commands/ScheduleCommand.java
+index 670e679ab629ab5923385baf16ea6d0754511608..388178ddd418c3d1bbb057868aeee47ff9f6db5a 100644
+--- a/net/minecraft/server/commands/ScheduleCommand.java
++++ b/net/minecraft/server/commands/ScheduleCommand.java
+@@ -13,7 +13,6 @@ import java.util.Collection;
+ import java.util.Optional;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+-import net.minecraft.commands.SharedSuggestionProvider;
+ import net.minecraft.commands.arguments.TimeArgument;
+ import net.minecraft.commands.arguments.item.FunctionArgument;
+ import net.minecraft.commands.functions.CommandFunction;
+@@ -31,9 +30,8 @@ public class ScheduleCommand {
+         s -> Component.translatableEscape("commands.schedule.cleared.failure", s)
+     );
+     private static final SimpleCommandExceptionType ERROR_MACRO = new SimpleCommandExceptionType(Component.translatableEscape("commands.schedule.macro"));
+-    private static final SuggestionProvider<CommandSourceStack> SUGGEST_SCHEDULE = (c, p) -> SharedSuggestionProvider.suggest(
+-        c.getSource().getLevel().scheduledEvents.getEventsIds(), p // Paper - Make schedule command per-world
+-    );
++    private static final SuggestionProvider<CommandSourceStack> SUGGEST_SCHEDULE = (c, p) ->
++        dev.iyanz.sourbycraft.world.ScheduledFunctionTicker.suggest(c.getSource().getLevel(), p); // SourbyCraft - global-owned queue
+ 
+     public static void register(final CommandDispatcher<CommandSourceStack> dispatcher) {
+         dispatcher.register(
+@@ -96,6 +94,7 @@ public class ScheduleCommand {
+         final int time,
+         final boolean replace
+     ) throws CommandSyntaxException {
++        return dev.iyanz.sourbycraft.world.ScheduledFunctionTicker.onGlobal(() -> { // SourbyCraft - serialize with timer ticking
+         if (time == 0) {
+             throw ERROR_SAME_TICK.create();
+         }
+@@ -127,9 +126,11 @@ public class ScheduleCommand {
+         }
+ 
+         return Math.floorMod(tickTime, Integer.MAX_VALUE);
++        }, source); // SourbyCraft - global-owned scheduled events
+     }
+ 
+     private static int remove(final CommandSourceStack source, final String id) throws CommandSyntaxException {
++        return dev.iyanz.sourbycraft.world.ScheduledFunctionTicker.onGlobal(() -> { // SourbyCraft - serialize with timer ticking
+         int count = source.getLevel().scheduledEvents.remove(id); // Paper - Make schedule command per-world
+         if (count == 0) {
+             throw ERROR_CANT_REMOVE.create(id);
+@@ -137,5 +138,6 @@ public class ScheduleCommand {
+ 
+         source.sendSuccess(() -> Component.translatable("commands.schedule.cleared.success", count, id), true);
+         return count;
++        }, source); // SourbyCraft - global-owned scheduled events
+     }
+ }

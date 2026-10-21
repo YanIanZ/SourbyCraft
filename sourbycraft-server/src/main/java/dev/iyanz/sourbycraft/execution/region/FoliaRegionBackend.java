@@ -29,6 +29,16 @@ public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, R
         return TickRegionScheduler.getTickRate();
     }
 
+    /** Backs {@link RegionOwnership#ensureGlobalTickThread}: the engine's global-tick ownership check. */
+    static void ensureGlobalTickThread(final String reason) {
+        RegionizedServer.ensureGlobalTickThread(reason);
+    }
+
+    /** Backs {@link RegionOwnership#executeOnGlobalTick}: inline on the global tick thread, else queued for it. */
+    static void executeOnGlobalTick(final Runnable task) {
+        RegionizedServer.getInstance().scheduleToOrExecute(task);
+    }
+
     /**
      * A chunk the calling thread's region owns, for the Aurora Bridge's caller-region route.
      * {@code getCenterChunk} sorts every chunk the region owns, so anchors are cached per region

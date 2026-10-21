@@ -47,8 +47,8 @@ panel and JVM advisor use a UTF-8 stream. Changes affect the next startup.
 
 `log4j2.xml` (paper feature patch 0016) prints the logger through `%scLogger`
 (`sourbycraft-server/src/log4jPlugins`). Only a fixed list of server-internal namespaces is
-shortened: `dev.iyanz.sourbycraft.*` prints as `SourbyCraft/<Class>`, `dev.iyanz.aurora.*` and
-`io.canvasmc.*` as `Aurora/<Class>`, `ca.spottedleaf.dataconverter.*` as `DataConverter`,
+shortened: `dev.iyanz.sourbycraft.*` prints as `SourbyCraft/<Class>`, `dev.iyanz.aurora.*` as
+`Aurora/<Class>`, `ca.spottedleaf.dataconverter.*` as `DataConverter`,
 `oshi.*` as `OSHI`, and `io.papermc.*`, `ca.spottedleaf.*`, `net.minecraft.*`,
 `org.bukkit.craftbukkit.*`, `com.mojang.*`, `com.destroystokyo.paper.*` as the simple class name.
 Every other logger name, including plugin and library names with dots, is printed unchanged.

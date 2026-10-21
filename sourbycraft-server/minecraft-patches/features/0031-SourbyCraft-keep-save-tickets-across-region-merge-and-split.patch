@@ -16,10 +16,10 @@ synchronous dependent re-entering the regioniser would deadlock. A
 reported failure still wins over the completion that follows it.
 
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index aa0418219db400a05d8af99d744482da7a48ba46..590ccdfcf9e046e3e096310568d2bb8a1dfe1a99 100644
+index ab34149c5d0f8fd30c29c61513b294b0a69a5653..8a5c2236ddff34c092fe1db851f592733f0a4d5f 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -314,12 +314,9 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -311,12 +311,9 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          @Override
          public CompletableFuture<Void> propagateSaveAllTicket(final boolean flush) {
              final CompletableFuture<Void> future = new CompletableFuture<>();
@@ -35,7 +35,7 @@ index aa0418219db400a05d8af99d744482da7a48ba46..590ccdfcf9e046e3e096310568d2bb8a
              return future;
          }
  
-@@ -555,6 +552,17 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -552,6 +549,17 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
  
              // task queue
              this.taskQueueData.split(regioniser, into);
@@ -53,7 +53,7 @@ index aa0418219db400a05d8af99d744482da7a48ba46..590ccdfcf9e046e3e096310568d2bb8a
          }
  
          @Override
-@@ -593,6 +601,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -590,6 +598,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
  
              // task queue
              this.taskQueueData.mergeInto(data.taskQueueData);

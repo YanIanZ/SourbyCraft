@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.iyanz.aurora.engine.util.ticket.UnloadTicket;
-import io.canvasmc.canvas.WorldUnloadResult;
+import dev.iyanz.sourbycraft.api.world.WorldUnloadResult;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;

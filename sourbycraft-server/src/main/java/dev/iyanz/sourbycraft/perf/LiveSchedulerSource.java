@@ -9,7 +9,7 @@ import dev.iyanz.sourbycraft.perf.SchedulerQueueCollector.WorldProbe;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.LateTicks;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.RunnerActivity;
 import dev.iyanz.sourbycraft.perf.SchedulerQueueSnapshot.Scheduler;
-import io.canvasmc.canvas.region.WorldRegionizer;
+import dev.iyanz.sourbycraft.api.region.WorldRegionizer;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.RegionizedTaskQueue;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;

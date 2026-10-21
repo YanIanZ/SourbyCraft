@@ -1,6 +1,6 @@
 package dev.iyanz.aurora.engine.util.ticket;
 
-import io.canvasmc.canvas.WorldUnloadResult;
+import dev.iyanz.sourbycraft.api.world.WorldUnloadResult;
 import java.util.function.Consumer;
 
 /**

@@ -19,7 +19,7 @@ allowed                         avoid
 -------                         -----
 Aurora core                     Aurora core
     ↓                               ↓
-Aurora interface                io.canvasmc....
+Aurora interface                dev.iyanz.aurora.engine....
     ↑
 compat implementation
     ↓

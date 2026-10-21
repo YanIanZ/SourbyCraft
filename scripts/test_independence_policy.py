@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import tempfile
 import unittest
 
@@ -31,16 +32,14 @@ class CanvasSourceCouplingTest(unittest.TestCase):
         "dev.iyanz.aurora.engine.GlobalConfiguration.reload",
         "dev.iyanz.aurora.engine.WorldConfig.reload",
         # Runtime AWF world lifecycle (dependency-ledger.md section 1.2): a durable save waits for
-        # each region's save ticket, and the engine's unload outcome is mapped to the API's own
-        # UnloadResult so plugins never see it.
+        # each region's save ticket. (The unload outcome and the unload event are SourbyCraft's
+        # own plugin API since Build 48, dev.iyanz.sourbycraft.api, so they are not engine coupling.)
         "dev.iyanz.aurora.engine.util.ticket.SaveAllTicket",
-        "io.canvasmc.canvas.WorldUnloadResult",
-        "io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent",
         # /perf scheduler (dependency-ledger.md section 1.2, recorded 2026-10-20): the configured
         # scheduler kind and thread count, and the READY/TRANSIENT region split. Read-only;
-        # declared here rather than reached around by matching class names as strings.
+        # declared here rather than reached around by matching class names as strings. The region
+        # state it reads is SourbyCraft's plugin API type (dev.iyanz.sourbycraft.api.region).
         "dev.iyanz.aurora.engine.threadedregions.SchedulerUtil",
-        "io.canvasmc.canvas.region.WorldRegionizer",
     }
 
     ADAPTER = ("sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/config/upstream/"
@@ -62,15 +61,10 @@ class CanvasSourceCouplingTest(unittest.TestCase):
                          "add it to APPROVED with the reason, or route it through a "
                          "Sourby-owned integration point")
 
-    # Feature patches that name a Canvas symbol, with the reason (recorded 2026-10-20 when the
-    # scan was widened to paper-patches/features, audit OBS-7). Paper feature 0014 (staged
-    # createWorld) extends CraftServer's world lifecycle, whose unload path already returns the
-    # retained io.canvasmc plugin-API enum WorldUnloadResult (APPROVED above for sources); the
-    # patch returns the same two constants the baseline does. No engine internals are reached.
-    PATCH_APPROVED = [
-        "io.canvasmc.canvas.WorldUnloadResult.FAIL_UNKNOWN",
-        "io.canvasmc.canvas.WorldUnloadResult.SUCCESS",
-    ]
+    # Feature patches that name a Canvas symbol, with the reason. Empty since Build 48: the
+    # io.canvasmc plugin API was removed (owner decision 2026-10-21) and Paper feature 0014 names
+    # dev.iyanz.sourbycraft.api.world.WorldUnloadResult by its simple name.
+    PATCH_APPROVED = []
 
     def test_integration_patches_add_no_live_canvas_calls(self):
         self.assertEqual(sorted(policy.canvas_patch_symbols(REPO)), sorted(self.PATCH_APPROVED),
@@ -117,6 +111,47 @@ class CanvasSourceCouplingTest(unittest.TestCase):
                 "class Engine { void f() { dev.iyanz.aurora.engine.Thing.go(); } }")
             self.assertEqual(policy.canvas_source_sites(root), [])
             self.assertEqual(policy.scheduler_sites(root), [])
+
+
+class CanvasPackageRemovedTest(unittest.TestCase):
+    """Build 48 removed the io.canvasmc plugin API outright (owner decision 2026-10-21, no shim).
+
+    The package must not come back anywhere SourbyCraft ships code from: the API sources, the
+    server sources, and every patch tree, the engine baseline included.
+    """
+
+    ROOTS = (
+        "sourbyapi/src",
+        "sourbycraft-server/src/main",
+        "sourbycraft-server/src/log4jPlugins",
+        "sourbycraft-server/minecraft-patches",
+        "sourbycraft-server/paper-patches",
+        "sourbyapi/paper-patches",
+    )
+    FORBIDDEN = re.compile(r"io\.canvasmc")
+
+    def test_no_io_canvasmc_reference_remains(self):
+        offenders = []
+        for relative in self.ROOTS:
+            base = REPO / relative
+            self.assertTrue(base.is_dir(), relative)
+            for path in sorted(p for p in base.rglob("*") if p.is_file()):
+                text = path.read_text(errors="replace")
+                for number, line in enumerate(text.splitlines(), 1):
+                    if self.FORBIDDEN.search(line):
+                        offenders.append(f"{path.relative_to(REPO)}:{number}: {line.strip()}")
+        self.assertEqual(offenders, [], "io.canvasmc was removed in Build 48; use dev.iyanz.sourbycraft.api")
+
+    def test_the_package_directories_are_gone(self):
+        for relative in ("sourbyapi/src/main/java/io/canvasmc", "sourbyapi/src/test/java/io/canvasmc"):
+            self.assertFalse((REPO / relative).exists(), relative)
+
+    def test_the_owned_api_packages_exist(self):
+        api = REPO / "sourbyapi/src/main/java/dev/iyanz/sourbycraft/api"
+        for package in ("event", "event/world", "region", "simd", "world"):
+            self.assertTrue((api / package).is_dir(), package)
+        self.assertTrue((api / "Unsupported.java").is_file())
+        self.assertTrue((api / "world/WorldUnloadResult.java").is_file())
 
 
 class CanvasPatchCouplingTest(unittest.TestCase):

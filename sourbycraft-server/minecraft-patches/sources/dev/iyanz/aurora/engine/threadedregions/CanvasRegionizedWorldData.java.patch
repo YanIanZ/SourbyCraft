@@ -1,10 +1,9 @@
 --- /dev/null
 +++ b/dev/iyanz/aurora/engine/threadedregions/CanvasRegionizedWorldData.java
-@@ -1,0 +_,102 @@
+@@ -1,0 +_,101 @@
 +package dev.iyanz.aurora.engine.threadedregions;
 +
 +import dev.iyanz.aurora.engine.GlobalConfiguration;
-+import io.canvasmc.canvas.region.RegionTickData;
 +import dev.iyanz.aurora.engine.world.RegionResourceBar;
 +import dev.iyanz.aurora.engine.world.RegionizedRamBar;
 +import dev.iyanz.aurora.engine.world.RegionizedTpsBar;

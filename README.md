@@ -50,7 +50,7 @@ The architecture direction is:
                                         ex-Folia/Canvas)
 ```
 
-Since 2026-10-05 Paper is the only upstream: the region-threading changes that came from Canvas/Folia are SourbyCraft-owned patches and sources. Canvas survives only as the plugin API package `io.canvasmc.canvas.*` and the `config/canvas-*.yml` file names. It is **not** the SourbyCraft product architecture.
+Since 2026-10-05 Paper is the only upstream: the region-threading changes that came from Canvas/Folia are SourbyCraft-owned patches and sources. Canvas survives only in the `config/canvas-*.yml` file names and the `canvas-supported` plugin.yml key; its plugin API package moved to `dev.iyanz.sourbycraft.api.*` in Build 48 (breaking change, see `sourbyapi/README.md`). It is **not** the SourbyCraft product architecture.
 
 Start at **[Aurora Architecture](docs/architecture/AURORA.md)** — the entry point for every Aurora document: a document map, the current state verified against code, open contradictions between documents, and the architecture contract.
 
@@ -143,7 +143,7 @@ A single workload, machine, percentile or profiler sample must never be generali
 ### Aurora engine, and where it lives
 
 Aurora is the engine; SourbyCraft is what surrounds it. The console says so — a line from
-`net.minecraft`, `io.papermc.paper`, `io.canvasmc` or `dev.iyanz.aurora` prints as **Aurora
+`net.minecraft`, `io.papermc.paper` or `dev.iyanz.aurora` prints as **Aurora
 Engine**, a line from `dev.iyanz.sourbycraft` prints as **SourbyCraft** — and the source tree
 says so too: engine code SourbyCraft wrote lives in `dev.iyanz.aurora.*` inside the Minecraft
 tree, rather than hiding in a vanilla package. See

@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent;
+import dev.iyanz.sourbycraft.api.event.world.WorldUnloadAsyncEvent;
 import java.nio.file.Path;
 import org.bukkit.World;
 import org.junit.jupiter.api.Test;

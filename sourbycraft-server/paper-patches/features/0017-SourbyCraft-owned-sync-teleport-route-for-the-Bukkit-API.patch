@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 01:50:02 +0700
+Subject: [PATCH] SourbyCraft - owned sync teleport route for the Bukkit API
+
+CraftEntity#teleport0 asks SourbyCraft's OwnedTeleport for a route before the inherited refusal: SYNC runs Paper's body inside the admission scope (events, passenger rules, true only after the move), ASYNC starts teleportAsync from the entity's own region with the same cause and velocity flags and returns false (not completed now), REFUSE (-Daurora.compat.sync-teleport=false) keeps the inherited refusal. CraftPlayer reads player state only on the player's region and leaves the route to super.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
+index dce289e4c3bf0ea91a570af93cbe9df28e60ea51..046d024458bb205318030f90c53e1224b80896b0 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
+@@ -314,11 +314,17 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
+     }
+ 
+     protected boolean teleport0(Location location, TeleportCause cause, TeleportFlag... flags) {
++        // SourbyCraft start - owned sync teleport: SYNC runs Paper's body below, ASYNC schedules teleportAsync and returns false
++        final dev.iyanz.sourbycraft.entity.teleport.TeleportRoute.Route sourbyRoute = dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport.route(this.getHandleRaw(), location); // raw: the caller may be on any thread
++        if (sourbyRoute == dev.iyanz.sourbycraft.entity.teleport.TeleportRoute.Route.ASYNC) return dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport.scheduleAsync(this, location, cause, flags);
++        if (sourbyRoute != dev.iyanz.sourbycraft.entity.teleport.TeleportRoute.Route.SYNC) { // REFUSE (-Daurora.compat.sync-teleport=false): the inherited refusal
++        // SourbyCraft end - owned sync teleport
+         // Folia start - region threading
+         if (true) {
+             throw new UnsupportedOperationException("Must use teleportAsync while in region threading");
+         }
+         // Folia end - region threading
++        } // SourbyCraft - owned sync teleport
+         Entity entity = this.getHandle();
+         if (!entity.isAlive() || !entity.valid) {
+             return false;
+@@ -331,7 +337,7 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
+             }
+         }
+ 
+-        return this.entity.teleport(new TeleportTransition(
++        return dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport.runSync(this.entity, () -> this.entity.teleport(new TeleportTransition( // SourbyCraft - owned sync teleport: admit this entity tree past the NMS refusal
+             ((CraftWorld) location.getWorld()).getHandle(),
+             CraftLocation.toVec3(location),
+             Vec3.ZERO,
+@@ -343,7 +349,7 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
+             TeleportTransition.DO_NOTHING,
+             cause,
+             TeleportTransition.PassengerTeleportationMode.POSITION_RIDER
+-        )) != null;
++        )) != null); // SourbyCraft - owned sync teleport
+     }
+ 
+     public static net.minecraft.world.entity.Relative deltaRelativeToNMS(TeleportFlag.Relative apiFlag) {
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index 9c3606399d7cbf673d8abb87cec450be432f1463..be977468da9ec4bb95097c3a35898b0e44740427 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -1342,11 +1342,14 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+ 
+     @Override
+     protected boolean teleport0(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, io.papermc.paper.entity.TeleportFlag... flags) {
++        if (!dev.iyanz.sourbycraft.entity.teleport.TeleportRoute.ENABLED) { // SourbyCraft - owned sync teleport: super.teleport0 routes; the inherited refusal only when switched off
+         // Folia start - region threading
+         if (true) {
+             throw new UnsupportedOperationException("Must use teleportAsync while in region threading");
+         }
+         // Folia end - region threading
++        } // SourbyCraft - owned sync teleport
++        if (dev.iyanz.sourbycraft.entity.teleport.TeleportRoute.ENABLED) return dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport.playerMayProceed((net.minecraft.server.level.ServerPlayer) this.getHandleRaw()) && super.teleport0(location, cause, flags); // SourbyCraft - owned sync teleport: player state is read only on the player's region; a cross-world vehicle is scheduled with its passengers
+         if (this.getHandle().connection == null) {
+             return false;
+         }

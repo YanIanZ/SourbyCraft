@@ -25,7 +25,7 @@ availableProcessors() (not OSNuma total cores) so container CPU quotas
 are respected. See docs/architecture/region-parallelism.md.
 
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 5c63dd102328f2e5f555c644988e5be162ce73f1..9cfcedd6fb759646ad54c7192806148be714b29e 100644
+index d31d0a05906ed540c1c1145d8b78a997ce1322e2..4d4fa380e52f83d107a9a8a24c825d4439208bea 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
 @@ -1,7 +1,6 @@
@@ -36,7 +36,7 @@ index 5c63dd102328f2e5f555c644988e5be162ce73f1..9cfcedd6fb759646ad54c7192806148b
  import ca.spottedleaf.moonrise.common.util.TickThread;
  import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
  import com.mojang.logging.LogUtils;
-@@ -59,12 +58,30 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -56,12 +55,30 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
      private static int getTickThreads(final GlobalConfiguration.@NonNull ThreadedRegions config) {
          int tickThreads;
          if (config.threads <= 0) {

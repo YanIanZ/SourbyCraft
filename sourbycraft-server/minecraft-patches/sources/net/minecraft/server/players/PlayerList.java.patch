@@ -173,7 +173,7 @@
          if (advancements != null) {
              advancements.save();
          }
-+        new io.canvasmc.canvas.event.PlayerSaveEvent(player.getBukkitEntity(), false).callEvent(); // Canvas - player save event
++        new PlayerSaveEvent(player.getBukkitEntity(), false).callEvent(); // Canvas - player save event
      }
  
      public net.kyori.adventure.text.@Nullable Component remove(final ServerPlayer player) { // CraftBukkit - return string // Paper - return Component
@@ -222,7 +222,7 @@
          // This removes the scoreboard (and player reference) for the specific player in the manager
          this.cserver.getScoreboardManager().removePlayer(player.getBukkitEntity());
          // CraftBukkit end
-+        new io.canvasmc.canvas.event.PlayerSaveEvent(player.getBukkitEntity(), true).callEvent(); // Canvas - player save event
++        new PlayerSaveEvent(player.getBukkitEntity(), true).callEvent(); // Canvas - player save event
          return playerQuitEvent.quitMessage(); // Paper - Adventure
      }
  

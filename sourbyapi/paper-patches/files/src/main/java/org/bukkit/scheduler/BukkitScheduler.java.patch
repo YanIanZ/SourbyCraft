@@ -13,7 +13,7 @@
 + */
 +// Folia end - add new schedulers
 +@Deprecated
-+@io.canvasmc.canvas.Unsupported // Canvas - region threading
++@Unsupported // Canvas - region threading
  public interface BukkitScheduler {
  
      /**

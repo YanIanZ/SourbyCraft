@@ -6,7 +6,7 @@ Subject: [PATCH] SourbyCraft - store Entity#lastKnownSpeed as 3 doubles
 
 
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 96c39cc2363beba2736bdd14f2b6576103a461eb..85389f035db40c4ac3e6eeae687fd1faa1fa63a1 100644
+index 8db0e5a2282ef5c57cc76dff65878419d0a0fdf7..bf82ac064d11d0ddc2c480ed0695e02187937820 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -398,8 +398,17 @@ public abstract class Entity

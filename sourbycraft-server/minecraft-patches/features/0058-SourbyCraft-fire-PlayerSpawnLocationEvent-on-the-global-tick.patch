@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 01:50:02 +0700
+Subject: [PATCH] SourbyCraft - fire PlayerSpawnLocationEvent on the global
+ tick
+
+The inherited baseline switched Spigot's PlayerSpawnLocationEvent off. SourbyCraft's SpawnLocationEvents fires it once per join on the global tick (which ticks configuration connections), before Paper's AsyncPlayerSpawnLocationEvent, feeding the chosen location into the existing async chunk load. When an event moves the join to another world the engine's joining-player mark moves with it; an unloading world is refused.
+
+diff --git a/net/minecraft/server/network/config/PrepareSpawnTask.java b/net/minecraft/server/network/config/PrepareSpawnTask.java
+index 88c4d0225bdf1b69785568af237844461ace6d87..50a1415348289facc65bcdf1a46d71ab187b0dec 100644
+--- a/net/minecraft/server/network/config/PrepareSpawnTask.java
++++ b/net/minecraft/server/network/config/PrepareSpawnTask.java
+@@ -222,6 +222,8 @@ public class PrepareSpawnTask implements ConfigurationTask {
+         private @Nullable CompletableFuture<?> chunkLoadFuture;
+         private @Nullable CompletableFuture<org.bukkit.Location> eventFuture; // Paper
+         private final ChunkLoadCounter chunkLoadCounter = new ca.spottedleaf.moonrise.patches.chunk_system.MoonriseChunkLoadCounter(); // Paper - rewrite chunk system
++        private boolean sourbyLegacySpawnEventFired; // SourbyCraft - PlayerSpawnLocationEvent on the global tick: once per join
++        private @Nullable ServerLevel sourbyJoinMarkLevel; // SourbyCraft - PlayerSpawnLocationEvent on the global tick: the world holding this join's mark
+ 
+         private Preparing(final ServerLevel spawnLevel, final CompletableFuture<Vec3> spawnPosition, final Vec2 spawnAngle) {
+             this.spawnLevel = spawnLevel;
+@@ -240,6 +242,17 @@ public class PrepareSpawnTask implements ConfigurationTask {
+ 
+             Vec3 spawnPosition = this.spawnPosition.join();
+             if (this.chunkLoadFuture == null) {
++                // SourbyCraft start - PlayerSpawnLocationEvent on the global tick (SpawnLocationEvents); the inherited block below stays off
++                if (this.sourbyJoinMarkLevel == null) this.sourbyJoinMarkLevel = this.spawnLevel;
++                if (dev.iyanz.sourbycraft.world.SpawnLocationEvents.shouldFireLegacy(this.sourbyLegacySpawnEventFired, org.spigotmc.event.player.PlayerSpawnLocationEvent.getHandlerList().getRegisteredListeners().length)) {
++                    this.sourbyLegacySpawnEventFired = true;
++                    final org.bukkit.Location chosen = dev.iyanz.sourbycraft.world.SpawnLocationEvents.fireLegacy(PrepareSpawnTask.this.listener.connection, PrepareSpawnTask.this.server, PrepareSpawnTask.this.profile, org.bukkit.craftbukkit.util.CraftLocation.toBukkit(spawnPosition, this.spawnLevel, this.spawnAngle.x, this.spawnAngle.y));
++                    spawnPosition = io.papermc.paper.util.MCUtil.toVec3(chosen);
++                    this.spawnLevel = ((org.bukkit.craftbukkit.CraftWorld) chosen.getWorld()).getHandle();
++                    this.spawnPosition = CompletableFuture.completedFuture(spawnPosition);
++                    this.spawnAngle = new Vec2(chosen.getYaw(), chosen.getPitch());
++                }
++                // SourbyCraft end - PlayerSpawnLocationEvent on the global tick
+                 // Paper start - PlayerSpawnLocationEvent
+                 if (false && this.eventFuture == null && org.spigotmc.event.player.PlayerSpawnLocationEvent.getHandlerList().getRegisteredListeners().length != 0) { // Folia - region threading
+                     ServerPlayer player;
+@@ -288,6 +301,7 @@ public class PrepareSpawnTask implements ConfigurationTask {
+                     this.spawnAngle = new Vec2(location.getYaw(), location.getPitch());
+                 }
+                 // Paper end - PlayerSpawnLocationEvent
++                this.spawnLevel = dev.iyanz.sourbycraft.world.SpawnLocationEvents.moveJoinMark(this.sourbyJoinMarkLevel, this.spawnLevel, PrepareSpawnTask.this.nameAndId.name()); // SourbyCraft - the join mark follows an event's world change
+                 ChunkPos spawnChunk = ChunkPos.containing(BlockPos.containing(spawnPosition));
+                 this.chunkLoadFuture = ((ca.spottedleaf.moonrise.patches.chunk_system.MoonriseChunkLoadCounter)this.chunkLoadCounter).trackLoadWithRadius(this.spawnLevel, spawnChunk, 3, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, ca.spottedleaf.concurrentutil.util.Priority.HIGH, () -> { Preparing.this.spawnLevel.getChunkSource().addTicketWithRadius(TicketType.PLAYER_SPAWN, spawnChunk, 3); }); // Paper - rewrite chunk system
+                 PrepareSpawnTask.this.loadListener.start(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS, this.chunkLoadCounter.totalChunks());

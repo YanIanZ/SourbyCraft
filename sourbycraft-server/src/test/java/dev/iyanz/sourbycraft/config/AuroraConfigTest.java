@@ -282,4 +282,27 @@ public class AuroraConfigTest {
         assertTrue(AuroraConfig.DEFAULT.reloadSummary(AuroraConfig.DEFAULT)
             .startsWith("Aurora: 0 live change(s)"));
     }
+
+    @Test
+    void commandBlocksAreOffByDefaultLiveAndOffOnATypo() {
+        assertFalse(AuroraConfig.DEFAULT.world().commandBlocks());
+        assertEquals(AuroraConfig.Lifecycle.LIVE, AuroraConfig.COMMAND_BLOCKS.lifecycle());
+        assertEquals("aurora.world.command-blocks", AuroraConfig.COMMAND_BLOCKS_KEY);
+        assertTrue(parse(Map.of(AuroraConfig.COMMAND_BLOCKS_KEY, true)).config().world().commandBlocks());
+        for (Object invalid : List.of("true", 1, List.of(true))) {
+            var result = parse(Map.of(AuroraConfig.COMMAND_BLOCKS_KEY, invalid));
+            assertFalse(result.config().world().commandBlocks());
+            assertEquals(List.of(AuroraConfig.COMMAND_BLOCKS_KEY), result.invalidKeys());
+        }
+        var malformed = parse(Map.of("aurora.world", "on", AuroraConfig.COMMAND_BLOCKS_KEY, true));
+        assertFalse(malformed.config().world().commandBlocks());
+        assertEquals(List.of("aurora.world"), malformed.invalidKeys());
+    }
+
+    @Test
+    void commandBlocksCountAsOneLiveChange() {
+        final AuroraConfig on = parse(Map.of(AuroraConfig.COMMAND_BLOCKS_KEY, true)).config();
+        assertTrue(on.reloadSummary(AuroraConfig.DEFAULT).startsWith("Aurora: 1 live change(s)"));
+        assertTrue(on.reloadSummary(AuroraConfig.DEFAULT).contains("restart required: none"));
+    }
 }

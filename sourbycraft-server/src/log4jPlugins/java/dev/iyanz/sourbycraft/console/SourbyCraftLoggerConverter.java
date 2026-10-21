@@ -19,7 +19,7 @@ import org.apache.logging.log4j.core.pattern.PatternConverter;
  * {@code com.example.plugin.Main}) keeps its identity:
  * <ul>
  *   <li>{@code dev.iyanz.sourbycraft.*} becomes {@code SourbyCraft/<Class>};</li>
- *   <li>{@code dev.iyanz.aurora.*} and {@code io.canvasmc.*} become {@code Aurora/<Class>};</li>
+ *   <li>{@code dev.iyanz.aurora.*} becomes {@code Aurora/<Class>};</li>
  *   <li>{@code ca.spottedleaf.dataconverter.*} becomes {@code DataConverter}, {@code oshi.*} {@code OSHI};</li>
  *   <li>{@code io.papermc.*}, {@code ca.spottedleaf.*}, {@code net.minecraft.*},
  *       {@code org.bukkit.craftbukkit.*}, {@code com.mojang.*} and {@code com.destroystokyo.paper.*}
@@ -59,7 +59,6 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
     private static final String[][] ALIASES = {
         {"dev.iyanz.sourbycraft.", BRAND + "/"},
         {"dev.iyanz.aurora.", ENGINE + "/"},
-        {"io.canvasmc.", ENGINE + "/"},
         {"ca.spottedleaf.dataconverter.", "DataConverter"},
         {"oshi.", "OSHI"},
         // Server internals: the simple class name ("" = no prefix).

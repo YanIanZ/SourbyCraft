@@ -37,6 +37,12 @@ storage-queue = 64
 # LIVE. Stop/start wire-byte and packet counting for /perf network.
 counters = true
 
+[aurora.world]
+# LIVE. Default-off. true runs command blocks and command-block minecarts under SourbyCraft's
+# region rules (docs/architecture/command-blocks.md); the vanilla gamerule command_blocks_work
+# (default true) must also be true. A repeating block that stopped while this was false needs re-arming.
+command-blocks = false
+
 [aurora.awf]
 # All AWF settings RESTART_REQUIRED. Empty lists leave new worlds on region files.
 # Existing AWF stores stay in use even after removing a name; use export to leave AWF.

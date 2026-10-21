@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 01:50:02 +0700
+Subject: [PATCH] SourbyCraft - owned sync teleport on the owning region
+
+The inherited Canvas/Folia refusal in Entity#teleport(TeleportTransition) and ServerPlayer#teleport stays for every caller except entities admitted by SourbyCraft's OwnedTeleport scope (a Bukkit API teleport whose route was SYNC: same world, caller owns the entity and the destination, chunks loaded). After the Bukkit teleport event, OwnedTeleport.continueAfterEvents re-checks the destination and hands it to teleportAsync when the event moved it off this region.
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 5707045565a21fae798ca8bc05ec960e0a758e71..e1aed4970090e1c77dc07b456c8e63f2732c9919 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -2212,11 +2212,13 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     // Folia end - region threading
+     @Override
+     public @Nullable ServerPlayer teleport(TeleportTransition transition) { // Paper - make non-final
++        if (!dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport.admitted(this, transition)) { // SourbyCraft - owned sync teleport: only an admitted API teleport passes the inherited refusal
+         // Folia start - region threading
+         if (true) {
+             throw new UnsupportedOperationException("Must use teleportAsync while in region threading");
+         }
+         // Folia end - region threading
++        } // SourbyCraft - owned sync teleport
+         if (this.isSleeping()) return null; // CraftBukkit - SPIGOT-3154
+         if (this.isRemoved()) {
+             return null;
+@@ -2253,6 +2255,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+             transition = transition.withChangedLocation(newExit).withVelocity(Vec3.ZERO).withRelatives(Set.of());
+         }
+         // CraftBukkit end
++        if (!dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport.continueAfterEvents(this, transition)) return null; // SourbyCraft - owned sync teleport: an event moved the destination off this region
+         if (!transition.asPassenger()) {
+             this.removeVehicle();
+         }
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index db45248a8b3e3d843026518d776b2f8a34da437b..454d4c4aa3360cb0d670a6f9fd774dda0f4bcf3c 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -5551,11 +5551,13 @@ public abstract class Entity
+ 
+     // Folia end - region threading
+     public @Nullable Entity teleport(TeleportTransition transition) { // Paper - remove param final
++        if (!dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport.admitted(this, transition)) { // SourbyCraft - owned sync teleport: only an admitted API teleport passes the inherited refusal
+         // Folia start - region threading
+         if (true) {
+             throw new UnsupportedOperationException("Must use teleportAsync while in region threading");
+         }
+         // Folia end - region threading
++        } // SourbyCraft - owned sync teleport
+         // Paper start - Fix item duplication and teleport issues
+         if ((!this.isAlive() || !this.valid) && (transition.newLevel() != this.level)) {
+             LOGGER.warn("Illegal Entity Teleport {} to {}:{}", this, transition.newLevel(), transition.position(), new Throwable());
+@@ -5615,6 +5617,7 @@ public abstract class Entity
+             }
+             // Paper end - Call EntityPortalExitEvent
+             // CraftBukkit end
++            if (!dev.iyanz.sourbycraft.entity.teleport.OwnedTeleport.continueAfterEvents(this, transition)) return null; // SourbyCraft - owned sync teleport: an event moved the destination off this region
+             ServerLevel newLevel = transition.newLevel();
+             boolean otherDimension = newLevel.dimension() != serverLevel.dimension();
+             if (!transition.asPassenger()) {

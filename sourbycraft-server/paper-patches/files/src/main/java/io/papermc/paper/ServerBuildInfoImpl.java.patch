@@ -14,7 +14,7 @@
  ) implements ServerBuildInfo {
      private static final String ATTRIBUTE_BRAND_ID = "Brand-Id";
      private static final String ATTRIBUTE_BRAND_NAME = "Brand-Name";
-@@ -29,8 +_,17 @@
+@@ -29,8 +_,16 @@
      private static final String ATTRIBUTE_BUILD_NUMBER = "Build-Number";
      private static final String ATTRIBUTE_GIT_BRANCH = "Git-Branch";
      private static final String ATTRIBUTE_GIT_COMMIT = "Git-Commit";
@@ -26,7 +26,6 @@
 +    // Canvas start - Rebrand
 +    private static final String BRAND_CANVAS_NAME = "Canvas";
 +
-+    // private static final Key BRAND_CANVAS_ID = Key.key("canvasmc", "canvas");
 +    // private static final Key BRAND_FOLIA_ID = Key.key("papermc", "folia");
 +    // Canvas end - Rebrand
  

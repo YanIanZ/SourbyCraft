@@ -2,23 +2,22 @@
 # SHA-256 of each file (CRLF normalised to LF). SourbyCraft changes to Minecraft/Paper
 # code belong in */features/ patches; regenerate this only for a deliberate baseline
 # change: python3 scripts/baseline_policy.py --write-manifest
-# Recorded 2026-10-20 from the tree at HEAD 4e859950; baseline content unchanged since 2554782c (2026-10-05).
 9c98b4dd7aae71cb1abec89e13bf52354e87b8cd260d7d8f2ca20b77de185b1e  sourbyapi/paper-patches/files/src/main/java/co/aikar/timings/Timings.java.patch
 96aada728f99836c0f681e8a72ca295350579a348a2ff88bb5d0b8657ab81980  sourbyapi/paper-patches/files/src/main/java/com/destroystokyo/paper/util/VersionFetcher.java.patch
 f79862b5939e7aaa4a5a6e194d89655a1cea1a940613663587ec008ef9f1b616  sourbyapi/paper-patches/files/src/main/java/io/papermc/paper/ServerBuildInfo.java.patch
-4c1b765d272f26eb6bc6e5ecb0aa472695a5b0f4ebc6fde88dc86d3922d43e2b  sourbyapi/paper-patches/files/src/main/java/io/papermc/paper/datapack/Datapack.java.patch
+94dfe8516ad0d32a46332bd646d543590203336227aee887d756bfdb327f09dd  sourbyapi/paper-patches/files/src/main/java/io/papermc/paper/datapack/Datapack.java.patch
 b936542e351f9700fe6b83c011d7708eb9e1df765026e9dbcfd86aefaac0309f  sourbyapi/paper-patches/files/src/main/java/io/papermc/paper/entity/RemovalReason.java.patch
 4842411fc41f43c13a2c862ca97cf08ef3f9514cf07590c3b2eb9d341dc5c86a  sourbyapi/paper-patches/files/src/main/java/io/papermc/paper/plugin/configuration/PluginMeta.java.patch
 e58d0464409a68c2048ffa3c09d972fe228a7a3a142304951b91fe998dd7eeb4  sourbyapi/paper-patches/files/src/main/java/org/bukkit/Bukkit.java.patch
-9a7f390ff80b025a2ed8a7425bf0076a609c857c16bbab8668e9e56f4c7c3753  sourbyapi/paper-patches/files/src/main/java/org/bukkit/Server.java.patch
-cc6da839d165d28f9c6865070ed64440dfa270f80df6ef79bdc591ac56f5f854  sourbyapi/paper-patches/files/src/main/java/org/bukkit/ServerTickManager.java.patch
-e7d3421f829ec9e3fd5be34ef3a640f734df404c18efeec8b6baf2b9c4ddb99b  sourbyapi/paper-patches/files/src/main/java/org/bukkit/World.java.patch
-96ad300dfd29ea47a0ad9c3d61bec42913ce6506762c1bdb7d6cdeb02c017a1e  sourbyapi/paper-patches/files/src/main/java/org/bukkit/entity/Entity.java.patch
+adc51724e4fad1e1cde3ab1132aa94aea56cb8e5eb1fd0cd5c568d54817a88a9  sourbyapi/paper-patches/files/src/main/java/org/bukkit/Server.java.patch
+2579be0e564cac592fc708b91a03bda5055a12a334735b0fd62711c85c817cf5  sourbyapi/paper-patches/files/src/main/java/org/bukkit/ServerTickManager.java.patch
+4400511c090aa1d4f2b891231bd76dc64c9f1f9838c7d688e190bcbfb37cafe9  sourbyapi/paper-patches/files/src/main/java/org/bukkit/World.java.patch
+e8e12be40e2ac09a5395ba0ab3f3b547d98de42d64f27206f7ae250408df2626  sourbyapi/paper-patches/files/src/main/java/org/bukkit/entity/Entity.java.patch
 0d57a830f0633aaa661eb5c0e6f72e6b8324a33bf9e3e4d5a55bdda413b0a085  sourbyapi/paper-patches/files/src/main/java/org/bukkit/event/inventory/InventoryType.java.patch
-084dec9028eac8205c19f17861d9d3f783fc7f8bb484233a1f68b2f91f3b869f  sourbyapi/paper-patches/files/src/main/java/org/bukkit/map/MapPalette.java.patch
+1828c7d8c702398b7f793276e40f65ec9e500385d9fddb05c502e062d7b7d04f  sourbyapi/paper-patches/files/src/main/java/org/bukkit/map/MapPalette.java.patch
 afee14935541c91459f9a3efe4e41c01ac794eefecf70bbc9e177c5c1747cbfb  sourbyapi/paper-patches/files/src/main/java/org/bukkit/plugin/PluginDescriptionFile.java.patch
 7787b7e935c4accafbd0c96edb12c373d548b1a1282b1baf066f77c86f3dd165  sourbyapi/paper-patches/files/src/main/java/org/bukkit/plugin/SimplePluginManager.java.patch
-fd429ce6a9ed4756f2b12980fd208602160e24a320a7240cdece409e0036612e  sourbyapi/paper-patches/files/src/main/java/org/bukkit/scheduler/BukkitScheduler.java.patch
+16ad79b6c4a145b68d4696febc1b42fdda2e3b664605e8a2b8d9c6caad8c21ab  sourbyapi/paper-patches/files/src/main/java/org/bukkit/scheduler/BukkitScheduler.java.patch
 cf899c02970839b44b38bd12632220d087be8953dd5c7dcdc709195a8af7ce28  sourbycraft-server/minecraft-patches/sources/ca/spottedleaf/concurrentutil/executor/thread/BalancedPrioritisedThreadPool.java.patch
 5ebbcc22e46c90711756b7695fe36d0b5bf45cf1d6c8a8a67a2703016ac88053  sourbycraft-server/minecraft-patches/sources/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java.patch
 544ba9058fe6c630c364d2fdda11fc1d569300881dd9784946a9b224327f5579  sourbycraft-server/minecraft-patches/sources/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java.patch
@@ -40,11 +39,11 @@ bc0ea1ea05476d313b4581de243c2a1f34076a4afe06a3c41300837c2c42fcee  sourbycraft-se
 6e466458c1e5ab641ede027f8700e600e0b8524d5f5c1aee9fc2a4332a14d227  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/commands/HelpCommand.java.patch
 0c65f037f6c5f36c6c260924edbe7c310dc1dd8c94eb5ca58eaa245f42051db2  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/commands/SubCommand.java.patch
 51bd4e3109ec8190df79bac65a169fe87050c9fa81a61433b3d27e488cf7281f  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/commands/package-info.java.patch
-a2302f73be2ab560434419fc7e55bc141f30b6afeee88ac6a9f8c045d0e6b9db  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/CanvasRegionizedWorldData.java.patch
+0d2b9449bff4ccbdb371d6422d69bf4dd60ce72cae080d61e891d99f12b53327  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/CanvasRegionizedWorldData.java.patch
 1885c7d866c69dc9026d8c48bc1144e64f38b0abe9ef21ccc8a26b76cea41ee1  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java.patch
 de19e45988ee5226d9923489762fe7bfac98eb029cc93590d0ded84be2dcb737  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/SchedulerUtil.java.patch
-ea84a2300226bd0a71fb7589ce4dd113ea7a196ddbc16c09b3b94b9149442267  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/ServerRegionTickManager.java.patch
-69d91d0b5b868768a86e31dd1eb6dc7c153607ebf8cf6f6496548b94ff20696c  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java.patch
+41edee8badd32a78a8fd6f69c57e1a3a10451b47d5572cc2cfc062c28cc26f87  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/ServerRegionTickManager.java.patch
+12ae2b32524ad8480f350faee292548bc90774e622d575a0f0d391717b6da2c1  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java.patch
 478aba61d54a5f93cb3c34c380b29f64a5988476de2ec9e7920e8634dcfe1555  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/commands/AbstractCommandExecution.java.patch
 4528682a015aebb07914b2e7e88434d92b294668d2cba5b16a7be6dce2f2d9ee  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/commands/ExecutionCallbacks.java.patch
 e4402eb926ca9e5f2fd312ef3629ad6a7ef575f4b4619e6611359d97ae0c76fc  sourbycraft-server/minecraft-patches/sources/dev/iyanz/aurora/engine/threadedregions/commands/package-info.java.patch
@@ -76,9 +75,9 @@ c2d46ee5f364e2af84306d5b96263c3e68596f185f9944bac09bfb1ef85622b6  sourbycraft-se
 ad5f81c0604b08d2b7646dbfbfdfbc41dc16a9bed1e3620254768c4ab4055b6c  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/RegionizedTaskQueue.java.patch
 d1d832669b7733d2e4458dd99d98b7ad89c1f89f3003210528e778d710d75d22  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/RegionizedWorldData.java.patch
 56ec4424cd3f6193e60ba5f26d7b94dc043af6067df0f81c8830a7786ea2206c  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/TeleportUtils.java.patch
-38a9881c7ca96889b0e660f4bbc06727f4d11179a62c26078dd5c44d41bb857e  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/ThreadedRegionizer.java.patch
+ad0c09cb8e10f154f370493eff1cab5ce927f31e67e5f315123cac8b48cd4997  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/ThreadedRegionizer.java.patch
 8b083896306f04191c5fe8ab467b0b534ed965627005f70651c55e0a14fc5b34  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/TickRegionScheduler.java.patch
-1e426bbdfe9a0817f25e120b8af1d8a3700f2784f658c7b3526774ea9baff007  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/TickRegions.java.patch
+2a2f165110831c0be2f5d7abe8d4364bad95026ab5df9f2418c2f3822e916e23  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/TickRegions.java.patch
 e8d3058a4208684ca21789a85f6667ba30b588437b8d002e1a769b085c9ea04e  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/commands/CommandServerHealth.java.patch
 d480efa5ca6fdc4fcfd673b103063cdcf458108568381291355b886d80030e11  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/commands/CommandUtil.java.patch
 96eaa0393d5c568e81e6b526fa7549ca7e83d12c73e1f808d7d5c3c113f311cc  sourbycraft-server/minecraft-patches/sources/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java.patch
@@ -229,7 +228,7 @@ ccb9ee44ec088c36763f4890c66f59ba13aed8e14839c43061b7a6f4a9a5f1cf  sourbycraft-se
 a0f92f93101958a9b31e3aa8df27be4047c1c20d97a32fcf746960a54cc36809  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/level/ServerEntity.java.patch
 1c81ab21edf5c9c09f8e2e8a8d94b096e7d2db819be829e75f72a1a0c43b374d  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/level/ServerEntityGetter.java.patch
 24c8b87871f9f8a96c9eb8474c181a4ef88eeb6ff5f1adf57c39e844daffc16b  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/level/ServerLevel.java.patch
-81ebc0af814cd57b6f1825b34fe9df48dd2400a77d89ab4d806f1469fbd3809f  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/level/ServerPlayer.java.patch
+04f66ca1e6d078fe6bd335c0912518214b8c86be43b054732e57ec257fc42a8f  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/level/ServerPlayer.java.patch
 3f6ba1b0e234fe60a8d1a84b61acf7018445787c97520d70ac12b30075dc4ce8  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/level/ServerPlayerGameMode.java.patch
 7984ddac326b32ded9af86af1fe74fff962409764fa2f4d79d832460af7acd85  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/level/TicketType.java.patch
 9937e12a16e48367d5269a7f986020cd930e8383cf225c6d34c8b567e01d201b  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/level/WorldGenRegion.java.patch
@@ -245,7 +244,7 @@ db4d506d01024e856a32c2ffbab010cf6cbc760fa8f8f1aed4a128b4b1001db9  sourbycraft-se
 f85ba9613be1f25f00505c7138228baf28801bf98221df04725f697a22cd2454  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/packs/resources/SimplePreparableReloadListener.java.patch
 0465ee8df07edc96e08cdad647af23b7e24d9f110bef7f9d8b1a0e39cc0661bf  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/players/BanListEntry.java.patch
 7d7d0be0e5a194f42b4217d7071bb80d8ab8f7c92326f004db9f0404d893d916  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/players/OldUsersConverter.java.patch
-705ec0317b3f55ad5266e6db851caaad15fc2a7172c5ff431e5b4a6fce6f6869  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/players/PlayerList.java.patch
+39a5ecc81e9808f16a76488fd4922da388939dfddd99bd6246bf9e8bba0927b1  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/players/PlayerList.java.patch
 c0532f0282e5cc325581b32f00ab44eebd819f1f02b53e9b3fea70f73bf4c274  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/players/SleepStatus.java.patch
 73da524c89a4ef5626d8000d38001dd1d79d4be7896f43689a5eb57f3174415e  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/players/StoredUserList.java.patch
 0deb852d3de36bffdb27b8956262cf04fd73c7b6b1c66f717785ababc47f0e6a  sourbycraft-server/minecraft-patches/sources/net/minecraft/server/waypoints/ServerWaypointManager.java.patch
@@ -262,7 +261,7 @@ c18e090e0a38369255bd3f93d0c1b7904ee61f7b57019b51f59895dc35f05815  sourbycraft-se
 e7c0126cc003db7010295e5920ec5714747638efd4322e720bc35ae74f07cf66  sourbycraft-server/minecraft-patches/sources/net/minecraft/world/damagesource/CombatTracker.java.patch
 b4344261f5aba23986b930495e4a1c27bf0b1e8aaf10351559703c3d2f595b6f  sourbycraft-server/minecraft-patches/sources/net/minecraft/world/damagesource/DamageSource.java.patch
 f3c789ea4cdf281d38f594ea292629e8e0c119c776a89cf5c378a1f027693a59  sourbycraft-server/minecraft-patches/sources/net/minecraft/world/damagesource/FallLocation.java.patch
-030c5f52cbda49d5133117155b415bffb627db6a6baa5ab3c6d19153cf027218  sourbycraft-server/minecraft-patches/sources/net/minecraft/world/entity/Entity.java.patch
+04ee27098eef7dbdb5833cdec8dee53281adb3961c840b0e19ed5861904d2a16  sourbycraft-server/minecraft-patches/sources/net/minecraft/world/entity/Entity.java.patch
 47786bf8164a3fc624ad97efeec55368c4ac8fd6a16ef61c6c19bd34adeb4e06  sourbycraft-server/minecraft-patches/sources/net/minecraft/world/entity/EntityReference.java.patch
 092c19fa41317ba6185b6e7670a904368919879063e307b2fd57e214db12383c  sourbycraft-server/minecraft-patches/sources/net/minecraft/world/entity/ExperienceOrb.java.patch
 10a7247da97405a3d30c6f9815ed01e12ccf2fce6db027cded0d4406ff43c3bd  sourbycraft-server/minecraft-patches/sources/net/minecraft/world/entity/InsideBlockEffectApplier.java.patch
@@ -504,7 +503,7 @@ b238ea093a05e216dcbaabffc8e83e70af2582879458f0ef59431e9202e57c5a  sourbycraft-se
 b0dfceff4e01537ad682ec846af0af6dd01790e5fb269eb79f5e316a3a84a3ac  sourbycraft-server/paper-patches/files/src/main/java/com/destroystokyo/paper/console/PaperConsole.java.patch
 b3024c1761cc3dfed6bdafa1475574b503d17a9af380fdfeb232abcaa6429e90  sourbycraft-server/paper-patches/files/src/main/java/com/destroystokyo/paper/entity/ai/PaperMobGoals.java.patch
 3b990f2734de353577e41b07373d4ba1ad85515ff083858dc0247cce5cf06017  sourbycraft-server/paper-patches/files/src/main/java/io/papermc/paper/PaperServerInternalAPIBridge.java.patch
-c2040263ec79ab6253bd239815c64019b0cf15bb711f6bfac66fcb4f6c3c13cf  sourbycraft-server/paper-patches/files/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java.patch
+9248dfa7228754dbeb3d7883dda0cd1e324605b9b3f7f3f6ba385c5c2b4e2532  sourbycraft-server/paper-patches/files/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java.patch
 2899238b614db9fb0cf4a8532239020f16f37e2b4709abae30cfbbefde55e2a0  sourbycraft-server/paper-patches/files/src/main/java/io/papermc/paper/SparksFly.java.patch
 93274d189e3e076a81b911ba1febf38db043821aaa8e457281c349f0565eea0e  sourbycraft-server/paper-patches/files/src/main/java/io/papermc/paper/adventure/ChatProcessor.java.patch
 0ff076cfe9cbd49d90b2316ac998c9db7af9af7a817b2d42ca1ec08bcb4c6adb  sourbycraft-server/paper-patches/files/src/main/java/io/papermc/paper/adventure/providers/ClickCallbackProviderImpl.java.patch
@@ -532,9 +531,9 @@ bba3a85e91d12dfd657bead7dc64ebaab59634bb51d20d701c2ef9483bc4bf28  sourbycraft-se
 45b74f0e3d10cd48493a727f9f1ba200f125841387d90b0cc1472162527dd15e  sourbycraft-server/paper-patches/files/src/main/java/io/papermc/paper/world/migration/WorldMigrationContext.java.patch
 f5241cafde83d8b98467234e478bbc1875255aa65ee14bf0eec8f1967aba041f  sourbycraft-server/paper-patches/files/src/main/java/io/papermc/paper/world/saveddata/PaperLevelOverrides.java.patch
 d52bf4303ab1c6cdf50e20cee18d39e7594b4a61bb870e205233d27bab074037  sourbycraft-server/paper-patches/files/src/main/java/org/bukkit/craftbukkit/CraftChunk.java.patch
-59d1f300820f07605c9f84e29cdc5f5ff0f0d2af1670b99fa95429b524c8c254  sourbycraft-server/paper-patches/files/src/main/java/org/bukkit/craftbukkit/CraftServer.java.patch
+e5a021df7e495e2540a5c1fa927903a7dfec607b8ff87b03f238515b097ab156  sourbycraft-server/paper-patches/files/src/main/java/org/bukkit/craftbukkit/CraftServer.java.patch
 8fe3da64647ef84220d43bb4a914e1cd063fa9b69677fe825806be8a143470a6  sourbycraft-server/paper-patches/files/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java.patch
-f1a6d47445a9a22ef459fbee0d71759fef7c709cfa6d589b50f9af02aa9fc3a7  sourbycraft-server/paper-patches/files/src/main/java/org/bukkit/craftbukkit/CraftWorld.java.patch
+245e8f6173299113e72b1d2e925efc42e409e9edcf789a0a2b296c7f577a73b1  sourbycraft-server/paper-patches/files/src/main/java/org/bukkit/craftbukkit/CraftWorld.java.patch
 23fa7a53314ecce9b91fddf419a98148d42e10f4fb0743635f48268031d8c8ce  sourbycraft-server/paper-patches/files/src/main/java/org/bukkit/craftbukkit/block/CraftBlock.java.patch
 5f5c2ad52f1aeabfb0a9f336e10b426ae076ff3f307ec94217077dd76330f2d9  sourbycraft-server/paper-patches/files/src/main/java/org/bukkit/craftbukkit/block/CraftBlockEntityState.java.patch
 414ad0935106d0a661d9380a84f13eb792d10332b88f132c923ccff20217a0f7  sourbycraft-server/paper-patches/files/src/main/java/org/bukkit/craftbukkit/block/CraftBlockState.java.patch

@@ -243,7 +243,7 @@ Replace direct config calls:
 ```text
 SourbyCraftConfig
     ↓
-io.canvasmc.canvas.*
+dev.iyanz.aurora.engine.*
 ```
 
 with:
@@ -927,7 +927,7 @@ LEGACY
 
 ### Inventory
 
-- `io.canvasmc.*`
+- `dev.iyanz.aurora.engine.*`
 - Folia scheduler imports
 - Paper internals
 - Canvas configs

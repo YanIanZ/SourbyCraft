@@ -133,3 +133,14 @@ the clean-stop value of boot 1, about 119; a jar without this patch was not re-r
 start 699, SIGKILL at 1709, restored **1479**. Clean stops exited 0; no corruption or error lines
 on the restarts. Not yet re-run on Sourby Demo (`verify_crash_panel.py`), with players, or with
 AWF worlds.
+
+## 7. Save-path ledger and feature patch 0056 (2026-10-21)
+
+[persistence-save-paths.md](persistence-save-paths.md) lists every save path under region threading
+(region autosave, global-tick autosave, dragon fight, `save-all`/`World#save`, clean shutdown) and,
+per kind of data, who mutates it, who writes it and when. Feature patch 0056 adds the world border,
+random sequences, `/data storage` containers and `level.dat` to the global-tick autosave (one
+`saveSpecific` per type, `WorldMetadataAutosave.saveContained`; `level.dat` synchronously as vanilla);
+before it they were written only at a clean stop. Still shutdown-only: raids, forceload tickets, the
+world PDC; never persisted: wandering trader timers; never ticked: `/schedule`. The kill-test evidence
+is in that document's §4.

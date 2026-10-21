@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 01:52:42 +0700
+Subject: [PATCH] SourbyCraft - plugin API types from dev.iyanz.sourbycraft.api
+
+The region-threading plugin API (formerly Canvas's API package) moved to
+dev.iyanz.sourbycraft.api in Build 48 (owner decision 2026-10-21, no
+compatibility shim). The engine baseline names these types by their
+simple names only, because a baseline line may not name a SourbyCraft
+package; this patch supplies the imports.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index c28670e81063e12b9b83783bb87a5aa71aca8005..caa20c0c555bde8bb6fa100e0c728f4752ed7b66 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -260,6 +260,10 @@ import org.yaml.snakeyaml.LoaderOptions;
+ import org.yaml.snakeyaml.Yaml;
+ import org.yaml.snakeyaml.constructor.SafeConstructor;
+ import org.yaml.snakeyaml.error.MarkedYAMLException;
++import dev.iyanz.sourbycraft.api.region.RegionThreadingTickManager;
++import dev.iyanz.sourbycraft.api.region.RegionTickData;
++import dev.iyanz.sourbycraft.api.event.world.WorldUnloadAsyncEvent;
++import dev.iyanz.sourbycraft.api.world.WorldUnloadResult;
+ 
+ public final class CraftServer implements Server {
+     private final String serverName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName();
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+index 8ba4cf1c299f17bd2e09d6c79d44cede12a57a5e..f52c0398dffed7126ab323ff5778b1c2e5b1bf5b 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -162,6 +162,7 @@ import org.bukkit.util.StructureSearchResult;
+ import org.bukkit.util.Vector;
+ import org.jetbrains.annotations.NotNull;
+ import org.jetbrains.annotations.Nullable;
++import dev.iyanz.sourbycraft.api.region.WorldRegionizer;
+ 
+ public class CraftWorld extends CraftRegionAccessor implements World {
+     private static final PointersSupplier<World> POINTERS_SUPPLIER = PointersSupplier.<World>builder()

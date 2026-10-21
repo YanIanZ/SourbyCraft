@@ -7,7 +7,7 @@ import dev.iyanz.aurora.engine.configuration.Resolver;
 import dev.iyanz.aurora.engine.configuration.Style;
 import dev.iyanz.aurora.engine.configuration.Undocumented;
 import dev.iyanz.aurora.engine.configuration.Validator;
-import io.canvasmc.canvas.simd.SIMDDetection;
+import dev.iyanz.sourbycraft.api.simd.SIMDDetection;
 import dev.iyanz.aurora.engine.threadedregions.scheduler.AffinitySchedulerThreadPool;
 import dev.iyanz.aurora.engine.util.FasterRandomSource;
 import dev.iyanz.aurora.engine.util.LockedReference;

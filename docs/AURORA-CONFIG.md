@@ -22,6 +22,7 @@ This document describes **what branch `26.2` actually consumes now**. It is not 
 | `aurora.scheduler.storage-threads` | integer ≥ 0 / `1` (0 = 1) | RESTART_REQUIRED | Resource Governor `STORAGE` lane |
 | `aurora.scheduler.storage-queue` | integer ≥ 1 / `64` | RESTART_REQUIRED | same |
 | `aurora.network.counters` | boolean / `true` | LIVE | `NetworkCounters` increments (`/perf network`) |
+| `aurora.world.command-blocks` | boolean / `false` | LIVE (caveat: a repeating block whose tick was dropped while off stays idle until re-armed by redstone, re-placement, GUI save or chunk reload) | `CommandBlockPolicy`, read on every command-block tick, GUI open and edit packet; `false` keeps the inherited hard-disable exactly; `true` runs command blocks/minecarts under SourbyCraft's region rules ([command-blocks.md](architecture/command-blocks.md)); the vanilla gamerule `command_blocks_work` (default `true`; 26.2 has no `enable-command-block` property) must also be `true`; an invalid value is reported and stays off |
 | `aurora.awf.worlds` | list of world folder names / `[]` | RESTART_REQUIRED | `AwfEngine.attach` from `RegionFileStorage`'s constructor; read from the files directly, not the config system |
 | `aurora.awf.export` | list of world folder names / `[]` | RESTART_REQUIRED | export to region files at the next load, then retire the store |
 | `aurora.awf.backend` | name / `file` | RESTART_REQUIRED | `AwfBackend` the stores live on; unregistered + listed world = load failure |

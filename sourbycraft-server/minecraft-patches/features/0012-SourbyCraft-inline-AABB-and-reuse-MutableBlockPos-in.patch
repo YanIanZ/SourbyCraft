@@ -6,7 +6,7 @@ Subject: [PATCH] SourbyCraft - inline AABB and reuse MutableBlockPos in
 
 
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 85389f035db40c4ac3e6eeae687fd1faa1fa63a1..a65e6b188668893e947f56bbb7114c0e1e6b5487 100644
+index bf82ac064d11d0ddc2c480ed0695e02187937820..8bfd9778d18d1b03bfad971002c07e34e2af7eb5 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -414,6 +414,12 @@ public abstract class Entity

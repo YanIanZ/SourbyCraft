@@ -71,7 +71,6 @@ class StartupLogLayoutTest {
             {"oshi.software.os.mac.MacOperatingSystem", "[OSHI]"},
             {"dev.iyanz.sourbycraft.perf.AsyncPathProcessor", "[SourbyCraft/AsyncPathProcessor]"},
             {"dev.iyanz.aurora.engine.GlobalConfiguration", "[Aurora/GlobalConfiguration]"},
-            {"io.canvasmc.canvas.Config", "[Aurora/Config]"},
             {"io.papermc.paper.threadedregions.TickRegionScheduler$Inner", "[TickRegionScheduler]"},
             {"org.bukkit.craftbukkit.CraftServer", "[CraftServer]"},
             {"ca.spottedleaf.moonrise.common.util.MoonriseCommon", "[MoonriseCommon]"},
@@ -109,10 +108,10 @@ class StartupLogLayoutTest {
             for (final String logger : new String[] {
                 "ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry",
                 "oshi.software.os.mac.MacOperatingSystem", "dev.iyanz.sourbycraft.Foo",
-                "io.canvasmc.canvas.Bar", "SourbyCraft", "Aurora"}) {
+                "dev.iyanz.aurora.engine.Bar", "SourbyCraft", "Aurora"}) {
                 final String line = render(pattern, logger, Level.INFO, COLOURED);
                 assertFalse(line.contains(ESC), appender + " wrote an escape: " + line);
-                assertFalse(line.matches("(?s).*\\b(dev\\.iyanz|io\\.canvasmc|ca\\.spottedleaf|oshi)\\..*"),
+                assertFalse(line.matches("(?s).*\\b(dev\\.iyanz|ca\\.spottedleaf|oshi)\\..*"),
                     appender + " wrote a qualified logger name: " + line);
                 assertTrue(line.contains("SourbyCraft / Version"), line);
             }

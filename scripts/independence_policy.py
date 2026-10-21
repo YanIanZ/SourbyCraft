@@ -8,7 +8,9 @@ and so new coupling has to be added deliberately rather than drifting in.
 Two surfaces are measured and they are not the same thing:
 
 * **Source coupling** — the region-threading engine (`dev.iyanz.aurora.engine`, formerly
-  `io.canvasmc.canvas`, plus the `io.canvasmc` plugin API) reached from SourbyCraft-owned code.
+  `io.canvasmc.canvas`) reached from SourbyCraft-owned code. The former `io.canvasmc` plugin API
+  was removed in Build 48 (now `dev.iyanz.sourbycraft.api`); the pattern still matches it so a
+  reintroduction is reported.
   This is what would have to be rewritten if the engine were replaced.
 * **Patch coupling** — engine symbols named by the SourbyCraft feature patches, both the
   Minecraft ones (`minecraft-patches/features`) and the Paper ones (`paper-patches/features`),
@@ -49,8 +51,10 @@ INTEGRATION_PATCH_ROOTS = (
     "sourbycraft-server/paper-patches/features",
 )
 
-# The former Canvas engine: its internals moved to dev.iyanz.aurora.engine, its plugin API kept
-# io.canvasmc. dev.iyanz.aurora's other packages are SourbyCraft's own engine code, not counted.
+# The former Canvas engine: its internals moved to dev.iyanz.aurora.engine; its plugin API moved to
+# dev.iyanz.sourbycraft.api in Build 48 (io.canvasmc removed, no shim). io.canvasmc stays in the
+# pattern so a reintroduction counts. dev.iyanz.aurora's other packages are SourbyCraft's own
+# engine code, not counted.
 CANVAS_SYMBOL = re.compile(r"\b(?:io\.canvasmc|dev\.iyanz\.aurora\.engine)\.[A-Za-z0-9_.]+")
 COMMENT = re.compile(r"^\s*(\*|//|/\*)")
 

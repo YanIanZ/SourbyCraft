@@ -1061,24 +1061,24 @@
 +        final boolean isSameRegion = destination == this.level()
 +            && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(destination, ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(pos), 8)
 +            && (((teleportFlags & TELEPORT_FLAG_LOAD_CHUNK) == 0L) || destination.areChunksLoadedForMove(this.getBoundingBoxAt(pos.x, pos.y, pos.z)));
-+        final io.canvasmc.canvas.event.EntityTeleportAsyncEvent.TeleportType teleportType =
-+            isSameRegion ? io.canvasmc.canvas.event.EntityTeleportAsyncEvent.TeleportType.SAME_REGION :
-+                (destination == this.level() ? io.canvasmc.canvas.event.EntityTeleportAsyncEvent.TeleportType.CROSS_REGION :
-+                 io.canvasmc.canvas.event.EntityTeleportAsyncEvent.TeleportType.CROSS_WORLD);
++        final EntityTeleportAsyncEvent.TeleportType teleportType =
++            isSameRegion ? EntityTeleportAsyncEvent.TeleportType.SAME_REGION :
++                (destination == this.level() ? EntityTeleportAsyncEvent.TeleportType.CROSS_REGION :
++                 EntityTeleportAsyncEvent.TeleportType.CROSS_WORLD);
 +
 +        final boolean shouldCallEvents =
 +            callEvents &&
 +            // this is purely so we don't do unneeded event calls and we don't run checks twice for no reason
 +            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
-+            io.canvasmc.canvas.event.EntityTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
++            EntityTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
 +
 +        if (shouldCallEvents) {
 +            // we have listeners, call
 +            final org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
 +            final org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
 +
-+            final io.canvasmc.canvas.event.EntityTeleportAsyncEvent teleportAsyncEvent =
-+                new io.canvasmc.canvas.event.EntityTeleportAsyncEvent(this.getBukkitEntity(), bukkitFrom, bukkitTo, cause, teleportType);
++            final EntityTeleportAsyncEvent teleportAsyncEvent =
++                new EntityTeleportAsyncEvent(this.getBukkitEntity(), bukkitFrom, bukkitTo, cause, teleportType);
 +
 +            if (!teleportAsyncEvent.callEvent()) {
 +                // event was cancelled
@@ -1186,12 +1186,12 @@
 +            // check the tick thread for if teleport complete removes the entity again
 +            if (
 +                ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this) &&
-+                io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0
++                EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0
 +            ) {
 +                final org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
 +                final org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
 +
-+                new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
++                new EntityPostTeleportAsyncEvent(
 +                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause, teleportType
 +                ).callEvent();
 +            }
@@ -1243,12 +1243,12 @@
 +            if (
 +                callEvents &&
 +                ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this) &&
-+                io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0
++                EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0
 +            ) {
 +                final org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
 +                final org.bukkit.Location bukkitTo = new org.bukkit.Location(finalLevelDest.getWorld(), finalPos.x, finalPos.y, finalPos.z, finalYaw == null ? 0 : finalYaw, finalPitch == null ? 0 : finalPitch);
 +
-+                new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
++                new EntityPostTeleportAsyncEvent(
 +                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause, teleportType
 +                ).callEvent();
 +            }
@@ -1564,10 +1564,10 @@
 +        final boolean shouldCallEvents =
 +            // this is purely so we don't do unneeded event calls and we don't run checks twice for no reason
 +            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
-+            io.canvasmc.canvas.event.EntityPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
++            EntityPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
 +
 +        if (shouldCallEvents) {
-+            final io.canvasmc.canvas.event.EntityPortalAsyncEvent portalAsyncEvent = new io.canvasmc.canvas.event.EntityPortalAsyncEvent(
++            final EntityPortalAsyncEvent portalAsyncEvent = new EntityPortalAsyncEvent(
 +                this.getBukkitEntity(), originWorld.getWorld(), destination.getWorld(),
 +                switch (type) {
 +                    case END -> org.bukkit.PortalType.ENDER;
@@ -1723,9 +1723,9 @@
 +
 +                    if (
 +                        ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this) &&
-+                        io.canvasmc.canvas.event.EntityPostPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0
++                        EntityPostPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0
 +                    ) {
-+                        new io.canvasmc.canvas.event.EntityPostPortalAsyncEvent(
++                        new EntityPostPortalAsyncEvent(
 +                            this.getBukkitEntity(), originWorld.getWorld(), finalDestination.getWorld(),
 +                            switch (type) {
 +                                case END -> org.bukkit.PortalType.ENDER;

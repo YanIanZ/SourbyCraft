@@ -30,7 +30,7 @@
  
 +    // SourbyCraft - Paper is the only upstream. Region threading and the other changes that
 +    // used to come from Canvas/Folia are SourbyCraft's own minecraft-patches, paper-patches and
-+    // sources (src/main/java/io/canvasmc keeps its package name for plugin compatibility).
++    // sources (engine internals use dev.iyanz.aurora.engine; plugin API uses dev.iyanz.sourbycraft.api).
 +    val sourbycraft = forks.register("sourbycraft") {
 +        upstream.patchDir("paperServer") {
 +            upstreamPath = "paper-server"

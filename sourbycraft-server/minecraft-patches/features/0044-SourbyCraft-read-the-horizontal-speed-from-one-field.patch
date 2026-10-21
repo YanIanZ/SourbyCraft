@@ -13,7 +13,7 @@ reader reads that one field; same arithmetic, same threshold.
 See docs/architecture/scratch-reentrancy-proof.md (DEV-A).
 
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index a65e6b188668893e947f56bbb7114c0e1e6b5487..4e5bd99c018f5cc0d6836350edc0cc876c6deb3e 100644
+index 8bfd9778d18d1b03bfad971002c07e34e2af7eb5..b315e4ebfc493896b34a48cc5e3ae0be3c46dbd3 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -407,6 +407,12 @@ public abstract class Entity

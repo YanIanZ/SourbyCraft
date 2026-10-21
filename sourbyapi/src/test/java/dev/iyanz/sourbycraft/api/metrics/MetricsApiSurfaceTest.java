@@ -86,7 +86,7 @@ class MetricsApiSurfaceTest {
         final String name = type.getTypeName();
         assertFalse(name.contains("net.minecraft"), signature);
         assertFalse(name.contains("craftbukkit"), signature);
-        assertFalse(name.contains("io.canvasmc"), signature);
+        assertFalse(name.contains("dev.iyanz.aurora"), signature);
         assertFalse(name.contains("me.lucko.spark"), signature);
         assertFalse(name.contains("dev.iyanz.sourbycraft.perf"), signature);
         if (type instanceof Class<?> clazz && clazz.isArray()) {

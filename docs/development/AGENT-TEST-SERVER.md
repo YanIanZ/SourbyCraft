@@ -43,6 +43,8 @@ python3 $S stop --name my-check             # console stop; kill after --timeout
 python3 $S kill --name my-check             # crash test: SIGKILL, no console stop, no save
 python3 $S start --name my-check-2 --world-from my-check   # boot again over my-check's world
 python3 $S start --name awf-1 --aurora-toml awf.toml       # sourbycraft_config/aurora.toml (e.g. AWF worlds)
+python3 $S start --name tp-1 --config-file plugins/SourbyCraft-Test-Plugin.jar=test-plugin/build/libs/test-plugin-1.0.0.jar \
+    --jvm-property sourby.testplugin.probes=true    # plugin jar (bytes, <= 8 MiB, run.json keeps its sha256) + test-plugin probes
 python3 $S run --name my-scn --scenario path/to/scenario.json
 python3 $S cleanup --keep 5 [--dry-run]
 ```

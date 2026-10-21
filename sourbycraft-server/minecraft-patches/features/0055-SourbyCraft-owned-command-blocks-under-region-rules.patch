@@ -1,0 +1,411 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 01:08:07 +0700
+Subject: [PATCH] SourbyCraft - owned command blocks under region rules
+
+Replaces the inherited Canvas/Folia hard-disable of command blocks and command-block minecarts with SourbyCraft's CommandBlockPolicy, behind aurora.world.command-blocks (default off = inherited behaviour). On: execute only on the owning region, region-local entity selectors and block targets while a command block's command runs, edits refused for blocks/minecarts another region owns, late output from other regions dropped.
+
+diff --git a/dev/iyanz/aurora/engine/threadedregions/commands/AbstractCommandExecution.java b/dev/iyanz/aurora/engine/threadedregions/commands/AbstractCommandExecution.java
+index 32475f818912c315a9ff740ac5caaea35a9da18f..531844c65273fbff6349367248c2e64a021146d8 100644
+--- a/dev/iyanz/aurora/engine/threadedregions/commands/AbstractCommandExecution.java
++++ b/dev/iyanz/aurora/engine/threadedregions/commands/AbstractCommandExecution.java
+@@ -79,6 +79,7 @@ public class AbstractCommandExecution<D, E extends Entity> {
+     public static int executeAtPosWithRadius(
+         final CSEIntSupplier action, final BlockPos pos, final int radius, final Level level, final CommandSourceStack css
+     ) {
++        dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.requireOwnedUnchecked(level, pos, radius, "target blocks"); // SourbyCraft - owned command blocks
+         level.canvas$loadOrRunAtChunksAsync(
+             pos, radius, Priority.NORMAL, () -> {
+                 try {
+@@ -115,6 +116,7 @@ public class AbstractCommandExecution<D, E extends Entity> {
+     public static int executeAtPos(
+         final CSEIntSupplier action, final BlockPos pos, final Level level, final CommandSourceStack css
+     ) {
++        dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.requireOwnedUnchecked(level, pos, 0, "target blocks"); // SourbyCraft - owned command blocks
+         RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(
+             (ServerLevel) level,
+             pos.getX() >> 4,
+diff --git a/net/minecraft/commands/arguments/selector/EntitySelector.java b/net/minecraft/commands/arguments/selector/EntitySelector.java
+index cfc1b480704bf47917f68abe4da2e59cc5019513..7b5eaecbfc10a2441e09b290374a6539c675ddaa 100644
+--- a/net/minecraft/commands/arguments/selector/EntitySelector.java
++++ b/net/minecraft/commands/arguments/selector/EntitySelector.java
+@@ -144,7 +144,7 @@ public class EntitySelector {
+ 
+         if (this.playerName != null) {
+             ServerPlayer result = sender.getServer().getPlayerList().getPlayerByName(this.playerName);
+-            return result == null ? List.of() : List.of(result);
++            return dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.single(result); // SourbyCraft - owned command blocks
+         }
+ 
+         if (this.entityUUID != null) {
+@@ -152,7 +152,7 @@ public class EntitySelector {
+                 Entity entity = level.getEntity(this.entityUUID);
+                 if (entity != null) {
+                     if (entity.getType().isEnabled(sender.enabledFeatures())) {
+-                        return List.of(entity);
++                        return dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.single(entity); // SourbyCraft - owned command blocks
+                     }
+                     break;
+                 }
+@@ -192,6 +192,7 @@ public class EntitySelector {
+             // check the entity is actually contained in the AABB
+ 
+             level.getEntities(this.type, (entity) -> {
++                if (!dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.mayRead(entity)) return false; // SourbyCraft - owned command blocks: ownership before the bounding box is read
+                 // check AABB first, then check predicate
+                 if (absoluteAABB != null && !entity.getBoundingBox().intersects(absoluteAABB)) {
+                     return false;
+@@ -224,12 +225,12 @@ public class EntitySelector {
+         this.checkPermissions(sender);
+         if (this.playerName != null) {
+             ServerPlayer result = sender.getServer().getPlayerList().getPlayerByName(this.playerName);
+-            return result == null ? List.of() : List.of(result);
++            return dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.single(result); // SourbyCraft - owned command blocks
+         }
+ 
+         if (this.entityUUID != null) {
+             ServerPlayer result = sender.getServer().getPlayerList().getPlayer(this.entityUUID);
+-            return result == null ? List.of() : List.of(result);
++            return dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.single(result); // SourbyCraft - owned command blocks
+         }
+ 
+         Vec3 pos = this.position.apply(sender.getPosition());
+@@ -289,7 +290,7 @@ public class EntitySelector {
+             completePredicates = predicates;
+         }
+ 
+-        return Util.allOf(completePredicates);
++        return dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.selector(Util.allOf(completePredicates)); // SourbyCraft - owned command blocks: region-local selectors in a command block
+     }
+ 
+     private <T extends Entity> List<T> sortAndLimit(final Vec3 pos, final List<T> result) {
+diff --git a/net/minecraft/server/commands/CloneCommands.java b/net/minecraft/server/commands/CloneCommands.java
+index 7587f3d8d619dafbf7f9ae2c482596f6d6a5a48c..ba2defc33cbcae714779a3330f9569459783c0c9 100644
+--- a/net/minecraft/server/commands/CloneCommands.java
++++ b/net/minecraft/server/commands/CloneCommands.java
+@@ -263,6 +263,11 @@ public class CloneCommands {
+             throw ERROR_FAILED.create();
+         }
+ 
++        // SourbyCraft start - owned command blocks
++        // the 32-block physics buffer below is part of the footprint: owned with it, the loadOrRun calls run now, on this thread
++        dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.requireOwned(fromDimension, (from.minX() - 32) >> 4, (from.minZ() - 32) >> 4, (from.maxX() + 32) >> 4, (from.maxZ() + 32) >> 4, "clone from blocks");
++        dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.requireOwned(toDimension, (destination.minX() - 32) >> 4, (destination.minZ() - 32) >> 4, (destination.maxX() + 32) >> 4, (destination.maxZ() + 32) >> 4, "clone to blocks");
++        // SourbyCraft end - owned command blocks
+         // Canvas start - region threading
+         if (true) {
+ 
+diff --git a/net/minecraft/server/commands/FillBiomeCommand.java b/net/minecraft/server/commands/FillBiomeCommand.java
+index 23d57039f6517e6718a4cd04f4e0a2d47d524d63..73a054e69e7f760dc0954cef559fb5899cb6ef3b 100644
+--- a/net/minecraft/server/commands/FillBiomeCommand.java
++++ b/net/minecraft/server/commands/FillBiomeCommand.java
+@@ -135,11 +135,13 @@ public class FillBiomeCommand {
+         }
+         // Folia start - region threading
+         int buffer = 0; // no buffer, we do not touch neighbours
+-        level.moonrise$loadChunksAsync(
++        try { // SourbyCraft - owned command blocks
++        dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.loadChunksThenRun(level, // SourbyCraft - owned command blocks: a command block runs this now on its own region or not at all
+                 (region.minX() - buffer) >> 4,
+                 (region.maxX() + buffer) >> 4,
+                 (region.minZ() - buffer) >> 4,
+                 (region.maxZ() + buffer) >> 4,
++                region.minX() >> 4, region.maxX() >> 4, region.minZ() >> 4, region.maxZ() >> 4, // SourbyCraft - owned command blocks: the chunks that are mutated
+                 net.minecraft.world.level.chunk.status.ChunkStatus.FULL,
+                 ca.spottedleaf.concurrentutil.util.Priority.NORMAL,
+                 (List<ChunkAccess> _chunks) -> {
+@@ -182,7 +184,10 @@ public class FillBiomeCommand {
+         return Either.left(changedCount.intValue());
+         // Folia start - region threading
+                 }); // sendMessage
+-                }); // loadChunksAsync
++                }, "fill biomes"); // loadChunksAsync // SourbyCraft - owned command blocks
++        } catch (final CommandSyntaxException refused) { // SourbyCraft start - owned command blocks
++            return Either.right(refused);
++        } // SourbyCraft end - owned command blocks
+         return Either.left(Integer.valueOf(0));
+         // Folia end - region threading
+     }
+diff --git a/net/minecraft/server/commands/FillCommand.java b/net/minecraft/server/commands/FillCommand.java
+index 0149a0baea3e817150500644607e5442fcc42b69..e74814e5a954db51bdf9f98dd4aee6750fb7b7cf 100644
+--- a/net/minecraft/server/commands/FillCommand.java
++++ b/net/minecraft/server/commands/FillCommand.java
+@@ -187,11 +187,12 @@ public class FillCommand {
+         // Folia start - region threading
+         int buffer = 32;
+         // physics may spill into neighbour chunks, so use a buffer
+-        level.moonrise$loadChunksAsync(
++        dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.loadChunksThenRun(level, // SourbyCraft - owned command blocks: a command block runs this now on its own region (buffer included) or not at all
+                 (region.minX() - buffer) >> 4,
+                 (region.maxX() + buffer) >> 4,
+                 (region.minZ() - buffer) >> 4,
+                 (region.maxZ() + buffer) >> 4,
++                region.minX() >> 4, region.maxX() >> 4, region.minZ() >> 4, region.maxZ() >> 4, // SourbyCraft - owned command blocks: the chunks that are mutated
+                 net.minecraft.world.level.chunk.status.ChunkStatus.FULL,
+                 ca.spottedleaf.concurrentutil.util.Priority.NORMAL,
+                 (chunks) -> {
+@@ -241,7 +242,7 @@ public class FillCommand {
+         // Folia start - region threading
+         } catch (final CommandSyntaxException cse) {
+             sendMessage(source, cse);
+-        }});
++        }}, "fill blocks"); // SourbyCraft - owned command blocks
+         return 1;
+         // Folia end - region threading
+     }
+diff --git a/net/minecraft/server/commands/data/BlockDataAccessor.java b/net/minecraft/server/commands/data/BlockDataAccessor.java
+index 5e4a4e0c6247f6417cd5c0570876348aaa5fe233..c725276d7414780cfb50566b213d41a874679fbe 100644
+--- a/net/minecraft/server/commands/data/BlockDataAccessor.java
++++ b/net/minecraft/server/commands/data/BlockDataAccessor.java
+@@ -72,6 +72,7 @@ public class BlockDataAccessor implements DataAccessor {
+         if (entityLevel == null) {
+             return;
+         }
++        dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.requireOwnedUnchecked(entityLevel, pos, 0, "access block data"); // SourbyCraft - owned command blocks
+         // if we own the pos we just run it
+         entityLevel.canvas$loadOrRunAtChunksAsync(
+             // just set radius to 0, nobody cares about surrounding blocks
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index efa2c506897817e08d92bd1e123349b731eb0cdf..bdc979af86e7b95d85728c7b28f6162084df02b7 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -3012,7 +3012,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     }
+ 
+     public boolean isCommandBlockEnabled() {
+-        return false; // Canvas - region threading
++        return dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.enabled() && this.getGameRules().get(GameRules.COMMAND_BLOCKS_WORK); // SourbyCraft - owned command blocks: aurora.world.command-blocks, then vanilla's gamerule (was Canvas's unconditional false)
+     }
+ 
+     public boolean isSpawnerBlockEnabled() {
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index 12ffd37286b5bd93ee5589d5e66413a218b7711f..8c2005bba5366abc7c475418f285015ec68f1854 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -1018,12 +1018,16 @@ public class ServerGamePacketListenerImpl
+     @Override
+     public void handleSetCommandBlock(final ServerboundSetCommandBlockPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        // Canvas start - region threading
+-        if (true) {
++        // SourbyCraft start - owned command blocks
++        if (!dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.enabled()) {
+             this.player.sendSystemMessage(Component.literal("Command blocks are not enabled with region threading"));
+             return;
+         }
+-        // Canvas end - region threading
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.player.level(), packet.getPos())) {
++            this.player.sendSystemMessage(Component.literal(dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.crossRegionMessage("edit a command block")));
++            return;
++        }
++        // SourbyCraft end - owned command blocks
+         if (!this.player.canUseGameMasterBlocks() && (!this.player.isCreative() || !this.player.getBukkitEntity().hasPermission("minecraft.commandblock"))) { // Paper - command block permission
+             this.player.sendSystemMessage(Component.translatable("advMode.notAllowed"));
+         } else {
+@@ -1085,16 +1089,22 @@ public class ServerGamePacketListenerImpl
+     @Override
+     public void handleSetCommandMinecart(final ServerboundSetCommandMinecartPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        // Canvas start - region threading
+-        if (true) {
++        // SourbyCraft start - owned command blocks
++        if (!dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.enabled()) {
+             this.player.sendSystemMessage(Component.literal("Command block minecarts are not enabled with region threading"));
+             return;
+         }
+-        // Canvas end - region threading
++        // SourbyCraft end - owned command blocks
+         if (!this.player.canUseGameMasterBlocks() && (!this.player.isCreative() || !this.player.getBukkitEntity().hasPermission("minecraft.commandblock"))) { // Paper - command block permission
+             this.player.sendSystemMessage(Component.translatable("advMode.notAllowed"));
+         } else {
+             BaseCommandBlock commandBlock = packet.getCommandBlock(this.player.level());
++            // SourbyCraft start - owned command blocks: never edit a minecart another region owns
++            if (commandBlock != null && !commandBlock.sourbyOwnedByCurrentThread()) {
++                this.player.sendSystemMessage(Component.literal(dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.crossRegionMessage("edit a command block minecart")));
++                return;
++            }
++            // SourbyCraft end - owned command blocks
+             if (commandBlock != null) {
+                 String command = packet.getCommand();
+                 commandBlock.setCommand(command);
+diff --git a/net/minecraft/world/entity/vehicle/minecart/MinecartCommandBlock.java b/net/minecraft/world/entity/vehicle/minecart/MinecartCommandBlock.java
+index 0be598cae2a7c0ec34b31d812b56780f3a983e8f..ae04c8ff071931f1c4c39c7b08190eb41dcd58eb 100644
+--- a/net/minecraft/world/entity/vehicle/minecart/MinecartCommandBlock.java
++++ b/net/minecraft/world/entity/vehicle/minecart/MinecartCommandBlock.java
+@@ -87,11 +87,11 @@ public class MinecartCommandBlock extends AbstractMinecart {
+ 
+     @Override
+     public InteractionResult interact(final Player player, final InteractionHand hand, final Vec3 location) {
+-        // Canvas start - region threading
+-        if (true) {
++        // SourbyCraft start - owned command blocks
++        if (!dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.enabled()) {
+             return InteractionResult.FAIL;
+         }
+-        // Canvas end - region threading
++        // SourbyCraft end - owned command blocks
+         if (!player.canUseGameMasterBlocks() && (!player.isCreative() || !player.getBukkitEntity().hasPermission("minecraft.commandblock"))) { // Paper - command block permission
+             return InteractionResult.PASS;
+         }
+@@ -160,5 +160,16 @@ public class MinecartCommandBlock extends AbstractMinecart {
+             ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(MinecartCommandBlock.this, "Asynchronous sendSystemMessage to a command block");
+         }
+         // Folia end
++        // SourbyCraft start - owned command blocks
++        @Override
++        public boolean sourbyOwnedByCurrentThread() {
++            return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(MinecartCommandBlock.this);
++        }
++
++        @Override
++        public String sourbyDescribe() {
++            return "command block minecart " + MinecartCommandBlock.this.getStringUUID();
++        }
++        // SourbyCraft end - owned command blocks
+     }
+ }
+diff --git a/net/minecraft/world/level/BaseCommandBlock.java b/net/minecraft/world/level/BaseCommandBlock.java
+index afd2d882f91ce999bc2a4cd50ca5cd3421de6a94..a9cf58fb20d74236937858a7b74b6034dda27b2b 100644
+--- a/net/minecraft/world/level/BaseCommandBlock.java
++++ b/net/minecraft/world/level/BaseCommandBlock.java
+@@ -91,7 +91,7 @@ public abstract class BaseCommandBlock {
+     }
+ 
+     public boolean performCommand(final ServerLevel level) {
+-        if (true) return false; // Folia - region threading
++        if (dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.decide(this.sourbyOwnedByCurrentThread()) != dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.Decision.RUN) return false; // SourbyCraft - owned command blocks (was Folia's unconditional return)
+         if (level.getGameTime() == this.lastExecution) {
+             return false;
+         }
+@@ -119,7 +119,9 @@ public abstract class BaseCommandBlock {
+                     if (!event.callEvent()) {
+                         return true;
+                     }
++                    try (dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.Scope scope = dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.enter()) { // SourbyCraft - owned command blocks: region-local selectors and block targets
+                     level.getServer().getCommands().performPrefixedCommand(commandSourceStack, event.getCommand());
++                    } // SourbyCraft - owned command blocks
+                     // Paper end - ServerCommandEvent
+                 }
+             } catch (Throwable t) {
+@@ -179,10 +181,22 @@ public abstract class BaseCommandBlock {
+     }
+     // Folia end - region threading
+ 
++    // SourbyCraft start - owned command blocks
++    /** Whether this thread owns the block or minecart; unknown subclasses never do. */
++    public boolean sourbyOwnedByCurrentThread() {
++        return false;
++    }
++
++    /** Where this command block is, for the deferred-output log. Safe from any thread. */
++    public String sourbyDescribe() {
++        return this.getName().getString();
++    }
++    // SourbyCraft end - owned command blocks
++
+     public class CloseableCommandBlockSource implements CommandSource, AutoCloseable { // Paper - public
+         private final ServerLevel level;
+         private static final ThreadLocal<DateTimeFormatter> TIME_FORMAT = ThreadLocal.withInitial(() -> DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT)); // Folia - region threading - SDF is not thread-safe
+-        private boolean closed;
++        private volatile boolean closed; // SourbyCraft - owned command blocks: read by other regions' late output
+ 
+         // Paper start - add back source when output disabled
+         private final boolean trackOutput;
+@@ -203,7 +217,7 @@ public abstract class BaseCommandBlock {
+ 
+         @Override
+         public boolean acceptsFailure() {
+-            return this.trackOutput && !this.closed; // Paper - add back source when output disabled
++            return this.trackOutput && (!this.closed || dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.enabled()); // Paper - add back source when output disabled // SourbyCraft - owned command blocks: a late failure reaches sendSystemMessage, which logs it
+         }
+ 
+         @Override
+@@ -213,6 +227,12 @@ public abstract class BaseCommandBlock {
+ 
+         @Override
+         public void sendSystemMessage(final Component message) {
++            // SourbyCraft start - owned command blocks: late or other-region output goes to a thread-safe log sink, never into the block
++            if (this.trackOutput && dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.toDiagnostics(dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.enabled(), this.closed, BaseCommandBlock.this.sourbyOwnedByCurrentThread())) {
++                dev.iyanz.sourbycraft.commandblock.CommandBlockDiagnostics.global().report(BaseCommandBlock.this.sourbyDescribe(), BaseCommandBlock.this.getCommand(), message.getString());
++                return;
++            }
++            // SourbyCraft end - owned command blocks
+             if (this.trackOutput && !this.closed) { // Paper - add back source when output disabled
+                 org.spigotmc.AsyncCatcher.catchOp("sendSystemMessage to a command block"); // Paper - Don't broadcast messages to command blocks
+                 BaseCommandBlock.this.threadCheck(); // Folia - region threading
+diff --git a/net/minecraft/world/level/block/CommandBlock.java b/net/minecraft/world/level/block/CommandBlock.java
+index 53507d88a14b788e096109cb6fec17de3fbaec4e..fe06b57070fdfbd3a8f017a3587a4b31c42543fd 100644
+--- a/net/minecraft/world/level/block/CommandBlock.java
++++ b/net/minecraft/world/level/block/CommandBlock.java
+@@ -91,11 +91,11 @@ public class CommandBlock extends BaseEntityBlock implements GameMasterBlock {
+ 
+     @Override
+     protected void tick(final BlockState state, final ServerLevel level, final BlockPos pos, final RandomSource random) {
+-        // Canvas start - region threading
+-        if (true) {
++        // SourbyCraft start - owned command blocks: off keeps the inherited "never run"; on, region rules in CommandBlockPolicy
++        if (!dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.enabled()) {
+             return;
+         }
+-        // Canvas end - region threading
++        // SourbyCraft end - owned command blocks
+         if (level.getBlockEntity(pos) instanceof CommandBlockEntity commandBlock) {
+             BaseCommandBlock baseCommandBlock = commandBlock.getCommandBlock();
+             boolean commandSet = !StringUtil.isNullOrEmpty(baseCommandBlock.getCommand());
+@@ -138,11 +138,11 @@ public class CommandBlock extends BaseEntityBlock implements GameMasterBlock {
+     protected InteractionResult useWithoutItem(
+         final BlockState state, final Level level, final BlockPos pos, final Player player, final BlockHitResult hitResult
+     ) {
+-        // Canvas start - region threading
+-        if (true) {
++        // SourbyCraft start - owned command blocks
++        if (!dev.iyanz.sourbycraft.commandblock.CommandBlockPolicy.enabled()) {
+             return InteractionResult.FAIL;
+         }
+-        // Canvas end - region threading
++        // SourbyCraft end - owned command blocks
+         if (level.getBlockEntity(pos) instanceof CommandBlockEntity commandBlockEntity && (player.canUseGameMasterBlocks() || (player.isCreative() && player.getBukkitEntity().hasPermission("minecraft.commandblock")))) { // Paper - command block permission
+             player.openCommandBlock(commandBlockEntity);
+             return InteractionResult.SUCCESS;
+@@ -204,6 +204,7 @@ public class CommandBlock extends BaseEntityBlock implements GameMasterBlock {
+ 
+         while (maxIterations-- > 0) {
+             pos.move(direction);
++            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, pos)) break; // SourbyCraft - owned command blocks: a chain stops at the region edge
+             BlockState state = level.getBlockState(pos);
+             Block block = state.getBlock();
+             if (!state.is(Blocks.CHAIN_COMMAND_BLOCK)
+diff --git a/net/minecraft/world/level/block/entity/CommandBlockEntity.java b/net/minecraft/world/level/block/entity/CommandBlockEntity.java
+index 84e18b68c857cd5ddff45d1f19ffccb2ed42b304..8122d6f0d45906fc1b28efc435dcc3626b96231d 100644
+--- a/net/minecraft/world/level/block/entity/CommandBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/CommandBlockEntity.java
+@@ -74,6 +74,19 @@ public class CommandBlockEntity extends BlockEntity {
+         }
+ 
+         // Folia end - region threading
++        // SourbyCraft start - owned command blocks
++        @Override
++        public boolean sourbyOwnedByCurrentThread() {
++            return CommandBlockEntity.this.level instanceof ServerLevel serverLevel
++                && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, CommandBlockEntity.this.worldPosition);
++        }
++
++        @Override
++        public String sourbyDescribe() {
++            final net.minecraft.world.level.Level level = CommandBlockEntity.this.level;
++            return (level == null ? "?" : level.dimension().identifier().toString()) + " " + CommandBlockEntity.this.worldPosition.toShortString();
++        }
++        // SourbyCraft end - owned command blocks
+         @Override
+         public boolean isValid() {
+             return !CommandBlockEntity.this.isRemoved();
+@@ -149,6 +162,9 @@ public class CommandBlockEntity extends BlockEntity {
+         this.conditionMet = true;
+         if (this.isConditional()) {
+             BlockPos relative = this.worldPosition.relative(this.level.getBlockState(this.worldPosition).getValue(CommandBlock.FACING).getOpposite());
++            if (!dev.iyanz.sourbycraft.commandblock.CommandBlockRegions.mayReadPredecessor(this.level, relative)) { // SourbyCraft - owned command blocks: a predecessor another region owns is never read
++                this.conditionMet = false;
++            } else
+             if (this.level.getBlockState(relative).getBlock() instanceof CommandBlock) {
+                 this.conditionMet = this.level.getBlockEntity(relative) instanceof CommandBlockEntity commandBlockEntity
+                     && commandBlockEntity.getCommandBlock().getSuccessCount() > 0;

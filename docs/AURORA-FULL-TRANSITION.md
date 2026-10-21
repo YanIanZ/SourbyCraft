@@ -811,7 +811,7 @@ Avoid:
 ```text
 Aurora core
     ↓
-io.canvasmc....
+dev.iyanz.aurora.engine....
 ```
 
 except in direct NMS/upstream patches where indirection would be harmful and the dependency is intentionally documented.
@@ -954,7 +954,7 @@ LEGACY
 
 Inventory at minimum:
 
-- `io.canvasmc.*`,
+- `dev.iyanz.aurora.engine.*`,
 - Folia scheduler classes,
 - Paper internals,
 - Canvas config classes,
