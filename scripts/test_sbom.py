@@ -75,7 +75,14 @@ class SbomTest(unittest.TestCase):
         self.assertEqual("4.2", native["version"])
 
     def test_metadata_names_the_jar_and_carries_build_identity_and_provenance(self):
-        bom = sbom.generate(self.jar, self.server)
+        # CI exports SOURCE_DATE_EPOCH (reproducible builds), which takes precedence over the
+        # jar's buildTimestamp; this case pins the buildTimestamp fallback, so it runs without it.
+        saved = os.environ.pop("SOURCE_DATE_EPOCH", None)
+        try:
+            bom = sbom.generate(self.jar, self.server)
+        finally:
+            if saved is not None:
+                os.environ["SOURCE_DATE_EPOCH"] = saved
         root = bom["metadata"]["component"]
         self.assertEqual(sha(self.jar.read_bytes()), root["hashes"][0]["content"])
         self.assertEqual("Build 47", root["version"])
