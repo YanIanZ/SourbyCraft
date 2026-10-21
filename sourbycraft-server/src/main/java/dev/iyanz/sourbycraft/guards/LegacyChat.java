@@ -18,20 +18,33 @@ import org.slf4j.LoggerFactory;
  * listening only to them never saw a message, and its cancel or format change was ignored.
  *
  * <p>Each is fired on the thread that owns the sender, which is where Paper's "main thread" event
- * belongs under region threading: inline when the calling thread already owns the player (a
- * plugin's {@code Player#chat} on the player's region), otherwise handed to the player's entity
- * scheduler while the chat thread waits, bounded ({@link #START_TIMEOUT_NANOS} to start,
- * {@link #RUN_TIMEOUT_NANOS} more to finish). Chat processing then continues with the event's
- * message, format, recipients and cancelled state, as on Paper.</p>
+ * belongs under region threading. What happens is decided by the calling thread, not by Paper's
+ * {@code async} flag ({@code Player#chat} always passes {@code false}, from whatever thread):</p>
+ * <ul>
+ *   <li>the caller owns the player (a plugin's {@code Player#chat} on the player's region): the
+ *       event fires inline, then the message continues ({@link Delivery#INLINE});</li>
+ *   <li>the caller is not a tick thread (the asynchronous chat thread): the event is handed to the
+ *       player's entity scheduler and the caller waits, bounded ({@link #START_TIMEOUT_NANOS} to
+ *       start, {@link #RUN_TIMEOUT_NANOS} more to finish), then continues with the event's
+ *       message, format, recipients and cancelled state, as on Paper ({@link Delivery#HANDED_OFF});</li>
+ *   <li>the caller is a tick thread that does not own the player (a plugin's {@code Player#chat}
+ *       from the global region scheduler or another region): it must not wait, since two tick
+ *       threads waiting on each other deadlock. The event and the rest of the message are handed
+ *       to the player's entity scheduler as one continuation and the caller returns at once; the
+ *       message is processed on the player's next tick ({@link Delivery#CONTINUED_ON_OWNER}).</li>
+ * </ul>
  *
- * <p>When the event could not be delivered (the player left, the region did not run it in time, or
- * the caller is a tick thread that does not own the player and so must not wait) the message is
- * dropped and a warning is logged: a chat filter that could not answer must not be bypassed.</p>
+ * <p>A message is dropped, with a rate-limited warning, only when its event could not be run: the
+ * player left, the region did not start the event in time, or the listeners were still running
+ * when the wait ran out ({@link Delivery#DROPPED}). In the last case the listeners finish on the
+ * region, but nothing reads their result and the message is never sent: the part that sends it
+ * (the {@code deliver} step) runs only after a completed wait. A chat filter that could not answer
+ * must not be bypassed, and a message must not arrive late and out of order.</p>
  *
  * <p>Order of events for one chat message, as on Paper: {@code AsyncPlayerChatEvent} (chat thread),
  * {@code PlayerChatEvent} (sender's region, only with listeners), {@code AsyncChatEvent} (chat
- * thread), {@code ChatEvent} (sender's region, only with listeners; the message is sent from
- * there), delivery.</p>
+ * thread), {@code ChatEvent} (sender's region, only with listeners), delivery (from the chat
+ * thread after the wait; Paper sent it from the main thread inside the {@code ChatEvent} hop).</p>
  */
 public final class LegacyChat {
 
@@ -44,58 +57,95 @@ public final class LegacyChat {
     /** At most one "not delivered" warning per this interval, so a stalled region cannot flood the log. */
     private static final long WARN_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(10L);
     private static final AtomicLong NEXT_WARN = new AtomicLong(Long.MIN_VALUE);
+    private static final String WHERE = "on the thread that owns the sender (inline when the caller owns the player; "
+        + "otherwise on the player's region, the asynchronous chat thread waiting for it, bounded)";
+
+    /** How a legacy chat event was handled. */
+    public enum Delivery {
+        /** The caller owns the player: event and message ran inline. */
+        INLINE,
+        /** The event ran on the player's region while the caller waited; the message continued on the caller. */
+        HANDED_OFF,
+        /** The caller is a tick thread that does not own the player: event and message run on the player's next tick. */
+        CONTINUED_ON_OWNER,
+        /** The event could not be run (or not in time); the message is dropped and was never sent. */
+        DROPPED
+    }
 
     private LegacyChat() {
     }
 
     /**
-     * Engine glue: runs {@code fire} (which posts one legacy synchronous chat event) on the thread
-     * that owns {@code player}.
+     * Engine glue: runs {@code fire} (posts one legacy synchronous chat event) on the thread that
+     * owns {@code player}, then {@code deliver} (everything the message does after that event).
      *
      * @param player the sender
-     * @param async whether the caller is the asynchronous chat thread (Paper's {@code ChatProcessor#async})
-     * @param fire posts the event and applies its result
-     * @return {@code true} when {@code fire} ran to completion; {@code false} when it was not
-     *         delivered in time and the message must be dropped
+     * @param fire posts the event
+     * @param deliver continues the message with the event's result; never run for a dropped message
+     * @return how the event was handled
      */
-    public static boolean onSenderRegion(final ServerPlayer player, final boolean async, final Runnable fire) {
-        LegacyListenerNotice.report(PlayerChatEvent.getHandlerList(), "PlayerChatEvent",
-            "on the sender's region thread while the chat thread waits (bounded)", LOGGER::info);
-        LegacyListenerNotice.report(io.papermc.paper.event.player.ChatEvent.getHandlerList(), "ChatEvent",
-            "on the sender's region thread while the chat thread waits (bounded)", LOGGER::info);
-        return onSenderRegion(player.getScoreboardName(), async,
-            () -> RegionOwnership.current().isTickThreadFor(player),
+    public static Delivery onSenderRegion(final ServerPlayer player, final Runnable fire, final Runnable deliver) {
+        LegacyListenerNotice.report(PlayerChatEvent.getHandlerList(), "PlayerChatEvent", WHERE, LOGGER::info);
+        LegacyListenerNotice.report(io.papermc.paper.event.player.ChatEvent.getHandlerList(), "ChatEvent", WHERE, LOGGER::info);
+        final RegionOwnership ownership = RegionOwnership.current();
+        return onSenderRegion(player.getScoreboardName(),
+            () -> ownership.isTickThreadFor(player), ownership::isTickThread,
             (body, retired) -> player.getBukkitEntity().taskScheduler.schedule(
                 (ServerPlayer owned) -> body.run(), (ServerPlayer gone) -> retired.run(), 1L),
-            fire, START_TIMEOUT_NANOS, RUN_TIMEOUT_NANOS, System::nanoTime, LegacyChat::warn);
+            fire, deliver, START_TIMEOUT_NANOS, RUN_TIMEOUT_NANOS, System::nanoTime, LegacyChat::warn);
     }
 
-    /** {@link #onSenderRegion(ServerPlayer, boolean, Runnable)} with ownership, scheduler, bounds, clock and log injected. */
-    static boolean onSenderRegion(final String playerName, final boolean async, final BooleanSupplier ownsPlayer,
-                                  final BoundedHandoff.Target playerRegion, final Runnable fire,
-                                  final long startNanos, final long runNanos, final LongSupplier clock,
-                                  final Consumer<String> warn) {
+    /** {@link #onSenderRegion(ServerPlayer, Runnable, Runnable)} with ownership, scheduler, bounds, clock and log injected. */
+    static Delivery onSenderRegion(final String playerName, final BooleanSupplier ownsPlayer, final BooleanSupplier onTickThread,
+                                   final BoundedHandoff.Target playerRegion, final Runnable fire, final Runnable deliver,
+                                   final long startNanos, final long runNanos, final LongSupplier clock,
+                                   final Consumer<String> warn) {
         if (ownsPlayer.getAsBoolean()) {
             fire.run();
-            return true;
+            deliver.run();
+            return Delivery.INLINE;
         }
-        if (!async) {
-            // A synchronous caller is a tick thread. Waiting on another region from a tick thread
-            // can deadlock two regions, so the event is not fired and the message is dropped.
-            warnLimited(clock, warn, "Legacy chat event for " + playerName
-                + " was requested from a tick thread that does not own the player; the message is dropped.");
-            return false;
+        if (onTickThread.getAsBoolean()) {
+            // A tick thread that does not own the player must not wait for its region (two tick
+            // threads waiting on each other deadlock): hand the rest of the message over instead.
+            final Runnable continuation = () -> {
+                try {
+                    fire.run();
+                    deliver.run();
+                } catch (final RuntimeException e) {
+                    LOGGER.error("Exception processing chat for {}", playerName, e);
+                }
+            };
+            boolean posted;
+            try {
+                posted = playerRegion.post(continuation, () -> warnLimited(clock, warn, "Legacy chat event for " + playerName
+                    + " could not run: the player left before their next tick; the message is dropped."));
+            } catch (final RuntimeException e) {
+                posted = false;
+            }
+            if (!posted) {
+                warnLimited(clock, warn, "Legacy chat event for " + playerName
+                    + " could not be handed to the player's region (REFUSED); the message is dropped.");
+                return Delivery.DROPPED;
+            }
+            return Delivery.CONTINUED_ON_OWNER;
         }
         final BoundedHandoff.Result result = BoundedHandoff.run(playerRegion, fire, startNanos, runNanos);
-        if (result.outcome() == BoundedHandoff.Outcome.COMPLETED) {
-            return true;
+        switch (result.outcome()) {
+            case COMPLETED:
+                deliver.run();
+                return Delivery.HANDED_OFF;
+            case FAILED:
+                throw new RuntimeException("Exception processing chat", result.failure());
+            case OVERRAN:
+                warnLimited(clock, warn, "Legacy chat event for " + playerName + " was still running on the player's region"
+                    + " when the wait ran out (OVERRAN); the message is dropped and will not be sent when the listeners finish.");
+                return Delivery.DROPPED;
+            default:
+                warnLimited(clock, warn, "Legacy chat event for " + playerName + " was not delivered on the player's region ("
+                    + result.outcome() + "); the message is dropped.");
+                return Delivery.DROPPED;
         }
-        if (result.outcome() == BoundedHandoff.Outcome.FAILED) {
-            throw new RuntimeException("Exception processing chat", result.failure());
-        }
-        warnLimited(clock, warn, "Legacy chat event for " + playerName + " was not delivered on the player's region ("
-            + result.outcome() + "); the message is dropped.");
-        return false;
     }
 
     private static void warnLimited(final LongSupplier clock, final Consumer<String> warn, final String message) {

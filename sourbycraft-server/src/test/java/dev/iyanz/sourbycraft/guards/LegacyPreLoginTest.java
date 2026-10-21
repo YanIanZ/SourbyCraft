@@ -64,6 +64,28 @@ class LegacyPreLoginTest {
         assertEquals(Component.text("banned here"), kick);
     }
 
+    /**
+     * Review finding 2: the verdict used {@code kickMessage() == null} as "allowed", so a listener
+     * that disallowed without a message (or an async denial pre-set with none) let the player in.
+     * Paper's rule is the result: anything but {@code ALLOWED} refuses, with a default message.
+     */
+    @Test
+    @SuppressWarnings("DataFlowIssue")
+    void aDenialWithoutAKickMessageIsStillRefused() throws ExecutionException {
+        final Component kick = this.fire(event(), e -> ((PlayerPreLoginEvent) e).disallow(PlayerPreLoginEvent.Result.KICK_OTHER, (Component) null));
+        assertSame(LegacyPreLogin.DENIED_MESSAGE, kick, "fail closed: a denial is a denial");
+
+        final PlayerPreLoginEvent asyncDenied = event();
+        asyncDenied.disallow(PlayerPreLoginEvent.Result.KICK_FULL, (Component) null);
+        assertSame(LegacyPreLogin.DENIED_MESSAGE, this.fire(asyncDenied, e -> { }), "an async denial pre-set without a message stands");
+
+        final PlayerPreLoginEvent inlineDenied = event();
+        inlineDenied.disallow(PlayerPreLoginEvent.Result.KICK_BANNED, (Component) null);
+        assertSame(LegacyPreLogin.DENIED_MESSAGE, LegacyPreLogin.verdict(inlineDenied), "the global-tick inline path uses the same verdict");
+        inlineDenied.allow();
+        assertNull(LegacyPreLogin.verdict(inlineDenied));
+    }
+
     @Test
     void theAsyncDenialIsSeenAndStandsUnlessAListenerAllowsAsOnPaper() throws ExecutionException {
         final PlayerPreLoginEvent denied = event();

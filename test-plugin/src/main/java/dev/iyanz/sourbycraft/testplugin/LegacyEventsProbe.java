@@ -21,7 +21,10 @@ import org.bukkit.plugin.Plugin;
  * denial, a cancel and a format change are honoured. Registered only with
  * {@code -Dsourby.testplugin.probes=true}.
  *
- * <p>Pre-login: a name starting with {@code LegacyDeny} is denied with {@link #DENY_MESSAGE}.
+ * <p>Pre-login: a name starting with {@code LegacyDeny} is denied with {@link #DENY_MESSAGE}; a name
+ * starting with {@code LegacyNullDeny} is denied without a kick message (must still be refused).
+ * {@code /chatprobe <player> <global|async|entity> <message>} calls {@code Player#chat} from that
+ * scheduler and logs whether it returned or threw.
  * Chat: a message containing {@code cancel-me} is cancelled; any other gets the format
  * {@code [legacy] <name>: <message>}. The async chat event logs what it sees afterwards.</p>
  */
@@ -41,6 +44,8 @@ final class LegacyEventsProbe implements Listener, BasicCommand {
         final boolean deny = event.getName().startsWith("LegacyDeny");
         if (deny) {
             event.disallow(PlayerPreLoginEvent.Result.KICK_OTHER, Component.text(DENY_MESSAGE));
+        } else if (event.getName().startsWith("LegacyNullDeny")) {
+            event.disallow(PlayerPreLoginEvent.Result.KICK_OTHER, (Component) null);
         }
         Bukkit.getLogger().info("LEGACYPROBE prelogin name=" + event.getName() + " thread=" + Thread.currentThread().getName()
             + " globalTick=" + Bukkit.isGlobalTickThread() + " result=" + event.getResult());
@@ -102,6 +107,37 @@ final class LegacyEventsProbe implements Listener, BasicCommand {
                 });
             });
         });
+    }
+
+    /** {@code /chatprobe <player> <global|async|entity> <message...>}. */
+    BasicCommand chatProbe() {
+        return (source, args) -> {
+            if (args.length < 3) {
+                Bukkit.getLogger().info("LEGACYPROBE chatprobe usage: <player> <global|async|entity> <message>");
+                return;
+            }
+            final org.bukkit.entity.Player player = Bukkit.getPlayerExact(args[0]);
+            if (player == null) {
+                Bukkit.getLogger().info("LEGACYPROBE chatprobe no-player " + args[0]);
+                return;
+            }
+            final String mode = args[1];
+            final String message = String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length));
+            final Runnable chat = () -> {
+                try {
+                    player.chat(message);
+                    Bukkit.getLogger().info("LEGACYPROBE chatprobe mode=" + mode + " returned thread=" + Thread.currentThread().getName()
+                        + " ownsPlayer=" + Bukkit.isOwnedByCurrentRegion(player));
+                } catch (final RuntimeException e) {
+                    Bukkit.getLogger().info("LEGACYPROBE chatprobe mode=" + mode + " threw=" + e + " thread=" + Thread.currentThread().getName());
+                }
+            };
+            switch (mode) {
+                case "global" -> Bukkit.getGlobalRegionScheduler().run(this.plugin, task -> chat.run());
+                case "async" -> Bukkit.getAsyncScheduler().runNow(this.plugin, task -> chat.run());
+                default -> player.getScheduler().run(this.plugin, task -> chat.run(), null);
+            }
+        };
     }
 
     private void later(final long ticks, final Runnable action) {

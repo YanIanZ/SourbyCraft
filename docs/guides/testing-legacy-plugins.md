@@ -46,16 +46,20 @@ plugin listens to it, and the first time a plugin's listener is used the log say
 
 | Event / API | Where it runs | Waits | If it cannot run in time |
 | --- | --- | --- | --- |
-| `PlayerPreLoginEvent` | Global tick, after `AsyncPlayerPreLoginEvent` (pre-set from its result; the legacy event's final result decides, as on Paper) | The login's authentication thread, up to 10 s to start + 10 s to finish | Login refused ("could not finish its login checks in time"), WARN |
-| `PlayerChatEvent` | The region that owns the sender (inline when the caller already owns the player) | The chat thread, up to 5 s + 5 s | Message dropped, WARN (at most one per 10 s) |
-| Paper's sync `ChatEvent` | Same; the message is then sent from that region | Same | Same |
+| `PlayerPreLoginEvent` | Global tick, after `AsyncPlayerPreLoginEvent` (pre-set from its result; the legacy event's final result decides, as on Paper: anything but `ALLOWED` refuses, also without a kick message, then with "You are not allowed to join this server.") | The login's authentication thread, up to 10 s to start + 10 s to finish | Login refused ("could not finish its login checks in time"), WARN |
+| `PlayerChatEvent` | The region that owns the sender: inline when the caller already owns the player; from the chat thread handed to the player's region; from a tick thread that does not own the player (a plugin's `Player#chat` on the global scheduler or another region) the event and the rest of the message run on the player's next tick | The chat thread only, up to 5 s + 5 s; a tick thread never waits | Message dropped and never sent later, WARN (at most one per 10 s) |
+| Paper's sync `ChatEvent` | Same; the message is sent after the event ran (from the waiting chat thread, or on the owner) | Same | Same |
 | `Bukkit.getServerTickManager()` | Any thread; changes take effect at the next global tick | — | — |
 
 Order for one chat message, as on Paper: `AsyncPlayerChatEvent` (chat thread) → `PlayerChatEvent`
 (sender's region) → `AsyncChatEvent` (chat thread) → `ChatEvent` (sender's region) → delivery.
+A `Player#chat` from a non-owning tick thread returns before the message is processed.
 Cancel, message, format and recipients changes are honoured.
 
 `ServerTickManager` (freeze, step, sprint, tick rate) applies to every region and the global tick.
+The state is vanilla's own `ServerTickRateManager`, advanced once per global tick, so vanilla
+readers (datapack `#tick` functions, the watchdog) agree with the API. `isFrozen(Entity)` includes
+the region's own pause only when called on the entity's owner thread.
 Each region picks a change up at the start of its own next tick, so regions are not frozen at one
 shared tick boundary; step and sprint count global ticks (a region that is behind runs fewer). The
 tick rate is the one server-wide rate (1–10 000). A region's own pause from

@@ -5,12 +5,15 @@ Subject: [PATCH] SourbyCraft - ServerTickManager backed by server-wide tick
  state
 
 Every CraftServerTickManager method threw the owned TICK_MANAGER
-refusal. They now delegate to ServerTickControl, vanilla's freeze,
-step and sprint rules driven by the global tick for every region, and
-to the one server-wide tick rate (Paper's 1 to 10,000 range check).
+refusal. They now delegate to ServerTickControl, which holds the state
+in vanilla's own ServerTickRateManager driven by the global tick for
+every region, and to the one server-wide tick rate (Paper's 1 to
+10,000 range check). isFrozen(Entity) answers from the owning region's
+tick state (its own pause combined with the server-wide state) on the
+entity's owner thread, and from the server-wide state off it.
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java b/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
-index c5eb8cedd92777abc8e1f8dfb5f5d8da7887aef3..ce1a2dc49b3d05e1276ea1adf40d9bf0ebb62bc0 100644
+index c5eb8cedd92777abc8e1f8dfb5f5d8da7887aef3..7a5ba385364c481e8324b7e56e1be85979fcfb77 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
 @@ -16,66 +16,68 @@ final class CraftServerTickManager implements ServerTickManager {
@@ -86,7 +89,7 @@ index c5eb8cedd92777abc8e1f8dfb5f5d8da7887aef3..ce1a2dc49b3d05e1276ea1adf40d9bf0
 -        throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - region threading - SourbyCraft: owned refusal message
 +        Preconditions.checkArgument(entity != null, "The given entity must not be null"); // SourbyCraft - server-wide tick state on the global tick, for every region
 +        final net.minecraft.world.entity.Entity handle = ((CraftEntity) entity).getHandle(); // SourbyCraft - server-wide tick state on the global tick, for every region
-+        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().isEntityFrozen(handle instanceof net.minecraft.world.entity.player.Player, handle.countPlayerPassengers()); // SourbyCraft - server-wide tick state on the global tick, for every region
++        return dev.iyanz.sourbycraft.guards.ServerTickControl.get().isEntityFrozen(handle, owned -> owned.level().getCurrentWorldData().regionData.getRegionSchedulingHandle().getTickManager().isEntityFrozen(owned)); // SourbyCraft - region and server-wide state on the owner; server-wide state off it
      }
  
      @Override

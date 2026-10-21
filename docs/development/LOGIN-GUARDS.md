@@ -56,7 +56,10 @@ Verified in the patch files and in the materialized sources they produce
 The baseline (`ServerLoginPacketListenerImpl.java.patch`) disabled it with
 `if (false && PlayerPreLoginEvent.getHandlerList().getRegisteredListeners().length != 0)`; a plugin
 listening only to the deprecated sync event got no callback. Minecraft feature 0073 (`guards/LegacyPreLogin`) fires it again as Paper does: after `AsyncPlayerPreLoginEvent`,
-only when it has listeners, pre-set from the async result, its own final result decides. It runs on
+only when it has listeners, pre-set from the async result, its own final result decides: any result
+other than `ALLOWED` refuses the login, also when the listener (or the async event it was pre-set
+from) gave no kick message, which then is "You are not allowed to join this server." (review fix
+2026-10-22: a denial without a message used to let the player in). It runs on
 the **global tick** (Paper: the main thread) while the virtual authentication thread waits, bounded
 (10 s to start, 10 s to finish); an unanswered check refuses the login with "The server could not
 finish its login checks in time". One INFO line per listening plugin says so. A slow listener delays

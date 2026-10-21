@@ -119,6 +119,16 @@ public interface RegionOwnership {
     boolean isGlobalTickThread();
 
     /**
+     * Tests whether the calling thread is any tick thread (a region's or the global tick's). Such
+     * a thread must never block waiting for another owner: two tick threads waiting on each other
+     * deadlock. A {@code false} answer means the caller is an asynchronous thread that may wait,
+     * bounded, for an owner to run work.
+     *
+     * @return whether the calling thread is a tick thread
+     */
+    boolean isTickThread();
+
+    /**
      * Runs work owned by the global tick: inline when the calling thread already is the global
      * tick thread, otherwise queued for the global tick with the backend's existing ordering. No
      * retirement callback; the global tick lives as long as the server.

@@ -58,9 +58,9 @@ public enum RegionRefusal {
         "There is no main thread to hop to. Schedule on the owning region "
             + "(Server#getRegionScheduler or Entity#getScheduler) or on the global region (Server#getGlobalRegionScheduler)"),
     /**
-     * {@code org.bukkit.ServerTickManager}. No longer thrown: since Paper feature 0035 the tick manager is
+     * {@code org.bukkit.ServerTickManager}. No longer thrown: since Paper feature 0023 the tick manager is
      * implemented by {@link ServerTickControl}. Kept because Paper feature 0019,
-     * which the 0035 lines replace, still names it.
+     * which the 0023 lines replace, still names it.
      */
     TICK_MANAGER("ServerTickManager (/tick freeze, step, sprint, rate)",
         "Use Server#getRegionThreadingTickRateManager() for the region-aware tick manager; "

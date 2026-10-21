@@ -84,6 +84,7 @@ class RegionOwnershipContractTest {
             if (!owned) throw new IllegalStateException(reason);
         }
         @Override public boolean isGlobalTickThread() { return owned; }
+        @Override public boolean isTickThread() { return owned; }
         @Override public void executeOnGlobalTick(Runnable task) {
             queued.add(task);
         }

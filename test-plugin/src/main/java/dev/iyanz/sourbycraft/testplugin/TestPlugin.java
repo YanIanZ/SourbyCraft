@@ -59,6 +59,7 @@ public class TestPlugin extends JavaPlugin implements Listener {
             }
             if (legacyProbe != null) {
                 registrar.register("tickprobe", "Freeze, step, sprint and rate through ServerTickManager (test server).", legacyProbe);
+                registrar.register("chatprobe", "Player#chat from the global scheduler, an async task or the player's own scheduler (test server).", legacyProbe.chatProbe());
             }
             if (teleportProbe != null) {
                 registrar.register("tpprobe", "Drive Entity#teleport through each owned route (test server).", teleportProbe);

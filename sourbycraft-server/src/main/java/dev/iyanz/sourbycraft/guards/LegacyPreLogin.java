@@ -41,6 +41,9 @@ public final class LegacyPreLogin {
     /** The kick message when the event could not be answered in time. */
     static final Component TIMEOUT_MESSAGE = Component.text("The server could not finish its login checks in time. Please try again.");
 
+    /** The kick message for a login a listener refused without giving a message. */
+    static final Component DENIED_MESSAGE = Component.text("You are not allowed to join this server.");
+
     private LegacyPreLogin() {
     }
 
@@ -54,7 +57,8 @@ public final class LegacyPreLogin {
      *
      * @param event the event, already pre-set from the async event's result
      * @param callEvent the plugin manager's {@code callEvent}
-     * @return the kick message when the login must be refused, {@code null} when it may continue
+     * @return the kick message when the login must be refused (never {@code null} for a refusal, even
+     *         when the listener gave no message), {@code null} only when the final result is {@code ALLOWED}
      * @throws ExecutionException when calling the event threw (Paper's {@code Waitable#get} did the same)
      */
     public static @Nullable Component fire(final PlayerPreLoginEvent event, final Consumer<Event> callEvent) throws ExecutionException {
@@ -89,7 +93,16 @@ public final class LegacyPreLogin {
         }
     }
 
-    private static @Nullable Component verdict(final PlayerPreLoginEvent event) {
-        return event.getResult() == PlayerPreLoginEvent.Result.ALLOWED ? null : event.kickMessage();
+    /**
+     * Paper's rule: the login continues only when the final result is {@code ALLOWED}. A denial
+     * without a kick message is still a denial (it is refused with {@link #DENIED_MESSAGE});
+     * {@code null} is returned only for an allowed login, never because the message is missing.
+     */
+    static @Nullable Component verdict(final PlayerPreLoginEvent event) {
+        if (event.getResult() == PlayerPreLoginEvent.Result.ALLOWED) {
+            return null;
+        }
+        final Component message = event.kickMessage();
+        return message != null ? message : DENIED_MESSAGE;
     }
 }

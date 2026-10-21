@@ -1,6 +1,7 @@
 package dev.iyanz.sourbycraft.guards;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -53,6 +54,14 @@ class LegacyEventsPatchShapeTest {
         return patch.lines().filter(l -> l.startsWith("diff --git ")).collect(Collectors.toList());
     }
 
+    /** The part of {@code patch} for one file. */
+    private static String section(final String patch, final String file) {
+        final int start = patch.indexOf("diff --git a/" + file);
+        assertTrue(start >= 0, file + " not in the patch");
+        final int next = patch.indexOf("diff --git ", start + 1);
+        return next < 0 ? patch.substring(start) : patch.substring(start, next);
+    }
+
     private static long count(final List<String> lines, final String fragment) {
         return lines.stream().filter(l -> l.contains(fragment)).count();
     }
@@ -73,20 +82,30 @@ class LegacyEventsPatchShapeTest {
     }
 
     @Test
-    void theRegionsReadTheServerWideStateAndOnlyTheGlobalTickAdvancesIt() throws IOException {
+    void theRegionsReadTheServerWideStateAndOnlyTheMarkedGlobalTickAdvancesIt() throws IOException {
         final String patch = patch("minecraft-patches/features", "-SourbyCraft-server-wide-ServerTickManager-state-on-the-global-tick");
-        assertEquals(3, files(patch).size());
+        assertEquals(4, files(patch).size());
         final List<String> added = added(patch);
-        assertEquals(1, count(added, "if (scheduleHandle.region == null) { // the global tick handle"));
-        assertEquals(1, count(added, "int changes = serverTicks.globalTick();"), "advanced once per global tick, nowhere else");
-        assertEquals(1, count(added, "serverRunsGameElements = serverTicks.isRunningNormally();"));
-        assertEquals(1, count(added, "serverSprints = serverTicks.sprintsThisTick();"));
+        // Review finding 7: the advance is a scheduler-level boundary in the global tick handle's
+        // tickRegion (reached only after tryMarkTicking and the cancelled checks), not a
+        // region == null special case inside the shared per-handle tickStart.
+        assertEquals(1, count(added, "dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTick();"), "advanced once per global tick, nowhere else");
+        assertTrue(added.stream().noneMatch(l -> l.contains("scheduleHandle.region == null")), "no special case in the shared tickStart");
+        final String regionized = section(patch, "io/papermc/paper/threadedregions/RegionizedServer.java");
+        final int tickRegion = regionized.indexOf("protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {");
+        final int advance = regionized.indexOf("ServerTickControl.get().globalTick();");
+        final int recopy = regionized.indexOf("this.getTickManager().copyServerTickState();");
+        final int drain = regionized.indexOf("this.drainTasks();");
+        assertTrue(tickRegion >= 0 && tickRegion < advance && advance < recopy && recopy < drain,
+            "global tickRegion: advance, re-copy, then the global work");
+        assertFalse(section(patch, "dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java").contains("+        dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTick()"));
+        assertEquals(1, count(added, "copyServerTickState(); // SourbyCraft - server-wide ServerTickManager state, copied at the start of each tick"));
+        assertEquals(1, count(added, "serverRunsGameElements = dev.iyanz.sourbycraft.guards.ServerTickControl.get().isRunningNormally();"));
+        assertEquals(1, count(added, "serverSprints = dev.iyanz.sourbycraft.guards.ServerTickControl.get().sprintsThisTick();"));
         assertEquals(1, count(added, "return runsGameElements && serverRunsGameElements;"));
         assertEquals(1, count(added, "if (serverSprints) return 1L;"));
-        // The globalTick call precedes the copy, so the global tick reads what it just published.
-        final int advance = patch.indexOf("serverTicks.globalTick()");
-        final int copy = patch.indexOf("serverRunsGameElements = serverTicks.isRunningNormally();");
-        assertTrue(advance > 0 && copy > advance, "advance, then copy");
+        // Review finding 3/6: no hand-made step or state broadcast; vanilla's manager sends them.
+        assertTrue(added.stream().noneMatch(l -> l.contains("ClientboundTickingStepPacket")), "step packets come from vanilla's manager");
         // The two vanilla runsNormally() checks the base made unconditional come back.
         final List<String> removed = removed(patch);
         assertEquals(2, count(removed, "if (true) { // Canvas - region threading"));
@@ -96,7 +115,7 @@ class LegacyEventsPatchShapeTest {
     }
 
     @Test
-    void bothLegacyChatEventsFireThroughTheOwnedClassAndADropReturns() throws IOException {
+    void bothLegacyChatEventsFireThroughTheOwnedClassAndTheMessageIsSentOnlyAfterTheEventRan() throws IOException {
         final String patch = patch("paper-patches/features", "-SourbyCraft-legacy-PlayerChatEvent-and-ChatEvent-on-the-sender-s-region");
         assertEquals(1, files(patch).size());
         assertTrue(files(patch).get(0).contains("io/papermc/paper/adventure/ChatProcessor.java"));
@@ -105,9 +124,12 @@ class LegacyEventsPatchShapeTest {
         assertEquals(2, count(removed, "if (false && listenersOnSyncEvent) { // Folia - region threading"));
         assertEquals(2, count(added, "if (listenersOnSyncEvent) { // SourbyCraft - legacy"));
         assertEquals(1, count(removed, "this.server.processQueue.add(waitable);"));
-        assertEquals(1, count(added, "if (!dev.iyanz.sourbycraft.guards.LegacyChat.onSenderRegion(this.player, this.async, waitable)) {"));
-        assertEquals(1, count(added, "})) return; // SourbyCraft - not delivered in time: the message is dropped"),
-            "PlayerChatEvent: a message whose event was not delivered is not processed further");
+        // Review finding 1: the decision is by the calling thread, not Paper's async flag.
+        assertEquals(1, count(added, "dev.iyanz.sourbycraft.guards.LegacyChat.onSenderRegion(this.player, fire, deliver);"));
+        assertTrue(added.stream().noneMatch(l -> l.contains("this.async, ")), "the async flag no longer decides: " + added);
+        assertEquals(2, count(added, "this.onSenderRegion(() -> ChatProcessor.this.post(chatEvent), () -> {"));
+        // Review finding 4: complete() is in the deliver step, never inside the hop to the region.
+        assertTrue(added.stream().noneMatch(l -> l.contains("Waitable")), "no Waitable left: " + added);
         assertTrue(added.stream().noneMatch(l -> l.contains("processQueue")), "nothing new goes through the undrained queue");
     }
 
@@ -123,6 +145,10 @@ class LegacyEventsPatchShapeTest {
         assertEquals(13, added.stream().filter(l -> l.contains("dev.iyanz.sourbycraft.guards.ServerTickControl.get().")).count(),
             "one delegation per method");
         assertEquals(1, count(added, "Preconditions.checkArgument(entity != null"));
+        // Review finding 5: isFrozen(Entity) asks the owning region (its pause + server-wide state) and
+        // never reads passengers in the patch line; ServerTickControl decides by ownership.
+        assertEquals(1, count(added, "ServerTickControl.get().isEntityFrozen(handle, owned -> owned.level().getCurrentWorldData().regionData.getRegionSchedulingHandle().getTickManager().isEntityFrozen(owned));"));
+        assertTrue(added.stream().noneMatch(l -> l.contains("countPlayerPassengers")), "no off-owner passenger read in the patch: " + added);
     }
 
     @Test

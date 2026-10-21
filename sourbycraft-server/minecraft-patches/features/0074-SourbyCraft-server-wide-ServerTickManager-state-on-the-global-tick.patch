@@ -4,18 +4,22 @@ Date: Thu, 22 Oct 2026 02:03:07 +0700
 Subject: [PATCH] SourbyCraft - server-wide ServerTickManager state on the
  global tick
 
-ServerTickControl holds vanilla ServerTickRateManager's freeze, step and
-sprint rules; the global tick advances it once per tick and every
-region copies the published state at the start of its own tick, so a
-region runs game elements only when its own handle and the server-wide
-state allow it, and sprints while a server-wide sprint is active.
-Players are sent the ticking state and step count when they change.
-Player pushes and move counting honour the frozen state again, as in
-vanilla (they were unconditional since the base dropped the tick
-manager).
+The server-wide freeze, step, sprint and tick-rate state lives in
+vanilla's own ServerTickRateManager (MinecraftServer#tickRateManager,
+which ServerFunctionManager, the watchdog and the MSPT report read).
+ServerTickControl serialises access to it and the global tick handle
+advances it once per global tick from its tickRegion (after the handle
+is marked ticking, never for a cancelled handle): vanilla's
+checkShouldSprintThisTick + tick. Every region copies the published
+state at the start of its own tick, so a region runs game elements only
+when its own handle and the server-wide state allow it, and sprints
+while a server-wide sprint is active. Clients get vanilla's own state
+and step packets (the full step count at request time). Player pushes
+and move counting honour the frozen state again, as in vanilla (they
+were unconditional since the base dropped the tick manager).
 
 diff --git a/dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java b/dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java
-index a62ba97be22585298b53592b2bd076429c68d4c8..5c942d2f121f55df6a4907607a0f6381aa4da3f6 100644
+index a62ba97be22585298b53592b2bd076429c68d4c8..91c1a4975c9b8ab77893629332c27275b0c73685 100644
 --- a/dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java
 +++ b/dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java
 @@ -29,6 +29,10 @@ public final class ScheduledHandleTickState {
@@ -38,7 +42,7 @@ index a62ba97be22585298b53592b2bd076429c68d4c8..5c942d2f121f55df6a4907607a0f6381
      }
  
      public boolean isEntityFrozen(final Entity entity) {
-@@ -51,12 +55,20 @@ public final class ScheduledHandleTickState {
+@@ -51,12 +55,13 @@ public final class ScheduledHandleTickState {
      }
  
      public boolean isSprinting() {
@@ -49,36 +53,29 @@ index a62ba97be22585298b53592b2bd076429c68d4c8..5c942d2f121f55df6a4907607a0f6381
      public long tickStart(final long nanos) {
          // process all actions first
          processAllActions();
-+        dev.iyanz.sourbycraft.guards.ServerTickControl serverTicks = dev.iyanz.sourbycraft.guards.ServerTickControl.get(); // SourbyCraft start - server-wide ServerTickManager state
-+        if (scheduleHandle.region == null) { // the global tick handle
-+            int changes = serverTicks.globalTick();
-+            if ((changes & dev.iyanz.sourbycraft.guards.ServerTickControl.STATE_CHANGED) != 0) sendStateToAllPlayers();
-+            if ((changes & dev.iyanz.sourbycraft.guards.ServerTickControl.STEP_CHANGED) != 0) sendStepToAllPlayers(serverTicks.getFrozenTicksToRun());
-+        }
-+        serverRunsGameElements = serverTicks.isRunningNormally();
-+        serverSprints = serverTicks.sprintsThisTick(); // SourbyCraft end - server-wide ServerTickManager state
++        copyServerTickState(); // SourbyCraft - server-wide ServerTickManager state, copied at the start of each tick
  
          // check if overloaded
          if (lastTickTimeEndNanos != UNSET && lastTickTimeEndNanos + TickRegionScheduler.getTimeBetweenTicks() + (GlobalConfiguration.getInstance().regionScheduler.overloadedLogMillis * 1_000_000L) <= nanos) {
-@@ -82,8 +94,16 @@ public final class ScheduledHandleTickState {
+@@ -82,9 +87,16 @@ public final class ScheduledHandleTickState {
      }
  
      public void sendStateToPlayer(final ServerPlayer player) {
 -        player.connection.send(new ClientboundTickingStatePacket(TickRegionScheduler.getTickRate(), !runsGameElements));
 +        player.connection.send(new ClientboundTickingStatePacket(dev.iyanz.sourbycraft.guards.ServerTickControl.get().getTickRate(), !runsGameElements || dev.iyanz.sourbycraft.guards.ServerTickControl.get().isFrozen())); // SourbyCraft - server-wide ServerTickManager state
-+    }
-+
-+    // SourbyCraft start - server-wide ServerTickManager state: tell clients how many ticks a frozen server steps
-+    public static void sendStepToAllPlayers(final int steps) {
-+        for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().getPlayers()) {
-+            player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> entityPlayer.connection.send(new net.minecraft.network.protocol.game.ClientboundTickingStepPacket(steps)));
-+        }
      }
-+    // SourbyCraft end - server-wide ServerTickManager state
  
++    // SourbyCraft start - server-wide ServerTickManager state, copied at the start of each tick (the global tick handle copies again after advancing it)
++    public void copyServerTickState() {
++        serverRunsGameElements = dev.iyanz.sourbycraft.guards.ServerTickControl.get().isRunningNormally();
++        serverSprints = dev.iyanz.sourbycraft.guards.ServerTickControl.get().sprintsThisTick();
++    }
++    // SourbyCraft end - server-wide ServerTickManager state, copied at the start of each tick
++
      private void processAllActions() {
          boolean processed = false;
-@@ -138,6 +158,7 @@ public final class ScheduledHandleTickState {
+         Action action;
+@@ -138,6 +150,7 @@ public final class ScheduledHandleTickState {
              // later, and we can't divide by 0
              return 1L;
          }
@@ -86,6 +83,19 @@ index a62ba97be22585298b53592b2bd076429c68d4c8..5c942d2f121f55df6a4907607a0f6381
          return TickRegionScheduler.getTimeBetweenTicks();
      }
  
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index d7ad870fde85d23b119d6de2cf8e9cb1927ce30a..a26870e96ea3321bdc7c7a2c96eaf020c847fe93 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -208,6 +208,8 @@ public final class RegionizedServer {
+ 
+         @Override
+         protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
++            dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTick(); // SourbyCraft - advance the server-wide ServerTickManager state once per global tick, only once marked ticking
++            this.getTickManager().copyServerTickState(); // SourbyCraft - the global tick reads what it just published
+             this.drainTasks();
+             this.server.globalTick(tickCount);
+         }
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
 index 82a0acac65c60d3e1e5cd3d3fb948bd8ab711a1f..c33201e7d8d1eeddf679a569d69952b3a2b8c741 100644
 --- a/net/minecraft/server/level/ServerPlayer.java
