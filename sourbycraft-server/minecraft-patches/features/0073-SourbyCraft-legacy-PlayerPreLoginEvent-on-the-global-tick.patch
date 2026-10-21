@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 02:03:07 +0700
+Subject: [PATCH] SourbyCraft - legacy PlayerPreLoginEvent on the global tick
+
+The region-threading base never fired the deprecated synchronous
+PlayerPreLoginEvent (its Waitable went to the main-thread queue, which
+nothing drains), so a legacy whitelist/ban/limit plugin listening only
+to it got no callback. It is fired again as Paper fires it: after
+AsyncPlayerPreLoginEvent, only when it has listeners, pre-set from the
+async result, and its own final result decides. LegacyPreLogin runs it
+on the global tick while the authentication thread waits, bounded
+(10 s to start, 10 s more to finish); an unanswered check refuses the
+login.
+
+diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+index 01dcf0f14bb6d7e99fdab5434121668a683d1982..c5679e538738fa752091a4ca4bdf70ba711809cd 100644
+--- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+@@ -356,22 +356,14 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+         uniqueId = gameprofile.id();
+         // Paper end - Add more fields to AsyncPlayerPreLoginEvent
+ 
+-        if (false && PlayerPreLoginEvent.getHandlerList().getRegisteredListeners().length != 0) { // Folia - region threading
++        if (dev.iyanz.sourbycraft.guards.LegacyPreLogin.hasListeners()) { // SourbyCraft - legacy PlayerPreLoginEvent on the global tick, bounded wait
+             final PlayerPreLoginEvent event = new PlayerPreLoginEvent(playerName, address, uniqueId);
+             if (asyncEvent.getResult() != PlayerPreLoginEvent.Result.ALLOWED) {
+                 event.disallow(asyncEvent.getResult(), asyncEvent.kickMessage()); // Paper - Adventure
+             }
+-            Waitable<PlayerPreLoginEvent.Result> waitable = new Waitable<>() {
+-                @Override
+-                protected PlayerPreLoginEvent.Result evaluate() {
+-                    server.getPluginManager().callEvent(event);
+-                    return event.getResult();
+-                }
+-            };
+-
+-            ServerLoginPacketListenerImpl.this.server.processQueue.add(waitable);
+-            if (waitable.get() != PlayerPreLoginEvent.Result.ALLOWED) {
+-                this.disconnect(io.papermc.paper.adventure.PaperAdventure.asVanilla(event.kickMessage())); // Paper - Adventure
++            final net.kyori.adventure.text.Component kickMessage = dev.iyanz.sourbycraft.guards.LegacyPreLogin.fire(event, server.getPluginManager()::callEvent); // SourbyCraft - legacy PlayerPreLoginEvent on the global tick, bounded wait
++            if (kickMessage != null) { // SourbyCraft - legacy PlayerPreLoginEvent on the global tick, bounded wait
++                this.disconnect(io.papermc.paper.adventure.PaperAdventure.asVanilla(kickMessage)); // Paper - Adventure
+             }
+         } else {
+             if (asyncEvent.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) {

@@ -32,7 +32,9 @@ public class TestPlugin extends JavaPlugin implements Listener {
         final boolean probes = Boolean.getBoolean("sourby.testplugin.probes");
         final TeleportProbe teleportProbe = probes ? new TeleportProbe(this) : null;
         UnloadFixtureProbe unloadProbe = null;
+        final LegacyEventsProbe legacyProbe = probes ? new LegacyEventsProbe(this) : null;
         if (probes) {
+            Bukkit.getPluginManager().registerEvents(legacyProbe, this);
             Bukkit.getPluginManager().registerEvents(teleportProbe, this);
             Bukkit.getPluginManager().registerEvents(new SpawnLocationProbe(), this);
             Bukkit.getPluginManager().registerEvents(new PearlTeleportProbe(), this);
@@ -54,6 +56,9 @@ public class TestPlugin extends JavaPlugin implements Listener {
             }
             if (probes) {
                 registrar.register("stallprobe", "Block the global tick or a region on purpose (test server only).", new StallProbe(this));
+            }
+            if (legacyProbe != null) {
+                registrar.register("tickprobe", "Freeze, step, sprint and rate through ServerTickManager (test server).", legacyProbe);
             }
             if (teleportProbe != null) {
                 registrar.register("tpprobe", "Drive Entity#teleport through each owned route (test server).", teleportProbe);

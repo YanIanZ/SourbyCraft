@@ -38,6 +38,30 @@ touches a player or block in a *different* region than the one it runs on is ref
 engine (`IllegalStateException`). A long-running timer anchored on one region does not follow a
 player who walks away.
 
+### Legacy synchronous events and `ServerTickManager` (2026-10-22, unit-tested; see the coordination entry for the boot check)
+
+These work for every plugin, bridged or native; nothing to enable. Each costs nothing unless a
+plugin listens to it, and the first time a plugin's listener is used the log says once
+`Plugin <name> listens to the deprecated synchronous <event>; SourbyCraft fires it ...`.
+
+| Event / API | Where it runs | Waits | If it cannot run in time |
+| --- | --- | --- | --- |
+| `PlayerPreLoginEvent` | Global tick, after `AsyncPlayerPreLoginEvent` (pre-set from its result; the legacy event's final result decides, as on Paper) | The login's authentication thread, up to 10 s to start + 10 s to finish | Login refused ("could not finish its login checks in time"), WARN |
+| `PlayerChatEvent` | The region that owns the sender (inline when the caller already owns the player) | The chat thread, up to 5 s + 5 s | Message dropped, WARN (at most one per 10 s) |
+| Paper's sync `ChatEvent` | Same; the message is then sent from that region | Same | Same |
+| `Bukkit.getServerTickManager()` | Any thread; changes take effect at the next global tick | — | — |
+
+Order for one chat message, as on Paper: `AsyncPlayerChatEvent` (chat thread) → `PlayerChatEvent`
+(sender's region) → `AsyncChatEvent` (chat thread) → `ChatEvent` (sender's region) → delivery.
+Cancel, message, format and recipients changes are honoured.
+
+`ServerTickManager` (freeze, step, sprint, tick rate) applies to every region and the global tick.
+Each region picks a change up at the start of its own next tick, so regions are not frozen at one
+shared tick boundary; step and sprint count global ticks (a region that is behind runs fewer). The
+tick rate is the one server-wide rate (1–10 000). A region's own pause from
+`getRegionThreadingTickRateManager()` still applies on top. The vanilla `/tick` command stays
+unregistered: `/tick query` reads main-loop tick times that do not exist under region threading.
+
 ## 3. Test it
 
 1. Start the server with the plugin in `plugins/`.

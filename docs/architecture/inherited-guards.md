@@ -47,26 +47,26 @@ Every number below is generated; the test fails when it drifts from the manifest
 | scanned input | count |
 | --- | --- |
 | engine baseline patches | 720 (472 `sourbycraft-server/minecraft-patches/sources` + 232 `sourbycraft-server/paper-patches/files` + 16 `sourbyapi/paper-patches/files`), 720 Java files |
-| SourbyCraft feature patches | 95, touching 120 Java files |
+| SourbyCraft feature patches | 100, touching 122 Java files |
 | engine source files (sourbycraft-server/src/main/java/dev/iyanz/aurora/engine) | 88 |
-| guards found by the scan | 137 (manifest has 137; both scan modes agree, see RepositoryTest) |
+| guards found by the scan | 118 (manifest has 118; both scan modes agree, see RepositoryTest) |
 
 | detector | A | B | C | D | E |
 | --- | --- | --- | --- | --- | --- |
-| entries | 71 | 43 | 2 | 15 | 6 |
+| entries | 66 | 30 | 2 | 14 | 6 |
 
 | kind \ decision | KEEP-OWNED | REPLACE | REMOVE | UNDECIDED | total |
 | --- | --- | --- | --- | --- | --- |
-| FEATURE-DISABLED | 6 | 5 | 1 | 0 | 12 |
-| API-REFUSED | 59 | 23 | 2 | 0 | 84 |
+| FEATURE-DISABLED | 6 | 2 | 1 | 0 | 9 |
+| API-REFUSED | 59 | 9 | 2 | 0 | 70 |
 | OWNERSHIP-CHECK | 6 | 0 | 0 | 0 | 6 |
 | DEGRADED | 4 | 1 | 0 | 0 | 5 |
-| REROUTED | 30 | 0 | 0 | 0 | 30 |
-| **guards** | **105** | **29** | **3** | **0** | **137** |
+| REROUTED | 28 | 0 | 0 | 0 | 28 |
+| **guards** | **103** | **12** | **3** | **0** | **118** |
 
 | origin | Folia | Canvas | SourbyCraft |
 | --- | --- | --- | --- |
-| entries | 80 | 47 | 10 |
+| entries | 77 | 31 | 10 |
 
 | family | sites |
 | --- | --- |
@@ -106,8 +106,8 @@ is read-only — `DataPackCommand` "Canvas start" block; the waypoint manager, w
 ## 2. Counts
 
 See the generated block in section 1 (kind × decision, origins, detectors, families). The REPLACE
-entries are 9 distinct features (section 3), because one feature is usually guarded at several sites
-(the 13 `CraftServerTickManager` methods are one decision). Thirty-four entries were retired on
+entries are 6 distinct features (section 3), because one feature is usually guarded at several sites.
+Nineteen more entries were retired on 2026-10-22 when rows 4, 5 and 10 landed (section 8). Thirty-four entries were retired on
 2026-10-21 (section 8): seven when feature 0055 replaced the command-block guards, one when the
 scanner learned block comments, and 26 when sonnet-guards replaced or re-worded guards in Paper 0019 /
 Minecraft 0061–0063 (the re-worded refusals re-appear under new ids with the same decisions).
@@ -123,13 +123,13 @@ is named).
 | 1 | **Command blocks** — **landed** (retired `CommandBlock#1` `#2`, `BaseCommandBlock#1`, `MinecartCommandBlock#1`, `ServerGamePacketListenerImpl#1` `#2`, `ServerLevel#9`) | now only the policy's own default `BaseCommandBlock#2` | Was: every map/datapack using command blocks dead | MC 0055 (opus-cmdblock): `CommandBlockPolicy` behind `aurora.world.command-blocks` (default `false` = the inherited hard-disable, now owned; on = execute only on the owning region). Tests `CommandBlockPolicyTest`, `CommandBlockPatchShapeTest`; test-server runs in opus-cmdblock's entry. |
 | 2 | **Synchronous `Entity.teleport`** — **landed** | `CraftEntity#1`, `CraftPlayer#1`, `Entity#7`, `ServerPlayer#3` now KEEP-OWNED (fail-closed backstop); `Entity#1`–`#6` (API annotations) stay REPLACE until the javadoc/annotation follow-up | Was: every synchronous plugin teleport threw | MC 0057 + Paper 0017 (opus-teleport): `TeleportRoute`/`OwnedTeleport` — SYNC on the owning region when the destination box is owned and loaded, else `teleportAsync` + `false` with one WARN per plugin per 10 min; `-Daurora.compat.sync-teleport=false` restores the refusal (RESTART_REQUIRED). After the event the teleport is revalidated (removed / other region / another transfer started → dropped; destination moved off the region → `teleportAsync`); the fallback starts from the entity's own scheduler with the velocity flags. Tests in `entity/teleport/`; test-server `opus-teleport-5/-7/-9` (incl. a protocol-probe player: sync near `true`, far and off-thread `false`). Remaining: drop `@Unsupported` and document "false = scheduled" (a sourbyapi feature patch). |
 | 3 | **`PlayerSpawnLocationEvent`** — **landed** | `PrepareSpawnTask#1` now KEEP-OWNED (inherited off switch behind the owned event) | Was: hub/spawn plugins ignored | MC 0058 (opus-teleport): `SpawnLocationEvents` fires it once per join on the global tick before Paper's async event; location feeds the existing chunk load. Tests `SpawnLocationEventsTest`, `SpawnLocationPatchShapeTest`; test-server joins recorded. |
-| 4 | **Sync `PlayerPreLoginEvent`** | `ServerLoginPacketListenerImpl#1` | Legacy whitelist/ban/limit plugins: no callback, no warning ([LOGIN-GUARDS §2.2](../development/LOGIN-GUARDS.md)) | Planned: fire on the global tick with a future; the login listener already retries across ticks (`pushPendingJoin`). Log once per plugin that listens to it. |
-| 5 | **Sync `PlayerChatEvent`** | `ChatProcessor#1` `#2` | Legacy chat/format plugins: silently no chat | Planned: fire on the player's region thread when chat is handled there; when async, hop to the entity scheduler instead of the undrained queue. |
+| 4 | **Sync `PlayerPreLoginEvent`** — **landed** (retired `ServerLoginPacketListenerImpl#1`) | — | Was: legacy whitelist/ban/limit plugins got no callback ([LOGIN-GUARDS §2.2](../development/LOGIN-GUARDS.md)) | MC 0073 (claude-legacyevents, provisional number): `LegacyPreLogin` fires it after the async event, only with listeners, pre-set from the async result (its final result decides, as on Paper), on the global tick while the authentication thread waits (10 s to start + 10 s to finish; unanswered = login refused); one INFO line per listening plugin. Tests `LegacyPreLoginTest`, `BoundedHandoffTest`, `LegacyEventsPatchShapeTest`. |
+| 5 | **Sync `PlayerChatEvent`** (and Paper's sync `ChatEvent`) — **landed** (retired `ChatProcessor#1` `#2`) | — | Was: legacy chat/format plugins never saw chat | Paper 0022 (provisional): `LegacyChat` fires them in Paper's order on the sender's owning thread — inline when the caller owns the player, else via the player's entity scheduler while the chat thread waits (5 s + 5 s); cancel/format/message/recipients honoured; not delivered in time (player left, region stalled, or a non-owning tick thread that must not wait) = message dropped with a rate-limited WARN. Tests `LegacyChatTest`, `LegacyEventsPatchShapeTest`. |
 | 6 | **`/restart` and `Server.restart()`** | `Server#5` (planned feature); `RestartCommand#1`, `CraftServer#5` are now KEEP-OWNED refusals with an owned message (Paper 0019) | Admins: the API refuses with `RegionRefusal.RESTART`; Spigot `/restart` enqueues into the undrained server queue, which since MC 0060 **fails loudly** (`UndrainedQueue`) instead of silently doing nothing | Planned: owned restart (kick, halt through the engine's shutdown thread as the auto-updater does, exec `restart-script` from a hook after `RegionShutdownThread`). |
 | 7 | **`pause-when-empty-seconds`** | `MinecraftServer#15` (+ `MinecraftServer#27` `isPaused()` follows) | Hosts: empty servers tick every loaded region forever | Planned: scheduler-level idle flag; autosave once; resume on connect. |
 | 8 | **Player collision rule** — **landed** (retired `PlayerList#1` `#2` `#4`) | — | Was: `collisions.enable-player-collisions=false` ignored | MC 0062 (sonnet-guards): `PlayerCollisionTeam` posts the team add/remove to the global tick. `PlayerCollisionTeamTest` (unit only; no real-client run). |
 | 9 | **Conversation input** — **landed** (retired `ServerGamePacketListenerImpl#4`) | — | Was (corrected by sonnet-guards): `broadcastChatMessage` runs on the chat executor, the UOE was logged as "Chain link failed, continuing to next one" and the input **silently dropped** — the player was not kicked as this ledger first said | MC 0062: `ConversationInput.deliver` runs `acceptConversationInput` on the player's entity scheduler. `ConversationInputTest` (unit only). |
-| 10 | **`ServerTickManager` / `/tick`** | `ServerTickManager#1`, `CraftServerTickManager#14`–`#26` (owned message since Paper 0019; still refuse), `ServerPlayer#4`, `ServerGamePacketListenerImpl#3` follow | Plugins using the tick API throw; from the code `/tick freeze` is not honoured by region ticks (not booted) | Planned (low): map freeze/sprint/step onto the region scheduler with one scheduler-level flag. |
+| 10 | **`ServerTickManager`** — **landed** (retired `ServerTickManager#1`, `CraftServerTickManager#14`–`#26`, `ServerPlayer#4`, `ServerGamePacketListenerImpl#3`); `/tick` stays unregistered | — | Was: plugins using the tick API threw | MC 0074 + Paper 0023 + sourbyapi 0003 (provisional): `ServerTickControl` = vanilla freeze/step/sprint rules, advanced once per global tick, copied by every region at its tick start (the scheduler-level flag; regions observe a change at their own next tick, not one shared boundary; step/sprint count global ticks); tick rate = the one server-wide rate. Player pushes and move counting honour freeze again. `/tick` is not re-registered: `/tick query` reads the main-loop tick times, which do not exist here. Tests `ServerTickControlTest`, `LegacyEventsPatchShapeTest`. |
 | 11 | `getAverageTickTime()` off-region — **landed** | `CraftServer#4` now KEEP-OWNED (defensive, like `#6`) | Was: async/bridged callers got "Not on any region" | Paper 0019: global-tick data off any region, as `getTPS` since feature 0005. |
 | 12 | `World.getTickableTileEntityCount` — **landed** (retired `CraftWorld#1`; `World#1` annotation stays REPLACE for the javadoc) | — | Was: monitoring plugins threw | Paper 0019 / MC 0063: `RegionStatistics.tickableBlockEntities` sums the regions' last published counts. `RegionStatisticsTest`. |
 | 13 | End-platform `PortalCreateEvent` — **landed, gated** (retired `EndPlatformFeature#1`) | — | Was: protection/logging plugins missed END_PLATFORM | MC 0063: `EndPlatformEvents.shouldFire` — only with an entity and on the owning region. `EndPlatformEventsTest` (unit only). |
@@ -195,8 +195,7 @@ throwing.
   [persistence-save-paths.md §2](persistence-save-paths.md)), `CraftEntity#1`/`CraftPlayer#1`/
   `Entity#7`/`ServerPlayer#3` (owned sync teleport, row 2), `PrepareSpawnTask#1` (row 3),
   `CraftServer#4` (row 11), `CraftServer#7`/`CraftScheduler#4`/`RestartCommand#1`/`CraftServer#5` and
-  the `CraftServerTickManager#14`–`#26` messages (owned refusal text; the tick manager itself is still
-  row 10).
+  the former `CraftServerTickManager#14`–`#26` messages (retired 2026-10-22, row 10 landed).
 - **Async teleport/respawn is the only way to change region** — `PlayerList#3`,
   `ServerGamePacketListenerImpl#5` `#6`, `TeleportCommand#1`, `CloneCommands#1`, `SummonCommand#1`:
   commands return before the work completes; a chained `execute ... run` sees the pre-state
@@ -225,9 +224,8 @@ throwing.
   `ServerLevel#7` (`/debug` block-entity ticker dump empty; `/perf` is the owned equivalent).
 - **Not guards, listed for completeness** — `LivingEntity#1` (Canvas lookup reorder),
   `NaturalSpawner#1` (unreachable after Canvas's spawning rewrite), `LevelChunk#1` (the `NULL_TICKER`
-  null object answering `null`; the real wrapper at `LevelChunk:1156-1158` delegates), `ServerPlayer#4`,
-  `ServerGamePacketListenerImpl#3` and `MinecraftServer#27` (follow the tick-manager /
-  pause-when-empty decisions), `SparksFly#2` (Paper's built-in spark never self-enables; SourbyCraft's
+  null object answering `null`; the real wrapper at `LevelChunk:1156-1158` delegates) and
+  `MinecraftServer#27` (follows the pause-when-empty decision), `SparksFly#2` (Paper's built-in spark never self-enables; SourbyCraft's
   spark platform is the one profiler).
 - **SourbyCraft's own guards in the same shape** (origin `SourbyCraft`, already owned, recorded so the
   scan is complete) — `Metrics#1` (bStats phone-home removed, Paper feature 0001), `CraftScheduler#2`
@@ -296,6 +294,8 @@ fix `ThreadedRegionizer#1`; by Paper 0019 / MC 0061–0063 `PlayerList#1` `#2` `
 `MCUtil#1` `#2`, `CraftServer#3`, `CraftScheduler#1`, `CraftServerTickManager#1`–`#13`,
 `MinecraftServer#10`–`#14`, `#18`, `#23`, `#24`, `#26` (successors: `MCUtil#3` `#4`, `CraftServer#7`,
 `CraftScheduler#4`, `CraftServerTickManager#14`–`#26`, `MinecraftServer#28`–`#36`).
+Retired 2026-10-22 (claude-legacyevents; MC 0073/0074, Paper 0022/0023, sourbyapi 0003): `ServerLoginPacketListenerImpl#1`, `ChatProcessor#1` `#2`, `ServerTickManager#1`,
+`CraftServerTickManager#14`–`#26`, `ServerPlayer#4`, `ServerGamePacketListenerImpl#3`.
 
 ## Wandering trader route ownership (0068)
 
@@ -320,7 +320,6 @@ origin is SourbyCraft or the note names a feature patch.
 | `Server#3` | Canvas | API-REFUSED | KEEP-OWNED | `org/bukkit/Server.java:981` | `@Unsupported // Canvas - region threading` |
 | `Server#4` | Canvas | API-REFUSED | KEEP-OWNED | `org/bukkit/Server.java:988` | `@Unsupported // Canvas - region threading` |
 | `Server#5` | Canvas | API-REFUSED | REPLACE | `org/bukkit/Server.java:2513` | `@Unsupported // Canvas - region threading` |
-| `ServerTickManager#1` | Canvas | API-REFUSED | REPLACE | `org/bukkit/ServerTickManager.java:14` | `@Unsupported // Canvas - region threading` |
 | `World#1` | Canvas | API-REFUSED | REPLACE | `org/bukkit/World.java:124` | `@Unsupported // Canvas - region threading` |
 | `Entity#1` | Canvas | API-REFUSED | REPLACE | `org/bukkit/entity/Entity.java:169` | `@Unsupported // Canvas - region threading` |
 | `Entity#2` | Canvas | API-REFUSED | REPLACE | `org/bukkit/entity/Entity.java:187` | `@Unsupported // Canvas - region threading` |
@@ -332,8 +331,6 @@ origin is SourbyCraft or the note names a feature patch.
 | `Metrics#1` | SourbyCraft | FEATURE-DISABLED | KEEP-OWNED | `com/destroystokyo/paper/Metrics.java:173` | `if (true) return;` |
 | `SparksFly#1` | Folia | FEATURE-DISABLED | REMOVE | `io/papermc/paper/SparksFly.java:91` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
 | `SparksFly#2` | Canvas | REROUTED | KEEP-OWNED | `io/papermc/paper/SparksFly.java:179` | `return false; // Canvas - support spark` |
-| `ChatProcessor#1` | Folia | FEATURE-DISABLED | REPLACE | `io/papermc/paper/adventure/ChatProcessor.java:86` | `if (false && listenersOnSyncEvent) { // Folia - region threading` |
-| `ChatProcessor#2` | Folia | FEATURE-DISABLED | REPLACE | `io/papermc/paper/adventure/ChatProcessor.java:153` | `if (false && listenersOnSyncEvent) { // Folia - region threading` |
 | `PaperDatapack#1` | Canvas | API-REFUSED | KEEP-OWNED | `io/papermc/paper/datapack/PaperDatapack.java:32` | `if (true) {` |
 | `MCUtil#3` | Folia | API-REFUSED | KEEP-OWNED | `io/papermc/paper/util/MCUtil.java:129` | `if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.ENSURE_MAIN.error(); // Foli...` |
 | `MCUtil#4` | Canvas | API-REFUSED | KEEP-OWNED | `io/papermc/paper/util/MCUtil.java:148` | `if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.ENSURE_MAIN.error(); // Canv...` |
@@ -343,19 +340,6 @@ origin is SourbyCraft or the note names a feature patch.
 | `CraftServer#4` | Folia | API-REFUSED | KEEP-OWNED | `org/bukkit/craftbukkit/CraftServer.java:3030` | `throw new UnsupportedOperationException("Not on any region");` |
 | `CraftServer#5` | Canvas | API-REFUSED | KEEP-OWNED | `org/bukkit/craftbukkit/CraftServer.java:3090` | `if (true) {` |
 | `CraftServer#6` | Folia | API-REFUSED | KEEP-OWNED | `org/bukkit/craftbukkit/CraftServer.java:3115` | `throw new UnsupportedOperationException("Not on any region");` |
-| `CraftServerTickManager#14` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:19` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#15` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:24` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#16` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:29` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#17` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:34` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#18` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:39` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#19` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:44` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#20` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:49` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#21` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:54` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#22` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:59` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#23` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:64` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#24` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:69` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#25` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:74` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
-| `CraftServerTickManager#26` | Canvas | API-REFUSED | REPLACE | `org/bukkit/craftbukkit/CraftServerTickManager.java:79` | `throw dev.iyanz.sourbycraft.guards.RegionRefusal.TICK_MANAGER.error(); // Canvas - regi...` |
 | `CraftEntity#1` | Folia | API-REFUSED | KEEP-OWNED | `org/bukkit/craftbukkit/entity/CraftEntity.java:323` | `if (true) {` |
 | `CraftPlayer#1` | Folia | API-REFUSED | KEEP-OWNED | `org/bukkit/craftbukkit/entity/CraftPlayer.java:1347` | `if (true) {` |
 | `CraftScheduler#2` | SourbyCraft | REROUTED | KEEP-OWNED | `org/bukkit/craftbukkit/scheduler/CraftScheduler.java:272` | `if (true) return;` |
@@ -421,24 +405,22 @@ origin is SourbyCraft or the note names a feature patch.
 | `ServerLevel#2` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:517` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
 | `ServerLevel#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:522` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
 | `ServerLevel#4` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:552` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
-| `ServerLevel#5` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:1521` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
-| `ServerLevel#6` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:2034` | `if (false && this.isUpdatingNavigations) { // Folia - region threading` |
-| `ServerLevel#7` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:2732` | `if (false) { TickingBlockEntity ticker = null; // Folia - region threading` |
-| `ServerLevel#8` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:3200` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ServerLevel#5` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:1525` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ServerLevel#6` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:2038` | `if (false && this.isUpdatingNavigations) { // Folia - region threading` |
+| `ServerLevel#7` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:2736` | `if (false) { TickingBlockEntity ticker = null; // Folia - region threading` |
+| `ServerLevel#8` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:3204` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
 | `ServerPlayer#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:688` | `if (true) {` |
 | `ServerPlayer#2` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:825` | `if (true) return; // Canvas - region threading` |
 | `ServerPlayer#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:2220` | `if (true) {` |
-| `ServerPlayer#4` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:2533` | `if (true) { // Canvas - region threading` |
-| `ServerGamePacketListenerImpl#3` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/server/network/ServerGamePacketListenerImpl.java:1625` | `if (true) { // Canvas - region threading` |
 | `ServerGamePacketListenerImpl#5` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/network/ServerGamePacketListenerImpl.java:3161` | `if (true) {` |
 | `ServerGamePacketListenerImpl#6` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/network/ServerGamePacketListenerImpl.java:3178` | `if (true) {` |
-| `ServerLoginPacketListenerImpl#1` | Folia | FEATURE-DISABLED | REPLACE | `net/minecraft/server/network/ServerLoginPacketListenerImpl.java:359` | `if (false && PlayerPreLoginEvent.getHandlerList().getRegisteredListeners().length != 0)...` |
 | `PrepareSpawnTask#1` | Folia | FEATURE-DISABLED | KEEP-OWNED | `net/minecraft/server/network/config/PrepareSpawnTask.java:257` | `if (false && this.eventFuture == null && org.spigotmc.event.player.PlayerSpawnLocationE...` |
 | `PlayerList#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/players/PlayerList.java:656` | `if (true) {` |
 | `ServerWaypointManager#1` | Canvas | API-REFUSED | KEEP-OWNED | `net/minecraft/server/waypoints/ServerWaypointManager.java:66` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas -...` |
 | `Entity#7` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/world/entity/Entity.java:5560` | `if (true) {` |
 | `LivingEntity#1` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/world/entity/LivingEntity.java:606` | `if (true) { // Canvas - check frozen ticks before landing block` |
 | `Sniffer#1` | SourbyCraft | REROUTED | KEEP-OWNED | `net/minecraft/world/entity/animal/sniffer/Sniffer.java:119` | `return true;` |
+| `WanderingTraderSpawner#1` | SourbyCraft | FEATURE-DISABLED | KEEP-OWNED | `net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java:44` | `return; // SourbyCraft - global coordinator owns trader ticking` |
 | `ThrownEnderpearl#1` | Folia | DEGRADED | REPLACE | `net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java:103` | `if (true) {` |
 | `BaseCommandBlock#2` | SourbyCraft | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/BaseCommandBlock.java:187` | `return false;` |
 | `Level#1` | Canvas | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/Level.java:1376` | `if (!(this instanceof ServerLevel serverLevel)) throw new UnsupportedOperationException();` |
@@ -450,7 +432,6 @@ origin is SourbyCraft or the note names a feature patch.
 | `StructureStart#2` | Folia | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/levelgen/structure/StructureStart.java:168` | `throw new UnsupportedOperationException("Use tryReference()"); // Folia - region threading` |
 | `Scoreboard#1` | Canvas | API-REFUSED | REMOVE | `net/minecraft/world/scores/Scoreboard.java:515` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas -...` |
 | `CpuInfoReport#1` | Folia | API-REFUSED | KEEP-OWNED | `dev/iyanz/aurora/engine/util/CpuInfoReport.java:31` | `throw new UnsupportedOperationException("not supported in non-linux environments");` |
-| `WanderingTraderSpawner#1` | SourbyCraft | FEATURE-DISABLED | KEEP-OWNED | `net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java:44` | `return; // SourbyCraft - global coordinator owns trader ticking` |
 
 | family | sites | decision | description |
 | --- | --- | --- | --- |

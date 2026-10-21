@@ -6,7 +6,10 @@
  * alternative), {@link dev.iyanz.sourbycraft.guards.UndrainedQueue} (the server queue nothing
  * drains), {@link dev.iyanz.sourbycraft.guards.PlayerCollisionTeam},
  * {@link dev.iyanz.sourbycraft.guards.ConversationInput},
- * {@link dev.iyanz.sourbycraft.guards.RegionStatistics} and
- * {@link dev.iyanz.sourbycraft.guards.EndPlatformEvents}.
+ * {@link dev.iyanz.sourbycraft.guards.RegionStatistics},
+ * {@link dev.iyanz.sourbycraft.guards.EndPlatformEvents}, the legacy synchronous events
+ * {@link dev.iyanz.sourbycraft.guards.LegacyPreLogin} and {@link dev.iyanz.sourbycraft.guards.LegacyChat}
+ * (over {@link dev.iyanz.sourbycraft.guards.BoundedHandoff}) and the server-wide tick state
+ * {@link dev.iyanz.sourbycraft.guards.ServerTickControl}.
  */
 package dev.iyanz.sourbycraft.guards;

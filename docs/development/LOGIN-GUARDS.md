@@ -51,15 +51,17 @@ Verified in the patch files and in the materialized sources they produce
   tick and retries; once a login reaches the game listener it stops counting. The value is read on
   every attempt from the loaded Paper global configuration.
 
-### 2.2 Synchronous `PlayerPreLoginEvent`: never fired
+### 2.2 Synchronous `PlayerPreLoginEvent`: fired again (2026-10-22)
 
-`ServerLoginPacketListenerImpl.java.patch` turns the check into
-`if (false && PlayerPreLoginEvent.getHandlerList().getRegisteredListeners().length != 0)`
-(materialized `:353`). `AsyncPlayerPreLoginEvent` still fires; `PlayerLoginEvent` still fires
+The baseline (`ServerLoginPacketListenerImpl.java.patch`) disabled it with
+`if (false && PlayerPreLoginEvent.getHandlerList().getRegisteredListeners().length != 0)`; a plugin
+listening only to the deprecated sync event got no callback. Minecraft feature 0073 (`guards/LegacyPreLogin`) fires it again as Paper does: after `AsyncPlayerPreLoginEvent`,
+only when it has listeners, pre-set from the async result, its own final result decides. It runs on
+the **global tick** (Paper: the main thread) while the virtual authentication thread waits, bounded
+(10 s to start, 10 s to finish); an unanswered check refuses the login with "The server could not
+finish its login checks in time". One INFO line per listening plugin says so. A slow listener delays
+the global tick, as it delayed Paper's main thread. Not configurable. `PlayerLoginEvent` still fires
 (SourbyCraft's own `maxplayers/MaxPlayersBypass.java:69` relies on it).
-**Plugin consequence:** a plugin that only listens to the deprecated sync event gets no callback and
-nothing warns about it. That includes legacy plugins loaded through the Aurora Bridge: the bridge
-routes scheduler work, it does not resurrect an event the server never calls.
 
 ### 2.3 Duplicate profile: same outcome, different mechanism
 
@@ -89,8 +91,8 @@ routes scheduler work, it does not resurrect an event the server never calls.
 - **`max-joins-per-tick` does not do what the Paper docs say.** Operators tuning it for a login
   burst are changing the concurrent-pending cap. Whether that cap deserves its own key is an owner
   decision; either way it would be a feature patch over the baseline.
-- **Plugin authors:** use `AsyncPlayerPreLoginEvent` or `PlayerLoginEvent`; the sync
-  `PlayerPreLoginEvent` is dead on this server.
+- **Plugin authors:** prefer `AsyncPlayerPreLoginEvent` or `PlayerLoginEvent`; the sync
+  `PlayerPreLoginEvent` works again (§2.2) but holds the global tick while it runs.
 - Only the new `connection-guard` limits/modes are SourbyCraft-owned LIVE settings on this page.
   The baseline behaviors described in §2 retain their existing semantics.
 
