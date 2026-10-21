@@ -42,6 +42,9 @@ counters = true
 # region rules (docs/architecture/command-blocks.md); the vanilla gamerule command_blocks_work
 # (default true) must also be true. A repeating block that stopped while this was false needs re-arming.
 command-blocks = false
+# LIVE. Default-off. true runs the datapack tag #minecraft:tick once per server tick on the global
+# tick (docs/architecture/datapack-functions.md). #minecraft:load runs once per boot either way.
+tick-functions = false
 
 [aurora.awf]
 # All AWF settings RESTART_REQUIRED. Empty lists leave new worlds on region files.

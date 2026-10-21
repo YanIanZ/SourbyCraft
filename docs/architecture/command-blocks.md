@@ -40,12 +40,13 @@ commands:
 - any exception during execution is caught by Paper's `Commands.performCommand` and reported as
   `command.failed` plus an ERROR log line; it does not crash the region.
 
-Not registered at all on this engine (for any source): `/function`, `/reload`, `/return`, `/tick`,
-`/test`, `/item`, vanilla `/perf`. Score commands only accept entity holders: a fake player such as `#t` fails
+Not registered at all on this engine (for any source): `/reload`, `/tick`, `/test`, `/item`, vanilla
+`/perf`. `/function` and `/return` are registered since Build 48 patch 0066; a function run by a command
+block executes inside the same command-block scope (see [datapack functions](datapack-functions.md)). Score commands only accept entity holders: a fake player such as `#t` fails
 with `Holder target "#t" must be an entity` (from the inherited `ScoreboardCommand` adaptation, any source).
 
 Build 48 patch 0065 enables `/schedule` and routes its per-level timer queue access to the global tick;
-see [scheduled functions](scheduled-functions.md) for its execution context and limits.
+see [datapack functions](datapack-functions.md) for its execution context and limits.
 
 ## Decision (owned behaviour when the switch is on)
 

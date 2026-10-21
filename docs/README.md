@@ -89,7 +89,7 @@ Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](d
 [developing-awf.md](guides/developing-awf.md) (plugin API) · [testing-awf.md](guides/testing-awf.md) ·
 [testing-legacy-plugins.md](guides/testing-legacy-plugins.md) ·
 [region-threaded-commands.md](guides/region-threaded-commands.md) ·
-[scheduled-functions.md](architecture/scheduled-functions.md)
+[datapack-functions.md](architecture/datapack-functions.md)
 
 ### Audits (`audits/`)
 Handoff of the audit fix work: [development/HANDOFF-2026-10-14.md](development/HANDOFF-2026-10-14.md).

@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 22:37:05 +0700
+Subject: [PATCH] SourbyCraft - owned datapack functions on the global tick
+
+Load the function library again, register /function and /return, publish each loaded library to DatapackFunctions and run #minecraft:load once per publish (and #minecraft:tick when aurora.world.tick-functions is on) from the global tick. /reload stays unregistered; the per-region tickChildren path stays disabled.
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 6adb194f13a8e58d29f153270aa3c6abd4daa35e..f1d82e4c5b8368ba141fcf93f07de5057bfb45da 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -277,6 +277,9 @@ public final class RegionizedServer {
+         // commands
+         minecraftServer.handleConsoleInputs();
+ 
++        // datapack functions: #minecraft:load once per published library, #minecraft:tick when aurora.world.tick-functions
++        dev.iyanz.sourbycraft.world.DatapackFunctions.globalTick(minecraftServer, getGlobalTickData().getTickManager().doesRunGameElements()); // SourbyCraft
++
+         // needs
+         // player ping sample
+         // world global tick
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index bcec962312e5d819d7b677c63774db69ee0d515a..6465698ebd2fd7cb0297b6fec3f6e8262438c196 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -212,7 +212,7 @@ public class Commands {
+         FillCommand.register(this.dispatcher, context);
+         FillBiomeCommand.register(this.dispatcher, context);
+         ForceLoadCommand.register(this.dispatcher);
+-        //FunctionCommand.register(this.dispatcher); // Folia - region threading - TODO
++        FunctionCommand.register(this.dispatcher); // SourbyCraft - owned datapack functions: runs on the invoking source's thread
+         GameModeCommand.register(this.dispatcher);
+         GameRuleCommand.register(this.dispatcher, context);
+         GiveCommand.register(this.dispatcher, context);
+@@ -232,7 +232,7 @@ public class Commands {
+         //ReloadCommand.register(this.dispatcher); // Folia - region threading
+         RecipeCommand.register(this.dispatcher);
+         FetchProfileCommand.register(this.dispatcher);
+-        //ReturnCommand.register(this.dispatcher); // Folia - region threading
++        ReturnCommand.register(this.dispatcher); // SourbyCraft - function control flow, no world access
+         RideCommand.register(this.dispatcher);
+         RotateCommand.register(this.dispatcher);
+         SayCommand.register(this.dispatcher);
+diff --git a/net/minecraft/server/ReloadableServerResources.java b/net/minecraft/server/ReloadableServerResources.java
+index 09146997c3d82b96224b392862926a0ef0077592..bc3487efd52d9d9eb18e72705db4161a8a615c98 100644
+--- a/net/minecraft/server/ReloadableServerResources.java
++++ b/net/minecraft/server/ReloadableServerResources.java
+@@ -72,7 +72,7 @@ public class ReloadableServerResources {
+     }
+ 
+     public List<PreparableReloadListener> listeners() {
+-        return List.of(this.recipes, this.advancements); // Canvas - region threading
++        return List.of(this.recipes, this.functionLibrary, this.advancements); // SourbyCraft - load datapack functions and function tags again
+     }
+ 
+     public static CompletableFuture<ReloadableServerResources> loadResources(
+diff --git a/net/minecraft/server/ServerFunctionManager.java b/net/minecraft/server/ServerFunctionManager.java
+index 291eba3c0567057e7de1ad61e4fe3bfb6ddbf254..61bbe772d63ba4b4e1c10a25c0ed976e967d21bc 100644
+--- a/net/minecraft/server/ServerFunctionManager.java
++++ b/net/minecraft/server/ServerFunctionManager.java
+@@ -74,6 +74,7 @@ public class ServerFunctionManager {
+     private void postReload(final ServerFunctionLibrary library) {
+         this.ticking = List.copyOf(library.getTag(TICK_FUNCTION_TAG));
+         this.postReload = true;
++        dev.iyanz.sourbycraft.world.DatapackFunctions.published(); // SourbyCraft - #minecraft:load runs once per published library, on the global tick
+     }
+ 
+     public CommandSourceStack getGameLoopSender() {

@@ -47,7 +47,7 @@ Every number below is generated; the test fails when it drifts from the manifest
 | scanned input | count |
 | --- | --- |
 | engine baseline patches | 724 (476 `sourbycraft-server/minecraft-patches/sources` + 232 `sourbycraft-server/paper-patches/files` + 16 `sourbyapi/paper-patches/files`), 724 Java files |
-| SourbyCraft feature patches | 85, touching 106 Java files |
+| SourbyCraft feature patches | 86, touching 108 Java files |
 | engine source files (sourbycraft-server/src/main/java/dev/iyanz/aurora/engine) | 94 |
 | guards found by the scan | 136 (manifest has 136; both scan modes agree, see RepositoryTest) |
 
@@ -139,7 +139,12 @@ is named).
 
 Done since the first ledger, outside this table: F-1 "make `processQueue.add` fail loudly" (MC 0060,
 `UndrainedQueue`), F-2 "owned refusal messages" (MC 0061 / Paper 0019, `RegionRefusal`),
-`MinecraftServer#17` level-data autosave (MC 0056, `WorldMetadataAutosave`, section 5).
+`MinecraftServer#17` level-data autosave (MC 0056, `WorldMetadataAutosave`, section 5), and datapack
+functions (MC 0065 `/schedule`, MC 0066: function library listener, `/function`, `/return`, `#minecraft:load`
+once per library and `#minecraft:tick` behind `aurora.world.tick-functions` from the global tick;
+[datapack-functions.md](datapack-functions.md)). Those shapes (a dropped reload listener, commented-out
+registrations and the commented-out `getFunctions().tick()` next to `MinecraftServer#19`) are not detected
+by the scanner, so they were never manifest entries; `/reload` stays unregistered.
 
 ## 4. Ownership-check families (KEEP-OWNED)
 

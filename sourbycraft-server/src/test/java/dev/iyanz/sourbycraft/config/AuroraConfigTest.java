@@ -305,4 +305,22 @@ public class AuroraConfigTest {
         assertTrue(on.reloadSummary(AuroraConfig.DEFAULT).startsWith("Aurora: 1 live change(s)"));
         assertTrue(on.reloadSummary(AuroraConfig.DEFAULT).contains("restart required: none"));
     }
+
+    @Test
+    void tickFunctionsAreOffByDefaultLiveAndOffOnATypo() {
+        assertFalse(AuroraConfig.DEFAULT.world().tickFunctions());
+        assertEquals(AuroraConfig.Lifecycle.LIVE, AuroraConfig.TICK_FUNCTIONS.lifecycle());
+        assertEquals("aurora.world.tick-functions", AuroraConfig.TICK_FUNCTIONS_KEY);
+        final AuroraConfig on = parse(Map.of(AuroraConfig.TICK_FUNCTIONS_KEY, true)).config();
+        assertTrue(on.world().tickFunctions());
+        assertFalse(on.world().commandBlocks(), "independent of the command-block switch");
+        for (Object invalid : List.of("true", 1, List.of(true))) {
+            var result = parse(Map.of(AuroraConfig.TICK_FUNCTIONS_KEY, invalid, AuroraConfig.COMMAND_BLOCKS_KEY, true));
+            assertFalse(result.config().world().tickFunctions());
+            assertTrue(result.config().world().commandBlocks(), "a typo in one key keeps the other");
+            assertEquals(List.of(AuroraConfig.TICK_FUNCTIONS_KEY), result.invalidKeys());
+        }
+        assertTrue(on.reloadSummary(AuroraConfig.DEFAULT).startsWith("Aurora: 1 live change(s)"));
+        assertTrue(on.reloadSummary(AuroraConfig.DEFAULT).contains("restart required: none"));
+    }
 }

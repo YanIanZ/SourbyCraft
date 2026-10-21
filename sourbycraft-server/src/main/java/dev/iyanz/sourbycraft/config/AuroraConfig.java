@@ -22,6 +22,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     public static final String STORAGE_QUEUE_KEY = "aurora.scheduler.storage-queue";
     public static final String NETWORK_COUNTERS_KEY = "aurora.network.counters";
     public static final String COMMAND_BLOCKS_KEY = "aurora.world.command-blocks";
+    public static final String TICK_FUNCTIONS_KEY = "aurora.world.tick-functions";
     public static final AuroraConfig DEFAULT =
         new AuroraConfig(new Entity(false), new Diagnostics(true), new Cpu(Cpu.AUTO), Bridge.DEFAULT,
             Scheduler.DEFAULT, Network.DEFAULT, World.DEFAULT);
@@ -47,6 +48,8 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     // Read on every command-block tick, interaction and edit packet. A repeating block whose tick
     // was dropped while the switch was off stays idle until something re-arms it (see World).
     public static final Setting COMMAND_BLOCKS = new Setting(COMMAND_BLOCKS_KEY, Lifecycle.LIVE);
+    // Read on every global tick. Switching it on never re-runs #minecraft:load.
+    public static final Setting TICK_FUNCTIONS = new Setting(TICK_FUNCTIONS_KEY, Lifecycle.LIVE);
 
     public AuroraConfig {
         Objects.requireNonNull(entity, "entity");
@@ -110,9 +113,20 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
      * with a message. Off by default until there is evidence beyond functional runs. LIVE, with one
      * caveat: a repeating block whose tick was dropped while off stays idle until re-armed (redstone
      * change, re-placement, GUI save or chunk reload).</p>
+     *
+     * <p>{@code tickFunctions}: run the datapack function tag {@code #minecraft:tick} once per server
+     * tick on the global tick ({@code dev.iyanz.sourbycraft.world.DatapackFunctions},
+     * {@code docs/architecture/datapack-functions.md}). Off by default: the base never ran it, and a
+     * tick tag runs every tick with console rights. {@code #minecraft:load} does not depend on it.
+     * LIVE (read every global tick).</p>
      */
-    public record World(boolean commandBlocks) {
-        public static final World DEFAULT = new World(false);
+    public record World(boolean commandBlocks, boolean tickFunctions) {
+        public static final World DEFAULT = new World(false, false);
+
+        /** Only the command-block switch; tick functions off. */
+        public World(final boolean commandBlocks) {
+            this(commandBlocks, false);
+        }
     }
 
     /** Network measurement settings. {@code counters} stops the per-packet increments (LIVE). */
@@ -363,13 +377,24 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
             }
         }
 
+        // Off on a typo: a tick tag runs every tick with console rights, which needs the operator's intent.
+        boolean tickFunctions = World.DEFAULT.tickFunctions();
+        final Object tickFunctionsValue = values.get(TICK_FUNCTIONS_KEY);
+        if (tickFunctionsValue != null) {
+            if (tickFunctionsValue instanceof Boolean enabled) {
+                tickFunctions = enabled;
+            } else {
+                invalid.add(TICK_FUNCTIONS_KEY);
+            }
+        }
+
         // Each key falls back on its own. A typo in one setting must not silently revert another
         // the operator set deliberately -- only a malformed namespace container, handled above,
         // discards everything, because then nothing underneath it can be trusted.
         return new Parsed(new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling, chunkGenerationMetrics),
             new Cpu(cores), new Bridge(bridgeMode, quarantineAfter, syncRoute, maxPendingTasks, maxRunningAsyncTasks),
             new Scheduler(bridgeIoThreads, bridgeIoQueue, storageThreads, storageQueue), new Network(networkCounters),
-            new World(commandBlocks)),
+            new World(commandBlocks, tickFunctions)),
             List.copyOf(invalid), deprecated);
     }
 
@@ -397,6 +422,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         if (bridge.maxRunningAsyncTasksPerPlugin() != previous.bridge.maxRunningAsyncTasksPerPlugin()) changed++;
         if (network.counters() != previous.network.counters()) changed++;
         if (world.commandBlocks() != previous.world.commandBlocks()) changed++;
+        if (world.tickFunctions() != previous.world.tickFunctions()) changed++;
         return changed;
     }
 
