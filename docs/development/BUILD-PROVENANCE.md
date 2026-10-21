@@ -120,3 +120,78 @@ hash must be the jar's and the server component must match `versions.list`. CI g
 verifies it after `slimServerJar`, uploads it as the `SourbyCraft-26.2-sbom` artifact and attaches
 it to the GitHub release. Tests: `scripts/test_sbom.py` (9, one against the locally built jar when
 present). Not validated against the official CycloneDX JSON schema (no validator is vendored).
+
+## Reproducible slim jar, independent rebuild and attestation (Build 49)
+
+**What is wired (IMPLEMENTED in the workflow and build script; CI result NOT YET OBSERVED, see below):**
+
+- `slimServerJar` (root `build.gradle.kts`) writes every entry with one fixed time stamp and in a fixed
+  order (`META-INF/MANIFEST.MF` first, then by name). The time is `SOURCE_DATE_EPOCH` clamped to the ZIP
+  range (1980-01-01 to 2107), or exactly 1980-01-01T00:00:00 when it is unset; it is written with
+  `ZipEntry.setTimeLocal`, so it does not depend on the machine's time zone. `SOURCE_DATE_EPOCH` is a task
+  input, so changing it re-runs the task. Before this, entries took the clock.
+- The `build` job pins `SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)` for every later step (so `buildTimestamp`
+  in `sourbycraft-build.properties` and the server manifest `Build-Time` also derive from the commit, not
+  `now()`), and pins the exact Temurin build (`java-version: 25.0.4+1`) instead of the floating `25`. Bump the
+  pin in the `build` and `rebuild` jobs together; `scripts/test_reproducible_build.py` fails when they differ
+  or when the pin becomes a bare major. The provenance `Jdk` string (vendor + runtime version) and the deflate
+  output depend on that exact build.
+- The `build` job exposes `slim_sha256` and `source_epoch` as job outputs and uploads the slim jar for one day.
+- The `rebuild` job (`needs: build`, `contents: read`, push and dispatch only, never `pull_request`) checks the
+  same commit out fresh, restores the branch name (the jar records `gitBranch`), publishes the same pinned
+  private tools with the same deploy keys, applies patches, runs `slimServerJar` with the same `-P` flags and
+  compares SHA-256. A difference prints `unzip -l` / `unzip -v` diffs and `scripts/jar_diff.py` (nested jars,
+  properties and manifests, entry order and header fields) and fails the job. The `release` job `needs` the
+  rebuild, so a non-reproducible jar is not published, and re-checks that the jar it publishes has the
+  hash the build job recorded.
+- The `release` job attests the jar and the SBOM with `actions/attest-build-provenance` (pinned by SHA, v4.2.2).
+  `id-token: write` and `attestations: write` are granted to that job only.
+
+- A build stamped with `SOURCE_DATE_EPOCH` compiles with `-g:source,lines` (root `build.gradle.kts`): javac names
+  a synthetic local in a lambda after an identity hash, so two clean builds of one commit differed in
+  `io/papermc/paper/command/subcommands/EntityCommand.class` (`$1022440802` vs `$2023237490`) and so in the
+  server jar, the paperclip patch and the slim jar. The cost is that **stamped (CI/release) jars carry no
+  LocalVariableTable**: line numbers and stack traces are unchanged, but a debugger sees no local-variable
+  names and anything that resolves locals by name from bytecode (for example a mixin local capture by name
+  against a server class) has none to find. Builds without `SOURCE_DATE_EPOCH` keep the default `-g`.
+
+**Local proof (2026-10-22, worktree on `2c66444b`, macOS arm64, OpenJDK 25.0.2, `SOURCE_DATE_EPOCH=1792600571`,
+`-PsourbyBuild=49`, `build/` removed and `--no-build-cache` between runs):**
+
+| Run | Time zone | `-g` | `SourbyCraft-slim.jar` SHA-256 |
+|---|---|---|---|
+| 2 | UTC | default | `5e1dd2783206d3c3c8064afd52475e4ad847668b059dba971b04b8aadad41da8` |
+| 3 | UTC | default | `830c7c501cdc398dcb766cd0da16c54e0727475e906f94bc401be38d4fb624b0` |
+| 4 | UTC | `source,lines` | `7e0708bbd415f1bea8d9550508810b677038ff64026a2aa46162ea714f8b096f` |
+| 5 | Asia/Jakarta | `source,lines` | `7e0708bbd415f1bea8d9550508810b677038ff64026a2aa46162ea714f8b096f` |
+
+Runs 2 and 3 (identical inputs, entry times already fixed) differed in `META-INF/patches.list`,
+`META-INF/versions.list` and the paperclip patch, all following from the one differing class; runs 4 and 5 are
+byte-identical, in two time zones. Not covered: a different checkout path, a different machine or JDK build
+(CI uses Temurin 25.0.4+1, this laptop 25.0.2), and the CI `rebuild` job itself, which has not run yet.
+
+**Verify a release** (needs the `gh` CLI; `<jar>` is the downloaded `SourbyCraft-26.2-REL.jar`):
+
+```bash
+gh attestation verify <jar> --repo YanIanZ/SourbyCraft           # signature, repository, workflow, commit
+sha256sum <jar>                                                    # equals the sha256 in the release notes and <jar>.sha256
+python3 scripts/sbom.py verify <jar> SourbyCraft-26.2-REL.cdx.json
+```
+
+The rebuild comparison is in the `Rebuild slim jar and compare` job of the run that published the release
+(job summary lists both hashes). To redo it yourself you need the private toolchain (`PRIVATE-TOOLCHAIN.md`):
+check out the tag commit, `export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)`, use Temurin 25.0.4+1, then
+`./gradlew applyAllPatches` and `./gradlew slimServerJar -PsourbyBuild=<N> -PsourbyChannel=REL`, and compare
+`build/libs/SourbyCraft-slim.jar` with the published asset.
+
+**Limits, stated plainly:**
+
+- The rebuild job is a second run on the same GitHub infrastructure with the same two deploy keys and the same
+  pinned SourbyPatcher/SourbyClip revisions. It shows the jar is a function of the commit and the pinned
+  inputs. It does not show that the private toolchain or GitHub is trustworthy.
+- The attestation says this workflow run, at this commit, produced these bytes. It does not attest the private
+  toolchain's source and says nothing about the jar signature (SEC-2); the Ed25519 signature remains a separate check.
+- Reproducibility is only claimed for the slim jar on the pinned JDK. A different Temurin build, a different
+  `SOURCE_DATE_EPOCH`, an untracked non-ignored file in the checkout (`treeHash` covers those) or a different
+  branch name changes the bytes. The build job writes its release-number scratch files to `$RUNNER_TEMP` for
+  that reason.

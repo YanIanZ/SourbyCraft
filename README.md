@@ -102,7 +102,7 @@ The `26.2` branch already includes or is actively refining:
 - an Aurora engine package inside the Minecraft tree, `dev.iyanz.aurora`
 - ownership documents for all four engine domains, with metrics and boundaries
 - a Canvas/Folia dependency ledger, enforced by tests rather than prose
-- `SOURCE_DATE_EPOCH` support for build timestamps; slim-jar reproducibility is **UNVERIFIED**
+- `SOURCE_DATE_EPOCH` support for build timestamps and slim-jar entry times; two clean local builds gave the same slim-jar hash (2026-10-22, one machine, stamped builds omit the local-variable table). CI pins the epoch and the Temurin build and runs an independent `rebuild` job before release, plus a build-provenance attestation; **none of those CI jobs has run yet, so reproducibility in CI is UNVERIFIED** ([details](docs/development/BUILD-PROVENANCE.md))
 - persistence validation: `scripts/verify_persistence.py` (105/105 on the Build 47 RC tree, local laptop run 2026-10-13) and `scripts/verify_crash.py`
 
 **Not yet fully qualified.** The certified two-hour 10-player stability soak recorded in pre-Build-47 commit `1c883a55` (without plugins) showed stable heap-after-GC, resident memory and tick duration for that historical workload. It does **not** qualify the current tree and is **not** a certified performance reference pair. Certified comparable reference runs, remaining representative workloads, missing domain telemetry, and the open region-ownership gate still block T10. The exact gate state is tracked in **[Qualification Readiness](docs/architecture/qualification-readiness.md)** and raw measurement history in **[Performance Baseline](docs/BASELINE.md)**.

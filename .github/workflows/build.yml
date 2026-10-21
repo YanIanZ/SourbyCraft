@@ -88,19 +88,37 @@ jobs:
       number: ${{ steps.relnum.outputs.number }}
       tag: ${{ steps.relnum.outputs.tag }}
       publish: ${{ steps.relnum.outputs.publish }}
+      # What the independent rebuild job must reproduce (Build 49): the slim jar's SHA-256 and the
+      # SOURCE_DATE_EPOCH both builds were stamped with.
+      slim_sha256: ${{ steps.slim.outputs.sha256 }}
+      source_epoch: ${{ steps.epoch.outputs.epoch }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
         with:
           fetch-depth: 0        # paperweight needs git history for patch application
 
+      # Every later step (Gradle, tests, slimServerJar) sees SOURCE_DATE_EPOCH, so the build
+      # timestamps and the slim jar's entry times derive from the commit, not from the clock.
+      - name: Pin SOURCE_DATE_EPOCH to the commit time
+        id: epoch
+        run: |
+          epoch=$(git log -1 --format=%ct)
+          echo "SOURCE_DATE_EPOCH=$epoch" >> "$GITHUB_ENV"
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_DATE_EPOCH=$epoch"
+
       - name: Validate gradle wrapper
         uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6 (v6.4.0)
 
-      - name: Setup Java 25
+      # The exact Temurin build, not "25": the major alone floats with the runner image, and the
+      # provenance Jdk string (vendor + runtime version) and the deflate output depend on it. The
+      # rebuild job pins the same value; bump both together (scripts/test_reproducible_build.py
+      # fails when they differ). 25.0.4+1 is what the 2026-10-21 runs resolved.
+      - name: Setup Java 25 (Temurin 25.0.4+1)
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6 (v6.1.0)
         with:
-          java-version: 25
+          java-version: 25.0.4+1
           distribution: temurin
 
       - name: Set git identity (paperweight applies patches as commits)
@@ -192,17 +210,22 @@ jobs:
           mode=$(sed -n 's/^release=//p' gradle.properties | tr -d '[:space:]')
           publish=false
           if [ "$GITHUB_REF" = 'refs/heads/26.2' ] && [ "$GITHUB_EVENT_NAME" != 'pull_request' ] \
-              && [ "$mode" != false ] && python3 scripts/release_version.py > relnum.out 2> relnum.err; then
+              && [ "$mode" != false ] && python3 scripts/release_version.py > "$RUNNER_TEMP/relnum.out" 2> "$RUNNER_TEMP/relnum.err"; then
             publish=true
             channel=REL
-            cat relnum.out >> "$GITHUB_OUTPUT"
+            cat "$RUNNER_TEMP/relnum.out" >> "$GITHUB_OUTPUT"
           else
-            [ -s relnum.err ] && echo "not publishing: $(cat relnum.err)"
+            [ -s "$RUNNER_TEMP/relnum.err" ] && echo "not publishing: $(cat "$RUNNER_TEMP/relnum.err")"
             python3 scripts/release_version.py --development >> "$GITHUB_OUTPUT"
           fi
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "publish=$publish channel=$channel release=$mode"
+
+      # treeHash in the jar covers untracked, non-ignored files of the checkout; the rebuild job starts
+      # without them. Listing them here makes a rebuild mismatch caused by a stray file obvious.
+      - name: Show untracked files that enter the build identity
+        run: git status --porcelain --untracked-files=all | grep '^??' || echo "none"
 
       - name: Build slim server jar (SourbyLoader)
         run: |
@@ -219,6 +242,22 @@ jobs:
           cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
           api_version=$(sed -n 's/^apiVersion=//p' gradle.properties)
           python3 scripts/verify_build_identity.py build/libs/SourbyCraft-slim.jar --api-only --api-version "$api_version"
+
+      - name: Record the slim jar hash for the independent rebuild
+        id: slim
+        run: |
+          sha=$(sha256sum build/libs/SourbyCraft-slim.jar | cut -d' ' -f1)
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "slim jar sha256 $sha (SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH)"
+
+      # Only the rebuild job reads this (to print an entry diff when the hashes differ).
+      - name: Upload the first-build slim jar for the rebuild comparison
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (v7.0.2)
+        with:
+          name: SourbyCraft-26.2-first-build-slim
+          path: build/libs/SourbyCraft-slim.jar
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Generate and verify the SBOM (CycloneDX)
         run: |
@@ -865,9 +904,157 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Independent rebuild (Build 49): a second runner, a fresh checkout of the same commit, the same
+  # pinned toolchain and the same -P flags must produce a byte-identical slim jar. It is not
+  # independent of GitHub, of the two private deploy keys or of the pinned SourbyPatcher/SourbyClip
+  # revisions; it shows the jar is a function of the commit, not that those inputs are trustworthy.
+  # The release job needs it, so a non-reproducible jar is never published. Never on pull_request.
+  rebuild:
+    name: Rebuild slim jar and compare
+    needs: build
+    if: success() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code (fresh, at the built commit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0        # paperweight needs git history for patch application
+
+      # A checkout of a SHA is a detached HEAD, and the build properties record the branch name
+      # (gitBranch=, and the channel suffix derives from it), so give it the branch the first build had.
+      - name: Check out the same branch name at that commit
+        run: |
+          if [ "$GITHUB_REF_TYPE" = branch ]; then git checkout -B "$GITHUB_REF_NAME"; fi
+          git rev-parse --abbrev-ref HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Pin SOURCE_DATE_EPOCH to the commit time
+        run: |
+          epoch=$(git log -1 --format=%ct)
+          test "$epoch" = "${{ needs.build.outputs.source_epoch }}" \
+            || { echo "commit time $epoch differs from the first build's ${{ needs.build.outputs.source_epoch }}"; exit 1; }
+          echo "SOURCE_DATE_EPOCH=$epoch" >> "$GITHUB_ENV"
+
+      - name: Validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6 (v6.4.0)
+
+      # Must equal the build job's pin (scripts/test_reproducible_build.py).
+      - name: Setup Java 25 (Temurin 25.0.4+1)
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6 (v6.1.0)
+        with:
+          java-version: 25.0.4+1
+          distribution: temurin
+
+      - name: Set git identity (paperweight applies patches as commits)
+        run: |
+          git config --global user.email "no-reply@github.com"
+          git config --global user.name "Github Actions"
+          git config --global --add safe.directory '*'
+
+      - name: Read approved private revisions
+        id: toolchain
+        run: |
+          python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json
+          lock = json.load(open('build-data/private-toolchain.lock.json'))
+          print('clip=' + lock['SourbyClip']['revision'])
+          print('patcher=' + lock['SourbyPatcher']['revision'])
+          PYTHON
+
+      - name: Checkout private SourbyPatcher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          repository: YanIanZ/SourbyPatcher
+          ref: ${{ steps.toolchain.outputs.patcher }}
+          path: .private-toolchain/SourbyPatcher
+          ssh-key: ${{ secrets.SOURBYPATCHER_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Checkout private SourbyClip
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (v7.0.1)
+        with:
+          repository: YanIanZ/SourbyClip
+          ref: ${{ steps.toolchain.outputs.clip }}
+          path: .private-toolchain/SourbyClip
+          ssh-key: ${{ secrets.SOURBYCLIP_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Test and publish private tools to Maven Local
+        run: python3 scripts/private_toolchain.py --publish .private-toolchain
+
+      - name: Setup Metal (vendored — gen sources)
+        run: bash scripts/setup_metal.sh
+
+      - name: Apply all patches (Paper -> SourbyCraft)
+        run: ./gradlew applyAllPatches --no-daemon --stacktrace
+
+      - name: Show untracked files that enter the build identity
+        run: git status --porcelain --untracked-files=all | grep '^??' || echo "none"
+
+      # Same task, same -P flags as the build job's "Build slim server jar" step.
+      - name: Rebuild the slim server jar
+        run: ./gradlew slimServerJar --no-daemon --stacktrace -PsourbyBuild=${{ needs.build.outputs.number }} ${{ needs.build.outputs.publish == 'true' && '-PsourbyChannel=REL' || '' }}
+
+      - name: Download the first-build slim jar
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7 (v7.0.0)
+        with:
+          name: SourbyCraft-26.2-first-build-slim
+          path: first-build
+
+      - name: Compare the two slim jars
+        env:
+          EXPECTED_SHA256: ${{ needs.build.outputs.slim_sha256 }}
+        run: |
+          set -u
+          first=first-build/SourbyCraft-slim.jar
+          second=build/libs/SourbyCraft-slim.jar
+          first_sha=$(sha256sum "$first" | cut -d' ' -f1)
+          second_sha=$(sha256sum "$second" | cut -d' ' -f1)
+          echo "first build  (build job output) $EXPECTED_SHA256"
+          echo "first build  (artifact bytes)   $first_sha"
+          echo "rebuild                         $second_sha"
+          {
+            echo "## Slim jar rebuild"
+            echo
+            echo "| Build | SHA-256 |"
+            echo "|---|---|"
+            echo "| first build | \`$EXPECTED_SHA256\` |"
+            echo "| rebuild | \`$second_sha\` |"
+            echo
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH, commit $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$first_sha" != "$EXPECTED_SHA256" ]; then
+            echo "The uploaded first-build jar is not the one the build job hashed." >&2
+            exit 1
+          fi
+          if [ "$first_sha" = "$second_sha" ]; then
+            echo "REPRODUCIBLE: the rebuild is byte-identical."
+            echo "Result: byte-identical." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "NOT REPRODUCIBLE: the rebuild differs from the first build." >&2
+          echo "Result: **NOT reproducible**; entry listing diff in the job log." >&2
+          echo "Result: **NOT reproducible**" >> "$GITHUB_STEP_SUMMARY"
+          # tail -n +2 drops the "Archive: <path>" line so only entries are compared. unzip -l shows
+          # length, date, time and name; unzip -v adds method, compressed size and CRC-32.
+          unzip -l "$first" | tail -n +2 > first.list || true
+          unzip -l "$second" | tail -n +2 > second.list || true
+          echo "----- unzip -l diff (first build vs rebuild) -----"
+          diff -u first.list second.list || true
+          unzip -v "$first" | tail -n +2 > first.crc || true
+          unzip -v "$second" | tail -n +2 > second.crc || true
+          echo "----- unzip -v diff (sizes, methods, CRC-32) -----"
+          diff -u first.crc second.crc || true
+          echo "----- nested entry-by-entry diff (build properties, manifests, nested jars) -----"
+          python3 scripts/jar_diff.py "$first" "$second" || true
+          exit 1
+
   release:
     name: Publish release
-    needs: build
+    needs: [build, rebuild]
     # success() is implicit only when a job has no if of its own; spelled out so a failed or
     # skipped build never publishes. A pull request never reaches here.
     if: success() && needs.build.outputs.publish == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/26.2'
@@ -875,6 +1062,10 @@ jobs:
     # The one job that writes to the repository: it creates the tag and the GitHub release.
     permissions:
       contents: write
+      # Provenance attestation (actions/attest-build-provenance): the OIDC token that signs it, and
+      # the right to store it. Only this job has them.
+      id-token: write
+      attestations: write
     env:
       # A secret cannot appear in a step's if:, so its presence is turned into a plain flag here.
       # The value itself is only ever exposed to the signing step below.
@@ -891,6 +1082,18 @@ jobs:
         with:
           name: SourbyCraft-26.2-release
           path: release
+
+      # The jar this job publishes must be the one the build job hashed and the rebuild job reproduced.
+      - name: Check the handed-over jar is the reproduced slim jar
+        env:
+          EXPECTED_SHA256: ${{ needs.build.outputs.slim_sha256 }}
+          RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
+        run: |
+          set -eu
+          actual=$(sha256sum "release/SourbyCraft-26.2-$RELEASE_CHANNEL.jar" | cut -d' ' -f1)
+          test "$actual" = "$EXPECTED_SHA256" \
+            || { echo "release jar sha256 $actual is not the rebuilt slim jar $EXPECTED_SHA256" >&2; exit 1; }
+          echo "release jar sha256 $actual equals the reproduced slim jar"
 
       # SEC-2 + signed release manifest ship together: the public key in the jar, the jar signature
       # and the manifest signature. A key without the secret would publish an unsigned release that
@@ -929,6 +1132,17 @@ jobs:
             openssl pkeyutl -verify -rawin -pubin -inkey "$RELEASE_PUBLIC_KEY" -in "$file" -sigfile "$file.sig"
             test "$(wc -c < "$file.sig")" -eq 64
           done
+
+      # SLSA-style build provenance for the jar and its SBOM, stored with the repository and verifiable
+      # with `gh attestation verify <jar> --repo YanIanZ/SourbyCraft` (docs/releases/runbooks/build-49-real-test.md).
+      # It attests that this workflow run, at this commit, published these exact bytes (after the
+      # rebuild job reproduced them); it is not an attestation about the private toolchain.
+      - name: Attest build provenance of the release jar and SBOM
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4 (v4.2.2)
+        with:
+          subject-path: |
+            release/SourbyCraft-26.2-${{ needs.build.outputs.channel }}.jar
+            release/SourbyCraft-26.2-${{ needs.build.outputs.channel }}.cdx.json
 
       - name: Create GitHub release
         env:

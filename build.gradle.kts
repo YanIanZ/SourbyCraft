@@ -1,4 +1,6 @@
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 import java.util.jar.JarEntry
 import java.util.jar.JarFile
 import java.util.jar.JarOutputStream
@@ -110,6 +112,10 @@ val slimServerJar = tasks.register("slimServerJar") {
     )
     val prefixes = externalizeArtifactDirs
     inputs.property("externalizeArtifactDirs", prefixes)
+    // Entry timestamps come from SOURCE_DATE_EPOCH (reproducible slim jar, Build 49). Declared as
+    // an input so a changed value re-runs the task instead of leaving a jar with stale entry times.
+    val sourceDateEpoch = providers.environmentVariable("SOURCE_DATE_EPOCH").orElse("")
+    inputs.property("sourceDateEpoch", sourceDateEpoch)
     val outFileProvider = layout.buildDirectory.file("libs/SourbyCraft-slim.jar")
     outputs.file(outFileProvider)
 
@@ -122,11 +128,25 @@ val slimServerJar = tasks.register("slimServerJar") {
         var strippedCount = 0
         var strippedBytes = 0L
 
+        // Every written entry carries one fixed timestamp, so two builds of one commit differ in no
+        // entry header. SOURCE_DATE_EPOCH (seconds), clamped to the ZIP/DOS range [1980-01-01, 2107];
+        // unset -> exactly 1980-01-01T00:00:00 (the DOS epoch), never the clock. Written with
+        // setTimeLocal so the DOS fields hold this UTC wall time whatever the machine's time zone is.
+        val dosEpochSecond = 315532800L          // 1980-01-01T00:00:00Z
+        val dosMaxSecond = 4354819198L           // 2107-12-31T23:59:58Z
+        val entryEpoch = (sourceDateEpoch.get().trim().toLongOrNull() ?: dosEpochSecond)
+            .coerceIn(dosEpochSecond, dosMaxSecond)
+        val entryTime = LocalDateTime.ofEpochSecond(entryEpoch, 0, ZoneOffset.UTC)
+
         JarFile(fatJar).use { jar ->
             JarOutputStream(out.outputStream().buffered()).use { jos ->
-                val entries = jar.entries()
-                while (entries.hasMoreElements()) {
-                    val entry = entries.nextElement()
+                // Deterministic order: MANIFEST.MF first (readers expect it early), then by name.
+                // Never the source jar's own order, which is whatever the producing task emitted.
+                val manifestName = "META-INF/MANIFEST.MF"
+                val ordered = jar.entries().toList().sortedWith(
+                    compareBy<JarEntry>({ it.name != "META-INF/" }, { it.name != manifestName }, { it.name })
+                )
+                for (entry in ordered) {
                     val name = entry.name
                     val strip = name.endsWith(".jar") && normalizedPrefixes.any { name.startsWith(it) }
                     if (strip) {
@@ -134,7 +154,9 @@ val slimServerJar = tasks.register("slimServerJar") {
                         if (entry.size >= 0) strippedBytes += entry.size
                         continue
                     }
-                    jos.putNextEntry(JarEntry(name))
+                    val outEntry = JarEntry(name)
+                    outEntry.setTimeLocal(entryTime)
+                    jos.putNextEntry(outEntry)
                     if (!entry.isDirectory) {
                         jar.getInputStream(entry).use { it.copyTo(jos) }
                     }
@@ -263,10 +285,19 @@ subprojects {
         isPreserveFileTimestamps = false
         isReproducibleFileOrder = true
     }
+    // javac names a synthetic local after the identity hash of a tree node (Lower.abstractLval, e.g. the
+    // temporary for `boxedField++`) and, inside a lambda, writes it to the LocalVariableTable. Two compiles
+    // of the same source then differ (observed: io/papermc/paper/command/subcommands/EntityCommand.class,
+    // `$1022440802` vs `$2023237490`), which makes the server jar, the paperclip patch and the slim jar
+    // differ run to run. A build stamped with SOURCE_DATE_EPOCH (CI, reproducibility checks) therefore
+    // omits the local-variable table (`-g:source,lines`); ordinary dev builds keep the default `-g`.
+    // Line numbers and source file names stay, so stack traces are unchanged.
+    val reproducibleBuild = providers.environmentVariable("SOURCE_DATE_EPOCH").isPresent
     tasks.withType<JavaCompile>().configureEach {
         options.encoding = Charsets.UTF_8.name()
         options.release = 25
         options.isFork = true
+        if (reproducibleBuild) options.debugOptions.debugLevel = "source,lines"
     }
     tasks.withType<Javadoc>().configureEach {
         options.encoding = Charsets.UTF_8.name()

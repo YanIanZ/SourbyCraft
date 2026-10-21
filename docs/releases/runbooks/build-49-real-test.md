@@ -417,6 +417,24 @@ Each Pass criteria field below reproduces its gate's **Evidence required** cell 
 2. Compare complete slim-jar SHA-256 values with each other and the published asset; record any difference without normalizing bytes away.
 3. Inspect and verify the SBOM and signed provenance attestation against the release artifact and commit, using [BUILD-PROVENANCE.md](../../development/BUILD-PROVENANCE.md). Embedded unsigned metadata alone does not satisfy attestation.
 
+How to verify (needs `gh`; `JAR` is the downloaded release asset; the tag commit is `git rev-list -n1 v26.2-r49`):
+
+```bash
+sha256sum "$JAR"                                         # equals the release notes and "$JAR.sha256"
+gh attestation verify "$JAR" --repo YanIanZ/SourbyCraft  # attestation exists, signed for this repo's workflow
+gh run list --workflow build.yml --commit "$(git rev-list -n1 v26.2-r49)" --json databaseId,conclusion,event
+gh run view <run id> --log | grep -A3 'Slim jar rebuild\|REPRODUCIBLE'   # rebuild job: both hashes, "byte-identical"
+python3 scripts/sbom.py verify "$JAR" SourbyCraft-26.2-REL.cdx.json
+```
+
+Pass needs all of: the rebuild job of the publishing run is green and its summary lists two equal SHA-256 values;
+that value equals the published asset's; `gh attestation verify` succeeds and names this repository and the tag
+commit. Record the run id, both hashes and the verify output. A red or missing `rebuild` job, a missing
+attestation, or a hash that differs from the asset is a FAIL. A later green re-run does not erase the failing run:
+record both. Optional local redo (private toolchain, Temurin 25.0.4+1):
+`export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)` on the tag commit, `./gradlew applyAllPatches`, then
+`./gradlew slimServerJar -PsourbyBuild=49 -PsourbyChannel=REL`, and compare `build/libs/SourbyCraft-slim.jar`.
+
 **Capture:** Common capture plus Both job ids/environment manifests, input pins, complete hash comparison, SBOM verification and attestation verification output; common capture where a server is booted. Store in `docs/releases/evidence/49/g13-supply-chain/` using the shared filename pattern.
 
 **Pass criteria:** clean-checkout build reproduces the slim jar hash; independent rebuild job; SBOM verified; signed provenance attestation
