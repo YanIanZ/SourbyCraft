@@ -1151,7 +1151,7 @@ class Harness:
               rebuild_jar=False, seed_cache=True, console_probe=True, command=None,
               lifetime_grace_s=LIFETIME_GRACE_S, world_from=None, aurora_toml=None,
               exclusive=False, exclusive_wait_s=EXCLUSIVE_WAIT_S, config_files=None,
-              startup_cache_from=None, startup_cache_corrupt=None):
+              startup_cache_from=None, startup_cache_corrupt=None, plugin_files=None):
         """Create the run, start the supervisor, wait for ``Done (``. Returns run.json.
 
         ``world_from`` names an earlier, finished run whose world directories are copied in
@@ -1159,7 +1159,9 @@ class Harness:
         ``exclusive`` waits (up to ``exclusive_wait_s``) until every slot is free and holds all
         of them for the whole run; otherwise the first free slot is taken or LockBusy raised.
         ``config_files`` maps a run-relative destination (e.g. ``spigot.yml``) to a source file
-        copied there before boot. ``startup_cache_from`` names an earlier run whose startup-index
+        copied there before boot. ``plugin_files`` maps ``plugins/<Plugin>/...`` destinations to
+        files copied as bytes into a plugin's data folder (e.g. a SuperiorSkyblock2 module jar in
+        ``plugins/SuperiorSkyblock2/modules/``). ``startup_cache_from`` names an earlier run whose startup-index
         cache (and plugin jars, mtimes kept so the entries still match) are installed first;
         ``startup_cache_corrupt`` damages that cache in one named way (STARTUP_CACHE_SHAPES).
         """
@@ -1177,6 +1179,9 @@ class Harness:
         world_source = self.world_source(world_from) if world_from else None
         aurora = self.aurora_config(aurora_toml, world_source)
         configs = self.config_files(config_files)
+        data_files = self.plugin_files(plugin_files)
+        check_destination_collisions([dest for dest, _s, _t in configs],
+                                     [dest for dest, _s, _d in data_files])
         startup_seed = self.startup_cache_seed(startup_cache_from, startup_cache_corrupt)
         jar = ensure_jar(self.jar, rebuild_jar, self._gradle)
         java, java_version = self._java()
@@ -1206,7 +1211,7 @@ class Harness:
                                 properties, jvm_properties, startup_timeout_s, seed_cache,
                                 command, lifetime_grace_s, token, world_source, aurora,
                                 port=port, slot=slot, resources=resources, configs=configs,
-                                startup_seed=startup_seed)
+                                startup_seed=startup_seed, data_files=data_files)
             self._spawn_supervisor(workdir, token, paths)
         except BaseException:
             for path in reversed(paths):
@@ -1230,7 +1235,7 @@ class Harness:
                  simulation_distance, heap_mib, max_lifetime_s, level_type, properties,
                  jvm_properties, startup_timeout_s, seed_cache, command, lifetime_grace_s,
                  token, world_source=None, aurora=None, port=None, slot=None, resources=None,
-                 configs=(), startup_seed=None):
+                 configs=(), startup_seed=None, data_files=()):
         workdir.mkdir(parents=True)
         (workdir / MARKER).write_text("created by scripts/agent_testserver.py\n")
         (workdir / "tmp").mkdir()
@@ -1256,6 +1261,12 @@ class Harness:
                 continue
             (workdir / dest).write_text(text)
             installed.append({"dest": dest, "source": source, "text": text})
+        plugin_data = []
+        for dest, source, data in data_files:
+            (workdir / dest).parent.mkdir(parents=True, exist_ok=True)
+            (workdir / dest).write_bytes(data)
+            plugin_data.append({"dest": dest, "source": source, "bytes": len(data),
+                                "sha256": hashlib.sha256(data).hexdigest()})
         startup_cache = self._install_startup_cache(workdir, startup_seed)
         seeded = []
         cache = self.base / CACHE_NAME
@@ -1299,6 +1310,7 @@ class Harness:
                "world_from": world_from,
                "aurora_toml": aurora_toml,
                "config_files": installed,
+               "plugin_files": plugin_data,
                "startup_cache": startup_cache,
                "other_server_jars_running": run_baseline.competing_servers(jar, -1),
                "hardware": hardware}
@@ -1405,23 +1417,37 @@ class Harness:
                 # copied as bytes and recorded by hash, never as text.
                 if len(rel.parts) != 2 or rel.parts[0] != "plugins":
                     raise HarnessError(f"config file destination {dest!r}: a jar may only go "
-                                       "directly into plugins/")
-                if path.is_symlink():
-                    raise HarnessError(f"plugin jar {path} is a symlink; pass the real file")
-                limit = f"{PLUGIN_JAR_MAX_BYTES // (1024 * 1024)} MiB"
-                if not path.is_file():
-                    raise HarnessError(f"plugin jar {path} is not a file under {limit}")
-                # One open, at most cap + 1 bytes read: the cap holds even if the file grows.
-                with open(path, "rb") as handle:
-                    data = handle.read(PLUGIN_JAR_MAX_BYTES + 1)
-                if len(data) > PLUGIN_JAR_MAX_BYTES:
-                    raise HarnessError(f"plugin jar {path} is not a file under {limit}")
-                configs.append((rel.as_posix(), str(path), data))
+                                       "directly into plugins/ (use --plugin-file for a jar "
+                                       "inside a plugin's data folder)")
+                configs.append((rel.as_posix(), str(path), read_capped_bytes(path, "plugin jar")))
                 continue
             if not path.is_file() or path.stat().st_size > 64 * 1024:
                 raise HarnessError(f"config file {path} is not a file under 64 KiB")
             configs.append((rel.as_posix(), str(path), path.read_text()))
         return configs
+
+    @staticmethod
+    def plugin_files(mapping):
+        """[(dest, source, bytes)] for files inside a plugin's data folder, validated up front.
+
+        The destination must be ``plugins/<Plugin>/<path>`` (at least one folder below
+        ``plugins/``): a plugin jar itself goes directly into ``plugins/`` through
+        ``config_files``. Any file type is accepted (module jars, schematics, data files); it is
+        copied as bytes with the plugin-jar checks (regular file, not a symlink, at most
+        ``PLUGIN_JAR_MAX_BYTES``) and recorded in run.json by size and SHA-256.
+        """
+        files = []
+        for dest, source in (mapping or {}).items():
+            rel = Path(dest)
+            if ("\\" in dest or ":" in dest or rel.is_absolute() or dest.endswith("/")
+                    or "//" in dest or len(rel.parts) < 3 or rel.parts[0] != "plugins"
+                    or any(part in ("", ".", "..") for part in dest.split("/"))):
+                raise HarnessError(f"plugin file destination {dest!r} must be a relative POSIX "
+                                   "path plugins/<Plugin>/<file> without '..' (a plugin jar "
+                                   "itself goes in with --config-file plugins/<name>.jar=FILE)")
+            path = Path(source)
+            files.append((rel.as_posix(), str(path), read_capped_bytes(path, "plugin file")))
+        return files
 
     def world_source(self, name):
         """(directory, world dirs, run.json) of a finished run to boot over again.
@@ -1705,7 +1731,8 @@ STEP_KEYS = {
 }
 COMMON_KEYS = {"label", "continue_on_failure"}
 CONFIG_FILE_DIRS = ("config", "plugins", "sourbycraft_config")
-# A plugin jar installed with --config-file plugins/<name>.jar=FILE (copied as bytes).
+# A plugin jar installed with --config-file plugins/<name>.jar=FILE, or a file inside a plugin's
+# data folder installed with --plugin-file plugins/<Plugin>/<path>=FILE (both copied as bytes).
 PLUGIN_JAR_MAX_BYTES = 8 * 1024 * 1024
 RESERVED_CONFIG_FILES = ("sourbycraft_config/aurora.toml",
                          "sourbycraft_config/sourbycraft_global_config.toml")
@@ -1715,6 +1742,34 @@ SETTINGS_KEYS = {"view_distance": int, "simulation_distance": int, "heap_mib": i
                  "startup_cache_from": str, "startup_cache_corrupt": str}
 SAFE_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 PERF_VIEW = re.compile(r"^[a-z]*( [A-Za-z0-9_:./-]+)?$")
+
+
+def read_capped_bytes(path, what):
+    """The bytes of ``path`` (a regular file, not a symlink, <= PLUGIN_JAR_MAX_BYTES).
+
+    One open, at most cap + 1 bytes read: the cap holds even if the file grows after a check.
+    """
+    path = Path(path)
+    if path.is_symlink():
+        raise HarnessError(f"{what} {path} is a symlink; pass the real file")
+    limit = f"{PLUGIN_JAR_MAX_BYTES // (1024 * 1024)} MiB"
+    if not path.is_file():
+        raise HarnessError(f"{what} {path} is not a file under {limit}")
+    with open(path, "rb") as handle:
+        data = handle.read(PLUGIN_JAR_MAX_BYTES + 1)
+    if len(data) > PLUGIN_JAR_MAX_BYTES:
+        raise HarnessError(f"{what} {path} is not a file under {limit}")
+    return data
+
+
+def check_destination_collisions(config_dests, plugin_dests):
+    """Refuse a --plugin-file destination equal to, inside, or containing a --config-file one."""
+    for plugin in plugin_dests:
+        for config in config_dests:
+            if (plugin == config or plugin.startswith(config + "/")
+                    or config.startswith(plugin + "/")):
+                raise HarnessError(f"plugin file destination {plugin!r} collides with config "
+                                   f"file destination {config!r}")
 
 
 class ScenarioError(HarnessError):
@@ -1949,6 +2004,10 @@ def build_parser():
         p.add_argument("--config-file", action="append", type=_kv, default=[],
                        metavar="DEST=FILE",
                        help="copy FILE to DEST in the run dir before boot (e.g. spigot.yml=...)")
+        p.add_argument("--plugin-file", action="append", type=_kv, default=[],
+                       metavar="plugins/<Plugin>/PATH=FILE",
+                       help="copy FILE (bytes, <= 8 MiB, no symlink) into a plugin's data folder "
+                            "before boot, e.g. plugins/SuperiorSkyblock2/modules/<name>.jar=FILE")
         p.add_argument("--startup-cache-from", metavar="RUN",
                        help="install RUN's startup-index cache and plugin jars (warm second boot)")
         p.add_argument("--startup-cache-corrupt", metavar="SHAPE", choices=list(STARTUP_CACHE_SHAPES),
@@ -2013,6 +2072,7 @@ def _start_kwargs(args):
               "aurora_toml": args.aurora_toml, "exclusive": args.exclusive or None,
               "exclusive_wait_s": args.exclusive_wait_s,
               "config_files": dict(args.config_file) or None,
+              "plugin_files": dict(args.plugin_file) or None,
               "startup_cache_from": args.startup_cache_from,
               "startup_cache_corrupt": args.startup_cache_corrupt}
     return kwargs
