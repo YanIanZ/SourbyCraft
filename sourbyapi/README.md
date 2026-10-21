@@ -94,11 +94,12 @@ feature patch, `paper-patches/features/0001-…`). `scripts/test_independence_po
 ```
 group:    dev.iyanz.sourbycraft
 artifact: sourbyapi
-version:  <releaseVersion>-<CHANNEL>   e.g. 26.2-REL on a release/* branch, 26.2-DEV otherwise
+version:  <releaseVersion>-<CHANNEL>   e.g. 26.2-REL with -PsourbyChannel=REL; 26.2-DEV on branch 26.2
 ```
 
-`version` is computed at configuration time from the current git branch (see the root
-`settings.gradle.kts`), matching the same `REL`/`DEV`/`EXP` channel suffix reported by `/ver` and the
+`version` is computed at configuration time from the current git branch unless
+`-PsourbyChannel=REL` is passed (used by CI for official `26.2` releases; see the root
+`settings.gradle.kts` and `.github/workflows/build.yml`), matching the same `REL`/`DEV`/`EXP` channel suffix reported by `/ver` and the
 auto-updater. No public Maven repository publishes this module: JitPack cannot build it because
 settings evaluation requires the private SourbyPatcher toolchain. External consumers build it with
 `./gradlew :sourbyapi:publishToMavenLocal` on a machine that has the pinned private toolchain

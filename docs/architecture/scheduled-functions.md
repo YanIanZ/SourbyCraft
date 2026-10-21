@@ -86,9 +86,12 @@ same game time, and overdue events. `ScheduledFunctionPatchShapeTest` pins the
 single global hook, command registration and global queue routing, and protects
 the disabled per-region path and throwing server accessor.
 
-The PM must run patch application, Java compilation, both new test classes and a
-boot/datapack probe (including append/replace/clear, function tags, save/restart,
-freeze/unfreeze and multi-region execution). No Gradle command was run here.
+Integration `e0198582` reported patch application, Java compilation and tests PASS
+([CI run 39622745507](https://github.com/YanIanZ/SourbyCraft/actions/runs/39622745507),
+Build 26.2 jar job green). This does not qualify scheduled functions: function loading and
+end-to-end execution remain **PENDING** (MC 0066 follow-up, not present in this tree).
+The boot/datapack probe still needs append/replace/clear, function tags, save/restart,
+freeze/unfreeze and multi-region execution; see the integration result below.
 
 Local non-Gradle validation (2026-10-21):
 

@@ -1,7 +1,7 @@
 > **2026-10-05:** Paper became the only upstream. The `canvas-patches/` below are now plain edits in
 > the owned sources under `sourbycraft-server/src/main/java/dev/iyanz/aurora/engine/` (formerly `io/canvasmc/canvas`), the per-file
-> `minecraft-patches/sources` and `paper-patches/files` entries are feature patches, and the former
-> Canvas/Folia changes are the engine baseline. See `dependency-ledger.md` §2. The inventory below is
+> `minecraft-patches/sources/` and `paper-patches/files/` entries (plus `sourbyapi/paper-patches/files/`)
+> are the engine baseline inherited from Canvas/Folia; `features/` holds SourbyCraft feature patches. See `dependency-ledger.md` §2. The inventory below is
 > kept as recorded.
 
 > Phase 46 follow-up (2026-09-14): patches 0009/0014 and the Mob portion of 0016 below are now
@@ -12,15 +12,15 @@
 
 # Patch inventory and ownership audit (PRD Phase 1)
 
-> **Numbering (annotated 2026-10-20):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
+> **Historical numbering (updated 2026-10-21):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later in that historical snapshot. Current numbered feature-file counts: **65 Minecraft (0001–0065), 19 Paper (0001–0019), 1 sourbyapi (0001)**, counted from `NNNN-*.patch` files on 2026-10-21. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
 
-Every SourbyCraft patch on `release/26.2-canvas`, classified per PRD section 22 with
+Historical build-45 review on `release/26.2-canvas`, classified per PRD section 22 with
 the section 87 fields. Counts are added and removed lines in the patch file itself.
 
 ## Headline findings
 
-**The patch-sprawl premise in PRD section 13 does not hold on this branch.** There are
-27 patches totalling 1,636 added lines. 915 of those are a single new file. The real
+**Historical build-45 finding:** the patch-sprawl premise in PRD section 13 did not hold for
+that snapshot: 27 patches totalling 1,636 added lines (not current totals; current counts above). 915 of those are a single new file. The real
 downstream modification of upstream code is about **721 lines across 26 patches** —
 an average of 28 lines each. Nothing here is obsolete, nothing duplicates an upstream
 optimization, and no patch mixes unrelated systems in the way section 16 warns about.
@@ -46,7 +46,9 @@ entries; it is not repeated per row.
 
 ## Inventory
 
-### `minecraft-patches/features/` — 17 patches (0013 and 0015 removed by action 2)
+### Historical `minecraft-patches/features/` — 17 patches (0013 and 0015 removed by action 2)
+
+Current directory count: **65** numbered feature patches (0001–0065), 2026-10-21.
 
 | Patch | Category | Upstream dependency | Lines | Status | Action |
 | --- | --- | --- | ---: | --- | --- |
@@ -68,13 +70,13 @@ entries; it is not repeated per row.
 | 0018 custom tick metrics | 100-runtime | 6 files | +85 −12 | KEEP | **Done.** Class relocated to the Sourby source tree; 1,229 → 309 lines. |
 | 0019 close lifecycle-owned runtime services | 100-runtime | `MinecraftServer` | +1 −1 | **MERGE** | One line. Belongs with 0018's lifecycle wiring. |
 
-### `minecraft-patches/sources/` — 1 patch
+### Historical `minecraft-patches/sources/` — 1 patch
 
 | Patch | Category | Upstream dependency | Lines | Status | Action |
 | --- | --- | --- | ---: | --- | --- |
 | `Commands.java` remove `/canvas` command tree | 900-branding | `Commands` | +4 −1 | KEEP | Paired with the `GlobalConfiguration` change; note the dependency. |
 
-### `canvas-patches/` — 4 patches
+### Historical `canvas-patches/` — 4 patches
 
 | Patch | Category | Upstream dependency | Lines | Status | Action |
 | --- | --- | --- | ---: | --- | --- |
@@ -83,7 +85,7 @@ entries; it is not repeated per row.
 | `FoliaSparkPlugin` wire Spark to `MetricsRuntime` | 700-api | Canvas Spark bridge | +3 −2 | KEEP | Exemplary integration: three lines, all delegation. |
 | `FoliaTickStatistics` reimplement on Sourby telemetry | 700-api | Canvas Spark bridge | +61 −78 | KEEP | Net −17 lines. Satisfies section 81, one metrics source. |
 
-### `paper-patches/` — 3 patches
+### Historical `paper-patches/` — 3 patches
 
 | Patch | Category | Upstream dependency | Lines | Status | Action |
 | --- | --- | --- | ---: | --- | --- |
@@ -191,7 +193,9 @@ be reverted without 0019 breaking, and 0019 alone said nothing. 0007 guarded the
 different file but as one feature. 0007's explanation was carried into 0006's message
 rather than deleted with the file.
 
-The feature patch set is now thirteen patches, renumbered `0001-0013` with no gaps.
+At that historical action-3 checkpoint, the Minecraft feature set was thirteen patches,
+renumbered `0001-0013` with no gaps. Current counts (2026-10-21): **65 Minecraft, 19 Paper,
+1 sourbyapi** numbered feature patches; the tables above retain their historical numbering.
 
 The gaps this originally left were not sustainable. `rebuildMinecraftFeaturePatches`
 renumbers the whole set every time it runs — it regenerates the filenames from the

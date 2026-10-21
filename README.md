@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
   <img src="https://img.shields.io/badge/architecture-Aurora-8a2be2?style=flat-square">
   <img src="https://img.shields.io/badge/runtime-SourbyCraft-00bcd4?style=flat-square">
-  <img src="https://img.shields.io/badge/build-47%20Aurora%20Nexus-brightgreen?style=flat-square">
+  <img src="https://img.shields.io/badge/build-48%20development-blue?style=flat-square">
   <img src="https://img.shields.io/badge/mixins-Cherry-e83e8c?style=flat-square">
   <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
 </p>
@@ -19,6 +19,8 @@
 ---
 
 ## What is SourbyCraft 26.2 Aurora?
+
+**Build 48 is the current development build; [Build 47](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r47) is the latest published release.**
 
 **SourbyCraft 26.2 Aurora** is a Java 25, region-threaded Minecraft server project focused on **stable performance, efficient resource usage, deep engine optimization, observability, and progressive runtime independence**.
 
@@ -94,16 +96,16 @@ The `26.2` branch already includes or is actively refining:
 - patch/threading architecture audits
 - removal of unsafe cross-region scratch-buffer optimizations
 - direct Minecraft/NMS performance patches where ownership is proven safe
-- Aurora execution contracts, with the region backend confined to three pinned adapter files (`RegionOwnerHandoff`, `FoliaRegionBackend`, `awf/world/AuroraWorldsService`)
+- Aurora execution contracts: the scheduler-coupling inventory pins five files (`RegionOwnerHandoff`, `FoliaRegionBackend`, `awf/world/AuroraWorldsService`, `LiveSchedulerSource`, `RegionLocator`) in `scripts/test_independence_policy.py`; Build 48 also adds the ownership contract `RegionOwnership` and its `MoonriseRegionOwnership` implementation
 - the Aurora region system: region identity, topology and lifecycle, backend-free
 - execution lanes with per-lane CPU attribution, surfaced by `/perf lanes`
 - an Aurora engine package inside the Minecraft tree, `dev.iyanz.aurora`
 - ownership documents for all four engine domains, with metrics and boundaries
 - a Canvas/Folia dependency ledger, enforced by tests rather than prose
-- reproducible builds via `SOURCE_DATE_EPOCH`
+- `SOURCE_DATE_EPOCH` support for build timestamps; slim-jar reproducibility is **UNVERIFIED**
 - persistence validation: `scripts/verify_persistence.py` (105/105 on the Build 47 RC tree, local laptop run 2026-10-13) and `scripts/verify_crash.py`
 
-**Not yet fully qualified.** A certified two-hour 10-player stability soak now exists and showed stable heap-after-GC, resident memory and tick duration over the window. That is stability evidence; it is **not** a certified performance reference pair and does not by itself clear the regression gate. Certified comparable reference runs, remaining representative workloads, missing domain telemetry, and the open region-ownership gate still block T10. The exact gate state is tracked in **[Qualification Readiness](docs/architecture/qualification-readiness.md)** and raw measurement history in **[Performance Baseline](docs/BASELINE.md)**.
+**Not yet fully qualified.** The certified two-hour 10-player stability soak recorded in pre-Build-47 commit `1c883a55` (without plugins) showed stable heap-after-GC, resident memory and tick duration for that historical workload. It does **not** qualify the current tree and is **not** a certified performance reference pair. Certified comparable reference runs, remaining representative workloads, missing domain telemetry, and the open region-ownership gate still block T10. The exact gate state is tracked in **[Qualification Readiness](docs/architecture/qualification-readiness.md)** and raw measurement history in **[Performance Baseline](docs/BASELINE.md)**.
 
 Deeper entity/chunk/network profiling and further Aurora ownership work remain active
 development tasks.
@@ -142,9 +144,9 @@ A single workload, machine, percentile or profiler sample must never be generali
 
 ### Aurora engine, and where it lives
 
-Aurora is the engine; SourbyCraft is what surrounds it. The console says so — a line from
-`net.minecraft`, `io.papermc.paper` or `dev.iyanz.aurora` prints as **Aurora
-Engine**, a line from `dev.iyanz.sourbycraft` prints as **SourbyCraft** — and the source tree
+Aurora is the engine; SourbyCraft is what surrounds it. Console logger tags use
+`Aurora/<Class>` for `dev.iyanz.aurora.*` and `SourbyCraft/<Class>` for
+`dev.iyanz.sourbycraft.*`; Minecraft/Paper classes use their simple class names. The source tree
 says so too: engine code SourbyCraft wrote lives in `dev.iyanz.aurora.*` inside the Minecraft
 tree, rather than hiding in a vanilla package. See
 [aurora-engine-package.md](docs/architecture/aurora-engine-package.md).
@@ -197,7 +199,7 @@ Existing files remain supported:
 
 - `sourbycraft_config/sourbycraft_global_config.toml` — SourbyCraft utility/global configuration
 - `sourbycraft_config/aurora.toml` — early-boot Aurora CPU budget consumed before normal SourbyCraft bootstrap
-- `sourbycraft-security.yml` — currently **not enforced**: only `/sourbycraft` and the spark config dump read it (audit SEC-1, 2026-10-14; rebuild decided by the owner, not implemented)
+- `sourbycraft-security.yml` — consumed by security guards at boot and `/sourbycraft reload` (**LIVE**); all guard groups default to `LOG` (observe and log; enforcement requires `KICK`)
 - `config/canvas-server.yml`
 - `config/canvas-worlds.yml`
 
@@ -330,10 +332,9 @@ Current/active command family:
 | `/update` | SourbyCraft updater status/check |
 
 Implemented `/perf` views: `tick`, `cpu`, `memory`, `gc`, `lanes`, `async`, `network`,
-`governor`, `storage`, `awf`, `plugins`, `history`, `player <name>`, `chunks`, `entities`, `region`, `health`. Still planned, not implemented:
+`governor`, `scheduler`, `incidents`, `storage`, `awf`, `plugins`, `history`, `player <name>`, `chunks`, `entities`, `region`, `health`. Still planned, not implemented:
 
 ```text
-/perf scheduler
 /perf profile
 ```
 
@@ -417,11 +418,11 @@ python3 scripts/private_toolchain.py --publish .private-toolchain
 
 The active build currently materializes pinned upstream source inputs and applies SourbyCraft changes. Aurora's long-term build goal is reproducible SourbyCraft ownership with upstream inputs treated as replaceable implementation sources rather than runtime requirements.
 
-Scheduler replacement is **not** on the near path, and the measurements are the reason. On this
-hardware the region lane — the part Folia's architecture governs — accounts for roughly a third of
-consumed CPU at ten players, and the machine sits mostly idle; chunk work dominates, and chunk work
-is the same noise mathematics in any architecture. Aurora therefore owns its contracts first, so a
-backend *can* be replaced, and defers replacing one until a workload measurement argues for it.
+Scheduler replacement is **not** on the near path. In historical, workload-specific ten-player
+observations on the development hardware, the region lane accounted for roughly a third of
+consumed CPU while chunk work dominated and the machine remained mostly idle. These are not
+current-tree or release-wide CPU shares. Aurora owns its contracts first so a backend *can* be
+replaced, and defers replacement until a workload measurement argues for it.
 
 ---
 
@@ -457,10 +458,11 @@ trust — a dirty worktree, a moved HEAD, a shared machine, rejected setup comma
 dropped out. Two rules are worth knowing before reading any number from it:
 
 - **Seed a pre-generated world with `--world`.** Without it, the run builds terrain inside its own
-  measurement window; on this project that accounted for half the measured CPU and most of the
-  tail latency, and made a workload deliver six regions where it declared ten.
+  measurement window; historical, workload-specific observations on this project attributed half
+  the measured CPU and most tail latency to this, with six regions delivered where ten were declared.
 - **Measure on a quiet machine.** The foreign-CPU guard exists because a desktop running a game
-  alongside the server silently doubles the numbers, and no accounting recovers that afterwards.
+  alongside the server roughly doubled measured numbers in a historical, workload-specific
+  observation; that multiplier is not a current-tree or general performance claim.
 - **[Threading Review](docs/architecture/threading.md)** — region-safety findings
 - **[Profiling](docs/PROFILING.md)** — JFR/profiling workflow
 
