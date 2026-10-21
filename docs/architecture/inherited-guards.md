@@ -58,11 +58,11 @@ Every number below is generated; the test fails when it drifts from the manifest
 | kind \ decision | KEEP-OWNED | REPLACE | REMOVE | UNDECIDED | total |
 | --- | --- | --- | --- | --- | --- |
 | FEATURE-DISABLED | 5 | 5 | 1 | 0 | 11 |
-| API-REFUSED | 57 | 23 | 2 | 2 | 84 |
+| API-REFUSED | 59 | 23 | 2 | 0 | 84 |
 | OWNERSHIP-CHECK | 6 | 0 | 0 | 0 | 6 |
 | DEGRADED | 4 | 1 | 0 | 0 | 5 |
-| REROUTED | 29 | 0 | 0 | 1 | 30 |
-| **guards** | **101** | **29** | **3** | **3** | **136** |
+| REROUTED | 30 | 0 | 0 | 0 | 30 |
+| **guards** | **104** | **29** | **3** | **0** | **136** |
 
 | origin | Folia | Canvas | SourbyCraft |
 | --- | --- | --- | --- |
@@ -135,7 +135,7 @@ is named).
 | 13 | End-platform `PortalCreateEvent` — **landed, gated** (retired `EndPlatformFeature#1`) | — | Was: protection/logging plugins missed END_PLATFORM | MC 0063: `EndPlatformEvents.shouldFire` — only with an entity and on the owning region. `EndPlatformEventsTest` (unit only). |
 | 14 | Bonus chest | `MinecraftServer#6` | New worlds with bonus-chest requested get none | Open: runs on the startup thread before regions start; needs a `--bonusChest` fresh-world boot and chunk-load analysis (sonnet-guards left it). |
 | 15 | `/scoreboard players list <fake holder>` | `ScoreboardCommand#1` | Admins: a non-entity holder throws "Score holder must be an entity" inside Canvas's region hop (sonnet-guards saw it for every source) | Planned: read global scoreboard state on the global tick and reply through the sender's hop. |
-| 16 | Ender-pearl `PlayerTeleportEvent` | `ThrownEnderpearl#1` | Anti-pearl / claim-protection plugins: `attemptTeleport → teleportAsync(ENDER_PEARL)` fires the Canvas `EntityTeleportAsyncEvent`, the endermite `CreatureSpawnEvent` and a 0-damage `hurt`, but **not** Bukkit `PlayerTeleportEvent` (constructed only in the dead synchronous `ServerPlayer.teleport` and the packet-level `SGPLI.teleport`, which `internalTeleport` bypasses) | Planned (medium): fire `PlayerTeleportEvent(ENDER_PEARL)` on the region that owns the player at that moment, before the move; a cancel after a cross-region hop is itself a teleport back. |
+| 16 | Ender-pearl `PlayerTeleportEvent` | `ThrownEnderpearl#1` | Anti-pearl / claim-protection plugins: `attemptTeleport → teleportAsync(ENDER_PEARL)` fires the Canvas `EntityTeleportAsyncEvent`, the endermite `CreatureSpawnEvent` and a 0-damage `hurt`, but **not** Bukkit `PlayerTeleportEvent` (constructed only in the dead synchronous `ServerPlayer.teleport` and the packet-level `SGPLI.teleport`, which `internalTeleport` bypasses) | **Landed** (MC 0064, `PearlTeleport`): fires `PlayerTeleportEvent(ENDER_PEARL)` on the player's owning region before the transfer; cancel consumes the pearl with no damage or endermite, `setTo()` redirects (other worlds too). Unit tests only; no client run yet. |
 
 Done since the first ledger, outside this table: F-1 "make `processQueue.add` fail loudly" (MC 0060,
 `UndrainedQueue`), F-2 "owned refusal messages" (MC 0061 / Paper 0019, `RegionRefusal`),
@@ -232,11 +232,12 @@ throwing.
 
 ## 6. UNDECIDED (what must be checked)
 
-| id | question | check |
-| --- | --- | --- |
-| `ServerPlayer#1` | Is the throwing `adjustSpawnLocation` reachable for a bed-less player leaving the End through the vanilla portal path (`PortalProcessor` → `EndPortalBlock.getPortalDestination`)? The engine's async respawn does not call it; its async portal handling suggests the vanilla path is bypassed | test-server: bed-less player exits the End and dies; no exception in the log; code: confirm `Entity.handlePortal` is bypassed for players |
-| `ChunkMap#3` | Can a dedicated server reach `TrackingDebugSynchronizer.addSubscriber` (vanilla debug subscriptions), which calls the throwing `forEachEntityTrackedBy`? | find the packet handler and its permission gate; try from a client |
-| `EndPortalBlock#1` | The engine shows end credits from its async portal path (`ServerPlayer:2181-2195`, `PlayerViewEndCreditsEvent`); is `misc.disable-end-credits` still honoured and `seenCredits` persisted? | read `ServerPlayer:2170-2200`; test-server first End exit |
+None. The last three were decided KEEP-OWNED on 2026-10-21 from a read-only code trace (reasons in
+each entry's `note`): `ChunkMap#3` (debug subscriptions are not reachable from normal packets),
+`ServerPlayer#1` (the guarded path blocks across regions; bed-less respawn uses
+`fudgeSpawnLocation`, players' portals go through `portalAsync`) and `EndPortalBlock#1` (credits
+come from the ownership-checked async portal path). Runtime checks still open: bed-less death and
+End exit, and once-only credits across reconnects.
 
 Resolved this round (now in section 5): `MinecraftServer#17` (MC 0056), `ServerWaypointManager#1`
 (override found), `ChunkTaskScheduler#2` (dead caller), `LevelChunk#1` (null object);
@@ -393,7 +394,7 @@ origin is SourbyCraft or the note names a feature patch.
 | `TeleportCommand#1` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/commands/TeleportCommand.java:251` | `if (true) {` |
 | `ChunkMap#1` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/level/ChunkMap.java:907` | `if (true) { // Folia - region threading` |
 | `ChunkMap#2` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/server/level/ChunkMap.java:929` | `if (true) { // Folia - region threading` |
-| `ChunkMap#3` | Folia | API-REFUSED | UNDECIDED | `net/minecraft/server/level/ChunkMap.java:1131` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
+| `ChunkMap#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ChunkMap.java:1131` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
 | `ServerChunkCache#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:353` | `if (true) throw new UnsupportedOperationException("Unsupported in region threading"); /...` |
 | `ServerChunkCache#2` | Folia | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:808` | `throw new UnsupportedOperationException("Unsupported in region threadin"); // Folia - r...` |
 | `ServerChunkCache#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerChunkCache.java:840` | `if (true) {` |
@@ -411,7 +412,7 @@ origin is SourbyCraft or the note names a feature patch.
 | `ServerLevel#6` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:2034` | `if (false && this.isUpdatingNavigations) { // Folia - region threading` |
 | `ServerLevel#7` | Folia | DEGRADED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:2732` | `if (false) { TickingBlockEntity ticker = null; // Folia - region threading` |
 | `ServerLevel#8` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerLevel.java:3200` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |
-| `ServerPlayer#1` | Folia | API-REFUSED | UNDECIDED | `net/minecraft/server/level/ServerPlayer.java:688` | `if (true) {` |
+| `ServerPlayer#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:688` | `if (true) {` |
 | `ServerPlayer#2` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:825` | `if (true) return; // Canvas - region threading` |
 | `ServerPlayer#3` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:2220` | `if (true) {` |
 | `ServerPlayer#4` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/server/level/ServerPlayer.java:2533` | `if (true) { // Canvas - region threading` |
@@ -430,12 +431,20 @@ origin is SourbyCraft or the note names a feature patch.
 | `Level#1` | Canvas | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/Level.java:1376` | `if (!(this instanceof ServerLevel serverLevel)) throw new UnsupportedOperationException();` |
 | `NaturalSpawner#1` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/world/level/NaturalSpawner.java:300` | `throw new UnsupportedOperationException(); // Canvas - optimize natural spawning` |
 | `ServerLevelAccessor#1` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/world/level/ServerLevelAccessor.java:13` | `throw new UnsupportedOperationException("Must be overridden");` |
-| `EndPortalBlock#1` | Folia | REROUTED | UNDECIDED | `net/minecraft/world/level/block/EndPortalBlock.java:78` | `if (false && !level.isClientSide() && level.dimension() == Level.END && entity instance...` |
+| `EndPortalBlock#1` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/world/level/block/EndPortalBlock.java:78` | `if (false && !level.isClientSide() && level.dimension() == Level.END && entity instance...` |
 | `LevelChunk#1` | Folia | REROUTED | KEEP-OWNED | `net/minecraft/world/level/chunk/LevelChunk.java:74` | `return null;` |
 | `StructureStart#1` | Folia | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/levelgen/structure/StructureStart.java:150` | `throw new UnsupportedOperationException("Use tryReference()"); // Folia - region threading` |
 | `StructureStart#2` | Folia | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/levelgen/structure/StructureStart.java:168` | `throw new UnsupportedOperationException("Use tryReference()"); // Folia - region threading` |
 | `Scoreboard#1` | Canvas | API-REFUSED | REMOVE | `net/minecraft/world/scores/Scoreboard.java:515` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas -...` |
 | `CpuInfoReport#1` | Folia | API-REFUSED | KEEP-OWNED | `dev/iyanz/aurora/engine/util/CpuInfoReport.java:31` | `throw new UnsupportedOperationException("not supported in non-linux environments");` |
+
+| family | sites | decision | description |
+| --- | --- | --- | --- |
+| `F-TICKTHREAD-ENSURE` | 201 | KEEP-OWNED | TickThread.ensureTickThread: throws IllegalStateException off the owning region thread |
+| `F-TICKTHREAD-IS` | 46 | KEEP-OWNED | TickThread.isTickThreadFor: ownership test that picks a region-safe branch |
+| `F-GLOBAL-TICK` | 29 | KEEP-OWNED | RegionizedServer.ensureGlobalTickThread: global-tick-only operations |
+| `F-TICKGUARD` | 17 | KEEP-OWNED | TickGuard: Canvas's configurable guards (region-scheduler.guard-severity) |
+| `F-ASYNCCATCHER` | 0 | KEEP-OWNED | AsyncCatcher.catchOp re-marked by the region engine |
 
 | family | sites | decision | description |
 | --- | --- | --- | --- |
