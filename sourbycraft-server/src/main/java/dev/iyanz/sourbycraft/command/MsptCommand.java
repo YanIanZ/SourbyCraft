@@ -76,7 +76,8 @@ public class MsptCommand extends Command {
         lines.add(text("  Estimated p95 " + TpsCommand.ms(recent.estimatedP95Mspt())
             + " / p99 " + TpsCommand.ms(recent.estimatedP99Mspt()) + " (approximate)",
             SourbyCraftColors.VALUE));
-        lines.add(text("  Exact recent max " + TpsCommand.ms(recent.maximumMspt()), SourbyCraftColors.VALUE));
+        lines.add(text("  Exact recent max " + TpsCommand.ms(recent.maximumMspt())
+            + TickInProgress.maximumNote(recent, target), SourbyCraftColors.VALUE));
         lines.add(TpsCommand.freshness(snapshot.freshness()));
         lines.add(UiPanel.actions(List.of("/perf tick", "/perf region")));
         lines.add(UiPanel.footer());

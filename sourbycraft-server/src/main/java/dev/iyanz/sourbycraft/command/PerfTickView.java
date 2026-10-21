@@ -7,7 +7,11 @@ import dev.iyanz.sourbycraft.api.metrics.PerformanceSnapshot;
 import java.util.List;
 import net.kyori.adventure.text.Component;
 
-/** {@code /perf tick}: tick rate and MSPT over the five-second window. */
+/**
+ * {@code /perf tick}: tick rate and MSPT over the five-second window. "Recent maximum" is the
+ * slowest completed tick or, when longer, the elapsed time of a tick still running (not clamped to
+ * the window); a running tick longer than one tick budget is named on its own "Tick in progress" row.
+ */
 final class PerfTickView implements PerfView {
 
     @Override public String name() { return "tick"; }
@@ -21,6 +25,11 @@ final class PerfTickView implements PerfView {
         add(lines, "Worst average MSPT", TpsCommand.ms(tick.worstAverageMspt()));
         add(lines, "Estimated p95 / p99", TpsCommand.ms(tick.estimatedP95Mspt()) + " / "
             + TpsCommand.ms(tick.estimatedP99Mspt()) + " (approximate)");
-        add(lines, "Recent maximum", TpsCommand.ms(tick.maximumMspt()));
+        add(lines, "Recent maximum", TpsCommand.ms(tick.maximumMspt())
+            + TickInProgress.maximumNote(tick, snapshot.targetTps()));
+        final String running = TickInProgress.row(tick, snapshot.targetTps());
+        if (running != null) {
+            add(lines, "Tick in progress", running);
+        }
     }
 }

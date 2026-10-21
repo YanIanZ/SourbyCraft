@@ -23,10 +23,15 @@ import java.util.Objects;
  *       budget ({@code 1000 / target TPS} ms, 50 ms at 20 TPS). This is a 5 s average seen once a
  *       second, not a count of consecutive over-budget ticks: per-tick counting would need a hook
  *       on the region tick path.</li>
- *   <li>{@link Kind#GLOBAL_TICK_SLOW}: the global tick's 5 s maximum MSPT (which includes a tick still
- *       running) at or above {@link #GLOBAL_TICK_SLOW_MS}. Because it is a 5 s window maximum, one
- *       slow tick stays visible for about 5 s, so the incident's duration is inflated by up to the
- *       window length.</li>
+ *   <li>{@link Kind#GLOBAL_TICK_SLOW}: the global tick's 5 s maximum MSPT (the slowest completed tick,
+ *       or the real elapsed time of a global tick still running when that is longer; it is no longer
+ *       clamped to the window length) at or above {@link #GLOBAL_TICK_SLOW_MS}. Because it is a 5 s
+ *       window maximum, one slow completed tick stays visible for about 5 s, so the incident's
+ *       duration is inflated by up to the window length. A running-tick marker cannot outlive the
+ *       tick: {@link RegionTickMetrics} drops a marker that a completed tick has covered, so a
+ *       marker whose completion was lost no longer produces a standing incident; only a global
+ *       tick that really has not returned does, and its observed value is then its true elapsed
+ *       time.</li>
  *   <li>{@link Kind#GC_TIME}: cumulative MXBean collection time grew by at least
  *       {@link #GC_TIME_MS} since the previous pass. Collection time includes concurrent collector
  *       work; it is not a stop-the-world pause.</li>

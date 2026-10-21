@@ -9,7 +9,23 @@ record ImmutableWindowMetrics(long coverageMillis, long sampleCount, boolean app
                               double maximumMspt, double medianMspt,
                               double estimatedP95Mspt, double estimatedP99Mspt,
                               double busiestUtilisation, double averageUtilisation,
-                              double totalMissingCpuMs) implements WindowMetrics {
+                              double totalMissingCpuMs, double longestInProgressTickMspt,
+                              int ticksInProgress) implements WindowMetrics {
+
+    /** A window with no tick running; the usual case, and what every pre-existing caller means. */
+    ImmutableWindowMetrics(final long coverageMillis, final long sampleCount, final boolean approximate,
+                           final boolean truncated, final double worstTps, final double medianTps,
+                           final double aggregateTps, final double worstAverageMspt,
+                           final double aggregateAverageMspt, final double medianAverageMspt,
+                           final double minimumMspt, final double maximumMspt, final double medianMspt,
+                           final double estimatedP95Mspt, final double estimatedP99Mspt,
+                           final double busiestUtilisation, final double averageUtilisation,
+                           final double totalMissingCpuMs) {
+        this(coverageMillis, sampleCount, approximate, truncated, worstTps, medianTps, aggregateTps,
+            worstAverageMspt, aggregateAverageMspt, medianAverageMspt, minimumMspt, maximumMspt,
+            medianMspt, estimatedP95Mspt, estimatedP99Mspt, busiestUtilisation, averageUtilisation,
+            totalMissingCpuMs, Double.NaN, 0);
+    }
 
     static final ImmutableWindowMetrics EMPTY = new ImmutableWindowMetrics(
         0L, 0L, false, false,

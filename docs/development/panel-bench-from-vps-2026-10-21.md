@@ -76,6 +76,13 @@ network/Intave packet handling, GC (172 collections/min). `Recent maximum 5000.0
 every sample of both jars, so it reads like a clamp or a single early stall, not a per-sample reading; treat it as
 unreliable until the `/perf tick` source is checked.
 
+*Update 2026-10-22: the source was checked.* 5000.0 ms is `min(window, elapsed)` of a tick the collector saw as
+still running, so a value of exactly the window length means "a tick has been running for at least 5 s", not a
+measurement. The worst average MSPT in the same samples (2.6-3.4 ms) rules out a ticking region with a leaked
+marker; it fits a region with no completed tick in the window. Hung tick or other cause is not established. Since
+this change `/perf tick` shows the real elapsed time and a `Tick in progress` row; see
+[REGION-WATCHDOG.md](REGION-WATCHDOG.md#a-stalled-tick-without-the-watchdog-perf-tick-tick-in-progress-2026-10-22).
+
 The per-jar difference in client CPU-seconds and heap is run-to-run noise as far as can be said; there is
 no basis here to attribute it to the jars.
 

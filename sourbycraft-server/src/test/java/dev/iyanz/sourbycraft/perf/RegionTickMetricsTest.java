@@ -341,15 +341,78 @@ class RegionTickMetricsTest {
     }
 
     @Test
-    void completionClearsOnlyItsOwnActiveStart() {
+    void completionClearsTheMarkerOfItsOwnTickOrAnEarlierOne() {
         final RegionTickMetrics metrics = new RegionTickMetrics();
         metrics.tickStarted(123L);
 
-        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 456L, 1L), TARGET_20_TPS);
+        // A tick that started BEFORE the marked one (a late completion) must not clear it.
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 100L, 1L), TARGET_20_TPS);
         assertEquals(123L, metrics.snapshot(457L).activeTickStartNanos());
 
         metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 123L, 1L), TARGET_20_TPS);
         assertEquals(RegionTickMetrics.INACTIVE, metrics.snapshot(458L).activeTickStartNanos());
+    }
+
+    /**
+     * Regression for the "Recent maximum pinned at the window length" report. The collector turns
+     * any non-INACTIVE marker into a stalled tick of min(window, now - marker). With the old
+     * pairing a start whose completion never arrived stayed forever (the next start was dropped by
+     * the INACTIVE-only compare-and-set, and the next completion cleared only an EXACT match), so
+     * the marker aged until the stall term sat at the window length in every sample.
+     */
+    @Test
+    void aStartWhoseCompletionWasLostCannotPinTheMarkerPastTheNextCompletedTick() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickStarted(100L);
+        metrics.tickStarted(200L);
+        assertEquals(200L, metrics.snapshot(250L).activeTickStartNanos());
+
+        metrics.tickCompleted(tick(100L, 200L, 1L), TARGET_20_TPS);
+
+        assertEquals(RegionTickMetrics.INACTIVE, metrics.snapshot(300L).activeTickStartNanos());
+        assertEquals(RegionTickMetrics.INACTIVE, metrics.refreshSnapshot(300L).activeTickStartNanos());
+        assertEquals(RegionTickMetrics.INACTIVE,
+            metrics.acquireSnapshot(300L, new long[5 * 64], 0).activeTickStartNanos());
+    }
+
+    @Test
+    void aCompletionWithAMismatchedStartStillRetiresAnOlderMarker() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickStarted(100L);
+
+        // Completion of a LATER tick (start 300): the marked tick (100) can no longer be running,
+        // ticks of one owner are sequential.
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 300L, 1L), TARGET_20_TPS);
+
+        assertEquals(RegionTickMetrics.INACTIVE, metrics.snapshot(400L).activeTickStartNanos());
+        metrics.tickStarted(500L);
+        assertEquals(500L, metrics.snapshot(550L).activeTickStartNanos());
+    }
+
+    @Test
+    void aMarkerOlderThanTheLastCompletedTickIsNeverReported() throws Exception {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 300L, 1L), TARGET_20_TPS);
+        // Simulate a stale marker written behind the completion (the failure the guard exists for).
+        final var state = RegionTickMetrics.class.getDeclaredField("activeState");
+        state.setAccessible(true);
+        state.setLong(metrics, 100L);
+
+        assertEquals(RegionTickMetrics.INACTIVE, metrics.snapshot(400L).activeTickStartNanos());
+        assertEquals(RegionTickMetrics.INACTIVE, metrics.refreshSnapshot(400L).activeTickStartNanos());
+        assertEquals(RegionTickMetrics.INACTIVE,
+            metrics.acquireSnapshot(400L, new long[5 * 64], 0).activeTickStartNanos());
+    }
+
+    @Test
+    void aGenuinelyRunningTickKeepsItsMarkerAcrossRefreshes() {
+        final RegionTickMetrics metrics = new RegionTickMetrics();
+        metrics.tickCompleted(tick(TimeUtil.DEADLINE_NOT_SET, 100L, 1L), TARGET_20_TPS);
+        metrics.tickStarted(200L);
+
+        assertEquals(200L, metrics.snapshot(250L).activeTickStartNanos());
+        assertEquals(200L, metrics.refreshSnapshot(30L * SECOND).activeTickStartNanos());
+        assertEquals(200L, metrics.acquireSnapshot(60L * SECOND, new long[5 * 64], 0).activeTickStartNanos());
     }
 
     @Test

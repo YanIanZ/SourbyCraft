@@ -310,7 +310,10 @@ jobs:
           printf '[viaversion]\nauto-provision = false\n[protocollib]\nauto-provision = false\n[misc.auto_update]\nenabled = false\n' > sourbycraft_config/sourbycraft_global_config.toml
           echo "Booting $jar ..."
           mkfifo stdin.pipe
-          java -Xmx2G -XX:+UseG1GC -XX:StartFlightRecording=settings=profile,filename=boot.jfr,dumponexit=true -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
+          # sourby.testplugin.probes enables the test plugin's unload fixture (UnloadFixtureProbe): it
+          # creates a temporary world, queues region/entity tasks, unloads the world and logs
+          # SOURBY_UNLOAD_FIXTURE_* markers. The other probes it enables need players or commands.
+          java -Xmx2G -XX:+UseG1GC -Dsourby.testplugin.probes=true -XX:StartFlightRecording=settings=profile,filename=boot.jfr,dumponexit=true -jar "$jar" --nogui < stdin.pipe > server.log 2>&1 &
           PID=$!
           stdin_open=0
           java_status=
@@ -428,6 +431,46 @@ jobs:
             fail_after_launch "Server did not reach Done with the metrics markers (load, enable, sampled) within 240s."
           fi
 
+          # Region ownership gate: the unload fixture queues region and entity tasks in a temporary
+          # world, unloads it while they are pending and judges what happened to each. A marker ending
+          # in _WRONG or _FAILED names the broken rule; SOURBY_UNLOAD_FIXTURE_OK is the last marker.
+          fixture_done=0
+          for _ in $(seq 1 120); do
+            if grep -Eq 'SOURBY_UNLOAD_FIXTURE_[A-Z_]*(_WRONG|_FAILED)|SOURBY_UNLOAD_FIXTURE_FAILED' server.log; then
+              grep 'SOURBY_UNLOAD_FIXTURE_' server.log
+              fail_after_launch "The unload fixture reported a wrong or failed step (see markers above)."
+            fi
+            if grep -q 'SOURBY_UNLOAD_FIXTURE_START' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_WORLD_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_QUEUED_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_UNLOAD_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_ACCOUNTED_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_QUIET_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_RELEASED_OK' server.log \
+              && grep -q 'SOURBY_UNLOAD_FIXTURE_OK' server.log; then
+              fixture_done=1
+              break
+            fi
+            if ! kill -0 "$PID" 2>/dev/null; then echo "server process exited early"; break; fi
+            sleep 1
+          done
+          grep 'SOURBY_UNLOAD_FIXTURE_' server.log || true
+          if [ "$fixture_done" -ne 1 ]; then
+            fail_after_launch "The unload fixture did not log every marker (start, world, queued, unload, accounted, quiet, released, ok) within 120s."
+          fi
+          # The engine's own drain/ownership errors are not fixture markers; any of them fails the step.
+          if grep -Eq 'Failed to (drain|retire an entity scheduler|cancel region scheduler tasks|cancel queued region tasks)|Failed to save chunks in unloadfixture' server.log; then
+            grep -E 'Failed to (drain|retire an entity scheduler|cancel region scheduler tasks|cancel queued region tasks)|Failed to save chunks in unloadfixture' server.log
+            fail_after_launch "The engine reported an error while draining the unloaded fixture world."
+          fi
+          # Region execute() tasks have no handle: the fixture counts the ones that never ran, and the
+          # engine's drain line must account for at least that many cancelled queued tasks (else leaked).
+          not_run=$(grep 'SOURBY_UNLOAD_FIXTURE_QUIET_OK' server.log | grep -o 'executeNotRun=[0-9]*' | head -1 | cut -d= -f2)
+          cancelled_queued=$(grep 'Drained unloadfixture for unload' server.log | grep -o 'and [0-9]* queued region task' | head -1 | grep -o '[0-9]*' || true)
+          if [ "${not_run:-0}" -gt "${cancelled_queued:-0}" ]; then
+            fail_after_launch "The fixture's queued region tasks that never ran (${not_run}) exceed those the engine cancelled (${cancelled_queued:-0}): leaked."
+          fi
+
           if ! printf 'tps\nmspt\nram\nperf\nperf cpu\nperf gc\nspark profiler info\nstop\n' >&3; then
             fail_after_launch "Server console closed before accepting smoke-test commands."
           fi
@@ -474,7 +517,7 @@ jobs:
           echo "----- Aurora boot summary -----"
           grep -E 'stages completed without error|Aurora startup|Aurora startup index|failed during Aurora boot' server.log || echo "(no Aurora boot summary line found)"
           jfr summary boot.jfr
-          echo "Server reached Done, exposed metrics during load and enable, and exited cleanly."
+          echo "Server reached Done, exposed metrics during load and enable, ran the unload fixture, and exited cleanly."
 
       - name: Bootstrap failure recovery and offline boot
         run: |

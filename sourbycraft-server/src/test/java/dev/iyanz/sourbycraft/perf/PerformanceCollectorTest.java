@@ -257,6 +257,131 @@ class PerformanceCollectorTest {
     }
 
     @Test
+    void aTickRunningLongerThanTheWindowReportsItsRealElapsedNotTheWindowLength() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final RegionTickMetrics.WindowSnapshot completed = window(
+            100L, 5L * SECOND, 280L * MILLISECOND, 0.056);
+        final RegionTickMetrics.Snapshot running = snapshot(completed, 8L * SECOND);
+
+        collector(provider, (now, consumer) -> consumer.accept(
+            new RegionMetricsRegistry.GenerationView(1L, 1L, 1L, true, null, running)))
+            .collect(20L * SECOND, 1_000L, 0L);
+        final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        assertEquals(12_000.0, result.maximumMspt(), 1.0E-9, "12 s running, not the 5 s window length");
+        assertEquals(12_000.0, result.longestInProgressTickMspt(), 1.0E-9);
+        assertEquals(1, result.ticksInProgress());
+        assertEquals(1.0, result.busiestUtilisation(), 1.0E-9, "the utilisation ratio stays capped at the window");
+    }
+
+    @Test
+    void aWindowWithNoRunningTickReportsNoInProgressTick() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+
+        collector(provider, source(view(1L, true, window(100L, 5L * SECOND, 280L * MILLISECOND, 0.056))))
+            .collect(SECOND, 1_000L, 0L);
+        final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        assertTrue(Double.isNaN(result.longestInProgressTickMspt()));
+        assertEquals(0, result.ticksInProgress());
+    }
+
+    @Test
+    void severalRunningTicksAreCountedAndTheLongestIsReported() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final RegionTickMetrics.WindowSnapshot completed = window(10L, 500L * MILLISECOND, 30L * MILLISECOND, 0.06);
+
+        collector(provider, (now, consumer) -> {
+            consumer.accept(new RegionMetricsRegistry.GenerationView(1L, 1L, 1L, true, null,
+                snapshot(completed, 10L * SECOND - 70L * MILLISECOND)));
+            consumer.accept(new RegionMetricsRegistry.GenerationView(2L, 1L, 2L, true, null,
+                snapshot(completed, 10L * SECOND - 400L * MILLISECOND)));
+            consumer.accept(new RegionMetricsRegistry.GenerationView(3L, 1L, 3L, true, null,
+                snapshot(completed, RegionTickMetrics.INACTIVE)));
+        }).collect(10L * SECOND, 1_000L, 0L);
+        final WindowMetrics result = provider.snapshot().window(MetricWindow.FIVE_SECONDS);
+
+        assertEquals(2, result.ticksInProgress());
+        assertEquals(400.0, result.longestInProgressTickMspt(), 1.0E-9);
+        assertEquals(400.0, result.maximumMspt(), 1.0E-9);
+    }
+
+    @Test
+    void aGlobalTickRunningLongerThanTheWindowReportsItsRealElapsed() {
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final RegionTickMetrics.Snapshot global = snapshot(
+            window(100L, 5L * SECOND, 280L * MILLISECOND, 0.056), 8L * SECOND);
+        final PerformanceCollector collector = new PerformanceCollector(provider, source(),
+            now -> global, PerformanceCollectorTest::runtime,
+            System::nanoTime, System::currentTimeMillis, () -> 20.0);
+
+        collector.collect(20L * SECOND, 1_000L, 0L);
+        final WindowMetrics result = provider.snapshot().globalWindow(MetricWindow.FIVE_SECONDS);
+
+        assertEquals(12_000.0, result.maximumMspt(), 1.0E-9);
+        assertEquals(12_000.0, result.longestInProgressTickMspt(), 1.0E-9);
+        assertEquals(1, result.ticksInProgress());
+    }
+
+    /**
+     * End to end through the real owner: a marker whose completion was lost, followed by ticks that
+     * complete normally, must not show up as a stall in either window or as a global incident.
+     */
+    @Test
+    void aMarkerCoveredByLaterCompletedTicksIsNotReportedAsAStallOrAnIncident() throws Exception {
+        final RegionTickMetrics owner = new RegionTickMetrics();
+        owner.tickStarted(1L * SECOND);                    // completion lost
+        for (int i = 0; i < 100; ++i) {
+            final long start = 2L * SECOND + i * 50L * MILLISECOND;
+            owner.tickStarted(start);
+            owner.tickCompleted(new TickTime(TimeUtil.DEADLINE_NOT_SET, start, start, 0L,
+                start + 3L * MILLISECOND, 0L, 0L, 0L, false), 50L * MILLISECOND);
+        }
+        // The pre-fix leak, reproduced directly: the marker is stuck at an old start.
+        final var state = RegionTickMetrics.class.getDeclaredField("activeState");
+        state.setAccessible(true);
+        state.setLong(owner, 1L * SECOND);
+
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        final PerformanceCollector collector = new PerformanceCollector(provider,
+            (now, consumer) -> consumer.accept(
+                new RegionMetricsRegistry.GenerationView(1L, 1L, 1L, true, owner, null)),
+            now -> owner.refreshSnapshot(now), PerformanceCollectorTest::runtime,
+            System::nanoTime, System::currentTimeMillis, () -> 20.0);
+
+        collector.collect(7L * SECOND + 100L * MILLISECOND, 1_000L, 0L);
+        final ImmutablePerformanceSnapshot snapshot = (ImmutablePerformanceSnapshot)provider.snapshot();
+
+        for (final WindowMetrics window : List.of(snapshot.window(MetricWindow.FIVE_SECONDS),
+            snapshot.globalWindow(MetricWindow.FIVE_SECONDS))) {
+            assertTrue(window.maximumMspt() < 100.0, "no stall: " + window.maximumMspt());
+            assertEquals(0, window.ticksInProgress());
+            assertTrue(Double.isNaN(window.longestInProgressTickMspt()));
+        }
+        final List<IncidentLog.Breach> breaches = new IncidentDetector(new IncidentLog(),
+            () -> IncidentDetector.External.NONE).breaches(snapshot, null, IncidentDetector.External.NONE);
+        assertTrue(breaches.stream().noneMatch(breach -> breach.kind() == IncidentLog.Kind.GLOBAL_TICK_SLOW),
+            breaches.toString());
+    }
+
+    @Test
+    void aGlobalTickThatReallyHasNotReturnedStillRaisesTheSlowTickIncidentWithItsTrueElapsed() {
+        final RegionTickMetrics.Snapshot global = snapshot(
+            window(100L, 5L * SECOND, 280L * MILLISECOND, 0.056), 10L * SECOND - 600L * MILLISECOND);
+        final SourbyMetricsProvider provider = new SourbyMetricsProvider();
+        new PerformanceCollector(provider, source(), now -> global, PerformanceCollectorTest::runtime,
+            System::nanoTime, System::currentTimeMillis, () -> 20.0).collect(10L * SECOND, 1_000L, 0L);
+
+        final List<IncidentLog.Breach> breaches = new IncidentDetector(new IncidentLog(),
+            () -> IncidentDetector.External.NONE)
+            .breaches(provider.snapshot(), null, IncidentDetector.External.NONE);
+
+        final IncidentLog.Breach slow = breaches.stream()
+            .filter(breach -> breach.kind() == IncidentLog.Kind.GLOBAL_TICK_SLOW).findFirst().orElseThrow();
+        assertEquals(600.0, slow.value(), 1.0E-9);
+    }
+
+    @Test
     void truncationAndOverflowPropagateUnavailableAdditiveAndQuantileValues() {
         final SourbyMetricsProvider provider = new SourbyMetricsProvider();
         final RegionTickMetrics.WindowSnapshot overflow = new RegionTickMetrics.WindowSnapshot(

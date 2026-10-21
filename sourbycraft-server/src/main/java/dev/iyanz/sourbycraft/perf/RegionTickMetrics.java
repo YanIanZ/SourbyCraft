@@ -70,6 +70,12 @@ public final class RegionTickMetrics {
     private final long[] histogramScratch = new long[HISTOGRAM_BINS];
 
     private volatile long activeState = INACTIVE;
+    /**
+     * Start of the newest tick this owner has completed ({@link #INACTIVE} before the first). A
+     * marker at or before it cannot belong to a running tick, because ticks of one owner are
+     * sequential; readers drop such a marker instead of reporting a stall that cannot exist.
+     */
+    private volatile long lastCompletedStart = INACTIVE;
     private long sequence;
     private long publishedEpoch = Long.MIN_VALUE;
     private boolean publicationDirty;
@@ -100,8 +106,21 @@ public final class RegionTickMetrics {
                            WindowSnapshot fifteenSeconds, WindowSnapshot oneMinute,
                            WindowSnapshot fiveMinutes, WindowSnapshot fifteenMinutes) {}
 
+    /**
+     * Marks a tick as running. The newest start wins: ticks of one owner are sequential, so a
+     * marker still present when the next tick starts belongs to a tick whose completion never
+     * arrived, and keeping it (the previous INACTIVE-only compare-and-set did) pinned the marker
+     * for good, which the collector then reported as a stall as long as the window (audit: "Recent
+     * maximum" fixed at 5000 ms). A sealed owner stays sealed.
+     */
     public void tickStarted(final long startNanos) {
-        ACTIVE_STATE.compareAndSet(this, INACTIVE, startNanos);
+        long state;
+        do {
+            state = (long)ACTIVE_STATE.getAcquire(this);
+            if (state == SEALED) {
+                return;
+            }
+        } while (!ACTIVE_STATE.compareAndSet(this, state, startNanos));
     }
 
     /**
@@ -123,9 +142,38 @@ public final class RegionTickMetrics {
             this.recordCompletedSample(tick, targetIntervalNanos);
             this.publicationDirty = true;
         } finally {
-            ACTIVE_STATE.compareAndSet(this, tick.tickStart(), INACTIVE);
+            this.clearMarkerCoveredBy(tick.tickStart());
         }
         this.publishSnapshotIfDue(tick.tickEnd());
+    }
+
+    /**
+     * Clears the running-tick marker when a tick that started at {@code completedStart} has
+     * finished: the marker is that tick's own, or an older one whose completion was lost. A marker
+     * newer than the completed tick belongs to a tick that is still running and is kept.
+     */
+    private void clearMarkerCoveredBy(final long completedStart) {
+        final long last = this.lastCompletedStart;
+        if (last == INACTIVE || completedStart - last > 0L) {
+            this.lastCompletedStart = completedStart;
+        }
+        long state;
+        do {
+            state = (long)ACTIVE_STATE.getAcquire(this);
+            if (state == INACTIVE || state == SEALED || state - completedStart > 0L) {
+                return;
+            }
+        } while (!ACTIVE_STATE.compareAndSet(this, state, INACTIVE));
+    }
+
+    /** The marker as a reader may report it: INACTIVE when sealed or already covered by a completed tick. */
+    private long readableMarker() {
+        final long state = (long)ACTIVE_STATE.getAcquire(this);
+        if (state == SEALED || state == INACTIVE) {
+            return INACTIVE;
+        }
+        final long last = this.lastCompletedStart;
+        return last != INACTIVE && state - last <= 0L ? INACTIVE : state;
     }
 
     /** Recomputes every bounded window against the supplied monotonic sampling boundary. */
@@ -210,8 +258,7 @@ public final class RegionTickMetrics {
 
     private Snapshot snapshotWithActiveMarker() {
         final Snapshot current = this.published;
-        final long state = (long)ACTIVE_STATE.getAcquire(this);
-        final long active = state == SEALED ? INACTIVE : state;
+        final long active = this.readableMarker();
         if (active == current.activeTickStartNanos()) {
             return current;
         }
@@ -222,11 +269,11 @@ public final class RegionTickMetrics {
 
     private Snapshot acquiredSnapshotWithActiveMarker() {
         final Snapshot current = this.published;
-        final long state = (long)ACTIVE_STATE.getAcquire(this);
+        final long state = this.readableMarker();
         if (this.acquiredState == state && this.acquired.sequence() == current.sequence()) {
             return this.acquired;
         }
-        final long active = state == SEALED ? INACTIVE : state;
+        final long active = state;
         this.acquired = active == current.activeTickStartNanos() ? current : new Snapshot(
             current.sequence(), current.sampledAtNanos(), active,
             current.fiveSeconds(), current.tenSeconds(), current.fifteenSeconds(),

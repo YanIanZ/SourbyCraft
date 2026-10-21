@@ -43,7 +43,8 @@ class MetricsApiSurfaceTest {
                 Map.entry("minimumMspt", "()double"), Map.entry("maximumMspt", "()double"),
                 Map.entry("medianMspt", "()double"), Map.entry("estimatedP95Mspt", "()double"),
                 Map.entry("estimatedP99Mspt", "()double"), Map.entry("busiestUtilisation", "()double"),
-                Map.entry("averageUtilisation", "()double"), Map.entry("totalMissingCpuMs", "()double")),
+                Map.entry("averageUtilisation", "()double"), Map.entry("totalMissingCpuMs", "()double"),
+                Map.entry("longestInProgressTickMspt", "()double"), Map.entry("ticksInProgress", "()int")),
             RuntimeMetrics.class, Map.ofEntries(
                 Map.entry("heapUsedBytes", "()long"),
                 Map.entry("heapMaxBytes", "()long"),

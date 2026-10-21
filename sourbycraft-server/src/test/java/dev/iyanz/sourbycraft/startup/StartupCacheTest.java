@@ -7,8 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -104,5 +106,69 @@ class StartupCacheTest {
             assertEquals(List.of(file), files.toList());
         }
         assertEquals("2", StartupCache.load(file, ENV).entries().get("a.jar").payload());
+    }
+
+    @Test
+    void anEmptyFileIsCorruptNotMissing() throws Exception {
+        final Path file = this.dir.resolve("c");
+        Files.write(file, new byte[0]);
+        final StartupCache.Loaded loaded = StartupCache.load(file, ENV);
+        assertEquals(StartupCache.LoadStatus.CORRUPT, loaded.status());
+        assertTrue(loaded.discardedAnything());
+    }
+
+    @Test
+    void aHeaderCutBeforeTheEnvironmentLineIsCorrupt() throws Exception {
+        final Path file = this.dir.resolve("c");
+        Files.writeString(file, StartupCache.MAGIC + "\n");
+        assertEquals(StartupCache.LoadStatus.CORRUPT, StartupCache.load(file, ENV).status());
+        Files.writeString(file, StartupCache.MAGIC.substring(0, 8));
+        assertEquals(StartupCache.LoadStatus.CORRUPT, StartupCache.load(file, ENV).status());
+    }
+
+    @Test
+    void bytesThatAreNotUtf8AreIgnoredNotThrown() throws Exception {
+        final Path file = this.dir.resolve("c");
+        final byte[] noise = new byte[256];
+        new java.util.Random(7).nextBytes(noise);
+        noise[0] = (byte)0xFF;                          // never valid UTF-8
+        Files.write(file, noise);
+        final StartupCache.Loaded loaded = StartupCache.load(file, ENV);
+        assertEquals(StartupCache.LoadStatus.IO_ERROR, loaded.status());
+        assertTrue(loaded.entries().isEmpty());
+        assertTrue(loaded.discardedAnything());
+    }
+
+    @Test
+    void aDirectoryWhereTheCacheShouldBeIsIgnoredNotThrown() throws Exception {
+        final Path file = Files.createDirectory(this.dir.resolve("c"));
+        final StartupCache.Loaded loaded = StartupCache.load(file, ENV);
+        assertEquals(StartupCache.LoadStatus.IO_ERROR, loaded.status());
+        assertTrue(loaded.discardedAnything());
+    }
+
+    @Test
+    void aFileWithoutReadPermissionIsIgnoredNotThrown() throws Exception {
+        final Path file = this.dir.resolve("c");
+        StartupCache.write(file, ENV, List.of(entry("a.jar", SHA_A, "x")));
+        Assumptions.assumeTrue(file.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));
+        Assumptions.assumeFalse(Files.isReadable(file), "running as a user that bypasses file modes");
+        try {
+            assertEquals(StartupCache.LoadStatus.IO_ERROR, StartupCache.load(file, ENV).status());
+        } finally {
+            Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
+        }
+    }
+
+    @Test
+    void anEntryWithAForeignSourceHashStaysValidAndIsLeftToTheCallerToReject() throws Exception {
+        // A re-sealed entry (what a stale cache looks like after a jar changed) passes every
+        // integrity check; reuse is decided by comparing its SHA-256 with the jar, in PluginStartupIndex.
+        final Path file = this.dir.resolve("c");
+        StartupCache.write(file, ENV, List.of(entry("a.jar", SHA_A, "x")));
+        final StartupCache.Loaded loaded = StartupCache.load(file, ENV);
+        assertEquals(SHA_A, loaded.entries().get("a.jar").source().sha256());
+        assertFalse(loaded.discardedAnything());
     }
 }

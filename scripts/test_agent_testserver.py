@@ -1079,5 +1079,257 @@ class CleanupTest(HarnessCase):
         self.assertEqual([Path(p).name for p in self.harness.cleanup(keep=0)], ["live"])
 
 
+def make_startup_cache(keys=("a.jar", "b.jar"), env="26.2|1|1|2|25"):
+    """A valid cache in StartupCache's on-disk layout (header, env, one sealed line per entry)."""
+    import base64
+    lines = [ats.STARTUP_CACHE_MAGIC, "env " + env]
+    for key in keys:
+        payload = f"name: {key}\nregion: true".encode()
+        lines.append(ats._seal_entry([
+            base64.b64encode(key.encode()).decode(), hashlib.sha256(key.encode()).hexdigest(),
+            "123", "1700000000000", hashlib.sha256(payload).hexdigest(),
+            base64.b64encode(payload).decode()]))
+    return ("\n".join(lines) + "\n").encode()
+
+
+class StartupCacheShapesTest(unittest.TestCase):
+    def test_a_made_cache_parses_as_valid(self):
+        self.assertEqual(ats.parse_startup_cache(make_startup_cache()), ("26.2|1|1|2|25", 2, 0))
+
+    def test_empty_and_garbage_need_no_donor(self):
+        self.assertEqual(ats.corrupt_startup_cache("empty"), b"")
+        self.assertEqual(ats.parse_startup_cache(b"")[0], None)
+        garbage = ats.corrupt_startup_cache("garbage")
+        with self.assertRaises(UnicodeDecodeError):
+            garbage.decode("utf-8")               # Files.readAllLines fails on it: IO_ERROR
+        self.assertIsNone(ats.parse_startup_cache(garbage)[0])
+
+    def test_truncated_tears_the_last_entry_and_keeps_the_others(self):
+        torn = ats.corrupt_startup_cache("truncated", make_startup_cache())
+        self.assertFalse(torn.endswith(b"\n"))
+        self.assertEqual(ats.parse_startup_cache(torn), ("26.2|1|1|2|25", 1, 1))
+
+    def test_flipped_entry_fails_one_entry_hash(self):
+        flipped = ats.corrupt_startup_cache("flipped-entry", make_startup_cache())
+        self.assertEqual(ats.parse_startup_cache(flipped), ("26.2|1|1|2|25", 1, 1))
+
+    def test_wrong_version_changes_only_the_format_field(self):
+        wrong = ats.corrupt_startup_cache("wrong-version", make_startup_cache())
+        self.assertEqual(ats.parse_startup_cache(wrong), ("26.2|1|1|3|25", 2, 0))
+
+    def test_stale_hashes_stay_valid_entries_for_a_different_jar(self):
+        donor = make_startup_cache()
+        stale = ats.corrupt_startup_cache("stale-hashes", donor)
+        self.assertEqual(ats.parse_startup_cache(stale), ("26.2|1|1|2|25", 2, 0))
+        self.assertNotEqual(stale, donor)
+
+    def test_unreadable_keeps_the_bytes_and_sets_mode_zero(self):
+        donor = make_startup_cache()
+        self.assertEqual(ats.corrupt_startup_cache("unreadable", donor), donor)
+        self.assertEqual(ats.STARTUP_CACHE_SHAPES["unreadable"]["mode"], 0)
+
+    def test_every_shape_with_a_donor_flag_is_refused_without_one(self):
+        for shape, spec in ats.STARTUP_CACHE_SHAPES.items():
+            if spec["donor"]:
+                with self.assertRaisesRegex(ats.HarnessError, "needs --startup-cache-from"):
+                    ats.corrupt_startup_cache(shape)
+
+    def test_unknown_shape_and_unusable_donor_are_refused(self):
+        with self.assertRaisesRegex(ats.HarnessError, "unknown startup-cache shape"):
+            ats.corrupt_startup_cache("melted", make_startup_cache())
+        for donor in (b"", make_startup_cache(keys=()), b"junk\n"):
+            with self.assertRaisesRegex(ats.HarnessError, "no valid entries"):
+                ats.corrupt_startup_cache("truncated", donor)
+
+    def test_the_shape_table_matches_the_warning_text_in_the_java_source(self):
+        # PluginStartupIndex.describe() owns the words; a reworded WARN must fail here, not at boot.
+        source = (Path(__file__).resolve().parents[1] / "sourbycraft-server/src/main/java/dev/iyanz/"
+                  "sourbycraft/startup/PluginStartupIndex.java").read_text()
+        for shape, spec in ats.STARTUP_CACHE_SHAPES.items():
+            if spec["expect_warn"] is None:
+                continue
+            tail = spec["expect_warn"].replace("Aurora startup cache ", "", 1)
+            if tail.startswith("had "):
+                self.assertIn('"had " + loaded.discardedEntries() + " corrupt entr"', source, shape)
+            else:
+                self.assertIn(tail, source, shape)
+        self.assertIn('"Aurora startup cache " + describe(loaded)', source)
+        self.assertIn('"; affected entries are rebuilt and boot continues"', source)
+
+
+class StartupCacheCheckTest(unittest.TestCase):
+    DONE = '[12:00:00 INFO]: Done (3.1s)! For help, type "help"'
+    ENABLING = "[12:00:01 INFO]: [Probe] Enabling Probe v1"
+
+    def log(self, warn=None, index="Aurora startup index: 2 jar(s), cold start (hit 0, miss 2, discarded 0) in 4.0 ms"):
+        lines = []
+        if warn:
+            lines.append("[12:00:00 WARN]: [SourbyCraft] " + warn)
+        if index:
+            lines.append("[12:00:00 INFO]: [SourbyCraft] " + index)
+        return "\n".join(lines + [self.ENABLING, self.DONE])
+
+    def seed(self, shape, donor=None):
+        data = ats.corrupt_startup_cache(shape, donor)
+        return {"shape": shape, "sha256": hashlib.sha256(data).hexdigest()}
+
+    def test_a_recovered_boot_passes_for_each_warning_shape(self):
+        donor = make_startup_cache()
+        cases = {
+            "truncated": "Aurora startup cache had 1 corrupt entry discarded; affected entries are rebuilt and boot continues",
+            "wrong-version": "Aurora startup cache was written by a different Minecraft/ABI/format/Java and was discarded; affected entries are rebuilt and boot continues",
+            "empty": "Aurora startup cache was not a valid startup cache and was discarded; affected entries are rebuilt and boot continues",
+            "garbage": "Aurora startup cache could not be read and was ignored; affected entries are rebuilt and boot continues",
+        }
+        for shape, warn in cases.items():
+            ok, details = ats.check_startup_cache_boot(self.log(warn), self.seed(shape, donor), donor)
+            self.assertTrue(ok, (shape, details["checks"]))
+
+    def test_stale_hashes_pass_only_without_a_warning(self):
+        donor = make_startup_cache()
+        seed = self.seed("stale-hashes", donor)
+        self.assertTrue(ats.check_startup_cache_boot(self.log(), seed, donor)[0])
+        ok, details = ats.check_startup_cache_boot(self.log("Aurora startup cache had 1 corrupt entry discarded"),
+                                                   seed, donor)
+        self.assertFalse(ok)
+        self.assertFalse(details["checks"]["no_cache_warning"])
+
+    def test_unreadable_does_not_require_changed_bytes(self):
+        donor = make_startup_cache()
+        seed = self.seed("unreadable", donor)
+        warn = "Aurora startup cache could not be read and was ignored; affected entries are rebuilt and boot continues"
+        ok, details = ats.check_startup_cache_boot(self.log(warn), seed, donor)
+        self.assertTrue(ok, details["checks"])
+        self.assertNotIn("cache_changed", details["checks"])
+
+    def test_failures_are_named(self):
+        donor = make_startup_cache()
+        seed = self.seed("truncated", donor)
+        warn = "Aurora startup cache had 1 corrupt entry discarded; affected entries are rebuilt and boot continues"
+        good = ats.corrupt_startup_cache("truncated", donor)
+        ok, d = ats.check_startup_cache_boot(self.log(warn), seed, good)       # cache still torn
+        self.assertFalse(ok)
+        self.assertFalse(d["checks"]["cache_valid_after"])
+        ok, d = ats.check_startup_cache_boot(self.log(None), seed, donor)      # no warning at all
+        self.assertFalse(d["checks"]["one_clear_warning"])
+        ok, d = ats.check_startup_cache_boot(self.log(warn + "\n[x] Aurora startup cache again"), seed, donor)
+        self.assertFalse(d["checks"]["one_clear_warning"])
+        ok, d = ats.check_startup_cache_boot(self.log(warn), seed, None)       # cache never rewritten
+        self.assertFalse(d["checks"]["cache_valid_after"])
+        ok, d = ats.check_startup_cache_boot(self.log(warn, index=None), seed, donor)
+        self.assertFalse(d["checks"]["index_line"])
+
+    def test_the_warm_second_boot_needs_hits_and_no_warning(self):
+        donor = make_startup_cache()
+        seed = {"shape": None, "sha256": hashlib.sha256(donor).hexdigest()}
+        warm = "Aurora startup index: 2 jar(s), warm start (hit 2, miss 0, discarded 0) in 1.0 ms"
+        self.assertTrue(ats.check_startup_cache_boot(self.log(index=warm), seed, donor)[0])
+        self.assertFalse(ats.check_startup_cache_boot(self.log()   , seed, donor)[0])
+
+
+class StartupCacheSeedingTest(HarnessCase):
+    def _donor(self, name="donor", keys=("a.jar",), jars=True):
+        workdir = Path(self.start(name)["workdir"])
+        self.harness.stop(name, timeout=10)
+        (workdir / "plugins").mkdir(exist_ok=True)
+        if jars:
+            for key in keys:
+                jar = workdir / "plugins" / key
+                jar.write_bytes(b"jar " + key.encode())
+                os.utime(jar, (1_700_000_000, 1_700_000_000))
+        cache = workdir / ats.STARTUP_CACHE_DEST
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_bytes(make_startup_cache(keys))
+        return workdir
+
+    def test_a_corrupted_cache_and_the_donor_jars_are_installed_before_boot(self):
+        donor = self._donor(keys=("a.jar", "b.jar"))
+        workdir = Path(self.start("seeded", startup_cache_from="donor",
+                                  startup_cache_corrupt="wrong-version")["workdir"])
+        try:
+            record = self.run_json("seeded")["startup_cache"]
+            cache = workdir / ats.STARTUP_CACHE_DEST
+            self.assertEqual(record["shape"], "wrong-version")
+            self.assertEqual(record["sha256"], hashlib.sha256(cache.read_bytes()).hexdigest())
+            self.assertEqual(ats.parse_startup_cache(cache.read_bytes())[0], "26.2|1|1|3|25")
+            self.assertEqual(sorted(record["plugin_jars_carried"]), ["a.jar", "b.jar"])
+            self.assertEqual(int((workdir / "plugins/a.jar").stat().st_mtime), 1_700_000_000)
+            # The donor run is untouched.
+            self.assertEqual(ats.parse_startup_cache((donor / ats.STARTUP_CACHE_DEST).read_bytes())[0],
+                             "26.2|1|1|2|25")
+        finally:
+            self.harness.stop("seeded", timeout=10)
+
+    def test_without_a_shape_the_donor_cache_is_copied_unchanged_for_the_warm_boot(self):
+        donor = self._donor()
+        workdir = Path(self.start("warm", startup_cache_from="donor")["workdir"])
+        try:
+            self.assertEqual((workdir / ats.STARTUP_CACHE_DEST).read_bytes(),
+                             (donor / ats.STARTUP_CACHE_DEST).read_bytes())
+            self.assertIsNone(self.run_json("warm")["startup_cache"]["shape"])
+        finally:
+            self.harness.stop("warm", timeout=10)
+
+    def test_unreadable_sets_mode_000(self):
+        self._donor()
+        workdir = Path(self.start("locked", startup_cache_from="donor",
+                                  startup_cache_corrupt="unreadable")["workdir"])
+        try:
+            self.assertEqual((workdir / ats.STARTUP_CACHE_DEST).stat().st_mode & 0o777, 0)
+            self.assertEqual(self.run_json("locked")["startup_cache"]["mode"], "0000")
+        finally:
+            self.harness.stop("locked", timeout=10)
+
+    def test_empty_and_garbage_need_no_donor(self):
+        for shape in ("empty", "garbage"):
+            workdir = Path(self.start(shape, startup_cache_corrupt=shape)["workdir"])
+            try:
+                self.assertTrue((workdir / ats.STARTUP_CACHE_DEST).is_file())
+                self.assertEqual(self.run_json(shape)["startup_cache"]["plugin_jars_carried"], [])
+            finally:
+                self.harness.stop(shape, timeout=10)
+
+    def test_an_explicit_plugin_jar_wins_over_the_donor_copy(self):
+        self._donor()
+        mine = self.root / "mine.jar"
+        mine.write_bytes(b"mine")
+        workdir = Path(self.start("mixed", startup_cache_from="donor", startup_cache_corrupt="truncated",
+                                  config_files={"plugins/a.jar": str(mine)})["workdir"])
+        try:
+            self.assertEqual((workdir / "plugins/a.jar").read_bytes(), b"mine")
+            self.assertEqual(self.run_json("mixed")["startup_cache"]["plugin_jars_carried"], [])
+        finally:
+            self.harness.stop("mixed", timeout=10)
+
+    def test_refusals_leave_no_run_directory_and_no_lock(self):
+        live = self.root / "servers" / "live"
+        live.mkdir(parents=True)
+        (live / ats.MARKER).write_text("x")
+        (live / "run.json").write_text(json.dumps({"status": "ready"}))
+        self._donor("nocache", jars=False)
+        (self.root / "servers/nocache" / ats.STARTUP_CACHE_DEST).unlink()
+        for kwargs, message in (
+                ({"startup_cache_from": "missing"}, "not a harness run"),
+                ({"startup_cache_from": "live"}, "still running"),
+                ({"startup_cache_from": "nocache"}, "has no sourbycraft_config/cache"),
+                ({"startup_cache_corrupt": "truncated"}, "needs --startup-cache-from"),
+                ({"startup_cache_corrupt": "melted"}, "unknown startup-cache shape")):
+            with self.assertRaisesRegex(ats.HarnessError, message):
+                self.start("b", **kwargs)
+        self.assertFalse((self.root / "servers" / "b").exists())
+        self.assertFalse(self.harness.lock_path.exists())
+
+    def test_cli_options_reach_start_and_scenarios_accept_the_settings(self):
+        args = ats.build_parser().parse_args(
+            ["start", "--name", "x", "--startup-cache-from", "r1", "--startup-cache-corrupt", "truncated"])
+        kwargs = ats._start_kwargs(args)
+        self.assertEqual((kwargs["startup_cache_from"], kwargs["startup_cache_corrupt"]), ("r1", "truncated"))
+        with self.assertRaises(SystemExit):
+            ats.build_parser().parse_args(["start", "--name", "x", "--startup-cache-corrupt", "melted"])
+        settings, _ = ats.parse_scenario({"settings": {"startup_cache_corrupt": "empty"},
+                                          "steps": [{"sleep": 0}]})
+        self.assertEqual(settings["startup_cache_corrupt"], "empty")
+
+
 if __name__ == "__main__":
     unittest.main()

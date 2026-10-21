@@ -134,4 +134,102 @@ class PluginStartupIndexTest {
         assertTrue(result.plugins().isEmpty());
         assertEquals("empty", result.telemetry().startClass());
     }
+
+    /** Every way a cache can be damaged at boot: one warning, same index, rebuilt, then warm. */
+    private enum Damage {
+        EMPTY, NOT_UTF8, TORN_MID_ENTRY, FLIPPED_ENTRY, OTHER_FORMAT_VERSION, WRONG_JAVA, UNREADABLE_DIRECTORY
+    }
+
+    private static void damage(final Path cache, final Damage how) throws IOException {
+        final List<String> lines = new ArrayList<>(Files.readAllLines(cache, StandardCharsets.UTF_8));
+        switch (how) {
+            case EMPTY -> Files.write(cache, new byte[0]);
+            case NOT_UTF8 -> Files.write(cache, new byte[] {(byte)0xFF, (byte)0xC0, (byte)0x80, 1, 2, 3});
+            case TORN_MID_ENTRY -> {
+                final String last = lines.get(lines.size() - 1);
+                lines.set(lines.size() - 1, last.substring(0, last.length() / 2));
+                Files.writeString(cache, String.join("\n", lines));        // no trailing newline
+            }
+            case FLIPPED_ENTRY -> {
+                final String victim = lines.get(2);
+                final int at = victim.length() - 70;
+                lines.set(2, victim.substring(0, at) + (victim.charAt(at) == 'A' ? 'B' : 'A') + victim.substring(at + 1));
+                Files.write(cache, lines, StandardCharsets.UTF_8);
+            }
+            case OTHER_FORMAT_VERSION -> {
+                lines.set(1, "env 26.2|1|1|99|25");
+                Files.write(cache, lines, StandardCharsets.UTF_8);
+            }
+            case WRONG_JAVA -> {
+                lines.set(1, "env 26.2|1|1|1|17");
+                Files.write(cache, lines, StandardCharsets.UTF_8);
+            }
+            case UNREADABLE_DIRECTORY -> {
+                Files.delete(cache);
+                Files.createDirectory(cache);
+            }
+        }
+    }
+
+    @Test
+    void everyDamageShapeRecoversWithOneWarningTheSameIndexAndARebuiltCache() throws IOException {
+        for (final Damage how : Damage.values()) {
+            final Path root = Files.createDirectory(this.dir.resolve(how.name()));
+            final Path plugins = Files.createDirectory(root.resolve("plugins"));
+            jar(plugins.resolve("a.jar"), "plugin.yml", "name: Alpha\nfolia-supported: true\n");
+            jar(plugins.resolve("b.jar"), "paper-plugin.yml", "name: Beta\ncanvas-supported: true\n");
+            final Path cache = root.resolve("cache");
+            final List<String> descriptors = new ArrayList<>();
+            PluginStartupIndex.build(plugins, cache, ENV, 2, w -> {}).plugins()
+                .forEach(p -> descriptors.add(p.descriptor().name()));
+            damage(cache, how);
+
+            final List<String> warnings = new ArrayList<>();
+            final PluginStartupIndex.Result rebuilt = PluginStartupIndex.build(plugins, cache, ENV, 2, warnings::add);
+            final List<String> after = new ArrayList<>();
+            rebuilt.plugins().forEach(p -> after.add(p.descriptor().name()));
+
+            assertEquals(descriptors, after, how.name());
+            assertTrue(rebuilt.plugins().stream().allMatch(p -> p.failure() == null), how.name());
+            assertTrue(rebuilt.undeclared().isEmpty(), how.name());
+            assertTrue(warnings.stream().anyMatch(w -> w.startsWith("Aurora startup cache ")
+                && w.endsWith("affected entries are rebuilt and boot continues")), how.name() + " " + warnings);
+            if (how == Damage.UNREADABLE_DIRECTORY) {
+                // Reading failed and so does the rewrite: the stage still prints only the first line.
+                assertEquals(StartupCache.LoadStatus.IO_ERROR, rebuilt.cacheStatus());
+                assertFalse(rebuilt.cacheWritten());
+                assertEquals(2, warnings.size(), warnings.toString());
+                assertTrue(warnings.get(1).startsWith("Aurora startup cache could not be written"));
+                continue;
+            }
+            assertEquals(1, warnings.size(), how.name() + " " + warnings);
+            assertTrue(rebuilt.cacheWritten(), how.name());
+            assertEquals(StartupCache.LoadStatus.LOADED, StartupCache.load(cache, ENV).status(), how.name());
+            final List<String> secondWarnings = new ArrayList<>();
+            final PluginStartupIndex.Result warm = PluginStartupIndex.build(plugins, cache, ENV, 2, secondWarnings::add);
+            assertEquals("warm", warm.telemetry().startClass(), how.name());
+            assertTrue(secondWarnings.isEmpty(), how.name());
+        }
+    }
+
+    @Test
+    void entriesForJarsThatNoLongerHashTheSameAreMissesWithoutAWarning() throws IOException {
+        final Path plugins = plugins();
+        final Path a = plugins.resolve("a.jar");
+        jar(a, "plugin.yml", "name: Alpha\nfolia-supported: true\n");
+        final Path cache = this.dir.resolve("cache");
+        build(cache, new ArrayList<>());
+        final StartupCache.Loaded loaded = StartupCache.load(cache, ENV);
+        final StartupCache.Entry entry = loaded.entries().get("a.jar");
+        StartupCache.write(cache, ENV, List.of(new StartupCache.Entry("a.jar",
+            new SourceFingerprint("f".repeat(64), entry.source().size(), entry.source().modifiedMillis()),
+            entry.payload())));
+
+        final List<String> warnings = new ArrayList<>();
+        final PluginStartupIndex.Result result = build(cache, warnings);
+        assertTrue(warnings.isEmpty(), warnings.toString());
+        assertEquals(1, result.telemetry().misses());
+        assertTrue(result.cacheWritten());
+        assertEquals(entry.source().sha256(), StartupCache.load(cache, ENV).entries().get("a.jar").source().sha256());
+    }
 }

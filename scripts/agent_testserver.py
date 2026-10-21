@@ -704,6 +704,163 @@ GLOBAL_TOML = ("# Agent test server: no plugin downloads, no auto-update.\n"
                "[misc.auto_update]\nenabled=false\n")
 
 
+# ------------------------------------------------------------------- startup-cache seeding
+# `start --startup-cache-from RUN [--startup-cache-corrupt SHAPE]` installs a startup-index cache
+# taken from an earlier run, damaged in one named way, before the JVM starts. The shapes mirror
+# what StartupCache.load / PluginStartupIndex.build tell apart (docs/architecture/aurora-instant-
+# startup.md). `expect_warn` is the one WARN line the server must print for that shape (None: no
+# WARN, the entries are simply misses).
+STARTUP_CACHE_DEST = "sourbycraft_config/cache/startup-index.cache"
+STARTUP_CACHE_MAGIC = "aurora-startup-cache"
+STARTUP_CACHE_SHAPES = {
+    "empty": {"donor": False, "mode": 0o644, "status": "CORRUPT",
+              "expect_warn": r"Aurora startup cache was not a valid startup cache and was discarded"},
+    "garbage": {"donor": False, "mode": 0o644, "status": "IO_ERROR",
+                "expect_warn": r"Aurora startup cache could not be read and was ignored"},
+    "truncated": {"donor": True, "mode": 0o644, "status": "LOADED",
+                  "expect_warn": r"Aurora startup cache had 1 corrupt entry discarded"},
+    "flipped-entry": {"donor": True, "mode": 0o644, "status": "LOADED",
+                      "expect_warn": r"Aurora startup cache had 1 corrupt entry discarded"},
+    "wrong-version": {"donor": True, "mode": 0o644, "status": "STALE_ENVIRONMENT",
+                      "expect_warn": r"Aurora startup cache was written by a different "
+                                     r"Minecraft/ABI/format/Java and was discarded"},
+    "stale-hashes": {"donor": True, "mode": 0o644, "status": "LOADED", "expect_warn": None},
+    "unreadable": {"donor": True, "mode": 0o000, "status": "IO_ERROR",
+                   "expect_warn": r"Aurora startup cache could not be read and was ignored"},
+}
+STARTUP_INDEX_LINE = re.compile(
+    r"Aurora startup index: (\d+) jar\(s\), (\w+) start \(hit (\d+), miss (\d+), discarded (\d+)\)")
+
+
+def _cache_entry_lines(lines):
+    return [i for i, line in enumerate(lines) if line.startswith("entry ")]
+
+
+def _seal_entry(fields):
+    """An entry line from its six tab fields, with a valid trailing hash (StartupCache.encode)."""
+    body = "\t".join(fields)
+    return "entry " + body + "\t" + hashlib.sha256(body.encode()).hexdigest()
+
+
+def parse_startup_cache(data):
+    """(env, valid_entries, damaged_entries) for cache bytes; env is None for an unusable header.
+
+    Mirrors the integrity checks of ``StartupCache.decode`` (entry hash, payload hash, field
+    count) closely enough to tell "rebuilt and sane" from "still damaged"; not a second loader.
+    """
+    import base64
+    try:
+        lines = data.decode("utf-8").split("\n")
+    except UnicodeDecodeError:
+        return None, 0, 0
+    if lines and lines[-1] == "":
+        lines.pop()
+    if len(lines) < 2 or lines[0] != STARTUP_CACHE_MAGIC or not lines[1].startswith("env "):
+        return None, 0, 0
+    good = bad = 0
+    for line in lines[2:]:
+        if not line:
+            continue
+        ok = False
+        if line.startswith("entry ") and "\t" in line:
+            body, _, sealed = line[6:].rpartition("\t")
+            fields = body.split("\t")
+            if hashlib.sha256(body.encode()).hexdigest() == sealed and len(fields) == 6:
+                try:
+                    ok = hashlib.sha256(base64.b64decode(fields[5], validate=True)).hexdigest() \
+                        == fields[4]
+                except ValueError:
+                    ok = False
+        good, bad = (good + 1, bad) if ok else (good, bad + 1)
+    return lines[1][4:], good, bad
+
+
+def corrupt_startup_cache(shape, donor=None):
+    """Bytes of a damaged startup cache. ``donor`` is a valid cache (bytes) from an earlier run.
+
+    Shapes that damage entries need a donor with at least one entry; ``empty`` and ``garbage``
+    do not. Raises HarnessError rather than silently seeding a cache that is not damaged.
+    """
+    spec = STARTUP_CACHE_SHAPES.get(shape)
+    if spec is None:
+        raise HarnessError(f"unknown startup-cache shape {shape!r}; known: "
+                           f"{', '.join(STARTUP_CACHE_SHAPES)}")
+    if shape == "empty":
+        return b""
+    if shape == "garbage":
+        # Not UTF-8 (0xFF/0xC0 never occur in it), so readAllLines fails: the unreadable-bytes case.
+        return bytes([0xFF, 0xC0, 0x80, 0xFE]) + secrets.token_bytes(252)
+    if donor is None:
+        raise HarnessError(f"shape {shape!r} needs --startup-cache-from RUN (a run with a cache)")
+    env, good, bad = parse_startup_cache(donor)
+    if env is None or good < 1 or bad:
+        raise HarnessError("the donor run's startup cache has no valid entries "
+                           f"(header {'ok' if env else 'bad'}, {good} valid, {bad} damaged); boot it "
+                           "with at least one plugin jar first")
+    if shape == "unreadable":
+        return donor                                  # content intact; the mode makes it unreadable
+    lines = donor.decode("utf-8").split("\n")
+    entries = _cache_entry_lines(lines)
+    if shape == "wrong-version":
+        parts = lines[1][4:].split("|")
+        parts[3] = str(int(parts[3]) + 1)             # the cache-format field
+        lines[1] = "env " + "|".join(parts)
+    elif shape == "stale-hashes":
+        for index in entries:
+            fields = lines[index][6:].rpartition("\t")[0].split("\t")
+            fields[1] = hashlib.sha256(b"seeded-mismatch:" + fields[1].encode()).hexdigest()
+            lines[index] = _seal_entry(fields)        # a valid entry whose jar no longer hashes to it
+    elif shape == "flipped-entry":
+        line = lines[entries[0]]
+        at = len(line) - 70                           # inside the payload, before the entry hash
+        lines[entries[0]] = line[:at] + ("B" if line[at] == "A" else "A") + line[at + 1:]
+    elif shape == "truncated":
+        torn = lines[entries[-1]]
+        lines = lines[:entries[-1]] + [torn[:len(torn) // 2]]    # torn mid-line, no newline
+    return "\n".join(lines).encode("utf-8")
+
+
+def check_startup_cache_boot(log_text, seed, cache_after):
+    """Judge one boot against the cache it was seeded with. Returns (ok, details).
+
+    ``seed`` is run.json's ``startup_cache`` record (shape None = a valid, untouched donor copy:
+    the warm second boot). ``cache_after`` is the cache file's bytes now, or None if absent.
+    """
+    log_text = strip_ansi(log_text)
+    shape = seed.get("shape")
+    spec = STARTUP_CACHE_SHAPES.get(shape) if shape else None
+    warns = [line for line in log_text.splitlines() if "Aurora startup cache" in line]
+    index = None
+    for match in STARTUP_INDEX_LINE.finditer(log_text):
+        index = match
+    env, good, bad = parse_startup_cache(cache_after) if cache_after is not None else (None, 0, 0)
+    after_sha = hashlib.sha256(cache_after).hexdigest() if cache_after is not None else None
+    enabling = len(re.findall(r"\[[^\]]*\] Enabling \S+", log_text))
+    checks = {
+        "booted": bool(DONE_LINE.search(log_text)),
+        "index_line": index is not None,
+        "plugins_enabled": enabling > 0,
+        "cache_valid_after": env is not None and good >= 1 and bad == 0,
+    }
+    if spec is None:                                  # warm second boot
+        checks["no_cache_warning"] = not warns
+        checks["warm_hits"] = bool(index) and index.group(2) == "warm" and int(index.group(3)) >= 1
+    else:
+        want = spec["expect_warn"]
+        if want is None:
+            checks["no_cache_warning"] = not warns
+        else:
+            checks["one_clear_warning"] = len(warns) == 1 and re.search(want, warns[0]) is not None
+        checks["entries_rebuilt"] = bool(index) and int(index.group(4)) >= 1
+        if shape != "unreadable":      # its bytes were valid; a rebuild may reproduce them exactly
+            checks["cache_changed"] = after_sha != seed.get("sha256")
+    details = {"shape": shape, "seeded_sha256": seed.get("sha256"), "cache_sha256_after": after_sha,
+               "cache_entries_after": {"valid": good, "damaged": bad},
+               "cache_warnings": warns, "index_line": index.group(0) if index else None,
+               "plugins_enabled_lines": enabling, "checks": checks}
+    return all(checks.values()), details
+
+
 # ------------------------------------------------------------------------------- supervisor
 
 class Supervisor:
@@ -993,7 +1150,8 @@ class Harness:
               properties=None, jvm_properties=(), startup_timeout_s=STARTUP_TIMEOUT_S,
               rebuild_jar=False, seed_cache=True, console_probe=True, command=None,
               lifetime_grace_s=LIFETIME_GRACE_S, world_from=None, aurora_toml=None,
-              exclusive=False, exclusive_wait_s=EXCLUSIVE_WAIT_S, config_files=None):
+              exclusive=False, exclusive_wait_s=EXCLUSIVE_WAIT_S, config_files=None,
+              startup_cache_from=None, startup_cache_corrupt=None):
         """Create the run, start the supervisor, wait for ``Done (``. Returns run.json.
 
         ``world_from`` names an earlier, finished run whose world directories are copied in
@@ -1001,7 +1159,9 @@ class Harness:
         ``exclusive`` waits (up to ``exclusive_wait_s``) until every slot is free and holds all
         of them for the whole run; otherwise the first free slot is taken or LockBusy raised.
         ``config_files`` maps a run-relative destination (e.g. ``spigot.yml``) to a source file
-        copied there before boot.
+        copied there before boot. ``startup_cache_from`` names an earlier run whose startup-index
+        cache (and plugin jars, mtimes kept so the entries still match) are installed first;
+        ``startup_cache_corrupt`` damages that cache in one named way (STARTUP_CACHE_SHAPES).
         """
         if not (60 <= max_lifetime_s <= MAX_LIFETIME_CEILING_S) and command is None:
             raise HarnessError(f"max lifetime must be 60..{MAX_LIFETIME_CEILING_S}s")
@@ -1017,6 +1177,7 @@ class Harness:
         world_source = self.world_source(world_from) if world_from else None
         aurora = self.aurora_config(aurora_toml, world_source)
         configs = self.config_files(config_files)
+        startup_seed = self.startup_cache_seed(startup_cache_from, startup_cache_corrupt)
         jar = ensure_jar(self.jar, rebuild_jar, self._gradle)
         java, java_version = self._java()
         git = self._git()
@@ -1044,7 +1205,8 @@ class Harness:
                                 simulation_distance, heap_mib, max_lifetime_s, level_type,
                                 properties, jvm_properties, startup_timeout_s, seed_cache,
                                 command, lifetime_grace_s, token, world_source, aurora,
-                                port=port, slot=slot, resources=resources, configs=configs)
+                                port=port, slot=slot, resources=resources, configs=configs,
+                                startup_seed=startup_seed)
             self._spawn_supervisor(workdir, token, paths)
         except BaseException:
             for path in reversed(paths):
@@ -1068,7 +1230,7 @@ class Harness:
                  simulation_distance, heap_mib, max_lifetime_s, level_type, properties,
                  jvm_properties, startup_timeout_s, seed_cache, command, lifetime_grace_s,
                  token, world_source=None, aurora=None, port=None, slot=None, resources=None,
-                 configs=()):
+                 configs=(), startup_seed=None):
         workdir.mkdir(parents=True)
         (workdir / MARKER).write_text("created by scripts/agent_testserver.py\n")
         (workdir / "tmp").mkdir()
@@ -1094,6 +1256,7 @@ class Harness:
                 continue
             (workdir / dest).write_text(text)
             installed.append({"dest": dest, "source": source, "text": text})
+        startup_cache = self._install_startup_cache(workdir, startup_seed)
         seeded = []
         cache = self.base / CACHE_NAME
         if seed_cache and cache.is_dir():
@@ -1136,10 +1299,65 @@ class Harness:
                "world_from": world_from,
                "aurora_toml": aurora_toml,
                "config_files": installed,
+               "startup_cache": startup_cache,
                "other_server_jars_running": run_baseline.competing_servers(jar, -1),
                "hardware": hardware}
         write_json(workdir / "run.json", run)
         return run
+
+    def startup_cache_seed(self, from_run, shape):
+        """Validated seed for ``start``: {"from", "shape", "data", "jars"} or None.
+
+        ``from_run`` must be a finished run with a valid startup cache; its plugins/*.jar are
+        carried over so a shapeless seed (the warm second boot) still matches size/mtime/SHA.
+        With only a ``shape`` (empty, garbage) there is no donor.
+        """
+        if from_run is None and shape is None:
+            return None
+        if shape is not None and shape not in STARTUP_CACHE_SHAPES:
+            raise HarnessError(f"unknown startup-cache shape {shape!r}; known: "
+                               f"{', '.join(STARTUP_CACHE_SHAPES)}")
+        donor, jars = None, []
+        if from_run is not None:
+            source = self.existing(from_run)
+            run = read_json(source / "run.json") or {}
+            if run.get("status") not in FINAL_STATES or "lock_released" not in run:
+                raise HarnessError(f"run {from_run!r} is still running (status {run.get('status')}); "
+                                   "stop it first")
+            cache = source / STARTUP_CACHE_DEST
+            if not cache.is_file():
+                raise HarnessError(f"run {from_run!r} has no {STARTUP_CACHE_DEST}")
+            donor = cache.read_bytes()
+            jars = sorted(p for p in (source / "plugins").glob("*.jar") if p.is_file())
+        if shape is None:
+            env, good, bad = parse_startup_cache(donor)
+            if env is None or good < 1 or bad:
+                raise HarnessError(f"run {from_run!r} has no valid startup-cache entries to reuse")
+            data = donor
+        else:
+            data = corrupt_startup_cache(shape, donor)
+        return {"from": from_run, "shape": shape, "data": data, "jars": jars}
+
+    @staticmethod
+    def _install_startup_cache(workdir, seed):
+        """Write the seeded cache (and carried-over plugin jars) into a new run. Returns the record."""
+        if seed is None:
+            return None
+        carried = []
+        plugins = workdir / "plugins"
+        for jar in seed["jars"]:
+            plugins.mkdir(exist_ok=True)
+            if not (plugins / jar.name).exists():     # an explicit --config-file jar wins
+                shutil.copy2(jar, plugins / jar.name)   # copy2 keeps the mtime the entries record
+                carried.append(jar.name)
+        target = workdir / STARTUP_CACHE_DEST
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(seed["data"])
+        mode = STARTUP_CACHE_SHAPES[seed["shape"]]["mode"] if seed["shape"] else 0o644
+        os.chmod(target, mode)
+        return {"from": seed["from"], "shape": seed["shape"], "dest": STARTUP_CACHE_DEST,
+                "bytes": len(seed["data"]), "sha256": hashlib.sha256(seed["data"]).hexdigest(),
+                "mode": f"{mode:04o}", "plugin_jars_carried": carried}
 
     @staticmethod
     def aurora_config(path, world_source=None):
@@ -1493,7 +1711,8 @@ RESERVED_CONFIG_FILES = ("sourbycraft_config/aurora.toml",
                          "sourbycraft_config/sourbycraft_global_config.toml")
 SETTINGS_KEYS = {"view_distance": int, "simulation_distance": int, "heap_mib": int,
                  "max_lifetime_s": int, "level_type": str, "startup_timeout_s": int,
-                 "properties": dict, "jvm_properties": list}
+                 "properties": dict, "jvm_properties": list,
+                 "startup_cache_from": str, "startup_cache_corrupt": str}
 SAFE_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 PERF_VIEW = re.compile(r"^[a-z]*( [A-Za-z0-9_:./-]+)?$")
 
@@ -1730,6 +1949,11 @@ def build_parser():
         p.add_argument("--config-file", action="append", type=_kv, default=[],
                        metavar="DEST=FILE",
                        help="copy FILE to DEST in the run dir before boot (e.g. spigot.yml=...)")
+        p.add_argument("--startup-cache-from", metavar="RUN",
+                       help="install RUN's startup-index cache and plugin jars (warm second boot)")
+        p.add_argument("--startup-cache-corrupt", metavar="SHAPE", choices=list(STARTUP_CACHE_SHAPES),
+                       help="damage the seeded startup cache: " + ", ".join(STARTUP_CACHE_SHAPES)
+                       + " (empty/garbage need no --startup-cache-from)")
         p.add_argument("--no-seed-cache", action="store_true",
                        help=f"do not copy {CACHE_NAME}/ (bootstrap downloads) into the run")
         p.add_argument("--exclusive", action="store_true",
@@ -1766,6 +1990,8 @@ def build_parser():
     p.add_argument("--timeout", type=float, default=60)
     p = sub.add_parser("status")
     p.add_argument("--name")
+    p = sub.add_parser("cache-check", help="judge a run's boot against its seeded startup cache")
+    p.add_argument("--name", required=True)
     p = sub.add_parser("log")
     p.add_argument("--name", required=True)
     p.add_argument("--lines", type=int, default=50)
@@ -1786,7 +2012,9 @@ def _start_kwargs(args):
               "properties": dict(args.property) or None, "world_from": args.world_from,
               "aurora_toml": args.aurora_toml, "exclusive": args.exclusive or None,
               "exclusive_wait_s": args.exclusive_wait_s,
-              "config_files": dict(args.config_file) or None}
+              "config_files": dict(args.config_file) or None,
+              "startup_cache_from": args.startup_cache_from,
+              "startup_cache_corrupt": args.startup_cache_corrupt}
     return kwargs
 
 
@@ -1834,6 +2062,19 @@ def main(argv=None):
                 and not run.get("jvm_still_running") else 1
         elif args.action == "status":
             print(json.dumps(harness.status(args.name), indent=2, default=str))
+        elif args.action == "cache-check":
+            workdir = harness.existing(args.name)
+            seed = (read_json(workdir / "run.json") or {}).get("startup_cache")
+            if not seed:
+                raise HarnessError(f"run {args.name!r} was not started with a startup-cache seed")
+            cache = workdir / STARTUP_CACHE_DEST
+            try:
+                after = cache.read_bytes() if cache.is_file() else None
+            except OSError:
+                after = None
+            ok, details = check_startup_cache_boot(Console(harness, workdir).text, seed, after)
+            print(json.dumps(dict(details, ok=ok), indent=2))
+            return 0 if ok else 1
         elif args.action == "log":
             print("\n".join(tail(Console(harness, harness.existing(args.name)).text, args.lines)))
         elif args.action == "cleanup":

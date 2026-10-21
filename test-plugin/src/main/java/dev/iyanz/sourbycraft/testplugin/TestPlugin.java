@@ -31,11 +31,16 @@ public class TestPlugin extends JavaPlugin implements Listener {
         // Test-server probes for the owned Entity#teleport and PlayerSpawnLocationEvent; CI boots without them.
         final boolean probes = Boolean.getBoolean("sourby.testplugin.probes");
         final TeleportProbe teleportProbe = probes ? new TeleportProbe(this) : null;
+        UnloadFixtureProbe unloadProbe = null;
         if (probes) {
             Bukkit.getPluginManager().registerEvents(teleportProbe, this);
             Bukkit.getPluginManager().registerEvents(new SpawnLocationProbe(), this);
             Bukkit.getPluginManager().registerEvents(new PearlTeleportProbe(), this);
+            // The unload fixture runs once after startup (CI greps its markers) and on /unloadprobe.
+            unloadProbe = new UnloadFixtureProbe(this);
+            Bukkit.getPluginManager().registerEvents(unloadProbe, this);
         }
+        final UnloadFixtureProbe finalUnloadProbe = unloadProbe;
         // A Paper plugin must register commands through the lifecycle COMMANDS event.
         // JavaPlugin#getCommand throws UnsupportedOperationException during startup here.
         this.getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
@@ -44,6 +49,9 @@ public class TestPlugin extends JavaPlugin implements Listener {
                 new StressCommands(this, "massspawn"));
             registrar.register("flyspeed", "Set a player's fly speed for extreme-range testing.",
                 new StressCommands(this, "flyspeed"));
+            if (finalUnloadProbe != null) {
+                registrar.register("unloadprobe", "Queue region/entity tasks in a temporary world, unload it, report (test server).", finalUnloadProbe);
+            }
             if (teleportProbe != null) {
                 registrar.register("tpprobe", "Drive Entity#teleport through each owned route (test server).", teleportProbe);
             }

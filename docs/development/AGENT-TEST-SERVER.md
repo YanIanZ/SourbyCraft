@@ -45,6 +45,10 @@ python3 $S start --name my-check-2 --world-from my-check   # boot again over my-
 python3 $S start --name awf-1 --aurora-toml awf.toml       # sourbycraft_config/aurora.toml (e.g. AWF worlds)
 python3 $S start --name tp-1 --config-file plugins/SourbyCraft-Test-Plugin.jar=test-plugin/build/libs/test-plugin-1.0.0.jar \
     --jvm-property sourby.testplugin.probes=true    # plugin jar (bytes, <= 8 MiB, run.json keeps its sha256) + test-plugin probes
+python3 $S start --name cache-2 --startup-cache-from cache-1 --startup-cache-corrupt truncated   # boot over a damaged startup cache
+python3 $S cache-check --name cache-2       # judge that boot against the seed (exit 1 = a check failed)
+# with probes=true the unload fixture runs by itself after startup: wait-for "SOURBY_UNLOAD_FIXTURE_(OK|FAILED|[A-Z_]*_WRONG)"
+# and `cmd --name tp-1 unloadprobe --raw` runs it again (see docs/releases/runbooks/build-49-real-test.md, G02)
 python3 $S run --name my-scn --scenario path/to/scenario.json
 python3 $S cleanup --keep 5 [--dry-run]
 ```
@@ -56,6 +60,36 @@ and `run.json` `world_from` records its name, exit code, stop reason, git head a
 source's `sourbycraft_config/aurora.toml` is carried over unless `--aurora-toml` is given, so a
 world stored through AWF comes back through AWF. `kill` exits 0 when the server was SIGKILLed on
 request (`stop_reason` "killed on request") and the lock was released.
+
+### Startup-cache seeding (`--startup-cache-from`, `--startup-cache-corrupt`, `cache-check`)
+
+Build 49 gate "Cache corruption" needs a boot over a damaged `sourbycraft_config/cache/startup-index.cache`
+(`StartupCache` / `PluginStartupIndex`, see `docs/architecture/aurora-instant-startup.md`). The cache only
+has entries when `plugins/` holds a jar, so the donor run needs one (the test plugin jar via `--config-file`).
+`--startup-cache-from RUN` installs a finished run's cache **and its `plugins/*.jar`** (copied with their
+mtimes, because an entry is reused only when size, mtime and SHA-256 match; an explicit `--config-file`
+jar wins over the donor's copy). `--startup-cache-corrupt SHAPE` damages the installed cache first:
+
+| Shape | Needs donor | What the server must do (`PluginStartupIndex.describe`) |
+| --- | --- | --- |
+| `empty` | no | one WARN `was not a valid startup cache and was discarded` (status CORRUPT) |
+| `garbage` | no | one WARN `could not be read and was ignored` (not UTF-8: IO_ERROR) |
+| `truncated` | yes | one WARN `had 1 corrupt entry discarded` (last entry torn mid-line, rest kept) |
+| `flipped-entry` | yes | one WARN `had 1 corrupt entry discarded` (entry hash fails) |
+| `wrong-version` | yes | one WARN `was written by a different Minecraft/ABI/format/Java and was discarded` (format field +1) |
+| `stale-hashes` | yes | **no WARN**: entries stay valid but their jar SHA-256 no longer matches, so they are misses, rebuilt |
+| `unreadable` | yes | one WARN `could not be read and was ignored` (valid bytes, mode 000) |
+
+With `--startup-cache-from` and no shape the donor cache is copied unchanged, which is the warm second boot
+(`cache-check` then expects no cache WARN and `warm start (hit N, miss 0)`). The seed is recorded in
+`run.json` as `startup_cache` (shape, donor, bytes, SHA-256, mode, jars carried). `cache-check --name N` reads
+the run's log and cache file and prints one JSON verdict: `booted` (Done line), `index_line` (the `Aurora
+startup index:` line), `plugins_enabled` (an `Enabling` line), `cache_valid_after` (header, env and every
+entry pass the same integrity checks as `StartupCache.decode`), plus per shape `one_clear_warning` (exactly
+one `Aurora startup cache` line and it matches the table), `entries_rebuilt` (miss >= 1) and `cache_changed`
+(not for `unreadable`, whose rebuilt bytes can equal the seed). Exit 0 only when every check holds. Scenario
+`settings` accept `startup_cache_from` / `startup_cache_corrupt`. Functional evidence only: it proves the
+recovery path of the running jar, not that the cache makes boot faster.
 
 `status` keeps `lock`/`lock_path` meaning slot 1 (the old single lock) and adds `slots` (number,
 lock path, busy, owner, redis_port), `free_slots`, `exclusive` and `any_busy`. `run.json` has

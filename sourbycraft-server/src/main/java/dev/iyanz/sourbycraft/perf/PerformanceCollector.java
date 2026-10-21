@@ -435,6 +435,9 @@ public final class PerformanceCollector implements AutoCloseable {
         private boolean truncated;
         private boolean overflow;
         private boolean hasMaximum;
+        /** Ticks running at this collection and the longest one's elapsed nanoseconds (not clamped). */
+        private int inProgressCount;
+        private long longestInProgress;
 
         private WindowAccumulator(final MetricWindow window) {
             this.window = window;
@@ -458,6 +461,8 @@ public final class PerformanceCollector implements AutoCloseable {
             this.truncated = false;
             this.overflow = false;
             this.hasMaximum = false;
+            this.inProgressCount = 0;
+            this.longestInProgress = 0L;
         }
 
         private void accept(final RegionTickMetrics.WindowSnapshot source, final boolean active,
@@ -488,13 +493,21 @@ public final class PerformanceCollector implements AutoCloseable {
             double utilisation = source.utilisation();
             long activeMaximum = source.maximumNanos();
             if (activeTickStart != RegionTickMetrics.INACTIVE) {
-                final long stalled = Math.min(windowNanos(this.window), elapsed(nowNanos, activeTickStart));
-                activeExecution = saturatingAdd(activeExecution, stalled);
+                // A tick still running is at least this long. Its elapsed time is reported as it
+                // is: clamping it to the window length (the old behaviour) made a tick that had
+                // been running for minutes read exactly 5000 ms in the five-second window, a value
+                // indistinguishable from a measurement. Only the utilisation RATIO is capped to
+                // the window, since a window cannot be more than fully busy.
+                final long running = elapsed(nowNanos, activeTickStart);
+                activeExecution = saturatingAdd(activeExecution, running);
                 activeCount = saturatingAdd(activeCount, 1L);
-                activeMaximum = Math.max(activeMaximum, stalled);
-                utilisation = Math.min(1.0, utilisation + (double)stalled / windowNanos(this.window));
+                activeMaximum = Math.max(activeMaximum, running);
+                utilisation = Math.min(1.0, utilisation
+                    + (double)Math.min(windowNanos(this.window), running) / windowNanos(this.window));
                 this.maximum = Math.max(this.maximum, activeMaximum);
                 this.hasMaximum = true;
+                ++this.inProgressCount;
+                this.longestInProgress = Math.max(this.longestInProgress, running);
             }
             final double tps = source.intervalNanos() > 0L && source.intervalNanos() != Long.MAX_VALUE
                 ? (double)source.sampleCount() * 1.0E9 / source.intervalNanos() : Double.NaN;
@@ -548,7 +561,8 @@ public final class PerformanceCollector implements AutoCloseable {
                 this.truncated || this.overflow ? Double.NaN : pooledP95,
                 this.truncated || this.overflow ? Double.NaN : pooledP99,
                 this.busiestUtilisation, averageUtilisation,
-                this.overflow || this.missingCpu == Long.MAX_VALUE ? Double.NaN : this.missingCpu * 1.0E-6);
+                this.overflow || this.missingCpu == Long.MAX_VALUE ? Double.NaN : this.missingCpu * 1.0E-6,
+                this.inProgressCount == 0 ? Double.NaN : this.longestInProgress * 1.0E-6, this.inProgressCount);
         }
     }
 
@@ -557,7 +571,8 @@ public final class PerformanceCollector implements AutoCloseable {
                                                        final MetricWindow window) {
         final boolean completed = source.sampleCount() > 0L;
         final boolean stalled = activeTickStart != RegionTickMetrics.INACTIVE;
-        final long stallNanos = stalled ? Math.min(windowNanos(window), elapsed(nowNanos, activeTickStart)) : 0L;
+        // The real elapsed time of the running tick, not clamped to the window (see WindowAccumulator).
+        final long stallNanos = stalled ? elapsed(nowNanos, activeTickStart) : 0L;
         final long averageCount = completed ? saturatingAdd(source.sampleCount(), stalled ? 1L : 0L) : 0L;
         final long averageExecution = completed ? saturatingAdd(source.executionNanos(), stallNanos) : 0L;
         final boolean overflow = source.intervalNanos() == Long.MAX_VALUE
@@ -567,7 +582,8 @@ public final class PerformanceCollector implements AutoCloseable {
         final double averageMspt = averageCount == 0L || averageExecution == Long.MAX_VALUE
             ? Double.NaN : (double)averageExecution / averageCount * 1.0E-6;
         final double utilisation = completed || stalled
-            ? Math.min(1.0, source.utilisation() + (double)stallNanos / windowNanos(window)) : Double.NaN;
+            ? Math.min(1.0, source.utilisation()
+                + (double)Math.min(windowNanos(window), stallNanos) / windowNanos(window)) : Double.NaN;
         final double maximum = completed || stalled
             ? Math.max(source.maximumNanos(), stallNanos) * 1.0E-6 : Double.NaN;
         final boolean truncated = source.truncated() || overflow;
@@ -580,7 +596,8 @@ public final class PerformanceCollector implements AutoCloseable {
             truncated ? Double.NaN : source.estimatedP95Mspt(),
             truncated ? Double.NaN : source.estimatedP99Mspt(),
             utilisation, utilisation,
-            overflow ? Double.NaN : source.missingCpuNanos() * 1.0E-6);
+            overflow ? Double.NaN : source.missingCpuNanos() * 1.0E-6,
+            stalled ? stallNanos * 1.0E-6 : Double.NaN, stalled ? 1 : 0);
     }
 
     private static double minimumFinite(final float[] values, final int offset, final int length) {

@@ -12,6 +12,7 @@ import org.junit.platform.suite.api.Suite;
     RegionMetricsRegistryTest.class,
     RegionTickMetricsHolderTest.class,
     RegionMetricsLifecycleIntegrationTest.class,
+    RegionTickMarkerLifecycleModelTest.class,
     PerformanceCollectorTest.class,
     MetricsRuntimeTest.class,
     MetricsConsumerTest.class,

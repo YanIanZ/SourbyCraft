@@ -101,3 +101,59 @@ case-insensitive `true` enables it; unset or other values are false.
 These are proposed acceptance cases; only items 1 (partly) and 5 have recorded evidence as of 2026-10-07 (see
 above). No performance,
 deadlock-prevention, plugin-compatibility or release qualification is claimed.
+
+## A stalled tick without the watchdog: `/perf tick` "Tick in progress" (2026-10-22)
+
+With the watchdog off (the default), nothing logs a region tick that never returns. The one place it shows
+is the running-tick marker `RegionTickMetrics` keeps for every region and for the global tick, which
+`PerformanceCollector` turns into the "Recent maximum" of `/perf tick` and `/mspt` (regions) and into the
+`global tick slow` incident (global tick). This section records what that marker did wrong, what changed
+and what is still not known. It is code, not a setting: nothing to configure, effective after a restart on
+the new jar.
+
+**Before.** A running tick contributed `min(window, now - start)` to the maximum, so a tick running for
+minutes read exactly the window length (5000.0 ms in the five-second window). The panel bench of
+2026-10-21 showed that value in every sample of two jars ([panel-bench-from-vps-2026-10-21.md](panel-bench-from-vps-2026-10-21.md)).
+The marker was also fragile: `tickStarted` only set it from "none", and `tickCompleted` cleared it only when
+the completed tick's start equalled it, so one start whose completion never arrived stayed for good.
+
+**What the panel numbers do and do not say.** In those samples the worst average MSPT stayed at 2.6-3.4 ms.
+A region that keeps completing ticks while carrying a stuck marker would have added the clamped 5000 ms to
+its own average (about 50 ms for 100 ticks), so that is not what was observed. The numbers fit a region that
+completed no tick in the window at all (its average is "unavailable" and drops out of the worst-average
+figure, while the running tick still fed the maximum). Whether that was a tick that really never returned
+(hung inside a plugin or the engine) or a region with a live telemetry generation and no ticks was not
+established. The lost-completion weakness above is real and is fixed, but it is not shown to be the cause of
+the panel value.
+
+**Changed.**
+
+- `RegionTickMetrics.tickStarted`: the newest start wins; `tickCompleted` clears the marker of its own tick or
+  any older one and keeps a newer one; readers drop a marker that a completed tick already covers
+  (`lastCompletedStart`). A lost completion therefore ends at the next completed tick of that owner. Merge
+  rotation, inactive/active retirement and seal are unchanged (a randomised lifecycle model test,
+  `RegionTickMarkerLifecycleModelTest`, 40 seeds x 4000 steps, covers them and fails on the old pairing).
+- `PerformanceCollector`: a running tick is reported with its real elapsed time (no clamp). Only the
+  utilisation ratio is still capped at 1.0. New `WindowMetrics.longestInProgressTickMspt()` and
+  `ticksInProgress()` (additive default methods in `sourbyapi`) separate it from completed ticks;
+  `maximumMspt()` still includes it, as documented.
+- `/perf tick` and `/mspt` name a tick that has run longer than one tick budget: `Recent maximum: 12000.0ms
+  (includes a tick still running for 12.0 s)` plus a `Tick in progress` row. Shorter running ticks are the
+  normal state of a busy region at the sampling instant and are not mentioned. `/perf scheduler` shows which
+  world has ticking regions and the worst running age.
+- `global tick slow` fires on the global tick's real elapsed time; a marker that completed ticks have covered
+  cannot hold it open.
+
+**Still true.** A tick that really does not return is reported as "in progress" with a growing age; it is not
+cleared by anything, and the tick thread's stack is only printed with
+`-Dsourbycraft.region-watchdog.enabled=true` (the Sourby Demo panel cannot pass `-D` flags). Use `/perf tick`
+and `/perf scheduler` first. The region and world a long-running tick belongs to is not part of the public
+snapshot; `/perf scheduler` gives per-world counts and the worst age only.
+
+**Evidence (functional, shared machine, not a measurement).** Test server, worktree jar, a plugin that sleeps in a
+region task: `Recent maximum` read 2132 ms, 5113.5 ms, 8107.6 ms and 11107.2 ms with "includes a tick still
+running" while a 12 s region stall ran, then 12044.7 ms as a completed value and 22.0 ms / 12.4 ms afterwards;
+a 7 s global stall produced `global tick slow ... peak 7006.1 ms`. Four minutes with 8 headless clients,
+region churn from teleports and forceloaded chunks: 27 samples, `Recent maximum` 5.9-97 ms. A local run of the
+pre-fix jar (8 clients for about 6 minutes, teleports across and between regions, forceload churn) did not
+reproduce a pinned value either, so the panel value remains unreproduced here.

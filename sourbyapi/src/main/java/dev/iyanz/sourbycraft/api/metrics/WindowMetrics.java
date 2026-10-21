@@ -35,7 +35,31 @@ public interface WindowMetrics {
 
     double minimumMspt();
 
+    /**
+     * Returns the longest tick duration in this window: the slowest completed tick, or the elapsed
+     * time of a tick that is still running when it is longer (see
+     * {@link #longestInProgressTickMspt()}). It is not clamped to the window length.
+     */
     double maximumMspt();
+
+    /**
+     * Returns the elapsed time in milliseconds of the longest tick that was still running when the
+     * snapshot was taken, or {@link Double#NaN} when no tick was running. A running tick has not
+     * finished, so this is a lower bound of its duration, not a completed measurement. It is
+     * already part of {@link #maximumMspt()}; this separates the two so a stalled tick cannot pass
+     * for a completed maximum. Defaults to {@code NaN} for implementations that do not track it.
+     */
+    default double longestInProgressTickMspt() {
+        return Double.NaN;
+    }
+
+    /**
+     * Returns how many ticks were running when the snapshot was taken (regions for a region window,
+     * 0 or 1 for the global window). Defaults to 0 for implementations that do not track it.
+     */
+    default int ticksInProgress() {
+        return 0;
+    }
 
     double medianMspt();
 
