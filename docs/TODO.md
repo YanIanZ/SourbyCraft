@@ -285,9 +285,11 @@ dan gate yang masih terbuka tetap wajib.
 - [-] Audit timeout downloader, retry/failure, validasi SHA/cache, dan konkurensi di dalam
   SourbyClip: kandidat lokal 3.1.1 sudah diperiksa dan diuji (29 tes Java; timeout connect/read,
   staging SHA, mirror fallback, worker bounded). Pin rilis sudah masuk (SourbyClip 3.1.2 @ `85b4dd70`,
-  `5a3806f1`, SEC-5); masih terbuka: whole-transfer deadline dan size cap launcher (repo privat
-  SourbyClip: soket hanya dibatasi 30 s connect/read; butuh perubahan di repo itu, rilis, dan re-pin —
-  keputusan owner); bukti di `docs/architecture/bootstrap-download-audit.md` (DEV-L, AURORA-I)
+  `5a3806f1`, SEC-5). 2026-10-22: SourbyClip 3.1.3 (`e5de0f4b`, branch lokal `feat/transfer-deadline`)
+  menambah whole-transfer deadline, size cap dan retry terbatas per sumber (termasuk jar Mojang); 48 tes
+  Java lulus (loopback), re-pin (jar `56d317b8…435e`) dan cold boot lokal (`clip313-cold-2`, `Done`
+  17,7 s, stop exit 0; offline cold exit 1) di worktree claude-clip. Masih terbuka: push commit privat
+  + build CI dari pin itu, uji jaringan nyata/remote; bukti di `docs/architecture/bootstrap-download-audit.md` (DEV-L, AURORA-I)
 - [-] Kualifikasi cold-download dari remote (cold bootstrap pernah gagal cek hash Mojang dengan exit 0)
   — bukti lokal agent test server 2026-10-20 (server-w1, PARTIAL): `server-w1-cold-1 --no-seed-cache` (jar `f84e9c10…`, HEAD `69189766` tree kotor): SourbyClip 3.1.2 mengunduh `mojang_26.2.jar` + 112 entri library ber-SHA-256 dari mirror asli, siap 26,7 s (`Done` 8,755 s), stop exit 0. Offline cold (`server-w1-cold-offline-1`, `-Dsourbyclip.offline=true`, cache kosong): JVM exit 1, "Offline bootstrap requires SHA-256-verified cache file cache/mojang_26.2.jar". BELUM: host remote/Linux (needs-linux/panel), injeksi hash-mismatch (harness hanya mengisi cache bersama), tidak tenang/tersertifikasi; item tetap `[-]`
 

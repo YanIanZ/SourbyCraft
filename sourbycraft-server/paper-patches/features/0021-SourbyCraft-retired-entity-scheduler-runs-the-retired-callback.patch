@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 01:31:33 +0700
+Subject: [PATCH] SourbyCraft - retired entity scheduler runs the retired
+ callback
+
+A Bukkit entity task (FoliaEntityScheduler) is its own run and retired
+callback, and it chose between them by entity.isRemoved() alone. A world
+unload retires the schedulers of entities that are saved, not removed
+(WorldUnloadDrain), so every pending entity task ran its body at the
+unload, on the world's shutdown thread, delayed ones included, and no
+retired callback was invoked. A retired scheduler now always means the
+retired callback (or nothing when there is none), which is what Folia's
+contract promises: one of the two runs, the body only while the entity
+is in a world.
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java
+index 811b8efd155540beac19b70afa1885bff570cd3e..4c996e049f65576fd2384d2ac0be33e1da4e3f91 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java
++++ b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java
+@@ -160,7 +160,9 @@ public final class FoliaEntityScheduler implements EntityScheduler {
+                 return;
+             }
+ 
+-            final boolean retired = entity.isRemoved();
++            // SourbyCraft start - a retired scheduler means the retired callback, even for an entity not removed (world unload)
++            final boolean retired = entity.isRemoved() || FoliaEntityScheduler.this.entity.taskScheduler.isRetired();
++            // SourbyCraft end - a retired scheduler means the retired callback, even for an entity not removed (world unload)
+ 
+             try {
+                 if (!retired) {

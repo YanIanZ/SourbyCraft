@@ -414,13 +414,13 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 **Goal:** Validate bounded bootstrap downloads and verified offline reuse.
 
-**Preconditions:** Shared requirements; remote Linux host, Temurin JDK 25 and recorded hardware/network; P10 including provisioned plugins; minimum 1 real player after each successful boot. New SourbyClip deadline/size-cap release and pin are prerequisites.
+**Preconditions:** Shared requirements; remote Linux host, Temurin JDK 25 and recorded hardware/network; P10 including provisioned plugins; minimum 1 real player after each successful boot. New SourbyClip deadline/size-cap release and pin are prerequisites: SourbyClip 3.1.3 (`e5de0f4b`, jar SHA-256 `56d317b8…435e`) implements them and is pinned in the working change; the private commit must be pushed and the release built by CI before this gate can start.
 
 **Steps:**
 
-1. Obtain maintainer evidence that the release jar embeds the SourbyClip version with whole-transfer deadline and size cap; compare its pin with the tag. Block if the fix is only planned.
+1. Obtain maintainer evidence that the release jar embeds SourbyClip 3.1.3 or later (whole-transfer deadline, byte cap, bounded single-source retry): `java -jar <release jar> --sourbyclip-info` prints `SourbyClip 3.1.3`; `gradle.properties` `clipVersion`/`clipSha256` and the `SourbyClip.revision` in `build-data/private-toolchain.lock.json` at the release tag match. Block if the fix is only planned or the pin is older.
 2. Boot the release jar on a remote Linux disposable host with empty bootstrap caches. Capture download start/end, readiness and actual client login.
-3. Using a reviewed disposable download/cache fault setup (unverified until supplied), inject a hash mismatch and exercise the deadline/size-cap failures. Record rejection and process outcome; do not weaken verification.
+3. Using a reviewed disposable download/cache fault setup (unverified until supplied), inject a hash mismatch and exercise the deadline/size-cap failures. Shorten the deadline only through the launcher property (`-Dsourbyclip.transferDeadlineSeconds=<n>` before `-jar`; also `-Dsourbyclip.maxTransferBytes`, `-Dsourbyclip.transferRetries`, all RESTART_REQUIRED). Expected per failed attempt: `Transfer of <what> from <url> failed ...` with `whole-transfer deadline of N s exceeded`, `exceeds the cap of N bytes`, `SHA-256 mismatch` or `retrying in N ms`; when every source fails, a non-zero exit naming the coordinate (library) or `Cannot prepare original JAR ... source: <url>`. Record rejection and process outcome; do not weaken verification.
 4. Boot again with verified caches, then with `-Dsourbyclip.offline=true` before `-jar` (RESTART_REQUIRED). Confirm cached offline success and real client play; separately test a missing/corrupt required library in offline mode and retain its non-zero failure.
 
 **Capture:** Common capture plus Clip release/pin evidence, cold/cached/offline timelines, network activity observations, mismatch/deadline/cap logs, exit codes and client screenshots. Store in `docs/releases/evidence/49/g12-bootstrap/` using the shared filename pattern.

@@ -22,7 +22,13 @@ import net.minecraft.server.level.ServerLevel;
  * alive. Per region, with the shutdown thread owning it:</p>
  *
  * <ul>
- *   <li>every entity scheduler that holds tasks is retired, which invokes the retired callbacks;</li>
+ *   <li>every entity scheduler that holds tasks is retired: each pending task gets exactly its
+ *       retired callback, or nothing when it has none, and never its body. The entities are saved,
+ *       not removed, so this relies on Paper feature patch 0030: a Bukkit entity task
+ *       ({@code FoliaEntityScheduler}) is its own run and retired callback and used to choose by
+ *       {@code entity.isRemoved()} alone, which ran every body here, delayed ones included (found by
+ *       the test plugin's unload fixture, 2026-10-21). Delayed tasks are not fast-forwarded: retiring
+ *       never runs a body, whatever its due tick;</li>
  *   <li>every region scheduler task is cancelled ({@code CANCELLED}, its body never runs);</li>
  *   <li>every queued region task is cancelled without running (cancel-only); chunk tickets are
  *       not touched, the chunk system is already closed.</li>
@@ -95,6 +101,27 @@ public final class WorldUnloadDrain {
         return new Result(retired, scheduled, queued, failures);
     }
 
+    /**
+     * Retires every scheduler not retired yet, which invokes each pending task's retired callback
+     * (never its body, see the class comment). A scheduler whose callback throws is reported and the
+     * others still retire: one plugin's retired callback must not keep the others from running.
+     *
+     * @return how many schedulers were retired without an error
+     */
+    static int retireSchedulers(final EntityScheduler[] schedulers, final java.util.function.Consumer<Throwable> error) {
+        int retired = 0;
+        for (final EntityScheduler scheduler : schedulers) {
+            if (scheduler.isRetired()) continue;
+            try {
+                scheduler.retire();
+                retired++;
+            } catch (final Throwable failed) {
+                error.accept(failed);
+            }
+        }
+        return retired;
+    }
+
     /** Drains the regions of an unloading world on its shutdown thread. Never throws. */
     public static void drain(final RegionShutdownThread thread, final ServerLevel level,
                              final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions,
@@ -117,18 +144,8 @@ public final class WorldUnloadDrain {
                 public int retireEntitySchedulers(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
                     final RegionizedWorldData data = region.getData().getRegionizedData(level.worldRegionData);
                     if (data == null) return 0;
-                    int retired = 0;
-                    for (final EntityScheduler scheduler : data.entitySchedulerTickList.getAllSchedulers()) {
-                        if (scheduler.isRetired()) continue;
-                        try {
-                            scheduler.retire();
-                            retired++;
-                        } catch (final Throwable failed) {
-                            // One plugin's retired callback must not keep the others from running.
-                            logger.error("Failed to retire an entity scheduler while unloading {}", world, failed);
-                        }
-                    }
-                    return retired;
+                    return retireSchedulers(data.entitySchedulerTickList.getAllSchedulers(),
+                        failed -> logger.error("Failed to retire an entity scheduler while unloading {}", world, failed));
                 }
 
                 @Override

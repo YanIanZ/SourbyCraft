@@ -30,14 +30,8 @@ public final class StartupIndexStage {
         final Path pluginsDir = pluginsFolder();
         final CacheEnvironment environment = CacheEnvironment.current(org.bukkit.Bukkit.getMinecraftVersion());
         final int width = Math.min(4, Math.max(1, Runtime.getRuntime().availableProcessors() / 2));
-        final boolean[] warned = {false};
         final PluginStartupIndex.Result result = PluginStartupIndex.build(pluginsDir,
-            useCache ? CACHE_FILE : null, environment, width, message -> {
-                if (!warned[0]) {
-                    warned[0] = true;
-                    SourbyLogger.warn(message);
-                }
-            });
+            useCache ? CACHE_FILE : null, environment, width, warnings(SourbyLogger::warn));
         last = result;
         for (final PluginStartupIndex.Indexed indexed : result.plugins()) {
             if (indexed.descriptor() != null) {
@@ -82,6 +76,22 @@ public final class StartupIndexStage {
 
         t.phaseNanos().forEach((phase, nanos) -> StartupTimeline.phase("startup-index:" + phase, nanos));
         StartupTimeline.startClass(t.startClass());
+    }
+
+    /**
+     * At most one WARN for reading (or listing) and one for writing the cache. A cache that can be
+     * neither read nor rewritten, e.g. a directory at its path, used to log only the read line, so
+     * the next boot's identical miss had no visible cause.
+     */
+    static java.util.function.Consumer<String> warnings(final java.util.function.Consumer<String> sink) {
+        final boolean[] warned = {false, false};
+        return message -> {
+            final int kind = message.startsWith(PluginStartupIndex.CACHE_WRITE_FAILED) ? 1 : 0;
+            if (!warned[kind]) {
+                warned[kind] = true;
+                sink.accept(message);
+            }
+        };
     }
 
     private static volatile DependencyGraph.Report lastGraph;
