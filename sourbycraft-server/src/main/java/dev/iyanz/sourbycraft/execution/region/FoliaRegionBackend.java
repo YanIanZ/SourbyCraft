@@ -25,6 +25,22 @@ public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, R
     }
 
     @Override
+    public RegionTickMetrics globalTickMetricsLive() {
+        final TickRegionScheduler.RegionScheduleHandle global = RegionizedServer.getGlobalTickData();
+        return global == null ? null : global.sourbyTickMetrics.current();
+    }
+
+    @Override
+    public String globalTickFrameMarker() {
+        return RegionizedServer.GlobalTickTickHandle.class.getName();
+    }
+
+    @Override
+    public String regionTickFrameMarker() {
+        return TickRegionScheduler.RegionScheduleHandle.class.getName();
+    }
+
+    @Override
     public double tickRateHz() {
         return TickRegionScheduler.getTickRate();
     }

@@ -56,6 +56,38 @@ public final class ContainerMemory {
         return 100.0 * current / limit;
     }
 
+    /**
+     * Raw text of one cgroup memory file of this process ({@code memory.events}, {@code memory.stat},
+     * {@code memory.pressure}, v1 {@code memory.oom_control}, ...), for diagnostics. Read from the cgroup
+     * that enforces the limit, else from the process's own; v2 first, then v1. At most 8 KiB, trimmed;
+     * {@code null} when the file does not exist or cannot be read. Not on any hot path.
+     */
+    public static String readCgroupFile(final String fileName) {
+        return readCgroupFile(Cgroup.SYSTEM, fileName);
+    }
+
+    static String readCgroupFile(final Cgroup cg, final String fileName) {
+        final Limited v2 = findLimit(chainV2(cg), "memory.max", 0L);
+        final Path v2Dir = v2 != null ? v2.dir() : chainV2(cg).get(0);
+        String text = readSmall(v2Dir.resolve(fileName));
+        if (text != null) return text;
+        final Limited v1 = findLimit(chainV1(cg), "memory.limit_in_bytes", V1_UNLIMITED_FROM);
+        final Path v1Dir = v1 != null ? v1.dir() : chainV1(cg).get(0);
+        return readSmall(v1Dir.resolve(fileName));
+    }
+
+    private static String readSmall(final Path file) {
+        try {
+            if (!Files.isReadable(file) || Files.isDirectory(file)) return null;
+            try (var in = Files.newInputStream(file)) {
+                final String text = new String(in.readNBytes(8192), java.nio.charset.StandardCharsets.UTF_8).trim();
+                return text.isEmpty() ? null : text;
+            }
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     /** Where the cgroup filesystem and {@code /proc/self/cgroup} live; injectable for tests. */
     record Cgroup(Path procSelfCgroup, Path fsRoot) {
         static final Cgroup SYSTEM = new Cgroup(Path.of("/proc/self/cgroup"), Path.of("/sys/fs/cgroup"));

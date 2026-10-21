@@ -288,7 +288,15 @@ while true; do T=$(date +%s); docker exec $CID jcmd $PID Thread.print -l > td-$T
 Start it when the WebSocket listener sees the first spark timeout (or simply at the 50th client). Also take `docker exec $CID cat /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.events` every 10 s (`oom_kill` count in `memory.events` is the definitive OOM-kill record) and `docker inspect -f '{{.State.OOMKilled}} {{.State.ExitCode}}' $CID` right after the death.
 `-XX:NativeMemoryTracking=summary` is only useful with this shell; add it with it (`jcmd $PID VM.native_memory summary`), otherwise skip.
 
-**D. If there is no node shell: an in-JVM stall recorder (code change, not done here).** A daemon thread, not tied to any tick, that watches a global-tick heartbeat
+**D. If there is no node shell: an in-JVM stall recorder.** *Update 2026-10-22: implemented as
+`dev.iyanz.sourbycraft.diagnostics.StallRecorder`, on by default, writing `logs/stalls/stall-<UTC time>.txt` (see
+[STALL-RECORDER.md](STALL-RECORDER.md)). Capture step for the next run: as soon as `console.jsonl` (A.2) shows the first
+`Server stall:` WARN, or the bench sees the first spark timeout, fetch `logs/stalls/` through the panel file API
+(`GET /api/client/servers/<id>/files/list?directory=/logs/stalls`, then `files/download?file=...`) every 10 s until the
+state is `running` again after the restart, and once more right after the restart: the files survive a kill, and the
+`memory.events` `oom_kill` count plus the `memory.current` series across the dumps answer OOM-or-not without a node shell.
+The recorder does not replace A.1-A.2 (it cannot see a SIGKILL from outside) or B (`gc.log`, heap dump on OOM). Not yet
+run on a panel; the paragraph below is the original design note.* Original text: **(code change, not done here).** A daemon thread, not tied to any tick, that watches a global-tick heartbeat
 (`RegionizedServer` global tick counter) and, once it is stale for 10 s, writes every 10 s to `dumps/stall-<epoch>.txt`: `ThreadMXBean.dumpAllThreads(true, true)` with lock owners,
 `findDeadlockedThreads()`, heap used/committed, `Runtime.totalMemory`, `/sys/fs/cgroup/memory.current|max|events`, and the live count of `FoliaChunkInfo` futures. The pieces exist
 (`dev.iyanz.aurora.engine.spark.LabelledThreadDumper`, `dev.iyanz.sourbycraft.perf.RuntimeSampler`, `execution/ThreadCpuSource`); the file survives a SIGKILL. Cheapest way to get a stack

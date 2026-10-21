@@ -10,6 +10,11 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     public static final String LEGACY_ASYNC_PATH_KEY = "perf.ai.async-pathfinding";
     public static final String LANE_SAMPLING_KEY = "aurora.diagnostics.lane-sampling";
     public static final String CHUNK_GENERATION_METRICS_KEY = "aurora.diagnostics.chunk-generation-metrics";
+    public static final String STALL_RECORDER_ENABLED_KEY = "aurora.diagnostics.stall-recorder.enabled";
+    public static final String STALL_RECORDER_AFTER_KEY = "aurora.diagnostics.stall-recorder.after-seconds";
+    public static final String STALL_RECORDER_REPEAT_KEY = "aurora.diagnostics.stall-recorder.repeat-seconds";
+    public static final String STALL_RECORDER_MAX_DUMPS_KEY = "aurora.diagnostics.stall-recorder.max-dumps-per-stall";
+    public static final String STALL_RECORDER_KEEP_FILES_KEY = "aurora.diagnostics.stall-recorder.keep-files";
     public static final String CPU_CORES_KEY = "aurora.cpu.cores";
     public static final String BRIDGE_MODE_KEY = "aurora.bridge.mode";
     public static final String BRIDGE_QUARANTINE_KEY = "aurora.bridge.quarantine-after";
@@ -32,6 +37,9 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
     // system triggers before configuration loads; a reload cannot reach it.
     public static final Setting CHUNK_GENERATION_METRICS =
         new Setting(CHUNK_GENERATION_METRICS_KEY, Lifecycle.RESTART_REQUIRED);
+    // The recorder thread and its shutdown hook are created once, by SourbyCraftBootstrap, from the settings
+    // loaded at that moment; a reload republishes AuroraConfig but never reaches the running recorder.
+    public static final Setting STALL_RECORDER = new Setting("aurora.diagnostics.stall-recorder.*", Lifecycle.RESTART_REQUIRED);
     // The region scheduler is sized during GlobalConfiguration load, long before a reload can
     // reach it, so this cannot honestly be advertised as live.
     public static final Setting CPU_CORES = new Setting(CPU_CORES_KEY, Lifecycle.RESTART_REQUIRED);
@@ -241,10 +249,45 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
      * under load — but it is not free: on an idle server the telemetry lane costs more than the
      * region lane, so a host running many idle worlds has a reason to turn it off.</p>
      */
-    public record Diagnostics(boolean laneSampling, boolean chunkGenerationMetrics) {
+    public record Diagnostics(boolean laneSampling, boolean chunkGenerationMetrics, StallRecorder stallRecorder) {
+        public Diagnostics {
+            Objects.requireNonNull(stallRecorder, "stallRecorder");
+        }
+
+        /** Without the stall-recorder section, which then takes its defaults. */
+        public Diagnostics(final boolean laneSampling, final boolean chunkGenerationMetrics) {
+            this(laneSampling, chunkGenerationMetrics, StallRecorder.DEFAULT);
+        }
+
         /** Without the chunk-generation switch, which then stays off (its default). */
         public Diagnostics(final boolean laneSampling) {
             this(laneSampling, false);
+        }
+    }
+
+    /**
+     * The in-JVM stall recorder ({@code dev.iyanz.sourbycraft.diagnostics.StallRecorder}): a daemon thread
+     * that, when the global tick or an active region has completed no tick for {@code afterSeconds}, writes
+     * thread dumps with lock owners and memory figures to {@code logs/stalls/} so a hosted server (no shell,
+     * no {@code jcmd}) leaves evidence even when the process is later killed. It reads only volatile tick
+     * markers and runs on its own thread. RESTART_REQUIRED: the thread and its shutdown hook are created once
+     * at boot.
+     *
+     * @param enabled {@code false} starts no thread and registers no hook
+     * @param afterSeconds seconds without a completed tick before the first dump (1..3600)
+     * @param repeatSeconds seconds between dumps while the same stall lasts (1..3600)
+     * @param maxDumpsPerStall dumps written per stall, plus one final dump if the JVM shuts down during it (1..100)
+     * @param keepFiles newest {@code stall-*.txt} files kept in the directory (1..1000)
+     */
+    public record StallRecorder(boolean enabled, int afterSeconds, int repeatSeconds, int maxDumpsPerStall,
+                                int keepFiles) {
+        public static final StallRecorder DEFAULT = new StallRecorder(true, 10, 10, 6, 20);
+
+        public StallRecorder {
+            if (afterSeconds < 1 || afterSeconds > 3600 || repeatSeconds < 1 || repeatSeconds > 3600
+                || maxDumpsPerStall < 1 || maxDumpsPerStall > 100 || keepFiles < 1 || keepFiles > 1000) {
+                throw new IllegalArgumentException("stall recorder bounds: after/repeat 1..3600, dumps 1..100, files 1..1000");
+            }
         }
     }
     public enum Lifecycle { LIVE, RESTART_REQUIRED, IMMUTABLE_FOR_RUN }
@@ -262,7 +305,7 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         final var values = snapshot.values();
         // Malformed namespace containers must not expose a legacy true underneath them.
         for (final String parent : List.of("aurora", "aurora.entity", "aurora.diagnostics",
-                                          "aurora.cpu", "aurora.bridge", "aurora.scheduler",
+                                          "aurora.diagnostics.stall-recorder", "aurora.cpu", "aurora.bridge", "aurora.scheduler",
                                           "aurora.network", "aurora.world")) {
             if (values.containsKey(parent)) return new Parsed(DEFAULT, List.of(parent), List.of());
         }
@@ -304,6 +347,23 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
                 invalid.add(CHUNK_GENERATION_METRICS_KEY);
             }
         }
+
+        // The recorder falls back to its defaults on a typo: it is evidence-gathering that costs one
+        // idle daemon thread, so an unreadable value must not switch it off, and each number is
+        // bounded so a typo cannot ask for a dump every millisecond.
+        boolean stallEnabled = StallRecorder.DEFAULT.enabled();
+        final Object stallEnabledValue = values.get(STALL_RECORDER_ENABLED_KEY);
+        if (stallEnabledValue != null) {
+            if (stallEnabledValue instanceof Boolean enabled) {
+                stallEnabled = enabled;
+            } else {
+                invalid.add(STALL_RECORDER_ENABLED_KEY);
+            }
+        }
+        final int stallAfter = boundedInt(values, STALL_RECORDER_AFTER_KEY, StallRecorder.DEFAULT.afterSeconds(), 1, 3600, invalid);
+        final int stallRepeat = boundedInt(values, STALL_RECORDER_REPEAT_KEY, StallRecorder.DEFAULT.repeatSeconds(), 1, 3600, invalid);
+        final int stallMaxDumps = boundedInt(values, STALL_RECORDER_MAX_DUMPS_KEY, StallRecorder.DEFAULT.maxDumpsPerStall(), 1, 100, invalid);
+        final int stallKeepFiles = boundedInt(values, STALL_RECORDER_KEEP_FILES_KEY, StallRecorder.DEFAULT.keepFiles(), 1, 1000, invalid);
 
         // A negative or non-integer budget is a typo, not an instruction. AUTO is the documented
         // default and the honest fallback: guessing a number here would silently cap a machine.
@@ -391,11 +451,25 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         // Each key falls back on its own. A typo in one setting must not silently revert another
         // the operator set deliberately -- only a malformed namespace container, handled above,
         // discards everything, because then nothing underneath it can be trusted.
-        return new Parsed(new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling, chunkGenerationMetrics),
+        return new Parsed(new AuroraConfig(new Entity(asyncPathfinding), new Diagnostics(laneSampling, chunkGenerationMetrics,
+                new StallRecorder(stallEnabled, stallAfter, stallRepeat, stallMaxDumps, stallKeepFiles)),
             new Cpu(cores), new Bridge(bridgeMode, quarantineAfter, syncRoute, maxPendingTasks, maxRunningAsyncTasks),
             new Scheduler(bridgeIoThreads, bridgeIoQueue, storageThreads, storageQueue), new Network(networkCounters),
             new World(commandBlocks, tickFunctions)),
             List.copyOf(invalid), deprecated);
+    }
+
+    /** A whole number within {@code min..max}, else the default and an invalid-key report. */
+    private static int boundedInt(final java.util.Map<String, Object> values, final String key, final int fallback,
+                                  final int min, final int max, final List<String> invalid) {
+        final Object value = values.get(key);
+        if (value == null) return fallback;
+        if (value instanceof Number number && number.doubleValue() == Math.floor(number.doubleValue())
+            && number.longValue() >= min && number.longValue() <= max) {
+            return number.intValue();
+        }
+        invalid.add(key);
+        return fallback;
     }
 
     /** A whole number at or above {@code min}, else the default and an invalid-key report. */
@@ -442,6 +516,9 @@ public record AuroraConfig(Entity entity, Diagnostics diagnostics, Cpu cpu, Brid
         if (diagnostics.chunkGenerationMetrics() != previous.diagnostics.chunkGenerationMetrics()) {
             restart.add(CHUNK_GENERATION_METRICS_KEY + " (" + previous.diagnostics.chunkGenerationMetrics()
                 + " -> " + diagnostics.chunkGenerationMetrics() + ")");
+        }
+        if (!diagnostics.stallRecorder().equals(previous.diagnostics.stallRecorder())) {
+            restart.add("aurora.diagnostics.stall-recorder.*");
         }
         if (!scheduler.equals(previous.scheduler)) {
             restart.add("aurora.scheduler budgets");

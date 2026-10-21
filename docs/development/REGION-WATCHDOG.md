@@ -157,3 +157,10 @@ a 7 s global stall produced `global tick slow ... peak 7006.1 ms`. Four minutes 
 region churn from teleports and forceloaded chunks: 27 samples, `Recent maximum` 5.9-97 ms. A local run of the
 pre-fix jar (8 clients for about 6 minutes, teleports across and between regions, forceload churn) did not
 reproduce a pinned value either, so the panel value remains unreproduced here.
+
+## Not the same thing as the stall recorder (2026-10-22)
+
+This switch is the inherited Folia watchdog (RESTART_REQUIRED, default off). The
+[stall recorder](STALL-RECORDER.md) is SourbyCraft's own, on by default, independent of this flag: it writes
+thread dumps and memory figures to `logs/stalls/` when the global tick or a region completes no tick for 10 s.
+Neither stops, restarts or kills anything.

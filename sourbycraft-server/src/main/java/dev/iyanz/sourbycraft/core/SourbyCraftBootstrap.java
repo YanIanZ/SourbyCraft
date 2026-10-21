@@ -73,6 +73,8 @@ public final class SourbyCraftBootstrap {
         catch (Throwable failure) { SourbyLogger.error("HUD shutdown failed", failure); }
         try { AutoUpdateSettings.stopUpdater(); }
         catch (Throwable failure) { SourbyLogger.error("Updater shutdown failed", failure); }
+        try { dev.iyanz.sourbycraft.diagnostics.StallRecorderRuntime.stop(); }
+        catch (Throwable failure) { SourbyLogger.error("Stall recorder shutdown failed", failure); }
         try { dev.iyanz.sourbycraft.perf.MetricsRuntime.close(org.bukkit.Bukkit.getServicesManager()); }
         catch (Throwable failure) { SourbyLogger.error("Metrics shutdown failed", failure); }
         try { dev.iyanz.sourbycraft.perf.GcTracker.stop(); }
@@ -87,7 +89,7 @@ public final class SourbyCraftBootstrap {
     }
 
     /**
-     * Starts metrics, network counters, configuration, plugin config provisioning, branding,
+     * Starts metrics, network counters, configuration, the stall recorder, plugin config provisioning, branding,
      * diagnostics, the startup index, commands, listeners, player-slot settings, I/O workers, the
      * updater and GC sampling, in that order.
      * A second invocation is a no-op, including after a partially failed startup. Individual stage
@@ -117,6 +119,13 @@ public final class SourbyCraftBootstrap {
         // The unified TOML: messages, /maxp, auto-updater settings.
         stage("configuration", () -> {
             SourbyCraftConfig.init();
+        });
+
+        // After configuration (reads aurora.diagnostics.stall-recorder.*, RESTART_REQUIRED). Its own daemon
+        // thread; evidence for a hung tick on hosts with no shell. Disabled = no thread, no hook.
+        stage("stall recorder", () -> {
+            dev.iyanz.sourbycraft.diagnostics.StallRecorderRuntime.start(
+                SourbyCraftConfig.aurora().diagnostics().stallRecorder());
         });
 
         // AuroraWorlds API: before plugins enable, so they can look it up in onEnable.
@@ -246,7 +255,7 @@ public final class SourbyCraftBootstrap {
     static synchronized int failureCountForTesting() { return failureCount; }
 
     /** Stages the engine brings up, in order; the denominator of the boot bar. */
-    private static final int TOTAL_STAGES = 14;
+    private static final int TOTAL_STAGES = 15;
     private static int stageCount;
     private static int failureCount;
     private static final java.util.List<dev.iyanz.sourbycraft.brand.AuroraBoot.Stage> progress = new java.util.ArrayList<>();

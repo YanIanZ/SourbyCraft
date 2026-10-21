@@ -62,7 +62,9 @@ public final class RegionTickMetrics {
     private int unresolvedStart;
     private int unresolvedSize;
     private long lastDroppedUnresolvedEnd = INACTIVE;
-    private long lastCompletedEnd;
+    // Volatile so the stall recorder can read it without the monitor; written once per completed tick,
+    // inside the already-synchronized recordCompletedSample.
+    private volatile long lastCompletedEnd;
     private long lastPromotionEpoch = Long.MIN_VALUE;
 
     private final BucketStore seconds = new BucketStore(61, SECOND);
@@ -250,6 +252,23 @@ public final class RegionTickMetrics {
                 }
             }
         }
+    }
+
+    /**
+     * End ({@code System.nanoTime}) of the most recent completed tick, or {@code 0L} before the first.
+     * Lock-free: one volatile read, for the stall recorder.
+     */
+    public long lastCompletedEndNanos() {
+        return this.lastCompletedEnd;
+    }
+
+    /**
+     * Start of the tick in progress, or {@link #INACTIVE} between ticks (and once sealed). Lock-free:
+     * one acquire read, for the stall recorder.
+     */
+    public long activeTickStartNanos() {
+        final long state = (long)ACTIVE_STATE.getAcquire(this);
+        return state == SEALED ? INACTIVE : state;
     }
 
     public Snapshot snapshot(final long nowNanos) {

@@ -19,6 +19,31 @@ public interface RegionBackend {
     RegionTickMetrics.Snapshot globalTickMetrics(long nowNanos);
 
     /**
+     * The global tick's live metrics object (not a snapshot), for readers that must not take a monitor.
+     * Only its volatile markers ({@link RegionTickMetrics#lastCompletedEndNanos()},
+     * {@link RegionTickMetrics#activeTickStartNanos()}) are safe to read from a watchdog.
+     *
+     * @return the global tick's metrics, or {@code null} before the engine created them
+     */
+    RegionTickMetrics globalTickMetricsLive();
+
+    /**
+     * A class-name fragment that appears in the stack of the thread running the global tick (so a thread
+     * dump can name the stalled thread without the engine's thread being exposed).
+     *
+     * @return the fragment
+     */
+    String globalTickFrameMarker();
+
+    /**
+     * A class-name fragment that appears in the stack of any thread running a region tick or region task
+     * (the global tick's thread included).
+     *
+     * @return the fragment
+     */
+    String regionTickFrameMarker();
+
+    /**
      * The configured tick rate in hertz, against which TPS is judged.
      *
      * @return ticks per second the engine is aiming for

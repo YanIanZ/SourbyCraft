@@ -53,6 +53,11 @@ python3 $S run --name my-scn --scenario path/to/scenario.json
 python3 $S cleanup --keep 5 [--dry-run]
 ```
 
+With the test-plugin probes on, `cmd --name tp-1 "stallprobe global sleep 15"` blocks the global tick for 15 s
+(`global|region`, `sleep|lock|spin`, 1-600 s; `STALLPROBE start/end` log lines) so the stall recorder writes
+`<workdir>/logs/stalls/stall-*.txt` ([STALL-RECORDER.md](STALL-RECORDER.md)). The command itself returns at once; `stop` after
+the probe ends. Test servers only: it freezes the world it runs on.
+
 `--world-from RUN` copies a finished (exited/failed, lock released) run's world directories —
 the `level-name` directory and its `_nether`/`_the_end` siblings, nothing else — into the new run,
 so a restart-persistence or post-crash boot reads that run's saves; the source is never modified

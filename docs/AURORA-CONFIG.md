@@ -13,6 +13,11 @@ This document describes **what branch `26.2` actually consumes now**. It is not 
 | `aurora.entity.async-pathfinding` | boolean / `false` | LIVE | `AsyncPathProcessor` admission |
 | `aurora.diagnostics.lane-sampling` | boolean / `true` | LIVE | execution-lane CPU attribution |
 | `aurora.diagnostics.chunk-generation-metrics` | boolean / `false` | RESTART_REQUIRED | generic chunk-generation stage timing behind `/perf chunks`; read once from the TOML at class init (before configuration loads); also on when `-Dsourbycraft.chunk-generation-metrics.enabled=true`; an invalid value is reported and stays off |
+| `aurora.diagnostics.stall-recorder.enabled` | boolean / `true` | RESTART_REQUIRED | `StallRecorder` (`diagnostics/`): started by `SourbyCraftBootstrap` after the configuration stage; `false` starts no thread and registers no shutdown hook. An invalid value is reported and keeps the default (`true`). The four keys below share the lifecycle: they are read once at boot, a reload republishes `AuroraConfig` but never reaches the running recorder, and `/sourbycraft reload` lists them as restart-pending ([development/STALL-RECORDER.md](development/STALL-RECORDER.md)) |
+| `aurora.diagnostics.stall-recorder.after-seconds` | integer 1–3600 / `10` | RESTART_REQUIRED | seconds the global tick, or any active region, may go without completing a tick before the first dump; invalid keeps `10` |
+| `aurora.diagnostics.stall-recorder.repeat-seconds` | integer 1–3600 / `10` | RESTART_REQUIRED | seconds between dumps while the same stall lasts |
+| `aurora.diagnostics.stall-recorder.max-dumps-per-stall` | integer 1–100 / `6` | RESTART_REQUIRED | dumps per stall; one more is written if the JVM shuts down during the stall |
+| `aurora.diagnostics.stall-recorder.keep-files` | integer 1–1000 / `20` | RESTART_REQUIRED | newest `logs/stalls/stall-*.txt` kept; older ones are deleted when a new stall file is created |
 | `aurora.cpu.cores` | integer / `0` (AUTO) | RESTART_REQUIRED | early region-scheduler CPU budget |
 | `aurora.bridge.mode` | `off` / `safe`, default `off` | RESTART_REQUIRED | plugin loader admission via `AuroraBridge` (read from the TOML files directly, before `SourbyCraftBootstrap`) |
 | `aurora.bridge.quarantine-after` | integer ≥ 1 / `3` | LIVE | Aurora Bridge quarantine threshold |

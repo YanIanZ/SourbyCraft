@@ -102,6 +102,21 @@ behaviour. `/spark profiler start` is referenced by owned command views; further
 spark syntax, including `/spark profiler stop`, is **(verify command exists)** against
 the bundled version before use. Redact private endpoints, credentials and tokens.
 
+**Where to find stall dumps.** Build 49 records a hung tick by itself
+([STALL-RECORDER.md](../../development/STALL-RECORDER.md)). On a hosted panel with no shell, open the
+file manager at `logs/stalls/` (next to `logs/latest.log`): each `stall-<UTC time>.txt` holds, for one
+stall, up to six dumps taken 10 s apart (full thread dump with lock owners, the stalled thread, heap,
+RSS, container `memory.current`/`memory.max`/`memory.events`, GC counts, loaded chunks/entities/players),
+plus a final dump if the JVM was told to shut down during the stall. The console shows one WARN,
+`Server stall: the global tick has completed no tick for N s ... written to logs/stalls/stall-....txt`,
+when it starts. Download the **whole directory** before restarting the server when a run hangs, stops
+answering or dies, and attach it to the evidence folder next to `logs/latest.log` and the panel console
+history; `memory.events` `oom_kill > 0` in a dump is the kernel's own record of an OOM kill. An empty or
+missing `logs/stalls/` after a hang is itself a result (recorder disabled with
+`aurora.diagnostics.stall-recorder.enabled = false`, a boot hang before the first tick, or a kill before
+the first dump): record it, do not infer a cause. The recorder detects "no tick completed for 10 s",
+not slow ticks; it is RESTART_REQUIRED and on by default.
+
 Owned command registration and syntax were checked in `SourbyCraftCommands`,
 `PerfViews`, `AwfCommand`, `PluginsCommand`, `UpdateCommand`, `HudBarCommand` and
 `PerfBarCommand` under `sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/command/`.
@@ -112,6 +127,10 @@ runtime help/registration verification before use. Do not invent plugin test com
 record the installed plugin's documented command or GUI action before running it.
 
 ### Failure procedure F (every gate and runtime check)
+
+For a hang, a stall or an unexplained process death, first save `logs/stalls/` (see "Where to find
+stall dumps" under Capture for every run) before the server restarts; the panel may rotate or clear
+`logs/latest.log` and the next boot starts a fresh recorder, but the stall files stay until 20 newer ones exist.
 
 Record FAIL for an observed defect and BLOCKED for missing prerequisites. File an
 issue with the gate/check id, evidence folder path, exact `/ver` line, jar SHA-256,

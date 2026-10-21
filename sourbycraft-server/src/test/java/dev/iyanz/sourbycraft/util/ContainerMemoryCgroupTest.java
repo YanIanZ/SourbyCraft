@@ -151,4 +151,39 @@ class ContainerMemoryCgroupTest {
         assertEquals(2 * GIB, ContainerMemory.swapTotalBytes(cg));
         assertEquals(GIB / 2, ContainerMemory.swapUsedBytes(cg, 2 * GIB));
     }
+
+    @Test
+    void readCgroupFileReadsFromTheCgroupThatEnforcesTheLimit() throws IOException {
+        final Cgroup cg = cgroup("0::/system.slice/sc.scope\n");
+        write("system.slice/sc.scope/memory.max", "max");
+        write("system.slice/memory.max", String.valueOf(4 * GIB));
+        write("system.slice/memory.events", "low 0\nhigh 0\nmax 3\noom 1\noom_kill 1");
+        write("system.slice/sc.scope/memory.stat", "anon 1\nfile 2");
+
+        assertEquals("low 0\nhigh 0\nmax 3\noom 1\noom_kill 1", ContainerMemory.readCgroupFile(cg, "memory.events"));
+        // Not present at the enforcing level: falls through to nothing rather than guessing another directory.
+        assertEquals(null, ContainerMemory.readCgroupFile(cg, "memory.stat"));
+        assertEquals(null, ContainerMemory.readCgroupFile(cg, "memory.no-such-file"));
+    }
+
+    @Test
+    void readCgroupFileFallsBackToTheLeafAndToV1() throws IOException {
+        final Cgroup leafOnly = cgroup("0::/sc.scope\n");
+        write("sc.scope/memory.max", "max");
+        write("sc.scope/memory.pressure", "some avg10=0.50 avg60=0.10 avg300=0.00 total=12");
+        assertEquals("some avg10=0.50 avg60=0.10 avg300=0.00 total=12", ContainerMemory.readCgroupFile(leafOnly, "memory.pressure"));
+
+        final Cgroup v1 = cgroup("4:memory:/docker/abc\n");
+        write("memory/docker/abc/memory.limit_in_bytes", String.valueOf(2 * GIB));
+        write("memory/docker/abc/memory.oom_control", "oom_kill_disable 0\nunder_oom 0\noom_kill 2");
+        assertEquals("oom_kill_disable 0\nunder_oom 0\noom_kill 2", ContainerMemory.readCgroupFile(v1, "memory.oom_control"));
+    }
+
+    @Test
+    void readCgroupFileCapsWhatItReads() throws IOException {
+        final Cgroup cg = cgroup("0::/sc.scope\n");
+        write("sc.scope/memory.max", "max");
+        write("sc.scope/memory.stat", "x".repeat(20_000));
+        assertEquals(8192, ContainerMemory.readCgroupFile(cg, "memory.stat").length());
+    }
 }

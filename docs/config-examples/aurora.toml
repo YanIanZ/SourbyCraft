@@ -10,6 +10,19 @@ async-pathfinding = false
 # LIVE. Attribute per-thread CPU to execution lanes once per second.
 lane-sampling = true
 
+[aurora.diagnostics.stall-recorder]
+# RESTART_REQUIRED (all five keys; the thread and its shutdown hook are created once at boot).
+# When the global tick or an active region completes no tick for after-seconds, a daemon thread
+# writes thread dumps (with lock owners) and memory/cgroup figures to logs/stalls/stall-<time>.txt.
+# false = no thread, no hook. It reads volatile tick markers only; see docs/development/STALL-RECORDER.md.
+enabled = true
+after-seconds = 10
+# Seconds between dumps while the same stall lasts, and how many dumps one stall may write
+# (one more is written if the JVM shuts down during it). keep-files = newest stall files kept.
+repeat-seconds = 10
+max-dumps-per-stall = 6
+keep-files = 20
+
 [aurora.cpu]
 # RESTART_REQUIRED. 0 = JVM-visible processors; explicit paper-global thread count wins.
 cores = 0

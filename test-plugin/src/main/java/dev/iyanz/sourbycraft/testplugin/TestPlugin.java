@@ -52,6 +52,9 @@ public class TestPlugin extends JavaPlugin implements Listener {
             if (finalUnloadProbe != null) {
                 registrar.register("unloadprobe", "Queue region/entity tasks in a temporary world, unload it, report (test server).", finalUnloadProbe);
             }
+            if (probes) {
+                registrar.register("stallprobe", "Block the global tick or a region on purpose (test server only).", new StallProbe(this));
+            }
             if (teleportProbe != null) {
                 registrar.register("tpprobe", "Drive Entity#teleport through each owned route (test server).", teleportProbe);
             }

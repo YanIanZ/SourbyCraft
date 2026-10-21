@@ -13,22 +13,22 @@ The UI does not establish performance improvement or feature qualification.
 The new banner separates release, Minecraft/channel, Java, JVM-visible processors and
 maximum heap into labelled rows. Long build identities are preserved.
 
-Aurora prints one line per bootstrap service stage when the stage finishes (14 stages,
+Aurora prints one line per bootstrap service stage when the stage finishes (15 stages,
 `TOTAL_STAGES` in `core/SourbyCraftBootstrap`): a 16-cell progress gauge, `OK` or `FAIL`, the
 stage name and its elapsed time. A stage still running after 10 seconds also gets one WARN,
-`Stage N/14 "<name>" is still running after 10000 ms`, so a hang names its stage without extra
-logging. The `START N/14 <name>` line before each stage is a log4j DEBUG event on the `Aurora`
+`Stage N/15 "<name>" is still running after 10000 ms`, so a hang names its stage without extra
+logging. The `START N/15 <name>` line before each stage is a log4j DEBUG event on the `Aurora`
 logger and is not printed by default; to see it, start the server with a copy of `log4j2.xml`
 that adds `<Logger name="Aurora" level="debug"/>` inside `<Loggers>`
 (`-Dlog4j.configurationFile=<file>`). The stages run in this fixed order: metrics runtime,
-network counters, configuration, aurora worlds, plugin provisioning, banner, plugin diagnostics,
+network counters, configuration, stall recorder, aurora worlds, plugin provisioning, banner, plugin diagnostics,
 startup index, commands, messages, player slots, virtual executor, auto updater, gc tracker.
 Output is append-only, with no cursor movement, artificial waits or guessed time remaining.
 
 ```text
-[Aurora]  9/14  64% [==========......]  OK    commands  (14ms)
+[Aurora] 10/15  67% [==========......]  OK    commands  (14ms)
 ...
-[Aurora] COMPLETE | 14/14 stages completed without error | 0 failed | 61ms
+[Aurora] COMPLETE | 15/15 stages completed without error | 0 failed | 61ms
 [Aurora] Minecraft continues loading; wait for the server-ready message before connecting.
 ```
 

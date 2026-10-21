@@ -37,6 +37,23 @@ public final class RegionMetricsRegistry {
     public record GenerationView(long generationId, long worldId, long regionId, boolean active,
                                   RegionTickMetrics metrics, RegionTickMetrics.Snapshot snapshot) {}
 
+    /** A live region generation for the stall recorder: identity and its lock-free tick markers. */
+    public record ActiveGeneration(long worldId, long regionId, RegionTickMetrics metrics) {}
+
+    /**
+     * Walks the live (not retired) generations without touching any monitor: a concurrent map
+     * iteration plus one acquire read per generation. Meant for a watchdog that must keep working
+     * while a region is stuck; it never refreshes, publishes or removes anything.
+     */
+    public void forEachActive(final Consumer<ActiveGeneration> consumer) {
+        Objects.requireNonNull(consumer, "consumer");
+        for (final Generation generation : this.generations.values()) {
+            if (generation.isActive()) {
+                consumer.accept(new ActiveGeneration(generation.worldId, generation.regionId, generation.metrics));
+            }
+        }
+    }
+
     public long newWorldId() {
         return nextNonZero(this.nextWorldId);
     }

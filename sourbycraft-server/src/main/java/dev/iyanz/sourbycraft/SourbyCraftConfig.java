@@ -81,6 +81,9 @@ public final class SourbyCraftConfig {
         if (!beforeAurora.cpu().equals(afterAurora.cpu())) keys.add(AuroraConfig.CPU_CORES_KEY);
         if (beforeAurora.bridge().mode() != afterAurora.bridge().mode()) keys.add(AuroraConfig.BRIDGE_MODE_KEY);
         if (!beforeAurora.scheduler().equals(afterAurora.scheduler())) keys.add("aurora.scheduler.*");
+        if (!beforeAurora.diagnostics().stallRecorder().equals(afterAurora.diagnostics().stallRecorder())) {
+            keys.add("aurora.diagnostics.stall-recorder.*");
+        }
         for (String key : List.of("ui.console-style", "branding.gc-advisor.enabled",
                 "sourbycraft.max-players", "sourbycraft.maxplayers.bypass-enabled",
                 "viaversion.auto-provision", "protocollib.auto-provision", "messages.motd", "misc.auto_update.check_interval_minutes")) {
@@ -321,6 +324,19 @@ public final class SourbyCraftConfig {
             "Generic chunk-generation stage timing behind /perf chunks (RESTART_REQUIRED). Read once at "
             + "startup; the JVM property -Dsourbycraft.chunk-generation-metrics.enabled=true also turns it on. "
             + "Times every non-empty generation stage, so it is off by default.");
+        seed(f, changed, AuroraConfig.STALL_RECORDER_ENABLED_KEY, true,
+            "Stall recorder (RESTART_REQUIRED, with the four keys below). When the global tick or a region has "
+            + "completed no tick for after-seconds, a daemon thread writes thread dumps (with lock owners) and "
+            + "memory figures (heap, RSS, container cgroup) to logs/stalls/stall-<time>.txt, so a server without "
+            + "a shell leaves evidence. false starts no thread and registers no hook.");
+        seed(f, changed, AuroraConfig.STALL_RECORDER_AFTER_KEY, 10,
+            "Seconds without a completed tick before the first dump (RESTART_REQUIRED). 1-3600.");
+        seed(f, changed, AuroraConfig.STALL_RECORDER_REPEAT_KEY, 10,
+            "Seconds between dumps while the same stall lasts (RESTART_REQUIRED). 1-3600.");
+        seed(f, changed, AuroraConfig.STALL_RECORDER_MAX_DUMPS_KEY, 6,
+            "Dumps written per stall (RESTART_REQUIRED). 1-100. One more is written if the JVM shuts down during the stall.");
+        seed(f, changed, AuroraConfig.STALL_RECORDER_KEEP_FILES_KEY, 20,
+            "Newest stall files kept in logs/stalls/ (RESTART_REQUIRED). 1-1000; older ones are deleted.");
         seed(f, changed, AuroraConfig.BRIDGE_MODE_KEY, "off",
             "Aurora Compatibility Bridge (RESTART_REQUIRED). off = plugins without folia-supported/canvas-supported "
             + "are refused, as before. safe = they load, their Bukkit scheduler tasks are routed through "
