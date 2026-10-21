@@ -11,7 +11,7 @@
   <a href="https://github.com/YanIanZ/SourbyCraft/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/YanIanZ/SourbyCraft/build.yml?branch=26.2&style=flat-square&label=build" alt="Build status"></a>
   <img src="https://img.shields.io/badge/minecraft-26.2-brightgreen?style=flat-square" alt="Minecraft 26.2">
   <img src="https://img.shields.io/badge/java-25-blue?style=flat-square" alt="Java 25">
-  <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/license-GPL--3.0--only-blue?style=flat-square" alt="License: GPL-3.0-only">
 </p>
 
 ---
@@ -126,5 +126,6 @@ Cherry incorporates work inspired by or derived from **[LeavesMC](https://github
 ([Cherry](https://github.com/YanIanZ/Cherry)). Profiling integration uses
 **[spark](https://spark.lucko.me)**.
 
-SourbyCraft's own license is in [LICENSE.md](LICENSE.md). Third-party components remain under their
-respective licenses.
+SourbyCraft is licensed under the [GPL version 3 only](LICENSE.md); upstream components keep their own
+licences, listed there. The SourbyCraft and Aurora names and logos are covered by the
+[trademark policy](TRADEMARK.md): forks are welcome under the GPL, but must use their own name.
