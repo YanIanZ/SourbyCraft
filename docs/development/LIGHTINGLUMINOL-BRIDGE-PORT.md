@@ -7,6 +7,71 @@ build or tests for this increment. Testing and acceptance are assigned to Claude
 by the user. Materialization is not evidence of plugin qualification, improved
 throughput, or release readiness.
 
+## Status update 2026-10-22b (remaining local cases, agent `claude-luminol2`)
+
+Local functional evidence only, in worktree `sc-worktrees/claude-luminol2` (base `cc5d5ef1`, PR #18; not applied, nothing
+committed). Not qualified: no real players or plugins, no soak, no panel/VPS, no benchmark. Every boot was its own agent
+test-server run (`minecraft:flat`, 2048 MiB, localhost), raw logs and `run.json` under
+`/Volumes/Ext/DevCache/agent-tmp/sourbycraft/luminol-2026-10-22b/`; all stops exited 0. Final jar SHA-256 `cb8c068c...a4e0`.
+
+| Case | Result | Evidence (file in the evidence directory) |
+| --- | --- | --- |
+| 1 SAFE global `execute`/`run`/delayed/fixed-rate, from a region | PASS (local) | `safe-final-server.log`: all 20 CI `LEGACY_*` markers `_OK` in both generations |
+| 2 Native plugins with `mode = off`, legacy plugin present | PASS (local) after fix A | `case2-off-3-server.log`: test-plugin `SOURBY_METRICS_*_OK`, `SOURBY_STRESS_COMMANDS_OK`, `SOURBY_UNLOAD_FIXTURE_OK` (and `/unloadprobe` again); legacy plugin not loaded with one WARN (below), `/plugins` Failed 1 with the reason, `/perf plugins` failed 1, bridge mode off, 0 exceptions, 0 `Unsupported in region threading`. Before the fix: `case2-off-1-baseline-server.log` |
+| 3 Cancellation states, races, rejection, disable, quarantine | PASS (unit + local) | unchanged from the 2026-10-22 update; `safe-final-server.log` |
+| 4 Several plugins, global vs Bukkit cancellation | PASS (unit only) | `FoliaSchedulerCompatibilityTest` (2026-10-22); no second legacy plugin on a server |
+| 5 Disable before listener / submit from `onDisable` | PASS (local) | `LEGACY_DISABLE_GLOBAL_SUBMIT_OK`, `LEGACY_DISABLE_BUKKIT_SUBMIT_OK` in `reload-1-server.log`, `safe-final-server.log` |
+| 6 Region/entity schedulers, unsafe world access from a global callback | PASS (local) | `LEGACY_REGION_TASK_OK`, `LEGACY_ENTITY_*_OK`, `LEGACY_BRIDGE_WORLD_ACCESS_REFUSED` (counted, not quarantined) |
+| 6b World unload with bridged region tasks, incl. tasks submitted during the unload | PASS (local) after fix C | `safe-final-server.log`: `LEGACY_UNLOAD_RELEASED_OK`, `LEGACY_UNLOAD_LATE_REFUSED_OK racing=1941 racingStillQueued=0`; before the fix on the same fixture: `unload-baseline-prefix-server.log` `LEGACY_UNLOAD_LATE_REFUSED_WRONG ... racingStillQueued=446`, `/plugins` pending 447 |
+| 7 Packaged notices | PASS (local) | 2026-10-22 update |
+| 8 Real plugins, players, soak, AWF interaction | owner-run | Build 49 runbook G07 |
+| F1 Config limits: default 0, LIVE reload, early TOML precedence | PASS (local + unit) | `limits-1-server.log`, `reload-1-server.log`: `/sourbycraft reload` "Aurora LIVE: 2 change(s) applied" (limits) / "4 change(s)" (limits, sync-route, quarantine-after) and `/plugins` shows the new limits at once; defaults, bounds (`0..100000`), malformed values and file precedence of both keys unit-tested (`AuroraBridgeEarlyConfigTest` +2) |
+| F2 Pending limit | PASS (local) | limit 10: `LEGACY_LIMIT_PENDING_OK accepted=10 rejected=3 ... replacement=true overflowRejected=true`, `LEGACY_LIMIT_PENDING_RELEASED_OK ran=10 duplicates=0 ... probeAdmitted=true`; limit 0: `LEGACY_LIMIT_PENDING_UNLIMITED_OK accepted=300 ran=300` |
+| F3 Running-async limit | PASS (local) | limit 2 (6 BRIDGE_IO threads): `LEGACY_LIMIT_ASYNC_OK started=2 rejected=3 peak=2`, `..._RELEASED_OK finished=2 probeRuns=1`, overlapping timer `..._TIMER_OK cancelled=true`; limit 0: `..._UNLIMITED_OK started=6 peak=6`; fatal count unchanged (1 before and after, the deliberate world access), not quarantined; rejected count = refusals |
+| F4/F5 Worker API, `isCurrentlyRunning`, ID wrap | PASS (unit only) | `BridgeReviewTest`, `BridgeRuntimeTest` (2026-10-07); no live probe |
+| F6 `/plugins` counts/limits without starting the bridge for natives | PASS (local) | `case2-off-3`: native plugin "Bridge telemetry: not available"; `limits-1`: "Pending tasks / limit: 0 / 10" |
+| R1 Reload while tasks pending/running | PASS (local) | `reload-1-server.log`: 20 held one-shots (600 ticks) and 3 running async bodies across a reload that set limits 5/1, `sync-route = global`, `quarantine-after = 5`, `mode = off`: report "RESTART_REQUIRED (changes since boot): aurora.bridge.mode", plugin still Bridged; `LEGACY_HELD queued=20 cancelled=0` after the reload (lowering does not cancel), `LEGACY_BUSY_DONE completed=3 interrupted=0`, new work refused while 20 >= 5 (`LEGACY_LIMIT_PENDING_OK accepted=0 rejected=3`), later `LEGACY_HELD ran=20 duplicates=0 queued=0`; `LEGACY_ROUTE global=true` after the reload, `global=false` after restoring `caller-region` |
+| R2 Disable -> enable after a reload | PASS (local) | `reload-1-server.log`: `LEGACY_REENABLE_OK gen=2 staleRuns=0`, all 20 markers again in generation 2, 0 `_WRONG` |
+| S Final SAFE run after the above | PASS (local) | `safe-final-server.log` (fixed jar): 20/20 markers in both generations, `LEGACY_REENABLE_OK`, unload probes `_OK`, 0 `_WRONG`, 0 `Unsupported in region threading`/`while cancelling Bukkit scheduler tasks`; only the deliberate exceptions |
+
+There is no bridge-specific reload command: `/sourbycraft reload` is the only one, and `aurora.bridge.mode` stays
+RESTART_REQUIRED (reported, not applied).
+
+**Defects found and fixed (each with regression tests and a rerun of the case):**
+
+- **A. Mode OFF refusal was an ERROR with a stack trace and invisible in `/plugins`.** The provider factory threw, Paper
+  logged `Error loading plugin` with 15 stack lines, the explanation followed 3 s later in the future tense ("will be
+  refused"), and `/plugins` neither counted nor found the plugin (the load-failure capture is installed after Paper builds
+  providers). Fix: Paper feature patch 0024 (`FileProviderSource`) skips such a jar with one WARN
+  `Not loading <name> v<ver> (<jar>): it does not declare folia-supported or canvas-supported and aurora.bridge.mode = off.
+  Set aurora.bridge.mode = "safe" and restart ...` (`AuroraBridge.refused`) and records it through
+  `PluginLoadDiagnostics.record`, so `/plugins` shows it FAILED with that reason and `/perf plugins` counts it; the
+  startup-index line now says "were not loaded". The factories keep their refusal as backstop. Admission/refusal lines
+  go to Log4j directly: through JUL they reached the console unformatted (`WARNING:` after a JUL date line) before the
+  JUL bridge exists. Tests: `AuroraBridgeRefusalTest` (2), `PluginLoadDiagnosticsTest` (+1).
+- **B. Limit refusals flooded the log.** Each refused task logged a WARN with a `RejectedExecutionException` stack trace
+  (~35 lines; 4 refusals = 140 lines in `limits-1-server.log`), not rate-limited. Now: every refusal is counted and is the
+  last failure; the WARN has no stack trace, names the key and is logged once per (plugin, limit) per 60 s with a
+  suppressed count (`reload-1-server.log`: one line). Test: `BridgeCapacityLogTest` (2).
+- **C. (PR #18 review) World unload release was a one-time sweep.** A region-owner task anchored in a world submitted
+  after the sweep (an async thread naming a location there), or any task when a chunk save threw before
+  `WorldUnloadDrain`, stayed queued for good, counted against the pending limit and kept the unloaded `CraftWorld`
+  reachable. Fix: `BridgeRuntime` refuses a region-owner task whose world is unloading (its unload ticket is set at the
+  start of the unload and never cleared; `AuroraBridge.worldUnloading`), checked before and again after indexing, rejected
+  without a violation or log line; `WorldUnloadCompletion.run(ticket, unload, release)` runs the bridge release before the
+  callback on success and on failure (MC feature patch 0033 passes it). Javadoc reference "Paper feature patch 0030" in
+  `WorldUnloadDrain` corrected to 0021. Tests: `BridgeWorldUnloadTest` (+4), `WorldUnloadCompletionTest` (+2).
+
+**Fixture additions** (`legacy-test-plugin`, console only, CI unchanged): `LimitProbes` (`legacybridge pending-limit <n>`,
+`async-limit <n>`, `hold <n> <ticks>`, `held`, `release`, `busy <n> <s>`, `route`, `pending`) and an unload race inside
+`legacybridge unload` (`LEGACY_UNLOAD_LATE_REFUSED`). None runs at boot, so the CI marker list is unchanged.
+
+**Gradle / Python (worktree).** `-PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test`:
+sourbyapi 585/0 (2 skipped), sourbycraft-server 11934/0 (28 skipped), test-plugin 14/0 (`gradle-full-suites.log`). Python
+`scripts/test_*.py` 613 OK; patch_policy (102 patches), baseline_policy, inherited_guard_policy (summary in
+`docs/architecture/inherited-guards.md` regenerated: 102 feature patches), independence, concurrency, toolchain policies and
+`patch_surface.py --check` pass.
+
 ## Status update 2026-10-22 (verify + harden, agent `claude-luminol`)
 
 Functional, local evidence only. Not qualified: no real players, no real plugins, no soak, no panel/VPS, no
@@ -85,7 +150,8 @@ no-op); no native-plugin boot with mode OFF was run here beyond the fixture serv
 Case 6: entity retirement on unload is Paper 0021 (ENG-3), entity movement and named region ownership are not changed by
 this port; unsafe world access from a global callback reaching the guard/classifier is unit-tested here and seen live
 (`WORLD_ACCESS_REFUSED`). Case 8 (real plugins, players, soak, AWF interaction) and the follow-up config-bound/LIVE-reload
-cases remain open and belong to the owner's real-server acceptance.
+cases remain open and belong to the owner's real-server acceptance. (Superseded for case 2 and the config-limit/reload cases by
+the 2026-10-22b update above; case 8 stays owner-run.)
 
 ## Status update 2026-10-07 (what is applied, tested and run)
 

@@ -20,10 +20,20 @@ server stopped. Without a region the storage is now flushed and closed
 directly.
 
 diff --git a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
-index ac9669706b5ba1e62fe98d8e69af1c17e54574db..f14120ef6678d0cebd3c6805736c637b22959973 100644
+index ac9669706b5ba1e62fe98d8e69af1c17e54574db..61312defc0c33fdbffa31a310d336aeb4448c285 100644
 --- a/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
 +++ b/dev/iyanz/aurora/engine/threadedregions/WorldShutdownThread.java
-@@ -183,6 +183,8 @@ public class WorldShutdownThread extends RegionShutdownThread {
+@@ -58,7 +58,8 @@ public class WorldShutdownThread extends RegionShutdownThread {
+     @Override
+     public void run() {
+         // SourbyCraft start - always complete the unload callback, also when the unload throws
+-        WorldUnloadCompletion.run(this.level.canvas$unloadTicket::get, this::unload);
++        WorldUnloadCompletion.run(this.level.canvas$unloadTicket::get, this::unload,
++            () -> WorldUnloadDrain.releaseBridgedTasks(this.level, this.debugName, LOGGER)); // SourbyCraft - release bridged tasks also when the unload throws
+     }
+ 
+     private void unload() {
+@@ -183,6 +184,8 @@ public class WorldShutdownThread extends RegionShutdownThread {
                      region = regions.get(i);
                  saveRegionChunks(region, (i + 1) == regions.size());
              }
@@ -32,7 +42,7 @@ index ac9669706b5ba1e62fe98d8e69af1c17e54574db..f14120ef6678d0cebd3c6805736c637b
          } catch (final Throwable thrown) {
              LOGGER.error("Failed to save chunks in {}", getWorldName(), thrown);
              throw thrown;
-@@ -190,6 +192,9 @@ public class WorldShutdownThread extends RegionShutdownThread {
+@@ -190,6 +193,9 @@ public class WorldShutdownThread extends RegionShutdownThread {
              LOGGER.info("Saved chunks in {}", getWorldName());
          }
  

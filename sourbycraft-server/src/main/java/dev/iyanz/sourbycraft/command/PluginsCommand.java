@@ -103,7 +103,7 @@ public class PluginsCommand extends Command {
         // One recent failure per jar, keeping the latest reason. Different jars remain visible.
         Map<String, PluginLoadDiagnostics.Entry> failures = new LinkedHashMap<>();
         for (var failure : PluginLoadDiagnostics.recent()) failures.put(failure.pluginJar(), failure);
-        for (var failure : failures.values()) rows.add(new Row(failureName(failure.pluginJar()),
+        for (var failure : failures.values()) rows.add(new Row(failure.pluginName() != null ? failure.pluginName() : failureName(failure.pluginJar()),
             CompatibilityState.FAILED, failure.reason(), failure.pluginJar()));
         return rows;
     }

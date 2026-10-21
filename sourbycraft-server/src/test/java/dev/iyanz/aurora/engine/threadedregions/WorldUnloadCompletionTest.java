@@ -40,4 +40,32 @@ class WorldUnloadCompletionTest {
         assertEquals("unload", thrown.getMessage());
         assertEquals("callback", thrown.getSuppressed()[0].getMessage());
     }
+
+    /**
+     * PR #18 review: a chunk save that throws ends the unload before WorldUnloadDrain, which released
+     * the bridged legacy tasks anchored in the world only at its end; they stayed queued for good.
+     */
+    @Test
+    void theBridgeReleaseRunsBeforeTheCallbackWhenTheUnloadThrowsAndWhenItSucceeds() {
+        final List<String> order = new ArrayList<>();
+        final UnloadTicket ticket = new UnloadTicket(result -> order.add("callback " + result), true);
+        assertThrows(IllegalStateException.class, () -> WorldUnloadCompletion.run(() -> ticket,
+            () -> { throw new IllegalStateException("save failed"); }, () -> order.add("release")));
+        assertEquals(List.of("release", "callback FAIL_UNKNOWN"), order);
+
+        order.clear();
+        WorldUnloadCompletion.run(() -> ticket, () -> order.add("unload"), () -> order.add("release"));
+        assertEquals(List.of("unload", "release", "callback SUCCESS"), order);
+    }
+
+    @Test
+    void aThrowingReleaseDoesNotHideTheUnloadFailureNorSkipTheCallback() {
+        final List<WorldUnloadResult> results = new ArrayList<>();
+        final UnloadTicket ticket = new UnloadTicket(results::add, true);
+        final Error thrown = assertThrows(Error.class, () -> WorldUnloadCompletion.run(() -> ticket,
+            () -> { throw new Error("unload"); }, () -> { throw new RuntimeException("release"); }));
+        assertEquals("unload", thrown.getMessage());
+        assertEquals("release", thrown.getSuppressed()[0].getMessage());
+        assertEquals(List.of(WorldUnloadResult.FAIL_UNKNOWN), results);
+    }
 }

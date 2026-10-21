@@ -19,6 +19,8 @@ public final class LegacyBridgePlugin extends JavaPlugin {
     private final AtomicInteger generation = new AtomicInteger();
     /** Bodies that ran after their generation ended (a task that survived disable). */
     private final AtomicInteger staleRuns = new AtomicInteger();
+    /** Console-driven probes for the bridge's LIVE limits and reload (manual/agent runs only). */
+    private final LimitProbes limitProbes = new LimitProbes(this);
 
     @Override
     public void onEnable() {
@@ -178,7 +180,7 @@ public final class LegacyBridgePlugin extends JavaPlugin {
         });
     }
 
-    private void check(final boolean ok, final String marker, final String detail) {
+    void check(final boolean ok, final String marker, final String detail) {
         if (ok) this.getLogger().info(marker + "_OK " + detail);
         else this.getLogger().severe(marker + "_WRONG " + detail);
     }
@@ -290,6 +292,9 @@ public final class LegacyBridgePlugin extends JavaPlugin {
             unloadProbe();
             return true;
         }
+        if (args.length >= 1 && LimitProbes.handles(args[0])) {
+            return this.limitProbes.command(args);
+        }
         if (args.length != 1 || !"reenable".equals(args[0])) return false;
         final int gen = this.generation.get();
         final Runnable stale = () -> {
@@ -341,7 +346,32 @@ public final class LegacyBridgePlugin extends JavaPlugin {
                         dev.iyanz.sourbycraft.api.scheduler.RegionTask.at(spot, bodyRuns::incrementAndGet), 6000L, 20L);
                     this.getLogger().info("LEGACY_UNLOAD_QUEUED world=" + name + " queued=" + scheduler.isQueued(oneShot.getTaskId())
                         + "," + scheduler.isQueued(timer.getTaskId()));
+                    // PR #18 review: tasks anchored in the world submitted while it unloads (an async thread naming
+                    // a location there) used to miss the unload's one-time release and stay queued for good.
+                    final java.util.concurrent.atomic.AtomicBoolean unloadDone = new java.util.concurrent.atomic.AtomicBoolean();
+                    final java.util.List<BukkitTask> racing = new java.util.concurrent.CopyOnWriteArrayList<>();
+                    final Thread racer = new Thread(() -> {
+                        while (!unloadDone.get() && racing.size() < 2000) {
+                            racing.add(scheduler.runTaskLater(this,
+                                dev.iyanz.sourbycraft.api.scheduler.RegionTask.at(spot, bodyRuns::incrementAndGet), 6000L));
+                            java.util.concurrent.locks.LockSupport.parkNanos(2_000_000L);
+                        }
+                    }, "LegacyBridgeTest unload racer");
+                    racer.setDaemon(true);
+                    racer.start();
                     Bukkit.getServer().unloadWorldAsync(world, false, result -> Bukkit.getGlobalRegionScheduler().runDelayed(this, t3 -> {
+                        unloadDone.set(true);
+                        try {
+                            racer.join(1000L);
+                        } catch (final InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                        final BukkitTask late = scheduler.runTaskLater(this,
+                            dev.iyanz.sourbycraft.api.scheduler.RegionTask.at(spot, bodyRuns::incrementAndGet), 1L);
+                        final long racingQueued = racing.stream().filter(r -> scheduler.isQueued(r.getTaskId()) || !r.isCancelled()).count();
+                        check(late.isCancelled() && !scheduler.isQueued(late.getTaskId()) && racingQueued == 0 && !racing.isEmpty(),
+                            "LEGACY_UNLOAD_LATE_REFUSED", "late cancelled=" + late.isCancelled() + " queued="
+                                + scheduler.isQueued(late.getTaskId()) + " racing=" + racing.size() + " racingStillQueued=" + racingQueued);
                         final boolean released = !scheduler.isQueued(oneShot.getTaskId()) && !scheduler.isQueued(timer.getTaskId())
                             && oneShot.isCancelled() && timer.isCancelled()
                             && scheduler.getPendingTasks().stream().noneMatch(p -> p.getTaskId() == oneShot.getTaskId()

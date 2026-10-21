@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
  *
  * <p>Runs from {@code SourbyCraftBootstrap#init()}, which the server calls before
  * {@code CraftServer#loadPlugins}. It changes nothing about plugin loading: the output is one
- * structured log line and, when a jar will be refused, one warning naming it.</p>
+ * structured log line and, when a jar does not declare region support, one warning naming it and what the bridge mode did with it.</p>
  *
  * <p>{@code -Daurora.startup.cache=false} keeps the analysis but neither reads nor writes the
  * cache file; the flag is read once per boot (RESTART_REQUIRED).</p>
@@ -48,10 +48,11 @@ public final class StartupIndexStage {
         final var undeclared = result.undeclared();
         if (!undeclared.isEmpty()) {
             SourbyLogger.warn(undeclared.size() + " plugin(s) do not declare folia-supported or "
-                + "canvas-supported and will be "
+                + "canvas-supported and "
                 + (dev.iyanz.sourbycraft.bridge.AuroraBridge.runtimeMode() == dev.iyanz.sourbycraft.config.AuroraConfig.BridgeMode.SAFE
-                    ? "loaded through the Aurora Bridge (aurora.bridge.mode = safe): "
-                    : "refused by the region-threading base (aurora.bridge.mode = off): ")
+                    ? "are loaded through the Aurora Bridge (aurora.bridge.mode = safe): "
+                    : "were not loaded: the region-threading base refuses them while aurora.bridge.mode = off"
+                        + " (set \"safe\" and restart to try them through the Aurora Bridge): ")
                 + undeclared.stream().map(p -> p.descriptor().name() + " [" + p.scan().verdict(false) + "]")
                     .collect(Collectors.joining(", ")));
             // No bridge can make server-internals access region-safe; say so separately.

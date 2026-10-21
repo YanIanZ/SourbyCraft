@@ -44,7 +44,12 @@ public final class PluginLoadDiagnostics {
     private static volatile boolean installed = false;
 
     /** One captured plugin-load failure: the jar name and a short human-readable reason. */
-    public record Entry(String pluginJar, String reason) {}
+    public record Entry(String pluginJar, String reason, String pluginName) {
+        /** A failure captured from the log, which names the jar only. */
+        public Entry(final String pluginJar, final String reason) {
+            this(pluginJar, reason, null);
+        }
+    }
 
     private PluginLoadDiagnostics() {}
 
@@ -123,8 +128,24 @@ public final class PluginLoadDiagnostics {
         return false;
     }
 
+    /**
+     * Records a load refusal the server decided itself, rather than one captured from the log: the
+     * Aurora Bridge's refusal while {@code aurora.bridge.mode = off} happens while Paper builds plugin
+     * providers, before {@link #install()} runs, so the log capture never sees it.
+     *
+     * @param pluginName the plugin's name, so {@code /plugins <name>} finds the entry
+     */
+    public static synchronized void record(final String pluginJar, final String pluginName, final String reason) {
+        if (pluginJar == null || reason == null) return;
+        ENTRIES.removeIf(entry -> entry.pluginJar().equals(pluginJar));
+        if (ENTRIES.size() >= MAX_ENTRIES) {
+            ENTRIES.remove(0);
+        }
+        ENTRIES.add(new Entry(pluginJar, reason, pluginName));
+    }
+
     /** Clears captured state; tests only. */
-    static void resetForTest() {
+    public static void resetForTest() {
         ENTRIES.clear();
         ENABLE_FAILURES.clear();
     }

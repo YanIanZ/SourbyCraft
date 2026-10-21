@@ -127,7 +127,7 @@ Report results with the `/plugins <name>` output, the plugin version and the log
 reading a block (`LEGACY_BRIDGE_REGION_SYNC_OK`), and a global-region world access that is
 refused and counted.
 
-## 6. Optional per-plugin limits (upgrade awaiting Claude testing)
+## 6. Optional per-plugin limits (locally tested 2026-10-22, not qualified)
 
 The limits above apply separately to each bridged plugin. Pending counts unfinished
 indexed tasks; running async counts actual callbacks, including overlaps of one
@@ -138,10 +138,28 @@ as universal performance settings.
 A submission exceeding the pending limit is cancelled before it is scheduled.
 An async callback exceeding the running limit cancels its task/timer; existing
 bodies finish normally. The bridge records a capacity rejection and reason without
-classifying it as a fatal ownership violation. Limits do not queue excess work or
+classifying it as a fatal ownership violation. Every refusal is counted in
+`/plugins <name>` (Rejected, Last failure); the log shows at most one
+`Aurora Bridge cancelled task N for <plugin>: pending task limit N (aurora.bridge.max-pending-tasks-per-plugin) ...`
+line (or the running-async one) per plugin and limit per 60 s, without a stack trace. Limits do not queue excess work or
 promise fairness in the shared I/O lane. Lowering a limit is LIVE and affects new
 admission; it does not interrupt bodies already running.
 
-These additions and scheduler-worker patch 0008 are not covered by the historical
-CI evidence above. Claude is responsible for their testing and acceptance; see
-[the handoff cases](../development/LIGHTINGLUMINOL-BRIDGE-PORT.md).
+CI does not exercise the limits. They were run on a local agent test server on
+2026-10-22 with the fixture's console probes (`legacybridge pending-limit <n>`,
+`async-limit <n>`, `hold`, `held`, `busy`, `route`), including a `/sourbycraft reload`
+while tasks were pending and running: functional evidence only, see the per-case table
+in [the port doc](../development/LIGHTINGLUMINOL-BRIDGE-PORT.md). Real plugins under
+load remain the owner's acceptance (Build 49 runbook G07).
+
+## 7. With the bridge off
+
+With `mode = "off"` (the default) a plugin without `folia-supported`/`canvas-supported`
+is not loaded. The log has one line, no stack trace:
+
+```
+Not loading <Plugin> v<version> (<jar>): it does not declare folia-supported or canvas-supported and aurora.bridge.mode = off. ...
+```
+
+and `/plugins` lists it as **FAILED** ("did not load") with that reason. Native plugins
+are unaffected.

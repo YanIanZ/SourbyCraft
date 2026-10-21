@@ -93,4 +93,72 @@ class BridgeWorldUnloadTest {
             assertEquals(null, AuroraBridge.modeIfStarted());
         }
     }
+
+    /**
+     * PR #18 review: the unload's release is a one-time sweep. A task anchored in the world and submitted
+     * after it (an async thread naming a location there) was indexed for good: queued, counted against
+     * the pending limit, and holding the unloaded world. A world closed from the start of its unload
+     * refuses such tasks instead.
+     */
+    @Test
+    void aTaskAnchoredInAnUnloadingWorldIsRefusedNotIndexed() {
+        final BridgeRuntime bridge = new BridgeRuntime(BridgeMode.SAFE, () -> 3, this.executor, new BridgeTelemetry(),
+            (message, thrown) -> this.warnings.add(message), () -> null, () -> SyncRoute.CALLER_REGION, () -> 1, () -> 0);
+        bridge.worldClosedCheck(world -> world == this.unloading);
+        assertTrue(bridge.admit("Legacy"));
+        final var late = new TargetedTask(1, -1, new RegionAnchor(this.unloading, 0, 0), () -> {});
+        final var lateTimer = new TargetedTask(2, 20, new RegionAnchor(this.unloading, 1, 1), () -> {});
+
+        assertFalse(bridge.submit("Legacy", null, late, 5));
+        assertFalse(bridge.submit("Legacy", null, lateTimer, 5));
+
+        assertTrue(late.cancelled());
+        assertTrue(lateTimer.cancelled());
+        assertFalse(bridge.knows(1));
+        assertFalse(bridge.knows(2));
+        assertTrue(this.executor.jobs.isEmpty(), "never handed to the region scheduler of a closed world");
+        assertEquals(0, bridge.pending("Legacy"), "no pending slot is taken (limit 1)");
+        final BridgeTelemetry.PluginStats stats = bridge.telemetry().stats("Legacy");
+        assertEquals(2, stats.rejectedOperations());
+        assertEquals(0, stats.fatalViolations());
+        assertTrue(stats.lastFailure().contains("unloading"), stats.lastFailure());
+        assertTrue(this.warnings.isEmpty(), "expected during an unload, not logged per task: " + this.warnings);
+
+        final var elsewhere = new TargetedTask(3, -1, new RegionAnchor(this.staying, 0, 0), () -> {});
+        assertTrue(bridge.submit("Legacy", null, elsewhere, 5), "other worlds and the limit slot are unaffected");
+    }
+
+    /** The unload begins between the first check and indexing: the re-check after indexing refuses it. */
+    @Test
+    void anUnloadBeginningWhileTheTaskIsIndexedStillReleasesIt() {
+        final BridgeRuntime bridge = runtime();
+        final java.util.concurrent.atomic.AtomicInteger checks = new java.util.concurrent.atomic.AtomicInteger();
+        bridge.worldClosedCheck(world -> world == this.unloading && checks.incrementAndGet() > 1);
+        assertTrue(bridge.admit("Legacy"));
+        final var racing = new TargetedTask(1, -1, new RegionAnchor(this.unloading, 0, 0), () -> {});
+
+        assertFalse(bridge.submit("Legacy", null, racing, 5));
+
+        assertEquals(2, checks.get(), "checked before and after indexing");
+        assertTrue(racing.cancelled());
+        assertFalse(bridge.knows(1));
+        assertEquals(0, bridge.pending("Legacy"));
+        assertTrue(this.executor.jobs.isEmpty());
+        assertEquals(0, bridge.worldUnloaded(this.unloading), "nothing left for the sweep");
+    }
+
+    @Test
+    void aThrowingWorldCheckDoesNotRefuseTheTask() {
+        final BridgeRuntime bridge = runtime();
+        bridge.worldClosedCheck(world -> { throw new IllegalStateException("no handle"); });
+        assertTrue(bridge.admit("Legacy"));
+        assertTrue(bridge.submit("Legacy", null, new TargetedTask(1, -1, new RegionAnchor(this.staying, 0, 0), () -> {}), 5));
+        assertTrue(bridge.knows(1));
+    }
+
+    @Test
+    void theProductionCheckIgnoresWhatIsNotACraftWorld() {
+        assertFalse(AuroraBridge.worldUnloading(new Object()));
+        assertFalse(AuroraBridge.worldUnloading(null));
+    }
 }

@@ -408,15 +408,20 @@ dan gate yang masih terbuka tetap wajib.
   Source materialized di Paper commit `425610c83`; suite Gradle penuh 10.152/10.152 lulus
   sesudahnya (2026-10-06), regresi native-disable ditemukan saat boot dan diperbaiki di 0009.
   Marker fixture `LEGACY_GLOBAL_*` lulus di CI sejak run 37515867230. Rincian dan kasus penerimaan
-  di `docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md`.
+  di `docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md`. 2026-10-22b (worktree `claude-luminol2`, belum
+  di-apply, lokal fungsional saja): kasus 1-7, mode OFF (kasus 2), limit dan reload PASS(local) dengan
+  3 perbaikan (refusal OFF satu baris + terdaftar di `/plugins` lewat Paper 0024; log penolakan limit
+  di-rate-limit; task di world yang sedang unload ditolak + release juga saat unload gagal). Sisa: kasus 8
+  (plugin nyata, pemain, soak) milik owner, G07.
 - [-] Upgrade kapasitas bridge per plugin: limit pending/running async LIVE (default 0),
   worker Bukkit + status body yang masih draining setelah cancel, dan statistik `/plugins`.
   Source + feature patch 0008 ditulis dan materialized; tes batas `BridgeReviewTest` lulus
   (2026-10-07, unit saja); disable lalu reload kini bisa menjadwalkan lagi (B86). Enable ulang
   instance yang sama tanpa reload kini dibuka lagi oleh hook di Paper feature 0012
   (`reopen-bridge-admission-on-enable`, di-commit `49d4e640`, ikut boot CI sejak 37515867230).
-  Sisa: bukti runtime untuk enable ulang instance yang sama (belum ada marker/boot yang
-  menjalankannya).
+  Bukti runtime lokal 2026-10-22/22b: `LEGACY_REENABLE_OK staleRuns=0` (juga sesudah `/sourbycraft reload`),
+  limit pending/running async + 0 = unlimited + rilis slot (`LEGACY_LIMIT_*_OK`), reload LIVE saat task
+  pending/berjalan tanpa task hilang/ganda. Sisa: penerimaan server nyata (owner, G07).
 - [x] Indeks task per plugin + disable/admission/rejection cleanup; regresi 100 plugin simulasi,
   overlap async dan race scheduler; BridgeRuntimeTest 24/24, suite server 10.147 tes tanpa
   kegagalan (23 skipped), 2026-10-06; SPEC §155 dan `docs/architecture/aurora-plugin-bridge.md`.
