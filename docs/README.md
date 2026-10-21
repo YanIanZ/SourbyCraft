@@ -102,6 +102,7 @@ patches, plus proposals; a dated snapshot — fix status is tracked in [TODO.md]
 [Release roadmap 47–50](releases/ROADMAP-47-50.md) (owner plan 2026-10-21: 47 ship, 48 refinement, 49 full stable, 50 optimization; gates in [48](releases/26.2-build-48.md), [49](releases/26.2-build-49.md), [50](releases/26.2-build-50.md)) ·
 [Build 47 — Aurora Nexus](releases/26.2-build-47-aurora-nexus.md) (published release and its gates) ·
 [Build 48](releases/26.2-build-48.md) (current development build) ·
+[Build 49 real-test runbook](releases/runbooks/build-49-real-test.md) (human tester and operator handover) ·
 [46](releases/46.md) · [45](releases/45.md) · [44](releases/44.md)
 
 Dated plans and specs from the v6–v12, UniverseSpigot and Folia-base eras (May–September 2026,

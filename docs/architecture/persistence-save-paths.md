@@ -1,8 +1,8 @@
 # Persistence save paths under region threading
 
-> **Role:** who writes which piece of world state, on which thread, and when. **Status:** Active, verified
-> against the materialized sources on 2026-10-21 (Paper `9240f586`, engine baseline + feature patches
-> 0027/0056). Line numbers are those of the materialized files on that day; re-check with `rg` before
+> **Role:** who writes which piece of world state, on which thread, and when. **Status:** Active source ledger,
+> reviewed against the materialized sources on 2026-10-21 (Paper `9240f586`, engine baseline + feature patches
+> 0027/0056; 0067 source review only, not compiled). Line numbers are those of the materialized files on that day; re-check with `rg` before
 > relying on one. Entry point: [AURORA.md](AURORA.md); storage ownership: [engine-storage.md](engine-storage.md).
 
 Vanilla saves everything from one main-thread autosave (`MinecraftServer.tickServer` →
@@ -10,16 +10,16 @@ Vanilla saves everything from one main-thread autosave (`MinecraftServer.tickSer
 `saveLevelData` (its `data/`) and its chunks). Folia split that: chunks, entities, POI and players are
 saved by the region that owns them, a short whitelist of global data is saved by the global tick, and
 **everything else was written only at a clean stop** (`RegionShutdownThread`). Canvas widened the
-whitelist; SourbyCraft widened it again (0027, 0056). This document is the ledger of what is left.
+whitelist; SourbyCraft widened it again (0027, 0056, 0067). This document is the ledger of what is left.
 
 ## 1. The five save paths
 
 | Path | Thread | Trigger | What it saves | Evidence |
 |---|---|---|---|---|
 | Region autosave | each region tick | every tick, per region | **Chunks + entities + POI**: `ChunkHolderManager.autoSave` saves at most `max-auto-save-chunks-per-tick` (24) holders whose `lastAutoSave` is older than `chunks.auto-save-interval` (paper-world, 6000 ticks); a chunk save writes its entity chunk and POI chunk with it. **Players**: `PlayerList.saveAll(interval)` saves the region's local players whose last save is older than `player-auto-save.rate` (paper-global, `-1` → bukkit.yml `ticks-per.autosave` = 6000 ticks), at most `max-per-tick` per tick; a player save is NBT + stats + advancements. `saveIncrementally(false)` is otherwise a no-op. | `MinecraftServer.java:1723-1742` (`if (false && fullSave)` at 1733 — level data deliberately skipped), `ChunkMap.java:413`, `ChunkHolderManager.java:306-336`, `PlayerList.java:1137-1170`, `:487-500`, `ServerLevel.java:1611-1617` |
-| Global-tick autosave | global tick | wall clock, `config/canvas-server.yml` `autosave.autosave-frequency` (default `5m`, LIVE on config reload; `AUTOSAVE_SPAN`) | **Server `data/`** (`autosaveSafeGlobalData`): scoreboard, stopwatches, Canvas pearls, custom boss events, the server clock when `time.affects-all-worlds`; 0056: random sequences, `/data storage` containers, `level.dat`. **Per world `data/`** (`autosaveSafeWorldData`): maps + map index, per-world clocks, weather, game rules; 0027: `paper:level_overrides` (game time, spawn, game type, difficulty); 0056: the world border. Each selection is a `SavedDataStorage.saveSpecific` call: encode on the global tick, file write on `Util.DIMENSION_DATA_IO_POOL`, not joined. | `RegionizedServer.java:262-313` (call at 308), `:335-398`, `:400-470` (called from `autoSaveMaps`, 649-651), `GlobalConfiguration.java:55,203,596-626`, `SavedDataStorage.java:192-241` |
+| Global-tick autosave | global tick | wall clock, `config/canvas-server.yml` `autosave.autosave-frequency` (default `5m`, LIVE on config reload; `AUTOSAVE_SPAN`) | **Server `data/`** (`autosaveSafeGlobalData`): scoreboard, stopwatches, Canvas pearls, custom boss events, the server clock when `time.affects-all-worlds`; 0056: random sequences, `/data storage` containers, `level.dat`. **Per world `data/`** (`autosaveSafeWorldData`): maps + map index, per-world clocks, weather, game rules; 0027: `paper:level_overrides` (game time, spawn, game type, difficulty); 0056: the world border; 0067: detached persistent tickets (including forced chunks). Whitelist selections use `SavedDataStorage.saveSpecific`; 0067 uses `sourbycraft$saveSnapshot`: encode on the global tick, file write on `Util.DIMENSION_DATA_IO_POOL`, not joined. | `RegionizedServer.java:262-313` (call at 308), `:335-398`, `:400-470` (called from `autoSaveMaps`, 649-651), `GlobalConfiguration.java:55,203,596-626`, `SavedDataStorage.java:192-241` |
 | Dragon fight autosave | the region owning the fight | every `bukkit.yml ticks-per.autosave` ticks of wall time | `ender_dragon_fight.dat` (`saveSpecific(EnderDragonFight)`); `save-all` forces it on the next region tick. | `EnderDragonFight.java:226-252`, `ServerLevel.java:923-925`, `SaveAllCommand.java:47-50` |
-| `/save-all [flush]`, `World#save` | global tick + every region | command / plugin | `save-all`: `autosaveSafeGlobalData(true, true)` and `autosaveSafeWorldData(true, true, world)` for every world (forced, joined; the 0027/0056 selections included), then a `SaveAllTicket` per region (chunks via `saveAllChunksRegionised`, local players). **Bukkit `World#save` only propagates the region tickets**: chunks and players, no level data of any kind. | `SaveAllCommand.java:32-80`, `MinecraftServer.java:1886-1897`, `CraftWorld.java:1147-1157` |
+| `/save-all [flush]`, `World#save` | global tick + every region | command / plugin | `save-all`: `autosaveSafeGlobalData(true, true)` and `autosaveSafeWorldData(true, true, world)` for every world (forced, joined; the 0027/0056 selections and 0067 snapshot included), then a `SaveAllTicket` per region (chunks via `saveAllChunksRegionised`, local players). **Bukkit `World#save` only propagates the region tickets**: chunks and players, no level data of any kind. | `SaveAllCommand.java:32-80`, `MinecraftServer.java:1886-1897`, `CraftWorld.java:1147-1157` |
 | Clean shutdown | `RegionShutdownThread` (after `TickRegionScheduler.halt`, so no tick runs) | `stop` | players + in-flight pearls; per world: chunks of every region, then `ServerLevel.saveLevelData(true)` = `scheduleSave().join()` of **every** dirty `SavedData` of that world; then `MinecraftServer.saveGlobalData(true)` = scoreboard store, **`level.dat`**, `saveAndJoin` of every dirty server `SavedData`; then `PlayerList.saveAll()`; `stopPart2` closes the storages (another `saveAndJoin`). | `RegionShutdownThread.java:273-357` (`saveLevelData` 72-77 and 338, `saveGlobalData(true)` 346), `MinecraftServer.java:1026-1036,1146-1152`, `SavedDataStorage.java:243-283,320-328` |
 
 The vanilla `autoSave()` (`MinecraftServer.java:1772-1776`) is reachable only from the
@@ -54,11 +54,11 @@ clean-stop path above; a crash (SIGKILL, OOM, power) loses every change since bo
 | **Random sequences** (loot-table sequences) | `data/minecraft/random_sequences.dat` | any (concurrent map; a sequence's two seed longs are read outside the mutators' lock, so a sequence advanced at that instant can be encoded torn — the same read vanilla does single-threaded) | periodic (global), `save-all`, shutdown | **0056** (was shutdown only) |
 | **`/data storage` containers** | `data/<namespace>/command_storage.dat` | any (plain `HashMap`; a concurrent `put` can make the encode throw, the container then stays dirty for the next autosave) | periodic (global), `save-all`, shutdown | **0056** (was shutdown only) |
 | Dragon fight | `dimensions/minecraft/the_end/data/minecraft/ender_dragon_fight.dat` | owning region | periodic (region, `ticks-per.autosave`), `save-all` (next tick), shutdown | Canvas |
-| Raids | `dimensions/<dim>/data/minecraft/raids.dat` | each raid on its region (`Raids.tick`), the map thread-safe but `Raid` fields and `heroes_of_the_village` (a `HashSet`) are not | **shutdown only** | Folia; **open** (`Raids.java:82-105`, `Raid.java:74-90`) |
-| Forceload tickets | `dimensions/<dim>/data/minecraft/chunk_tickets.dat` | any region (`ServerChunkCache.addTicket`, `Long2ObjectOpenHashMap`) | **shutdown only** | Paper 26.x; **open** (`ServerChunkCache.java:212,257-261`, `TicketStorage.java:189,243,262`) |
+| Raids | `dimensions/<dim>/data/minecraft/raids.dat` | each raid on its region (`Raids.tick`), the map thread-safe but `Raid` fields and `heroes_of_the_village` (a `HashSet`) are not | **still shutdown-only** | 0067 review: no owner-consistent snapshot of mutable `Raid` fields, hero set or raid PDC; concurrent raid-map iteration does not protect its values |
+| Forceload tickets | `dimensions/<dim>/data/minecraft/chunk_tickets.dat` | regions via Moonrise ticket manager (concurrent index, section-locked ticket sets); startup activation of deactivated tickets | **periodic now** (global snapshot/encode), `save-all`, shutdown; code only, no compile/runtime evidence yet | **0067**; detached serialized fields under existing section locks, startup map locked separately; see §5 |
 | Wandering trader timers | — | per region, in memory (`RegionizedWorldData.wanderingTraderData`, created on first use) | **never** (not loaded, not written) | Folia (`WanderingTraderSpawner.java:74-83`) |
 | Scheduled functions (`/schedule`) | `dimensions/<dim>/data/minecraft/scheduled_events.dat` | command thread | **shutdown only**, and the queue is **never ticked** (`ServerLevel.java:1027`, commented out by Folia with a TODO), so `/schedule` stores entries that never fire | Folia; **open** |
-| World PDC (plugins) | `dimensions/<dim>/data/paper/persistent_data_container.dat` | any plugin thread | **shutdown only** (`ServerLevel.saveLevelData` copies the live PDC first) | Paper + Folia; left out of 0056 on purpose (a plugin writing while the global tick encodes would throw or copy a torn container). The comment at `awf/world/AuroraWorldsService.java:329-332` ("reaches level.dat at the world's next save (autosave, …)") is stale on both counts: the file is `persistent_data_container.dat` and only the clean stop writes it. |
+| World PDC (plugins) | `dimensions/<dim>/data/paper/persistent_data_container.dat` | any plugin thread | **still shutdown-only** (`ServerLevel.saveLevelData` copies the live PDC first) | 0067 review: `CraftPersistentDataContainer` has an unsynchronized `HashMap`, exposes `getRaw()` and mutable tags; `getTagsCloned()` has no lock. A global copy can throw or be torn; locking only the reader would not protect plugin writers. |
 | Structure data | written with the chunk (structure starts/references are chunk data) | owning region | with their chunk | baseline |
 
 ## 3. Feature patch 0056 (`save global-owned level data on autosave`)
@@ -124,3 +124,43 @@ uncommitted main tree, which also carried opus-cmdblock's uncommitted command-bl
 No `ERROR` line and no "Could not encode" warning in either run; both `stop`s exited 0 with the lock
 released. Random sequences and command storage were not exercised on the server (no loot, `/data` did
 not parse); their evidence is the unit round trip.
+
+## 5. Feature patch 0067: periodic persistent-ticket snapshots
+
+Source change only: **nothing compiled; Java tests not run, no Gradle**. No new crash/restart or
+performance evidence is claimed. The historical failed forceload probe in §4 predates this patch.
+
+`WorldStateAutosave.save(storage, sync)` runs inside the interval-gated world whitelist supplier,
+near 0056's world-data call. Ownership is checked through `RegionOwnership`, with no engine imports
+in the SourbyCraft helper. It schedules ticket data independently before the outer whitelist save;
+`save-all` joins it. No new executor or region I/O is added. This is governed by the existing global
+autosave interval (LIVE on reload), with no new setting; installing the patch requires a restart.
+
+The active path is not the vanilla unsynchronized ticket map: `TicketStorage` redirects to
+`ChunkHolderManager`. Its existing `getTicketsCopy` locks one section at a time but shallow-copies
+Ticket references. The new persistence variant copies only persisted tickets, constructing new
+Tickets from the codec's type, level and remaining-delay fields **while holding those same section
+locks** used for ticket mutation/expiry. Identifiers are not encoded by `Ticket.CODEC`. The inactive
+startup map is copied under its own monitor; its sole post-construction mutator,
+`activateAllDeactivatedTickets`, now uses that monitor too, with matching lock order. The existing
+shutdown codec and normal ticket-copy path remain selected as before.
+
+The result is a detached encoding input, not a transaction across every section: concurrent index
+iteration may miss a just-added chunk, and different sections can represent different instants.
+Mutations through `TicketStorage` publish dirty after their changes, and region ticket purges mark it
+dirty too, so overlapping changes remain eligible for a later autosave. The helper clears dirty
+**before** snapshot capture and never clears it after capture. Capture/encode failures restore only
+that item's dirty flag and do not skip the other items. Detached NBT is chained through the existing
+`SavedDataStorage.pendingWriteFuture` and `DIMENSION_DATA_IO_POOL`, preserving ordering with later
+world saves and shutdown. Existing storage file-write errors are logged rather than propagated; this
+patch does not add durable-write acknowledgement or change that behavior.
+
+Raids remain shutdown-only: serializing a concurrent raid map still reads region-owned `Raid`
+fields, a mutable hero `HashSet`, and raid PDC off-owner. No owner snapshot/aggregation protocol
+exists here; this patch does not add one. World PDC remains shutdown-only: neither its map nor tag
+copying shares synchronization with plugin writes, and raw mutable access prevents proving an
+atomic copy. These crash-loss gaps remain open.
+
+Tests added: `WorldStateAutosaveTest` (snapshot isolation with a later mutation retaining dirty,
+clean skip, and snapshot/encode failure containment; 4 cases), `WorldStateAutosavePatchShapeTest`
+(2 cases), plus `scripts/test_world_state_autosave_patch.py` (2 cases) for patch shape only. Neither source-shape checks nor the unrun Java tests establish runtime persistence.

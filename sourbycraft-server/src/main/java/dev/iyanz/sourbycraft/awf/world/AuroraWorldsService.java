@@ -328,8 +328,8 @@ public final class AuroraWorldsService implements AuroraWorlds, org.bukkit.event
         if (fileWorld.pluginData() == null) return created;
         // The world's BukkitValues go into its persistent data container. start() completes on the
         // global tick, where the world's container may be written; WorldLoadEvent has already fired, so
-        // a listener on it does not see the data yet. The container reaches level.dat at the world's
-        // next save (autosave, save-all or shutdown), like any other world PDC write.
+        // a listener on it does not see the data yet. The container reaches paper/persistent_data_container.dat
+        // at clean shutdown; world PDC has no consistent concurrent snapshot for periodic autosave.
         return created.thenApply(world -> {
             try {
                 SlimeImporter.restorePluginData(world.getPersistentDataContainer(), fileWorld.pluginData());

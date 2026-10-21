@@ -1,0 +1,145 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 22:46:27 +0700
+Subject: [PATCH] SourbyCraft - periodically save detached persistent tickets
+
+Save detached persistent ticket snapshots under existing section locks and serialize with the world data write chain. Raids and world PDC remain shutdown-only because no consistent concurrent snapshot is available.
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
+index 25db7b8b85f8717ad626f9033e57e83dc55fa7ce..9c431704db5e41445138b04511edf9d18de98338 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
+@@ -569,6 +569,16 @@ public final class ChunkHolderManager {
+     }
+ 
+     public Long2ObjectOpenHashMap<Collection<Ticket>> getTicketsCopy() {
++        return this.getTicketsCopy(false);
++    }
++
++    // SourbyCraft start - detached persistence copy under the existing ticket section locks
++    public Long2ObjectOpenHashMap<Collection<Ticket>> getTicketsCopyForPersistence() {
++        return this.getTicketsCopy(true);
++    }
++
++    private Long2ObjectOpenHashMap<Collection<Ticket>> getTicketsCopy(final boolean detached) {
++    // SourbyCraft end - detached persistence copy under the existing ticket section locks
+         final Long2ObjectOpenHashMap<Collection<Ticket>> ret = new Long2ObjectOpenHashMap<>();
+         final Long2ObjectOpenHashMap<LongArrayList> sections = new Long2ObjectOpenHashMap<>();
+         final int sectionShift = this.taskScheduler.getChunkSystemLockShift();
+@@ -603,7 +613,19 @@ public final class ChunkHolderManager {
+                         // removed before we acquired lock
+                         continue;
+                     }
+-                    ret.put(coord, tickets.copy());
++                    // SourbyCraft start - copy serialized fields while the section is locked
++                    if (detached) {
++                        final List<Ticket> copy = new ArrayList<>();
++                        for (final Ticket ticket : tickets) {
++                            if (ticket.getType().persist()) {
++                                copy.add(new Ticket(ticket.getType(), ticket.getTicketLevel(), ticket.moonrise$getRemoveDelay()));
++                            }
++                        }
++                        ret.put(coord, copy);
++                    } else {
++                        ret.put(coord, tickets.copy());
++                    }
++                    // SourbyCraft end - copy serialized fields while the section is locked
+                 }
+             } finally {
+                 this.ticketLockArea.unlock(ticketLock);
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 9c26108e00de6bcceb5a79523b66de0d7a97320a..d94888a011a1ed6d85fda10f1136105afa60a717 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -456,6 +456,9 @@ public final class RegionizedServer {
+                     toSave.add(GameRuleMap.class);
+                 }
+ 
++                // SourbyCraft - snapshot ticket data independently; raids and world PDC stay shutdown-only.
++                dev.iyanz.sourbycraft.world.WorldStateAutosave.save(level.getDataStorage(), sync);
++
+                 // note: the dragon fight is autosaved on the region owning the fight in question.
+                 //       this is because this is specific per-dimension and is also region-specific
+                 //       in that dimension to a single region, and is ticked there too, so no point
+diff --git a/net/minecraft/world/level/TicketStorage.java b/net/minecraft/world/level/TicketStorage.java
+index d966a073ba74ff881941aba79d23d8135bac119b..d30e6700cdf00d7b66f65e8943ef8e432485d89b 100644
+--- a/net/minecraft/world/level/TicketStorage.java
++++ b/net/minecraft/world/level/TicketStorage.java
+@@ -82,7 +82,35 @@ public class TicketStorage extends SavedData implements ca.spottedleaf.moonrise.
+         return new TicketStorage(new Long2ObjectOpenHashMap<>(4), ticketsToLoad);
+     }
+ 
++    // SourbyCraft start - detached periodic ticket snapshot; normal shutdown codec path is unchanged
++    private @Nullable List<Pair<ChunkPos, Ticket>> sourbycraft$snapshotTickets;
++
++    public TicketStorage sourbycraft$snapshot() {
++        final List<Pair<ChunkPos, Ticket>> packed = new ArrayList<>();
++        // Same lock order as activation: deactivated map, then the manager's existing section locks.
++        synchronized (this.deactivatedTickets) {
++            final var active = this.chunkMap.level.moonrise$getChunkTaskScheduler().chunkHolderManager.getTicketsCopyForPersistence();
++            for (final var entry : Long2ObjectMaps.fastIterable(active)) {
++                final ChunkPos pos = ChunkPos.unpack(entry.getLongKey());
++                for (final Ticket ticket : entry.getValue()) {
++                    packed.add(new Pair<>(pos, ticket)); // already detached under the section lock
++                }
++            }
++            forEachTicket((pos, ticket) -> {
++                if (ticket.getType().persist()) {
++                    packed.add(new Pair<>(pos, new Ticket(ticket.getType(), ticket.getTicketLevel(), ticket.moonrise$getRemoveDelay())));
++                }
++            }, this.deactivatedTickets);
++        }
++        final TicketStorage snapshot = new TicketStorage();
++        snapshot.sourbycraft$snapshotTickets = List.copyOf(packed);
++        return snapshot;
++    }
++    // SourbyCraft end - detached periodic ticket snapshot
++
+     private List<Pair<ChunkPos, Ticket>> packTickets() {
++        // SourbyCraft - periodic encoding reads only the detached snapshot, never the live ticket map
++        if (this.sourbycraft$snapshotTickets != null) return this.sourbycraft$snapshotTickets;
+         List<Pair<ChunkPos, Ticket>> tickets = new ArrayList<>();
+         this.forEachTicket((pos, ticket) -> {
+             if (ticket.getType().persist()) {
+@@ -132,13 +160,15 @@ public class TicketStorage extends SavedData implements ca.spottedleaf.moonrise.
+     }
+ 
+     public void activateAllDeactivatedTickets() {
+-        for (Entry<List<Ticket>> entry : Long2ObjectMaps.fastIterable(this.deactivatedTickets)) {
+-            for (Ticket ticket : entry.getValue()) {
+-                this.addTicket(entry.getLongKey(), ticket);
++        synchronized (this.deactivatedTickets) { // SourbyCraft - serialize with periodic snapshot
++            for (Entry<List<Ticket>> entry : Long2ObjectMaps.fastIterable(this.deactivatedTickets)) {
++                for (Ticket ticket : entry.getValue()) {
++                    this.addTicket(entry.getLongKey(), ticket);
++                }
+             }
+-        }
+ 
+-        this.deactivatedTickets.clear();
++            this.deactivatedTickets.clear();
++        }
+     }
+ 
+     public void setLoadingChunkUpdatedListener(final TicketStorage.@Nullable ChunkUpdated loadingChunkUpdatedListener) {
+diff --git a/net/minecraft/world/level/storage/SavedDataStorage.java b/net/minecraft/world/level/storage/SavedDataStorage.java
+index 65bb86910f333ee41aec2347a1a9ce87dc644ffc..2bfe41918c6f2973dbbee96afa683dce4ac53eb1 100644
+--- a/net/minecraft/world/level/storage/SavedDataStorage.java
++++ b/net/minecraft/world/level/storage/SavedDataStorage.java
+@@ -239,6 +239,16 @@ public class SavedDataStorage implements AutoCloseable {
+         }
+     }
+ 
++    // SourbyCraft start - encode detached data on the caller and preserve the existing write/shutdown chain
++    public <T extends SavedData> CompletableFuture<?> sourbycraft$saveSnapshot(final SavedDataType<T> type, final T snapshot) {
++        if (this.closed) throw new IllegalStateException("Trying to save a snapshot after storage was closed");
++        final CompoundTag tag = this.encodeUnchecked(type, snapshot, this.registries.createSerializationContext(NbtOps.INSTANCE));
++        this.pendingWriteFuture = this.pendingWriteFuture.thenCompose(ignored ->
++            CompletableFuture.runAsync(() -> this.tryWrite(type, tag), Util.DIMENSION_DATA_IO_POOL));
++        return this.pendingWriteFuture;
++    }
++    // SourbyCraft end - encode detached data on the caller and preserve the existing write/shutdown chain
++
+     // Folia end - region threading
+     public CompletableFuture<?> scheduleSave() {
+         if (this.closed) {

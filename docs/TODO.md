@@ -204,8 +204,9 @@ dan gate yang masih terbuka tetap wajib.
   2/2; slim jar lokal (flat, tanpa pemain): `save-all flush` di game time 651, SIGKILL di 942,
   restart 681; autosave saja (span 20 s): SIGKILL di 1709, restart 1479; stop bersih exit 0, tanpa
   baris korupsi; `verify_crash_panel.py` di demo 2026-10-07: game time PASS, 64/64 blok, entitas utuh.
-  Sisa: run dengan pemain nyata, world border,
-  world PDC dan `level.dat` belum masuk. Detail: `docs/architecture/engine-storage.md` §6.
+  Sisa: run dengan pemain nyata dan world PDC (masih shutdown-only). World border dan
+  `level.dat` masuk lewat 0056; 0067 menambah snapshot tiket periodik (belum dikompilasi),
+  raids/PDC tetap terbuka; lihat `docs/architecture/persistence-save-paths.md` §5. Detail: `docs/architecture/engine-storage.md` §6.
 - [x] AWF create masih menunggu generasi spawn pada global tick: report Spark pengguna
   `https://spark.lucko.me/RyP3FlAYME` mencatat 4.650 ms sampel inclusive pada
   `/awf create` → `setInitialSpawn` → `syncLoadNonFull`; 4.570 ms di `parkNanos`.
