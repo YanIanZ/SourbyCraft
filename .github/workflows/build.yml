@@ -746,6 +746,7 @@ jobs:
               && grep -q 'LEGACY_GLOBAL_ONESHOT_STATES_OK' server.log \
               && grep -q 'LEGACY_GLOBAL_IDLE_CANCEL_OK' server.log \
               && grep -q 'LEGACY_GLOBAL_CANCEL_TASKS_OK' server.log \
+              && grep -q 'LEGACY_GLOBAL_EXCEPTION_OK' server.log \
               && grep -q 'LEGACY_REGION_TASK_OK' server.log \
               && grep -q 'LEGACY_ENTITY_TASK_OK' server.log \
               && grep -q 'LEGACY_ENTITY_RETIRED_OK' server.log; then

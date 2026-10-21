@@ -15,9 +15,16 @@ import org.bukkit.scheduler.BukkitTask;
  */
 public final class LegacyBridgePlugin extends JavaPlugin {
 
+    /** Incremented by every onEnable of this instance; tasks remember the generation they belong to. */
+    private final AtomicInteger generation = new AtomicInteger();
+    /** Bodies that ran after their generation ended (a task that survived disable). */
+    private final AtomicInteger staleRuns = new AtomicInteger();
+
     @Override
     public void onEnable() {
-        this.getLogger().info("LEGACY_BRIDGE_ENABLED");
+        final int gen = this.generation.incrementAndGet();
+        this.getLogger().info("LEGACY_BRIDGE_ENABLED gen=" + gen);
+        if (gen > 1) reenableChecks(gen);
         final BukkitScheduler scheduler = this.getServer().getScheduler();
 
         scheduler.runTask(this, () -> this.getLogger().info(
@@ -239,6 +246,21 @@ public final class LegacyBridgePlugin extends JavaPlugin {
         Bukkit.getRegionScheduler().execute(this, world, 0, 0, () -> global.execute(this, () ->
             check(Bukkit.isGlobalTickThread(), "LEGACY_GLOBAL_FROM_REGION", "thread=" + Thread.currentThread().getName())));
 
+        // An exception in a global repeater's body is the plugin's failure, not a violation: Folia
+        // keeps the repeater, so it runs again and can still cancel itself. The bridge logs the
+        // deliberate exception ("generated an exception while executing task").
+        final AtomicInteger throwingRuns = new AtomicInteger();
+        global.runAtFixedRate(this, task -> {
+            final int run = throwingRuns.incrementAndGet();
+            if (run == 1) throw new IllegalArgumentException("LEGACY_DELIBERATE exception in a global repeater body");
+            if (run == 2) {
+                task.cancel();
+                global.runDelayed(this, after -> check(throwingRuns.get() == 2
+                        && task.getExecutionState() == ScheduledTask.ExecutionState.CANCELLED,
+                    "LEGACY_GLOBAL_EXCEPTION", "runs=" + throwingRuns.get() + " state=" + task.getExecutionState()), 5L);
+            }
+        }, 1L, 1L);
+
         // GlobalRegionScheduler#cancelTasks removes this plugin's global tasks only; its async
         // Bukkit task survives.
         final AtomicInteger cancelledGlobalRuns = new AtomicInteger();
@@ -253,6 +275,101 @@ public final class LegacyBridgePlugin extends JavaPlugin {
                     && asyncRuns.get() == 1, "LEGACY_GLOBAL_CANCEL_TASKS",
                 "globalRuns=" + cancelledGlobalRuns.get() + " asyncRuns=" + asyncRuns.get()), 60L);
         }, 50L);
+    }
+
+    /**
+     * {@code legacybridge reenable} (console): disables this plugin and enables the same instance
+     * again, the way a plugin manager does. Long-lived global, Bukkit sync and Bukkit async timers of
+     * the current generation are left running into the disable; none of them may run afterwards.
+     * The second onEnable then repeats every marker above.
+     */
+    @Override
+    public boolean onCommand(final org.bukkit.command.CommandSender sender, final org.bukkit.command.Command command,
+                             final String label, final String[] args) {
+        if (args.length == 1 && "unload".equals(args[0])) {
+            unloadProbe();
+            return true;
+        }
+        if (args.length != 1 || !"reenable".equals(args[0])) return false;
+        final int gen = this.generation.get();
+        final Runnable stale = () -> {
+            if (this.generation.get() != gen || !this.isEnabled()) {
+                this.staleRuns.incrementAndGet();
+                this.getLogger().severe("LEGACY_REENABLE_STALE_RAN_WRONG gen=" + gen + " now=" + this.generation.get()
+                    + " thread=" + Thread.currentThread().getName());
+            }
+        };
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate(this, task -> stale.run(), 5L, 5L);
+        Bukkit.getGlobalRegionScheduler().runDelayed(this, task -> stale.run(), 40L);
+        this.getServer().getScheduler().runTaskTimer(this, stale, 5L, 5L);
+        this.getServer().getScheduler().runTaskTimerAsynchronously(this, stale, 5L, 5L);
+        this.getServer().getScheduler().runTaskLater(this, stale, 40L);
+        this.getLogger().info("LEGACY_REENABLE_START gen=" + gen + " thread=" + Thread.currentThread().getName());
+        this.getServer().getPluginManager().disablePlugin(this);
+        this.getLogger().info("LEGACY_REENABLE_DISABLED enabled=" + this.isEnabled());
+        this.getServer().getPluginManager().enablePlugin(this);
+        return true;
+    }
+
+    /**
+     * {@code legacybridge unload} (console): legacy sync tasks anchored (RegionTask) in a world that
+     * is then unloaded. The engine cancels that world's region scheduler tasks without running them;
+     * the bridge must release its entries too, so the plugin sees them cancelled and not queued.
+     */
+    private void unloadProbe() {
+        final dev.iyanz.sourbycraft.api.world.AuroraWorlds worlds =
+            Bukkit.getServicesManager().load(dev.iyanz.sourbycraft.api.world.AuroraWorlds.class);
+        if (worlds == null) {
+            this.getLogger().severe("LEGACY_UNLOAD_WRONG no AuroraWorlds service");
+            return;
+        }
+        final String name = "legacy_unload_" + Long.toHexString(System.nanoTime());
+        final BukkitScheduler scheduler = this.getServer().getScheduler();
+        final AtomicInteger bodyRuns = new AtomicInteger();
+        worlds.create(new org.bukkit.WorldCreator(name), "void", false).whenComplete((world, failure) -> {
+            if (failure != null) {
+                this.getLogger().severe("LEGACY_UNLOAD_WRONG create failed: " + failure);
+                return;
+            }
+            Bukkit.getGlobalRegionScheduler().run(this, t -> {
+                world.addPluginChunkTicket(0, 0, this);
+                world.getChunkAtAsync(0, 0, true).whenComplete((chunk, loadFailure) -> Bukkit.getGlobalRegionScheduler().run(this, t2 -> {
+                    final org.bukkit.Location spot = new org.bukkit.Location(world, 8, 64, 8);
+                    final BukkitTask oneShot = scheduler.runTaskLater(this,
+                        dev.iyanz.sourbycraft.api.scheduler.RegionTask.at(spot, bodyRuns::incrementAndGet), 6000L);
+                    final BukkitTask timer = scheduler.runTaskTimer(this,
+                        dev.iyanz.sourbycraft.api.scheduler.RegionTask.at(spot, bodyRuns::incrementAndGet), 6000L, 20L);
+                    this.getLogger().info("LEGACY_UNLOAD_QUEUED world=" + name + " queued=" + scheduler.isQueued(oneShot.getTaskId())
+                        + "," + scheduler.isQueued(timer.getTaskId()));
+                    Bukkit.getServer().unloadWorldAsync(world, false, result -> Bukkit.getGlobalRegionScheduler().runDelayed(this, t3 -> {
+                        final boolean released = !scheduler.isQueued(oneShot.getTaskId()) && !scheduler.isQueued(timer.getTaskId())
+                            && oneShot.isCancelled() && timer.isCancelled()
+                            && scheduler.getPendingTasks().stream().noneMatch(p -> p.getTaskId() == oneShot.getTaskId()
+                                || p.getTaskId() == timer.getTaskId());
+                        check(result == dev.iyanz.sourbycraft.api.world.WorldUnloadResult.SUCCESS && released && bodyRuns.get() == 0,
+                            "LEGACY_UNLOAD_RELEASED", "world=" + name + " result=" + result + " queued="
+                                + scheduler.isQueued(oneShot.getTaskId()) + "," + scheduler.isQueued(timer.getTaskId())
+                                + " cancelled=" + oneShot.isCancelled() + "," + timer.isCancelled() + " bodyRuns=" + bodyRuns.get());
+                    }, 20L));
+                }));
+            });
+        });
+    }
+
+    /** After the same instance is enabled again: it can schedule, and nothing from before ran. */
+    private void reenableChecks(final int gen) {
+        final GlobalRegionScheduler global = Bukkit.getGlobalRegionScheduler();
+        final AtomicInteger freshGlobal = new AtomicInteger();
+        final AtomicInteger freshAsync = new AtomicInteger();
+        global.runAtFixedRate(this, task -> {
+            if (freshGlobal.incrementAndGet() == 3) task.cancel();
+        }, 1L, 1L);
+        this.getServer().getScheduler().runTaskAsynchronously(this, freshAsync::incrementAndGet);
+        // 100 ticks: well after every stale timer (period 5, delay 40) would have run.
+        this.getServer().getScheduler().runTaskLaterAsynchronously(this, () -> check(this.staleRuns.get() == 0
+                && freshGlobal.get() == 3 && freshAsync.get() == 1 && this.generation.get() == gen, "LEGACY_REENABLE",
+            "gen=" + gen + " staleRuns=" + this.staleRuns.get() + " freshGlobal=" + freshGlobal.get()
+                + " freshAsync=" + freshAsync.get()), 100L);
     }
 
     @Override

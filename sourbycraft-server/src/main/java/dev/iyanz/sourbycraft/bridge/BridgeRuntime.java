@@ -92,7 +92,9 @@ public final class BridgeRuntime {
         }
     }
 
-    private record Scheduled(String plugin, Object owner, Handle handle, Task task, BridgeRouter.Route route) {}
+    /** {@code world}: the anchor's world for {@link BridgeRouter.Route#REGION_OWNER}, else {@code null}. */
+    private record Scheduled(String plugin, Object owner, Handle handle, Task task, BridgeRouter.Route route,
+                             Object world) {}
 
     /** The bridged body running on this thread, if any; see {@link GuardViolations}. */
     private static final ThreadLocal<Invocation> CURRENT = new ThreadLocal<>();
@@ -313,7 +315,8 @@ public final class BridgeRuntime {
         final long delay = Math.max(0L, delayTicks);
         final long period = task.period() > 0 ? task.period() : 0L;
         final LateHandle handle = new LateHandle();
-        final Scheduled entry = new Scheduled(plugin, owner, handle, task, route);
+        final Scheduled entry = new Scheduled(plugin, owner, handle, task, route,
+            route == BridgeRouter.Route.REGION_OWNER ? anchor.world() : null);
         final PluginTasks tasks = this.admitted.get(plugin);
         final int pendingLimit = this.maxPendingTasks.getAsInt();
         boolean capacityRejected = false;
@@ -380,6 +383,30 @@ public final class BridgeRuntime {
         if (!rejected(entry)) return;
         this.telemetry.failure(entry.plugin(), "task " + entry.task().id()
             + " cancelled: its target entity was removed before it ran (retired)");
+    }
+
+    /**
+     * A world is unloading. Its regions never tick again, and the engine cancels their region
+     * scheduler tasks without running them and without telling the bridge (WorldUnloadDrain), so
+     * a bridged task anchored there would otherwise stay indexed for good: counted as pending,
+     * reported by {@code isQueued}/{@code getPendingTasks}, never cancelled in the plugin's view.
+     * Releases those entries like a retired entity task: rejected, never a violation. Entity
+     * tasks are released by their retired callback; global and async tasks have no world.
+     *
+     * @param world the unloading world, compared by identity with the anchor's world
+     * @return how many bridged tasks were released
+     */
+    public int worldUnloaded(final Object world) {
+        if (world == null) return 0;
+        int released = 0;
+        for (final Scheduled entry : this.scheduled.values()) {
+            if (entry.route() != BridgeRouter.Route.REGION_OWNER || entry.world() != world) continue;
+            if (!rejected(entry)) continue;
+            this.telemetry.failure(entry.plugin(), "task " + entry.task().id()
+                + " cancelled: the world it was anchored in unloaded before it ran");
+            ++released;
+        }
+        return released;
     }
 
     /**

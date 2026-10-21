@@ -241,6 +241,15 @@ public final class AuroraBridge {
         if (plugin != null && current != null) current.cancelGlobal(plugin.getName());
     }
 
+    /**
+     * Releases bridged tasks anchored in a world whose regions were just drained for unload;
+     * see {@link BridgeRuntime#worldUnloaded}. Never creates the runtime.
+     */
+    public static int worldUnloaded(final Object world) {
+        final BridgeRuntime current = runtime;
+        return current == null ? 0 : current.worldUnloaded(world);
+    }
+
     /** Closes admission even before the bridge's disable listener has been registered. */
     public static void disable(final Plugin plugin) {
         final BridgeRuntime current = runtime;

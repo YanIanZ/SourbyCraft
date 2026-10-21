@@ -304,14 +304,18 @@ async body stays visible to `running`/`activeWorkers`/`runningAsync` until it fi
 `RegionTask.at` floors negative coordinates and snapshots them. Also reviewed without new tests:
 `FoliaSchedulerCompatibility` state machine against `bridgeCancelled` and `cancel()` (including
 cancellation before `setBukkitTask`), quarantine classification (capacity and resolver failures
-never reach `onFailure`), and body-time recording under concurrent completion.
+never reach `onFailure`), and body-time recording under concurrent completion. (2026-10-22: the state machine now has
+tests, `FoliaSchedulerCompatibilityTest`, 23, including run/cancel races; see the LightingLuminol port doc.)
 
 Correct but fragile:
 
 - An entry leaves the indexes only when its body runs, it is cancelled through the bridge, or
   the plugin is disabled/quarantined. Work the backend drops without running it (Folia
-  `AsyncScheduler#cancelTasks` called directly by the plugin, a region task for a world that
-  unloads) stays indexed and counts toward `max-pending-tasks-per-plugin` until disable.
+  `AsyncScheduler#cancelTasks` called directly by the plugin) stays indexed and counts toward
+  `max-pending-tasks-per-plugin` until disable. A region task for a world that unloads no longer
+  does (2026-10-22): `WorldUnloadDrain` calls `AuroraBridge.worldUnloaded`, which releases the
+  `REGION_OWNER` entries anchored in that world (rejected, never a violation; `BridgeWorldUnloadTest`,
+  fixture `legacybridge unload` -> `LEGACY_UNLOAD_RELEASED_OK`).
 - `GlobalRegionScheduler#cancelTasks` also drains ordinary Bukkit sync tasks that fell back to the
   global region, because the native cancellation already cancels them.
 - Body-time count/total and the percentile ring are each consistent, not one atomic snapshot.

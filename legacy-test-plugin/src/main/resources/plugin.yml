@@ -5,3 +5,11 @@ version: '${version}'
 main: dev.iyanz.sourbycraft.legacytest.LegacyBridgePlugin
 api-version: '${api_version}'
 description: CI fixture for the Aurora Bridge. Uses the Bukkit scheduler as a pre-Folia plugin would.
+commands:
+  legacybridge:
+    description: "Fixture only: 'reenable' disables and re-enables this plugin instance; 'unload' unloads a world holding bridged tasks."
+    usage: /legacybridge <reenable|unload>
+    permission: legacybridgetest.admin
+permissions:
+  legacybridgetest.admin:
+    default: op

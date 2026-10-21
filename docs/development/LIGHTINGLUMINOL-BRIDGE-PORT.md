@@ -7,6 +7,86 @@ build or tests for this increment. Testing and acceptance are assigned to Claude
 by the user. Materialization is not evidence of plugin qualification, improved
 throughput, or release readiness.
 
+## Status update 2026-10-22 (verify + harden, agent `claude-luminol`)
+
+Functional, local evidence only. Not qualified: no real players, no real plugins, no soak, no panel/VPS, no
+benchmark. Real-server acceptance (Sourby Demo, G07 of the Build 49 runbook) stays the owner's. Everything below was
+done in worktree `sc-worktrees/claude-luminol` (base `c7523d2e`); nothing is committed until the PM applies it.
+
+**What is in the tree (2026-10-22).** Paper feature patches, current numbers: 0007 port (`GlobalRegionScheduler`
+`runDelayed`/`runAtFixedRate` -> `FoliaSchedulerCompatibility`, `runDelayedNative`/`runAtFixedRateNative`,
+`cancelTasks` -> `AuroraBridge.cancelGlobal`, bridge admission closed before disable callbacks, Bukkit `cancelTasks` on
+disable, `CraftScheduler` `global()`/`bridgeCancelled()` wiring), 0008 (async workers, draining tasks, limits), 0009
+(native plugin `cancelTask`/`cancelTasks` is a no-op instead of the refused legacy cancel task), 0010/0011 (explicit
+region/entity owner routing), 0012 (re-open admission when the same instance is enabled again). All are committed
+in the root repository now (the 2026-10-07 note that 0007/0008/0010/0011 were untracked is superseded). Adapter:
+`bridge/FoliaSchedulerCompatibility.java` with the GPL-3 header; packaged notices `META-INF/licenses/NOTICE_LIGHTINGLUMINOL`,
+`LICENSE_LIGHTINGLUMINOL`, `LICENSE_LIGHTINGLUMINOL_GPL`, `LICENSE_LIGHTINGLUMINOL_MIT` (and `LICENSE_LUMINOL`) are
+present in the patched server jar a booted run produced (`versions/26.2/sourbycraft-26.2.jar`, checked with `unzip -l`):
+handoff case 7 is now verified locally. README credits the port.
+
+**Safety review of the adapter and the bridged scheduler paths** (state machine, cancellation, disable/re-enable,
+exceptions, guard/quarantine, world unload):
+
+| # | Finding | Where | Severity | Outcome |
+| --- | --- | --- | --- | --- |
+| 1 | Region-owner bridged tasks were never released on world unload. `WorldUnloadDrain` cancels the world's region scheduler tasks without running them and without telling the bridge, so a legacy sync task anchored there (`RegionTask`, SSB2 spawn adapter, or `caller-region`) stayed in both bridge indexes for good: `isQueued` true, `isCancelled` false, listed by `getPendingTasks`, counted against `max-pending-tasks-per-plugin`. Reproduced on a baseline jar: `LEGACY_UNLOAD_RELEASED_WRONG ... queued=true,true cancelled=false,false`, `/plugins` pending `2` | `BridgeRuntime` (no unload path), `WorldUnloadDrain.drain` | Medium (silent task loss in the plugin's view, bounded index leak) | FIXED: `BridgeRuntime.worldUnloaded(world)` releases `REGION_OWNER` entries anchored in that world (rejected, last failure "the world it was anchored in unloaded", never a violation, no log line per task); `AuroraBridge.worldUnloaded`; `WorldUnloadDrain` calls it after the drain (also when a drain step failed) and logs `Released N bridged legacy task(s) anchored in <world> for unload`. Tests: `BridgeWorldUnloadTest` (2) |
+| 2 | Adapter state machine (IDLE/RUNNING/CANCELLED_RUNNING/FINISHED/CANCELLED): every transition is either a synchronized CAS or a write that no other transition can race (one-shot FINISHED; repeater CANCELLED only after its CAS failed). `bridgeCancelled()` covers rejection, disable, quarantine, global/Bukkit cancellation and the pending limit; `setBukkitTask` cancels a handle published after a cancel/rejection. No defect found | `FoliaSchedulerCompatibility` `BukkitBackedScheduledTask` | - | pinned by 23 tests (below) |
+| 3 | Exceptions in a global body: `BridgeRuntime.runGuarded` catches them; a region violation counts toward quarantine, anything else is a failure. A repeater whose body threw stays scheduled (Folia keeps it). A one-shot that threw ends FINISHED | `BridgeRuntime.runGuarded`/`onFailure` | - | tests + `LEGACY_GLOBAL_EXCEPTION_OK` |
+| 4 | Disable: admission closes before `onDisable` (0007), `cancelTasks` + `GlobalRegionScheduler#cancelTasks` follow; a native plugin's disable no longer reaches the refused legacy cancel (0009). Submissions from `onDisable` are refused (`IllegalPluginAccessException`), a running one-shot finishes, a running repeater ends CANCELLED. Same-instance re-enable (0012 `reopen`): new tasks run, no task from before the disable runs | 0007/0009/0012, `BridgeRuntime.disable`/`reopen` | - | tests + `LEGACY_REENABLE_OK staleRuns=0` |
+| 5 | Fatal-violation count and quarantine survive a disable/re-enable of the same instance (by design: cleared only by a restart). A plugin with a recurring deliberate violation is quarantined after `quarantine-after` re-enables | `BridgeTelemetry` | Info | documented here; the fixture reaches 2/3 after one re-enable |
+| 6 | Re-enabling the same instance logs Paper's `Enabled plugin with unregistered ConfiguredPluginClassLoader` WARN (upstream Paper behavior for plugman-style re-enable, not the bridge) | Paper plugin manager | Info | left as is |
+| 7 | Global callbacks calling `Entity#teleport`: the owned teleport route (Paper 0017) returns `false` and schedules `teleportAsync` from a foreign thread instead of blocking the global tick; no deadlock path through the adapter | Paper 0017 | - | reviewed only |
+
+**Unit tests added** (`sourbycraft-server/src/test/java/dev/iyanz/sourbycraft/bridge/`). `FoliaSchedulerCompatibilityTest`
+(23) drives the adapter through a real `BridgeRuntime` with the same wiring as `CraftScheduler` (patches 0003/0007/0009):
+entry-point validation; no runtime started when nothing is bridged; explicit global routing even with `caller-region`;
+one-shot run/finish, idle cancel (`CANCELLED_BY_CALLER` then `CANCELLED_ALREADY`, Bukkit task cancelled once), cancel while
+running (`RUNNING`, then FINISHED), exception in a one-shot; repeater IDLE between runs, self-cancel
+(`NEXT_RUNS_CANCELLED`, `CANCELLED_RUNNING`, `NEXT_RUNS_CANCELLED_ALREADY`, then CANCELLED and no further run), exception in a
+repeater (keeps running, not fatal), cancel from another thread while the body runs (index entry removed at once,
+`isCurrentlyRunning` true until the body drains); rejection inside submit before the handle exists, pending-limit
+rejection, cancel before the handle is published; a guard hit in a global body counted toward quarantine, quarantine
+cancelling the running repeater and idle work, new submissions refused; a thrown region violation counted as fatal; plugin
+disabled before a body is due, disabled during a repeater's body; disable with idle and running work then same-instance
+re-enable; a one-shot running during disable; `cancelGlobal` removing only this plugin's global-backed entries (async,
+region and other plugins untouched; admission open) and `cancelAll` the rest; 500 one-shot run-vs-cancel and 300
+repeater run-vs-cancel-vs-bridge-cancel races (results and final states always agree, no index leak). Package-private seam:
+`FoliaSchedulerCompatibility.schedule(plugin, task, period, BukkitSubmit)`; the public entry points delegate to it.
+Mutations: removing the cancel-on-publish in `setBukkitTask` fails 2 tests; making `bridgeCancelled()` a no-op fails 5.
+
+**Gradle / Python (worktree, 2026-10-22).** Bridge package: 110 tests, 0 failures (`SuperiorSpawnRealJarTest` 4 skipped,
+env-gated). Full suites (`-PincludeTestPlugin=true :sourbyapi:test :sourbycraft-server:test :test-plugin:test`): sourbyapi 585/0 (2 skipped), sourbycraft-server 11880/0 (28 skipped), test-plugin 14/0. Python `scripts/test_*.py` 613 OK; patch_policy, baseline_policy, inherited_guard_policy, independence, concurrency, toolchain policies and `patch_surface.py --check` pass.
+
+**Local functional run (agent test server, not qualified).** Jar: worktree `slimServerJar` (SHA-256 `23165cef...2f22`),
+`aurora.bridge.mode = "safe"`, `minecraft:flat`, legacy fixture `legacy-test-plugin-1.0.0.jar` from this worktree.
+Run `claude-luminol-legacy-2` (2026-10-22 02:38, slot 2, boot 11.4 s, stop exit 0): every `LEGACY_*` marker CI waits for
+printed `_OK` (plus the new `LEGACY_GLOBAL_EXCEPTION_OK`) in both generations; console `legacybridge reenable` ->
+`LEGACY_DISABLE_GLOBAL_SUBMIT_OK`, `LEGACY_DISABLE_BUKKIT_SUBMIT_OK`, second onEnable repeats all markers,
+`LEGACY_REENABLE_OK gen=2 staleRuns=0 freshGlobal=3 freshAsync=1` (global repeater, global one-shot, Bukkit sync timer,
+Bukkit async timer and Bukkit one-shot left pending into the disable never ran afterwards); `legacybridge unload` ->
+`LEGACY_UNLOAD_RELEASED_OK ... queued=false,false cancelled=true,true bodyRuns=0`. 0 `_WRONG`, 0 `Unsupported in region
+threading`, 0 `while cancelling Bukkit scheduler tasks`; the only exceptions are the deliberate ones (2x `LEGACY_DELIBERATE`
+body exception, 2x `LEGACY_BRIDGE_WORLD_ACCESS_REFUSED` with its TickThread error and bridge violation line). `/plugins
+LegacyBridgeTest` at the end: Bridged, 71 redirects / 10 handoffs, 4 rejected / 2 fatal, not quarantined, pending 0.
+Baseline run `claude-luminol-legacy-3-baseline` (same tree without the `WorldUnloadDrain` call): `LEGACY_UNLOAD_RELEASED_WRONG`,
+pending 2. Run 1 (`claude-luminol-legacy-1`) exposed a counter bug in the new fixture check (fixed), not in the server.
+Raw logs: `/Volumes/Ext/DevCache/agent-tmp/sourbycraft/luminol-2026-10-22/` (`run2-latest.log`, `run3-baseline-no-unload-release-latest.log`,
+`run1-fixture-bug-latest.log`, `gradle-full-suites.log`).
+
+**Fixture additions** (`legacy-test-plugin`, CI unaffected except one new required marker): a global repeater whose first
+body throws (`LEGACY_GLOBAL_EXCEPTION`, now in the CI settled list), console command `legacybridge reenable` and
+`legacybridge unload` (manual/agent runs only; CI does not send them).
+
+**Handoff cases after this update.** Case 1, case 3 (including handle-publication, rejection, disable, quarantine and
+cancel-during-run), case 4 (one runtime, several plugins, unit level), case 5 and case 7: covered as above (unit + local
+functional). Case 2: native-plugin path unchanged (`shouldUseBukkitScheduler` false without a bridged admission; 0009
+no-op); no native-plugin boot with mode OFF was run here beyond the fixture server's own native plugins (none installed).
+Case 6: entity retirement on unload is Paper 0021 (ENG-3), entity movement and named region ownership are not changed by
+this port; unsafe world access from a global callback reaching the guard/classifier is unit-tested here and seen live
+(`WORLD_ACCESS_REFUSED`). Case 8 (real plugins, players, soak, AWF interaction) and the follow-up config-bound/LIVE-reload
+cases remain open and belong to the owner's real-server acceptance.
+
 ## Status update 2026-10-07 (what is applied, tested and run)
 
 Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md), `sourbycraft-server/build/test-results`,
@@ -29,7 +109,7 @@ Sources: [AGENT-COORDINATION.md](../../AGENT-COORDINATION.md), `sourbycraft-serv
   `aCancelledAsyncBodyStaysVisibleUntilItFinishes`. `BridgeRuntimeTest` covers pending-index cleanup, `isQueued`/
   `isCurrentlyRunning`, overlapping invocations and per-plugin independence (method names in that file).
   **No unit test targets `FoliaSchedulerCompatibility` (the adapter's `ScheduledTask` state machine)**; its
-  states are exercised only by the fixture below.
+  states are exercised only by the fixture below. (Superseded 2026-10-22: `FoliaSchedulerCompatibilityTest`.)
 - **CI boot evidence: none yet for the new markers.** The `LEGACY_GLOBAL_*`, `LEGACY_REGION_TASK_OK`, `LEGACY_ENTITY_*` and
   `LEGACY_DISABLE_*` checks in `.github/workflows/build.yml`, and the fixture code that prints them, are uncommitted
   working-tree changes as of 2026-10-07 (`git diff HEAD`), so no CI run has executed them. The log says the newer markers

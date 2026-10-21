@@ -37,10 +37,7 @@ public final class FoliaSchedulerCompatibility {
                                                    final long delayTicks) {
         validate(plugin, task);
         if (delayTicks <= 0) throw new IllegalArgumentException("Delay ticks may not be <= 0");
-        final BukkitBackedScheduledTask ret = new BukkitBackedScheduledTask(plugin, -1, task);
-        ret.setBukkitTask(Bukkit.getScheduler().runTaskLater(plugin, ret, delayTicks));
-        if (!plugin.isEnabled()) ret.cancel();
-        return ret;
+        return schedule(plugin, task, -1, callback -> Bukkit.getScheduler().runTaskLater(plugin, callback, delayTicks));
     }
 
     public static ScheduledTask runAtFixedRateOnBukkit(final Plugin plugin, final Consumer<ScheduledTask> task,
@@ -48,8 +45,25 @@ public final class FoliaSchedulerCompatibility {
         validate(plugin, task);
         if (initialDelayTicks <= 0) throw new IllegalArgumentException("Initial delay ticks may not be <= 0");
         if (periodTicks <= 0) throw new IllegalArgumentException("Period ticks may not be <= 0");
+        return schedule(plugin, task, periodTicks,
+            callback -> Bukkit.getScheduler().runTaskTimer(plugin, callback, initialDelayTicks, periodTicks));
+    }
+
+    /** How the adapter hands its callback to the Bukkit scheduler; a seam for unit tests. */
+    @FunctionalInterface
+    interface BukkitSubmit {
+        BukkitTask submit(Runnable callback);
+    }
+
+    /**
+     * Creates the adapter task and publishes its Bukkit handle. The bridge may reject or cancel
+     * the callback inside {@code submit} (before the handle exists); {@code setBukkitTask} then
+     * cancels the handle it is given. Arguments are validated by the public entry points.
+     */
+    static ScheduledTask schedule(final Plugin plugin, final Consumer<ScheduledTask> task, final long periodTicks,
+                                  final BukkitSubmit submit) {
         final BukkitBackedScheduledTask ret = new BukkitBackedScheduledTask(plugin, periodTicks, task);
-        ret.setBukkitTask(Bukkit.getScheduler().runTaskTimer(plugin, ret, initialDelayTicks, periodTicks));
+        ret.setBukkitTask(submit.submit(ret));
         if (!plugin.isEnabled()) ret.cancel();
         return ret;
     }
