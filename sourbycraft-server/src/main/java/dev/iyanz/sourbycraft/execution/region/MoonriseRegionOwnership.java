@@ -64,6 +64,11 @@ public final class MoonriseRegionOwnership implements RegionOwnership, RegionChu
     }
 
     @Override
+    public boolean isTickThread() {
+        return TickThread.isTickThread();
+    }
+
+    @Override
     public void executeOnGlobalTick(final Runnable task) {
         FoliaRegionBackend.executeOnGlobalTick(task);
     }

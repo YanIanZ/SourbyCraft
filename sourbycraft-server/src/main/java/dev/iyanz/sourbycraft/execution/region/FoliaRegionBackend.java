@@ -13,7 +13,7 @@ import io.papermc.paper.threadedregions.TickRegionScheduler;
  * ticking" and "which region is this thread ticking", the other "hand this to whoever owns that
  * entity". Nothing else reaches the backend.</p>
  */
-public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, RegionPopulation, EnginePools {
+public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, RegionPopulation, EnginePools, RegionTickRate {
 
     private static final int MAX_CACHED_ANCHORS = 4096;
     /** Anchors by region id; recomputed when the cached chunk has left the region. World held weakly. */
@@ -43,6 +43,18 @@ public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, R
     @Override
     public double tickRateHz() {
         return TickRegionScheduler.getTickRate();
+    }
+
+    // RegionTickRate: the one server-wide rate (TickRegionScheduler), for ServerTickManager#getTickRate/setTickRate.
+
+    @Override
+    public float currentTickRate() {
+        return TickRegionScheduler.getTickRate();
+    }
+
+    @Override
+    public void setTickRate(final float hz) {
+        TickRegionScheduler.setTickRate(hz);
     }
 
     /** Backs {@link RegionOwnership#ensureGlobalTickThread}: the engine's global-tick ownership check. */

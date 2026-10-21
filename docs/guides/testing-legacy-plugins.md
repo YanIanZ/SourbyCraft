@@ -38,6 +38,49 @@ touches a player or block in a *different* region than the one it runs on is ref
 engine (`IllegalStateException`). A long-running timer anchored on one region does not follow a
 player who walks away.
 
+### Legacy synchronous events and `ServerTickManager` (2026-10-22, unit-tested; see the coordination entry for the boot check)
+
+These work for every plugin, bridged or native; nothing to enable. Each costs nothing unless a
+plugin listens to it, and the first time a plugin's listener is used the log says once
+`Plugin <name> listens to the deprecated synchronous <event>; SourbyCraft fires it ...`.
+
+| Event / API | Where it runs | Waits | If it cannot run in time |
+| --- | --- | --- | --- |
+| `PlayerPreLoginEvent` | Global tick, after `AsyncPlayerPreLoginEvent` (pre-set from its result; the legacy event's final result decides, as on Paper: anything but `ALLOWED` refuses, also without a kick message, then with "You are not allowed to join this server.") | The login's authentication thread, up to 10 s to start + 10 s to finish | Login refused ("could not finish its login checks in time"), WARN |
+| `PlayerChatEvent` | The region that owns the sender: inline when the caller already owns the player; from the chat thread handed to the player's region; from a tick thread that does not own the player (a plugin's `Player#chat` on the global scheduler or another region) the event and the rest of the message run on the player's next tick | The chat thread only, up to 5 s + 5 s; a tick thread never waits | Message dropped and never sent later, WARN (at most one per 10 s) |
+| Paper's sync `ChatEvent` | Same; the message is sent after the event ran (from the waiting chat thread, or on the owner) | Same | Same |
+| `Bukkit.getServerTickManager()` | Any thread; changes take effect at the next global tick | — | — |
+
+Order for one chat message, as on Paper: `AsyncPlayerChatEvent` (chat thread) → `PlayerChatEvent`
+(sender's region) → `AsyncChatEvent` (chat thread; on the player's region for a `Player#chat` from
+a non-owning tick thread, see below) → `ChatEvent` (sender's region) → delivery.
+A `Player#chat` from a non-owning tick thread (the global region scheduler, another region)
+returns before the message is processed. When a plugin listens to `PlayerChatEvent` or `ChatEvent`,
+everything after that event then runs on the **player's region thread**, after the caller
+returned, with the event's `isAsynchronous()` still `false` (Paper's flag for `Player#chat`): that
+includes `AsyncChatEvent`. A listener that blocks in `AsyncChatEvent` (database or HTTP lookup,
+waiting on a future) stalls that region's tick for every player and chunk in it; check
+`event.isAsynchronous()` or hand the work off. If the event or the delivery fails on this path,
+there is no caller left to throw to: the log shows one ERROR line naming the player and the plugins
+listening to the legacy chat events, and the message is not sent (on the other paths the exception
+reaches the caller, as Paper's `Exception processing chat` from the chat thread).
+Cancel, message, format and recipients changes are honoured.
+
+`ServerTickManager` (freeze, step, sprint, tick rate) applies to every region and the global tick.
+The state is vanilla's own `ServerTickRateManager`, advanced once per global tick, so vanilla
+readers (datapack `#tick` functions, the watchdog) agree with the API. Each player is told its own
+region's state: frozen while the server is frozen **or** its region is paused through
+`getRegionThreadingTickRateManager()`, so unfreezing the server or changing the tick rate does not
+unfreeze the client of a player in a paused region. The read methods never block and never throw
+(before the server exists they answer not frozen, not stepping, tick rate 20); changing the state
+before the server exists is refused with `IllegalStateException`. `isFrozen(Entity)` includes
+the region's own pause only when called on the entity's owner thread.
+Each region picks a change up at the start of its own next tick, so regions are not frozen at one
+shared tick boundary; step and sprint count global ticks (a region that is behind runs fewer). The
+tick rate is the one server-wide rate (1–10 000). A region's own pause from
+`getRegionThreadingTickRateManager()` still applies on top. The vanilla `/tick` command stays
+unregistered: `/tick query` reads main-loop tick times that do not exist under region threading.
+
 ## 3. Test it
 
 1. Start the server with the plugin in `plugins/`.

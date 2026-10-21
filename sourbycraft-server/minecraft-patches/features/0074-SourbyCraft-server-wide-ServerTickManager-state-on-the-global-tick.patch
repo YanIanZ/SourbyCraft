@@ -1,0 +1,151 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 02:03:07 +0700
+Subject: [PATCH] SourbyCraft - server-wide ServerTickManager state on the
+ global tick
+
+The server-wide freeze, step, sprint and tick-rate state lives in
+vanilla's own ServerTickRateManager (MinecraftServer#tickRateManager,
+which ServerFunctionManager, the watchdog and the MSPT report read).
+ServerTickControl serialises access to it and the global tick handle
+advances it once per global tick from its tickRegion (after the handle
+is marked ticking, never for a cancelled handle): vanilla's
+checkShouldSprintThisTick + tick. Every region copies the published
+state at the start of its own tick, so a region runs game elements only
+when its own handle and the server-wide state allow it, and sprints
+while a server-wide sprint is active. Vanilla's own state and step
+broadcasts are switched off: its state packet carries only the
+server-wide freeze and overwrote the combined state of players in a
+region paused through the region API. ServerTickControl has each
+player's owner send its region's combined state and sends the step
+count (the full count at request time), after releasing its lock. The
+global tick handle calls ServerTickControl#globalTickEnd after the
+global work so sprinted ticks are accounted (vanilla endTickWork). Player pushes
+and move counting honour the frozen state again, as in vanilla (they
+were unconditional since the base dropped the tick manager).
+
+diff --git a/dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java b/dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java
+index a62ba97be22585298b53592b2bd076429c68d4c8..91c1a4975c9b8ab77893629332c27275b0c73685 100644
+--- a/dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java
++++ b/dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java
+@@ -29,6 +29,10 @@ public final class ScheduledHandleTickState {
+     private long lastTickTimeEndNanos = UNSET;
+ 
+     private boolean runsGameElements = true;
++    // SourbyCraft start - server-wide ServerTickManager state, copied at the start of each tick
++    private boolean serverRunsGameElements = true;
++    private boolean serverSprints = false;
++    // SourbyCraft end - server-wide ServerTickManager state, copied at the start of each tick
+ 
+     public ScheduledHandleTickState(final TickRegionScheduler.RegionScheduleHandle scheduleHandle) {
+         this.scheduleHandle = scheduleHandle;
+@@ -43,7 +47,7 @@ public final class ScheduledHandleTickState {
+     }
+ 
+     public boolean doesRunGameElements() {
+-        return runsGameElements;
++        return runsGameElements && serverRunsGameElements; // SourbyCraft - server-wide ServerTickManager state
+     }
+ 
+     public boolean isEntityFrozen(final Entity entity) {
+@@ -51,12 +55,13 @@ public final class ScheduledHandleTickState {
+     }
+ 
+     public boolean isSprinting() {
+-        return tickCountToSprintTo != UNSET;
++        return tickCountToSprintTo != UNSET || serverSprints; // SourbyCraft - server-wide ServerTickManager state
+     }
+ 
+     public long tickStart(final long nanos) {
+         // process all actions first
+         processAllActions();
++        copyServerTickState(); // SourbyCraft - server-wide ServerTickManager state, copied at the start of each tick
+ 
+         // check if overloaded
+         if (lastTickTimeEndNanos != UNSET && lastTickTimeEndNanos + TickRegionScheduler.getTimeBetweenTicks() + (GlobalConfiguration.getInstance().regionScheduler.overloadedLogMillis * 1_000_000L) <= nanos) {
+@@ -82,9 +87,16 @@ public final class ScheduledHandleTickState {
+     }
+ 
+     public void sendStateToPlayer(final ServerPlayer player) {
+-        player.connection.send(new ClientboundTickingStatePacket(TickRegionScheduler.getTickRate(), !runsGameElements));
++        player.connection.send(new ClientboundTickingStatePacket(dev.iyanz.sourbycraft.guards.ServerTickControl.get().getTickRate(), !runsGameElements || dev.iyanz.sourbycraft.guards.ServerTickControl.get().isFrozen())); // SourbyCraft - server-wide ServerTickManager state
+     }
+ 
++    // SourbyCraft start - server-wide ServerTickManager state, copied at the start of each tick (the global tick handle copies again after advancing it)
++    public void copyServerTickState() {
++        serverRunsGameElements = dev.iyanz.sourbycraft.guards.ServerTickControl.get().isRunningNormally();
++        serverSprints = dev.iyanz.sourbycraft.guards.ServerTickControl.get().sprintsThisTick();
++    }
++    // SourbyCraft end - server-wide ServerTickManager state, copied at the start of each tick
++
+     private void processAllActions() {
+         boolean processed = false;
+         Action action;
+@@ -138,6 +150,7 @@ public final class ScheduledHandleTickState {
+             // later, and we can't divide by 0
+             return 1L;
+         }
++        if (serverSprints) return 1L; // SourbyCraft - server-wide ServerTickManager sprint
+         return TickRegionScheduler.getTimeBetweenTicks();
+     }
+ 
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index d7ad870fde85d23b119d6de2cf8e9cb1927ce30a..5c6ede7ea4e77063cf6c9fc0696bfa24fe75cb6d 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -208,8 +208,11 @@ public final class RegionizedServer {
+ 
+         @Override
+         protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
++            dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTick(); // SourbyCraft - advance the server-wide ServerTickManager state once per global tick, only once marked ticking
++            this.getTickManager().copyServerTickState(); // SourbyCraft - the global tick reads what it just published
+             this.drainTasks();
+             this.server.globalTick(tickCount);
++            dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTickEnd(); // SourbyCraft - sprint time accounting (vanilla endTickWork), after the global tick's work
+         }
+ 
+         private void drainTasks() {
+diff --git a/net/minecraft/server/ServerTickRateManager.java b/net/minecraft/server/ServerTickRateManager.java
+index 9a21de639f124e1450ee59b2aced752384238276..1ae428c4cb18b7b97412a6cd79be4060245b2a2a 100644
+--- a/net/minecraft/server/ServerTickRateManager.java
++++ b/net/minecraft/server/ServerTickRateManager.java
+@@ -32,11 +32,11 @@ public class ServerTickRateManager extends TickRateManager {
+     }
+ 
+     private void updateStateToClients() {
+-        this.server.getPlayerList().broadcastAll(ClientboundTickingStatePacket.from(this));
++        // SourbyCraft - ServerTickControl tells each player its region's combined state (region pause + server-wide freeze) after releasing its lock; this server-wide-only packet would overwrite it
+     }
+ 
+     private void updateStepTicks() {
+-        this.server.getPlayerList().broadcastAll(ClientboundTickingStepPacket.from(this));
++        // SourbyCraft - ServerTickControl sends the step count after releasing its lock
+     }
+ 
+     public boolean stepGameIfPaused(final int ticks) {
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 82a0acac65c60d3e1e5cd3d3fb948bd8ab711a1f..c33201e7d8d1eeddf679a569d69952b3a2b8c741 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -2530,7 +2530,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+ 
+     @Override
+     protected void pushEntities() {
+-        if (true) { // Canvas - region threading
++        if (this.level().getCurrentWorldData().regionData.getRegionSchedulingHandle().getTickManager().doesRunGameElements()) { // SourbyCraft - frozen ticks stop player pushes again (region and server-wide ServerTickManager state)
+             super.pushEntities();
+         }
+     }
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index d0c57a42d8efc73d67033002433de8e8e2e9f93a..025dbe858f2216ca25fd550330da93afef1c11e8 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -1622,7 +1622,7 @@ public class ServerGamePacketListenerImpl
+                                 }
+                             } else {
+                                 boolean isFallFlying = this.player.isFallFlying();
+-                                if (true) { // Canvas - region threading
++                                if (this.player.level().getCurrentWorldData().regionData.getRegionSchedulingHandle().getTickManager().doesRunGameElements()) { // SourbyCraft - frozen ticks skip move counting again (region and server-wide ServerTickManager state)
+                                     this.receivedMovePacketCount++;
+                                     int deltaPackets = this.receivedMovePacketCount - this.knownMovePacketCount;
+                                     // CraftBukkit start - handle custom speeds and skipped ticks

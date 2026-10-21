@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 02:03:18 +0700
+Subject: [PATCH] SourbyCraft - ServerTickManager is supported
+
+The tick manager is implemented server-wide (ServerTickControl), so the
+@Unsupported marker goes; the javadoc states how the state applies to
+regions.
+
+diff --git a/src/main/java/org/bukkit/ServerTickManager.java b/src/main/java/org/bukkit/ServerTickManager.java
+index 86ad1c75f3992e067395cba76b09b9e6d144349f..8756da3e4fff73cec078156f76f6c9116186f7a4 100644
+--- a/src/main/java/org/bukkit/ServerTickManager.java
++++ b/src/main/java/org/bukkit/ServerTickManager.java
+@@ -2,16 +2,21 @@ package org.bukkit;
+ 
+ import org.bukkit.entity.Entity;
+ import org.jetbrains.annotations.NotNull;
+-import dev.iyanz.sourbycraft.api.Unsupported;
+ 
+ /**
+  * Manages ticking within a server.
+  * <p>
+  * To learn more about the features surrounding this interface.
+  *
++ * <p>
++ * SourbyCraft: the state applies to every region and the global tick. Changes may be requested
++ * from any thread and take effect at the next global tick; each region observes them at the start
++ * of its own next tick, so regions are not frozen at one shared tick boundary. Stepping and
++ * sprinting count global ticks. A region's own pause/sprint
++ * ({@code Server#getRegionThreadingTickRateManager()}) is separate and still applies.
++ *
+  * @see <a href="https://minecraft.wiki/w/Commands/tick">Tick Command</a>
+  */
+-@Unsupported // Canvas - region threading
+ public interface ServerTickManager {
+ 
+     /**

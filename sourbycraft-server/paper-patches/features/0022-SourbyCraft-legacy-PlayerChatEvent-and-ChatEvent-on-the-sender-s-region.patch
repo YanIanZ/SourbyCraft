@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 02:03:18 +0700
+Subject: [PATCH] SourbyCraft - legacy PlayerChatEvent and ChatEvent on the
+ sender's region
+
+The region-threading base disabled the deprecated synchronous chat
+events (their Waitable went to the main-thread queue, which nothing
+drains), so legacy chat/format plugins listening only to them never saw
+a message. With listeners they fire again in Paper's order, on the
+thread that owns the sender, decided by the calling thread (LegacyChat),
+not by Paper's async flag (Player#chat always passes false): inline when
+the caller owns the player; from the asynchronous chat thread through
+the player's entity scheduler while it waits, bounded (5 s to start,
+5 s more to finish); from a tick thread that does not own the player
+(global region scheduler, another region) as a continuation on the
+player's next tick, never waiting. Cancel, message, format and
+recipients are honoured as on Paper. The message is sent only by the
+step that follows a completed event, so a message whose event could not
+run in time is dropped and is never sent late.
+
+diff --git a/src/main/java/io/papermc/paper/adventure/ChatProcessor.java b/src/main/java/io/papermc/paper/adventure/ChatProcessor.java
+index 794feeef692f123420fd5451c53d5986bae454e9..4572901ddd6b215b7533735e451aaa5404ea4759 100644
+--- a/src/main/java/io/papermc/paper/adventure/ChatProcessor.java
++++ b/src/main/java/io/papermc/paper/adventure/ChatProcessor.java
+@@ -83,16 +83,10 @@ public final class ChatProcessor {
+             final CraftPlayer player = this.player.getBukkitEntity();
+             final AsyncPlayerChatEvent asyncChatEvent = new AsyncPlayerChatEvent(this.async, player, this.craftbukkit$originalMessage, new LazyPlayerSet(this.server));
+             this.post(asyncChatEvent);
+-            if (false && listenersOnSyncEvent) { // Folia - region threading
++            if (listenersOnSyncEvent) { // SourbyCraft - legacy PlayerChatEvent on the sender's region, bounded wait
+                 final PlayerChatEvent chatEvent = new PlayerChatEvent(player, asyncChatEvent.getMessage(), asyncChatEvent.getFormat(), asyncChatEvent.getRecipients());
+                 chatEvent.setCancelled(asyncChatEvent.isCancelled()); // propagate cancelled state
+-                this.queueIfAsyncOrRunImmediately(new Waitable<>() {
+-                    @Override
+-                    protected Void evaluate() {
+-                        ChatProcessor.this.post(chatEvent);
+-                        return null;
+-                    }
+-                });
++                this.onSenderRegion(() -> ChatProcessor.this.post(chatEvent), () -> { // SourbyCraft - legacy PlayerChatEvent on the sender's region; the message continues only after it ran
+                 this.readLegacyModifications(chatEvent.getMessage(), chatEvent.getFormat(), chatEvent.getPlayer());
+                 this.processModern(
+                     this.modernRenderer(chatEvent.getFormat()),
+@@ -101,6 +95,7 @@ public final class ChatProcessor {
+                     chatEvent.getPlayer(),
+                     chatEvent.isCancelled()
+                 );
++                }); // SourbyCraft - legacy PlayerChatEvent on the sender's region; the message continues only after it ran
+             } else {
+                 this.readLegacyModifications(asyncChatEvent.getMessage(), asyncChatEvent.getFormat(), asyncChatEvent.getPlayer());
+                 this.processModern(
+@@ -150,18 +145,13 @@ public final class ChatProcessor {
+         ae.setCancelled(cancelled); // propagate cancelled state
+         this.post(ae);
+         final boolean listenersOnSyncEvent = canYouHearMe(ChatEvent.getHandlerList());
+-        if (false && listenersOnSyncEvent) { // Folia - region threading
+-            this.queueIfAsyncOrRunImmediately(new Waitable<>() {
+-                @Override
+-                protected Void evaluate() {
+-                    final ChatEvent chatEvent = new ChatEvent(player, ae.viewers(), ae.renderer(), ae.message(), ChatProcessor.this.paper$originalMessage/*, ae.usePreviewComponent()*/, signedMessage);
+-                    chatEvent.setCancelled(ae.isCancelled()); // propagate cancelled state
+-                    ChatProcessor.this.post(chatEvent);
+-                    ChatProcessor.this.readModernModifications(chatEvent, renderer);
+-                    ChatProcessor.this.complete(chatEvent);
+-                    return null;
+-                }
+-            });
++        if (listenersOnSyncEvent) { // SourbyCraft - legacy ChatEvent on the sender's region, bounded wait
++            final ChatEvent chatEvent = new ChatEvent(player, ae.viewers(), ae.renderer(), ae.message(), ChatProcessor.this.paper$originalMessage/*, ae.usePreviewComponent()*/, signedMessage); // SourbyCraft - built on the caller, fired on the sender's region
++            chatEvent.setCancelled(ae.isCancelled()); // propagate cancelled state
++            this.onSenderRegion(() -> ChatProcessor.this.post(chatEvent), () -> { // SourbyCraft - the message is sent only after the event ran, never late after a given-up wait
++                ChatProcessor.this.readModernModifications(chatEvent, renderer);
++                ChatProcessor.this.complete(chatEvent);
++            }); // SourbyCraft - the message is sent only after the event ran, never late after a given-up wait
+         } else {
+             this.readModernModifications(ae, renderer);
+             this.complete(ae);
+@@ -359,19 +349,8 @@ public final class ChatProcessor {
+         return String.format(format, legacyDisplayName((CraftPlayer) player), message);
+     }
+ 
+-    private void queueIfAsyncOrRunImmediately(final Waitable<Void> waitable) {
+-        if (this.async) {
+-            this.server.processQueue.add(waitable);
+-        } else {
+-            waitable.run();
+-        }
+-        try {
+-            waitable.get();
+-        } catch (final InterruptedException e) {
+-            Thread.currentThread().interrupt(); // tag, you're it
+-        } catch (final ExecutionException e) {
+-            throw new RuntimeException("Exception processing chat", e.getCause());
+-        }
++    private void onSenderRegion(final Runnable fire, final Runnable deliver) { // SourbyCraft - on the thread that owns the sender, decided by the calling thread (LegacyChat)
++        dev.iyanz.sourbycraft.guards.LegacyChat.onSenderRegion(this.player, fire, deliver); // SourbyCraft - on the thread that owns the sender, decided by the calling thread (LegacyChat)
+     }
+ 
+     private void post(final Event event) {
