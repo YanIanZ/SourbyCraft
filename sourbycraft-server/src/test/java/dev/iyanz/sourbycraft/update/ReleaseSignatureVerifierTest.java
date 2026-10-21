@@ -13,8 +13,9 @@ import java.security.Signature;
 import java.util.Base64;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,12 +37,20 @@ class ReleaseSignatureVerifierTest {
     }
 
     @Test
-    void thisBuildShipsNoKeySoTheVerifierIsInactive() {
-        // The owner has not generated the release key pair; until the public key is added as
-        // META-INF/sourbycraft-release.pub, staging must keep working on SHA-256 alone.
-        assertNull(ReleaseSignatureVerifier.class.getResource(ReleaseSignatureVerifier.KEY_RESOURCE),
-            "a release public key appeared in the build; this test and the docs must change together");
-        assertFalse(ReleaseSignatureVerifier.fromClasspath().isActive());
+    void thisBuildShipsTheReleaseKeySoTheVerifierIsActive() throws Exception {
+        // SEC-2 key generated 2026-10-22 (fingerprint sha256:a9643e8b3dcdaae50d0acd5a93f4ef1fff593ee7c8bf26199ca32a0b7232f9c4);
+        // the public key ships as META-INF/sourbycraft-release.pub from Build 48 on.
+        var url = ReleaseSignatureVerifier.class.getResource(ReleaseSignatureVerifier.KEY_RESOURCE);
+        assertNotNull(url, "the release public key is missing from the build");
+        assertTrue(ReleaseSignatureVerifier.fromClasspath().isActive());
+        String pem;
+        try (var in = url.openStream()) {
+            pem = new String(in.readAllBytes(), StandardCharsets.US_ASCII);
+        }
+        String b64 = pem.replaceAll("-----[A-Z ]+-----", "").replaceAll("\\s", "");
+        byte[] der = java.util.Base64.getDecoder().decode(b64);
+        String fingerprint = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(der));
+        assertEquals("a9643e8b3dcdaae50d0acd5a93f4ef1fff593ee7c8bf26199ca32a0b7232f9c4", fingerprint);
     }
 
     @Test
