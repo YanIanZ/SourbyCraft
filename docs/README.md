@@ -36,8 +36,7 @@ disagree, the code wins ([DEVELOPMENT.md](DEVELOPMENT.md), truthfulness policy).
 6. **Test.** Gradle and Python suites (commands in [AGENTS.md](../AGENTS.md#running-tests)); AWF and
    legacy-plugin guides under [guides/](guides/). Performance claims need the evidence rules in
    [BASELINE.md](BASELINE.md) and [PROFILING.md](PROFILING.md).
-7. **Track and release.** Priorities live only in [TODO.md](TODO.md); per-area checklist in
-   [AURORA-TASKS.md](AURORA-TASKS.md). A build is declared STABLE only after the gates in its release doc under
+7. **Track and release.** Priorities live only in [TODO.md](TODO.md). A build is declared STABLE only after the gates in its release doc under
    [releases/](releases/) pass; the owner decides the channel (Build 47 ships `release=true`
    without the STABLE label, see [ROADMAP-47-50.md](releases/ROADMAP-47-50.md)).
 
@@ -47,10 +46,7 @@ disagree, the code wins ([DEVELOPMENT.md](DEVELOPMENT.md), truthfulness policy).
 | Document | About |
 |---|---|
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Active development contract, governing rules, testing matrix |
-| [PRD.md](PRD.md) · [SPEC.md](SPEC.md) · [PLAN.md](PLAN.md) | Requirements, modernization spec (numbered contracts), next-generation plan |
-| [AURORA-ROADMAP.md](AURORA-ROADMAP.md) · [AURORA-FULL-TRANSITION.md](AURORA-FULL-TRANSITION.md) · [AURORA-DEVELOPMENT.md](AURORA-DEVELOPMENT.md) | Aurora plans (plan role: checkboxes are snapshots) |
-| [AURORA-TASKS.md](AURORA-TASKS.md) · [DEVELOPMENT-TASKS.md](DEVELOPMENT-TASKS.md) | Task matrices with evidence links |
-| [MODERNIZATION-AUDIT.md](MODERNIZATION-AUDIT.md) | Build 44 architecture audit |
+| [AURORA-ROADMAP.md](AURORA-ROADMAP.md) · [AURORA-DEVELOPMENT.md](AURORA-DEVELOPMENT.md) | Aurora plans (plan role: checkboxes are snapshots) |
 
 ### Architecture (`architecture/`)
 | Area | Documents |
@@ -92,12 +88,13 @@ Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](d
 [datapack-functions.md](architecture/datapack-functions.md) ·
 [wandering-traders.md](architecture/wandering-traders.md)
 
-### Audits (`audits/`)
-Handoff of the audit fix work: [development/HANDOFF-2026-10-14.md](development/HANDOFF-2026-10-14.md).
-[2026-10-14 system audit](audits/2026-10-14-system-audit.md) (AWF, region engine/bridge,
-boot/distribution/security, observability/tooling: findings AWF-/ENG-/SEC-/OBS-n with proposed
-patches, plus proposals; a dated snapshot — fix status is tracked in [TODO.md](TODO.md)
-*Audit sistem 2026-10-14*)
+### Audit handoff
+Handoff of the 2026-10-14 audit fix work: [development/HANDOFF-2026-10-14.md](development/HANDOFF-2026-10-14.md);
+fix status is tracked in [TODO.md](TODO.md) *Audit sistem 2026-10-14*.
+
+Internal planning documents (requirements, specification, task matrices, transition plan, dated
+audits) are kept by the maintainers outside this repository; references to them elsewhere in the
+docs (for example `SPEC.md` V/B numbers or `AURORA-TASKS.md` lines) point there.
 
 ### Releases (`releases/`)
 [Release roadmap 47–50](releases/ROADMAP-47-50.md) (owner plan 2026-10-21: 47 ship, 48 refinement, 49 full stable, 50 optimization; gates in [48](releases/26.2-build-48.md), [49](releases/26.2-build-49.md), [50](releases/26.2-build-50.md)) ·

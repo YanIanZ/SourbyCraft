@@ -38,7 +38,7 @@ A cold AWF read uses the engine caller's thread; with Redis that operation can i
 I/O. The caller context must be checked at each active engine path; the Redis read paths are traced
 in [Redis chunk-read paths](#redis-chunk-read-paths-static-trace-2026-10-20) below. The
 `createAfter` global-thread `ready.join()` (B80/B85) is **fixed** since 2026-10-13 (staged
-creation, [SPEC.md](../SPEC.md) B80/B85, [aurora-world-fabric.md](aurora-world-fabric.md) "Staged
+creation, SPEC.md B80/B85, [aurora-world-fabric.md](aurora-world-fabric.md) "Staged
 creation"); the [ASP port review](../development/ASP-26.2-AWF-PORT-REVIEW.md) text that calls it
 OPEN is the 2026-10-06 snapshot. `Bukkit.createWorld` itself is unchanged and still synchronous, and
 global tick waiting is a separate blocking boundary from a region tick. `/spec` reads a cgroup

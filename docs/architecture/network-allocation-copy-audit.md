@@ -1,7 +1,7 @@
 # Network packet allocation and copy audit
 
 > **Role:** static code read of the per-packet buffer and object path, 2026-10-20 (closes the
-> "inspect packet allocation/copy count" item in [AURORA-TASKS.md](../AURORA-TASKS.md) Network).
+> "inspect packet allocation/copy count" item in AURORA-TASKS.md Network).
 > **Status:** read from source and from the bundled jars with `javap`. **Nothing here was run or
 > measured**: no byte counts, no allocation rates, no CPU cost. Counts are per packet and describe
 > what the code does, not what it costs. Part of [engine-network.md](engine-network.md) §3.
