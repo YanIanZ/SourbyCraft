@@ -18,6 +18,13 @@ final class PerfPluginsView implements PerfView {
         final java.util.Map<dev.iyanz.sourbycraft.bridge.CompatibilityState, Integer> counts =
             new java.util.EnumMap<>(dev.iyanz.sourbycraft.bridge.CompatibilityState.class);
         for (final var plugin : plugins) counts.merge(PluginsCommand.stateOf(plugin), 1, Integer::sum);
+        // Load failures (one per jar), as /plugins counts them: a plugin refused while aurora.bridge.mode = off
+        // never reaches the plugin manager, and "failed 0" here beside "Failed 1" in /plugins contradicted it.
+        final long loadFailures = dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics.recent().stream()
+            .map(dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics.Entry::pluginJar).distinct().count();
+        if (loadFailures > 0) {
+            counts.merge(dev.iyanz.sourbycraft.bridge.CompatibilityState.FAILED, (int)loadFailures, Integer::sum);
+        }
         final StringBuilder summary = new StringBuilder();
         for (final var state : dev.iyanz.sourbycraft.bridge.CompatibilityState.values()) {
             if (summary.length() > 0) summary.append(" / ");

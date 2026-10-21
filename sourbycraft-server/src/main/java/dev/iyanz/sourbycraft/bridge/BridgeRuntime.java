@@ -92,7 +92,9 @@ public final class BridgeRuntime {
         }
     }
 
-    private record Scheduled(String plugin, Object owner, Handle handle, Task task, BridgeRouter.Route route) {}
+    /** {@code world}: the anchor's world for {@link BridgeRouter.Route#REGION_OWNER}, else {@code null}. */
+    private record Scheduled(String plugin, Object owner, Handle handle, Task task, BridgeRouter.Route route,
+                             Object world) {}
 
     /** The bridged body running on this thread, if any; see {@link GuardViolations}. */
     private static final ThreadLocal<Invocation> CURRENT = new ThreadLocal<>();
@@ -199,6 +201,32 @@ public final class BridgeRuntime {
         this.warn = Objects.requireNonNull(warn, "warn");
         this.maxPendingTasks = Objects.requireNonNull(maxPendingTasks, "maxPendingTasks");
         this.maxRunningAsyncTasks = Objects.requireNonNull(maxRunningAsyncTasks, "maxRunningAsyncTasks");
+    }
+
+    /**
+     * Whether a world is unloading or unloaded (its unload ticket is set at the START of the unload and
+     * stays set). A region-owner task anchored there is refused: the unload's one-time release
+     * ({@link #worldUnloaded}) would never see it, so it would stay indexed, count against the pending
+     * limit and keep the unloaded world reachable. Default: no world is ever closed (unit tests).
+     */
+    private volatile java.util.function.Predicate<Object> worldClosed = world -> false;
+
+    /** Installs the production "world is unloading" check; see {@link #worldClosed}. */
+    public void worldClosedCheck(final java.util.function.Predicate<Object> check) {
+        this.worldClosed = Objects.requireNonNull(check, "check");
+    }
+
+    private boolean anchoredInClosedWorld(final BridgeRouter.Route route, final Object world) {
+        if (route != BridgeRouter.Route.REGION_OWNER || world == null) return false;
+        try {
+            return this.worldClosed.test(world);
+        } catch (final RuntimeException unknown) {
+            return false;
+        }
+    }
+
+    private static String closedWorldFailure(final int taskId) {
+        return "task " + taskId + " refused: the world it is anchored in is unloading";
     }
 
     public BridgeMode mode() {
@@ -310,10 +338,19 @@ public final class BridgeRuntime {
             task.markCancelled();
             return false;
         }
+        if (anchoredInClosedWorld(route, anchor == null ? null : anchor.world())) {
+            // Expected while a world unloads (an async thread naming a location there): rejected,
+            // never a violation, not logged per task.
+            this.telemetry.rejected(plugin);
+            this.telemetry.failure(plugin, closedWorldFailure(task.id()));
+            task.markCancelled();
+            return false;
+        }
         final long delay = Math.max(0L, delayTicks);
         final long period = task.period() > 0 ? task.period() : 0L;
         final LateHandle handle = new LateHandle();
-        final Scheduled entry = new Scheduled(plugin, owner, handle, task, route);
+        final Scheduled entry = new Scheduled(plugin, owner, handle, task, route,
+            route == BridgeRouter.Route.REGION_OWNER ? anchor.world() : null);
         final PluginTasks tasks = this.admitted.get(plugin);
         final int pendingLimit = this.maxPendingTasks.getAsInt();
         boolean capacityRejected = false;
@@ -338,7 +375,13 @@ public final class BridgeRuntime {
         if (capacityRejected) {
             this.telemetry.rejected(plugin);
             task.markCancelled();
-            capacityFailure(plugin, task.id(), "pending task limit " + pendingLimit);
+            capacityFailure(plugin, task.id(), "pending task limit", pendingLimit);
+            return false;
+        }
+        // Re-checked after indexing: an unload that began after the check above and before the entry
+        // was indexed has either swept it (worldUnloaded runs after the ticket is set) or is seen here.
+        if (anchoredInClosedWorld(route, entry.world())) {
+            if (rejected(entry)) this.telemetry.failure(plugin, closedWorldFailure(task.id()));
             return false;
         }
         final Runnable body = () -> runGuarded(entry, period > 0);
@@ -380,6 +423,30 @@ public final class BridgeRuntime {
         if (!rejected(entry)) return;
         this.telemetry.failure(entry.plugin(), "task " + entry.task().id()
             + " cancelled: its target entity was removed before it ran (retired)");
+    }
+
+    /**
+     * A world is unloading. Its regions never tick again, and the engine cancels their region
+     * scheduler tasks without running them and without telling the bridge (WorldUnloadDrain), so
+     * a bridged task anchored there would otherwise stay indexed for good: counted as pending,
+     * reported by {@code isQueued}/{@code getPendingTasks}, never cancelled in the plugin's view.
+     * Releases those entries like a retired entity task: rejected, never a violation. Entity
+     * tasks are released by their retired callback; global and async tasks have no world.
+     *
+     * @param world the unloading world, compared by identity with the anchor's world
+     * @return how many bridged tasks were released
+     */
+    public int worldUnloaded(final Object world) {
+        if (world == null) return 0;
+        int released = 0;
+        for (final Scheduled entry : this.scheduled.values()) {
+            if (entry.route() != BridgeRouter.Route.REGION_OWNER || entry.world() != world) continue;
+            if (!rejected(entry)) continue;
+            this.telemetry.failure(entry.plugin(), "task " + entry.task().id()
+                + " cancelled: the world it was anchored in unloaded before it ran");
+            ++released;
+        }
+        return released;
     }
 
     /**
@@ -533,7 +600,7 @@ public final class BridgeRuntime {
             return;
         }
         if (capacityRejected) {
-            if (rejected(entry)) capacityFailure(plugin, task.id(), "running async callback limit " + asyncLimit);
+            if (rejected(entry)) capacityFailure(plugin, task.id(), "running async callback limit", asyncLimit);
             return;
         }
         final Invocation previous = CURRENT.get();
@@ -565,10 +632,23 @@ public final class BridgeRuntime {
         }
     }
 
-    private void capacityFailure(final String plugin, final int taskId, final String reason) {
-        final var failure = new java.util.concurrent.RejectedExecutionException(reason);
+    /**
+     * A task refused by a per-plugin limit. Every refusal is counted and becomes the last failure; the
+     * WARN is rate-limited per (plugin, limit) like the I/O-lane line, and carries no stack trace: the
+     * limit is the operator's configuration, not a fault, and a plugin scheduling past it used to log one
+     * 35-line stack trace per task (2026-10-22 local run, 4 refusals = 140 lines).
+     */
+    private void capacityFailure(final String plugin, final int taskId, final String limit, final int value) {
+        final String reason = limit + " " + value;
         this.telemetry.failure(plugin, reason);
-        this.warn.accept("Aurora Bridge cancelled task " + taskId + " for " + plugin + ": " + reason, failure);
+        final long suppressed = admitLog(plugin, limit);
+        if (suppressed >= 0) {
+            this.warn.accept("Aurora Bridge cancelled task " + taskId + " for " + plugin + ": " + reason
+                + " (aurora.bridge." + (limit.startsWith("pending") ? "max-pending-tasks-per-plugin"
+                    : "max-running-async-tasks-per-plugin") + "); further refusals for this limit are counted in"
+                + " /plugins " + plugin + " and logged at most once per "
+                + java.util.concurrent.TimeUnit.NANOSECONDS.toSeconds(LOG_WINDOW_NANOS) + " s" + suppressedNote(suppressed), null);
+        }
     }
 
     private void onFailure(final String plugin, final Throwable thrown, final int taskId, final boolean alreadyCounted) {

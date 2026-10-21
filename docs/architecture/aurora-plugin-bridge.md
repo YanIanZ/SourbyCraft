@@ -41,13 +41,15 @@ Per-plugin compatibility state, scheduler redirects, owner handoffs, rejected op
 Code: `dev.iyanz.sourbycraft.bridge` plus bridge feature patches under
 `sourbycraft-server/paper-patches/features` (0003, 0006, LightingLuminol port 0007
 and worker/query follow-up 0008, native-disable fix 0009, explicit callback owners 0010,
-entity callback owners 0011).
+entity callback owners 0011, one-line OFF-mode refusal 0024).
 Feature patches are the source of truth for edits
 to Paper classes. The 0007/0008 materialized sources are present; build/testing of
 this increment remains assigned to Claude.
 
 - **Mode.** `aurora.bridge.mode` in `aurora.toml` (or the unified file): `off` (default) keeps the
-  base's refusal; `safe` admits. It is read straight from the TOML files on first use, because
+  base's refusal; `safe` admits. Under `off`, Paper patch 0024 skips such a jar in `FileProviderSource`
+  with one WARN (`Not loading <name> ... aurora.bridge.mode = off ...`, no stack trace) and records it
+  for `/plugins` (FAILED, with the reason) and `/perf plugins`; the provider factories' refusal stays as backstop. It is read straight from the TOML files on first use, because
   plugin providers are built during Paper bootstrap, before `SourbyCraftBootstrap`; it is
   RESTART_REQUIRED. A malformed value means `off`. `off` is the default rather than SAFE because
   correctness outranks compatibility in the safety order: admitting unqualified code is the
@@ -61,6 +63,10 @@ this increment remains assigned to Claude.
   Otherwise sync tasks scheduled from a region use that caller region by default; tasks from
   startup, console, global or async contexts use the global region. Async tasks are
   timed by Folia's async scheduler and run on the Resource Governor's bounded `BRIDGE_IO` lane.
+  A region-owner task whose world is unloading (its unload ticket is set when the unload starts) is
+  refused, checked before and after indexing, as a rejected operation (no violation, no log line); the
+  unload's release of tasks already anchored there also runs when the unload fails
+  (`WorldUnloadCompletion`, PR #18 review 2026-10-22).
   `cancelTask`/`cancelTasks` cancel bridged tasks; disable cancels them too, because Folia no
   longer does for the Bukkit scheduler. Sync callbacks wrapped in `EntityTask` take the
   entity-owner route: `entity.getScheduler().run/runDelayed/runAtFixedRate` with a retired
@@ -304,14 +310,18 @@ async body stays visible to `running`/`activeWorkers`/`runningAsync` until it fi
 `RegionTask.at` floors negative coordinates and snapshots them. Also reviewed without new tests:
 `FoliaSchedulerCompatibility` state machine against `bridgeCancelled` and `cancel()` (including
 cancellation before `setBukkitTask`), quarantine classification (capacity and resolver failures
-never reach `onFailure`), and body-time recording under concurrent completion.
+never reach `onFailure`), and body-time recording under concurrent completion. (2026-10-22: the state machine now has
+tests, `FoliaSchedulerCompatibilityTest`, 23, including run/cancel races; see the LightingLuminol port doc.)
 
 Correct but fragile:
 
 - An entry leaves the indexes only when its body runs, it is cancelled through the bridge, or
   the plugin is disabled/quarantined. Work the backend drops without running it (Folia
-  `AsyncScheduler#cancelTasks` called directly by the plugin, a region task for a world that
-  unloads) stays indexed and counts toward `max-pending-tasks-per-plugin` until disable.
+  `AsyncScheduler#cancelTasks` called directly by the plugin) stays indexed and counts toward
+  `max-pending-tasks-per-plugin` until disable. A region task for a world that unloads no longer
+  does (2026-10-22): `WorldUnloadDrain` calls `AuroraBridge.worldUnloaded`, which releases the
+  `REGION_OWNER` entries anchored in that world (rejected, never a violation; `BridgeWorldUnloadTest`,
+  fixture `legacybridge unload` -> `LEGACY_UNLOAD_RELEASED_OK`).
 - `GlobalRegionScheduler#cancelTasks` also drains ordinary Bukkit sync tasks that fell back to the
   global region, because the native cancellation already cancels them.
 - Body-time count/total and the percentile ring are each consistent, not one atomic snapshot.

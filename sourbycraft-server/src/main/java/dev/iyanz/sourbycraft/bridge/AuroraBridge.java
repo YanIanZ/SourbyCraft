@@ -56,11 +56,21 @@ public final class AuroraBridge {
                         new FoliaExecutor(), new BridgeTelemetry(),
                         SourbyLogger::warn, regions::anchor, AuroraBridge::syncRoute,
                         AuroraBridge::maxPendingTasks, AuroraBridge::maxRunningAsyncTasks);
+                    current.worldClosedCheck(AuroraBridge::worldUnloading);
                     runtime = current;
                 }
             }
         }
         return current;
+    }
+
+    /**
+     * A world whose unload has begun: CraftServer sets its unload ticket before the world's regions are
+     * descheduled, and the ticket is never cleared (an unloaded world is not loaded again as the same
+     * object).
+     */
+    static boolean worldUnloading(final Object world) {
+        return world instanceof org.bukkit.craftbukkit.CraftWorld craft && craft.getHandle().canvas$unloadTicket.isPresent();
     }
 
     private static AuroraConfig.SyncRoute syncRoute() {
@@ -118,14 +128,14 @@ public final class AuroraBridge {
                     if (value != null) values.put(key, value);
                 }
             } catch (final Exception unreadable) {
-                SourbyLogger.warn("Aurora Bridge could not read " + file + " (" + unreadable.getMessage()
+                bootWarn("Aurora Bridge could not read " + file + " (" + unreadable.getMessage()
                     + "); the bridge stays off for this run");
                 return AuroraConfig.Bridge.DEFAULT;
             }
         }
         final AuroraConfig.Parsed parsed = AuroraConfig.parse(new ConfigSnapshot(values));
         for (final String key : parsed.invalidKeys()) {
-            SourbyLogger.warn("Aurora config key '" + key + "' is invalid; the bridge uses its default");
+            bootWarn("Aurora config key '" + key + "' is invalid; the bridge uses its default");
         }
         return parsed.config().bridge();
     }
@@ -185,10 +195,47 @@ public final class AuroraBridge {
         final boolean admitted = current.admit(pluginName);
         // The provider factory and the API-version check both ask; say it once.
         if (admitted && !known) {
-            SourbyLogger.warn("Aurora Bridge admitted " + pluginName + " (no folia-supported/canvas-supported)."
+            bootWarn("Aurora Bridge admitted " + pluginName + " (no folia-supported/canvas-supported)."
                 + " Its scheduler tasks are routed by ownership; it is not qualified for region threading.");
         }
         return admitted;
+    }
+
+    /**
+     * Paper {@code FileProviderSource#registerProviders} (feature patch 0024), for a jar whose plugin declares
+     * neither {@code folia-supported} nor {@code canvas-supported} and that the bridge did not admit
+     * ({@code aurora.bridge.mode = off}): the plugin is skipped with one clear WARN instead of the base's
+     * {@code Error loading plugin} ERROR and stack trace, and recorded as a load failure for {@code /plugins}
+     * (the plugin-load log capture is installed later in boot and never saw this refusal). Never throws.
+     *
+     * @param displayName {@code Name vVersion}
+     * @param jarName the jar's file name
+     */
+    public static void refused(final String pluginName, final String displayName, final String jarName) {
+        try {
+            bootWarn(refusalMessage(displayName, jarName));
+            dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics.record(jarName, pluginName, REFUSAL_REASON);
+        } catch (final RuntimeException unexpected) {
+            // Diagnostics only; the plugin stays refused either way.
+        }
+    }
+
+    /**
+     * Admission and refusal are decided while Paper builds plugin providers, before the JUL-to-Log4j bridge
+     * is installed: through {@link SourbyLogger} (JUL) these lines reached the console unformatted
+     * ({@code WARNING: ...} after a JUL date line) and never reached logs/latest.log. Log4j directly.
+     */
+    private static void bootWarn(final String message) {
+        org.apache.logging.log4j.LogManager.getLogger("SourbyCraft").warn(message);
+    }
+
+    static final String REFUSAL_REASON = "not marked folia-supported or canvas-supported; aurora.bridge.mode = off"
+        + " (set \"safe\" in sourbycraft_config/aurora.toml and restart to load it through the Aurora Bridge)";
+
+    static String refusalMessage(final String displayName, final String jarName) {
+        return "Not loading " + displayName + " (" + jarName + "): it does not declare folia-supported or"
+            + " canvas-supported and aurora.bridge.mode = off. Set aurora.bridge.mode = \"safe\" and restart to try it"
+            + " through the Aurora Bridge; a bridged plugin is not qualified for region threading.";
     }
 
     /** The bridge mode for this run. */
@@ -239,6 +286,15 @@ public final class AuroraBridge {
     public static void cancelGlobal(final Plugin plugin) {
         final BridgeRuntime current = runtime;
         if (plugin != null && current != null) current.cancelGlobal(plugin.getName());
+    }
+
+    /**
+     * Releases bridged tasks anchored in a world whose regions were just drained for unload;
+     * see {@link BridgeRuntime#worldUnloaded}. Never creates the runtime.
+     */
+    public static int worldUnloaded(final Object world) {
+        final BridgeRuntime current = runtime;
+        return current == null ? 0 : current.worldUnloaded(world);
     }
 
     /** Closes admission even before the bridge's disable listener has been registered. */

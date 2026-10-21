@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 03:11:42 +0700
+Subject: [PATCH] SourbyCraft - one clear line for a legacy plugin refused
+ while the bridge is off
+
+FileProviderSource skips a jar whose plugin declares neither folia-supported nor canvas-supported and that the Aurora Bridge did not admit (aurora.bridge.mode = off) with one WARN naming the setting, and records it for /plugins, instead of the provider factory's 'Error loading plugin' ERROR and stack trace. The factories keep their refusal as the backstop.
+
+diff --git a/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java b/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
+index 9661f033bbb2c00073f1c891e1411c2a9943a37a..1ccd3913810a017c74022515904a5c428ddbc5aa 100644
+--- a/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
++++ b/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
+@@ -81,6 +81,12 @@ public class FileProviderSource implements ProviderSource<Path, Path> {
+             return;
+         }
+ 
++        // SourbyCraft start - Aurora Bridge: a plugin refused for missing folia-supported (mode off) gets one clear line, not a stack trace
++        if (!config.isFoliaSupported() && !dev.iyanz.sourbycraft.bridge.AuroraBridge.admitLegacy(config.getName())) {
++            dev.iyanz.sourbycraft.bridge.AuroraBridge.refused(config.getName(), config.getDisplayName(), context.getFileName().toString());
++            return;
++        }
++        // SourbyCraft end - Aurora Bridge
+         type.register(entrypointHandler, file, context);
+     }
+ 

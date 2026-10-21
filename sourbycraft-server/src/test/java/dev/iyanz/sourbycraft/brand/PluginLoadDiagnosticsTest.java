@@ -41,4 +41,19 @@ class PluginLoadDiagnosticsTest {
             "Error occurred while enabling Quiet v1 (Is it up to date?)", null);
         assertFalse(PluginLoadDiagnostics.enableFailed("Quiet"));
     }
+
+    /** The bridge's OFF-mode refusal happens before the log capture is installed; it is recorded directly. */
+    @Test
+    void aRecordedRefusalCarriesThePluginNameAndReplacesAnOlderEntryForTheJar() {
+        PluginLoadDiagnostics.resetForTest();
+        PluginLoadDiagnostics.record("legacy-1.0.jar", "Legacy", "first");
+        PluginLoadDiagnostics.record("legacy-1.0.jar", "Legacy", "not marked folia-supported");
+        PluginLoadDiagnostics.record(null, "x", "ignored");
+        assertEquals(1, PluginLoadDiagnostics.failedCount());
+        final PluginLoadDiagnostics.Entry entry = PluginLoadDiagnostics.recent().getFirst();
+        assertEquals("Legacy", entry.pluginName());
+        assertEquals("legacy-1.0.jar", entry.pluginJar());
+        assertEquals("not marked folia-supported", entry.reason());
+        PluginLoadDiagnostics.resetForTest();
+    }
 }

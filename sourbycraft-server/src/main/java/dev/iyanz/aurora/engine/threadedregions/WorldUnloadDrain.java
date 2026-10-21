@@ -24,7 +24,7 @@ import net.minecraft.server.level.ServerLevel;
  * <ul>
  *   <li>every entity scheduler that holds tasks is retired: each pending task gets exactly its
  *       retired callback, or nothing when it has none, and never its body. The entities are saved,
- *       not removed, so this relies on Paper feature patch 0030: a Bukkit entity task
+ *       not removed, so this relies on Paper feature patch 0021: a Bukkit entity task
  *       ({@code FoliaEntityScheduler}) is its own run and retired callback and used to choose by
  *       {@code entity.isRemoved()} alone, which ran every body here, delayed ones included (found by
  *       the test plugin's unload fixture, 2026-10-21). Delayed tasks are not fast-forwarded: retiring
@@ -33,6 +33,9 @@ import net.minecraft.server.level.ServerLevel;
  *   <li>every queued region task is cancelled without running (cancel-only); chunk tickets are
  *       not touched, the chunk system is already closed.</li>
  * </ul>
+ *
+ * <p>Afterwards the Aurora Bridge releases the bridged legacy tasks anchored in the world, whose
+ * region scheduler tasks were just cancelled without its knowledge.</p>
  *
  * <p>The callbacks run on the world's shutdown thread, the thread that owns every region of the
  * world while it unloads, like the teleport completion and chunk saving before them. Work queued
@@ -160,12 +163,32 @@ public final class WorldUnloadDrain {
             }, (message, failed) -> logger.error("{} while unloading {}", message, world, failed));
         } catch (final Throwable failed) {
             logger.error("Failed to drain the regions of {}", world, failed);
+            releaseBridgedTasks(level, world, logger);
             return;
         }
+        releaseBridgedTasks(level, world, logger);
         if (result.anything()) {
             logger.info("Drained {} for unload: retired {} entity scheduler(s), cancelled {} region scheduler task(s)"
                     + " and {} queued region task(s){}", world, result.retired(), result.cancelledScheduled(),
                 result.cancelledQueued(), result.failures() > 0 ? ", " + result.failures() + " step(s) failed" : "");
+        }
+    }
+
+    /**
+     * The drain cancelled the world's region scheduler tasks without telling the Aurora Bridge;
+     * release the bridged legacy tasks anchored there so they do not stay pending for good. Also run
+     * by {@link WorldUnloadCompletion} when the unload threw before the drain (a chunk save failed),
+     * so the release does not depend on reaching the drain; a second call releases nothing. New
+     * bridged tasks anchored in the world are refused from the start of the unload (its ticket).
+     */
+    static void releaseBridgedTasks(final ServerLevel level, final String world, final org.slf4j.Logger logger) {
+        try {
+            final int released = dev.iyanz.sourbycraft.bridge.AuroraBridge.worldUnloaded(level.getWorld());
+            if (released > 0) {
+                logger.info("Released {} bridged legacy task(s) anchored in {} for unload", released, world);
+            }
+        } catch (final Throwable failed) {
+            logger.error("Failed to release bridged tasks of {}", world, failed);
         }
     }
 

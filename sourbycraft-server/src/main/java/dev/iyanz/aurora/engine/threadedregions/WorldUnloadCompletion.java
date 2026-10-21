@@ -24,9 +24,25 @@ public final class WorldUnloadCompletion {
      * @param unload the unload itself, which must not invoke the callback
      */
     public static void run(final Supplier<@Nullable UnloadTicket> ticket, final Runnable unload) {
+        run(ticket, unload, () -> {});
+    }
+
+    /**
+     * As {@link #run(Supplier, Runnable)}, and runs {@code release} before the callback whatever the
+     * outcome: the Aurora Bridge's release of legacy tasks anchored in the world, which the unload
+     * itself reaches only when it gets as far as the region drain (a failed chunk save throws first).
+     *
+     * @param release must not throw; it is only reported if it does
+     */
+    public static void run(final Supplier<@Nullable UnloadTicket> ticket, final Runnable unload, final Runnable release) {
         try {
             unload.run();
         } catch (final Throwable failed) {
+            try {
+                release.run();
+            } catch (final Throwable releaseFailed) {
+                failed.addSuppressed(releaseFailed);
+            }
             final UnloadTicket current = ticket.get();
             if (current != null) {
                 try {
@@ -37,6 +53,7 @@ public final class WorldUnloadCompletion {
             }
             throw failed;
         }
+        release.run();
         Objects.requireNonNull(ticket.get(), "not propagated").callback().accept(WorldUnloadResult.SUCCESS);
     }
 }
