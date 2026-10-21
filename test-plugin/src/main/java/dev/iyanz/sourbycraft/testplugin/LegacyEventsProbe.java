@@ -74,6 +74,10 @@ final class LegacyEventsProbe implements Listener, BasicCommand {
     @Override
     public void execute(final CommandSourceStack source, final String[] args) {
         final ServerTickManager ticks = Bukkit.getServerTickManager();
+        if (args.length == 2 && "region".equals(args[0])) {
+            this.regionPause(ticks, args[1]);
+            return;
+        }
         log("start", ticks);
         ticks.setFrozen(true);
         log("after-setFrozen(true)", ticks);
@@ -104,6 +108,41 @@ final class LegacyEventsProbe implements Listener, BasicCommand {
                             later(2, () -> log("done", ticks));
                         });
                     });
+                });
+            });
+        });
+    }
+
+    /**
+     * {@code /tickprobe region <player>}: pauses the player's region through the region API, then
+     * unfreezes the server and changes the tick rate; the player's client must keep receiving
+     * frozen=true (its region's combined state) until the region plays again.
+     */
+    private void regionPause(final ServerTickManager ticks, final String name) {
+        final org.bukkit.entity.Player player = Bukkit.getPlayerExact(name);
+        if (player == null) {
+            Bukkit.getLogger().info("LEGACYPROBE region no-player " + name);
+            return;
+        }
+        player.getScheduler().run(this.plugin, task -> this.regionPauseOnOwner(ticks, player.getLocation().getChunk()), null);
+    }
+
+    private void regionPauseOnOwner(final ServerTickManager ticks, final org.bukkit.Chunk chunk) {
+        final dev.iyanz.sourbycraft.api.region.RegionThreadingTickManager regions = Bukkit.getServer().getRegionThreadingTickRateManager();
+        final float before = ticks.getTickRate();
+        regions.getHandleAt(chunk).pause();
+        log("region-paused", ticks);
+        later(5, () -> {
+            ticks.setFrozen(false);
+            log("region-paused-setFrozen(false)", ticks);
+            later(5, () -> {
+                ticks.setTickRate(30.0F);
+                log("region-paused-rate30", ticks);
+                later(5, () -> {
+                    ticks.setTickRate(before);
+                    regions.getHandleAt(chunk).play();
+                    log("region-played", ticks);
+                    later(5, () -> log("region-done", ticks));
                 });
             });
         });

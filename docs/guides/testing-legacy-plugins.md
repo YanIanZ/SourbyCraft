@@ -52,13 +52,28 @@ plugin listens to it, and the first time a plugin's listener is used the log say
 | `Bukkit.getServerTickManager()` | Any thread; changes take effect at the next global tick | — | — |
 
 Order for one chat message, as on Paper: `AsyncPlayerChatEvent` (chat thread) → `PlayerChatEvent`
-(sender's region) → `AsyncChatEvent` (chat thread) → `ChatEvent` (sender's region) → delivery.
-A `Player#chat` from a non-owning tick thread returns before the message is processed.
+(sender's region) → `AsyncChatEvent` (chat thread; on the player's region for a `Player#chat` from
+a non-owning tick thread, see below) → `ChatEvent` (sender's region) → delivery.
+A `Player#chat` from a non-owning tick thread (the global region scheduler, another region)
+returns before the message is processed. When a plugin listens to `PlayerChatEvent` or `ChatEvent`,
+everything after that event then runs on the **player's region thread**, after the caller
+returned, with the event's `isAsynchronous()` still `false` (Paper's flag for `Player#chat`): that
+includes `AsyncChatEvent`. A listener that blocks in `AsyncChatEvent` (database or HTTP lookup,
+waiting on a future) stalls that region's tick for every player and chunk in it; check
+`event.isAsynchronous()` or hand the work off. If the event or the delivery fails on this path,
+there is no caller left to throw to: the log shows one ERROR line naming the player and the plugins
+listening to the legacy chat events, and the message is not sent (on the other paths the exception
+reaches the caller, as Paper's `Exception processing chat` from the chat thread).
 Cancel, message, format and recipients changes are honoured.
 
 `ServerTickManager` (freeze, step, sprint, tick rate) applies to every region and the global tick.
 The state is vanilla's own `ServerTickRateManager`, advanced once per global tick, so vanilla
-readers (datapack `#tick` functions, the watchdog) agree with the API. `isFrozen(Entity)` includes
+readers (datapack `#tick` functions, the watchdog) agree with the API. Each player is told its own
+region's state: frozen while the server is frozen **or** its region is paused through
+`getRegionThreadingTickRateManager()`, so unfreezing the server or changing the tick rate does not
+unfreeze the client of a player in a paused region. The read methods never block and never throw
+(before the server exists they answer not frozen, not stepping, tick rate 20); changing the state
+before the server exists is refused with `IllegalStateException`. `isFrozen(Entity)` includes
 the region's own pause only when called on the entity's owner thread.
 Each region picks a change up at the start of its own next tick, so regions are not frozen at one
 shared tick boundary; step and sprint count global ticks (a region that is behind runs fewer). The

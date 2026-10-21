@@ -1,5 +1,6 @@
 package dev.iyanz.sourbycraft.guards;
 
+import java.lang.ref.WeakReference;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -17,12 +18,17 @@ import org.bukkit.plugin.RegisteredListener;
  * <p>Called on every legacy event, so the common case must cost nothing: the handler list's
  * registered-listener array is only rebuilt when a listener is registered or unregistered, so the
  * listeners are walked only when that array is not the one walked last time for the event.</p>
+ *
+ * <p>The array walked last is remembered through a {@link WeakReference}: it holds the plugins'
+ * listeners, so a strong reference would keep an unregistered or disabled plugin's class loader
+ * alive until the event fired again. Once the handler list re-bakes, the old array can be
+ * collected; a cleared reference only means the next call walks again (and reports nothing new).</p>
  */
 final class LegacyListenerNotice {
 
     private static final Set<String> SEEN = ConcurrentHashMap.newKeySet();
-    /** Per event: the listener array last walked (identity). */
-    private static final Map<String, RegisteredListener[]> WALKED = new ConcurrentHashMap<>();
+    /** Per event: the listener array last walked (identity), weakly held so no plugin class loader is pinned. */
+    private static final Map<String, WeakReference<RegisteredListener[]>> WALKED = new ConcurrentHashMap<>();
 
     private LegacyListenerNotice() {
     }
@@ -35,7 +41,8 @@ final class LegacyListenerNotice {
      */
     static int report(final HandlerList handlers, final String event, final String where, final Consumer<String> log) {
         final RegisteredListener[] listeners = handlers.getRegisteredListeners();
-        if (WALKED.get(event) == listeners) {
+        final WeakReference<RegisteredListener[]> walked = WALKED.get(event);
+        if (walked != null && walked.get() == listeners) {
             return 0; // nothing registered or unregistered since the last walk
         }
         int reported = 0;
@@ -47,7 +54,7 @@ final class LegacyListenerNotice {
                 reported++;
             }
         }
-        WALKED.put(event, listeners);
+        WALKED.put(event, new WeakReference<>(listeners));
         return reported;
     }
 

@@ -13,8 +13,14 @@ is marked ticking, never for a cancelled handle): vanilla's
 checkShouldSprintThisTick + tick. Every region copies the published
 state at the start of its own tick, so a region runs game elements only
 when its own handle and the server-wide state allow it, and sprints
-while a server-wide sprint is active. Clients get vanilla's own state
-and step packets (the full step count at request time). Player pushes
+while a server-wide sprint is active. Vanilla's own state and step
+broadcasts are switched off: its state packet carries only the
+server-wide freeze and overwrote the combined state of players in a
+region paused through the region API. ServerTickControl has each
+player's owner send its region's combined state and sends the step
+count (the full count at request time), after releasing its lock. The
+global tick handle calls ServerTickControl#globalTickEnd after the
+global work so sprinted ticks are accounted (vanilla endTickWork). Player pushes
 and move counting honour the frozen state again, as in vanilla (they
 were unconditional since the base dropped the tick manager).
 
@@ -84,10 +90,10 @@ index a62ba97be22585298b53592b2bd076429c68d4c8..91c1a4975c9b8ab77893629332c27275
      }
  
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
-index d7ad870fde85d23b119d6de2cf8e9cb1927ce30a..a26870e96ea3321bdc7c7a2c96eaf020c847fe93 100644
+index d7ad870fde85d23b119d6de2cf8e9cb1927ce30a..5c6ede7ea4e77063cf6c9fc0696bfa24fe75cb6d 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
-@@ -208,6 +208,8 @@ public final class RegionizedServer {
+@@ -208,8 +208,11 @@ public final class RegionizedServer {
  
          @Override
          protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
@@ -95,7 +101,28 @@ index d7ad870fde85d23b119d6de2cf8e9cb1927ce30a..a26870e96ea3321bdc7c7a2c96eaf020
 +            this.getTickManager().copyServerTickState(); // SourbyCraft - the global tick reads what it just published
              this.drainTasks();
              this.server.globalTick(tickCount);
++            dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTickEnd(); // SourbyCraft - sprint time accounting (vanilla endTickWork), after the global tick's work
          }
+ 
+         private void drainTasks() {
+diff --git a/net/minecraft/server/ServerTickRateManager.java b/net/minecraft/server/ServerTickRateManager.java
+index 9a21de639f124e1450ee59b2aced752384238276..1ae428c4cb18b7b97412a6cd79be4060245b2a2a 100644
+--- a/net/minecraft/server/ServerTickRateManager.java
++++ b/net/minecraft/server/ServerTickRateManager.java
+@@ -32,11 +32,11 @@ public class ServerTickRateManager extends TickRateManager {
+     }
+ 
+     private void updateStateToClients() {
+-        this.server.getPlayerList().broadcastAll(ClientboundTickingStatePacket.from(this));
++        // SourbyCraft - ServerTickControl tells each player its region's combined state (region pause + server-wide freeze) after releasing its lock; this server-wide-only packet would overwrite it
+     }
+ 
+     private void updateStepTicks() {
+-        this.server.getPlayerList().broadcastAll(ClientboundTickingStepPacket.from(this));
++        // SourbyCraft - ServerTickControl sends the step count after releasing its lock
+     }
+ 
+     public boolean stepGameIfPaused(final int ticks) {
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
 index 82a0acac65c60d3e1e5cd3d3fb948bd8ab711a1f..c33201e7d8d1eeddf679a569d69952b3a2b8c741 100644
 --- a/net/minecraft/server/level/ServerPlayer.java

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.event.HandlerList;
@@ -66,5 +67,30 @@ class LegacyListenerNoticeTest {
         assertEquals(1, LegacyListenerNotice.report(handlers, "ChatEvent", "x", this.log::add));
         assertEquals(2, this.log.size());
         assertTrue(this.log.get(1).contains("Later"), this.log.get(1));
+    }
+
+    /**
+     * Re-review finding 9: the notice kept the last walked listener array strongly, pinning the
+     * listeners (and their plugin's class loader) of a plugin that unregistered until the event fired
+     * again. Once the handler list re-bakes, the old array must be collectable.
+     */
+    @Test
+    void theLastWalkedArrayDoesNotPinTheListeners() throws InterruptedException {
+        final RegisteredListener[][] current = {{listenerOf("Unloaded")}};
+        final HandlerList handlers = new HandlerList() {
+            @Override
+            public RegisteredListener[] getRegisteredListeners() {
+                return current[0];
+            }
+        };
+        final WeakReference<RegisteredListener[]> old = new WeakReference<>(current[0]);
+        assertEquals(1, LegacyListenerNotice.report(handlers, "PlayerChatEvent", "x", this.log::add));
+        current[0] = new RegisteredListener[0]; // the plugin unregistered: the list re-baked
+        for (int attempt = 0; attempt < 200 && old.get() != null; attempt++) {
+            System.gc();
+            Thread.sleep(10L);
+        }
+        assertTrue(old.get() == null, "the notice still holds the unregistered plugin's listener array");
+        assertEquals(0, LegacyListenerNotice.report(handlers, "PlayerChatEvent", "x", this.log::add));
     }
 }

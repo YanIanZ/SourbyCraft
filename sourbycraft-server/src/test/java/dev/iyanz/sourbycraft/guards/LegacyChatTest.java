@@ -90,6 +90,55 @@ class LegacyChatTest {
         assertTrue(this.warnings.isEmpty(), "not dropped: " + this.warnings);
     }
 
+    /**
+     * Re-review finding 7: a failure in the continuation (after the caller returned) was swallowed
+     * silently for anything but a RuntimeException. It is logged once with the listening plugins,
+     * counted, the message is not sent, and only a VirtualMachineError escapes.
+     */
+    @Test
+    void aContinuationFailureIsLoggedOnceWithThePluginsAndCounted() {
+        final List<String> errors = new ArrayList<>();
+        final List<Throwable> causes = new ArrayList<>();
+        final AssertionError boom = new AssertionError("not a RuntimeException");
+        assertEquals(LegacyChat.Delivery.CONTINUED_ON_OWNER, LegacyChat.onSenderRegion("alice", () -> false, () -> true,
+            (body, retired) -> this.queued.add(body), () -> {
+                throw boom;
+            }, this.deliver, LONG, LONG, () -> this.now, this.warnings::add, () -> "ChatFilter", (message, cause) -> {
+                errors.add(message);
+                causes.add(cause);
+            }));
+        assertDoesNotThrow(() -> this.queued.get(0).run(), "nobody to throw to on the owner");
+        assertEquals(1, errors.size());
+        assertTrue(errors.get(0).contains("alice") && errors.get(0).contains("ChatFilter") && errors.get(0).contains("not sent"), errors.get(0));
+        assertSame(boom, causes.get(0));
+        assertEquals(1L, LegacyChat.continuedFailures());
+        assertTrue(this.deliveredOn.isEmpty(), "the message is not sent");
+
+        this.queued.clear();
+        final StackOverflowError fatal = new StackOverflowError();
+        LegacyChat.onSenderRegion("alice", () -> false, () -> true, (body, retired) -> this.queued.add(body), () -> {
+            throw fatal;
+        }, this.deliver, LONG, LONG, () -> this.now, this.warnings::add, () -> "ChatFilter", (message, cause) -> errors.add(message));
+        assertSame(fatal, assertThrows(StackOverflowError.class, () -> this.queued.get(0).run()), "a VirtualMachineError is never swallowed");
+        assertEquals(1, errors.size());
+    }
+
+    @Test
+    void theListeningPluginsAreNamedOnceEach() {
+        final org.bukkit.event.HandlerList chat = org.mockito.Mockito.mock(org.bukkit.event.HandlerList.class);
+        final org.bukkit.event.HandlerList paper = org.mockito.Mockito.mock(org.bukkit.event.HandlerList.class);
+        final org.bukkit.plugin.Plugin filter = org.mockito.Mockito.mock(org.bukkit.plugin.Plugin.class);
+        org.mockito.Mockito.when(filter.getName()).thenReturn("ChatFilter");
+        final org.bukkit.plugin.RegisteredListener listener = org.mockito.Mockito.mock(org.bukkit.plugin.RegisteredListener.class);
+        org.mockito.Mockito.when(listener.getPlugin()).thenReturn(filter);
+        org.mockito.Mockito.when(chat.getRegisteredListeners()).thenReturn(new org.bukkit.plugin.RegisteredListener[] {listener});
+        org.mockito.Mockito.when(paper.getRegisteredListeners()).thenReturn(new org.bukkit.plugin.RegisteredListener[] {listener});
+        assertEquals("ChatFilter", LegacyChat.listeningPlugins(chat, paper));
+        org.mockito.Mockito.when(chat.getRegisteredListeners()).thenReturn(new org.bukkit.plugin.RegisteredListener[0]);
+        org.mockito.Mockito.when(paper.getRegisteredListeners()).thenReturn(new org.bukkit.plugin.RegisteredListener[0]);
+        assertEquals("none", LegacyChat.listeningPlugins(chat, paper));
+    }
+
     @Test
     void aContinuationForAPlayerWhoLeftIsDroppedWithAWarning() {
         assertEquals(LegacyChat.Delivery.CONTINUED_ON_OWNER, this.call(false, true, (body, retired) -> {

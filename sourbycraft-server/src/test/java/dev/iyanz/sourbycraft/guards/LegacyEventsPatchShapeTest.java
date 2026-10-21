@@ -84,7 +84,7 @@ class LegacyEventsPatchShapeTest {
     @Test
     void theRegionsReadTheServerWideStateAndOnlyTheMarkedGlobalTickAdvancesIt() throws IOException {
         final String patch = patch("minecraft-patches/features", "-SourbyCraft-server-wide-ServerTickManager-state-on-the-global-tick");
-        assertEquals(4, files(patch).size());
+        assertEquals(5, files(patch).size());
         final List<String> added = added(patch);
         // Review finding 7: the advance is a scheduler-level boundary in the global tick handle's
         // tickRegion (reached only after tryMarkTicking and the cancelled checks), not a
@@ -96,18 +96,26 @@ class LegacyEventsPatchShapeTest {
         final int advance = regionized.indexOf("ServerTickControl.get().globalTick();");
         final int recopy = regionized.indexOf("this.getTickManager().copyServerTickState();");
         final int drain = regionized.indexOf("this.drainTasks();");
-        assertTrue(tickRegion >= 0 && tickRegion < advance && advance < recopy && recopy < drain,
-            "global tickRegion: advance, re-copy, then the global work");
+        final int work = regionized.indexOf("this.server.globalTick(tickCount);");
+        final int end = regionized.indexOf("ServerTickControl.get().globalTickEnd();");
+        assertTrue(tickRegion >= 0 && tickRegion < advance && advance < recopy && recopy < drain && drain < work && work < end,
+            "global tickRegion: advance, re-copy, the global work, then the sprint accounting (re-review finding 6)");
+        assertEquals(1, count(added, "dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTickEnd();"));
         assertFalse(section(patch, "dev/iyanz/aurora/engine/threadedregions/ScheduledHandleTickState.java").contains("+        dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTick()"));
         assertEquals(1, count(added, "copyServerTickState(); // SourbyCraft - server-wide ServerTickManager state, copied at the start of each tick"));
         assertEquals(1, count(added, "serverRunsGameElements = dev.iyanz.sourbycraft.guards.ServerTickControl.get().isRunningNormally();"));
         assertEquals(1, count(added, "serverSprints = dev.iyanz.sourbycraft.guards.ServerTickControl.get().sprintsThisTick();"));
         assertEquals(1, count(added, "return runsGameElements && serverRunsGameElements;"));
         assertEquals(1, count(added, "if (serverSprints) return 1L;"));
-        // Review finding 3/6: no hand-made step or state broadcast; vanilla's manager sends them.
-        assertTrue(added.stream().noneMatch(l -> l.contains("ClientboundTickingStepPacket")), "step packets come from vanilla's manager");
-        // The two vanilla runsNormally() checks the base made unconditional come back.
+        // Re-review findings 1/2: vanilla's broadcasts carry only the server-wide freeze and overwrote
+        // a paused region's state; they are off, and ServerTickControl sends the per-region state.
         final List<String> removed = removed(patch);
+        final String vanilla = section(patch, "net/minecraft/server/ServerTickRateManager.java");
+        assertEquals(1, count(removed, "this.server.getPlayerList().broadcastAll(ClientboundTickingStatePacket.from(this));"));
+        assertEquals(1, count(removed, "this.server.getPlayerList().broadcastAll(ClientboundTickingStepPacket.from(this));"));
+        assertTrue(vanilla.lines().filter(l -> l.startsWith("+")).noneMatch(l -> l.contains("broadcastAll")), "no broadcast comes back");
+        assertTrue(added.stream().noneMatch(l -> l.contains("new ClientboundTickingStepPacket")), "no hand-made step packet in the patch");
+        // The two vanilla runsNormally() checks the base made unconditional come back.
         assertEquals(2, count(removed, "if (true) { // Canvas - region threading"));
         assertEquals(2, count(added, "getRegionSchedulingHandle().getTickManager().doesRunGameElements()) { // SourbyCraft - frozen ticks"));
         // No new region-scheduler symbol in added lines (test_independence_policy pins the recorded set).
