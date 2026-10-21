@@ -96,10 +96,46 @@ public final class AwfWorld {
      * is never released under a commit, and no commit starts on a closed store.
      */
     void closeStore() throws IOException {
-        synchronized (this.commitLock) {
+        this.commitLock.lock();
+        try {
             this.fenced = true;
             if (this.store != null) this.store.close();
+        } finally {
+            this.commitLock.unlock();
         }
+    }
+
+    /**
+     * {@link #closeStore()} within the shutdown budget. The world is fenced either way. When a commit
+     * is still running at the deadline the store is not closed under it (its backend claim, a Redis
+     * lease, then expires on its own) and this returns {@code false}.
+     */
+    boolean closeStore(final AwfShutdownBudget budget) throws IOException {
+        this.fenced = true;
+        if (!budget.tryLock(this.commitLock)) return false;
+        try {
+            if (this.store != null) this.store.close();
+            return true;
+        } finally {
+            this.commitLock.unlock();
+        }
+    }
+
+    /** Whether a commit holds the commit lock right now (running, not queued). */
+    boolean commitRunning() {
+        return this.commitLock.isLocked();
+    }
+
+    /** Chunks of the last commit attempt whose outcome is unknown (sent, then cut off), 0 for none. */
+    int uncertainChunks() {
+        return this.uncertainChunks;
+    }
+
+    /** Up to {@code limit} of the dirty positions, lowest first, for reports. */
+    java.util.List<ChunkKey> dirtySample(final int limit) {
+        final java.util.List<ChunkKey> keys = new java.util.ArrayList<>(this.dirty.keySet());
+        java.util.Collections.sort(keys);
+        return keys.size() <= limit ? keys : java.util.List.copyOf(keys.subList(0, limit));
     }
 
     /**
@@ -316,6 +352,43 @@ public final class AwfWorld {
     }
 
     /**
+     * {@link #saveNow} within the shutdown budget: the commit lock is taken with the remaining time,
+     * no attempt starts once the deadline has passed, and an attempt cut off by it is not retried.
+     *
+     * @throws AwfDeadlineExceeded when the deadline stopped it: {@link AwfDeadlineExceeded#requestSent()}
+     *     is {@code true} when a commit was sent (by this call, or by the commit still running that held
+     *     the lock) and may have been applied, {@code false} when nothing of this commit reached the backend
+     * @throws IOException when every attempt failed before the deadline; the chunks stay dirty
+     */
+    public AwfStore.CommitResult saveNow(final PersistenceMode mode, final int maxAttempts,
+                                         final AwfShutdownBudget budget) throws IOException {
+        if (this.store == null || !this.role.acceptsCommits() || mode == PersistenceMode.READ_ONLY) {
+            throw new IllegalStateException("a " + this.role + " world in " + mode + " mode does not save");
+        }
+        if (maxAttempts < 1) throw new IllegalArgumentException("maxAttempts must be at least 1");
+        if (budget.expired()) {
+            throw new AwfDeadlineExceeded("the AWF shutdown deadline passed before this commit could start", false);
+        }
+        if (!budget.tryLock(this.commitLock)) {
+            // Another commit (a periodic one on the storage lane) holds the lock past the deadline.
+            throw new AwfDeadlineExceeded("a commit of " + this.name + " was still running at the AWF shutdown"
+                + " deadline; this commit could not start", true);
+        }
+        try {
+            if (this.fenced) {
+                throw new FencedException("AWF world " + this.name + " was discarded or closed; this commit was"
+                    + " refused before it took its snapshot");
+            }
+            return commitInOrder(mode, maxAttempts, budget);
+        } catch (final CompletionException failed) {
+            if (failed.getCause() instanceof IOException io) throw io;
+            throw failed;
+        } finally {
+            this.commitLock.unlock();
+        }
+    }
+
+    /**
      * Writes the store's committed state as a self-contained generation ({@link AwfStore#compact}),
      * under the commit lock so it never interleaves with a commit and is refused once fenced.
      * Dirty chunks are not part of it; a flush before or after carries them.
@@ -326,11 +399,14 @@ public final class AwfWorld {
         if (this.store == null || !this.role.acceptsCommits()) {
             throw new IllegalStateException("a " + this.role + " world does not compact");
         }
-        synchronized (this.commitLock) {
+        this.commitLock.lock();
+        try {
             if (this.fenced) {
                 throw new FencedException("AWF world " + this.name + " was discarded or closed; no compaction");
             }
             return this.store.compact();
+        } finally {
+            this.commitLock.unlock();
         }
     }
 
@@ -350,7 +426,9 @@ public final class AwfWorld {
      * the race for the store to a flush that snapshotted the chunk's newer bytes, land last, and
      * leave the store with the older bytes while the chunk was no longer dirty.
      */
-    private final Object commitLock = new Object();
+    private final java.util.concurrent.locks.ReentrantLock commitLock = new java.util.concurrent.locks.ReentrantLock();
+    /** See {@link #uncertainChunks()}. */
+    private volatile int uncertainChunks;
     /**
      * Set by {@link #fence} and {@link #closeStore}. Read under {@link #commitLock} before a commit
      * takes its snapshot, so a commit either started before the fence (and completes) or commits
@@ -359,16 +437,21 @@ public final class AwfWorld {
     private volatile boolean fenced;
 
     private AwfStore.CommitResult commit(final PersistenceMode mode, final int maxAttempts) {
-        synchronized (this.commitLock) {
+        this.commitLock.lock();
+        try {
             if (this.fenced) {
                 throw new FencedException("AWF world " + this.name + " was discarded or closed; this commit was"
                     + " refused before it took its snapshot");
             }
-            return commitInOrder(mode, maxAttempts);
+            return commitInOrder(mode, maxAttempts, null);
+        } finally {
+            this.commitLock.unlock();
         }
     }
 
-    private AwfStore.CommitResult commitInOrder(final PersistenceMode mode, final int maxAttempts) {
+    /** @param budget the shutdown budget, or {@code null} outside shutdown */
+    private AwfStore.CommitResult commitInOrder(final PersistenceMode mode, final int maxAttempts,
+                                                final AwfShutdownBudget budget) {
         final long prepared = System.nanoTime();
         final Map<ChunkKey, Long> taken = new HashMap<>(this.dirty);
         final Map<ChunkKey, byte[]> changed = new HashMap<>();
@@ -390,6 +473,12 @@ public final class AwfWorld {
             return new AwfStore.CommitResult(-1L, 0, 0, 0L, 0);
         }
         for (int attempt = 1; ; attempt++) {
+            if (budget != null && budget.expired()) {
+                this.metrics.failures.incrementAndGet();
+                // An earlier attempt of this commit failed and may have reached the backend.
+                throw new CompletionException(new AwfDeadlineExceeded("the AWF shutdown deadline passed before"
+                    + " commit attempt " + attempt + " of " + this.name + " could start", attempt > 1));
+            }
             final long begun = System.nanoTime();
             try {
                 final AwfStore.CommitResult r = this.store.commit(changed, Set.of(), deleted, mode);
@@ -397,8 +486,14 @@ public final class AwfWorld {
                 this.metrics.bytesWritten.addAndGet(r.bytesWritten());
                 // Only entries whose version is unchanged: a chunk rewritten meanwhile stays dirty.
                 taken.forEach(this.dirty::remove);
+                this.uncertainChunks = 0;
                 evictCleanBeyondLimit();
                 return r;
+            } catch (final AwfDeadlineExceeded cut) {
+                // Never retried: the deadline is shared, and a retry could only wait for nothing.
+                this.metrics.failures.incrementAndGet();
+                if (cut.requestSent()) this.uncertainChunks = changed.size() + deleted.size();
+                throw new CompletionException(cut);
             } catch (final IOException failure) {
                 if (attempt < maxAttempts) {
                     this.metrics.retries.incrementAndGet();

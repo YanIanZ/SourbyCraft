@@ -49,6 +49,10 @@ public final class AwfEngine {
      */
     private final Map<String, AwfStore> templateStores = new ConcurrentHashMap<>();
     private volatile boolean warnedMissingBackend;
+    /** Set once by {@link #beginShutdown()}; every AWF wait from then on shares it. */
+    private volatile AwfShutdownBudget shutdownBudget;
+    /** What each storage's close at shutdown confirmed; see {@link AwfShutdownReport}. */
+    private final AwfShutdownReport shutdownReport = new AwfShutdownReport(SourbyLogger::error);
 
     AwfEngine(final AwfSettings settings, final Executor storageLane, final LongSupplier nanoClock) {
         this(settings, storageLane, nanoClock, defaultBackends(settings));
@@ -420,7 +424,8 @@ public final class AwfEngine {
         try {
             final AwfWorld world = new AwfWorld(name, role, base, store, this.settings.residentChunks());
             final AwfRegionStorage storage = new AwfRegionStorage(name, world, this.settings, this.storageLane,
-                this.nanoClock.getAsLong(), () -> this.storages.remove(name));
+                this.nanoClock.getAsLong(), () -> this.storages.remove(name), () -> this.shutdownBudget,
+                this.shutdownReport::record);
             if (managedWorld && prunes(regionFolder)) storage.pruneEmpty(regionFolder.getFileName().toString());
             if (managedWorld) storage.saveBounds(boundsFor(regionFolder));
             if (this.storages.putIfAbsent(name, storage) != null) {
@@ -504,18 +509,89 @@ public final class AwfEngine {
     }
 
     /**
+     * Starts the AWF shutdown deadline ({@code aurora.awf.shutdown-deadline-ms}). Called once at the
+     * start of shutdown, before the first AWF wait (SourbyCraft's shutdown hook runs before the region
+     * saves, the chunk I/O drain and {@link #closeAll()}); later calls keep the first budget. Does
+     * nothing when no storage was ever attached.
+     *
+     * <p>From then on every flush, close, commit and Redis call measures against this one deadline;
+     * when it passes, every world is fenced (queued commits commit nothing), lease renewal stops and
+     * every Redis connection in use is aborted.</p>
+     */
+    public static void beginShutdown() {
+        final AwfEngine current = global;
+        if (current != null) current.beginShutdownBudget();
+    }
+
+    AwfShutdownBudget beginShutdownBudget() {
+        synchronized (this) {
+            if (this.shutdownBudget != null) return this.shutdownBudget;
+            final AwfShutdownBudget budget = new AwfShutdownBudget(this.settings.shutdownDeadlineMillis(), this.nanoClock);
+            budget.onExpiry(() -> {
+                if (this.storages.isEmpty()) return;                  // nothing of AWF's is still waiting
+                for (final AwfRegionStorage storage : this.storages.values()) storage.fenceAtDeadline();
+                SourbyLogger.warn("Aurora World Fabric: the shutdown deadline (" + budget.totalMillis() + " ms, "
+                    + AwfSettings.SHUTDOWN_DEADLINE_KEY + ") passed; no further commit is attempted and open backend"
+                    + " connections are cut. What was not confirmed is listed below");
+            });
+            for (final AwfBackend backend : this.shutdownBackends()) backend.beginShutdown(budget);
+            this.shutdownBudget = budget;
+            budget.startTimer();
+            if (!this.storages.isEmpty()) {
+                SourbyLogger.info("Aurora World Fabric: shutdown began; every AWF commit and release must finish within "
+                    + budget.totalMillis() + " ms (" + AwfSettings.SHUTDOWN_DEADLINE_KEY + ")");
+            }
+            return budget;
+        }
+    }
+
+    /** Backends that take part in the shutdown deadline: the configured one, when registered. */
+    private List<AwfBackend> shutdownBackends() {
+        final AwfBackend backend = this.backends.apply(this.settings.backend());
+        return backend == null ? List.of() : List.of(backend);
+    }
+
+    /** The shutdown budget, or {@code null} before {@link #beginShutdown()}. */
+    AwfShutdownBudget shutdownBudget() {
+        return this.shutdownBudget;
+    }
+
+    AwfShutdownReport shutdownReport() {
+        return this.shutdownReport;
+    }
+
+    /**
      * Commits and closes every open storage, on the calling thread. Called once at shutdown, after
      * the chunk system has written its last save: Folia's shutdown never closes region storages,
      * so without this the writes since the last periodic commit would be lost on every stop.
+     * Storages already closed by their world's region save reported to the same
+     * {@link AwfShutdownReport}; this logs the one aggregate result for all of them.
      *
-     * @return storages whose final commit failed; their uncommitted chunks are lost
+     * @return storages whose data is not confirmed (failed, refused or uncertain final commit),
+     *     counting those closed earlier in this shutdown; non-zero fails the shutdown
      */
     public static int closeAll() {
         final AwfEngine current = global;
         if (current == null) return 0;
-        final int failed = current.closeEvery();
-        if (AwfBackend.named("redis") instanceof dev.iyanz.sourbycraft.awf.redis.RedisBackend redis) redis.shutdown();
-        return failed;
+        return current.shutdownAll();
+    }
+
+    /** {@link #closeAll()} for this engine: close the rest, release the backend, report. */
+    int shutdownAll() {
+        final AwfShutdownBudget budget = beginShutdownBudget();
+        closeEvery();
+        for (final AwfBackend backend : shutdownBackends()) backend.shutdown();
+        final List<AwfShutdownReport.StorageResult> results = this.shutdownReport.results();
+        final int unconfirmed = this.shutdownReport.unconfirmed().size();
+        budget.finish();
+        final var alert = this.shutdownReport.alert(budget.totalMillis(), budget.elapsedMillis());
+        if (alert.isPresent()) {
+            SourbyLogger.error(alert.get());
+        } else if (!results.isEmpty()) {
+            SourbyLogger.info(AwfShutdownReport.OK_MARKER + ": Aurora World Fabric confirmed " + results.size()
+                + " storage(s) at shutdown in " + budget.elapsedMillis() + " ms (deadline " + budget.totalMillis() + " ms)");
+        }
+        return unconfirmed;
     }
 
     /** The configured backend. */
@@ -550,6 +626,19 @@ public final class AwfEngine {
     }
 
     int closeEvery() {
+        if (this.shutdownBudget != null) {
+            // Each close reports to shutdownReport; none throws for an unconfirmed commit.
+            int failed = 0;
+            for (final AwfRegionStorage storage : this.storages.values()) {
+                try {
+                    storage.close();
+                } catch (final IOException | RuntimeException failure) {
+                    failed++;
+                    SourbyLogger.error("Aurora World Fabric could not close " + storage.name() + " at shutdown", failure);
+                }
+            }
+            return failed + this.shutdownReport.unconfirmed().size();
+        }
         int failed = 0;
         int closed = 0;
         int unreleased = 0;
@@ -666,6 +755,12 @@ public final class AwfEngine {
             if (Path.of(storage.name()).startsWith(root)) found.add(storage);
         }
         return found;
+    }
+
+    /** Every open storage of the running engine; empty when none was ever attached. */
+    public static Collection<AwfRegionStorage> openStorages() {
+        final AwfEngine current = global;
+        return current == null ? List.of() : current.storages();
     }
 
     public Collection<AwfRegionStorage> storages() {

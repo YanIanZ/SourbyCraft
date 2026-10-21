@@ -300,14 +300,14 @@ Each Pass criteria field below reproduces its gate's **Evidence required** cell 
 
 **Goal:** Show bounded AWF shutdown and a clean stop under client load.
 
-**Preconditions:** Shared requirements; P10; minimum 2 players actively modifying dirty AWF chunks; disposable network Redis. D6 overall deadline must be implemented and its actual value documented before a PASS is possible.
+**Preconditions:** Shared requirements; P10; minimum 2 players actively modifying dirty AWF chunks; disposable network Redis. D6 overall deadline must be implemented and its actual value documented before a PASS is possible. **CONDITIONAL on MC feature patch 0071 (AWF shutdown failure fails the stop) and the D6 code being in the jar:** check that the boot's `sourbycraft_config/aurora.toml` has `[aurora.awf] shutdown-deadline-ms` (seeded, default `30000`, RESTART_REQUIRED) and that a stop logs `Aurora World Fabric: shutdown began; every AWF commit and release must finish within <N> ms`. Record N.
 
 **Steps:**
 
 1. First stop normally under real client load; time from console `stop` (verify command exists) to process exit and record save/player/plugin completion.
 2. On a separate disposable run make chunks dirty, freeze only the test Redis process using the operator’s reviewed SIGSTOP method (unverified until target/process command recorded), then issue console `stop` (verify command exists).
-3. Measure total AWF shutdown against the implemented D6 overall deadline. If only per-store timeouts exist, mark BLOCKED on D6 rather than accepting the historical 91–115 s stop.
-4. Resume the test backend using the paired reviewed SIGCONT method; boot again and inspect durable state and reported losses.
+3. Measure total AWF shutdown against the implemented D6 overall deadline. If only per-store timeouts exist, mark BLOCKED on D6 rather than accepting the historical 91–115 s stop. Expected with the deadline: the time from the `shutdown began` line to process exit is at most N plus a few seconds (vanilla steps after AWF); the log has one `ERROR ... could not confirm the shutdown commit of <storage>: UNCERTAIN|REFUSED|FAILED - <n> unconfirmed dirty position(s) [...]` per affected storage and one `AWF-SHUTDOWN-INCOMPLETE: ...` alert listing them; the process exit status is **70**, not 0 (record how the panel/script reports it). A line that says these chunks were saved, or exit 0 with a frozen Redis, is a FAIL. With a healthy backend the stop logs `AWF-SHUTDOWN-OK: Aurora World Fabric confirmed <n> storage(s) at shutdown in <ms> ms` and exits 0; if a healthy-backend stop ever logs the incomplete alert, the deadline is too short for that world's chunk save (it counts from the start of shutdown): record the elapsed time, raise the key, and report it.
+4. Resume the test backend using the paired reviewed SIGCONT method; wait until the leases expire (`lease-seconds`) or the same server directory restarts; boot again and inspect durable state against the alert: positions of a REFUSED storage must hold their last confirmed state; positions of an UNCERTAIN storage may hold either the old or the new state (the commit may have been applied after SIGCONT, as seen in the agent run below) — record which, never call it a loss or a success without checking.
 
 **Capture:** Common capture plus Stop-to-exit timeline/exit status, frozen-backend stacks, dirty/pending counts, deadline config/code reference and post-boot integrity observations. Store in `docs/releases/evidence/49/g08-shutdown/` using the shared filename pattern.
 
@@ -322,13 +322,13 @@ Each Pass criteria field below reproduces its gate's **Evidence required** cell 
 
 **Goal:** Test network backend loss, recovery and bounded reporting.
 
-**Preconditions:** Shared requirements; P10; minimum 2 players; Redis on a separate real-network host; capture sanitized backend settings and lease/timeout values. D4 requires closure evidence or written owner acceptance.
+**Preconditions:** Shared requirements; P10; minimum 2 players; Redis on a separate real-network host; capture sanitized backend settings and lease/timeout values. D4 requires closure evidence or written owner acceptance. **D4 closure evidence is CONDITIONAL on MC feature patch 0072 (save-all reports AWF durability)** being in the jar.
 
 **Steps:**
 
 1. Follow the [AWF backend-failure scenarios](../../architecture/aurora-world-fabric.md#backend-failure-redis-gone--lease-lost-on-a-running-server) on disposable worlds: kill/unavailable Redis, expiry/recovery and lease loss; record each injected condition and expected durable checkpoint.
 2. Repeat the SIGSTOP/SIGCONT freeze scenario on the release jar while players modify chunks and request stored/new terrain; observe dirty chunks, retries and region stacks.
-3. Record save acknowledgements against actual durable commits to assess D4. Exercise the Moonrise read-failure path and count log lines per time window; do not call a flood bounded from a short excerpt.
+3. Record save acknowledgements against actual durable commits to assess D4. Exercise the Moonrise read-failure path and count log lines per time window; do not call a flood bounded from a short excerpt. D4 check with 0072: with the backend healthy, `save-all flush` must print `Aurora World Fabric: waiting for <n> storage(s) to commit what this save wrote (pending; ...)` and then `Saved the game` followed by `Aurora World Fabric: <n> storage(s) durable, <m> chunk(s) committed`; with the backend frozen or down it must print the pending line and then `Save NOT durable: ... could not commit <k> of <n> storage(s), <c> chunk(s) only in memory: <storage> (<dirty> dirty: <error>)` and **no** `Saved the game` line for that command (it can take commit-attempts x timeout-ms, behind a running periodic commit). Place a marker block before each `save-all flush`, restart after a "Saved the game" acknowledgement and confirm the marker; a "Saved the game" for a save whose marker is missing after a restart is a FAIL. Plain `save-all` (no flush) still prints `Saved the game` at once plus a line with the AWF chunks still in memory: it never claimed durability.
 4. Restore the backend, inspect recovery and persistence, and attach either the D4 fix evidence or explicit owner acceptance.
 
 **Capture:** Common capture plus Per-scenario network/failure timeline, `/perf awf`, stacks, durable-state comparisons, Moonrise log rate, D4 disposition and client observations. Store in `docs/releases/evidence/49/g09-backend/` using the shared filename pattern.
@@ -730,6 +730,7 @@ may no longer exist; a document link is not a replacement for the raw evidence.
 - [ASP 26.2 AWF port review](../../development/ASP-26.2-AWF-PORT-REVIEW.md): records format/persistence findings, dated local fixes/tests and unverified service wiring, not completed qualification.
 - [Build provenance](../../development/BUILD-PROVENANCE.md): records build-identity/SBOM regression checks and embedded metadata limits; explicitly distinguishes metadata from signed attestation.
 - [Auto-updater](../../development/AUTO-UPDATER.md): records unit-tested verification/rollback state machines and the lack of an apply/rollback boot test in that wave; signing activation was still absent.
+- AWF D6/D4, 2026-10-22 (agent `opus-awf-d6`, runs `opus-awf-d6-redis-1/-2`, jar built from the worker tree, loopback Redis 8.10.2 with AOF, default 30000 ms deadline, no players): with Redis SIGSTOPped, `stop` exited after 31.1 s with exit status 70 and the `AWF-SHUTDOWN-INCOMPLETE` alert (was 91–115 s); `save-all flush` printed pending then `Save NOT durable` (no success line) with Redis frozen and pending then `Saved the game` when healthy; after SIGCONT the next boot read all four markers, including the two in the UNCERTAIN commit. See [aurora-world-fabric.md](../../architecture/aurora-world-fabric.md) "Fixes 2026-10-22". Not network Redis, not under load.
 - [Agent test server](../../development/AGENT-TEST-SERVER.md): documents isolated functional harness guarantees/output and why those runs are not certified baselines or client evidence; not an authorization for agent testing from Build 49.
 
 ## Known gaps

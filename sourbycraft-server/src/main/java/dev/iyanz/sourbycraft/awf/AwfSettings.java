@@ -41,10 +41,14 @@ import java.util.Set;
  *                         interval applies. Bounds how much a crash can lose by size, not only by time. At
  *                         most one commit per storage runs at a time and the check runs once a second, so
  *                         this is a trigger threshold, not a hard cap on unsaved bytes.
+ * @param shutdownDeadlineMillis one budget, in milliseconds, for every AWF wait at shutdown (flushes, final
+ *                         commits, lock waits, backend calls, lease release), measured from the start of
+ *                         shutdown. When it passes no further commit is attempted and the shutdown is reported
+ *                         as incomplete, never as saved. Default 30000. See {@link AwfShutdownBudget}.
  */
 public record AwfSettings(Set<String> worlds, Set<String> export, String backend, PersistenceMode persistence, int commitIntervalSeconds,
                           int residentChunks, int retainedGenerations, int commitAttempts, boolean deltaGenerations,
-                          int commitDirtyBytes) {
+                          int commitDirtyBytes, int shutdownDeadlineMillis) {
 
     public static final String WORLDS_KEY = "aurora.awf.worlds";
     public static final String EXPORT_KEY = "aurora.awf.export";
@@ -56,12 +60,32 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
     public static final String COMMIT_ATTEMPTS_KEY = "aurora.awf.commit-attempts";
     public static final String DELTA_GENERATIONS_KEY = "aurora.awf.delta-generations";
     public static final String COMMIT_DIRTY_BYTES_KEY = "aurora.awf.commit-dirty-bytes";
+    public static final String SHUTDOWN_DEADLINE_KEY = "aurora.awf.shutdown-deadline-ms";
+    /** {@link #shutdownDeadlineMillis()} unless configured. */
+    public static final int DEFAULT_SHUTDOWN_DEADLINE_MILLIS = 30_000;
     static final List<String> KEYS = List.of(WORLDS_KEY, EXPORT_KEY, BACKEND_KEY, PERSISTENCE_KEY, COMMIT_INTERVAL_KEY,
         RESIDENT_CHUNKS_KEY, RETAINED_GENERATIONS_KEY, COMMIT_ATTEMPTS_KEY, DELTA_GENERATIONS_KEY,
-        COMMIT_DIRTY_BYTES_KEY);
+        COMMIT_DIRTY_BYTES_KEY, SHUTDOWN_DEADLINE_KEY);
 
     public static final AwfSettings DEFAULT =
-        new AwfSettings(Set.of(), Set.of(), "file", PersistenceMode.INCREMENTAL, 30, 1024, 3, 3, false, 0);
+        new AwfSettings(Set.of(), Set.of(), "file", PersistenceMode.INCREMENTAL, 30, 1024, 3, 3, false, 0,
+            DEFAULT_SHUTDOWN_DEADLINE_MILLIS);
+
+    /** Settings with the default shutdown deadline. */
+    public AwfSettings(final Set<String> worlds, final Set<String> export, final String backend,
+                       final PersistenceMode persistence, final int commitIntervalSeconds, final int residentChunks,
+                       final int retainedGenerations, final int commitAttempts, final boolean deltaGenerations,
+                       final int commitDirtyBytes) {
+        this(worlds, export, backend, persistence, commitIntervalSeconds, residentChunks, retainedGenerations,
+            commitAttempts, deltaGenerations, commitDirtyBytes, DEFAULT_SHUTDOWN_DEADLINE_MILLIS);
+    }
+
+    /** These settings with another shutdown deadline. */
+    public AwfSettings withShutdownDeadlineMillis(final int millis) {
+        return new AwfSettings(this.worlds, this.export, this.backend, this.persistence, this.commitIntervalSeconds,
+            this.residentChunks, this.retainedGenerations, this.commitAttempts, this.deltaGenerations,
+            this.commitDirtyBytes, millis);
+    }
 
     /** Settings without an export list. */
     public AwfSettings(final Set<String> worlds, final PersistenceMode persistence, final int commitIntervalSeconds,
@@ -107,6 +131,7 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
             throw new IllegalArgumentException("AWF numbers must be at least 1");
         }
         if (commitDirtyBytes < 0) throw new IllegalArgumentException("commitDirtyBytes must not be negative");
+        if (shutdownDeadlineMillis < 1) throw new IllegalArgumentException("shutdownDeadlineMillis must be at least 1");
     }
 
     /** Settings and the keys that were present but unusable. */
@@ -151,8 +176,10 @@ public record AwfSettings(Set<String> worlds, Set<String> export, String backend
         final boolean deltas = flag(values, DELTA_GENERATIONS_KEY, DEFAULT.deltaGenerations(), invalid);
         final int dirtyBytes = whole(values, COMMIT_DIRTY_BYTES_KEY, DEFAULT.commitDirtyBytes(), 0, Integer.MAX_VALUE,
             invalid);
+        final int shutdownDeadline = whole(values, SHUTDOWN_DEADLINE_KEY, DEFAULT.shutdownDeadlineMillis(), 1,
+            Integer.MAX_VALUE, invalid);
         return new Parsed(new AwfSettings(worlds, export, backend, persistence, interval, resident, retained, attempts,
-            deltas, dirtyBytes), invalid);
+            deltas, dirtyBytes, shutdownDeadline), invalid);
     }
 
     /** A list of plain folder names, or none at all when any entry is unusable. */

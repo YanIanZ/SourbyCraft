@@ -42,6 +42,18 @@ public interface AwfBackend {
         throw new UnsupportedOperationException("the " + name() + " AWF backend cannot delete stores");
     }
 
+    /**
+     * Shutdown has begun: bound every later backend call by {@code budget}'s deadline, and when it
+     * passes stop background work (lease renewal) and abort calls in flight. Default: nothing (the
+     * FILE backend's commits are local and are bounded by the lock and attempt checks around them).
+     */
+    default void beginShutdown(final AwfShutdownBudget budget) {
+    }
+
+    /** Releases what the backend still holds for this server and closes its connections. Called once, last. */
+    default void shutdown() {
+    }
+
     /** One line for operators: where stores live. */
     default String describe() {
         return name();

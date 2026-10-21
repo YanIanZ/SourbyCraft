@@ -389,6 +389,12 @@ public final class SourbyCraftConfig {
             "AWF: start a commit as soon as a storage's unsaved chunks hold at least this many bytes, without waiting "
             + "for commit-interval-seconds (RESTART_REQUIRED). 0 = off (interval only). A trigger, not a hard cap: "
             + "the check runs once a second and one commit per storage runs at a time. 0-2147483647.");
+        seed(f, changed, dev.iyanz.sourbycraft.awf.AwfSettings.SHUTDOWN_DEADLINE_KEY,
+            dev.iyanz.sourbycraft.awf.AwfSettings.DEFAULT_SHUTDOWN_DEADLINE_MILLIS,
+            "AWF: one budget in milliseconds for every AWF wait at shutdown (flushes, final commits, lock waits, "
+            + "backend calls, lease release), from the start of shutdown (RESTART_REQUIRED). When it passes no further "
+            + "commit is attempted, open Redis connections are cut, and the shutdown is logged as "
+            + "AWF-SHUTDOWN-INCOMPLETE with every unconfirmed storage (exit status 70), never as saved. 1-2147483647.");
         if (changed[0]) {
             f.save();
             SourbyLogger.info("seeded Aurora engine defaults into sourbycraft_config/aurora.toml");

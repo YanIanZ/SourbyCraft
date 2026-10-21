@@ -264,7 +264,9 @@ generation-guarded take-back above is the fix, with tests for both the commit an
 Build 47 release gate *backend failure*. **State: local scenarios PASS after fixes (2026-10-14
 rerun below); D1–D3, D5 and a write-hang found in the rerun (D7) fixed in the working tree,
 uncommitted, not in CI; D4 only mitigated (log line), D6 open (report only).** Local laptop
-evidence only, not a qualification.
+evidence only, not a qualification. **Update 2026-10-22: D4 and D6 implemented (working tree,
+uncommitted; see "Fixes 2026-10-22" below), unit-tested and shown once on the agent test server
+with a SIGSTOPped loopback Redis; Redis over a network still not exercised.**
 
 **Designed behavior (from code, before testing).**
 - *Redis gone.* Every call fails within `timeout-ms` (connect, read and pool wait each bounded;
@@ -402,7 +404,61 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
   bytes are written in 64 KiB slices that record progress; a watchdog closes the connection when no
   byte went out for `timeout-ms`, and the call fails with `SocketTimeoutException`.
 - **D6** not changed: a frozen Redis still makes `stop` take stores × attempts × `timeout-ms` (115 s
-  in the rerun). No overall AWF shutdown deadline.
+  in the rerun). No overall AWF shutdown deadline. (Superseded 2026-10-22, below.)
+
+**Fixes 2026-10-22 (D4, D6; MC feature patches 0071/0072).**
+- **D6 — one AWF shutdown deadline** (`aurora.awf.shutdown-deadline-ms`, default 30000, 1..2^31-1,
+  RESTART_REQUIRED, read in `AwfSettings.readEarly`). `AwfEngine.beginShutdown()` is called first in
+  `SourbyCraftBootstrap.close()` (Sourby code, no patch), i.e. before the storage lane drains, before
+  the region saves (whose last region per world runs `MoonriseRegionFileIO.flush`, then the AWF
+  flush and close of that world) and before `AwfEngine.closeAll()` after the chunk I/O drain. It
+  creates one `AwfShutdownBudget` (monotonic `System.nanoTime` deadline) shared by everything after
+  it, so the budget also covers the vanilla chunk save: a world whose save alone takes longer than
+  the deadline gets its final commit refused (raise the key). Mechanisms: the commit lock
+  (`AwfWorld.commitLock`, now a `ReentrantLock`) and the storage's transition lock are taken with
+  `tryLock(remaining)`; no commit attempt starts once the deadline has passed and an attempt cut
+  by it is never retried; `RedisClient.deadline` cuts every call's pool wait, connect, write-progress
+  and read timeouts to the time left, refuses calls after it without touching the network, and at
+  the deadline closes every connection in use (and `close()` now also aborts checked-out
+  connections, not only idle ones); at expiry the engine fences every world (queued lane commits
+  commit nothing) and the Redis backend stops lease renewal; `RedisBackend.shutdown` releases all
+  remaining leases in one pipeline; `WAITAOF`'s server-side timeout is cut too. Shutdown closes
+  never throw for an unconfirmed commit any more: each reports to `AwfShutdownReport`, which logs
+  one ERROR per storage and, from `closeAll`, one aggregate `AWF-SHUTDOWN-INCOMPLETE` line listing
+  by storage the unconfirmed dirty positions (count + first 16), commits queued on the lane that the
+  deadline fenced, refused writes (fenced reads + writes after close) and uncertain commits.
+  Outcomes: CONFIRMED, FAILED (backend error before the deadline), REFUSED (no attempt could start:
+  certainly not on the backend), UNCERTAIN (sent or running, unanswered: "may or may not have been
+  applied", never "failed"). A clean shutdown logs `AWF-SHUTDOWN-OK`. MC 0071 turns a non-zero
+  `closeAll()` into `abnormalExit` (exit status 70). Tests: `AwfShutdownDeadlineTest` (7: shared
+  budget, a lock held by a hung commit cannot extend it, exact counts on expiry, sent vs never-sent,
+  expired budget attempts nothing, confirmed shutdown keeps every commit, setting validation, real
+  redis-server SIGSTOPped: 3 stores end at the 1500 ms deadline, ~1.7 s, where the old path would
+  take 3 × 4 × 2 s), `RedisShutdownDeadlineTest` (4). Agent test server, jar from this tree
+  (`opus-awf-d6-redis-1/-2`, loopback Redis 8.10.2 with AOF, default 30000 ms): markers placed and
+  `save-all flush` confirmed; two more markers; Redis SIGSTOPped; `stop` exited after **31.1 s**
+  with exit status 70 and the alert (overworld region UNCERTAIN, 763 dirty positions; overworld
+  entities REFUSED, 3), against 91–115 s before. After SIGCONT and lease expiry the next boot
+  read all four markers: Redis had applied the uncertain commit from the request already in its
+  socket buffer, which is exactly why it is reported as uncertain and not as failed. A clean
+  `stop` of that boot: `AWF-SHUTDOWN-OK ... 9 storage(s) ... 1468 ms`, exit 0, 0 lock keys.
+  Functional evidence on a shared machine only; no player load, no networked Redis.
+- **D4 — save-all durability.** `AwfRegionStorage.flushBarrier()` completes DURABLE once a commit
+  whose snapshot was taken after the call succeeded (FAILED with the dirty count otherwise; never
+  blocks). MC 0072 replaces `save-all`'s unconditional "Saved the game" with
+  `command/SaveAllFeedback` → `AwfFlushReporting`: no AWF storage open → the vanilla success
+  unchanged; plain `save-all` → vanilla success plus one line with the AWF chunks still in memory;
+  `save-all flush` → a pending line first (it never contains "Saved the game"), then, on a virtual
+  thread, wait (≤ 30 s) until the chunk I/O queue is idle (`RegionIoQueue`, so the save's writes
+  reached AWF), one barrier per open storage, and the vanilla success plus "N storage(s) durable,
+  M chunk(s) committed" only when every barrier succeeded; otherwise "Save NOT durable: ... could
+  not commit K of N storage(s), C chunk(s) only in memory: <storage> (<dirty> dirty: <error>)".
+  Later lines are delivered on the global tick (`RegionOwnership`). The WARN of the 2026-10-14
+  mitigation stays. Tests: `AwfFlushReportingTest` (7). Agent test server: healthy Redis →
+  pending, then "Saved the game" + "9 storage(s) durable, 72 chunk(s) committed" 2 s later; Redis
+  SIGSTOPped → pending, then after 60 s (commit attempts × `timeout-ms`, behind the running
+  periodic commit) "Save NOT durable: ... 2 of 9 storage(s), 17 chunk(s) only in memory ...", no
+  success line.
 
 Tests (all with `SOURBY_REQUIRE_REDIS=1`): `AwfReadFailureTest` (6: transient failure retried and
 invisible; regenerated chunk never committed, stored chunk committed again only after a load-path
@@ -437,8 +493,8 @@ stop, reboot check, clean stop). Evidence: `scratchpad/gates/redis2/` (`events.t
 | `stop` with Redis SIGSTOPped, dirty chunks | 105 s, bounded | jar `4d0cc1de`: **hung > 10 min** (D7, writer blocked in socket write), exited 1 s after SIGCONT. Final jar: 115 s, bounded (D6) |
 | Clean `stop`, Redis healthy | 3 s, 0 lock keys | 3 s, 0 lock keys, 0 ERROR lines in that boot |
 
-Left open: D6 (no overall shutdown deadline); D4 beyond the log line (`save-all` output);
-Moonrise's misleading "chunk data will be lost" line on a fenced read; a regenerated chunk is
+Left open: ~~D6~~ and ~~D4~~ (fixed 2026-10-22, above; not yet over a networked Redis or under
+player load); Moonrise's misleading "chunk data will be lost" line on a fenced read; a regenerated chunk is
 playable in memory while Redis is down (writes to it are dropped at the store, so player edits to
 such a chunk are lost by design); the load-path check is the `moonrise$readData` frame, so a
 Moonrise read that is not a chunk load (`ChunkMap.read`, e.g. a plugin reading chunk NBT) and

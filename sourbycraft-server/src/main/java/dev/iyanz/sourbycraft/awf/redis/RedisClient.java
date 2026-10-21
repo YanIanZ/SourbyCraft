@@ -126,6 +126,13 @@ public class RedisClient implements AutoCloseable {
     /** Idle connections; never more than the pool size, since only that many are ever out. */
     private final ArrayBlockingQueue<Connection> idle;
     private volatile boolean closed;
+    /** Connections handed to a caller right now, so a deadline or {@link #close()} can abort them. */
+    private final java.util.Set<Connection> checkedOut = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** {@link System#nanoTime} deadline for every call once {@link #deadline} was set. */
+    private volatile long deadlineNanos;
+    private volatile boolean hasDeadline;
+    /** Set when the deadline passed: every call fails at once and calls in flight were aborted. */
+    private volatile boolean expired;
 
     public RedisClient(final Endpoint endpoint, final int poolSize, final int timeoutMillis) {
         if (poolSize < 1) throw new IllegalArgumentException("pool size " + poolSize);
@@ -138,6 +145,84 @@ public class RedisClient implements AutoCloseable {
 
     public Endpoint endpoint() {
         return this.endpoint;
+    }
+
+    /**
+     * Bounds every call from now on by one deadline (the AWF shutdown deadline): each call's
+     * connection wait, connect, write-progress and read timeouts are cut to the time left, a call
+     * that starts after it fails at once without touching the network, and when it passes every
+     * connection in use is closed, so a call blocked in a socket read or write fails immediately.
+     * A call stopped by the deadline throws {@link dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded},
+     * saying whether its request may have reached Redis.
+     *
+     * @param deadlineNanos on the {@link System#nanoTime} scale; an earlier deadline set before wins
+     */
+    public void deadline(final long deadlineNanos) {
+        synchronized (this.checkedOut) {
+            if (this.hasDeadline && this.deadlineNanos - deadlineNanos <= 0) return;
+            this.deadlineNanos = deadlineNanos;
+            this.hasDeadline = true;
+        }
+        WATCHDOG.schedule(this::expireIfDue, Math.max(0L, deadlineNanos - System.nanoTime()), TimeUnit.NANOSECONDS);
+    }
+
+    private void expireIfDue() {
+        if (this.hasDeadline && System.nanoTime() - this.deadlineNanos >= 0) expire();
+    }
+
+    /** The deadline has passed: refuse new calls and abort every connection in use or idle. */
+    public void expire() {
+        this.expired = true;
+        abortAll();
+    }
+
+    /** Whether {@link #deadline} passed (or {@link #expire()} was called). */
+    public boolean expired() {
+        return this.expired;
+    }
+
+    private void abortAll() {
+        for (final Connection connection : List.copyOf(this.checkedOut)) connection.close();
+        Connection connection;
+        while ((connection = this.idle.poll()) != null) connection.close();
+    }
+
+    /**
+     * The timeout for the next step of a call: {@code timeout-ms}, cut to the time left before the
+     * deadline. Throws once the deadline has passed.
+     */
+    private int stepTimeoutMillis(final boolean requestSent) throws dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded {
+        if (this.expired) throw deadlinePassed(requestSent, null);
+        if (!this.hasDeadline) return this.timeoutMillis;
+        final long remaining = this.deadlineNanos - System.nanoTime();
+        if (remaining <= 0L) {
+            expire();
+            throw deadlinePassed(requestSent, null);
+        }
+        return (int) Math.max(1L, Math.min(this.timeoutMillis, TimeUnit.NANOSECONDS.toMillis(remaining + 999_999L)));
+    }
+
+    private static dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded deadlinePassed(final boolean requestSent,
+                                                                              final Throwable cause) {
+        return new dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded(requestSent
+            ? "the AWF shutdown deadline passed while waiting for Redis; the request was sent and may or may not have"
+                + " been applied"
+            : "refused: the AWF shutdown deadline has passed; nothing was sent to Redis", requestSent, cause);
+    }
+
+    /**
+     * The timeout a server-side wait (such as {@code WAITAOF}'s) may use now: {@code timeout-ms}, cut
+     * to the time left before the deadline.
+     *
+     * @throws dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded once the deadline has passed
+     */
+    public int remainingTimeoutMillis() throws dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded {
+        return stepTimeoutMillis(false);
+    }
+
+    /** Whether a failure happened because the deadline passed (the call was aborted or its timeout was cut). */
+    private boolean pastDeadline() {
+        return this.expired || (this.hasDeadline && System.nanoTime() - this.deadlineNanos >= 0);
     }
 
     /** Runs one command. An error reply is thrown as {@link RedisError}. */
@@ -153,25 +238,34 @@ public class RedisClient implements AutoCloseable {
      */
     public List<Object> pipeline(final List<Object[]> commands) throws IOException {
         if (this.closed) throw new IOException("Redis client is closed");
+        final int waitMillis = stepTimeoutMillis(false);
         try {
-            if (!this.permits.tryAcquire(this.timeoutMillis, TimeUnit.MILLISECONDS)) {
-                throw new IOException("no free Redis connection within " + this.timeoutMillis + " ms");
+            if (!this.permits.tryAcquire(waitMillis, TimeUnit.MILLISECONDS)) {
+                if (pastDeadline()) throw deadlinePassed(false, null);
+                throw new IOException("no free Redis connection within " + waitMillis + " ms");
             }
         } catch (final InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IOException("interrupted waiting for a Redis connection", interrupted);
         }
         Connection connection = null;
+        boolean sent = false;
         try {
             connection = this.idle.poll();
-            if (connection == null) connection = connect();
-            final WriteWatch watch = new WriteWatch(connection, TimeUnit.MILLISECONDS.toNanos(this.timeoutMillis));
+            if (connection == null) connection = connect(stepTimeoutMillis(false));
+            this.checkedOut.add(connection);
+            if (this.expired) throw deadlinePassed(false, null);     // aborted before it was registered
+            final int stepMillis = stepTimeoutMillis(false);
+            connection.timeout(stepMillis);
+            final WriteWatch watch = new WriteWatch(connection, TimeUnit.MILLISECONDS.toNanos(stepMillis));
             try {
+                sent = true;          // from the first byte on, Redis may receive and run the request
                 for (final Object[] command : commands) connection.write(command);
                 connection.flush();
             } catch (final IOException failed) {
+                if (pastDeadline()) throw deadlinePassed(true, failed);
                 if (watch.stalled) {
-                    throw new java.net.SocketTimeoutException("Redis accepted no request bytes for " + this.timeoutMillis
+                    throw new java.net.SocketTimeoutException("Redis accepted no request bytes for " + stepMillis
                         + " ms; connection closed");
                 }
                 throw failed;
@@ -179,11 +273,24 @@ public class RedisClient implements AutoCloseable {
                 watch.done();
             }
             final List<Object> replies = new ArrayList<>(commands.size());
-            for (int i = 0; i < commands.size(); i++) replies.add(connection.read());
+            try {
+                for (int i = 0; i < commands.size(); i++) replies.add(connection.read());
+            } catch (final IOException failed) {
+                if (pastDeadline()) throw deadlinePassed(true, failed);
+                throw failed;
+            }
+            this.checkedOut.remove(connection);
             if (this.idle.offer(connection)) connection = null;      // else closed below
+            if (this.expired) abortAll();                              // offered after the abort swept the pool
             return replies;
+        } catch (final IOException failed) {
+            if (failed instanceof dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded || !pastDeadline()) throw failed;
+            throw deadlinePassed(sent, failed);
         } finally {
-            if (connection != null) connection.close();    // broken mid-exchange: never reused
+            if (connection != null) {
+                this.checkedOut.remove(connection);
+                connection.close();    // broken mid-exchange: never reused
+            }
             this.permits.release();
         }
     }
@@ -253,7 +360,7 @@ public class RedisClient implements AutoCloseable {
         return command;
     }
 
-    private Connection connect() throws IOException {
+    private Connection connect(final int timeoutMillis) throws IOException {
         final Socket socket;
         if (this.endpoint.tls()) {
             final SSLSocket tls = (SSLSocket) SSLSocketFactory.getDefault().createSocket();
@@ -267,8 +374,8 @@ public class RedisClient implements AutoCloseable {
         try {
             socket.setTcpNoDelay(true);
             socket.setKeepAlive(true);
-            socket.connect(new InetSocketAddress(this.endpoint.host(), this.endpoint.port()), this.timeoutMillis);
-            socket.setSoTimeout(this.timeoutMillis);
+            socket.connect(new InetSocketAddress(this.endpoint.host(), this.endpoint.port()), timeoutMillis);
+            socket.setSoTimeout(timeoutMillis);
             if (socket instanceof SSLSocket tls) tls.startHandshake();
             final Connection connection = new Connection(socket);
             final List<Object[]> hello = new ArrayList<>();
@@ -297,11 +404,14 @@ public class RedisClient implements AutoCloseable {
         }
     }
 
+    /**
+     * Closes the client: idle connections and also the ones in use, whose calls then fail (a client
+     * is closed last at shutdown, when no call may keep the process waiting).
+     */
     @Override
     public void close() {
         this.closed = true;
-        Connection connection;
-        while ((connection = this.idle.poll()) != null) connection.close();
+        abortAll();
     }
 
     static byte[] bytes(final Object arg) {
@@ -411,6 +521,11 @@ public class RedisClient implements AutoCloseable {
 
         void flush() throws IOException {
             this.out.flush();
+        }
+
+        /** Sets the read timeout for the next call. */
+        void timeout(final int millis) throws IOException {
+            this.socket.setSoTimeout(millis);
         }
 
         Object read() throws IOException {

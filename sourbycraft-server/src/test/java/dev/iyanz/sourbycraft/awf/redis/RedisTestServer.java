@@ -76,12 +76,34 @@ public final class RedisTestServer implements AutoCloseable {
         throw new IllegalStateException("redis-server did not start: " + Files.readString(directory.resolve("redis.log")));
     }
 
+    /** Freezes the server like an operator's {@code kill -STOP}: it keeps its sockets but answers nothing. */
+    public void freeze() throws Exception {
+        signal("-STOP");
+    }
+
+    /** Resumes a {@link #freeze() frozen} server. */
+    public void thaw() throws Exception {
+        signal("-CONT");
+    }
+
+    private void signal(final String signal) throws Exception {
+        final Process kill = new ProcessBuilder("kill", signal, Long.toString(this.process.pid())).inheritIO().start();
+        if (!kill.waitFor(10, TimeUnit.SECONDS) || kill.exitValue() != 0) {
+            throw new IllegalStateException("kill " + signal + " " + this.process.pid() + " failed");
+        }
+    }
+
     public String uri() {
         return "redis://127.0.0.1:" + this.port + "/0";
     }
 
     @Override
     public void close() throws IOException {
+        try {
+            thaw();              // a frozen process ignores SIGTERM until it runs again
+        } catch (final Exception ignored) {
+            // already gone
+        }
         this.process.destroy();
         try {
             if (!this.process.waitFor(5, TimeUnit.SECONDS)) this.process.destroyForcibly();

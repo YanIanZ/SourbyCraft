@@ -237,11 +237,19 @@ public final class RedisBackend implements AwfBackend {
     /** Waits for the last write to reach Redis's append-only file, if configured and possible. */
     void awaitDurable() throws IOException {
         if (!this.waitForAof) return;
+        // The commit already ran on Redis: a deadline here leaves its durability unknown, never "not applied".
+        final int waitMillis;
         try {
-            final Object reply = this.client.call("WAITAOF", "1", "0", Integer.toString(this.settings.timeoutMillis()));
+            waitMillis = this.client.remainingTimeoutMillis();
+        } catch (final dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded passed) {
+            throw new dev.iyanz.sourbycraft.awf.AwfDeadlineExceeded("the AWF shutdown deadline passed after Redis ran the"
+                + " commit and before it confirmed the append-only file write", true, passed);
+        }
+        try {
+            final Object reply = this.client.call("WAITAOF", "1", "0", Integer.toString(waitMillis));
             if (reply instanceof List<?> counts && !counts.isEmpty() && counts.getFirst() instanceof Long local && local < 1) {
                 throw new IOException("Redis did not write the commit to its append-only file within "
-                    + this.settings.timeoutMillis() + " ms");
+                    + waitMillis + " ms");
             }
         } catch (final RedisClient.RedisError unsupported) {
             this.waitForAof = false;
@@ -365,15 +373,51 @@ public final class RedisBackend implements AwfBackend {
         this.client.call("DEL", store.chunksKey, store.deletedKey, store.genKey, store.writerKey);
     }
 
-    /** Releases every lease and closes the connections. */
+    /**
+     * Shutdown began: every Redis call from now on is bounded by the budget's deadline
+     * ({@link RedisClient#deadline}); when it passes lease renewal stops and every connection in use
+     * is aborted, so no call (a commit, a renewal, a read) keeps the server waiting.
+     */
+    @Override
+    public void beginShutdown(final dev.iyanz.sourbycraft.awf.AwfShutdownBudget budget) {
+        this.client.deadline(budget.deadlineNanos());
+        budget.onExpiry(() -> {
+            this.renewals.shutdownNow();
+            this.client.expire();
+        });
+    }
+
+    /** Whether lease renewal has stopped (shutdown, or the shutdown deadline passed). */
+    boolean renewalsStopped() {
+        return this.renewals.isShutdown();
+    }
+
+    /**
+     * Releases every lease still held, in one pipeline (one round trip, bounded by the shutdown
+     * deadline when one is set), and closes every connection, also those in use.
+     */
+    @Override
     public void shutdown() {
         this.renewals.shutdownNow();
-        for (final RedisStore store : List.copyOf(this.leased.values())) {
+        final List<RedisStore> stores = List.copyOf(this.leased.values());
+        if (!stores.isEmpty()) {
+            final List<Object[]> calls = new ArrayList<>(stores.size());
+            for (final RedisStore store : stores) calls.add(new Object[] {"1", store.lockKey, store.token()});
+            List<Object> replies = null;
             try {
-                release(store);
-            } catch (final IOException failed) {
-                SourbyLogger.warn("Aurora World Fabric could not release its Redis lease on " + store.id()
-                    + "; it expires in " + this.settings.leaseSeconds() + " s");
+                replies = this.client.evalPipeline(RELEASE_SCRIPT, calls);
+            } catch (final IOException | RuntimeException failed) {
+                SourbyLogger.warn("Aurora World Fabric could not release its Redis leases on " + stores.size()
+                    + " store(s) (" + failed.getMessage() + "); they expire in " + this.settings.leaseSeconds() + " s");
+            }
+            for (int i = 0; i < stores.size(); i++) {
+                final RedisStore store = stores.get(i);
+                this.leased.remove(store.token());
+                this.lost.remove(store.token());
+                if (replies != null && replies.get(i) instanceof RedisClient.RedisError error) {
+                    SourbyLogger.warn("Aurora World Fabric could not release its Redis lease on " + store.id() + " ("
+                        + error.getMessage() + "); it expires in " + this.settings.leaseSeconds() + " s");
+                }
             }
         }
         this.client.close();

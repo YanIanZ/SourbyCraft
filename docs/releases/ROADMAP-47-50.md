@@ -219,7 +219,7 @@ in writing in the gate doc.
 
 | Item | Reference | Board |
 | --- | --- | --- |
-| Redis disconnect / lost lease on a running server: D6 overall AWF shutdown deadline, D4, Redis over a network, Moonrise read-failure log flood (needs a feature patch), SIGSTOP rerun on new code; AWF database backend qualification | docs/TODO.md:60; AURORA-TASKS.md:237 | task_6483e86c005c6f38 |
+| Redis disconnect / lost lease on a running server: Redis over a network, SIGSTOP rerun under player load; AWF database backend qualification. Done 2026-10-22 (MC 0071/0072): D6 overall AWF shutdown deadline and D4 save-all durability (aurora-world-fabric.md "Fixes 2026-10-22"). Already done: the Moonrise read-failure log flood is bounded without a feature patch (`AwfRegionStorage` fence → `ReadFailureLog`, 10 s window; `RepeatedReadFailureLogFilter` drops Moonrise's records of repeats) | docs/TODO.md:60; AURORA-TASKS.md:237 | task_6483e86c005c6f38 |
 
 *Security and distribution*
 

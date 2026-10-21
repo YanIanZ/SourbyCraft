@@ -33,6 +33,7 @@ This document describes **what branch `26.2` actually consumes now**. It is not 
 | `aurora.awf.retained-generations` | ≥ 1 / `3` | RESTART_REQUIRED | generations kept for recovery |
 | `aurora.awf.commit-attempts` | ≥ 1 / `3` | RESTART_REQUIRED | attempts before a commit fails |
 | `aurora.awf.commit-dirty-bytes` | 0 to 2147483647 / `0` (off) | RESTART_REQUIRED | start a commit once a storage's unsaved chunks hold this many bytes, before the interval; a trigger, not a cap |
+| `aurora.awf.shutdown-deadline-ms` | 1 to 2147483647 / `30000` | RESTART_REQUIRED | `AwfSettings.readEarly`, used by `AwfEngine.beginShutdown` (called from `SourbyCraftBootstrap.close`, before the region saves): one budget for every AWF wait at shutdown (flushes, final commits, commit-lock waits, Redis calls, lease release), counted from the start of shutdown and so including the vanilla chunk save. When it passes no further commit starts, queued commits are fenced, lease renewal stops and Redis connections in use are cut; each unconfirmed storage is logged at ERROR, one `AWF-SHUTDOWN-INCOMPLETE` alert lists them, and the process exits with status 70 (MC feature 0080). Never reported as saved. Raise it for a world whose chunk save alone takes longer than the default ([aurora-world-fabric.md](architecture/aurora-world-fabric.md) D6) |
 
 **Hot-path lookup audit (2026-09-27).** Every remaining dotted-string lookup
 (`SourbyCraftConfig.cfgGet/cfgBool/cfgInt`) runs at boot, at explicit reload, on operator commands, or on a join/leave

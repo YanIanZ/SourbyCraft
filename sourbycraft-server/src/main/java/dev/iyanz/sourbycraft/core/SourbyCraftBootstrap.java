@@ -65,6 +65,10 @@ public final class SourbyCraftBootstrap {
         // Before the first service goes down, so anything consulting acceptingWork() stops
         // admitting during the window when shutdown is in flight and work is still arriving.
         AuroraRuntime.transition(AuroraRuntime.State.STOPPING);
+        // Before the first AWF wait of the shutdown (the storage lane draining below, then the region
+        // saves, the chunk I/O drain and AwfEngine.closeAll): one deadline for all of them.
+        try { dev.iyanz.sourbycraft.awf.AwfEngine.beginShutdown(); }
+        catch (Throwable failure) { SourbyLogger.error("AWF shutdown deadline could not start", failure); }
         try { dev.iyanz.sourbycraft.hud.HudBars.close(); }
         catch (Throwable failure) { SourbyLogger.error("HUD shutdown failed", failure); }
         try { AutoUpdateSettings.stopUpdater(); }

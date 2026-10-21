@@ -70,3 +70,8 @@ delta-generations = false
 # commit-interval-seconds. 0 = off (interval only). A trigger, not a cap: checked once a second, one commit per
 # storage at a time, deletions count as 0 bytes.
 commit-dirty-bytes = 0
+# One budget (ms) for every AWF wait at shutdown: flushes, final commits, lock waits, Redis calls, lease release.
+# Counted from the start of shutdown (so it includes the vanilla chunk save). When it passes, no further commit is
+# attempted, open Redis connections are cut, every unconfirmed storage is logged and the stop ends with
+# AWF-SHUTDOWN-INCOMPLETE and exit status 70 - never reported as saved. RESTART_REQUIRED.
+shutdown-deadline-ms = 30000

@@ -112,9 +112,22 @@ public final class AwfRegionStorage {
     private volatile boolean releaseFailed;
     /** Whether the last commit attempt (periodic, flush or close) failed; for flush reporting. */
     private volatile boolean lastCommitFailed;
+    /** The engine's shutdown budget once shutdown has begun, else {@code null}; see {@link AwfShutdownBudget}. */
+    private final java.util.function.Supplier<AwfShutdownBudget> shutdown;
+    /** Where a close under the shutdown budget reports what it could confirm. */
+    private final java.util.function.Consumer<AwfShutdownReport.StorageResult> shutdownReport;
+    /** Writes refused because this storage was already closed. */
+    private final AtomicLong closedWrites = new AtomicLong();
 
     AwfRegionStorage(final String name, final AwfWorld world, final AwfSettings settings, final Executor storageLane,
                      final long nowNanos, final Runnable onClose) {
+        this(name, world, settings, storageLane, nowNanos, onClose, () -> null, result -> { });
+    }
+
+    AwfRegionStorage(final String name, final AwfWorld world, final AwfSettings settings, final Executor storageLane,
+                     final long nowNanos, final Runnable onClose,
+                     final java.util.function.Supplier<AwfShutdownBudget> shutdown,
+                     final java.util.function.Consumer<AwfShutdownReport.StorageResult> shutdownReport) {
         this.name = name;
         this.world = world;
         this.settings = settings;
@@ -122,6 +135,8 @@ public final class AwfRegionStorage {
         this.lastCommitNanos = new AtomicLong(nowNanos);
         this.onClose = onClose;
         this.failureLog = ReadFailureLog.serverLog(name);
+        this.shutdown = shutdown;
+        this.shutdownReport = shutdownReport;
     }
 
     /** The FILE backend's store directory for a region folder. */
@@ -293,8 +308,9 @@ public final class AwfRegionStorage {
             try {
                 return this.world.read(key);
             } catch (final IOException failed) {
+                final AwfShutdownBudget budget = this.shutdown.get();
                 final boolean again = mayRetry && attempt < READ_ATTEMPTS && !this.closed.get()
-                    && System.nanoTime() - started < READ_RETRY_BUDGET_NANOS;
+                    && System.nanoTime() - started < READ_RETRY_BUDGET_NANOS && (budget == null || !budget.expired());
                 if (again) {
                     this.readRetries.incrementAndGet();
                     try {
@@ -393,7 +409,10 @@ public final class AwfRegionStorage {
         this.transition.readLock().lock();
         try {
             if (this.discarding) return;
-            if (this.closed.get()) throw new IOException("AWF storage " + this.name + " is closed");
+            if (this.closed.get()) {
+                this.closedWrites.incrementAndGet();
+                throw new IOException("AWF storage " + this.name + " is closed");
+            }
             this.admittedHook.run();
             admittedWrite(chunkX, chunkZ, nbt);
         } finally {
@@ -446,6 +465,8 @@ public final class AwfRegionStorage {
     public boolean maintain(final long nowNanos) {
         this.failureLog.flush();
         if (this.discarding || this.closed.get() || this.world.dirtyCount() == 0 || this.world.pendingSaveCount() > 0) return false;
+        final AwfShutdownBudget budget = this.shutdown.get();
+        if (budget != null && budget.expired()) return false;          // no new attempt after the deadline
         final long last = this.lastCommitNanos.get();
         final boolean intervalPassed = nowNanos - last >= this.settings.commitIntervalSeconds() * 1_000_000_000L;
         // The byte trigger (off at 0) lets a large backlog commit before the interval; it never skips
@@ -489,14 +510,87 @@ public final class AwfRegionStorage {
             maintain(0L);
             return;
         }
+        final AwfShutdownBudget budget = this.shutdown.get();
         try {
-            this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts());
+            if (budget == null) {
+                this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts());
+            } else {
+                // Shutdown (the region save of this world): within the shared budget. What the deadline
+                // stops here is reported by close, which follows.
+                if (budget.expired()) {
+                    this.lastCommitFailed = true;
+                    return;
+                }
+                this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts(), budget);
+            }
             this.lastCommitFailed = false;
+        } catch (final AwfDeadlineExceeded cut) {
+            this.lastCommitFailed = true;
+            return;
         } catch (final IOException failed) {
             this.lastCommitFailed = true;
             throw failed;
         }
         this.lastCommitNanos.set(System.nanoTime());
+    }
+
+    /** One storage's answer to {@link #flushBarrier()}. */
+    public record FlushResult(String storage, FlushStatus status, int chunks, String error) {}
+
+    public enum FlushStatus {
+        /** Every chunk written before the barrier is committed and confirmed by the backend. */
+        DURABLE,
+        /** The commit failed or could not start; {@code chunks} are still only in memory. */
+        FAILED,
+        /** Closed or being discarded: nothing is committed for it any more. */
+        SKIPPED
+    }
+
+    /**
+     * A durability barrier for the writes this storage holds now: completes {@link FlushStatus#DURABLE}
+     * once a commit whose snapshot was taken after this call succeeded (or at once when nothing is
+     * dirty), else {@link FlushStatus#FAILED} with the chunks still dirty. Never blocks: the commit runs
+     * on the storage lane, behind any commit already running, and the snapshot is taken when it starts,
+     * so it holds every write admitted before this call. For {@code save-all flush} reporting.
+     */
+    public java.util.concurrent.CompletableFuture<FlushResult> flushBarrier() {
+        if (this.discarding) {
+            return java.util.concurrent.CompletableFuture.completedFuture(
+                new FlushResult(this.name, FlushStatus.SKIPPED, 0, "being unloaded without saving"));
+        }
+        if (this.closed.get()) {
+            return java.util.concurrent.CompletableFuture.completedFuture(
+                new FlushResult(this.name, FlushStatus.SKIPPED, 0, "closed"));
+        }
+        final int dirty = this.world.dirtyCount();
+        if (dirty == 0) {
+            return java.util.concurrent.CompletableFuture.completedFuture(new FlushResult(this.name, FlushStatus.DURABLE, 0, null));
+        }
+        this.lastCommitNanos.set(System.nanoTime());
+        final java.util.concurrent.CompletableFuture<AwfStore.CommitResult> commit;
+        try {
+            commit = this.world.save(this.settings.persistence(), this.storageLane, this.settings.commitAttempts())
+                .toCompletableFuture();
+        } catch (final RuntimeException rejected) {
+            this.lastCommitFailed = true;
+            return java.util.concurrent.CompletableFuture.completedFuture(
+                new FlushResult(this.name, FlushStatus.FAILED, this.world.dirtyCount(), String.valueOf(rejected.getMessage())));
+        }
+        return commit.handle((ok, failed) -> {
+            if (failed == null) {
+                this.lastCommitFailed = false;
+                return new FlushResult(this.name, FlushStatus.DURABLE, dirty, null);
+            }
+            this.lastCommitFailed = true;
+            final Throwable cause = unwrap(failed);
+            return new FlushResult(this.name, FlushStatus.FAILED, this.world.dirtyCount(),
+                cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage());
+        });
+    }
+
+    /** Chunks written or deleted and not yet committed. */
+    public int dirtyCount() {
+        return this.world.dirtyCount();
     }
 
     /**
@@ -546,8 +640,20 @@ public final class AwfRegionStorage {
         }
     }
 
-    /** Flushes and forgets this storage. Called when the engine closes the region storage. */
+    /**
+     * Flushes and forgets this storage. Called when the engine closes the region storage.
+     *
+     * <p>Once shutdown has begun ({@link AwfEngine#beginShutdown()}) the close runs within the shared
+     * {@link AwfShutdownBudget} and never throws for what it could not confirm: it reports the outcome
+     * to the engine's {@link AwfShutdownReport}, which logs it and fails the shutdown. Outside shutdown
+     * (a world unloading) it throws {@link CloseFailure} as before.</p>
+     */
     public void close() throws IOException {
+        final AwfShutdownBudget budget = this.shutdown.get();
+        if (budget != null) {
+            closeWithin(budget);
+            return;
+        }
         // Under the write lock: every write admitted before this point is in the world, and every
         // later one sees closed and fails loudly, so the final commit below misses nothing.
         this.transition.writeLock().lock();
@@ -596,6 +702,89 @@ public final class AwfRegionStorage {
                 + " chunk(s) written since the last confirmed commit are lost, unless the backend applied the"
                 + " commit after reporting the failure (" + commitFailed.getMessage() + ")", uncommitted, commitFailed);
         }
+    }
+
+    private void closeWithin(final AwfShutdownBudget budget) {
+        // Writers hold the read lock only while copying bytes into memory, never across backend I/O.
+        if (!budget.tryLock(this.transition.writeLock())) {
+            this.shutdownReport.accept(new AwfShutdownReport.StorageResult(this.name, AwfShutdownReport.Outcome.REFUSED,
+                this.world.dirtyCount(), this.world.dirtySample(AwfShutdownReport.POSITIONS_LISTED), 0,
+                this.refusedWrites.get() + this.closedWrites.get(), this.world.uncertainChunks(), false,
+                "a chunk write held the storage past the deadline; it was not closed"));
+            return;
+        }
+        try {
+            if (!this.closed.compareAndSet(false, true)) return;
+        } finally {
+            this.transition.writeLock().unlock();
+        }
+        this.failureLog.close();
+        if (!this.unreadable.isEmpty()) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF " + this.name + ": " + this.unreadable.size()
+                + " chunk position(s) could not be read this session; their stored bytes were kept and "
+                + this.refusedWrites.get() + " write(s) of chunks generated in their place were not saved");
+        }
+        // Commits waiting on the storage lane behind the running one (if any); fenced below.
+        final int queued = Math.max(0, this.world.pendingSaveCount() - (this.world.commitRunning() ? 1 : 0));
+        AwfShutdownReport.Outcome outcome = AwfShutdownReport.Outcome.CONFIRMED;
+        String detail = null;
+        if (!this.discarding && this.world.dirtyCount() > 0) {
+            try {
+                this.world.saveNow(this.settings.persistence(), this.settings.commitAttempts(), budget);
+            } catch (final AwfDeadlineExceeded cut) {
+                outcome = cut.requestSent() ? AwfShutdownReport.Outcome.UNCERTAIN : AwfShutdownReport.Outcome.REFUSED;
+                detail = cut.getMessage();
+            } catch (final AwfWorld.FencedException fenced) {
+                outcome = AwfShutdownReport.Outcome.REFUSED;
+                detail = fenced.getMessage();
+            } catch (final IOException | RuntimeException failed) {
+                outcome = AwfShutdownReport.Outcome.FAILED;
+                detail = String.valueOf(failed.getMessage());
+            }
+        }
+        // A commit the deadline cut off earlier (periodic, or this world's flush) may have been applied.
+        if (outcome == AwfShutdownReport.Outcome.REFUSED && this.world.uncertainChunks() > 0) {
+            outcome = AwfShutdownReport.Outcome.UNCERTAIN;
+        }
+        boolean released;
+        try {
+            released = this.world.closeStore(budget);
+            if (!released) {
+                final String running = "a commit was still running at the deadline, so the store was not released under it";
+                detail = detail == null ? running : detail + "; " + running;
+                if (outcome == AwfShutdownReport.Outcome.CONFIRMED && this.world.dirtyCount() > 0) {
+                    outcome = AwfShutdownReport.Outcome.UNCERTAIN;
+                }
+            }
+        } catch (final IOException | RuntimeException releaseFailed) {
+            released = false;
+            if (outcome == AwfShutdownReport.Outcome.CONFIRMED) this.releaseFailed = true;
+            final String why = "release failed: " + releaseFailed.getMessage();
+            detail = detail == null ? why : detail + "; " + why;
+        } finally {
+            this.onClose.run();
+        }
+        final int dirty = this.discarding ? 0 : this.world.dirtyCount();
+        if (outcome == AwfShutdownReport.Outcome.CONFIRMED && dirty > 0) outcome = AwfShutdownReport.Outcome.UNCERTAIN;
+        if (outcome == AwfShutdownReport.Outcome.CONFIRMED && !released) {
+            dev.iyanz.sourbycraft.util.SourbyLogger.warn("AWF committed " + this.name + " but its backend could not"
+                + " release it (" + detail + "); no chunks are lost, and a lease expires on its own");
+        }
+        this.shutdownReport.accept(new AwfShutdownReport.StorageResult(this.name, outcome, dirty,
+            this.discarding ? java.util.List.of() : this.world.dirtySample(AwfShutdownReport.POSITIONS_LISTED),
+            outcome == AwfShutdownReport.Outcome.CONFIRMED ? 0 : queued,
+            this.refusedWrites.get() + this.closedWrites.get(),
+            outcome == AwfShutdownReport.Outcome.UNCERTAIN ? this.world.uncertainChunks() : 0, released, detail));
+    }
+
+    /** The shutdown deadline passed: commits that have not started (queued on the lane) commit nothing. */
+    void fenceAtDeadline() {
+        this.world.fence();
+    }
+
+    /** Writes refused because the storage was closed. */
+    public long closedWrites() {
+        return this.closedWrites.get();
     }
 
     /**
