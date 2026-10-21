@@ -107,7 +107,7 @@ architecture programs (Later).
 | Item | Reference | Board |
 | --- | --- | --- |
 | Startup log cleanup boot→`Done` (Paper feature 0016, log4j plugins, `BootLog`) | owner 2026-10-21; `AGENT-COORDINATION.md` opus-startuplog | task_2841828a2e9f066a, review task_a9a9c6d45ffceb1c |
-| TickRegions "Initialised EDF Folia scheduler" log wording → SourbyCraft-owned (needs an MC patch slot) | board | task_d2d28a6f780c9b3d |
+| TickRegions "Initialised EDF Folia scheduler" log wording → SourbyCraft-owned — done in worktree `opus-gate48-log` (MC 0075, `Initialised Aurora region scheduler (EDF) ...`; [evidence](../development/build48-log-and-commands-2026-10-22.md)), not yet merged | board | task_d2d28a6f780c9b3d |
 | Inherited guard ledger (inventory, owned decision per guard, policy pins). Includes the ENG-11 behaviour decision (`execute if/unless … run` refusal in MC 0016, docs/TODO.md:613, documented only) — **DECISION per guard** | owner 2026-10-21 | task_73a1c6ef0c442449 |
 | SourbyCraft-owned region-safe command blocks (MC feature 0055, flag) — **DECISION**: default on/off | owner 2026-10-21 | task_ab3bda9af0b220f4 |
 

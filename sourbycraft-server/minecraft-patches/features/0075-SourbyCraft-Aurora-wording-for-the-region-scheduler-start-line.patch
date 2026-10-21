@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 06:09:16 +0700
+Subject: [PATCH] SourbyCraft - Aurora wording for the region scheduler start
+ line
+
+The engine baseline logs "Initialised EDF Folia scheduler with initial
+N target thread(s)" once per boot. Folia is not the product identity
+since Build 47, so the line now reads "Initialised Aurora region
+scheduler (EDF) with initial N target thread(s)". The scheduler type
+and thread count are unchanged; no script or test reads this line.
+
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index 3ac4ab7f6b92e1cb018ef91c3a6f7238b2e48dd0..88b5fb966488ad875edf894e446b67ddbb0f42cb 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -106,7 +106,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         gridExponent = Math.min(31, gridExponent);
+         regionShift = gridExponent;
+         scheduler = new TickRegionScheduler(config.scheduler, tickThreads);
+-        LOGGER.info("Initialised {} Folia scheduler with initial {} target thread(s)", config.scheduler, tickThreads);
++        LOGGER.info("Initialised Aurora region scheduler ({}) with initial {} target thread(s)", config.scheduler, tickThreads); // SourbyCraft - SourbyCraft-owned wording
+     }
+ 
+     public static void start() {
