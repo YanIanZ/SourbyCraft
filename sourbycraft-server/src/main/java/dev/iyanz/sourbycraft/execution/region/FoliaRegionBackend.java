@@ -34,6 +34,11 @@ public final class FoliaRegionBackend implements RegionBackend, CurrentRegion, R
         RegionizedServer.ensureGlobalTickThread(reason);
     }
 
+    /** Backs {@link RegionOwnership#isGlobalTickThread}: the engine's non-throwing global-tick test. */
+    static boolean isGlobalTickThread() {
+        return RegionizedServer.isGlobalTickThread();
+    }
+
     /** Backs {@link RegionOwnership#executeOnGlobalTick}: inline on the global tick thread, else queued for it. */
     static void executeOnGlobalTick(final Runnable task) {
         RegionizedServer.getInstance().scheduleToOrExecute(task);

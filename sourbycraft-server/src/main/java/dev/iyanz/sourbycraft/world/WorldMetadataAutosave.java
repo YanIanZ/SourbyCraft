@@ -12,6 +12,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.RandomSequences;
 import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraft.world.level.saveddata.WanderingTraderData;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.SavedDataStorage;
 import net.minecraft.world.level.storage.WorldData;
@@ -44,7 +45,10 @@ import org.slf4j.Logger;
  * vanilla's main-thread autosave does; its gameplay fields are shadowed by {@code level_overrides.dat}, what it
  * alone carries is the data-pack configuration, {@code allowCommands}, the server brands and {@code LastPlayed}.</p>
  *
- * <p>Region-owned {@link SavedData} (raids, the dragon fight, wandering trader timers, forceload tickets, the
+ * <p><b>0068</b> — wandering trader countdown, delay and chance are global-owned and saved
+ * with the per-world contained types. No region callback mutates this saved data.</p>
+ *
+ * <p>Region-owned {@link SavedData} (raids, the dragon fight, forceload tickets, the
  * never-ticked scheduled events, the plugin world PDC) must never be listed here; see
  * {@code docs/architecture/persistence-save-paths.md} for who saves what and when.</p>
  */
@@ -56,7 +60,7 @@ public final class WorldMetadataAutosave {
     public static final List<Class<? extends SavedData>> GLOBAL_OWNED_TYPES = List.of(PaperLevelOverrides.class);
 
     /** Per-world types saved one {@code saveSpecific} call each from the global tick (patch 0056). */
-    public static final List<Class<? extends SavedData>> WORLD_CONTAINED_TYPES = List.of(WorldBorder.class);
+    public static final List<Class<? extends SavedData>> WORLD_CONTAINED_TYPES = List.of(WorldBorder.class, WanderingTraderData.class);
 
     /** Server-wide types (overworld {@code data/}) saved one call each from the global tick (patch 0056). */
     public static final List<Class<? extends SavedData>> SERVER_CONTAINED_TYPES = serverContainedTypes();

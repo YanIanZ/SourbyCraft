@@ -1,0 +1,192 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 23:04:49 +0700
+Subject: [PATCH] SourbyCraft - one wandering trader spawner per world on the
+ global tick
+
+Keep one persisted timer on global; hand spawn attempts to the selected player owner. Preserve world eligibility and vanilla spawn checks.
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 4b8664f0ad5323aec35f598187dc6c71a0b77811..d7ad870fde85d23b119d6de2cf8e9cb1927ce30a 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -613,6 +613,9 @@ public final class RegionizedServer {
+ 
+         // time ticking (TODO API synchronisation?)
+         this.tickTime(world, tickCount);
++        if (getGlobalTickData().getTickManager().doesRunGameElements() && world.tickTime) { // SourbyCraft - one world timer
++            dev.iyanz.sourbycraft.world.WanderingTraderCoordinator.tick(world, tickCount); // game time advanced by tickCount
++        }
+ 
+         world.updateTickData();
+ 
+diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+index 9061c5d95d7c1898b6cfe1ca7814d81e8dc25d16..33a849ce24fe16ea5e742ea5478fef29921dde20 100644
+--- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
++++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+@@ -62,7 +62,6 @@ import net.minecraft.world.level.chunk.LevelChunk;
+ import net.minecraft.world.level.material.Fluid;
+ import net.minecraft.world.level.pathfinder.PathTypeCache;
+ import net.minecraft.world.level.redstone.CollectingNeighborUpdater;
+-import net.minecraft.world.level.saveddata.WanderingTraderData;
+ import net.minecraft.world.ticks.LevelTicks;
+ import org.bukkit.craftbukkit.block.CraftBlockState;
+ import org.jetbrains.annotations.Contract;
+@@ -479,7 +478,6 @@ public final class RegionizedWorldData {
+     public int patrolSpawnerNextTick = 0;
+     public int phantomSpawnerNextTick = 0;
+     public VillageSiegeState villageSiegeState = new VillageSiegeState();
+-    public WanderingTraderData wanderingTraderData;
+ 
+     public static final class VillageSiegeState {
+         public boolean hasSetupSiege;
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index bdc979af86e7b95d85728c7b28f6162084df02b7..d4aac8594842d2ed5c98e92115180849efae128a 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -1029,6 +1029,10 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         }
+     }
+ 
++    public boolean sourby$hasWanderingTraderSpawner() { // SourbyCraft - preserve world's custom-spawner eligibility
++        return this.customSpawners.stream().anyMatch(net.minecraft.world.entity.npc.wanderingtrader.WanderingTraderSpawner.class::isInstance);
++    }
++
+     public void tickCustomSpawners(final boolean spawnEnemies) {
+         for (CustomSpawner spawner : this.customSpawners) {
+             spawner.tick(this, spawnEnemies);
+diff --git a/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java b/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
+index d07556f3862f3adeee94ec8803ebef85069482be..8575bd2d1ab6b655526390904d1cb4fac5d85f42 100644
+--- a/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
++++ b/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
+@@ -41,49 +41,10 @@ public class WanderingTraderSpawner implements CustomSpawner {
+ 
+     @Override
+     public void tick(final ServerLevel level, final boolean spawnEnemies) {
+-        WanderingTraderData data = this.getTraderData(); // Folia - moved up
+-        // Paper start - Add Wandering Trader spawn rate config options
+-        if (data.tickDelay == Integer.MIN_VALUE) { // Folia - moved to WanderingTraderData
+-            data.tickDelay = level.paperConfig().entities.spawning.wanderingTrader.spawnMinuteLength; // Folia - moved to WanderingTraderData
+-            // Folia - move up
+-            data.setSpawnDelay(level.paperConfig().entities.spawning.wanderingTrader.spawnDayLength);
+-            data.setSpawnChance(level.paperConfig().entities.spawning.wanderingTrader.spawnChanceMin);
+-        }
+-        if (level.getGameRules().get(GameRules.SPAWN_WANDERING_TRADERS)) {
+-            if (data.tickDelay - 1 <= 0) { // Paper - Prevent tickDelay going below 0 // Folia - moved to WanderingTraderData
+-                data.tickDelay = level.paperConfig().entities.spawning.wanderingTrader.spawnMinuteLength; // Folia - moved to WanderingTraderData
+-                // Folia - move up
+-                int spawnDelay = data.spawnDelay() - level.paperConfig().entities.spawning.wanderingTrader.spawnMinuteLength;
+-                data.setSpawnDelay(spawnDelay);
+-                if (spawnDelay <= 0) {
+-                    data.setSpawnDelay(level.paperConfig().entities.spawning.wanderingTrader.spawnDayLength);
+-                    int chanceToSpawn = data.spawnChance();
+-                    int newSpawnChance = Mth.clamp(chanceToSpawn + level.paperConfig().entities.spawning.wanderingTrader.spawnChanceFailureIncrement, level.paperConfig().entities.spawning.wanderingTrader.spawnChanceMin, level.paperConfig().entities.spawning.wanderingTrader.spawnChanceMax);
+-                    data.setSpawnChance(newSpawnChance);
+-                    if (this.random.nextInt(100) <= chanceToSpawn) {
+-                        if (this.spawn(level)) {
+-                            data.setSpawnChance(level.paperConfig().entities.spawning.wanderingTrader.spawnChanceMin);
+-                            // Paper end - Add Wandering Trader spawn rate config options
+-                        }
+-                    }
+-                }
+-            } else { data.tickDelay--; } // Paper - Prevent tickDelay going below 0 // Folia - moved to WanderingTraderData
+-        }
++        return; // SourbyCraft - global coordinator owns trader ticking
+     }
+ 
+-    private WanderingTraderData getTraderData() {
+-        // Folia start - region threading
+-        final io.papermc.paper.threadedregions.RegionizedWorldData worldData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
+-        if (worldData.wanderingTraderData == null) {
+-            worldData.wanderingTraderData = new net.minecraft.world.level.saveddata.WanderingTraderData();
+-        // Folia end - region threading
+-        }
+-
+-        return worldData.wanderingTraderData; // Folia - region threading
+-    }
+-
+-    private boolean spawn(final ServerLevel level) {
+-        Player player = level.getRandomLocalPlayer(); // Folia - region threading
++    public boolean spawnForPlayer(final ServerLevel level, final Player player) { // SourbyCraft - selected globally, executed by owner
+         if (player == null) {
+             return true;
+         }
+@@ -105,14 +66,13 @@ public class WanderingTraderSpawner implements CustomSpawner {
+ 
+             WanderingTrader trader = EntityTypes.WANDERING_TRADER.spawn(level, wanderingTrader -> wanderingTrader.setDespawnDelay(48000), spawnPosition, EntitySpawnReason.EVENT, false, false, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.NATURAL); // CraftBukkit // Paper - set despawnTimer before spawn events called
+             if (trader != null) {
+-                for (int i = 0; i < 2; i++) {
+-                    this.tryToSpawnLlamaFor(level, trader, 4);
+-                }
+-
+-                // trader.setDespawnDelay(48000); // Paper - moved above, modifiable by plugins on CreatureSpawnEvent
+-                trader.setWanderTarget(referencePos);
+-                trader.setHomeTo(referencePos, 16);
+-                return true;
++                // SourbyCraft start - a spawned trader always counts as the spawn; set up only while this region still owns it
++                return dev.iyanz.sourbycraft.world.WanderingTraderCoordinator.completeSpawn(level, trader, () -> {
++                    // trader.setDespawnDelay(48000); // Paper - moved above, modifiable by plugins on CreatureSpawnEvent
++                    trader.setWanderTarget(referencePos);
++                    trader.setHomeTo(referencePos, 16);
++                }, () -> this.tryToSpawnLlamaFor(level, trader, 4));
++                // SourbyCraft end
+             }
+         }
+ 
+@@ -123,7 +83,8 @@ public class WanderingTraderSpawner implements CustomSpawner {
+         BlockPos spawnPosition = this.findSpawnPositionNear(level, trader.blockPosition(), radius);
+         if (spawnPosition != null) {
+             TraderLlama llama = EntityTypes.TRADER_LLAMA.spawn(level, spawnPosition, EntitySpawnReason.EVENT, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.NATURAL); // CraftBukkit
+-            if (llama != null) {
++            if (llama != null && dev.iyanz.sourbycraft.world.WanderingTraderCoordinator.ownsSpawnedTrader(level, llama)
++                && dev.iyanz.sourbycraft.world.WanderingTraderCoordinator.ownsSpawnedTrader(level, trader)) { // SourbyCraft - recheck after llama event
+                 llama.setLeashedTo(trader, true);
+             }
+         }
+diff --git a/net/minecraft/world/level/saveddata/WanderingTraderData.java b/net/minecraft/world/level/saveddata/WanderingTraderData.java
+index 60cc79dff0d2e3b808e881e673bb8133b49a832f..29e91878cbc16911b101d042188cc411bb795e8c 100644
+--- a/net/minecraft/world/level/saveddata/WanderingTraderData.java
++++ b/net/minecraft/world/level/saveddata/WanderingTraderData.java
+@@ -9,26 +9,41 @@ public class WanderingTraderData extends SavedData {
+     public static final Codec<WanderingTraderData> CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+                 Codec.INT.optionalFieldOf("spawn_delay", 24000).forGetter(data -> data.spawnDelay),
+-                Codec.INT.optionalFieldOf("spawn_chance", 25).forGetter(data -> data.spawnChance)
++                Codec.INT.optionalFieldOf("spawn_chance", 25).forGetter(data -> data.spawnChance),
++                Codec.INT.optionalFieldOf("tick_delay", Integer.MIN_VALUE).forGetter(data -> data.tickDelay) // SourbyCraft - persist minute countdown
+             )
+             .apply(i, WanderingTraderData::new)
+     );
+     public static final SavedDataType<WanderingTraderData> TYPE = new SavedDataType<>(
+         Identifier.withDefaultNamespace("wandering_trader"), WanderingTraderData::new, CODEC, DataFixTypes.SAVED_DATA_WANDERING_TRADER
+     );
++    public final dev.iyanz.sourbycraft.world.WanderingTraderCoordinator coordinator = new dev.iyanz.sourbycraft.world.WanderingTraderCoordinator(); // SourbyCraft - global-owned, lifetime of world saved data
+     private int spawnDelay;
+     private int spawnChance;
+     public int tickDelay = Integer.MIN_VALUE; // Paper - Add Wandering Trader spawn rate config options // Folia - moved from WanderingTraderSpawner
+ 
+     public WanderingTraderData() {
+         this(24000, 25);
++        this.coordinator.initializeNewData(); // SourbyCraft - new data uses Paper defaults; decoded data keeps saved values
+     }
+ 
+     public WanderingTraderData(final int spawnDelay, final int spawnChance) {
++        this(spawnDelay, spawnChance, Integer.MIN_VALUE);
++    }
++
++    public WanderingTraderData(final int spawnDelay, final int spawnChance, final int tickDelay) {
++        this.tickDelay = tickDelay;
+         this.spawnDelay = spawnDelay;
+         this.spawnChance = spawnChance;
+     }
+ 
++    public void setTickDelay(final int tickDelay) { // SourbyCraft - global-owned saved countdown
++        if (this.tickDelay != tickDelay) {
++            this.tickDelay = tickDelay;
++            this.setDirty(true);
++        }
++    }
++
+     public int spawnDelay() {
+         return this.spawnDelay;
+     }

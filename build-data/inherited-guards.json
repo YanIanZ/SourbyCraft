@@ -2315,6 +2315,23 @@
       "decision": "KEEP-OWNED",
       "note": "KEEP-OWNED. Platform guard in engine code SourbyCraft owns outright; not region related, listed because the engine-root scan records every refusal-shaped throw. Follow-up: SourbyCraft's AuroraCpu already reports cores portably; the Linux-only report could fall back to it.",
       "test": "test missing"
+    },
+    {
+      "id": "WanderingTraderSpawner#1",
+      "file": "sourbycraft-server/src/minecraft/java/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java",
+      "line": 44,
+      "method": "tick",
+      "site": "public void tick(final ServerLevel level, final boolean spawnEnemies) { | @Override",
+      "anchor": "return; // SourbyCraft - global coordinator owns trader ticking",
+      "nth": 1,
+      "detector": "E",
+      "origin": "SourbyCraft",
+      "patch": "sourbycraft-server/minecraft-patches/features/0068-SourbyCraft-one-wandering-trader-spawner-per-world-on-the-global-tick.patch",
+      "decision": "KEEP-OWNED",
+      "kind": "FEATURE-DISABLED",
+      "effect": "Region-local trader ticks return without touching per-region timers; the global world coordinator is the only active timer.",
+      "note": "KEEP-OWNED: bypass region-local ticking to prevent multiplied attempts and merge/split timer loss. Feature 0068 runs one persisted world timer on global and uses OwnerHandoff for vanilla spawning on the selected player owner. This disables only the duplicate region route; see docs/architecture/wandering-traders.md.",
+      "test": "WanderingTraderCoordinatorTest (fake clock/RNG/ownership, catch-up countdown, spawn completion, patch shape; passing 2026-10-22); server validation of trader spawning NOT RUN"
     }
   ],
   "families": [

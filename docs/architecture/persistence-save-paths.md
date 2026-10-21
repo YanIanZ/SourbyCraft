@@ -52,11 +52,11 @@ clean-stop path above; a crash (SIGKILL, OOM, power) loses every change since bo
 | **World border** | `dimensions/<dim>/data/minecraft/world_border.dat` | ticked on the global tick; set from commands/plugins on any thread (plain fields, extent swapped atomically; a concurrent change gives a stale snapshot, never a torn object) | periodic (world), `save-all`, shutdown | **0056** (was shutdown only) |
 | **`level.dat`** (data-pack configuration, `allowCommands`, server brands, `LastPlayed`; the gameplay fields are shadowed by `level_overrides.dat`) | `level.dat` (+ `_old`) | global tick / `reloadResources` | periodic (global, synchronous write as vanilla), `save-all`, shutdown | **0056** (was shutdown only) |
 | **Random sequences** (loot-table sequences) | `data/minecraft/random_sequences.dat` | any (concurrent map; a sequence's two seed longs are read outside the mutators' lock, so a sequence advanced at that instant can be encoded torn — the same read vanilla does single-threaded) | periodic (global), `save-all`, shutdown | **0056** (was shutdown only) |
-| **`/data storage` containers** | `data/<namespace>/command_storage.dat` | any (plain `HashMap`; a concurrent `put` can make the encode throw, the container then stays dirty for the next autosave) | periodic (global), `save-all`, shutdown | **0056** (was shutdown only) |
+| **`/data storage` containers** | `data/<namespace>/command_storage.dat` | global tick only (plain `HashMap`; plugins must also respect ownership). MC 0069: storage-only `/data` commands and storage suggestions run on the global tick (inline from console/RCON/global-tick functions with the real result; handed off from a region with result 0 and the outcome sent to the sender). A mixed `data modify … from` reads the source on its owner, copies it, and writes the target on its owner (storage on the global tick, a block on its region, an entity through its scheduler); a block or entity source read from the console is refused with a command error. `/execute … storage` and `/function … with storage` from a region are a command error, not routed. | periodic (global), `save-all`, shutdown | **0056** (was shutdown only) |
 | Dragon fight | `dimensions/minecraft/the_end/data/minecraft/ender_dragon_fight.dat` | owning region | periodic (region, `ticks-per.autosave`), `save-all` (next tick), shutdown | Canvas |
 | Raids | `dimensions/<dim>/data/minecraft/raids.dat` | each raid on its region (`Raids.tick`), the map thread-safe but `Raid` fields and `heroes_of_the_village` (a `HashSet`) are not | **still shutdown-only** | 0067 review: no owner-consistent snapshot of mutable `Raid` fields, hero set or raid PDC; concurrent raid-map iteration does not protect its values |
 | Forceload tickets | `dimensions/<dim>/data/minecraft/chunk_tickets.dat` | regions via Moonrise ticket manager (concurrent index, section-locked ticket sets); startup activation of deactivated tickets | **periodic now** (global snapshot/encode), `save-all`, shutdown; code only, no compile/runtime evidence yet | **0067**; detached serialized fields under existing section locks, startup map locked separately; see §5 |
-| Wandering trader timers | — | per region, in memory (`RegionizedWorldData.wanderingTraderData`, created on first use) | **never** (not loaded, not written) | Folia (`WanderingTraderSpawner.java:74-83`) |
+| Wandering trader timers (0068) | `dimensions/<dim>/data/minecraft/wandering_trader.dat` | global tick; region results handed back through `RegionOwnership` | global autosave / save-all (separate contained type), clean shutdown | countdown, delay and chance saved; Java tests and server validation **not run**; [details](wandering-traders.md) |
 | Scheduled functions (`/schedule`) | `dimensions/<dim>/data/minecraft/scheduled_events.dat` | command thread | **shutdown only**, and the queue is **never ticked** (`ServerLevel.java:1027`, commented out by Folia with a TODO), so `/schedule` stores entries that never fire | Folia; **open** |
 | World PDC (plugins) | `dimensions/<dim>/data/paper/persistent_data_container.dat` | any plugin thread | **still shutdown-only** (`ServerLevel.saveLevelData` copies the live PDC first) | 0067 review: `CraftPersistentDataContainer` has an unsynchronized `HashMap`, exposes `getRaw()` and mutable tags; `getTagsCloned()` has no lock. A global copy can throw or be torn; locking only the reader would not protect plugin writers. |
 | Structure data | written with the chunk (structure starts/references are chunk data) | owning region | with their chunk | baseline |
@@ -107,6 +107,16 @@ uncommitted main tree, `older_than_head_commit` true because HEAD moved during t
 
 `/data … storage` commands did not parse through the harness console in this build (not investigated),
 so command storage has unit-test evidence only.
+*(2026-10-22, MC 0069 fixes, run `opus-fix6869-data-1`, jar `6d096680…`, functional only:)* storage is
+registered again. Console: `data modify storage sc:probe v set value 42` → "Modified storage",
+`data get storage sc:probe v` → 42, `execute store result score probe scp run data get storage sc:probe v`
+→ score 42; `data get block` / `data modify block … Items` on a force-loaded chest work (handed to the
+owning region); `data modify storage … from block` from the console is refused with "Target not in same
+region". Command blocks (`aurora.world.command-blocks = true`): `execute if data storage …` fails with
+the "only available on the global tick" command error (SuccessCount 0); `data get storage …` runs deferred
+(result 0; a command block's SuccessCount still counts the accepted command); `data modify storage … from
+block` (block owned by that region) copied the chest items into storage. No exception in the log;
+`stop` exited 0. Not covered on the server: `/function … with storage` from a region (unit/patch-shape only).
 
 **With the fix** — `fable-autosave-fix-1` (jar `32945854…`, `--rebuild-jar` from HEAD `26ec3cd4` + the
 uncommitted main tree, which also carried opus-cmdblock's uncommitted command-block edits), same probes at
@@ -164,3 +174,17 @@ atomic copy. These crash-loss gaps remain open.
 Tests added: `WorldStateAutosaveTest` (snapshot isolation with a later mutation retaining dirty,
 clean skip, and snapshot/encode failure containment; 4 cases), `WorldStateAutosavePatchShapeTest`
 (2 cases), plus `scripts/test_world_state_autosave_patch.py` (2 cases) for patch shape only. Neither source-shape checks nor the unrun Java tests establish runtime persistence.
+
+### Command storage ownership
+
+The new `data-command-threading` feature patch restores `/data get|merge|modify|remove storage`.
+The code path runs console commands inline on the global tick; players and command blocks
+hand storage commands to the global tick, where feedback is sent after the action. Suggestions
+also run there. Source storage reads in `modify ... from storage` use the same route. Mixed
+storage/block/entity operations still require ownership of every non-storage source/target;
+no cross-region read is permitted. Console block-data commands now refuse before looking up
+world data, with a message to run from a player or command block in the owning region.
+
+Status: code and tests written; Java compilation and runtime verification pending PM validation.
+This is command routing, not a LIVE configuration toggle; deployment requires a new jar/restart.
+Autosave timing remains the existing LIVE `autosave.autosave-frequency` setting.

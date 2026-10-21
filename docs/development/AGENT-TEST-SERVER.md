@@ -11,7 +11,7 @@ slots for anything performance-related (board task testserver-slots, 2026-10-20)
 | Rule | How |
 | --- | --- |
 | Isolation | Run directory `/Volumes/Ext/Sourby/agent-testservers/<name>/`, created fresh (an existing name is refused). Refused: names that are not `[A-Za-z0-9._-]`, anything inside the repository or `$HOME`, anything else under `/Volumes/Ext/Sourby` (the owner's servers). `eula=true` is written only there. |
-| Jar | `build/libs/SourbyCraft-slim.jar`, copied into the run directory, so a rebuild cannot change a running server. Missing jar (or `--rebuild-jar`): `slimServerJar` through the shared `gradle_locked.sh`. `run.json` records its SHA-256, mtime and `older_than_head_commit`; the harness does not know which commit built the jar, `/ver`'s `Git:` line does. |
+| Jar | `build/libs/SourbyCraft-slim.jar`, copied into the run directory, so a rebuild cannot change a running server. Missing jar (or `--rebuild-jar`): `slimServerJar` through this checkout’s `scripts/gradle_locked.sh`. `run.json` records its SHA-256, mtime and `older_than_head_commit`; the harness does not know which commit built the jar, `/ver`'s `Git:` line does. |
 | Slots | Two `mkdir` slot locks, each with `owner.json` (token, pid, JVM pid, workdir, port, Redis port, lifetime): slot 1 = `/private/tmp/claude-501/sourby-testserver.lock` (the historical single-server lock, so a supervisor started before slots existed still counts as "slot 1 busy"), slot 2 = `sourby-testserver-slot-2.lock` beside it. `start` takes the first free slot; with both busy it is refused (exit 2) naming both holders. Each slot lock is broken on its own when its owner pid is dead or it is older than its lifetime + 300 s; the dead run's JVM is killed first (only if its command line names that run directory). |
 | Exclusive | `--exclusive` first takes `sourby-testserver-exclusive.lock` (from then on every functional `start` is refused with "an --exclusive run holds or waits for every slot"), then waits for slot 1 and slot 2 in turn (default up to 3600 s, `--exclusive-wait`), and holds all three locks for the whole run; the supervisor releases them together. Giving up releases whatever it had taken. While waiting, the locks carry lifetime + wait so they are not broken as stale; a dead waiter's locks are broken by the next start. Use it for anything performance-related. It still does not make the machine quiet (Gradle builds, other agents and the owner's servers keep running): not a certified baseline. |
 | Per-slot ports | Server port: a random free localhost port, excluding the other slot's port and the Redis ports. Redis convention for a scenario that starts its own `redis-server`: **slot N uses port 6400 + N** (slot 1 = 6401, slot 2 = 6402; an exclusive run uses 6401). `run.json` `slot.redis_port` and `status` show it; the harness itself never starts Redis. Each run has its own workdir (`<name>/`) as before. |
@@ -90,6 +90,13 @@ replies use `cmd --raw` or a scenario step with `"bracket": false` (allowed on `
 `perf` steps): every new log line after sending, which DOES leak concurrent commands' output (seen
 in run asyncpath-soak-2: `count-*` outputs with "Successfully filled N block(s)" from a parallel
 loop). `wait-for` is not correlated; it matches log lines, not commands.
+
+The 2026-10-21 command-block probe's region-thread replies arrived after the end marker.
+This is the capture timing limit above, not a log-prefix matching bug: markers are recognized
+anywhere in a line. A closed window with no output returns exit 1 even if the command later
+succeeds. Use `cmd --raw --expect '<reply>'` for such commands; raw output is uncorrelated.
+The existing delayed-reply test pins this behavior. The rebuild-wrapper path is now repository
+local; its path regression test passes, but no Gradle build was run for this change.
 
 ## Scenario file
 

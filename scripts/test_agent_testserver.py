@@ -85,6 +85,11 @@ class TempCase(unittest.TestCase):
 
 
 class PathRefusalTest(TempCase):
+    def test_gradle_wrapper_default_is_repository_local(self):
+        self.assertEqual(ats.GRADLE_LOCKED, ats.REPO / "scripts" / "gradle_locked.sh")
+        self.assertTrue(ats.GRADLE_LOCKED.is_relative_to(ats.REPO))
+        self.assertTrue(ats.GRADLE_LOCKED.is_file())
+
     def test_a_plain_name_resolves_inside_the_base(self):
         base = self.root / "base"
         self.assertEqual(ats.resolve_workdir(base, "smoke-1", repo=self.root / "repo",
@@ -516,6 +521,20 @@ class BracketRegionTest(unittest.TestCase):
         self.assertEqual(state, "closed")
         self.assertEqual(region.splitlines(), ["[12:00:01 INFO]: Successfully filled 4 block(s)",
                                                "[12:00:01 INFO]: Found 3 entities"])
+
+    def test_region_thread_prefix_is_accepted_but_late_output_is_excluded(self):
+        prefix = "[12:00:01] [Folia Region Scheduler Thread #1/INFO]: "
+        log = (f"{self.BEGIN}\n{prefix}inside reply\n{self.END}\n"
+               f"{prefix}late reply\n")
+        state, output = ats.capture_state(log, self.BEGIN, self.END)
+        self.assertEqual(state, "closed")
+        self.assertIn("inside reply", output)
+        self.assertNotIn("late reply", output)
+        self.assertTrue(ats.Harness._finish_capture(output, None)[0])
+        empty = f"{self.BEGIN}\n{self.END}\n{prefix}late reply\n"
+        state, output = ats.capture_state(empty, self.BEGIN, self.END)
+        self.assertEqual(state, "closed")
+        self.assertFalse(ats.Harness._finish_capture(output, None)[0])
 
     def test_open_absent_and_empty_regions(self):
         cut = self.LOG.split(self.END)[0]

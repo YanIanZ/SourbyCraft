@@ -53,7 +53,7 @@ class WorldMetadataAutosaveTest {
 
         assertEquals(List.of(PaperLevelOverrides.class), toSave);
         for (final Class<? extends SavedData> type : toSave) {
-            assertFalse(WanderingTraderData.class.isAssignableFrom(type), "wandering trader data is region-owned");
+            assertFalse(WanderingTraderData.class.isAssignableFrom(type), "trader data uses the separate contained save");
             assertFalse(EnderDragonFight.class.isAssignableFrom(type), "the dragon fight is saved by its region");
             assertFalse(PaperWorldPDC.class.isAssignableFrom(type), "world PDC is plugin-written from any thread");
         }
@@ -75,7 +75,7 @@ class WorldMetadataAutosaveTest {
         }).join();
 
         assertFalse(overrides.isDirty(), "level overrides were saved");
-        assertTrue(trader.isDirty(), "region-owned data is left for its owner");
+        assertTrue(trader.isDirty(), "trader data uses the separate contained save");
 
         final SavedDataStorage reloaded = new SavedDataStorage(dir, DataFixers.getDataFixer(), RegistryHelper.registryAccess());
         final PaperLevelOverrides read = reloaded.get(PaperLevelOverrides.TYPE);
@@ -88,7 +88,7 @@ class WorldMetadataAutosaveTest {
 
     @Test
     void theContainedListsNameOnlyGlobalTickOwnedTypes() {
-        assertEquals(List.of(WorldBorder.class), WorldMetadataAutosave.WORLD_CONTAINED_TYPES);
+        assertEquals(List.of(WorldBorder.class, WanderingTraderData.class), WorldMetadataAutosave.WORLD_CONTAINED_TYPES);
         assertEquals(2, WorldMetadataAutosave.SERVER_CONTAINED_TYPES.size(), "random sequences + command storage containers");
         assertTrue(WorldMetadataAutosave.SERVER_CONTAINED_TYPES.contains(RandomSequences.class));
         assertEquals("net.minecraft.world.level.storage.CommandStorage$Container",
@@ -106,12 +106,23 @@ class WorldMetadataAutosaveTest {
         final WorldBorder border = storage.computeIfAbsent(WorldBorder.TYPE);
         border.setSize(1234.0);
         assertTrue(border.isDirty());
+        final WanderingTraderData trader = storage.computeIfAbsent(WanderingTraderData.TYPE);
+        trader.setSpawnDelay(1234);
+        trader.setSpawnChance(65);
+        trader.setTickDelay(37);
         final Raids raids = storage.computeIfAbsent(Raids.TYPE);
         raids.setDirty();
 
         WorldMetadataAutosave.saveWorldOwnedData(storage, true);
 
         assertFalse(border.isDirty(), "the world border was saved");
+        assertFalse(trader.isDirty(), "the global-owned trader timer was saved");
+        final SavedDataStorage reload = new SavedDataStorage(dir, DataFixers.getDataFixer(), RegistryHelper.registryAccess());
+        final WanderingTraderData readTrader = reload.get(WanderingTraderData.TYPE);
+        assertNotNull(readTrader);
+        assertEquals(1234, readTrader.spawnDelay());
+        assertEquals(65, readTrader.spawnChance());
+        assertEquals(37, readTrader.tickDelay);
         assertTrue(raids.isDirty(), "raids are left for their owner / the shutdown save");
         assertEquals(1234.0, readData(dir, "world_border.dat").getDoubleOr("size", -1.0));
         assertNull(find(dir, "raids.dat"), "raids were not written");

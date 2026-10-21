@@ -111,6 +111,14 @@ public interface RegionOwnership {
     void ensureGlobalTickThread(String reason);
 
     /**
+     * Tests whether the calling thread is the global tick thread, without the violation
+     * diagnostics of {@link #ensureGlobalTickThread}, so callers can refuse with their own error.
+     *
+     * @return whether the calling thread is the global tick thread
+     */
+    boolean isGlobalTickThread();
+
+    /**
      * Runs work owned by the global tick: inline when the calling thread already is the global
      * tick thread, otherwise queued for the global tick with the backend's existing ordering. No
      * retirement callback; the global tick lives as long as the server.

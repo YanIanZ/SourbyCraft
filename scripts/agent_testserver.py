@@ -59,8 +59,7 @@ EXCLUSIVE_POLL_S = 2.0
 # Before a server starts (16 GiB machine shared with Gradle builds and other agents).
 MIN_FREE_RAM_BYTES = 3 * 1024 ** 3
 MAX_GRADLE_BUILDS = 2
-GRADLE_LOCKED = Path("/private/tmp/claude-501/-Volumes-Ext-Sourby-SourbyCraft/"
-                     "a9dedc8d-e562-4440-8e46-781542e8f43d/scratchpad/gradle_locked.sh")
+GRADLE_LOCKED = REPO / "scripts" / "gradle_locked.sh"
 JAR = REPO / "build" / "libs" / "SourbyCraft-slim.jar"
 # Directories a harness run must never be created in, besides the repository and $HOME:
 # /Volumes/Ext/Sourby holds the owner's own servers (TestServer, StressTest, ...).

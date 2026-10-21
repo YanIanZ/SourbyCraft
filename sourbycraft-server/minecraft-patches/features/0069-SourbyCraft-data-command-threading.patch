@@ -1,0 +1,363 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 23:14:55 +0700
+Subject: [PATCH] SourbyCraft - data command threading
+
+
+diff --git a/net/minecraft/server/commands/data/BlockDataAccessor.java b/net/minecraft/server/commands/data/BlockDataAccessor.java
+index c725276d7414780cfb50566b213d41a874679fbe..031b70803fca67d8e4b62361f5f09f541b5d3061 100644
+--- a/net/minecraft/server/commands/data/BlockDataAccessor.java
++++ b/net/minecraft/server/commands/data/BlockDataAccessor.java
+@@ -31,6 +31,17 @@ public class BlockDataAccessor implements DataAccessor {
+     public static final Function<String, DataCommands.DataProvider> PROVIDER = argPrefix -> new DataCommands.DataProvider() {
+         @Override
+         public DataAccessor access(final CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++            // SourbyCraft start - no world access off the owner: console/RCON resolve on the owning region, regions refuse
++            final net.minecraft.server.level.ServerLevel level = context.getSource().getLevel();
++            final BlockPos requested = BlockPosArgument.getBlockPos(context, argPrefix + "Pos");
++            if (dev.iyanz.sourbycraft.command.DataCommandThreading.isGlobalTickThread()) {
++                if (!level.isInWorldBounds(requested)) {
++                    throw BlockPosArgument.ERROR_OUT_OF_WORLD.create();
++                }
++                return new BlockDataAccessor(level, requested);
++            }
++            dev.iyanz.sourbycraft.command.DataCommandThreading.ensureBlockOwned(level, requested);
++            // SourbyCraft end
+             BlockPos pos = BlockPosArgument.getLoadedBlockPos(context, argPrefix + "Pos");
+             BlockEntity entity = context.getSource().getLevel().getBlockEntity(pos);
+             if (entity == null) {
+@@ -48,13 +59,34 @@ public class BlockDataAccessor implements DataAccessor {
+             return parent.then(Commands.literal("block").then(function.apply(Commands.argument(argPrefix + "Pos", BlockPosArgument.blockPos()))));
+         }
+     };
+-    private final BlockEntity entity;
++    private BlockEntity entity; // SourbyCraft - resolved on the owning region for a global-tick (console) accessor
++    private final net.minecraft.world.level.Level level; // SourbyCraft
+     private final BlockPos pos;
+ 
+     public BlockDataAccessor(final BlockEntity entity, final BlockPos pos) {
+         this.entity = entity;
++        this.level = entity.getLevel(); // SourbyCraft
++        this.pos = pos;
++    }
++
++    // SourbyCraft start - console/RCON accessor: the block entity is looked up only on the owning region
++    private BlockDataAccessor(final net.minecraft.world.level.Level level, final BlockPos pos) {
++        this.level = level;
+         this.pos = pos;
+     }
++
++    private BlockEntity entity() throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        if (this.entity == null) {
++            this.ensureTickThread("Resolve block entity on its owner");
++            final BlockEntity found = this.level.getBlockEntity(this.pos);
++            if (found == null) {
++                throw ERROR_NOT_A_BLOCK_ENTITY.create();
++            }
++            this.entity = found;
++        }
++        return this.entity;
++    }
++    // SourbyCraft end
+     // Canvas start - region threading
+     // note: this is only used by the data command
+ 
+@@ -68,7 +100,7 @@ public class BlockDataAccessor implements DataAccessor {
+ 
+     @Override
+     public void scheduleOrExecute(final java.util.function.Consumer<DataAccessor> consumer) {
+-        final net.minecraft.world.level.Level entityLevel = this.entity.getLevel();
++        final net.minecraft.world.level.Level entityLevel = this.level; // SourbyCraft - known before the block entity is
+         if (entityLevel == null) {
+             return;
+         }
+@@ -84,24 +116,26 @@ public class BlockDataAccessor implements DataAccessor {
+ 
+     @Override
+     public boolean isTickThreadFor() {
+-        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.entity.getLevel(), pos);
++        return this.level != null && dev.iyanz.sourbycraft.execution.region.RegionOwnership.current().isTickThreadFor(this.level, pos); // SourbyCraft
+     }
+     // Canvas end - region threading
+ 
+     @Override
+-    public void setData(final CompoundTag tag) {
+-        BlockState state = this.entity.getLevel().getBlockState(this.pos);
++    public void setData(final CompoundTag tag) throws com.mojang.brigadier.exceptions.CommandSyntaxException { // SourbyCraft
++        final BlockEntity entity = this.entity(); // SourbyCraft
++        BlockState state = entity.getLevel().getBlockState(this.pos);
+ 
+-        try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(this.entity.problemPath(), LOGGER)) {
+-            this.entity.loadWithComponents(TagValueInput.create(reporter, this.entity.getLevel().registryAccess(), tag));
+-            this.entity.setChanged();
+-            this.entity.getLevel().sendBlockUpdated(this.pos, state, state, Block.UPDATE_ALL);
++        try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(entity.problemPath(), LOGGER)) {
++            entity.loadWithComponents(TagValueInput.create(reporter, entity.getLevel().registryAccess(), tag));
++            entity.setChanged();
++            entity.getLevel().sendBlockUpdated(this.pos, state, state, Block.UPDATE_ALL);
+         }
+     }
+ 
+     @Override
+-    public CompoundTag getData() {
+-        return this.entity.saveWithFullMetadata(this.entity.getLevel().registryAccess());
++    public CompoundTag getData() throws com.mojang.brigadier.exceptions.CommandSyntaxException { // SourbyCraft
++        final BlockEntity entity = this.entity(); // SourbyCraft
++        return entity.saveWithFullMetadata(entity.getLevel().registryAccess());
+     }
+ 
+     @Override
+diff --git a/net/minecraft/server/commands/data/DataCommands.java b/net/minecraft/server/commands/data/DataCommands.java
+index 52666798630ad87ae1e0fbaa3fddcce975e70251..aac47d07fdba5561ad26bc6512b6db6dd5bc068c 100644
+--- a/net/minecraft/server/commands/data/DataCommands.java
++++ b/net/minecraft/server/commands/data/DataCommands.java
+@@ -54,7 +54,7 @@ public class DataCommands {
+         (start, end) -> Component.translatableEscape("commands.data.modify.invalid_substring", start, end)
+     );
+     public static final List<Function<String, DataCommands.DataProvider>> ALL_PROVIDERS = ImmutableList.of(
+-        EntityDataAccessor.PROVIDER, BlockDataAccessor.PROVIDER // StorageDataAccessor.PROVIDER // Canvas - region threading
++        EntityDataAccessor.PROVIDER, BlockDataAccessor.PROVIDER, StorageDataAccessor.PROVIDER // SourbyCraft - global storage
+     );
+     public static final List<DataCommands.DataProvider> TARGET_PROVIDERS = ALL_PROVIDERS.stream()
+         .map(f -> f.apply("target"))
+@@ -72,27 +72,27 @@ public class DataCommands {
+                         Commands.literal("merge"),
+                         p -> p.then(
+                             Commands.argument("nbt", CompoundTagArgument.compoundTag())
+-                                .executes(c -> mergeData(c.getSource(), targetProvider.access(c), CompoundTagArgument.getCompoundTag(c, "nbt")))
++                                .executes(c -> dev.iyanz.sourbycraft.command.DataCommandThreading.execute(c, () -> mergeData(c.getSource(), targetProvider.access(c), CompoundTagArgument.getCompoundTag(c, "nbt"))))
+                         )
+                     )
+                 )
+                 .then(
+                     targetProvider.wrap(
+                         Commands.literal("get"),
+-                        p -> p.executes(c -> getData(c.getSource(), targetProvider.access(c)))
++                        p -> p.executes(c -> dev.iyanz.sourbycraft.command.DataCommandThreading.execute(c, () -> getData(c.getSource(), targetProvider.access(c))))
+                             .then(
+                                 Commands.argument("path", NbtPathArgument.nbtPath())
+-                                    .executes(c -> getData(c.getSource(), targetProvider.access(c), NbtPathArgument.getPath(c, "path")))
++                                    .executes(c -> dev.iyanz.sourbycraft.command.DataCommandThreading.execute(c, () -> getData(c.getSource(), targetProvider.access(c), NbtPathArgument.getPath(c, "path"))))
+                                     .then(
+                                         Commands.argument("scale", DoubleArgumentType.doubleArg())
+                                             .executes(
+-                                                c -> getNumeric(
++                                                c -> dev.iyanz.sourbycraft.command.DataCommandThreading.execute(c, () -> getNumeric(
+                                                     c.getSource(),
+                                                     targetProvider.access(c),
+                                                     NbtPathArgument.getPath(c, "path"),
+                                                     DoubleArgumentType.getDouble(c, "scale")
+                                                 )
+-                                            )
++                                            ))
+                                     )
+                             )
+                     )
+@@ -102,7 +102,7 @@ public class DataCommands {
+                         Commands.literal("remove"),
+                         p -> p.then(
+                             Commands.argument("path", NbtPathArgument.nbtPath())
+-                                .executes(c -> removeData(c.getSource(), targetProvider.access(c), NbtPathArgument.getPath(c, "path")))
++                                .executes(c -> dev.iyanz.sourbycraft.command.DataCommandThreading.execute(c, () -> removeData(c.getSource(), targetProvider.access(c), NbtPathArgument.getPath(c, "path"))))
+                         )
+                     )
+                 )
+@@ -165,12 +165,7 @@ public class DataCommands {
+     }
+     // Canvas start - region threading
+ 
+-    // we disallow getting/modifying data of accessors not in the same region unless the sender is
+-    // calling from the global tick(most likely meaning console or RCON). we can't add the global
+-    // data accessor back since that's not quite thread safe and that implementation I haven't quite
+-    // figured out yet, but that is something we can revisit in the future
+-
+-    // TODO - bring back global storage data accessor?
++    // SourbyCraft - storage actions are routed before resolving source/target accessors.
+ 
+     private static int handleAction(
+         final dev.iyanz.aurora.engine.util.command.CSEFunction<DataAccessor, Integer> iAction,
+@@ -179,20 +174,16 @@ public class DataCommands {
+     ) throws CommandSyntaxException {
+         if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) {
+             // just schedule to the instance in question
+-            accessor.scheduleOrExecute((da) -> {
+-                try {
+-                    iAction.act(da);
+-                } catch (final CommandSyntaxException cse) {
+-                    sourceStack.sendFailure(Component.literal(cse.getMessage()));
+-                }
+-            });
++            // SourbyCraft start - real result when it runs inline, 0 when deferred; deferred failures reach the sender
++            return dev.iyanz.sourbycraft.command.DataCommandThreading.runOrDefer(
++                task -> accessor.scheduleOrExecute(da -> task.run()), () -> iAction.act(accessor), sourceStack);
++            // SourbyCraft end
+         }
+         else {
+             // on a region thread
+             accessor.ensureTickThread("Cannot access or modify data of target off region");
+-            iAction.act(accessor);
++            return iAction.act(accessor); // SourbyCraft - real result
+         }
+-        return Command.SINGLE_SUCCESS;
+     }
+     // Canvas end - region threading
+ 
+@@ -231,10 +222,10 @@ public class DataCommands {
+                             targetPathNode,
+                             manipulator -> sourceProvider.wrap(
+                                 Commands.literal("from"),
+-                                s -> s.executes(c -> manipulateData(c, targetProvider, manipulator, getSingletonSource(c, sourceProvider)))
++                                s -> s.executes(c -> dev.iyanz.sourbycraft.command.DataCommandThreading.modifyFrom(c, () -> getSingletonSource(c, sourceProvider), () -> targetProvider.access(c), (target, source) -> manipulateData(c, target, manipulator, source)))
+                                     .then(
+                                         Commands.argument("sourcePath", NbtPathArgument.nbtPath())
+-                                            .executes(c -> manipulateData(c, targetProvider, manipulator, resolveSourcePath(c, sourceProvider)))
++                                            .executes(c -> dev.iyanz.sourbycraft.command.DataCommandThreading.modifyFrom(c, () -> resolveSourcePath(c, sourceProvider), () -> targetProvider.access(c), (target, source) -> manipulateData(c, target, manipulator, source)))
+                                     )
+                             )
+                         );
+@@ -243,45 +234,29 @@ public class DataCommands {
+                             manipulator -> sourceProvider.wrap(
+                                 Commands.literal("string"),
+                                 s -> s.executes(
+-                                        c -> manipulateData(c, targetProvider, manipulator, stringifyTagList(getSingletonSource(c, sourceProvider), str -> str))
+-                                    )
++                                        c -> dev.iyanz.sourbycraft.command.DataCommandThreading.modifyFrom(c, () -> stringifyTagList(getSingletonSource(c, sourceProvider), str -> str), () -> targetProvider.access(c), (target, source) -> manipulateData(c, target, manipulator, source)))
+                                     .then(
+                                         Commands.argument("sourcePath", NbtPathArgument.nbtPath())
+                                             .executes(
+-                                                c -> manipulateData(
+-                                                    c, targetProvider, manipulator, stringifyTagList(resolveSourcePath(c, sourceProvider), str -> str)
+-                                                )
+-                                            )
++                                                c -> dev.iyanz.sourbycraft.command.DataCommandThreading.modifyFrom(c, () -> stringifyTagList(resolveSourcePath(c, sourceProvider), str -> str), () -> targetProvider.access(c), (target, source) -> manipulateData(c, target, manipulator, source)))
+                                             .then(
+                                                 Commands.argument("start", IntegerArgumentType.integer())
+                                                     .executes(
+-                                                        c -> manipulateData(
+-                                                            c,
+-                                                            targetProvider,
+-                                                            manipulator,
+-                                                            stringifyTagList(
++                                                        c -> dev.iyanz.sourbycraft.command.DataCommandThreading.modifyFrom(c, () -> stringifyTagList(
+                                                                 resolveSourcePath(c, sourceProvider),
+                                                                 str -> substring(str, IntegerArgumentType.getInteger(c, "start"))
+-                                                            )
+-                                                        )
+-                                                    )
++                                                            ), () -> targetProvider.access(c), (target, source) -> manipulateData(c, target, manipulator, source)))
+                                                     .then(
+                                                         Commands.argument("end", IntegerArgumentType.integer())
+                                                             .executes(
+-                                                                c -> manipulateData(
+-                                                                    c,
+-                                                                    targetProvider,
+-                                                                    manipulator,
+-                                                                    stringifyTagList(
++                                                                c -> dev.iyanz.sourbycraft.command.DataCommandThreading.modifyFrom(c, () -> stringifyTagList(
+                                                                         resolveSourcePath(c, sourceProvider),
+                                                                         str -> substring(
+                                                                             str,
+                                                                             IntegerArgumentType.getInteger(c, "start"),
+                                                                             IntegerArgumentType.getInteger(c, "end")
+                                                                         )
+-                                                                    )
+-                                                                )
+-                                                            )
++                                                                    ), () -> targetProvider.access(c), (target, source) -> manipulateData(c, target, manipulator, source)))
+                                                     )
+                                             )
+                                     )
+@@ -290,10 +265,10 @@ public class DataCommands {
+                     }
+ 
+                     nodeSupplier.accept(
+-                        targetPathNode, manipulator -> Commands.literal("value").then(Commands.argument("value", NbtTagArgument.nbtTag()).executes(c -> {
++                        targetPathNode, manipulator -> Commands.literal("value").then(Commands.argument("value", NbtTagArgument.nbtTag()).executes(c -> dev.iyanz.sourbycraft.command.DataCommandThreading.execute(c, () -> {
+                             List<Tag> source = Collections.singletonList(NbtTagArgument.getNbtTag(c, "value"));
+                             return manipulateData(c, targetProvider, manipulator, source);
+-                        }))
++                        })))
+                     );
+                     return t.then(targetPathNode);
+                 }
+@@ -329,11 +304,13 @@ public class DataCommands {
+ 
+     private static List<Tag> getSingletonSource(final CommandContext<CommandSourceStack> context, final DataCommands.DataProvider sourceProvider) throws CommandSyntaxException {
+         DataAccessor source = sourceProvider.access(context);
++        source.ensureTickThread("Cannot read source data outside its owner"); // SourbyCraft - source reads also require ownership
+         return Collections.singletonList(source.getData());
+     }
+ 
+     private static List<Tag> resolveSourcePath(final CommandContext<CommandSourceStack> context, final DataCommands.DataProvider sourceProvider) throws CommandSyntaxException {
+         DataAccessor source = sourceProvider.access(context);
++        source.ensureTickThread("Cannot read source data outside its owner"); // SourbyCraft - source reads also require ownership
+         NbtPathArgument.NbtPath sourcePath = NbtPathArgument.getPath(context, "sourcePath");
+         return sourcePath.get(source.getData());
+     }
+@@ -343,9 +320,17 @@ public class DataCommands {
+         final DataCommands.DataProvider targetProvider,
+         final DataCommands.DataManipulator manipulator,
+         final List<Tag> source
++    ) throws CommandSyntaxException {
++        return manipulateData(context, targetProvider.access(context), manipulator, source); // SourbyCraft - target resolved by the caller
++    }
++
++    private static int manipulateData( // SourbyCraft - target resolved where it is owned
++        final CommandContext<CommandSourceStack> context,
++        final DataAccessor providerAccessed,
++        final DataCommands.DataManipulator manipulator,
++        final List<Tag> source
+     ) throws CommandSyntaxException {
+         // Canvas start - region threading
+-        DataAccessor providerAccessed = targetProvider.access(context);
+         return handleAction((target) -> {
+         // Canvas end - region threading
+         NbtPathArgument.NbtPath targetPath = NbtPathArgument.getPath(context, "targetPath");
+diff --git a/net/minecraft/server/commands/data/StorageDataAccessor.java b/net/minecraft/server/commands/data/StorageDataAccessor.java
+index 1967b08727464cbc9d7908a030e86f79f276aaf6..e36c139984bf5bccfba5734c061ee82381076733 100644
+--- a/net/minecraft/server/commands/data/StorageDataAccessor.java
++++ b/net/minecraft/server/commands/data/StorageDataAccessor.java
+@@ -18,10 +18,12 @@ import net.minecraft.resources.Identifier;
+ import net.minecraft.world.level.storage.CommandStorage;
+ 
+ public class StorageDataAccessor implements DataAccessor {
+-    private static final SuggestionProvider<CommandSourceStack> SUGGEST_STORAGE = (c, p) -> SharedSuggestionProvider.suggestResource(getGlobalTags(c).keys(), p);
++    private static final SuggestionProvider<CommandSourceStack> SUGGEST_STORAGE = (c, p) -> dev.iyanz.sourbycraft.command.DataCommandThreading.suggestOnGlobalTick(p,
++        () -> SharedSuggestionProvider.suggestResource(getGlobalTags(c).keys(), p)); // SourbyCraft - storage is global-owned
+     public static final Function<String, DataCommands.DataProvider> PROVIDER = arg -> new DataCommands.DataProvider() {
+         @Override
+-        public DataAccessor access(final CommandContext<CommandSourceStack> context) {
++        public DataAccessor access(final CommandContext<CommandSourceStack> context) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++            dev.iyanz.sourbycraft.command.DataCommandThreading.requireGlobalTickForStorage(); // SourbyCraft - /execute and /function from a region: command error
+             return new StorageDataAccessor(StorageDataAccessor.getGlobalTags(context), IdentifierArgument.getId(context, arg));
+         }
+ 
+@@ -47,13 +49,26 @@ public class StorageDataAccessor implements DataAccessor {
+         this.id = id;
+     }
+ 
++    // SourbyCraft - command storage is owned by the global tick.
+     @Override
+-    public void setData(final CompoundTag tag) {
++    public void ensureTickThread(final String reason) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        dev.iyanz.sourbycraft.command.DataCommandThreading.requireGlobalTickForStorage();
++    }
++
++    @Override
++    public void scheduleOrExecute(final java.util.function.Consumer<DataAccessor> consumer) {
++        dev.iyanz.sourbycraft.command.DataCommandThreading.scheduleOrExecute(() -> consumer.accept(this));
++    }
++
++    @Override
++    public void setData(final CompoundTag tag) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        ensureTickThread("Write command storage");
+         this.storage.set(this.id, tag);
+     }
+ 
+     @Override
+-    public CompoundTag getData() {
++    public CompoundTag getData() throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        ensureTickThread("Read command storage");
+         return this.storage.get(this.id);
+     }
+ 
