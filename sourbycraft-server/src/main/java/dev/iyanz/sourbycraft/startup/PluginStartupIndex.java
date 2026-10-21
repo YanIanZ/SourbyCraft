@@ -64,6 +64,9 @@ public final class PluginStartupIndex {
 
     private PluginStartupIndex() {}
 
+    /** How the cache-write failure line starts, so a caller can keep it apart from the read line. */
+    public static final String CACHE_WRITE_FAILED = "Aurora startup cache could not be written: ";
+
     /**
      * Builds the index.
      *
@@ -71,7 +74,8 @@ public final class PluginStartupIndex {
      * @param cacheFile where the cache lives, or {@code null} to analyse without a cache
      * @param environment the compatibility key for this process
      * @param parallelism STARTUP lane width, at least 1
-     * @param warnOnce receives one line when cached content was discarded
+     * @param warnOnce receives one line when cached content was discarded, and one when the cache
+     *                 could not be written (prefixed {@link #CACHE_WRITE_FAILED})
      */
     public static Result build(final Path pluginsDir, final Path cacheFile, final CacheEnvironment environment,
                                final int parallelism, final java.util.function.Consumer<String> warnOnce) {
@@ -111,7 +115,7 @@ public final class PluginStartupIndex {
                 StartupCache.write(cacheFile, environment, entries(indexed, pluginsDir));
                 written = true;
             } catch (final IOException unwritable) {
-                warnOnce.accept("Aurora startup cache could not be written: " + unwritable.getMessage());
+                warnOnce.accept(CACHE_WRITE_FAILED + unwritable.getMessage());
             }
             telemetry.phase("cache-write", System.nanoTime() - writeBegun);
         }

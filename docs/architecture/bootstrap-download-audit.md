@@ -40,7 +40,7 @@ The historic CI probes do not qualify these new candidates.
   SourbyClip's download error and no `.tmp` left. Online: `Done`. Without network again:
   `Done (9.282s)` with nothing downloaded. The only network error in that boot was Mojang's
   `api.minecraftservices.com/publickeys` lookup (logged, not fatal, `online-mode=false`).
-- SourbyClip whole-transfer deadline/size cap, remote cold-download qualification and rollout of the new private revision/hash pins.
+- SourbyClip whole-transfer deadline/size cap: **implemented in SourbyClip 3.1.3** (`e5de0f4b`, 2026-10-22, see the section below); pin rolled in the working change, private push pending. Remote cold-download qualification remains open.
 - The utility manifest in the historical scope has one URL per library. SourbyClip
   has a separate Maven fallback list; see the current launcher audit below.
 
@@ -80,8 +80,9 @@ pool is closed by try-with-resources (`Sourbyclip.java:416`), which waits for ev
 task; it does not `shutdownNow`. So after one library fails, the remaining queued libraries
 still run to completion before the failure surfaces, and the worst-case wall time of a batch is
 bounded only by the per-socket 30 s timeouts multiplied by mirrors and entries divided by
-workers, not by a whole-transfer deadline. That is the same open item as the missing launcher
-transfer deadline/size cap below; fixing it is a change in the private SourbyClip repo.
+workers, not by a whole-transfer deadline. 3.1.3 adds the per-attempt deadline and byte cap
+(section at the end), so each entry is now bounded; the pool still drains queued work after a
+failure instead of `shutdownNow`.
 
 Settings introduced here (`sourbyclip.console`, `sourbyclip.downloadThreads`) are
 **RESTART_REQUIRED**, read during launcher startup/batch setup. They do not tune region or server executors.
@@ -116,9 +117,39 @@ Both private JAR hashes match across two local clean builds. The real SourbyCraf
 stores and reuses configuration cache. These results are controlled tests/local reproducibility,
 not cross-host reproducibility, a remote cold boot, a performance claim or server/plugin qualification.
 
-Still open (re-checked against SourbyClip 3.1.2 / `85b4dd70`, 2026-10-20): launcher
-whole-transfer deadlines and size limits (30 s read timeout is an inactivity bound, not a
-total-transfer limit; the server-side `LibDownloader` has both, the launcher has neither); full
+Still open (re-checked against SourbyClip 3.1.3 / `e5de0f4b`, 2026-10-22): full
 POM/dependency content pins; remote cold-download and cached/offline Minecraft boot
 qualification. Done since: the private pushes and the official revision/hash rollout (`5a3806f1`).
 The previously pinned artifacts still validate unchanged.
+
+## SourbyClip 3.1.3 bounded transfers — 2026-10-22
+
+**IMPLEMENTED in the private repo; pinned in this change; not yet pushed or CI-built.**
+SourbyClip `e5de0f4ba2d10fc81e95b0d23069b3b9d59d73bf` (local branch `feat/transfer-deadline`),
+jar SHA-256 `56d317b81044d8d618901ef46d5b418de59ffdc9bb8940b6745aa1a732c4435e`. New
+`downloader/BoundedTransfer` is the only network path of the launcher (`DownloadContext.download`,
+`MavenDependencyResolver.downloadFile`/`downloadString`); HTTP(S) uses `java.net.http.HttpClient`
+(HTTP/1.1, normal redirects, default proxy selector), other URL schemes a `URLConnection` with the
+same cap and a per-read deadline check.
+
+| Concern | 3.1.2 | 3.1.3 | Evidence (private `BoundedTransferTest`, loopback) |
+| --- | --- | --- | --- |
+| Whole transfer | 30 s connect/read per socket only; a trickle never ends | Deadline per attempt: 600 s unknown size; known size (`Content-Length`; manifests carry none) `size / 64 KiB/s` clamped 120–1800 s; `sourbyclip.transferDeadlineSeconds` fixes it. Covers headers and body; the exchange is cancelled on expiry | `tricklingSourceHitsTheWholeTransferDeadlineAndIsNotRetried`, `tricklingHeadersAreBoundedToo`, `originalJarTrickleFailsNamingTheSource` |
+| Idle | 30 s read timeout | 30 s without data (retryable) | `stalledSourceIsRetriedBoundedTimesThenFails` |
+| Size | none | Expected size + 1% (≥ 64 KiB) when known, else `sourbyclip.maxTransferBytes` (256 MiB); POM/metadata ≤ 4 MiB; an oversized `Content-Length` is refused before the body | `endlessStreamIsCutAtTheByteCap`, `declaredLengthAboveTheCapIsRejectedBeforeTheBody`, `expectedSizeCapsTheBodyWithSmallSlack` |
+| Single-source retry | none (mirror fallback only; the Mojang jar had one attempt per context) | Transient failures (connect error, idle, truncated body, HTTP 5xx/408/429) retried `sourbyclip.transferRetries` (default 2) times, backoff 1 s doubling; deadline/cap/SHA-256/other 4xx not retried on that source | `transientHttpStatusIsRetriedUntilTheSourceRecovers`, `truncatedBodyIsRetriedAndNeverPublished`, `notFoundAndHashMismatchAreNotRetried`, `originalJarSingleSourceIsRetriedThenDownloaded`, `mavenBootstrapFallsBackFromATricklingRepositoryToAGoodOne` |
+| Partial files | staged + SHA-256 | unchanged; aborted transfers remove their temporary file and keep the previous destination | `previousDestinationSurvivesAnAbortedTransfer` and the existing `VerifiedDownloadTest`/`DownloadContextTest` |
+| Final failure | non-zero exit naming coordinate / source | unchanged, plus one `Transfer of <what> from <url> failed ...` line per failed attempt | `mavenBootstrapFailureNamesTheCoordinate` |
+| Offline | no network | unchanged | `OfflineBootstrapTest` |
+
+All 48 SourbyClip Java tests pass (Temurin 25, Gradle 9.8.0, macOS arm64); `BoundedTransferTest`
+passed 3 reruns. Worst case is bounded but not short: per library, 4 mirrors × (one deadline, or
+3 attempts × 30 s idle plus backoff); per batch divided by `sourbyclip.downloadThreads`.
+Not covered: real-network/remote Linux cold download, proxies, HTTP/2, a tampered cache in a
+booted server.
+
+Local server evidence (2026-10-22, agent test server, macOS arm64, not certified): 2026-10-22 local run (claude-clip worktree, PARTIAL, slim jar `c730ebf4…06ed052` with SourbyClip 3.1.3 `e5de0f4b`, built from HEAD `5851c8e7` plus the uncommitted re-pin, not certified): `clip313-cold-2 --no-seed-cache` downloaded the Mojang jar (60.9 MB) + 112 SHA-256-verified entries through the bounded transfer path from the real mirrors (one `Transfer of me.lucko:spark-paper:1.10.180:jar ... HTTP 404; not retrying this source` then the next mirror), classpath 15.9 s, `Done` 17.686 s, stop exit 0, no `.part` left; offline cold boot (`clip313-cold-offline-1`, empty cache) exits 1 naming `cache/mojang_26.2.jar` and its source URL. The
+first run (`clip313-cold-1`, an earlier build of the same change) also reached `Done` with stop
+exit 0. This exercises only the success path and a 404 mirror miss on a real network; the deadline,
+cap and retry paths are covered by the loopback tests above.
+

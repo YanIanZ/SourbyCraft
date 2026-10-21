@@ -3,7 +3,7 @@
 Official server downloads are GitHub Releases. Maintainer builds require private checkouts:
 
 - `YanIanZ/SourbyPatcher`: active `paper-toolchain` 3.0.0; archived `canvas-toolchain` 2.0.x and Folia patcher.
-- `YanIanZ/SourbyClip`: launcher 3.1.2, protocol 1 (revision and SHA-256 in the checked-in pins).
+- `YanIanZ/SourbyClip`: launcher 3.1.3, protocol 1 (revision and SHA-256 in the checked-in pins).
 
 The public repository no longer vendors these sources or SourbyClip Maven binaries.
 Previously published Git history and releases still contain earlier versions. Private access
@@ -174,3 +174,14 @@ checkout HEAD and installed Maven Local artifact were verified in this session;
 Patcher remains 3.0.0. Terminal controls, worker lifecycle and prepare mode from
 Clip 3.1.1 are included. These launcher changes are RESTART_REQUIRED. Packaging,
 launcher probes and isolated boot evidence are recorded in `AGENT-COORDINATION.md`.
+
+## Clip 3.1.3 re-pin — 2026-10-22
+
+Clip 3.1.3 (bounded transfers: whole-transfer deadline, byte cap, bounded single-source retry; see
+[BOOTSTRAP.md](../BOOTSTRAP.md)) is selected by `gradle.properties` and the revision lock:
+`e5de0f4ba2d10fc81e95b0d23069b3b9d59d73bf` (local branch `feat/transfer-deadline` in the private
+clone), SHA-256 `56d317b81044d8d618901ef46d5b418de59ffdc9bb8940b6745aa1a732c4435e`, protocol 1
+(unchanged, so no Patcher release). The jar hash was identical across two local clean builds;
+cross-host reproduction is unverified. **Until that commit is pushed to `YanIanZ/SourbyClip`, CI
+cannot check out the pinned revision and the build job fails at the private-toolchain step.**
+
