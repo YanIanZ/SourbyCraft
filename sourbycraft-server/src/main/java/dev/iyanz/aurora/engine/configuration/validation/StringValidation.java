@@ -79,7 +79,7 @@ public record StringValidation(StringType type) implements Part.Validation<Strin
     public enum StringType {
         SINGLE_WORD("word", "words_with_underscores"),
         GREEDY_PHRASE("word", "words with spaces", "\"and symbols\""),
-        IDENTIFIER("minecraft:test", "just_the_key", "canvas:example");
+        IDENTIFIER("minecraft:test", "just_the_key", "aurora:example");
 
         private final Collection<String> examples;
 

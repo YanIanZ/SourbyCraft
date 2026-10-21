@@ -46,9 +46,9 @@ Every number below is generated; the test fails when it drifts from the manifest
 
 | scanned input | count |
 | --- | --- |
-| engine baseline patches | 724 (476 `sourbycraft-server/minecraft-patches/sources` + 232 `sourbycraft-server/paper-patches/files` + 16 `sourbyapi/paper-patches/files`), 724 Java files |
-| SourbyCraft feature patches | 89, touching 115 Java files |
-| engine source files (sourbycraft-server/src/main/java/dev/iyanz/aurora/engine) | 94 |
+| engine baseline patches | 720 (472 `sourbycraft-server/minecraft-patches/sources` + 232 `sourbycraft-server/paper-patches/files` + 16 `sourbyapi/paper-patches/files`), 720 Java files |
+| SourbyCraft feature patches | 92, touching 118 Java files |
+| engine source files (sourbycraft-server/src/main/java/dev/iyanz/aurora/engine) | 88 |
 | guards found by the scan | 137 (manifest has 137; both scan modes agree, see RepositoryTest) |
 
 | detector | A | B | C | D | E |

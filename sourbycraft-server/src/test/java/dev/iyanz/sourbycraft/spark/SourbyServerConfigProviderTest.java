@@ -20,6 +20,13 @@ class SourbyServerConfigProviderTest {
     }
 
     @Test
+    void engineFilesAreGroupedUnderAuroraNotCanvas() {
+        assertTrue(SourbyServerConfigProvider.FILES.containsKey("aurora/"));
+        assertFalse(SourbyServerConfigProvider.FILES.containsKey("canvas/"), "group renamed 2026-10-21 (owner decision)");
+        assertTrue(SourbyServerConfigProvider.FILES.containsKey("sourbycraft/"));
+    }
+
+    @Test
     void v10RetainsCurrentSparkManagementSecretExclusions() throws Exception {
         final Path path = directory.resolve("server.properties");
         Files.writeString(path, "management-server-secret=synthetic-management-secret\n"

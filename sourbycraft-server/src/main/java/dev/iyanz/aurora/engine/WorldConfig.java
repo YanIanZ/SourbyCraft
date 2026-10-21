@@ -193,13 +193,13 @@ public class WorldConfig extends Part {
     public static class RegionBars extends Part {
 
         {
-            option("enableTpsBar").docs("Enables a regionized TPS-Bar implementation for Canvas.");
+            option("enableTpsBar").docs("Enables the regionized TPS bar.");
             option("tpsBarFormat")
                 .docs(
                     "MiniMessage-formatted line for the TPS bar. Placeholders are <tps>, <mspt>, <util>, and <players>.",
                     "Legacy tokens(%tps%, %mspt%, %util%, %players%) are also accepted and auto-converted."
                 ).greedyString();
-            option("enableRamBar").docs("Enables a regionized RAM-Bar implementation for Canvas.");
+            option("enableRamBar").docs("Enables the regionized RAM bar.");
             option("ramBarFormat")
                 .docs(
                     "MiniMessage-formatted line for the RAM bar. Placeholders are <used>, <xmx>, <percent>.",

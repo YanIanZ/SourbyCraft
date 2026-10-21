@@ -6,6 +6,13 @@
 > decision. Per [docs/DEVELOPMENT.md](../DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy),
 > every statement below is tagged with what was actually verified.
 >
+> **Superseded in part (2026-10-21, owner decision):** the `config/canvas-*.yml` and `canvas-patch.yml`
+> file names are **kept**. Other names this plan cites were changed: `subcommands/ReloadSubCommand`
+> (and the whole dormant `/canvas` subcommand tree) was deleted, `CanvasFileMigration` is
+> `AuroraFileMigration`, and the Spark group `canvas/` (`CanvasSplitParser`) is `aurora/`
+> (`AuroraSplitParser`; the entry names inside still match the real file names). Line numbers below are
+> from before that change.
+>
 > Source: [docs/TODO.md](../TODO.md) — *"Rencana migrasi nama file konfigurasi
 > `config/canvas-server.yml` / `canvas-worlds.yml`"* (`docs/TODO.md:507`).
 > Written 2026-10-20 by `oc-deepseek-flash`; read-only investigation, one Gradle test run

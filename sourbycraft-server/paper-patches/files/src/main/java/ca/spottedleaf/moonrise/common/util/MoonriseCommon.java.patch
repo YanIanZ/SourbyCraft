@@ -29,7 +29,7 @@
 -    public static final BalancedPrioritisedThreadPool.OrderedStreamGroup CLIENT_GROUP = MoonriseCommon.WORKER_POOL.createOrderedStreamGroup();
 -    public static final BalancedPrioritisedThreadPool.OrderedStreamGroup SERVER_GROUP = MoonriseCommon.WORKER_POOL.createOrderedStreamGroup();
 +    // Canvas start - replace moonrise executor
-+    public static boolean AGGRESSIVE_VARIANT = dev.iyanz.aurora.engine.util.Util.isFlagEnabled("Canvas.AggressiveChunkSystem");
++    public static boolean AGGRESSIVE_VARIANT = dev.iyanz.aurora.engine.util.LegacyNames.flag("Aurora.AggressiveChunkSystem", "Canvas.AggressiveChunkSystem"); // Aurora - renamed; the Canvas name is read with a warning until Build 50
 +
 +    // 1ms for aggressive, fallback to upstream when not
 +    public static final long WORKER_QUEUE_HOLD_TIME = AGGRESSIVE_VARIANT ? (long)(1.0e6) : (long)(20.0e6);

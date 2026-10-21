@@ -32,7 +32,7 @@ public enum ExecutionLane {
      *
      * <p>Two names: {@code <brand> Common Worker #n} (the brand is {@code PlatformHooks.getBrand()},
      * so any one word is accepted, see {@link #of}) and, with the aggressive chunk system
-     * ({@code Canvas.AggressiveChunkSystem}), {@code ls_wg worker #n}.</p>
+     * ({@code -DAurora.AggressiveChunkSystem}, formerly {@code Canvas.AggressiveChunkSystem}), {@code ls_wg worker #n}.</p>
      */
     CHUNK_WORKER("Chunk workers", "Paper Common Worker", "ls_wg worker"),
 

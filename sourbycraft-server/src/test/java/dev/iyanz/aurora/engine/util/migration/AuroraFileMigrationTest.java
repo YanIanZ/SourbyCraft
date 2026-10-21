@@ -29,19 +29,19 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * OBS-14 engine util/migration: {@link CanvasFileMigration#initMigration}, the per-level entry point
+ * OBS-14 engine util/migration: {@link AuroraFileMigration#initMigration}, the per-level entry point
  * that decides which migrations to run. The per-migration logic is covered by
  * {@link PearlsMigrationTest}; this covers the decision (old data present and new data absent), that
  * it runs again harmlessly, and that a failure is loud.
  *
  * <p>The level's data folder comes from a mocked {@code LevelStorageAccess}, so the new
- * {@code canvas/pearls.dat} lives in a {@code @TempDir}. The legacy path is the fixed
+ * {@code aurora/pearls.dat} (and the Canvas-era {@code canvas/pearls.dat}) live in a {@code @TempDir}. The legacy path is the fixed
  * {@code pearls.dat} in the working directory; the tests that would be disturbed by one being there are
  * skipped rather than touching it. {@code paper.disableMigrationDelay} is set so the 8 s
  * "interrupt now" pause is not served, and restored afterwards.</p>
  */
 @ResourceLock("java.lang.System.properties")
-class CanvasFileMigrationTest {
+class AuroraFileMigrationTest {
 
     private String previousDelayFlag;
 
@@ -73,6 +73,10 @@ class CanvasFileMigrationTest {
     }
 
     private static Path pearls(final Path dataFolder) {
+        return dataFolder.resolve("aurora").resolve("pearls.dat");
+    }
+
+    private static Path canvasPearls(final Path dataFolder) {
         return dataFolder.resolve("canvas").resolve("pearls.dat");
     }
 
@@ -95,13 +99,13 @@ class CanvasFileMigrationTest {
         NbtIo.writeCompressed(legacy(), file);
         assertTrue(PearlsMigration.needsMigration(file));
 
-        CanvasFileMigration.initMigration(context(data));
+        AuroraFileMigration.initMigration(context(data));
 
         assertFalse(PearlsMigration.needsMigration(file));
         assertEquals(PearlsMigration.migratePearlsTag(legacy()), NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap()));
 
         final byte[] settled = Files.readAllBytes(file);
-        CanvasFileMigration.initMigration(context(data));
+        AuroraFileMigration.initMigration(context(data));
         assertArrayEquals(settled, Files.readAllBytes(file), "the second run neither rewrites nor touches the migrated file");
     }
 
@@ -113,7 +117,7 @@ class CanvasFileMigrationTest {
         NbtIo.writeCompressed(PearlsMigration.migratePearlsTag(legacy()), file);
         final byte[] before = Files.readAllBytes(file);
 
-        CanvasFileMigration.initMigration(context(data));
+        AuroraFileMigration.initMigration(context(data));
 
         assertArrayEquals(before, Files.readAllBytes(file));
     }
@@ -122,10 +126,10 @@ class CanvasFileMigrationTest {
     void aLevelWithNoPearlsDataCreatesNothing(@TempDir final Path data) {
         requireNoLegacyFileInTheWorkingDirectory();
 
-        CanvasFileMigration.initMigration(context(data));
+        AuroraFileMigration.initMigration(context(data));
 
         assertFalse(Files.exists(pearls(data)));
-        assertFalse(Files.exists(data.resolve("canvas")), "no directory is created when there is nothing to migrate");
+        assertFalse(Files.exists(data.resolve("aurora")), "no directory is created when there is nothing to migrate");
     }
 
     @Test
@@ -135,8 +139,25 @@ class CanvasFileMigrationTest {
         Files.createDirectories(file.getParent());
         Files.writeString(file, "not gzip nbt");
 
-        assertThrows(RuntimeException.class, () -> CanvasFileMigration.initMigration(context(data)));
+        assertThrows(RuntimeException.class, () -> AuroraFileMigration.initMigration(context(data)));
 
         assertEquals("not gzip nbt", Files.readString(file), "the operator's file is left as it was");
+    }
+
+    @Test
+    void aCanvasEraPearlsFileIsMovedToTheAuroraNamespaceOnce(@TempDir final Path data) throws IOException {
+        requireNoLegacyFileInTheWorkingDirectory();
+        final Path old = canvasPearls(data);
+        Files.createDirectories(old.getParent());
+        NbtIo.writeCompressed(PearlsMigration.migratePearlsTag(legacy()), old);
+
+        AuroraFileMigration.initMigration(context(data));
+
+        assertFalse(Files.exists(old));
+        assertEquals(PearlsMigration.migratePearlsTag(legacy()), NbtIo.readCompressed(pearls(data), NbtAccounter.unlimitedHeap()));
+
+        final byte[] settled = Files.readAllBytes(pearls(data));
+        AuroraFileMigration.initMigration(context(data));
+        assertArrayEquals(settled, Files.readAllBytes(pearls(data)), "the second boot does not migrate again");
     }
 }

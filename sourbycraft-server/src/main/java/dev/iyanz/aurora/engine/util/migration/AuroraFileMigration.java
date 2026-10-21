@@ -6,7 +6,7 @@ import java.util.HashSet;
 import java.util.Set;
 import org.slf4j.Logger;
 
-public class CanvasFileMigration {
+public class AuroraFileMigration {
     private static final Logger LOGGER = LogUtils.getClassLogger();
     private static boolean MSG_SHOWN = false;
 
@@ -22,7 +22,7 @@ public class CanvasFileMigration {
         }
 
         if (!todo.isEmpty()) {
-            LOGGER.info("Beginning migration of Canvas filesave features");
+            LOGGER.info("Beginning migration of Aurora engine save files (Canvas-era names and layouts)");
             LOGGER.info("{} migration types awaiting conduction: {}", todo.size(), todo.toArray());
 
             if (!MSG_SHOWN) {
@@ -34,7 +34,7 @@ public class CanvasFileMigration {
                 type.migration.conduct(migrationContext);
             }
 
-            LOGGER.info("All Canvas features migrated successfully, continuing with startup");
+            LOGGER.info("Aurora engine save files migrated successfully, continuing with startup");
         }
     }
 
@@ -45,10 +45,10 @@ public class CanvasFileMigration {
             if (!Boolean.getBoolean("paper.disableMigrationDelay")) {
                 Thread.sleep(8_000L);
             }
-            LOGGER.info("Continuing with Canvas file migration, please wait");
+            LOGGER.info("Continuing with the Aurora engine save-file migration, please wait");
         } catch (final InterruptedException ie) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while waiting before startup Canvas file migration", ie);
+            throw new RuntimeException("Interrupted while waiting before the startup Aurora engine save-file migration", ie);
         } finally {
             MSG_SHOWN = true;
         }

@@ -2,6 +2,14 @@
 
 Scope: all 94 Java files under `sourbycraft-server/src/main/java/dev/iyanz/aurora/engine/**`; branch `26.2`, HEAD `26ec3cd4d1184c30f9074c5e97970aced0c2d03d`, working-tree snapshot, 2026-10-21. Build 48 P3 board task `task_4896a8d6660a7de9`.
 
+> **Update 2026-10-21 (Canvas-name removal, owner decision):** every row citing `subcommands/…` refers
+> to code that no longer exists — the dormant `/canvas` subcommands (never registered since MC feature
+> 0020) were deleted together with `commands/CanvasCommands`, `HelpCommand` and `SubCommand`, so those
+> UNDECIDED rows are closed as removed, not decided. `util/version/CanvasVersionFetcher` (#174) is now
+> `util/version/AuroraVersionFetcher` (same `getVersionMessage` behaviour) and
+> `util/migration/CanvasFileMigration` is `AuroraFileMigration`. The counts below are the 2026-10-21
+> snapshot and were not regenerated.
+
 ## Summary counts
 
 One row per guard site; a condition and its immediate refusal count once. Multiple predicates sharing a single refusal site count once. Decisions are recommendations from source inspection, not runtime qualification.

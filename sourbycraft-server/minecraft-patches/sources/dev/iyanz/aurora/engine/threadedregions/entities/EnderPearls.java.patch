@@ -53,7 +53,7 @@
 +    ).apply(i, EnderPearls::new));
 +
 +    public static final SavedDataType<EnderPearls> TYPE = new SavedDataType<>(
-+        Identifier.fromNamespaceAndPath("canvas", "pearls"),
++        Identifier.fromNamespaceAndPath("aurora", "pearls"), // Aurora - was canvas:pearls; PearlsMigration moves data/canvas/pearls.dat once
 +        EnderPearls::new,
 +        CODEC,
 +        DataFixTypes.NONE

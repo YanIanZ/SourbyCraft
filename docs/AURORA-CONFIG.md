@@ -99,6 +99,25 @@ Where the branch still supports legacy keys such as `perf.ai.async-pathfinding`,
 
 Deprecation support is compatibility, not permission to document the legacy key as the preferred interface.
 
+### Canvas-era names (renamed in Build 48, old names removed in Build 50)
+
+Owner decision 2026-10-21. The new name wins when both are present; the old one is read with one
+`[Aurora]` WARN line naming its replacement (once per JVM flag or saved key, once per player for the
+permission). All are RESTART_REQUIRED except the permission, which is checked on every engine
+broadcast (LIVE).
+
+| New name | Old name (read until Build 50) | Kind | Read at |
+| --- | --- | --- | --- |
+| `-DAurora.AggressiveChunkSystem` | `-DCanvas.AggressiveChunkSystem` | JVM flag, `-Dx` alone means true | `MoonriseCommon` class init |
+| `-DAurora.DisableRegionProfiler` | `-DCanvas.DisableRegionProfiler` | JVM flag, only `=true` counts | each region-profiler support check (`SchedulerUtil`) |
+| `-DAurora.isRunningInIDE` | `-DCanvas.isRunningInIDE` | JVM flag, `-Dx` alone means true | `SharedConstants` class init |
+| permission `aurora.broadcasting.receiver` | `canvas.broadcasting.receiver` (only when set explicitly; both default to operators) | permission | each `GlobalConfiguration.broadcast` |
+| `Aurora.Distance` in `paper:level_overrides` | `Canvas.Distance` | saved world data | world load; the next save writes only the new key |
+| `data/aurora/pearls.dat` (`aurora:pearls`) | `data/canvas/pearls.dat` (`canvas:pearls`) | saved server data | moved once by the world-folder migration before load |
+
+The `config/canvas-server.yml`, `config/canvas-worlds.yml` and per-world `canvas-patch.yml` file
+names are **not** renamed. The schedule is in `docs/releases/26.2-build-50.md`.
+
 ## Development rules for configuration claims
 
 Documentation and release notes must distinguish:

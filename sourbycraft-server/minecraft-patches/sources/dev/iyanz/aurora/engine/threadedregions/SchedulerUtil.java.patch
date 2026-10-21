@@ -65,7 +65,7 @@
 +     * @return if the region profiler is supported with the scheduler
 +     */
 +    public static boolean doesSupportRegionProfiler(final Scheduler scheduler) {
-+        if (Boolean.getBoolean("Canvas.DisableRegionProfiler")) {
++        if (dev.iyanz.aurora.engine.util.LegacyNames.strictFlag("Aurora.DisableRegionProfiler", "Canvas.DisableRegionProfiler")) { // Aurora - renamed; the Canvas name is read with a warning until Build 50
 +            return false;
 +        }
 +        if (scheduler instanceof AffinitySchedulerThreadPool) {

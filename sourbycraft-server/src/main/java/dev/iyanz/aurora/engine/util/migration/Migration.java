@@ -3,7 +3,7 @@ package dev.iyanz.aurora.engine.util.migration;
 import io.papermc.paper.world.migration.WorldMigrationContext;
 
 /**
- * Abstract interface for a migration for Canvas file data for update from before 26.1 to post 26.1 data structure
+ * A migration of engine save data from an older name, location or layout (pre-26.1 files, Canvas-era names) to the current one
  */
 public interface Migration {
     /**

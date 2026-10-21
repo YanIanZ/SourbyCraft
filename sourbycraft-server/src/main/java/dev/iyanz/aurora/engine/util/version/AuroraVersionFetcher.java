@@ -21,14 +21,16 @@ import oshi.SystemInfo;
 import static net.kyori.adventure.text.Component.text;
 
 /**
- * This is a replacement version fetcher that is intended to replace {@link com.destroystokyo.paper.PaperVersionFetcher}
- * for general simplicity purposes of the rebrand patch(I don't want to replace half of the paper version fetcher,
- * because I'm lazy)
- *
- * @author dueris
+ * The server's {@link VersionFetcher} (Paper's {@code /version} and {@code Bukkit.getUnsafe().getVersionFetcher()}),
+ * replacing {@link com.destroystokyo.paper.PaperVersionFetcher}. It makes no network request; the build commit links
+ * to the SourbyCraft repository ({@link #REPOSITORY}). Originally Canvas's {@code CanvasVersionFetcher} by dueris,
+ * renamed 2026-10-21 (owner decision) when its links stopped pointing at the Canvas project.
  */
 @NullMarked
-public class CanvasVersionFetcher implements VersionFetcher {
+public class AuroraVersionFetcher implements VersionFetcher {
+
+    /** Where a build commit is shown; the default repository of the SourbyCraft auto-updater. */
+    public static final String REPOSITORY = "https://github.com/YanIanZ/SourbyCraft/";
 
     private static final TextColor RED = TextColor.color(0xFF5300);
     private static final TextColor YELLOW = TextColor.color(0xFFCD00);
@@ -105,12 +107,8 @@ public class CanvasVersionFetcher implements VersionFetcher {
             builder.append(text(buildInfo.buildNumber().getAsInt(), SECONDARY));
             builder.append(text(" [", HEADER));
 
-            String url = "https://github.com/CraftCanvasMC/Canvas/";
-            String commit = buildInfo.gitCommit().orElse("Unknown Commit");
-
-            if (buildInfo.gitCommit().isPresent()) {
-                url = url + "commit/" + commit;
-            }
+            final String commit = buildInfo.gitCommit().orElse("Unknown Commit");
+            final String url = commitUrl(buildInfo.gitCommit().orElse(null));
 
             builder.append(text(commit, INFORMATION)
                 .hoverEvent(HoverEvent.showText(text("Click to view commit", SECONDARY)))
@@ -199,9 +197,14 @@ public class CanvasVersionFetcher implements VersionFetcher {
         return builder.build();
     }
 
+    /** The commit page in {@link #REPOSITORY}, or the repository itself when the commit is unknown. */
+    static String commitUrl(final @Nullable String commit) {
+        return commit == null || commit.isBlank() ? REPOSITORY : REPOSITORY + "commit/" + commit;
+    }
+
     private Status computeStatus() {
-        // SourbyCraft - no remote build lookup. Canvas asked canvasmc.io for its own build channel
-        // here; SourbyCraft builds are not Canvas builds, and updates are SourbyCraft's auto-updater.
+        // No remote build lookup: the upstream fetcher asked its project's API for a build channel here;
+        // updates are the SourbyCraft auto-updater's job.
         return new LocalStatus();
     }
 

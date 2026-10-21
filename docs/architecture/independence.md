@@ -143,11 +143,9 @@ engine baseline is SourbyCraft-owned (section 2.1); these are names and contract
 | Surface | Where | Why it stays | Compatibility effect of renaming |
 | --- | --- | --- | --- |
 | Plugin API package (21 files): `Unsupported`, `WorldUnloadResult`, `event.*`, `event.world.WorldUnloadAsyncEvent`, `region.*`, `simd.*` | `sourbyapi/src/main/java/dev/iyanz/sourbycraft/api` | **Renamed in Build 48** (owner decision 2026-10-21, "canvasmc dihapus total, tidak ada shim tipis"): the package moved from `io.canvasmc.canvas` to `dev.iyanz.sourbycraft.api`, with no compatibility shim. The Bukkit entry points (`World.getRegionizer()`, `Server.unloadWorldAsync`, `createRegionizedData`, `getLocalRegionizedData`, `getRegionThreadingTickRateManager`, `MapPalette` SIMD path, `@Unsupported`) keep their names and now use the new types; the engine baseline names them by simple name and three SourbyCraft feature patches (MC 0059, Paper 0018, API 0001) supply the imports. | **Deliberate binary break** for every plugin compiled against the old package: such a plugin fails to load or link (`NoClassDefFoundError`) until rebuilt against `sourbyapi` Build 48. The old-to-new class table is in `sourbyapi/README.md`. |
-| Engine config file names `config/canvas-server.yml`, `config/canvas-worlds.yml`, per-world `canvas-patch.yml`, and the `canvas/` data directory (`canvas/pearls.dat`) | `aurora/engine/GlobalConfiguration`, `WorldConfig`, `util/migration/PearlsMigration` | Existing servers keep their settings and saved data. The files say so in their own header ("historical path is retained"). | Silent loss of operator settings or pearl data unless a migration is written. SourbyCraft must not rewrite them on its own (section 4). |
-| Permission nodes `canvas.broadcasting.receiver`, `canvas.command.worlddistance` | `GlobalConfiguration:50`, `subcommands/WorldDistanceSubCommand:44` | Permission plugins already hold these grants. | Operators lose access until grants are re-issued. |
-| Spark config group `canvas/` (`CanvasSplitParser`) beside `sourbycraft/` | `spark/SourbyServerConfigProvider:57,272` | It reports the engine files above to the profiler. | Follows the file names; changes only with them. |
+| Engine config file names `config/canvas-server.yml`, `config/canvas-worlds.yml`, per-world `canvas-patch.yml` | `aurora/engine/GlobalConfiguration`, `WorldConfig` | Kept deliberately (owner decision 2026-10-21): existing servers keep their settings. The files say so in their own header ("historical path is retained"). | Silent loss of operator settings unless a migration is written. SourbyCraft must not rewrite them on its own (section 4). |
 | Plugin descriptor key `canvas-supported` (read beside `folia-supported`) | `startup/StartupIndexStage:56`, `SourbyCraftConfig:323`, `startup/PluginDescriptor` | Plugins in the wild declare it. | Plugins that only declare it would be treated as not region-safe. |
-| Engine member names `canvas$...` / `canvasConfig()` / `reloadCanvasConfig`, class names `CanvasRegionizedWorldData`, `CanvasCommands`, `CanvasFileMigration` (about 136 `canvas$` occurrences in 34 files of the patch sources and engine code) | `minecraft-patches/sources`, `aurora/engine` | Engine-internal. Renaming is churn across the engine baseline that `build-data/engine-baseline.sha256` would show as a reviewed diff, with no behaviour change. | None for plugins; high patch churn and rebase risk. |
+| Engine member names `canvas$...` / `canvasConfig()` / `reloadCanvasConfig`, class name `CanvasRegionizedWorldData` (about 136 `canvas$` occurrences in 34 files of the patch sources and engine code) | `minecraft-patches/sources`, `aurora/engine` | Engine-internal. Renaming is churn across the engine baseline that `build-data/engine-baseline.sha256` would show as a reviewed diff, with no behaviour change. | None for plugins; high patch churn and rebase risk. |
 | Environment variable `CANVAS_TEST_STRICT` set for the server tests | `sourbycraft-server/build.gradle.kts.patch:192` | Test-only switch for the engine's strict guard mode. | Test configuration only. |
 | CI/release branch name `release/26.2-canvas` | `.github/workflows/build.yml` (`on.push.branches`, release gating), `AGENTS.md` | The publish job is gated on this ref name. | Changing it changes who publishes; a CI and owner decision. |
 
@@ -155,8 +153,29 @@ Not hard, listed so nobody re-audits them: the `/canvas` command tree is not reg
 public build identity carries no Canvas suffix from Build 47 (`BuildInfo` only mentions the old `c` suffix in
 comments and strips it from legacy values); Canvas is no longer an upstream or toolchain input (section 2).
 
+Renamed in Build 48 (owner decision 2026-10-21, "replace every remaining user/plugin-visible Canvas
+identifier"; old names still read until Build 50, see `docs/releases/26.2-build-50.md`):
+
+| Was | Now | Old name |
+| --- | --- | --- |
+| Permission `canvas.broadcasting.receiver` | `aurora.broadcasting.receiver` (`aurora/engine/BroadcastPermission`) | still receives when a permission plugin sets it explicitly; one deprecation line per player |
+| JVM flags `-DCanvas.AggressiveChunkSystem`, `-DCanvas.DisableRegionProfiler`, `-DCanvas.isRunningInIDE` | `-DAurora.AggressiveChunkSystem`, `-DAurora.DisableRegionProfiler`, `-DAurora.isRunningInIDE` (`aurora/engine/util/LegacyNames`, engine baseline) | still read when the new flag is absent; one deprecation line |
+| Saved data `canvas:pearls` (`data/canvas/pearls.dat`) | `aurora:pearls` (`data/aurora/pearls.dat`) | moved once at world load by `util/migration/PearlsMigration`; a leftover old file beside a new one is renamed `pearls.dat.superseded`, never deleted |
+| `paper:level_overrides` key `Canvas.Distance` | `Aurora.Distance` (`PerWorldDistanceConfig.LEVEL_OVERRIDES_FIELD`) | read when the new key is absent; the next save writes only the new key |
+| Ticket types `canvas:end_credits`, `canvas:region_profiler_hold` | `aurora:end_credits`, `aurora:region_profiler_hold` | none needed: not persisted |
+| `ServerBuildInfo.BRAND_CANVAS_ID` (`canvasmc:canvas`), fallback brand name `Canvas` | `BRAND_SOURBYCRAFT_ID` (`sourbycraft:sourbycraft`), fallback `SourbyCraft` (sourbyapi feature 0002, Paper feature 0020) | **removed, no shim** (breaking API change, `sourbyapi/README.md`) |
+| bStats service `Canvas`, version `Canvas-V3-…`, chart `canvas_version` | `SourbyCraft`, `SourbyCraft-…`, `sourbycraft_version` (Paper feature 0020) | none: nothing is submitted (Paper feature 0001) |
+| `CanvasVersionFetcher` (commit link to CraftCanvasMC/Canvas) | `AuroraVersionFetcher`, links to `github.com/YanIanZ/SourbyCraft` | none (internal class) |
+| `CanvasFileMigration` log lines "Canvas filesave features" | `AuroraFileMigration`, "Aurora engine save files" | none |
+| Spark config group `canvas/` (`CanvasSplitParser`) | `aurora/` (`AuroraSplitParser`); the entries inside keep the real file names (`canvas-server.yml`, ...) | none |
+| GUI icon `canvas-logo.png` (Canvas logo) | `sourbycraft-logo.png` (from `.github/assets/SourbyCraft.png`, MC feature 0069) | none |
+| Dormant `/canvas` help dialog and subcommands (`aurora/engine/commands/*`, `aurora/engine/subcommands/*`, permissions `canvas.command.*`, flag `Canvas.LegacyHelpCommand`) | deleted: never registered since feature 0020; vanilla/Paper `/help` unchanged | none |
+
+Kept deliberately: the `config/canvas-*.yml` file names, the plugin.yml key `canvas-supported`, and
+`META-INF/licenses/LICENSE_CANVAS` (attribution).
+
 Not verified here: whether any third-party plugin in the wild links the former Canvas API (it breaks on Build 48), and whether
-any permission plugin holds the two nodes; both are deployment facts, not repository facts. Counts above come
+any permission plugin holds `canvas.broadcasting.receiver`; both are deployment facts, not repository facts. Counts above come
 from `rg` on 2026-10-20, not from a pinned policy test; `scripts/independence_policy.py` pins only the narrower
 set in section 2.1 (symbols reached from SourbyCraft-owned code and from feature patches).
 

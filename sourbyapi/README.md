@@ -89,6 +89,17 @@ SourbyCraft feature patches add the imports (Minecraft, Paper server, and this m
 feature patch, `paper-patches/features/0001-…`). `scripts/test_independence_policy.py` fails on any
 `io.canvasmc` string in this module's sources, the server sources or any patch tree.
 
+## Breaking change in Build 48: `ServerBuildInfo.BRAND_CANVAS_ID` was removed
+
+Same owner decision (2026-10-21): `io.papermc.paper.ServerBuildInfo.BRAND_CANVAS_ID`
+(`Key.key("canvasmc", "canvas")`) is **deleted**, with no compatibility constant. Use
+`ServerBuildInfo.BRAND_SOURBYCRAFT_ID` (`Key.key("sourbycraft", "sourbycraft")`), which is the
+`Brand-Id` a SourbyCraft server jar declares; `ServerBuildInfo.buildInfo().brandId()` returns it,
+and `isBrandCompatible` accepts it, `BRAND_PAPER_ID` and `BRAND_FOLIA_ID` (unchanged). A plugin
+compiled against the old constant fails with `NoSuchFieldError` when that code runs; a plugin that
+compared `brandId()` with the Canvas key already got `false` on SourbyCraft. Source: this module's
+second API feature patch, `paper-patches/features/0002-…`; pinned by `BrandIdTest`.
+
 ## Artifact coordinates
 
 ```

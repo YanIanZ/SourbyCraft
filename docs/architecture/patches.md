@@ -12,7 +12,7 @@
 
 # Patch inventory and ownership audit (PRD Phase 1)
 
-> **Historical numbering (updated 2026-10-21):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later in that historical snapshot. Current numbered feature-file counts: **69 Minecraft (0001–0069), 19 Paper (0001–0019), 1 sourbyapi (0001)**, counted from `NNNN-*.patch` files on 2026-10-21. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
+> **Historical numbering (updated 2026-10-21):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later in that historical snapshot. Current numbered feature-file counts: **70 Minecraft (0001–0070), 20 Paper (0001–0020), 2 sourbyapi (0001–0002)**, counted from `NNNN-*.patch` files on 2026-10-21. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
 
 Historical build-45 review on `release/26.2-canvas`, classified per PRD section 22 with
 the section 87 fields. Counts are added and removed lines in the patch file itself.
@@ -48,7 +48,7 @@ entries; it is not repeated per row.
 
 ### Historical `minecraft-patches/features/` — 17 patches (0013 and 0015 removed by action 2)
 
-Current directory count: **69** numbered feature patches (0001–0069), 2026-10-21.
+Current directory count: **70** numbered feature patches (0001–0070), 2026-10-22.
 
 | Patch | Category | Upstream dependency | Lines | Status | Action |
 | --- | --- | --- | ---: | --- | --- |
@@ -110,6 +110,8 @@ Current directory count: **69** numbered feature patches (0001–0069), 2026-10-
 | plugin API types from `dev.iyanz.sourbycraft.api` (minecraft 0059, paper 0018, sourbyapi 0001) | 700-api | 7 MC engine/vanilla files; `CraftServer`, `CraftWorld`; 7 Bukkit/Paper API files | +15 −0; +5 −0; +12 −0 | KEEP | Imports only: the baseline uses simple names, these patches add the `dev.iyanz.sourbycraft.api` imports; `io.canvasmc` removed with no shim (see `sourbyapi/README.md`). |
 | ender-pearl `PlayerTeleportEvent` (minecraft 0064) | 300-correctness | `ThrownEnderpearl` | +5 −72 | REVIEW | Logic in `entity/teleport/PearlTeleport` + `PearlTeleportFlow` over the Aurora `RegionOwnership`/`RegionChunkLoading` contracts; test-plugin `PearlTeleportProbe`. |
 | owned refusal messages, off-region `getAverageTickTime`, `World#getTickableTileEntityCount` (paper 0019) | 300-correctness | `CraftServer`, `CraftWorld`, `CraftScheduler`, `CraftServerTickManager`, `PaperDatapack`, `MCUtil`, `RestartCommand` | +29 −23 | KEEP | `guards/RegionRefusal`, `guards/RegionStatistics`; refusals still match the bridge's `ViolationClassifier`. |
+| SourbyCraft brand id and fallback, bStats names (paper 0020, sourbyapi 0002) | 900-branding | `ServerBuildInfoImpl`, `Metrics`; `ServerBuildInfo` | +6 −6; +5 −3 | KEEP | `BRAND_CANVAS_ID` removed with no shim, `BRAND_SOURBYCRAFT_ID` added (`sourbyapi/README.md`); bStats names only, nothing is submitted (paper 0001). Owner decision 2026-10-21. |
+| server GUI icon (minecraft 0070) | 900-branding | `MinecraftServerGui` | +1 −1 | KEEP | `sourbycraft-logo.png` replaces `canvas-logo.png`. The engine's other Canvas-era names (ticket ids, `aurora:pearls`, `Aurora.*` JVM flags, `Aurora.Distance`, `AuroraVersionFetcher`, `AuroraFileMigration`) were renamed in the engine baseline (no `sourby` text there, manifest regenerated) and the dormant `/canvas` command sources were deleted from it; see `independence.md` §2.2. |
 
 ## Recommended actions, in priority order
 
@@ -199,8 +201,8 @@ different file but as one feature. 0007's explanation was carried into 0006's me
 rather than deleted with the file.
 
 At that historical action-3 checkpoint, the Minecraft feature set was thirteen patches,
-renumbered `0001-0013` with no gaps. Current counts (2026-10-21): **65 Minecraft, 19 Paper,
-1 sourbyapi** numbered feature patches; the tables above retain their historical numbering.
+renumbered `0001-0013` with no gaps. Current counts (2026-10-21): **66 Minecraft, 20 Paper,
+2 sourbyapi** numbered feature patches; the tables above retain their historical numbering.
 
 The gaps this originally left were not sustainable. `rebuildMinecraftFeaturePatches`
 renumbers the whole set every time it runs — it regenerates the filenames from the

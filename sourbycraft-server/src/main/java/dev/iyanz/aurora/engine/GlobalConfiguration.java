@@ -47,7 +47,6 @@ import org.slf4j.LoggerFactory;
 public class GlobalConfiguration extends Part {
 
     private static final Path CONFIG_PATH = Path.of("config/canvas-server.yml").toAbsolutePath().normalize();
-    private static final String BROADCAST_PERMISSION = "canvas.broadcasting.receiver";
 
     protected static final int CHAR_LIM = 90;
 
@@ -144,7 +143,7 @@ public class GlobalConfiguration extends Part {
             try {
                 RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
             } catch (final Throwable ignored) {
-                broadcast("Canvas' faster random impl is not supported by your VM, falling back to legacy random", WARN);
+                broadcast("Aurora's faster random implementation is not supported by your VM, falling back to legacy random", WARN);
                 ENABLE_FASTER_RANDOM = false;
             }
 
@@ -226,7 +225,7 @@ public class GlobalConfiguration extends Part {
             // players might be in the server, try and send msg to people with perms
 
             for (final ServerPlayer entityPlayer : MinecraftServer.getServer().getPlayerList().getPlayers()) {
-                if (entityPlayer.getBukkitEntity().hasPermission(BROADCAST_PERMISSION)) {
+                if (BroadcastPermission.receives(entityPlayer.getBukkitEntity())) {
                     entityPlayer.sendSystemMessage(literal);
                 }
             }
@@ -253,7 +252,7 @@ public class GlobalConfiguration extends Part {
         {
             option("affinityScheduler")
                 .docs(
-                    "Configurations for the AFFINITY scheduler provided by Canvas. For these options to take effect,",
+                    "Configurations for the AFFINITY region scheduler. For these options to take effect,",
                     "change the \"threaded-regions.scheduler\" option in \"paper-global.yml\" to \"AFFINITY\""
                 );
         }
@@ -283,7 +282,7 @@ public class GlobalConfiguration extends Part {
                     ).greaterThanOrEqualTo(0.0F);
 
                 option("tickRegionAffinity")
-                    .docs("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores")
+                    .docs("Thread affinity for the AFFINITY region scheduler. By using this, you could pin the threads of region scheduler to cpu cores")
                     .greaterThanOrEqualTo(0.0F);
                 option("enableAffinitySchedulerCpuAffinity").docs("Enables pinning threads of the AFFINITY region scheduler to cpu cores");
             }
@@ -312,7 +311,7 @@ public class GlobalConfiguration extends Part {
             option("guardSeverity")
                 .docs(
                     Style.wrap(
-                        "Canvas introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are"
+                        "The Aurora engine adds extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are"
                     ).defineEnum(GuardSeverity.class, (severity) -> switch (severity) {
                         case LOG -> "Just logs a warning in console, but continues the operation";
                         case THROW -> "Throws an exception, can crash the server. Good for ensuring correctness";
@@ -492,7 +491,7 @@ public class GlobalConfiguration extends Part {
         option("displayWorldLoadScreenForCrossRegionTransfers")
             .docs(
                 "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
-                "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
+                "instead shows an empty void. With this enabled, the server will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
         option("tileEntitySnapshotCreation").docs("Enables creation of tile entity snapshots on retrieving blockstates");
@@ -561,7 +560,7 @@ public class GlobalConfiguration extends Part {
                 "Write a whole number and a unit: s (seconds), m (minutes), h (hours), d (days), w (weeks), mo (months), y (years), e.g. 30d or 2w.",
                 "A lone upper-case \"M\" is rejected on purpose because it reads as months but means minutes; use \"m\" or \"mo\". An unreadable value stops the configuration from loading and names this key."
             ).timeSpan("logs.cleanerTimeSpan", true);
-            option("logEnderPearlRewriteActions").docs("Logs when a pearl is saved or loaded from Canvas' pearl save rewrite");
+            option("logEnderPearlRewriteActions").docs("Logs when a pearl is saved or loaded by the Aurora pearl save rewrite");
         }
 
         private boolean enableLogCleaner = false;
@@ -594,7 +593,7 @@ public class GlobalConfiguration extends Part {
 
     {
         option("autosave").docs(
-            "Folia breaks a lot of autosave features. Canvas restores these,",
+            "Folia breaks a lot of autosave features. Aurora restores these,",
             "and this section allows more specific configuration of autosave functionalities"
         );
     }

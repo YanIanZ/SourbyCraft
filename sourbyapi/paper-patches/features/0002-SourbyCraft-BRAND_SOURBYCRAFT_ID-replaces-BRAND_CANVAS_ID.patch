@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Wed, 21 Oct 2026 23:09:57 +0700
+Subject: [PATCH] SourbyCraft - BRAND_SOURBYCRAFT_ID replaces BRAND_CANVAS_ID
+
+Breaking API change (owner decision 2026-10-21): the Canvas brand key is
+removed without a shim; SourbyCraft's own key matches the jar's Brand-Id
+sourbycraft:sourbycraft.
+
+diff --git a/src/main/java/io/papermc/paper/ServerBuildInfo.java b/src/main/java/io/papermc/paper/ServerBuildInfo.java
+index 4e9e4e40d31a323bf31aa3cb08ba10f94ebc053c..a3967d9275f370663c341c83db569e75cd77799a 100644
+--- a/src/main/java/io/papermc/paper/ServerBuildInfo.java
++++ b/src/main/java/io/papermc/paper/ServerBuildInfo.java
+@@ -21,11 +21,13 @@ public interface ServerBuildInfo {
+      * The brand id for Folia.
+      */
+     Key BRAND_FOLIA_ID = Key.key("papermc", "folia");
++    // Canvas end - Rebrand
++    // SourbyCraft start - brand id; BRAND_CANVAS_ID ("canvasmc:canvas") removed (owner decision 2026-10-21, no shim)
+     /**
+-     * The brand id for Canvas.
++     * The brand id for SourbyCraft, the {@code Brand-Id} of a SourbyCraft server jar.
+      */
+-    Key BRAND_CANVAS_ID = Key.key("canvasmc", "canvas");
+-    // Canvas end - Rebrand
++    Key BRAND_SOURBYCRAFT_ID = Key.key("sourbycraft", "sourbycraft");
++    // SourbyCraft end - brand id
+ 
+     /**
+      * Gets the {@code ServerBuildInfo}.

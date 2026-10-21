@@ -108,71 +108,147 @@ class PearlsMigrationTest {
     @Test
     void conductMovesTheLegacyFileIntoTheNewLocationWrappedAndDeletesTheOldOne(@TempDir final Path dir) throws IOException {
         final Path legacyFile = dir.resolve("pearls.dat");
-        final Path newFile = dir.resolve("world").resolve("data").resolve("canvas").resolve("pearls.dat");
+        final Path data = dir.resolve("world").resolve("data");
+        final Path newFile = PearlsMigration.newPath(data);
         NbtIo.writeCompressed(legacy(), legacyFile);
         final PearlsMigration migration = new PearlsMigration(legacyFile);
 
-        assertTrue(migration.hasOldData(newFile));
-        assertFalse(migration.hasNewData(newFile));
+        assertTrue(migration.hasOldData(data));
+        assertFalse(migration.hasNewData(data));
 
-        migration.conduct(newFile);   // creates the missing parent directories
+        migration.conduct(data);   // creates the missing parent directories
 
         assertFalse(Files.exists(legacyFile), "legacy file removed after a successful move");
+        assertEquals(data.resolve("aurora").resolve("pearls.dat"), newFile);
         assertEquals(PearlsMigration.migratePearlsTag(legacy()), NbtIo.readCompressed(newFile, NbtAccounter.unlimitedHeap()));
-        assertFalse(migration.hasOldData(newFile), "nothing left to migrate");
-        assertTrue(migration.hasNewData(newFile));
+        assertFalse(migration.hasOldData(data), "nothing left to migrate");
+        assertTrue(migration.hasNewData(data));
     }
 
     @Test
     void conductReshapesAnExistingNewFileInPlaceAndLeavesTheLegacyFileAlone(@TempDir final Path dir) throws IOException {
         final Path legacyFile = dir.resolve("pearls.dat");
-        final Path newFile = dir.resolve("data").resolve("canvas").resolve("pearls.dat");
+        final Path data = dir.resolve("data");
+        final Path newFile = PearlsMigration.newPath(data);
         Files.createDirectories(newFile.getParent());
         NbtIo.writeCompressed(legacy(), newFile);          // pre-merger 26.2 shape already at the new path
         NbtIo.writeCompressed(legacy(), legacyFile);
         final PearlsMigration migration = new PearlsMigration(legacyFile);
 
-        assertTrue(migration.hasOldData(newFile));
-        assertFalse(migration.hasNewData(newFile), "a legacy-shaped file at the new path is not new data");
+        assertTrue(migration.hasOldData(data));
+        assertFalse(migration.hasNewData(data), "a legacy-shaped file at the new path is not new data");
 
-        migration.conduct(newFile);
+        migration.conduct(data);
 
         assertTrue(Files.exists(legacyFile), "the new-path branch never touches the legacy file");
         assertEquals(PearlsMigration.migratePearlsTag(legacy()), NbtIo.readCompressed(newFile, NbtAccounter.unlimitedHeap()));
-        assertTrue(migration.hasNewData(newFile));
+        assertTrue(migration.hasNewData(data));
+    }
+
+    @Test
+    void canvasEraFileIsMovedToTheAuroraNamespaceOnceAndTheOldDirectoryGoes(@TempDir final Path dir) throws IOException {
+        final Path data = dir.resolve("data");
+        final Path canvasFile = PearlsMigration.canvasPath(data);
+        Files.createDirectories(canvasFile.getParent());
+        final CompoundTag stored = PearlsMigration.migratePearlsTag(legacy());
+        NbtIo.writeCompressed(stored, canvasFile);
+        final PearlsMigration migration = new PearlsMigration(dir.resolve("absent-pearls.dat"));
+
+        assertTrue(migration.hasOldData(data), "data/canvas/pearls.dat is old data");
+        assertFalse(migration.hasNewData(data));
+
+        migration.conduct(data);
+
+        assertEquals(stored, NbtIo.readCompressed(PearlsMigration.newPath(data), NbtAccounter.unlimitedHeap()), "round trip keeps every pearl");
+        assertFalse(Files.exists(canvasFile), "the old file is read once, then removed");
+        assertFalse(Files.exists(canvasFile.getParent()), "the emptied canvas/ directory is removed");
+        assertFalse(Files.exists(PearlsMigration.newPath(data).resolveSibling("pearls.dat.migrating")), "no temp file left");
+        assertFalse(migration.hasOldData(data), "a second boot finds nothing to migrate");
+        assertTrue(migration.hasNewData(data));
+    }
+
+    @Test
+    void canvasEraFileInThePreMergerShapeIsWrappedWhileMoving(@TempDir final Path dir) throws IOException {
+        final Path data = dir.resolve("data");
+        final Path canvasFile = PearlsMigration.canvasPath(data);
+        Files.createDirectories(canvasFile.getParent());
+        NbtIo.writeCompressed(legacy(), canvasFile);
+
+        new PearlsMigration(dir.resolve("absent-pearls.dat")).conduct(data);
+
+        assertEquals(PearlsMigration.migratePearlsTag(legacy()), NbtIo.readCompressed(PearlsMigration.newPath(data), NbtAccounter.unlimitedHeap()));
+        assertFalse(Files.exists(canvasFile));
+    }
+
+    @Test
+    void canvasEraFileBesideAnExistingNewFileIsKeptAsSupersededNotDeleted(@TempDir final Path dir) throws IOException {
+        final Path data = dir.resolve("data");
+        final Path canvasFile = PearlsMigration.canvasPath(data);
+        final Path newFile = PearlsMigration.newPath(data);
+        Files.createDirectories(canvasFile.getParent());
+        Files.createDirectories(newFile.getParent());
+        final CompoundTag current = PearlsMigration.migratePearlsTag(legacy());
+        ((CompoundTag) current.get("data")).putString("marker", "new");
+        NbtIo.writeCompressed(current, newFile);
+        NbtIo.writeCompressed(legacy(), canvasFile);
+        final PearlsMigration migration = new PearlsMigration(dir.resolve("absent-pearls.dat"));
+
+        assertFalse(migration.hasNewData(data), "a leftover Canvas-era file means the migration has not finished");
+
+        migration.conduct(data);
+
+        assertEquals(current, NbtIo.readCompressed(newFile, NbtAccounter.unlimitedHeap()), "the new file wins");
+        assertFalse(Files.exists(canvasFile));
+        assertEquals(legacy(), NbtIo.readCompressed(canvasFile.resolveSibling("pearls.dat.superseded"), NbtAccounter.unlimitedHeap()),
+            "the old file is kept byte-for-byte content under a new name");
+        assertTrue(migration.hasNewData(data));
     }
 
     @Test
     void hasOldDataIsFalseWhenNeitherLocationHoldsLegacyData(@TempDir final Path dir) {
         final PearlsMigration migration = new PearlsMigration(dir.resolve("pearls.dat"));
-        final Path newFile = dir.resolve("data").resolve("canvas").resolve("pearls.dat");
+        final Path data = dir.resolve("data");
 
-        assertFalse(migration.hasOldData(newFile));
-        assertFalse(migration.hasNewData(newFile));
+        assertFalse(migration.hasOldData(data));
+        assertFalse(migration.hasNewData(data));
     }
 
     @Test
     void conductFailsLoudlyAndLeavesNothingBehindWhenThereIsNoSourceData(@TempDir final Path dir) {
-        final Path newFile = dir.resolve("data").resolve("canvas").resolve("pearls.dat");
+        final Path data = dir.resolve("data");
         final PearlsMigration migration = new PearlsMigration(dir.resolve("missing-pearls.dat"));
 
-        final RuntimeException failure = assertThrows(RuntimeException.class, () -> migration.conduct(newFile));
+        final RuntimeException failure = assertThrows(RuntimeException.class, () -> migration.conduct(data));
 
         assertEquals("Couldn't conduct pearl migration", failure.getMessage());
         assertTrue(failure.getCause() instanceof IOException);
-        assertFalse(Files.exists(newFile));
+        assertFalse(Files.exists(PearlsMigration.newPath(data)));
     }
 
     @Test
     void conductDoesNotDeleteTheLegacyFileWhenItCannotBeParsed(@TempDir final Path dir) throws IOException {
         final Path legacyFile = Files.writeString(dir.resolve("pearls.dat"), "not gzip nbt");
-        final Path newFile = dir.resolve("data").resolve("canvas").resolve("pearls.dat");
+        final Path data = dir.resolve("data");
         final PearlsMigration migration = new PearlsMigration(legacyFile);
 
-        assertThrows(RuntimeException.class, () -> migration.conduct(newFile));
+        assertThrows(RuntimeException.class, () -> migration.conduct(data));
 
         assertTrue(Files.exists(legacyFile), "operator data survives a failed migration");
-        assertFalse(Files.exists(newFile));
+        assertFalse(Files.exists(PearlsMigration.newPath(data)));
+    }
+
+    @Test
+    void conductDoesNotDeleteTheCanvasEraFileWhenItCannotBeParsed(@TempDir final Path dir) throws IOException {
+        final Path data = dir.resolve("data");
+        final Path canvasFile = PearlsMigration.canvasPath(data);
+        Files.createDirectories(canvasFile.getParent());
+        Files.writeString(canvasFile, "not gzip nbt");
+        final PearlsMigration migration = new PearlsMigration(dir.resolve("absent-pearls.dat"));
+
+        assertThrows(RuntimeException.class, () -> migration.conduct(data));
+
+        assertEquals("not gzip nbt", Files.readString(canvasFile), "operator data survives a failed migration");
+        assertFalse(Files.exists(PearlsMigration.newPath(data)));
     }
 
     @Test

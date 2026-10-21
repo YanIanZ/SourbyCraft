@@ -39,13 +39,13 @@ import org.jspecify.annotations.Nullable;
 /**
  * SourbyCraft-owned spark configuration provider.
  *
- * <p>Keeps the normal Paper/Canvas configuration metadata while adding a first-class
+ * <p>Keeps the normal Paper and Aurora engine configuration metadata while adding a first-class
  * {@code sourbycraft/} group. The profiler is read-only: it never rewrites or migrates
  * operator configuration.</p>
  */
 public final class SourbyServerConfigProvider extends ServerConfigProvider {
 
-    private static final Map<String, ConfigParser> FILES;
+    static final Map<String, ConfigParser> FILES;
     static final Collection<String> HIDDEN_PATHS;
 
     static {
@@ -54,7 +54,7 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
             .put("bukkit.yml", YamlConfigParser.INSTANCE)
             .put("spigot.yml", YamlConfigParser.INSTANCE)
             .put("paper.yml", YamlConfigParser.INSTANCE)
-            .put("canvas/", CanvasSplitParser.INSTANCE)
+            .put("aurora/", AuroraSplitParser.INSTANCE)
             .put("paper/", SplitYamlConfigParser.INSTANCE)
             .put("sourbycraft/", SourbyCraftSplitParser.INSTANCE)
             .put("purpur.yml", YamlConfigParser.INSTANCE)
@@ -269,8 +269,12 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
         }
     }
 
-    private static class CanvasSplitParser extends YamlConfigParser {
-        static final CanvasSplitParser INSTANCE = new CanvasSplitParser();
+    /**
+     * The Aurora engine files. Group {@code aurora/} (was {@code canvas/} until 2026-10-21); the entry names inside
+     * are the real file names, which stay {@code canvas-*.yml} so existing servers keep their settings.
+     */
+    private static class AuroraSplitParser extends YamlConfigParser {
+        static final AuroraSplitParser INSTANCE = new AuroraSplitParser();
 
         @Nullable
         @Override

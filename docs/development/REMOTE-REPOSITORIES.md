@@ -155,7 +155,8 @@ Order on a fresh host, as the code runs it:
 
 Not inventoried here: Mojang session/authentication servers for `online-mode=true` and other
 vanilla/Paper/plugin network use (Spark upload, plugin update checks). The `/version` output links
-to `https://github.com/CraftCanvasMC/Canvas/` (`CanvasVersionFetcher.java`) but fetches nothing.
+to `https://github.com/YanIanZ/SourbyCraft/commit/<commit>` (`AuroraVersionFetcher.java`, was
+`CanvasVersionFetcher` linking to CraftCanvasMC/Canvas until 2026-10-21) but fetches nothing.
 The bStats phone-home is removed by the Paper baseline patch of `Metrics.java`.
 
 ## 6. Without network

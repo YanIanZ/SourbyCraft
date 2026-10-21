@@ -6,7 +6,7 @@
          LEGACY_GAME_TYPE_CODEC.fieldOf("game_type").forGetter(levelOverrides -> levelOverrides.gameType),
 -        LevelSettings.DifficultySettings.CODEC.fieldOf("difficulty_settings").forGetter(levelOverrides -> levelOverrides.difficultySettings)
 +        LevelSettings.DifficultySettings.CODEC.fieldOf("difficulty_settings").forGetter(levelOverrides -> levelOverrides.difficultySettings),
-+        dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.CODEC.fieldOf("Canvas.Distance").forGetter(levelOverrides -> levelOverrides.canvas$distanceConfig) // Canvas - per world distance
++        dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.LEVEL_OVERRIDES_FIELD.forGetter(levelOverrides -> levelOverrides.canvas$distanceConfig) // Canvas - per world distance // Aurora - saved as Aurora.Distance, Canvas.Distance read until Build 50
      ).apply(instance, PaperLevelOverrides::new));
      public static final SavedDataType<PaperLevelOverrides> TYPE = new SavedDataType<>(
          Identifier.fromNamespaceAndPath(Identifier.PAPER_NAMESPACE, "level_overrides"),
@@ -55,7 +55,7 @@
              GameType.byId(levelData.get("GameType").asInt(GameType.SURVIVAL.getId())),
 -            levelData.get("difficulty_settings").read(LevelSettings.DifficultySettings.CODEC).result().orElse(LevelSettings.DifficultySettings.DEFAULT)
 +            levelData.get("difficulty_settings").read(LevelSettings.DifficultySettings.CODEC).result().orElse(LevelSettings.DifficultySettings.DEFAULT),
-+            levelData.get("Canvas.Distance").read(dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.CODEC).resultOrPartial(dev.iyanz.aurora.engine.GlobalConfiguration.LOGGER::error).orElse(dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.DEFAULT) // Canvas - per world distance
++            dev.iyanz.aurora.engine.world.PerWorldDistanceConfig.fromRawLevelData(levelData) // Canvas - per world distance // Aurora - Aurora.Distance, else Canvas.Distance
          );
      }
  

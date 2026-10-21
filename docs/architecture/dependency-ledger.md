@@ -201,7 +201,7 @@ every Canvas patch's added lines, plus SourbyCraft's own source and patches.
 | Candidate | Finding |
 |---|---|
 | Paper's startup update check (`PaperVersionFetcher`) | Removed by Canvas (`MinecraftServer.java.patch`, "Canvas - Rebrand") |
-| `CanvasVersionFetcher` (`/version`) | **Corrected 2026-10-05:** it did call `https://canvasmc.io/api/v2/` (`getLatestBuild`) whenever the jar's `Build-Number` was set, and `GlobalConfiguration` did the same (`getBuild`) after every config load. SourbyCraft's CI never sets `BUILD_NUMBER`, so released jars took the local path and made no request. Both calls were removed with `httpclient`; `/version` now always reports the local status it already showed |
+| `CanvasVersionFetcher` (`/version`; renamed `AuroraVersionFetcher` 2026-10-21, commit link now SourbyCraft) | **Corrected 2026-10-05:** it did call `https://canvasmc.io/api/v2/` (`getLatestBuild`) whenever the jar's `Build-Number` was set, and `GlobalConfiguration` did the same (`getBuild`) after every config load. SourbyCraft's CI never sets `BUILD_NUMBER`, so released jars took the local path and made no request. Both calls were removed with `httpclient`; `/version` now always reports the local status it already showed |
 | `io.canvasmc.httpclient:httpclient` | **Corrected 2026-10-05:** the jar's only class is `io.canvasmc.canvas.ClientV2`, used by the two calls above; the original audit searched for the artifact's group name instead. Removed with the Canvas Maven repository |
 | `https://maven.canvasmc.io` | No longer used, at build time or runtime (removed 2026-10-05) |
 | SourbyCraft's own network I/O | GitHub (updater, Via), local GeoIP, speedtest, bootstrap libraries; see [region-io-audit.md](region-io-audit.md). None of it is a Canvas service |
