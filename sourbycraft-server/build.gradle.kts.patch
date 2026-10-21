@@ -176,7 +176,8 @@
 +            "Specification-Vendor" to "dev.iyanz", // SourbyCraft - Rebrand
 +            "Brand-Id" to "sourbycraft:sourbycraft", // SourbyCraft - Rebrand
 +            "Brand-Name" to "SourbyCraft", // SourbyCraft - Rebrand
-             "Build-Number" to (build ?: ""),
+-            "Build-Number" to (build ?: ""),
++            "Build-Number" to sourbyBuild, // SourbyCraft - Paper formats VERSION_FULL from this; empty printed DEV on REL jars
              "Build-Time" to buildTime.toString(),
 +            "Build-Time-Display" to buildTimeDisplay, // SourbyCraft - GMT+7 day-name boot-line timestamp
              "Git-Branch" to gitBranch,
