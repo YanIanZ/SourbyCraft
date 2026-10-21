@@ -294,6 +294,7 @@ subprojects {
 
         val engineCodename = providers.gradleProperty("codename").getOrElse("dev")
         inputs.property("internalVersion", internalVersionProvider)
+        inputs.property("gitBranch", sourbycraftBranchProvider)
         inputs.property("mcVersion", mcVersion)
         inputs.property("codename", engineCodename)
         inputs.property("sourbyBuild", sourbyBuild)
@@ -332,6 +333,7 @@ subprojects {
                 build=$buildLabel
                 buildNumber=$rawBuild
                 gitCommit=${identity["commit"]}
+                gitBranch=${sourbycraftBranchProvider.get()}
                 treeHash=${identity["treeHash"]}
                 dirty=$dirty
                 mcVersion=$mcVersion

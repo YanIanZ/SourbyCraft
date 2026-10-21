@@ -11,13 +11,15 @@ import java.util.Properties;
  * auto-updater so they all report the same version/build/tagline without re-parsing the jar.
  *
  * @param version        the channel version, e.g. {@code "26.2-REL"}
- * @param build          the human-facing build id, e.g. {@code "4c"} (c = Canvas base); may be empty
+ * @param build          the build label, e.g. {@code "48-dirty"}; may be empty
  * @param buildNumber    the raw build number for update comparison, e.g. {@code "43.1"}, without
  *                       the platform suffix; derived from {@code build} when the properties file
  *                       predates the field
  * @param mcVersion       the Minecraft version this build targets
  * @param tagline        short marketing tagline shown in the startup banner
  * @param buildTimestamp ISO-8601 instant the jar was built, or empty if unknown
+ * @param gitBranch      source branch, from the same provider as the manifest's Git-Branch
+ * @param gitCommit      full source commit, matching the manifest's Git-Commit
  */
 public record BuildInfo(
     String version,
@@ -26,8 +28,16 @@ public record BuildInfo(
     String mcVersion,
     String codename,
     String tagline,
-    String buildTimestamp
+    String buildTimestamp,
+    String gitBranch,
+    String gitCommit
 ) {
+
+    /** Compatibility constructor for callers without source metadata. */
+    public BuildInfo(String version, String build, String buildNumber, String mcVersion,
+                     String codename, String tagline, String buildTimestamp) {
+        this(version, build, buildNumber, mcVersion, codename, tagline, buildTimestamp, "", "");
+    }
 
     /**
      * The engine name shown to operators. Since Build 47 it is always Aurora: the release codename
@@ -40,10 +50,14 @@ public record BuildInfo(
 
     /** Human-readable release codename, e.g. aurora-nexus -> Aurora Nexus. */
     public String codenameDisplay() {
-        if (this.codename == null || this.codename.isBlank() || "dev".equalsIgnoreCase(this.codename)) {
+        return codenameDisplay(this.codename);
+    }
+
+    private static String codenameDisplay(String codename) {
+        if (codename == null || codename.isBlank() || "dev".equalsIgnoreCase(codename)) {
             return "Development";
         }
-        final String[] parts = this.codename.split("[-_ ]+");
+        final String[] parts = codename.split("[-_ ]+");
         final StringBuilder out = new StringBuilder();
         for (final String part : parts) {
             if (part.isBlank()) continue;
@@ -51,7 +65,7 @@ public record BuildInfo(
             out.append(part.substring(0, 1).toUpperCase(Locale.ROOT));
             if (part.length() > 1) out.append(part.substring(1).toLowerCase(Locale.ROOT));
         }
-        return out.isEmpty() ? this.codename : out.toString();
+        return out.isEmpty() ? codename : out.toString();
     }
 
     /**
@@ -135,22 +149,54 @@ public record BuildInfo(
             p.getProperty("mcVersion", "unknown"),
             p.getProperty("codename", ""),
             p.getProperty("tagline", "Lightning Fast Performance · Feature Rich"),
-            p.getProperty("buildTimestamp", "")
+            p.getProperty("buildTimestamp", ""),
+            p.getProperty("gitBranch", ""),
+            p.getProperty("gitCommit", "")
         );
     }
 
-    /**
-     * Strip the trailing single-letter platform suffix ({@code c}=Canvas, {@code f}=Folia) from
-     * a build id when it follows a digit or dot, returning the raw build number for comparison.
-     * E.g. {@code "43c"} -> {@code "43"}, {@code "43.1c"} -> {@code "43.1"},
-     * {@code "44-hotfix"} -> {@code "44-hotfix"} (no known suffix).
-     */
-    public String releaseIdentity() {
-        final String release = displayVersion();
-        final String name = codenameDisplay();
-        return "Development".equals(name) ? release : release + " — " + name;
+    /** Display-only channel from the baked version suffix; never assumes a release. */
+    public String channel() {
+        if (version == null) return "UNKNOWN";
+        int dash = version.lastIndexOf('-');
+        return dash < 0 ? "UNKNOWN" : normalizeChannel(version.substring(dash + 1));
     }
 
+    private static String normalizeChannel(String channel) {
+        if (channel == null) return "UNKNOWN";
+        return switch (channel.trim().toUpperCase(Locale.ROOT)) {
+            case "REL" -> "REL";
+            case "DEV" -> "DEV";
+            case "EXP" -> "EXP";
+            default -> "UNKNOWN";
+        };
+    }
+
+    /** Shared display text only; version/build fields retain their machine-readable formats. */
+    public String releaseIdentity() {
+        final String commit = sourceOrUnknown(gitCommit);
+        return formatReleaseIdentity(build, codename, channel(), gitBranch,
+            commit.substring(0, Math.min(7, commit.length())));
+    }
+
+    /** Pure release formatter. The codename is the raw build codename; commit is already short. */
+    public static String formatReleaseIdentity(String buildNumber, String codename, String channel,
+                                               String branch, String shortCommit) {
+        final String release = "Build " + stripPlatformSuffix(sourceOrUnknown(buildNumber));
+        final String name = codenameDisplay(codename);
+        final String identity = "Development".equals(name) ? release : release + " — " + name;
+        final String actualChannel = normalizeChannel(channel);
+        return "REL".equals(actualChannel) ? identity
+            : identity + " (" + actualChannel + ", " + sourceOrUnknown(branch)
+                + "@" + sourceOrUnknown(shortCommit) + ")";
+    }
+
+    private static String sourceOrUnknown(String value) {
+        return value == null || value.isBlank() || "unknown".equalsIgnoreCase(value.trim())
+            ? "?" : value.trim();
+    }
+
+    /** Strip historical single-letter platform suffixes from build ids. */
     private static String stripPlatformSuffix(String build) {
         if (build.length() >= 2) {
             char last = build.charAt(build.length() - 1);

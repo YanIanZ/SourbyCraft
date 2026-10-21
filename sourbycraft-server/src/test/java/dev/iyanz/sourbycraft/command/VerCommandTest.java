@@ -72,6 +72,31 @@ class VerCommandTest {
     }
 
     @Test
+    void updateChannelShowsTheResolvedValueInsteadOfAVagueHint() throws Exception {
+        final Server server = mock(Server.class);
+        when(server.getBukkitVersion()).thenReturn("26.2-R0.1-SNAPSHOT");
+        final String previous = dev.iyanz.sourbycraft.update.AutoUpdateSettings.channel;
+        try {
+            withServer(server, () -> {
+                for (String configured : new String[] {null, "", "REL", "dev", "EXP", "invalid"}) {
+                    dev.iyanz.sourbycraft.update.AutoUpdateSettings.channel = configured;
+                    final ReplyProbe probe = new ReplyProbe();
+                    new VerCommand("ver", VerCommandTest::paperBuild)
+                        .execute(probe.sender(ConsoleCommandSender.class, true), "ver", new String[0]);
+                    final String all = plainReceived(probe.received());
+                    final var forced = dev.iyanz.sourbycraft.update.UpdateChannel.parseConfig(configured);
+                    final String expected = configured == null || configured.isBlank()
+                        ? BuildInfo.load().channel() : "invalid".equals(configured) ? "UNKNOWN" : forced.suffix();
+                    assertTrue(all.contains("Update channel: " + expected), all);
+                    assertFalse(all.contains("auto-detected from this build"), all);
+                }
+            });
+        } finally {
+            dev.iyanz.sourbycraft.update.AutoUpdateSettings.channel = previous;
+        }
+    }
+
+    @Test
     void anUnparseableBuildTimestampReadsUnavailableNotAnException() throws Exception {
         // BuildInfo is cached from the classpath resource; whichever timestamp the test classpath
         // carries, the line is either a formatted date or the placeholder, never blank.

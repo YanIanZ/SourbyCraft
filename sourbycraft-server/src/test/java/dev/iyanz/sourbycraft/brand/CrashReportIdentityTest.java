@@ -43,7 +43,8 @@ class CrashReportIdentityTest {
 
     @Test
     void missingFieldsStillGiveALine() {
-        assertEquals("dev (channel dev, Minecraft unknown, built unknown)", CrashReportIdentity.line(info("")));
+        assertEquals("Build ? (UNKNOWN, ?@?) (channel dev, Minecraft unknown, built unknown)",
+            CrashReportIdentity.line(info("")));
     }
 
     @Test

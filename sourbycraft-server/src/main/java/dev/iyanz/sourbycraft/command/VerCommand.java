@@ -86,9 +86,10 @@ public class VerCommand extends Command {
         s.sendMessage(line("Aurora Bridge", bridgeMode == null ? "not-started" : bridgeMode.name().toLowerCase(java.util.Locale.ROOT)));
         s.sendMessage(line("Bukkit API", Bukkit.getBukkitVersion()));
         s.sendMessage(line("Java", Runtime.version().toString()));
-        final String channel = dev.iyanz.sourbycraft.update.AutoUpdateSettings.channel;
-        s.sendMessage(line("Update channel",
-            channel == null || channel.isBlank() ? "auto-detected from this build" : channel));
+        final String configuredChannel = dev.iyanz.sourbycraft.update.AutoUpdateSettings.channel;
+        final var forcedChannel = dev.iyanz.sourbycraft.update.UpdateChannel.parseConfig(configuredChannel);
+        s.sendMessage(line("Update channel", configuredChannel == null || configuredChannel.isBlank()
+            ? brand.channel() : forcedChannel == null ? "UNKNOWN" : forcedChannel.suffix()));
 
         long u = ManagementFactory.getRuntimeMXBean().getUptime();
         long d = u / 86400000, h = (u % 86400000) / 3600000, m = (u % 3600000) / 60000;
