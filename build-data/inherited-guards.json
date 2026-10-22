@@ -1985,11 +1985,11 @@
       "id": "F-GLOBAL-TICK",
       "description": "RegionizedServer.ensureGlobalTickThread: global-tick-only operations",
       "marked_only": true,
-      "sites": 29,
+      "sites": 17,
       "kind": "OWNERSHIP-CHECK",
       "decision": "KEEP-OWNED",
-      "note": "KEEP-OWNED. Global state (scoreboards, world list, status, time) is owned by the global tick; SourbyCraft's own code honours it (AuroraWorldsService creates worlds on the global tick; TickGuard.ensureGlobalOrStartup for startup-time exceptions).",
-      "test": "count pinned by this manifest; AuroraWorldsService tests for the owned callers"
+      "note": "KEEP-OWNED. Global state (scoreboards, world list, status, time) is owned by the global tick; SourbyCraft's own code honours it (AuroraWorldsService creates worlds on the global tick; TickGuard.ensureGlobalOrStartup for startup-time exceptions). 2026-10-22: the 12 CraftWorld world-settings sites (setTime, setFullTime, setStorm, setWeatherDuration, setThundering, setThunderDuration, setClearWeatherDuration, setHardcore, setTicksPerSpawns, setSpawnLimit, setGameRuleValue, setGameRule) moved to guards/WorldSettingsOwner (paper 0025): before the region scheduler starts the startup thread owns them, as on Paper (plugins applying per-world settings at enable, e.g. Multiverse-Core 5.8.1); after it starts the global tick rule is unchanged. Force-loaded chunks and world metadata stay global-tick-only.",
+      "test": "count pinned by this manifest; AuroraWorldsService tests for the owned callers; WorldSettingsOwnerTest (decision + paper 0025 shape)"
     },
     {
       "id": "F-TICKGUARD",
