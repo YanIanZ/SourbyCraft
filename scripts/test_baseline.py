@@ -982,6 +982,28 @@ class ReadinessTest(unittest.TestCase):
         self.assertIn("Aurora boot DEGRADED", reason)
         self.assertIn("13/14 stages ok | 1 failed", reason)
 
+    # Control jars from before Build 49 (#35) print the older summary form; a baseline run
+    # against one must still see it, or startup_state waits until the timeout.
+    LEGACY_SUMMARY = ("[Aurora Engine] COMPLETE | 14/14 stages completed without error | 0 failed | 812ms\n"
+                      "Minecraft continues loading; wait for the server-ready message before connecting.\n")
+
+    def test_a_pre_build_49_summary_is_ready(self):
+        self.assertEqual(run_baseline.startup_state(self.LEGACY_SUMMARY + self.DONE), ("ready", None))
+        self.assertEqual(run_baseline.startup_state(self.LEGACY_SUMMARY), ("waiting", None))
+
+    def test_a_pre_build_49_colour_painted_summary_is_ready(self):
+        # Old ConsoleStyle.paint wrapped the verdict text in a 24-bit ANSI sequence when rich.
+        painted = ("\x1b[38;2;80;200;120mCOMPLETE | 14/14 stages completed without error | 0 failed"
+                   " | 812ms\x1b[0m\n")
+        self.assertEqual(run_baseline.startup_state(painted + self.DONE), ("ready", None))
+
+    def test_a_pre_build_49_degraded_boot_fails_the_run(self):
+        degraded = "DEGRADED | 13/14 stages completed without error | 1 failed | 900ms\n"
+        state, reason = run_baseline.startup_state(degraded + self.DONE)
+        self.assertEqual(state, "failed")
+        self.assertIn("Aurora boot DEGRADED", reason)
+        self.assertIn("13/14 stages completed without error | 1 failed", reason)
+
     def test_a_startup_failure_marker_still_fails_first(self):
         state, reason = run_baseline.startup_state("FAILED TO BIND TO PORT\n" + self.SUMMARY + self.DONE)
         self.assertEqual(state, "failed")

@@ -53,8 +53,13 @@ STARTUP_FAILURES = ("Failed to start the minecraft server", "Perhaps a server is
 # text itself carries no escape codes. Readiness needs both lines: "Done (" says Minecraft is
 # up, the summary says every SourbyCraft stage ran and whether one of them failed -- a
 # baseline measured on a DEGRADED engine is not a baseline of the engine (audit OBS-16).
+# Control jars from before Build 49 print the older form, sometimes with the verdict wrapped
+# in ANSI colour, and must still be recognised so a comparison run against one does not
+# wait out the startup timeout:
+#     COMPLETE | 14/14 stages completed without error | 0 failed | 812ms
 BOOT_SUMMARY = re.compile(
-    r"Engine (COMPLETE|DEGRADED|FAILED) \| (\d+)/(\d+) stages ok \| (\d+) failed")
+    r"(?:Engine )?(COMPLETE|DEGRADED|FAILED) \| (\d+)/(\d+) "
+    r"stages (?:ok|completed without error) \| (\d+) failed")
 
 COMMAND_FAILURES = ("Unknown or incomplete command", "Incorrect argument for command",
                     "Expected whitespace to end one argument", "Invalid or unknown entity type",

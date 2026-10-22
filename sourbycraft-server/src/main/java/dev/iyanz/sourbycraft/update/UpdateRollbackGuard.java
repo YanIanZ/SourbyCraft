@@ -8,6 +8,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
@@ -27,15 +28,17 @@ import java.util.Properties;
  * <p><b>Mechanism.</b> One small properties file, {@code auto_update/}{@value #STATE_FILE}, carries
  * a phase:
  * <ol>
- *   <li>{@link UpdateApplier} copies the launch jar to {@code <jar>}{@value #PREV_SUFFIX} and, after
- *       the swap, records {@link Phase#APPLIED} with the tag and both paths.</li>
+ *   <li>{@link UpdateApplier} copies the launch jar to {@code <jar>}{@value #PREV_SUFFIX}, records
+ *       {@link Phase#APPLIED} with the tag, both paths and the SHA-256 of {@code .prev}, and only
+ *       then swaps; a failed record aborts the apply, a failed swap puts the earlier record back.</li>
  *   <li>The next boot's updater stage ({@link #onBoot()}) sees {@code APPLIED}, moves the phase to
  *       {@link Phase#BOOTING} and asks the caller to watch for ready
  *       ({@link BootDecision#AWAIT_READY}). Ready is Bukkit's {@code ServerLoadEvent STARTUP}: worlds
  *       loaded and plugins enabled, fired right before the server accepts connections and a few
  *       lines before {@code Done (}. {@link #onReady()} then records {@link Phase#OK}.</li>
  *   <li>A boot that instead finds {@code BOOTING} knows the previous boot after the apply ended
- *       before ready. It copies {@code .prev} back over the launch jar, records
+ *       before ready. It copies {@code .prev} (never a symbolic link) to a temporary file beside the
+ *       launch jar, checks that file's SHA-256, renames it over the launch jar, records
  *       {@link Phase#ROLLED_BACK} and the updater is <em>held</em>: {@link #isHeld()} stays true, and
  *       {@link SourbyUpdater#check} refuses every check and apply, until an operator clears it
  *       ({@link #clearHold()}, {@code /update resume}).</li>
@@ -124,8 +127,9 @@ public final class UpdateRollbackGuard {
     }
 
     /**
-     * Record that {@code tag} now sits at {@code launchJar} and the previous build at {@code prevJar}.
-     * Called by the async updater apply callback; streams the kept jar off server/region threads.
+     * Record that {@code tag} is about to replace {@code launchJar}, with the previous build at {@code prevJar}.
+     * Called before the swap, from the async updater apply callback (streams the kept jar off
+     * server/region threads); a failure here must abort the swap.
      */
     public void recordApplied(String tag, Path launchJar, Path prevJar, Instant when) throws IOException {
         // Hash outside the state monitor so status/ready callers cannot wait on this file read.
@@ -133,6 +137,20 @@ public final class UpdateRollbackGuard {
         synchronized (this) {
             write(new State(Phase.APPLIED, tag, launchJar.toAbsolutePath().normalize(),
                 prevJar.toAbsolutePath().normalize(), when.toString(), "swapped in-place; restart pending", previousHash));
+        }
+    }
+
+    /** Strict read of the current state, for {@link #restoreState}; throws when it is unreadable. */
+    public synchronized Optional<State> currentState() throws IOException {
+        return read();
+    }
+
+    /** Put back a state read with {@link #currentState()} (none = no state file). */
+    public synchronized void restoreState(Optional<State> previous) throws IOException {
+        if (previous.isPresent()) {
+            write(previous.get());
+        } else {
+            Files.deleteIfExists(stateFile);
         }
     }
 
@@ -239,13 +257,29 @@ public final class UpdateRollbackGuard {
     private BootDecision restore(State s) {
         Path launch = s.launchJar();
         Path prev = s.prevJar();
-        if (launch == null || prev == null || !Files.isRegularFile(prev)) {
+        if (prev != null && Files.isSymbolicLink(prev)) {
+            String reason = "previous jar " + prev + " is a symbolic link; refusing restore; jar files left untouched";
+            SourbyLogger.error("auto-updater: " + reason);
+            writeQuietly(with(s, Phase.RESTORE_FAILED, reason));
+            return BootDecision.RESTORE_FAILED;
+        }
+        if (launch == null || prev == null || !Files.isRegularFile(prev, LinkOption.NOFOLLOW_LINKS)) {
             writeQuietly(with(s, Phase.RESTORE_FAILED, "previous jar missing: " + prev));
             return BootDecision.RESTORE_FAILED;
         }
+        Path part = null;
         try {
+            // Copy, not move: .prev stays for the operator; the running JVM keeps its open inode.
+            // The bytes are copied once into a fresh temporary file, and THAT file is hashed and
+            // renamed, so what lands on the launch path is exactly what was verified even if
+            // .prev changes in between.
+            Path parent = launch.toAbsolutePath().getParent();
+            part = Files.createTempFile(parent, launch.getFileName() + ".restore-", ".part");
+            try (InputStream in = Files.newInputStream(prev, LinkOption.NOFOLLOW_LINKS)) {
+                Files.copy(in, part, StandardCopyOption.REPLACE_EXISTING);
+            }
             if (s.prevSha256() != null) {
-                String actual = sha256(prev);
+                String actual = sha256(part);
                 if (!actual.equalsIgnoreCase(s.prevSha256())) {
                     String reason = "SHA-256 mismatch for " + prev + ": expected=" + s.prevSha256()
                         + ", actual=" + actual + "; refusing restore; jar files left untouched";
@@ -254,23 +288,39 @@ public final class UpdateRollbackGuard {
                     return BootDecision.RESTORE_FAILED;
                 }
             }
-            // Copy, not move: .prev stays for the operator; the running JVM keeps its open inode.
-            Path part = launch.resolveSibling(launch.getFileName() + ".restore");
-            Files.copy(prev, part, StandardCopyOption.REPLACE_EXISTING);
+            copyPermissions(launch, part);
             moveReplacing(part, launch);
+            part = null;
             writeQuietly(with(s, Phase.ROLLED_BACK, "the boot after applying it did not reach ready; "
                 + prev.getFileName() + " was copied back over " + launch.getFileName()));
             return BootDecision.RESTORED;
         } catch (IOException e) {
             writeQuietly(with(s, Phase.RESTORE_FAILED, "copy of " + prev + " over " + launch + " failed: " + e.getMessage()));
             return BootDecision.RESTORE_FAILED;
+        } finally {
+            if (part != null) {
+                try {
+                    Files.deleteIfExists(part);
+                } catch (IOException ignored) {
+                    // a stray temporary file is harmless; the state already records the outcome
+                }
+            }
+        }
+    }
+
+    /** A temp file is created owner-only; give the restored jar the launch jar's POSIX mode. */
+    private static void copyPermissions(Path from, Path to) {
+        try {
+            Files.setPosixFilePermissions(to, Files.getPosixFilePermissions(from));
+        } catch (UnsupportedOperationException | IOException ignored) {
+            // non-POSIX file system, or the launch jar is gone: keep the default mode
         }
     }
 
     private static String sha256(Path file) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream in = Files.newInputStream(file)) {
+            try (InputStream in = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
                 byte[] buffer = new byte[64 * 1024];
                 int read;
                 while ((read = in.read(buffer)) != -1) digest.update(buffer, 0, read);

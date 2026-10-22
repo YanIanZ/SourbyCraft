@@ -237,4 +237,29 @@ class UpdateRollbackGuardTest {
         assertEquals(p, properties());
     }
 
+
+    @Test
+    void aSymlinkedPrevIsRefusedEvenWhenItsTargetHashMatches() throws IOException {
+        Path prev = applyNewBuild();
+        guard.onBoot();
+        // The kept jar is replaced by a link to a file with the recorded bytes; a link can be
+        // retargeted between check and use, so the restore refuses it outright.
+        Path elsewhere = Files.write(root.resolve("elsewhere.jar"), OLD);
+        Files.delete(prev);
+        Files.createSymbolicLink(prev, elsewhere);
+        assertEquals(BootDecision.RESTORE_FAILED, guard.onBoot());
+        assertArrayEquals(NEW, Files.readAllBytes(launchJar));
+        assertTrue(guard.holdReason().contains("symbolic link"), guard.holdReason());
+    }
+
+    @Test
+    void aRestoreLeavesNoTemporaryFileBehind() throws IOException {
+        applyNewBuild();
+        guard.onBoot();
+        assertEquals(BootDecision.RESTORED, guard.onBoot());
+        try (var files = Files.list(root)) {
+            assertEquals(java.util.List.of("SourbyCraft.jar", "SourbyCraft.jar.prev", "auto_update"),
+                files.map(f -> f.getFileName().toString()).sorted().toList());
+        }
+    }
 }
