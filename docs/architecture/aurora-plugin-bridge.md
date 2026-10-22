@@ -16,6 +16,18 @@ Aurora Bridge adapts supported classes of legacy Paper/Spigot plugin behavior to
 
 Green means “running through Aurora Bridge”; it never means official Folia support.
 
+Failed also counts plugins that never loaded (IMPLEMENTED, LIVE, no setting). At `ServerLoadEvent STARTUP`,
+`startup/UnloadedPlugins` compares the descriptors the startup index read from `plugins/*.jar` with the plugin
+manager: a descriptor whose plugin the manager never created is recorded in `PluginLoadDiagnostics` with a reason
+from the startup dependency graph (`Missing hard dependency: Citizens`, `Hard dependency did not load: B`, a
+dependency cycle, invalid YAML, or "the server log has the cause"). No log line is parsed for this: Paper's modern
+loader reports such a plugin only as `Could not load 'plugins/x.jar' in 'plugins'`, which the log capture does not
+match, so `/plugins` used to say `0 failed` beside it. A bridge refusal (`aurora.bridge.mode = off`) is recorded
+when it happens and is not counted twice. `/plugins`, `/plugins filter failed`, `/plugins <name|jar>`, `/perf
+plugins` and `/sys` read the same record. Limits: a jar without `plugin.yml`/`paper-plugin.yml` is treated as a
+library and not reported; the record is a bounded recent history (16 jars); a plugin missing from the index (added
+after it ran) is not reported.
+
 ## Safety
 Default mode is OFF. Operators can enable SAFE on a test server; unknown/unsafe world mutation is rejected and diagnosed rather than run on an arbitrary thread.
 
