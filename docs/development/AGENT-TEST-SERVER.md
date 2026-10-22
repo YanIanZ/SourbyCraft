@@ -47,6 +47,7 @@ python3 $S start --name tp-1 --config-file plugins/SourbyCraft-Test-Plugin.jar=t
     --jvm-property sourby.testplugin.probes=true    # plugin jar (bytes, <= 8 MiB, run.json keeps its sha256) + test-plugin probes
 python3 $S start --name ssb-1 --config-file plugins/SuperiorSkyblock2.jar=/path/SuperiorSkyblock2-2026.3.jar \
     --plugin-file plugins/SuperiorSkyblock2/modules/SSB-AuroraWorlds.jar=/path/SSB-AuroraWorlds.jar   # file inside a plugin's data folder
+python3 $S start --name fawe-1 --large-plugin-jar --config-file plugins/FastAsyncWorldEdit.jar=/path/FastAsyncWorldEdit-Paper-2.15.4.jar   # plugins/<name>.jar up to 32 MiB (only those; recorded as run.json large_plugin_jars)
 python3 $S start --name cache-2 --startup-cache-from cache-1 --startup-cache-corrupt truncated   # boot over a damaged startup cache
 python3 $S cache-check --name cache-2       # judge that boot against the seed (exit 1 = a check failed)
 # with probes=true the unload fixture runs by itself after startup: wait-for "SOURBY_UNLOAD_FIXTURE_(OK|FAILED|[A-Z_]*_WRONG)"

@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 17:21:39 +0700
+Subject: [PATCH] SourbyCraft - restore MinecraftServer.currentTick as a
+ global-tick counter
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 5c6ede7ea4e77063cf6c9fc0696bfa24fe75cb6d..6b4a5851bd4160198f5fc812d495eabe90f40ac2 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -210,6 +210,7 @@ public final class RegionizedServer {
+         protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
+             dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTick(); // SourbyCraft - advance the server-wide ServerTickManager state once per global tick, only once marked ticking
+             this.getTickManager().copyServerTickState(); // SourbyCraft - the global tick reads what it just published
++            dev.iyanz.sourbycraft.bridge.LegacyServerTick.globalTick(); // SourbyCraft - MinecraftServer.currentTick counts global ticks
+             this.drainTasks();
+             this.server.globalTick(tickCount);
+             dev.iyanz.sourbycraft.guards.ServerTickControl.get().globalTickEnd(); // SourbyCraft - sprint time accounting (vanilla endTickWork), after the global tick's work
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index a6185bcbce53adb5cf581203005e2301ad7bf085..1d63c3cef4c5bb4eb59cdf0ee21a2a7bf2940b8d 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -300,6 +300,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     public joptsimple.OptionSet options;
+     public org.bukkit.command.ConsoleCommandSender console;
+     // public static int currentTick; // Paper - improve tick loop // Folia - region threading
++    public static volatile int currentTick; // SourbyCraft - Paper's field again for plugins that read it (FAWE): a global-tick counter, not a region tick; see bridge/LegacyServerTick
+     public java.util.Queue<Runnable> processQueue = new java.util.concurrent.ConcurrentLinkedQueue<Runnable>();
+     public int autosavePeriod;
+     // Paper - don't store the vanilla dispatcher
