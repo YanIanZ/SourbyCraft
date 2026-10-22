@@ -77,6 +77,7 @@ public final class LegacyBridgePlugin extends JavaPlugin {
 
         regionTask();
         entityTask();
+        new ContextProbes(this).run();
         globalScheduler();
 
         // World access from a legacy "sync" task scheduled outside any region (onEnable). The

@@ -38,10 +38,76 @@ Entity-owned -> entity owner. Location-owned -> region owner. Global-safe -> glo
 | --- | --- | --- |
 | Sync callback wrapped in `EntityTask` | Entity owner (Folia entity scheduler); follows the entity; entity removed first -> cancelled, counted rejected, not a violation | `EntityTask` (patch 0011), IMPLEMENTED, unit-tested; boot fixture not yet run in CI |
 | Sync callback wrapped in `RegionTask`, or the fingerprinted SSB2 spawn callback | Region owning that chunk | patch 0010 |
+| Other sync callback scheduled while a **player's** event is dispatched or a player's command executes, or from a bridged body that carries that player (its async continuation, or a sync task already anchored to the player) | That player's owner (entity scheduler), following the player; player already gone when scheduled -> the caller-region/global route below; player leaves afterwards -> cancelled, counted rejected, not a violation | `SchedulingContext` (patch 0026, 2026-10-22), IMPLEMENTED, unit-tested; headless fixture `LEGACY_CONTEXT_*` |
 | Other sync callback | Caller region (`sync-route = caller-region`) or global region | default |
-| Explicit global request, async task | Global region / I/O lane; target metadata never consulted | 0007, 0003 |
+| Explicit global request, async task | Global region / I/O lane; target metadata never consulted. An async body carries the scheduling context it was scheduled from; an explicit global body carries none | 0007, 0003 |
 
-Precedence: explicit entity > explicit region > caller-region/global fallback.
+Precedence: explicit entity (`EntityTask`) > explicit region (`RegionTask`, adapter) > entity anchor
+(the player of the scheduling context) > caller region > global.
+
+### Entity anchor from the scheduling context (2026-10-22)
+
+The two live failures that motivated it (Sourby Demo, v26.2-r48.2, Epic Skyblock, ~30 bridged
+plugins): DeluxeMenus `Menu.openMenu` runs `runTaskAsynchronously` (build the items) and from that
+body `runTask` (`player.openInventory`); EssentialsXSpawn's new-player teleport is
+`PlayerJoinEvent -> Essentials runTaskAsynchronously -> callEvent(AsyncUserDataLoadEvent) ->
+scheduleSyncDelayedTask(NewPlayerTeleport)`. Both inner sync tasks are scheduled from a bridge I/O
+thread, which ticks no region, so the caller-region route put them on the global region, where
+`openInventory` failed in `InventoryChangeTrigger` ("Cannot trigger criterion async") and the
+teleport's `CraftWorld.getChunkAt` was refused (a violation; 3 quarantine Essentials).
+
+The bridge now reads **why** a task was scheduled. `bridge/SchedulingContext` is a thread-confined
+frame holding the player a server frame acts for; `bridge/EventAnchors` decides which events name one.
+Paper feature patch 0026 publishes it from two sites, each one call into `AuroraBridge`:
+`PaperEventManager#callEvent` around the listener loop (`enterEventContext`/`exitContext`) and
+`BukkitCommandNode.BukkitBrigCommand#run` around `Command#execute` (`withCommandContext`, player
+senders only). `BridgeRuntime.submit` takes the frame's player as the task's entity anchor when the
+plugin named no `EntityTask`/`RegionTask` target, and routes it exactly like an `EntityTask`
+(`executor.entity`, retired callback). Every bridged body runs under its own anchor: an entity-anchored
+sync body publishes its player (a `runTaskLater` chain follows the player), an async body publishes
+the frame it was scheduled from (the two cases above), a region or global body publishes nothing (and
+never inherits a frame that happens to be open on the tick thread it runs on). Both hooks return at
+once while no plugin has been admitted (one volatile read per event dispatch).
+
+Rules, each pinned by `BridgeContextRoutingTest`, `EventAnchorsTest`, `AuroraBridgeContextHooksTest`:
+
+- **Players only.** `PlayerEvent`, `PlayerDeathEvent`, an `EntityEvent` whose entity is a player,
+  `InventoryEvent` (the viewer), `BlockBreakEvent`/`BlockPlaceEvent`/`SignChangeEvent`. A mob dies
+  without notice, and a task anchored to it would be retired unrun; a dropped task is a worse surprise
+  than a global run, so non-player entities never anchor (fixture `LEGACY_CONTEXT_MOB_EVENT_OK`).
+- **Leaving or unplaced players anchor nothing**: `PlayerQuitEvent`, `PlayerKickEvent`,
+  `PlayerLoginEvent`, `PlayerSpawnLocationEvent`. A cleanup task scheduled from a quit handler must
+  run; the entity scheduler of a gone or not-yet-placed player would retire or hold it.
+- **An event about no player keeps the enclosing frame** (`AsyncUserDataLoadEvent` fired inside the
+  carried join frame), so plugin-to-plugin events do not erase the player.
+- **Player already gone at scheduling time** (Folia's entity scheduler reports it synchronously): the
+  inference is dropped and the task takes the route it would have taken without it (caller region or
+  global). Nothing has run, so this is a routing decision, not a retry after a violation; it is not
+  counted as rejected. **Player leaves after scheduling**: cancelled, rejected, last failure names it,
+  never a violation, no per-task log line, same as `EntityTask`. A repeating task anchored this way
+  therefore stops when its player leaves (Folia semantics; on Paper it would keep running until it
+  cancelled itself).
+- **Explicit targets and explicit global requests are untouched**; async tasks only carry the frame.
+- **No retry.** A body that already ran and violated ownership is never re-dispatched to another owner.
+
+What this does not cover is listed under *Not bridgeable* below.
+
+**Evidence (2026-10-22, agent test server, not qualification).** Jar built from this branch, `mode = "safe"`,
+real EssentialsX + EssentialsXSpawn 2.22.1-dev+24, DeluxeMenus 1.14.1, PlaceholderAPI 2.12.3; a headless
+player (`scripts/baseline_client.py`) joined as a new player (EssentialsXSpawn newbie teleport) and ran
+`/testmenu` (DeluxeMenus `open_command`). Run `fable-routing-real3` (two new players, one of them sending
+the command 2 s after login): 7 menu opens, 7 DeluxeMenus sync bodies on the player's region, 0 violations;
+Essentials 4 region bodies (the join chain), 0 violations, 0 rejected; both quit-time `cleanInventory`
+tasks of DeluxeMenus (scheduled from `InventoryCloseEvent` as the player left) were retired as rejected.
+Run `fable-routing-real2` (jar without the diagnostic below): 1 of 2 opens, the first after a new player's
+join, took the "player already gone when scheduled" fallback and ran on the global region (violation,
+`Cannot init menu async`, with the sweep hint); the second open and every later open (3 more after a
+rejoin) ran on the region. Not reproduced in 7 further opens; `FoliaExecutor.entity` now logs one WARN
+when an entity scheduler refuses a task for an entity that is still valid, and the fallback is recorded as
+the plugin's last failure. The console form `dm open <menu> <player>` was not exercised with a player
+online. Fixture run `fable-routing-fixture1`: 22 `LEGACY_*_OK`, 0 `_WRONG`, 36 redirects / 6 handoffs /
+1 rejected (retired EntityTask) / 1 fatal (deliberate), not quarantined. Logs under the session scratchpad
+(`logs/fable-real2.log`, `fable-real3.log`, `fable-fixture1.log`). No Sourby Demo run: owner-run.
 
 ## Telemetry
 Per-plugin compatibility state, scheduler redirects, owner handoffs, rejected operations, fatal violations, quarantine, startup duration/cache state and last failure.
@@ -53,7 +119,7 @@ Per-plugin compatibility state, scheduler redirects, owner handoffs, rejected op
 Code: `dev.iyanz.sourbycraft.bridge` plus bridge feature patches under
 `sourbycraft-server/paper-patches/features` (0003, 0006, LightingLuminol port 0007
 and worker/query follow-up 0008, native-disable fix 0009, explicit callback owners 0010,
-entity callback owners 0011, one-line OFF-mode refusal 0024).
+entity callback owners 0011, one-line OFF-mode refusal 0024, scheduling-context hooks 0026).
 Feature patches are the source of truth for edits
 to Paper classes. Since Build 50 (2026-10-22) every `CraftScheduler` site those patches add is one
 call into `AuroraBridge` (`cancelTask`, `cancelTasks`, `currentlyRunning`, `knows`,
@@ -90,9 +156,10 @@ this increment remains assigned to Claude.
   entity-owner route: `entity.getScheduler().run/runDelayed/runAtFixedRate` with a retired
   callback that cancels the bridged task, frees both task indexes and counts one rejected
   operation (last failure names the retirement; no violation, no quarantine count, no per-task
-  log line). Entity routing only happens when the plugin author wraps the task; the bridge does
-  not infer an entity from an opaque callback. Caller-region fallback does not establish
-  ownership of other locations accessed by a task.
+  log line). The bridge never infers an entity from the callback object itself; since 2026-10-22
+  it infers one from the **scheduling frame** (the player whose event or command is being handled,
+  carried through bridged async continuations; see *Entity anchor from the scheduling context*
+  above). Caller-region fallback does not establish ownership of other locations accessed by a task.
 - **Violations.** A task body's `UnsupportedOperationException`/`IllegalStateException` from the
   base's region checks counts as a fatal violation. Other exceptions are recorded as the last
   failure, as the plain server would log them. After `aurora.bridge.quarantine-after` (LIVE,
@@ -205,6 +272,26 @@ possible endpoints:
 
 Full compatibility therefore means a native port; the bridge is the safety and diagnosis layer for
 plugins that have not had one. BRIDGED is not a compatibility verdict (see *Qualification*).
+
+### Not bridgeable (2026-10-22)
+
+Patterns the owner precedence above cannot place, with what the bridge offers for each. None of them
+weakens a guard; the engine's refusal stands and counts toward quarantine as before.
+
+| Pattern | Example (live, Sourby Demo 2026-10-22) | Why routing cannot fix it | What the bridge does |
+| --- | --- | --- | --- |
+| **Whole-world sweep from one task**: a global-routed timer iterates `world.getEntities()` / every chunk and touches each | ClearLag 3.2.2 `ClearTask -> EntityManager.removeEntities -> ClearModule.getRemovables -> CraftItem.getItemStack` ("Accessing entity state off owning region's thread" on the global tick; quarantined after 3) | The body is one Runnable over entities owned by many regions. A task can be handed to one owner; a loop inside a plugin cannot be split per region by anyone but its author. A hash-pinned adapter would have to re-implement the sweep, which is a port of the plugin, not an adapter | The violation/quarantine line says so: an untargeted global task's violation carries "The task named no owner and ran on the global region ...; a body that sweeps entities or blocks across the world cannot be routed to one owner and needs a region-aware (folia-supported) plugin version." Decision: documented not-bridgeable; replace with a Folia-supported plugin (or a native port). |
+| **Console command targeting a player** | `dm open <menu> <player>` from the console | The frame is the console's (global tick); the player is a command argument the bridge cannot read | Caller-region/global as before. Run the command as the player, or the plugin names the player (`EntityTask`). |
+| **Per-player work scheduled from `onEnable` or a global timer** (iterate online players, open/teleport each) | typical "scoreboard refresh" timers | No single owner; same class as the sweep | As before: global; each cross-region access is a violation. |
+| **A task that acts on a different player than the frame's** | trade GUI opened for both parties from one click | The anchor is the frame's player; the other party is usually in the same region, but not necessarily | Same as the caller-region route today (one hop, no retry). |
+
+Considered and not done (2026-10-22): making `openInventory`/`teleport` hand themselves to the entity
+scheduler when called from a bridged global body. `teleport` already has the owned sync/async route
+(Paper 0017); `openInventory` returns an `InventoryView`, so a hand-off would have to return `null`
+to callers that use it, and today's failure (the criterion check inside `initMenu`, after the menu
+was assigned and the open packet sent) leaves half-applied state. A fail-closed ownership check at
+the top of `CraftHumanEntity#openInventory` (refuse before any side effect, same violation count)
+is the recommended follow-up; it is a guard decision for `inherited-guards.md`, not routing.
 
 Bridge telemetry so far has been counts with no time dimension: it records how many tasks a plugin
 had redirected, handed off, rejected or failed, never how long they ran, so it cannot attribute tick
