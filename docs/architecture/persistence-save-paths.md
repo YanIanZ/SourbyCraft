@@ -50,7 +50,7 @@ clean-stop path above; a crash (SIGKILL, OOM, power) loses every change since bo
 | Game rules | `dimensions/<dim>/data/minecraft/game_rules.dat` | any (synchronized map, copied for the codec) | periodic (world), `save-all`, shutdown | Canvas |
 | Maps | `dimensions/<dim>/data/minecraft/map_*.dat`, `idcounts` | any (synchronized) | periodic (world), `save-all`, shutdown | Folia |
 | **World border** | `dimensions/<dim>/data/minecraft/world_border.dat` | ticked on the global tick; set from commands/plugins on any thread (plain fields, extent swapped atomically; a concurrent change gives a stale snapshot, never a torn object) | periodic (world), `save-all`, shutdown | **0056** (was shutdown only) |
-| **`level.dat`** (data-pack configuration, `allowCommands`, server brands, `LastPlayed`; the gameplay fields are shadowed by `level_overrides.dat`) | `level.dat` (+ `_old`) | global tick / `reloadResources` | periodic (global, synchronous write as vanilla), `save-all`, shutdown | **0056** (was shutdown only) |
+| **`level.dat`** (data-pack configuration, `allowCommands`, server brands, `LastPlayed`; the gameplay fields are shadowed by `level_overrides.dat`) | `level.dat` (+ `_old`) | global tick / `reloadResources` | periodic (global; tag on the global tick, file on the `level.dat` writer thread, 0077), `save-all` (synchronous), shutdown | **0056** (was shutdown only), **0077** |
 | **Random sequences** (loot-table sequences) | `data/minecraft/random_sequences.dat` | any (concurrent map; a sequence's two seed longs are read outside the mutators' lock, so a sequence advanced at that instant can be encoded torn — the same read vanilla does single-threaded) | periodic (global), `save-all`, shutdown | **0056** (was shutdown only) |
 | **`/data storage` containers** | `data/<namespace>/command_storage.dat` | global tick only (plain `HashMap`; plugins must also respect ownership). MC 0069: storage-only `/data` commands and storage suggestions run on the global tick (inline from console/RCON/global-tick functions with the real result; handed off from a region with result 0 and the outcome sent to the sender). A mixed `data modify … from` reads the source on its owner, copies it, and writes the target on its owner (storage on the global tick, a block on its region, an entity through its scheduler); a block or entity source read from the console is refused with a command error. `/execute … storage` and `/function … with storage` from a region are a command error, not routed. | periodic (global), `save-all`, shutdown | **0056** (was shutdown only) |
 | Dragon fight | `dimensions/minecraft/the_end/data/minecraft/ender_dragon_fight.dat` | owning region | periodic (region, `ticks-per.autosave`), `save-all` (next tick), shutdown | Canvas |
@@ -73,9 +73,13 @@ in `autosaveSafeWorldData`. All logic is in
 - one `saveSpecific` call per type (`saveContained`). `saveSpecific` clears a dirty flag before it
   encodes, so one shared call that throws leaves the earlier types cleared and unsaved; per-type calls
   limit a failing encode to its own type, whose instances are marked dirty again and logged.
-- `level.dat` is written synchronously on the global tick through `LevelStorageAccess.saveDataTag`
-  (temp file + atomic replace, `level.dat_old` kept), as the vanilla main-thread autosave does. Measured
-  cost is not claimed; the file is a few KiB.
+- `level.dat`: the tag is built on the global tick (it reads live level data). The periodic autosave
+  writes the file on one bounded daemon thread (`SourbyCraft level.dat writer`, temp file + atomic
+  replace through `LevelStorageAccess.saveLevelData`, `level.dat_old` kept) and skips while the previous
+  write is outstanding (one WARN until a write completes); `save-all` writes on the global tick after
+  any outstanding write; the clean-shutdown `saveGlobalData` waits for it first (feature patch 0077).
+  Until 2026-10-22 the periodic write ran on the global tick and held it for a whole disk stall
+  ([region-io-blocking-2026-10-22.md](../development/region-io-blocking-2026-10-22.md)).
 - shutdown ordering: the global tick is halted by `TickRegionScheduler.halt` before
   `RegionShutdownThread` saves, so no owned save runs concurrently with the shutdown save. The async
   `.dat` writes are chained through `SavedDataStorage.pendingWriteFuture`, which the shutdown

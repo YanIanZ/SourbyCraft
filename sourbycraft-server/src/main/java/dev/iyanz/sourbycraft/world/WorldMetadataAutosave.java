@@ -2,12 +2,23 @@ package dev.iyanz.sourbycraft.world;
 
 import com.mojang.authlib.GameProfile;
 import com.mojang.logging.LogUtils;
+import com.mojang.serialization.Dynamic;
 import io.papermc.paper.world.saveddata.PaperLevelOverrides;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtOps;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.RandomSequences;
 import net.minecraft.world.level.border.WorldBorder;
@@ -41,9 +52,13 @@ import org.slf4j.Logger;
  * advanced on a region thread at the same instant may be encoded torn — its two seed longs are read outside the
  * mutators' lock, as vanilla's single thread never had to care) and the {@code CommandStorage.Container}s
  * ({@code /data storage}; a plain map, so a concurrent {@code put} can make the encode throw and the container
- * stays dirty for the next autosave). {@code level.dat} is rewritten synchronously by {@link #saveLevelDat}, as
- * vanilla's main-thread autosave does; its gameplay fields are shadowed by {@code level_overrides.dat}, what it
- * alone carries is the data-pack configuration, {@code allowCommands}, the server brands and {@code LastPlayed}.</p>
+ * stays dirty for the next autosave). {@code level.dat}: its gameplay fields are shadowed by
+ * {@code level_overrides.dat}, what it alone carries is the data-pack configuration, {@code allowCommands}, the
+ * server brands and {@code LastPlayed}. The tag is built on the global tick; the periodic autosave writes the file
+ * on one ordered daemon thread ({@link #scheduleLevelDat}), so a stalled disk cannot hold the global tick (seen
+ * 2026-10-22: 57-60 s in {@code write0} during a disk stall). {@code save-all} still writes on the calling thread
+ * ({@link #saveLevelDat}), after any scheduled write, and the clean-shutdown save waits for a scheduled write first
+ * ({@link #awaitLevelDatWrites}, feature patch 0077), so an older tag can never replace a newer file.</p>
  *
  * <p><b>0068</b> — wandering trader countdown, delay and chance are global-owned and saved
  * with the per-world contained types. No region callback mutates this saved data.</p>
@@ -65,6 +80,25 @@ public final class WorldMetadataAutosave {
     /** Server-wide types (overworld {@code data/}) saved one call each from the global tick (patch 0056). */
     public static final List<Class<? extends SavedData>> SERVER_CONTAINED_TYPES = serverContainedTypes();
 
+    /**
+     * One daemon thread for scheduled {@code level.dat} writes, created on the first periodic autosave. Its queue
+     * holds one task: {@link #scheduleLevelDat} never submits while a write is outstanding, and a refusal is a skip.
+     */
+    private static final ExecutorService LEVEL_DAT_WRITER = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<>(1), task -> {
+            final Thread thread = new Thread(task, "SourbyCraft level.dat writer");
+            thread.setDaemon(true);
+            return thread;
+        }, new ThreadPoolExecutor.AbortPolicy());
+
+    /** Held for the duration of one {@code level.dat} file write; package-private so tests can hold the disk "busy". */
+    static final Object LEVEL_DAT_WRITE_LOCK = new Object();
+
+    private static final AtomicBoolean LEVEL_DAT_SKIP_LOGGED = new AtomicBoolean();
+
+    /** The last scheduled write; guarded by the class monitor. */
+    private static CompletableFuture<Boolean> pendingLevelDat = CompletableFuture.completedFuture(true);
+
     private WorldMetadataAutosave() {
     }
 
@@ -77,11 +111,20 @@ public final class WorldMetadataAutosave {
         return saveContained(storage, WORLD_CONTAINED_TYPES, sync);
     }
 
-    /** Patch 0056 call site in {@code autosaveSafeGlobalData}: the server data storage plus {@code level.dat}. */
+    /**
+     * Patch 0056 call site in {@code autosaveSafeGlobalData}: the server data storage plus {@code level.dat}. With
+     * {@code sync} ({@code save-all}) {@code level.dat} is written before this returns; otherwise (the periodic
+     * autosave) only its tag is built here and the write is scheduled.
+     */
     public static void saveServerOwnedData(final MinecraftServer server, final boolean sync) {
         saveServerOwnedData(server.getDataStorage(), sync);
         final GameProfile profile = server.getSingleplayerProfile();
-        saveLevelDat(server.storageSource, server.getWorldData(), profile == null ? null : profile.id());
+        final UUID singleplayerId = profile == null ? null : profile.id();
+        if (sync) {
+            saveLevelDat(server.storageSource, server.getWorldData(), singleplayerId);
+        } else {
+            scheduleLevelDat(server.storageSource, server.getWorldData(), singleplayerId);
+        }
     }
 
     public static CompletableFuture<?> saveServerOwnedData(final SavedDataStorage storage, final boolean sync) {
@@ -89,19 +132,88 @@ public final class WorldMetadataAutosave {
     }
 
     /**
-     * Writes {@code level.dat} the way the clean shutdown does ({@code MinecraftServer#saveGlobalData}), on the
-     * calling thread: the tag is built from live level data, the file goes through the temp-file + replace of
-     * {@code LevelStorageAccess#saveDataTag} (I/O failures are logged there). Returns false, and logs, when the
-     * tag could not be built; the previous file is then left in place.
+     * Writes {@code level.dat} on the calling thread ({@code save-all}): the tag is built from live level data,
+     * any scheduled write is waited for first, then the file goes through the temp-file + replace of
+     * {@code LevelStorageAccess#saveLevelData} (I/O failures are logged there), as {@code saveDataTag} does.
+     * Returns false, and logs, when the tag could not be built; the previous file is then left in place.
      */
     public static boolean saveLevelDat(final LevelStorageSource.LevelStorageAccess access, final WorldData data,
                                        final @Nullable UUID singleplayerId) {
+        final CompoundTag tag = encodeLevelDat(data, singleplayerId);
+        if (tag == null) {
+            return false;
+        }
+        awaitLevelDatWrites();
+        writeLevelDat(access, tag);
+        return true;
+    }
+
+    /**
+     * The periodic autosave's {@code level.dat}: builds the tag on the calling (global) thread, which owns the
+     * level data, and writes the file on {@link #LEVEL_DAT_WRITER}, so the caller never waits on the disk. While
+     * the previous scheduled write has not finished (a slow or stalled disk) this one is skipped, not queued: the
+     * next autosave writes the then-current data, and at most one write is ever outstanding. The future completes
+     * with false when nothing was written (encode failure or skip).
+     */
+    public static CompletableFuture<Boolean> scheduleLevelDat(final LevelStorageSource.LevelStorageAccess access,
+                                                              final WorldData data, final @Nullable UUID singleplayerId) {
+        final CompoundTag tag = encodeLevelDat(data, singleplayerId);
+        if (tag == null) {
+            return CompletableFuture.completedFuture(false);
+        }
+        synchronized (WorldMetadataAutosave.class) {
+            if (!pendingLevelDat.isDone()) {
+                if (LEVEL_DAT_SKIP_LOGGED.compareAndSet(false, true)) {
+                    LOGGER.warn("The previous level.dat write has not finished (slow or stalled disk?); skipping the periodic "
+                        + "level.dat write until it does. The global tick does not wait for it.");
+                }
+                return CompletableFuture.completedFuture(false);
+            }
+            final CompletableFuture<Boolean> write;
+            try {
+                write = CompletableFuture.supplyAsync(() -> {
+                    writeLevelDat(access, tag);
+                    LEVEL_DAT_SKIP_LOGGED.set(false);
+                    return true;
+                }, LEVEL_DAT_WRITER);
+            } catch (final RejectedExecutionException refused) {
+                return CompletableFuture.completedFuture(false);
+            }
+            pendingLevelDat = write;
+            return write;
+        }
+    }
+
+    /**
+     * Waits for the scheduled {@code level.dat} write, if any. Feature patch 0077 calls it from
+     * {@code MinecraftServer#saveGlobalData} before the shutdown save writes {@code level.dat}, so an older
+     * scheduled tag cannot replace the file after it.
+     */
+    public static void awaitLevelDatWrites() {
+        final CompletableFuture<?> pending;
+        synchronized (WorldMetadataAutosave.class) {
+            pending = pendingLevelDat;
+        }
         try {
-            access.saveDataTag(data, singleplayerId);
-            return true;
+            pending.join();
+        } catch (final CompletionException | CancellationException failed) {
+            // writeLevelDat logs its own failures; nothing more to wait for
+        }
+    }
+
+    private static @Nullable CompoundTag encodeLevelDat(final WorldData data, final @Nullable UUID singleplayerId) {
+        try {
+            return data.createTag(singleplayerId);
         } catch (final Throwable thrown) {
             LOGGER.warn("Could not write level.dat for the periodic save; the previous file is kept", thrown);
-            return false;
+            return null;
+        }
+    }
+
+    /** Same file operation as {@code saveDataTag(data, id)}: the tag is wrapped in {@code Data} and replaced atomically. */
+    private static void writeLevelDat(final LevelStorageSource.LevelStorageAccess access, final CompoundTag tag) {
+        synchronized (LEVEL_DAT_WRITE_LOCK) {
+            access.saveLevelData(new Dynamic<>(NbtOps.INSTANCE, tag));
         }
     }
 
