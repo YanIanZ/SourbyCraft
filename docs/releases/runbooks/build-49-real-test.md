@@ -59,8 +59,8 @@ baselines and optimization belong to Build 50.
   not a source-defined qualification threshold. Record smaller/larger hosts exactly.
   Bootstrap additionally requires a remote Linux host; network failure tests require
   a separate Redis host. Keep private addresses and access details out of evidence.
-- Preserve and attach sanitized effective copies of `config/canvas-server.yml`,
-  `config/canvas-worlds.yml`, `config/paper-global.yml` (especially `threaded-regions`:
+- Preserve and attach sanitized effective copies of `config/aurora-server.yml`,
+  `config/aurora-worlds.yml` (Build 49 names; note any `*.migrated` copies present), `config/paper-global.yml` (especially `threaded-regions`:
   `threads`, `grid-exponent`, `scheduler`), `sourbycraft-security.yml`, and
   `sourbycraft_config/sourbycraft_global_config.toml`. List **every non-default value**;
   use `<fill in>` until captured. Also attach `server.properties`, JVM flags and,
@@ -308,7 +308,7 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 **Steps:**
 
-1. Set `[protocollib] auto-provision = true` in utility TOML (default true, RESTART_REQUIRED); record `[viaversion] auto-provision` separately. Boot and verify ProtocolLib enables before dependents; capture any 26.2 warning.
+1. Set `[plugins.protocollib] auto-provision = true` in the utility TOML (default true, RESTART_REQUIRED); record `[plugins.viaversion] auto-provision` separately. Boot and verify ProtocolLib enables before dependents; capture any 26.2 warning.
 2. Run `/plugins`, `/plugins Essentials`, `/plugins Vault`, `/perf plugins`. Have real players use the installed EssentialsX teleport/home flow and a Vault-backed economy consumer, plus native island create/visit/leave and ProtocolLib-dependent gameplay. Record plugin-specific command syntax before use.
 3. Repeat during G04’s representative legacy-plugin soak. Read per-plugin bridged timings in that run; inspect cancellations, event delivery, quarantine and errors. Include dependent-plugin observations, not only enabled state.
 4. LightingLuminol global-scheduler port (bridged plugins calling Folia's `GlobalRegionScheduler`; [port doc](../../development/LIGHTINGLUMINOL-BRIDGE-PORT.md)). With `aurora.bridge.mode = "safe"`, for each bridged plugin that uses the global scheduler: confirm its timers still fire (and stop when the plugin cancels them), that `/plugins <name>` shows no growing `Pending tasks` while idle, and that a disable/re-enable of the plugin (plugin manager, if the operator uses one) leaves no task from before the disable running and logs no `Unsupported in region threading` / `while cancelling Bukkit scheduler tasks`. If a world holding bridged work is unloaded (AWF/multiverse), the log shows `Released N bridged legacy task(s) anchored in <world> for unload` and the plugin's pending count drops. Optional synthetic cross-check on the same jar: install `legacy-test-plugin`, wait for every `LEGACY_*_OK` marker, run `legacybridge reenable` then `legacybridge unload` on the console and expect `LEGACY_REENABLE_OK`, `LEGACY_UNLOAD_RELEASED_OK` and `LEGACY_UNLOAD_LATE_REFUSED_OK` with no `_WRONG`. If the operator sets `max-pending-tasks-per-plugin` / `max-running-async-tasks-per-plugin`: refusals show in `/plugins <name>` (Rejected, Last failure names the limit) and as at most one WARN per plugin and limit per 60 s, never as a fatal violation; `legacybridge pending-limit <n>` / `async-limit <n>` (pass the configured value; the async probe needs `bridge-io-threads` >= n + 3) print `LEGACY_LIMIT_*_OK`. After a `/sourbycraft reload` the report lists LIVE changes and `aurora.bridge.mode` under RESTART_REQUIRED. With `mode = "off"` a legacy plugin is not loaded and the log has one `Not loading <plugin> ...` WARN (no stack trace) and `/plugins` lists it FAILED. Agent evidence of 2026-10-22/22b (port doc, per-case table) is local and functional only; this step is the real-server acceptance.
@@ -710,6 +710,49 @@ SHA-256, host/JDK/hardware, config, capture and rollback requirements.
 
 **Fail:** Apply [procedure F](#failure-procedure-f-every-gate-and-runtime-check), include this check’s folder, `/ver`, jar SHA and config in the issue; stop, restore valid `<jar>.prev` over the active jar and restart under F. Missing conditional prerequisites stay BLOCKED.
 
+
+<a id="configuration-migration-build-49-layout"></a>
+
+### Configuration migration (Build 49 layout)
+
+**Goal:** Prove on a copy of a real Build 48 server that the one-time migration keeps every operator value, keeps the
+old files as `*.migrated`, logs exactly the documented lines once, and that the second boot is silent and identical.
+
+**Preconditions:** Shared requirements; a **copy** (never the live directory) of a server last run on Build 48 with
+non-default values in `config/canvas-server.yml`, `config/canvas-worlds.yml`, `sourbycraft_config/sourbycraft_global_config.toml`
+(old layout) and, if present, Aurora keys in that TOML; `sha256sum` of every configuration file before the first boot.
+
+**Steps:**
+
+1. Record `sha256sum config/*.yml sourbycraft_config/*.toml sourbycraft-security.yml` and list every non-default value.
+2. Boot the Build 49 jar once to `Done (`; run `/sourbycraft config` and `/update status`; stop cleanly.
+3. Check the log for exactly one `Migrated config/canvas-server.yml -> config/aurora-server.yml`, one
+   `... canvas-worlds.yml -> ... aurora-worlds.yml`, one `Migrated the configuration files to the Build 49 layout`
+   (its `N key(s) renamed` must equal the number of old-layout keys the TOML held), and no
+   `Deprecated config key` / `is ignored` / `Both ... exist` WARN.
+4. Verify files: `config/canvas-*.yml.migrated` byte-identical to step 1 (`sha256sum`), `aurora-*.yml` holding every
+   non-default engine value, `sourbycraft_global_config.toml.migrated` byte-identical to step 1, the new TOML holding every
+   value under its Build 49 name (`console.*`, `players.*`, `plugins.*`, `updater.*`), no `[ui]`/`[misc`/`[perf`/`[swap`
+   tables left, Aurora keys only in `aurora.toml`.
+5. Boot a second time: none of the three `Migrated` lines, no WARN from the configuration, same effective values in
+   `/sourbycraft config`; stop cleanly. Then copy `config/canvas-server.yml.migrated` back to `config/canvas-server.yml`,
+   boot once more and expect the `Both config/aurora-server.yml and config/canvas-server.yml exist ... ignored` WARN and
+   the new file's values; remove the copy again.
+6. Downgrade rehearsal on the same copy: follow the downgrade sequence in `docs/AURORA-CONFIG.md` §7 with the Build 48 jar
+   and confirm it boots with the pre-49 values.
+
+**Capture:** Common capture plus the step 1/4 checksums, the three `Migrated` lines, `/sourbycraft config` output of both
+boots and a diff of the old TOML against the migrated one. Store in `docs/releases/evidence/49/config-migration/`.
+
+**Pass criteria:** every value kept (none changed, none lost), old files kept as `*.migrated`, migration lines exactly once,
+second boot silent and identical, stale-file WARN appears only in the deliberate step 5 case, downgrade rehearsal boots.
+
+**Fail handling:** [Procedure F](#failure-procedure-f-every-gate-and-runtime-check). A lost or changed value is a release
+blocker; attach both files and the log.
+
+**Agent evidence (functional, not qualified):** see the Build 49 release doc, "Configuration migration (operators)", and
+`AGENT-COORDINATION.md` (`fable-configdesign`, 2026-10-22): a local agent test server booted from a Build-48-style
+configuration set (old engine files + old TOML layout), then a second time with the migrated files.
 
 ## Evidence template
 

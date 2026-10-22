@@ -130,12 +130,12 @@ Order on a fresh host, as the code runs it:
    - ProtocolLib 5.4.0 (tagged release, not `dev-build`):
      `https://github.com/dmulloy2/ProtocolLib/releases/download/5.4.0/ProtocolLib.jar`, SHA-256
      `ee2e7ab9…` and 10,251,186 bytes (`bootstrap/ProtocolLibProvisioner.java:13-16`; the same pin is
-     in `build-data/protocollib-pin.json:2-15`; toggle `[protocollib] auto-provision`, read at
+     in `build-data/protocollib-pin.json:2-15`; toggle `[plugins.protocollib] auto-provision` (pre-49 `[protocollib]` still read), read at
      `ProtocolLibProvisioner.java:21`).
    - ViaVersion 5.10.0 `https://cdn.modrinth.com/data/P1OZGk5p/versions/ruzmiBqe/ViaVersion-5.10.0.jar`
      (SHA-256 `e5a63f86…`, 6,434,343 bytes; `bootstrap/PluginProvisioner.java:57-62`) and ViaBackwards
      5.10.0 `https://cdn.modrinth.com/data/NpvuJQoq/versions/YjpKsm6j/ViaBackwards-5.10.0.jar`
-     (SHA-256 `4699b6dd…`, 1,422,522 bytes; `:63-67`); toggle `[viaversion] auto-provision`.
+     (SHA-256 `4699b6dd…`, 1,422,522 bytes; `:63-67`); toggle `[plugins.viaversion] auto-provision` (pre-49 `[viaversion]` still read).
      The https-only check is at `PluginProvisioner.java:207-210`; the offline refusal at `:205-206`.
 
    A failure is logged with source URL and target path and the boot continues without that plugin.
@@ -148,8 +148,8 @@ Order on a fresh host, as the code runs it:
 
 | Remote | Trigger | Source | Fallback |
 | --- | --- | --- | --- |
-| `https://api.github.com/repos/<repo>/releases?per_page=100`, `<repo>` default `YanIanZ/SourbyCraft` (`misc.auto_update.repo`), then the release asset's `browser_download_url` and signature asset | auto-updater schedule (`misc.auto_update.enabled`, default `true`) and `/update` | `update/SourbyUpdater.java`, `AutoUpdateSettings.java`; see [AUTO-UPDATER.md](AUTO-UPDATER.md) | none; ETag conditional requests and a rate-limit backoff window, a failed check just ends |
-| `https://api.modrinth.com/v2/project/<id>/version`, then the pinned `cdn.modrinth.com` URL | same cadence, after each updater check (`misc.auto_update.via_auto_update`, default `true`, and `viaversion.auto-provision`) | `update/ViaAutoUpdate.java` (being edited in round 3; re-check) | none; installs only the shipped pin |
+| `https://api.github.com/repos/<repo>/releases?per_page=100`, `<repo>` default `YanIanZ/SourbyCraft` (`updater.repository`), then the release asset's `browser_download_url` and signature asset | auto-updater schedule (`updater.enabled`, default `true`) and `/update` | `update/SourbyUpdater.java`, `AutoUpdateSettings.java`; see [AUTO-UPDATER.md](AUTO-UPDATER.md) | none; ETag conditional requests and a rate-limit backoff window, a failed check just ends |
+| `https://api.modrinth.com/v2/project/<id>/version`, then the pinned `cdn.modrinth.com` URL | same cadence, after each updater check (`updater.via-auto-update`, default `true`, and `plugins.viaversion.auto-provision`) | `update/ViaAutoUpdate.java` (being edited in round 3; re-check) | none; installs only the shipped pin |
 | `https://download.db-ip.com/free/dbip-city-lite-YYYY-MM.mmdb.gz` | first `/ping` geo lookup without a local DB | `util/GeoUtil.java` | current month, then previous month; lookups degrade to unknown if both fail |
 | `https://install.speedtest.net/app/cli/` | `/speedtest` | `command/SpeedtestCommand.java` (SHA-256 pinned archives) | none |
 

@@ -39,7 +39,7 @@ class TimeSpanValidationTest {
                 () -> validation.validate("1M"));
             final String message = ex.getMessage();
             assertTrue(message.contains(validation.keyPath()), message);
-            assertTrue(message.contains("config/canvas-server.yml"), message);
+            assertTrue(message.contains("config/aurora-server.yml"), message);
             assertTrue(message.contains("'M'"), message);
             assertTrue(message.contains("'m' for minutes") && message.contains("'mo'"), message);
             assertTrue(message.contains("not applied"), message);

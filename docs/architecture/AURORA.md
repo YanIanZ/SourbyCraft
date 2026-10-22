@@ -232,10 +232,11 @@ Aurora must deepen SourbyCraft configuration ownership instead of continuing to 
 Existing files remain supported:
 
 ```text
-sourbycraft_config/sourbycraft_global_config.toml
+sourbycraft_config/sourbycraft_global_config.toml   (Build 49 layout; older layouts migrated once)
+sourbycraft_config/aurora.toml
 sourbycraft-security.yml
-config/canvas-server.yml
-config/canvas-worlds.yml
+config/aurora-server.yml                             (was config/canvas-server.yml; migrated once)
+config/aurora-worlds.yml                             (was config/canvas-worlds.yml; migrated once)
 ```
 
 But new SourbyCraft-owned behavior should move toward an Aurora namespace.

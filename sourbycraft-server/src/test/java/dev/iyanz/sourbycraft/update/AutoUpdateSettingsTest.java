@@ -21,13 +21,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@link AutoUpdateSettings}: what a fresh install gets (apply_mode=notify), how the live fields
+ * {@link AutoUpdateSettings}: what a fresh install gets (apply-mode=notify), how the live fields
  * are read back, and how bad values are handled. The settings are static, so every test saves and
  * restores them.
  */
 class AutoUpdateSettingsTest {
 
-    private static final String P = "misc.auto_update.";
+    private static final String P = "updater.";
 
     @TempDir Path dir;
 
@@ -96,30 +96,30 @@ class AutoUpdateSettingsTest {
             boolean[] changed = {false};
             AutoUpdateSettings.seedDefaults(f, changed);
             assertTrue(changed[0]);
-            assertEquals("notify", f.get(P + "apply_mode"));
+            assertEquals("notify", f.get(P + "apply-mode"));
             assertEquals(true, f.get(P + "enabled"));
-            assertEquals("YanIanZ/SourbyCraft", f.get(P + "repo"));
+            assertEquals("YanIanZ/SourbyCraft", f.get(P + "repository"));
             assertEquals("", f.get(P + "channel"));
-            assertEquals(List.of("06:00"), f.get(P + "check_times"));
-            assertEquals(30, (int) f.get(P + "check_interval_minutes"));
-            assertEquals("auto", f.get(P + "restart_mode"));
-            assertEquals(60, (int) f.get(P + "restart_delay_seconds"));
-            assertEquals(false, f.get(P + "allow_prerelease"));
-            assertEquals(true, f.get(P + "via_auto_update"));
-            assertNotNull(f.getComment("misc.auto_update"));
-            assertNotNull(f.getComment(P + "apply_mode"));
+            assertEquals(List.of("06:00"), f.get(P + "check-times"));
+            assertEquals(30, (int) f.get(P + "check-interval-minutes"));
+            assertEquals("auto", f.get(P + "restart-mode"));
+            assertEquals(60, (int) f.get(P + "restart-delay-seconds"));
+            assertEquals(false, f.get(P + "allow-prerelease"));
+            assertEquals(true, f.get(P + "via-auto-update"));
+            assertNotNull(f.getComment("updater"));
+            assertNotNull(f.getComment(P + "apply-mode"));
         }
     }
 
     @Test
     void seedingNeverOverwritesAnOperatorValueAndIsIdempotent() {
         try (CommentedFileConfig f = emptyFile()) {
-            f.set(P + "apply_mode", "auto");
-            f.set(P + "restart_delay_seconds", 120);
+            f.set(P + "apply-mode", "auto");
+            f.set(P + "restart-delay-seconds", 120);
             boolean[] first = {false};
             AutoUpdateSettings.seedDefaults(f, first);
-            assertEquals("auto", f.get(P + "apply_mode"), "an existing 'auto' must survive seeding");
-            assertEquals(120, (int) f.get(P + "restart_delay_seconds"));
+            assertEquals("auto", f.get(P + "apply-mode"), "an existing 'auto' must survive seeding");
+            assertEquals(120, (int) f.get(P + "restart-delay-seconds"));
             assertTrue(first[0], "the missing keys were added");
 
             boolean[] second = {false};
@@ -173,15 +173,15 @@ class AutoUpdateSettingsTest {
     void operatorValuesAreReadBack() throws Exception {
         Map<String, Object> v = new LinkedHashMap<>();
         v.put(P + "enabled", false);
-        v.put(P + "repo", "  me/fork  ");
+        v.put(P + "repository", "  me/fork  ");
         v.put(P + "channel", "DEV");
-        v.put(P + "apply_mode", "  STAGE ");
-        v.put(P + "check_times", List.of("07:30", "19:00"));
-        v.put(P + "check_interval_minutes", 15);
-        v.put(P + "restart_mode", "exit");
-        v.put(P + "restart_delay_seconds", 90);
-        v.put(P + "allow_prerelease", true);
-        v.put(P + "via_auto_update", false);
+        v.put(P + "apply-mode", "  STAGE ");
+        v.put(P + "check-times", List.of("07:30", "19:00"));
+        v.put(P + "check-interval-minutes", 15);
+        v.put(P + "restart-mode", "exit");
+        v.put(P + "restart-delay-seconds", 90);
+        v.put(P + "allow-prerelease", true);
+        v.put(P + "via-auto-update", false);
         withValues(v);
 
         assertFalse(AutoUpdateSettings.enabled);
@@ -233,9 +233,9 @@ class AutoUpdateSettingsTest {
         AutoUpdateSettings.repo = "x/y";
         AutoUpdateSettings.restartMode = "stop";
         Map<String, Object> v = new LinkedHashMap<>();
-        v.put(P + "apply_mode", "   ");
-        v.put(P + "repo", "");
-        v.put(P + "restart_mode", " ");
+        v.put(P + "apply-mode", "   ");
+        v.put(P + "repository", "");
+        v.put(P + "restart-mode", " ");
         withValues(v);
 
         assertEquals("notify", AutoUpdateSettings.applyMode, "a blank apply_mode is notify, never auto");
@@ -246,13 +246,13 @@ class AutoUpdateSettingsTest {
     @Test
     void numericLimitsAreClamped() throws Exception {
         Map<String, Object> v = new LinkedHashMap<>();
-        v.put(P + "restart_delay_seconds", 1);
-        v.put(P + "check_interval_minutes", -5);
+        v.put(P + "restart-delay-seconds", 1);
+        v.put(P + "check-interval-minutes", -5);
         withValues(v);
         assertEquals(5, AutoUpdateSettings.restartDelaySeconds, "minimum warning window is 5 s");
         assertEquals(0, AutoUpdateSettings.checkIntervalMinutes, "negative interval means only daily checks");
 
-        v.put(P + "restart_delay_seconds", -100);
+        v.put(P + "restart-delay-seconds", -100);
         withValues(v);
         assertEquals(5, AutoUpdateSettings.restartDelaySeconds);
     }
@@ -260,8 +260,8 @@ class AutoUpdateSettingsTest {
     @Test
     void anyNumberTypeIsAcceptedForIntegerKeys() throws Exception {
         Map<String, Object> v = new LinkedHashMap<>();
-        v.put(P + "check_interval_minutes", 45L);
-        v.put(P + "restart_delay_seconds", 12.9);
+        v.put(P + "check-interval-minutes", 45L);
+        v.put(P + "restart-delay-seconds", 12.9);
         withValues(v);
         assertEquals(45, AutoUpdateSettings.checkIntervalMinutes);
         assertEquals(12, AutoUpdateSettings.restartDelaySeconds, "a TOML float is truncated, not rejected");
@@ -271,13 +271,13 @@ class AutoUpdateSettingsTest {
     void wrongTypedValuesAreIgnoredAndTheDocumentedDefaultApplies() throws Exception {
         Map<String, Object> v = new LinkedHashMap<>();
         v.put(P + "enabled", "yes");
-        v.put(P + "apply_mode", 5);
-        v.put(P + "repo", List.of("a"));
-        v.put(P + "check_interval_minutes", "often");
-        v.put(P + "restart_delay_seconds", "soon");
-        v.put(P + "allow_prerelease", "true");
-        v.put(P + "via_auto_update", 1);
-        v.put(P + "check_times", "06:00");
+        v.put(P + "apply-mode", 5);
+        v.put(P + "repository", List.of("a"));
+        v.put(P + "check-interval-minutes", "often");
+        v.put(P + "restart-delay-seconds", "soon");
+        v.put(P + "allow-prerelease", "true");
+        v.put(P + "via-auto-update", 1);
+        v.put(P + "check-times", "06:00");
         withValues(v);
 
         assertTrue(AutoUpdateSettings.enabled);
@@ -293,12 +293,12 @@ class AutoUpdateSettingsTest {
     @Test
     void checkTimesDropsNonStringEntriesAndKeepsTheRestAndAnEmptyListIsTheDefault() throws Exception {
         Map<String, Object> mixed = new LinkedHashMap<>();
-        mixed.put(P + "check_times", new ArrayList<Object>(List.of("07:30", 5, "19:00")));
+        mixed.put(P + "check-times", new ArrayList<Object>(List.of("07:30", 5, "19:00")));
         withValues(mixed);
         assertEquals(List.of("07:30", "19:00"), AutoUpdateSettings.checkTimes);
 
         Map<String, Object> empty = new LinkedHashMap<>();
-        empty.put(P + "check_times", new ArrayList<String>());
+        empty.put(P + "check-times", new ArrayList<String>());
         withValues(empty);
         assertEquals(List.of("06:00"), AutoUpdateSettings.checkTimes,
             "an empty list is the default schedule, not a disabled daily check");

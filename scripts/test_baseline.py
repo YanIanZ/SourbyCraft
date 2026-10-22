@@ -927,8 +927,8 @@ class HeapGuardTest(unittest.TestCase):
             self.assertIn("online-mode=false", properties)
             self.assertIn(r"level-type=minecraft\:normal", properties)
             self.assertIn("auto-provision=false", config.read_text())
-            self.assertIn("[protocollib]\nauto-provision=false", config.read_text())
-            self.assertIn("[viaversion]\nauto-provision=false", config.read_text())
+            self.assertIn("[plugins.protocollib]\nauto-provision=false", config.read_text())
+            self.assertIn("[plugins.viaversion]\nauto-provision=false", config.read_text())
             self.assertEqual((target / "eula.txt").read_text(), "eula=true\n")
 
     def test_the_player_cap_covers_the_requested_clients(self):

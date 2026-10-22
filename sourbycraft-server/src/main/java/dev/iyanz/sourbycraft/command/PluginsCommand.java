@@ -209,7 +209,7 @@ public class PluginsCommand extends Command {
         try {
             Request request = parse(args);
             if (request.detail() != null) return detail(sender, request.detail());
-            render(roster(), request, SourbyCraftConfig.cfgInt("ui.plugins-page-size", 12)).forEach(sender::sendMessage);
+            render(roster(), request, SourbyCraftConfig.cfgInt(dev.iyanz.sourbycraft.config.UtilityKeys.PLUGINS_PAGE_SIZE.path(), 12)).forEach(sender::sendMessage);
         } catch (IllegalArgumentException invalid) {
             sender.sendMessage(text(invalid.getMessage(), SourbyCraftColors.DANGER));
             sender.sendMessage(UiPanel.hint(usageMessage));

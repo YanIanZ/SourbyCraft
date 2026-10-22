@@ -181,4 +181,37 @@ class BootstrapPluginSettingsTest {
         assertEquals(true, on(body, "protocollib", false));
         assertEquals(true, on(body, "viaversion", false));
     }
+
+    // ------------------------------------------------------------ Build 49 layout ([plugins.<group>])
+
+    @Test
+    void theBuild49TableSpellingIsRead() throws IOException {
+        assertFalse(on("[plugins.protocollib]\nauto-provision = false\n", "protocollib", true));
+        assertTrue(on("[plugins.protocollib]\nauto-provision = true\n", "protocollib", false));
+        assertFalse(on("[plugins]\nprotocollib.auto-provision = false\n", "protocollib", true));
+        assertFalse(on("plugins.protocollib.auto-provision = false\n", "protocollib", true));
+        assertTrue(on("[plugins.viaversion]\nauto-provision = false\n", "protocollib", true), "another group's table is not mine");
+        assertTrue(on("[plugins.protocollib]\nother = false\n", "protocollib", true));
+    }
+
+    @Test
+    void theBuild49SpellingWinsOverThePreBuild49OneWhateverTheOrder() throws IOException {
+        assertTrue(on("[protocollib]\nauto-provision = false\n\n[plugins.protocollib]\nauto-provision = true\n", "protocollib", false));
+        assertTrue(on("[plugins.protocollib]\nauto-provision = true\n\n[protocollib]\nauto-provision = false\n", "protocollib", false));
+        assertFalse(on("[plugins.protocollib]\nauto-provision = false\n\n[protocollib]\nauto-provision = true\n", "protocollib", true));
+    }
+
+    @Test
+    void anInvalidBuild49ValueDisablesInstallationAndNamesTheKey() throws IOException {
+        Path cfg = toml("[plugins.protocollib]\nauto-provision = maybe\n");
+        java.io.PrintStream previous = System.err;
+        java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+        System.setErr(new java.io.PrintStream(captured, true));
+        try {
+            assertFalse(BootstrapPluginSettings.enabled(cfg, "protocollib", true));
+        } finally {
+            System.setErr(previous);
+        }
+        assertTrue(captured.toString().contains("Invalid plugins.protocollib.auto-provision"), captured.toString());
+    }
 }

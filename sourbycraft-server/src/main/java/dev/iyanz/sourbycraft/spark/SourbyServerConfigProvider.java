@@ -271,7 +271,9 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
 
     /**
      * The Aurora engine files. Group {@code aurora/} (was {@code canvas/} until 2026-10-21); the entry names inside
-     * are the real file names, which stay {@code canvas-*.yml} so existing servers keep their settings.
+     * are the real file names: {@code aurora-server.yml} and {@code aurora-worlds.yml} since Build 49 (the
+     * {@code canvas-*.yml} names are migrated once at boot and no longer read), plus each world's
+     * {@code canvas-patch.yml}, which keeps its name.
      */
     private static class AuroraSplitParser extends YamlConfigParser {
         static final AuroraSplitParser INSTANCE = new AuroraSplitParser();
@@ -296,8 +298,10 @@ public final class SourbyServerConfigProvider extends ServerConfigProvider {
 
         private static Map<String, Path> getNestedFiles(final Path configDir) {
             final Map<String, Path> files = new LinkedHashMap<>();
-            files.put("canvas-server.yml", configDir.resolve("canvas-server.yml"));
-            files.put("world-defaults.yml", configDir.resolve("canvas-worlds.yml"));
+            // The engine's file names (Build 49), spelled here rather than imported: Aurora's own source
+            // names the engine only through config/upstream/UpstreamConfigBridge (independence policy).
+            files.put("aurora-server.yml", configDir.resolve("aurora-server.yml"));
+            files.put("aurora-worlds.yml", configDir.resolve("aurora-worlds.yml"));
             for (final World world : Bukkit.getWorlds()) {
                 files.put(world.getName() + ".yml", world.getWorldFolder().toPath().resolve("canvas-patch.yml"));
             }

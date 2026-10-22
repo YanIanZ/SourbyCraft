@@ -8,7 +8,7 @@ import net.kyori.adventure.text.format.TextColor;
 public record ConsoleStyle(boolean color, boolean unicode) {
     public static ConsoleStyle current() {
         return resolve(System.getProperty("sourbycraft.console",
-            SourbyCraftConfig.cfgGet("ui.console-style", "auto")), System.console() != null,
+            SourbyCraftConfig.cfgGet(dev.iyanz.sourbycraft.config.UtilityKeys.CONSOLE_STYLE.path(), "auto")), System.console() != null,
             System.getenv("NO_COLOR") != null, "dumb".equals(System.getenv("TERM")));
     }
 

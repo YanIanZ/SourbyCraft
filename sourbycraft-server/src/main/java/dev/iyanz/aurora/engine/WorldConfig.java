@@ -1,6 +1,7 @@
 package dev.iyanz.aurora.engine;
 
 import dev.iyanz.aurora.engine.configuration.ConfigurationProvider;
+import dev.iyanz.aurora.engine.configuration.EngineConfigFiles;
 import dev.iyanz.aurora.engine.configuration.Part;
 import dev.iyanz.aurora.engine.configuration.Resolver;
 import dev.iyanz.aurora.engine.configuration.Style;
@@ -50,7 +51,26 @@ public class WorldConfig extends Part {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("Aurora"); // SourbyCraft - engine config speaks as the engine: [CanvasWorlds] -> [Aurora]
 
-    private static final Path BASE_FILE = Path.of("config/canvas-worlds.yml").toAbsolutePath().normalize();
+    /** {@code config/aurora-worlds.yml}; {@link EngineConfigFiles#migrate} brings an older {@code canvas-worlds.yml} here once. */
+    private static final Path BASE_FILE = EngineConfigFiles.worldsFile();
+
+    /** Header of a newly created or migrated {@code aurora-worlds.yml}. */
+    private static final String[] HEADER = Style.create()
+        .literal("Aurora / World defaults (config/aurora-worlds.yml)").endLine()
+        .blank()
+        .wordWrap("Default region-engine settings shared by every world on SourbyCraft: combat, blocks and",
+            "spawners, entities, region bars, sleep messages. Every option is documented beside its key.").endLine()
+        .blank()
+        .wordWrap("Per-world overrides stay in each world's canvas-patch.yml (dimension storage directory):",
+            "copy an option path there to replace the default for that world only.").endLine()
+        .blank()
+        .wordWrap("Lifecycle: /sourbycraft reload re-reads this file and the per-world patches. Options read",
+            "when an object is created (spawner integers, projectile chunk loading) keep their value for",
+            "existing objects; see docs/AURORA-CONFIG.md.").endLine()
+        .blank()
+        .wordWrap("Build 49 renamed this file from config/canvas-worlds.yml. The old file was copied here once",
+            "and renamed to canvas-worlds.yml.migrated; it is not read any more.").endLine()
+        .compile(60);
 
     // for the default configuration, we do need a solid configuration for this or else the patchable
     // variant will fail to load, so we load this in the static block
@@ -69,6 +89,7 @@ public class WorldConfig extends Part {
     }
 
     public static void reload() {
+        EngineConfigFiles.migrate(BASE_FILE, EngineConfigFiles.legacyWorldsFile(), HEADER).log(LOGGER);
         ConfigurationProvider.buildSolidConfiguration(
             BASE_FILE,
             WorldConfig::new,
@@ -95,15 +116,7 @@ public class WorldConfig extends Part {
 
                 }
             },
-            Style.create()
-                .literal("Aurora / World defaults").endLine()
-                .blank()
-                .wordWrap("Default region-engine settings shared by worlds on SourbyCraft.",
-                    "The historical config/canvas-worlds.yml path is retained for existing servers.").endLine()
-                .blank()
-                .wordWrap("Per-world overrides remain in each world's existing configuration file.",
-                    "/sourbycraft reload re-reads supported settings; cached options require restart.").endLine()
-                .compile(60)
+            HEADER
         );
 
         // on reload, if the server started, we need to swap out the configs
@@ -139,7 +152,7 @@ public class WorldConfig extends Part {
                 .blank()
                 .wordWrap(
                     "This configuration file can be used to override the values in the default configuration",
-                    "for worlds defined in \"/config/canvas-worlds.yml\""
+                    "for worlds defined in \"/config/aurora-worlds.yml\""
                 ).endLine()
                 .blank()
                 .wordWrap(
@@ -212,7 +225,7 @@ public class WorldConfig extends Part {
         // regionized TPS/RAM bars are a duplicate of that feature, and their toggle command
         // (/canvas region-bar) has been removed with the rest of /canvas. Default them OFF so
         // there is a single owner and no competing/stacked bars. Operators who specifically want
-        // Canvas' per-region bars can re-enable them in config/canvas-worlds.yml.
+        // Canvas' per-region bars can re-enable them in config/aurora-worlds.yml.
         public boolean enableTpsBar = false;
         public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
 

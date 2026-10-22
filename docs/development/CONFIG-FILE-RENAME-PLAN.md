@@ -1,17 +1,42 @@
 # Config file rename plan — `canvas-server.yml` / `canvas-worlds.yml`
 
-> **Role:** plan (design + migration contract). **Status: PLANNED / PROPOSED — nothing in this
-> document is implemented.** No code, test, CI step, Docker file or documentation outside this
-> page was changed by this plan. Proposed names are marked **PROPOSED** and need the owner's
-> decision. Per [docs/DEVELOPMENT.md](../DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy),
-> every statement below is tagged with what was actually verified.
+> **Role:** plan (design + migration contract) and, in this box, the implementation record.
+> **Status: IMPLEMENTED in Build 49 (2026-10-22, owner decision reversing the 2026-10-21 keep).**
+> The effective contract now lives in [docs/AURORA-CONFIG.md](../AURORA-CONFIG.md) §4 and §7; the
+> sections below are the plan as written on 2026-10-20 and are kept as design history. Where the
+> implementation differs from the plan, this box wins:
 >
-> **Superseded in part (2026-10-21, owner decision):** the `config/canvas-*.yml` and `canvas-patch.yml`
-> file names are **kept**. Other names this plan cites were changed: `subcommands/ReloadSubCommand`
-> (and the whole dormant `/canvas` subcommand tree) was deleted, `CanvasFileMigration` is
-> `AuroraFileMigration`, and the Spark group `canvas/` (`CanvasSplitParser`) is `aurora/`
-> (`AuroraSplitParser`; the entry names inside still match the real file names). Line numbers below are
-> from before that change.
+> - Names: the proposed `config/aurora-server.yml` / `config/aurora-worlds.yml` (§3). Per-world
+>   `canvas-patch.yml` not renamed (§1).
+> - Code: `aurora/engine/configuration/EngineConfigFiles` (not `ConfigFileLocation`), wired into
+>   `GlobalConfiguration.reload()` / `WorldConfig.reload()` before every load; headers rewritten;
+>   `TimeSpanValidation` names the new file; Spark entries are the new file names (the plan's "keep the
+>   JSON keys" recommendation, Q2, was not followed: the group is already `aurora/` and the entries
+>   are real file names); `/sourbycraft config` prints the new names.
+> - **Old file is renamed, not left byte-identical** (owner instruction): after the copy under the new
+>   name the old file becomes `<old>.migrated` (`.migrated.1` … when taken). Rule 2 and the R1–R3
+>   downgrade story change accordingly: the `*.migrated` copy is the pre-rename snapshot; to run a pre-49
+>   jar copy `aurora-*.yml` over the `canvas-*.yml` names first (AURORA-CONFIG.md §7).
+> - Both present: new wins, one WARN naming the stale old file on every load (rule 3; no mtime
+>   comparison). Corrupt old file: the load fails naming both paths, nothing written or renamed
+>   (rule 5 as "no silent fallback"). Empty old file: defaults under the new name, old file still renamed.
+>   The copy goes through an atomic `.migrating` sibling (rule 9). Rule 10 (alias refusal), the escape
+>   hatch (§5.5) and the mtime warning were not implemented (owner chose fewer knobs).
+> - Tests: `EngineConfigFilesTest` (13: T1–T3, T5, T7–T11, T14 staging leftover, numbered `.migrated`,
+>   the real server and worlds key sets round-tripping value for value), `ConfigurationUpgradeTest`
+>   fixtures renamed, `TimeSpanValidationTest` updated. Boot evidence: Build 49 release doc, migration
+>   note.
+> - Out of this change: the per-world `canvas-patch.yml` (Q3), Spark path mismatch (Q10), engine
+>   pending-key tracking (Q11), making every ordinary load atomic (Q9). Deprecation end (Q4): the
+>   old-name migration stays until the owner schedules its removal
+>   ([26.2-build-50.md](../releases/26.2-build-50.md)).
+>
+> Original header: "PLANNED / PROPOSED — nothing in this document is implemented. Per
+> [docs/DEVELOPMENT.md](../DEVELOPMENT.md#development-truthfulness-and-non-misleading-policy), every
+> statement below is tagged with what was actually verified." Superseded in part on 2026-10-21 (names
+> kept, `/canvas` subcommand tree deleted, `CanvasFileMigration` → `AuroraFileMigration`, Spark group
+> `canvas/` → `aurora/`); superseded again on 2026-10-22 by the implementation above. Line numbers below
+> are from before both changes.
 >
 > Source: [docs/TODO.md](../TODO.md) — *"Rencana migrasi nama file konfigurasi
 > `config/canvas-server.yml` / `canvas-worlds.yml`"* (`docs/TODO.md:507`).

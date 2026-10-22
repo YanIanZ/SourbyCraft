@@ -32,7 +32,7 @@ public final class ViaAutoUpdate {
 
     public static void check() {
         if (!AutoUpdateSettings.viaAutoUpdate || Boolean.getBoolean("sourbyclip.offline")) return;
-        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool("viaversion.auto-provision", true)) return;
+        if (!dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool(dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), true)) return;
         String mc = BuildInfo.load().mcVersion();
         for (var trusted : PluginProvisioner.viaPins()) {
             Pin pin = new Pin(trusted.projectId(), trusted.prefix(), trusted.filename(), trusted.url(), trusted.sha256(), trusted.size());

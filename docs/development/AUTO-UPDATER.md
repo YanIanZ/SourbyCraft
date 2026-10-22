@@ -1,4 +1,9 @@
-# Auto-updater (`misc.auto_update.*`)
+# Auto-updater (`[updater]` in `sourbycraft_config/sourbycraft_global_config.toml`)
+
+Key names below are the Build 49 ones (`updater.*`, kebab-case). The pre-49 names (`misc.auto_update.enabled`,
+`repo`, `apply_mode`, `check_times`, `check_interval_minutes`, `restart_mode`, `restart_delay_seconds`,
+`allow_prerelease`, `via_auto_update`) are rewritten once at boot by `config/ConfigMigration` (copy kept as
+`*.migrated`) and still read until Build 50 with one WARN each.
 
 State as of 2026-10-20 (security wave SEC-2, SEC-3, SEC-9, SEC-10; OBS-8 for `/update`).
 Code: `sourbycraft-server/src/main/java/dev/iyanz/sourbycraft/update/`, command
@@ -9,13 +14,13 @@ column names the regression test that pins it.
 
 `SourbyUpdater` polls `https://api.github.com/repos/<repo>/releases` for a newer release **on the
 same channel** (REL/DEV/EXP, from this build's version suffix) and acts according to
-`apply_mode`:
+`apply-mode`:
 
-| `apply_mode` | Behaviour |
+| `apply-mode` | Behaviour |
 |---|---|
 | `notify` (**default** since this change; was `auto`) | log + operator banner only |
 | `stage` | download, verify, place in `auto_update/sourbycraft/`, write `auto_update/core.path` |
-| `auto` | `stage`, then swap the launch jar and restart after `restart_delay_seconds` |
+| `auto` | `stage`, then swap the launch jar and restart after `restart-delay-seconds` |
 | `off` | no checks scheduled |
 
 `/update` runs one check with the configured mode, `/update apply` forces one `auto` run,
@@ -23,7 +28,7 @@ same channel** (REL/DEV/EXP, from this build's version suffix) and acts accordin
 rollback hold.
 
 **Existing installs keep their stored value.** The TOML seed only writes keys that are absent
-(`SourbyCraftConfig.seed`), so a file created under the old default still says `apply_mode = "auto"`
+(`SourbyCraftConfig.seed`), so a file created under the old default still says `apply-mode = "auto"`
 until the operator changes it. New files get `notify`.
 
 ## Settings and reloadability
@@ -32,18 +37,18 @@ Verified against the consumers: `/sourbycraft reload` → `SourbyCraftConfig.app
 `AutoUpdateSettings.loadFromToml()` refreshes the static fields; `SourbyUpdater.check()` reads
 them on every check; `SourbyUpdater.start()` builds the schedule once at boot and is not re-run
 by reload. A key that is missing, blank or of the wrong type reads as the default in the table
-below, not as the previous live value: deleting `apply_mode` and reloading gives `notify`.
+below, not as the previous live value: deleting `apply-mode` and reloading gives `notify`.
 
 | Key | Default | Reloadability |
 |---|---|---|
 | `enabled` | `true` | RESTART_REQUIRED (decides whether `start()` runs) |
-| `repo` | `YanIanZ/SourbyCraft` | LIVE (next check) |
+| `repository` | `YanIanZ/SourbyCraft` | LIVE (next check) |
 | `channel` | `""` = from the build version | LIVE (next check) |
-| `apply_mode` | `notify` | LIVE between `notify`/`stage`/`auto` (next check); switching from or to `off` is RESTART_REQUIRED because `off` skips the schedule in `start()` |
-| `check_times`, `check_interval_minutes` | `["06:00"]`, `30` | RESTART_REQUIRED (schedule built in `start()`); `/update status` prints the interval the running schedule uses, plus `(pending restart: Nm)` when a reload changed it |
-| `restart_mode`, `restart_delay_seconds` | `auto`, `60` | LIVE (read when an apply is scheduled) |
-| `allow_prerelease` | `false` | LIVE (next check) |
-| `via_auto_update` | `true` | LIVE: recover missing reviewed Via pins; installed jars require restart |
+| `apply-mode` | `notify` | LIVE between `notify`/`stage`/`auto` (next check); switching from or to `off` is RESTART_REQUIRED because `off` skips the schedule in `start()` |
+| `check-times`, `check-interval-minutes` | `["06:00"]`, `30` | RESTART_REQUIRED (schedule built in `start()`); `/update status` prints the interval the running schedule uses, plus `(pending restart: Nm)` when a reload changed it |
+| `restart-mode`, `restart-delay-seconds` | `auto`, `60` | LIVE (read when an apply is scheduled) |
+| `allow-prerelease` | `false` | LIVE (next check) |
+| `via-auto-update` | `true` | LIVE: recover missing reviewed Via pins; installed jars require restart |
 
 ## Verification chain before a jar is staged
 
@@ -121,7 +126,7 @@ Files, all next to the server: `<launch jar>.prev`, `auto_update/rollback.state`
 file with `phase`, `tag`, `launch`, `prev`, `applied_at`, `note`), plus the pre-existing
 `auto_update/applied.tag`.
 
-Sequence for `apply_mode=auto` (or `/update apply`):
+Sequence for `apply-mode=auto` (or `/update apply`):
 
 1. **Apply** (`UpdateApplier.applyNow`): copy the launch jar to `<jar>.prev` (via a `.part` file,
    then an atomic rename). If that copy fails, the swap and the restart do **not** happen — an
@@ -140,7 +145,7 @@ Sequence for `apply_mode=auto` (or `/update apply`):
    is missing or the copy fails: `phase=RESTORE_FAILED`, also held, with a `ROLLBACK FAILED` block.
 4. **Every later boot** while held prints `AUTO-UPDATER HELD` and does nothing else.
 
-The guard boot step runs even when `enabled=false` or `apply_mode=off`
+The guard boot step runs even when `enabled=false` or `apply-mode=off`
 (`AutoUpdateSettings.startUpdater()` calls it first).
 
 Operator actions: `/update resume` (or delete `auto_update/rollback.state`) lifts the hold.
@@ -168,7 +173,7 @@ simulated start), `SourbyUpdaterCheckTest.aRollbackHoldShortCircuitsTheCheckWith
 
 ## Restart modes (SEC-9)
 
-`restart_mode`: `auto` = `exit` inside a Pterodactyl/Pelican container (`P_SERVER_UUID`), else
+`restart-mode`: `auto` = `exit` inside a Pterodactyl/Pelican container (`P_SERVER_UUID`), else
 `spigot`; `spigot` = `RestartCommand.restart()` (falls back to a clean stop); `stop` = clean stop;
 `exit` = clean stop **and exit code 70**.
 

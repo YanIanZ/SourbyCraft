@@ -48,7 +48,7 @@ import java.util.zip.ZipFile;
  * Advanced SourbyCraft auto-updater (F1-8) — targets SourbyCraft's own GitHub releases, replacing
  * the archived upstream updater the Folia base shipped (which pointed at a now-dead feed).
  *
- * <p>Design (all knobs live in the unified operator config under {@code misc.auto_update.*}, wired
+ * <p>Design (all knobs live in the unified operator config under {@code [updater]}, wired
  * by {@link dev.iyanz.sourbycraft.update.AutoUpdateSettings}):
  *
  * <ol>
@@ -199,7 +199,7 @@ public final class SourbyUpdater {
 
         java.util.List<String> times = Config.checkTimes();
         if (times.isEmpty()) {
-            SourbyLogger.warn("auto-updater enabled but misc.auto_update.check_times is empty; no checks scheduled.");
+            SourbyLogger.warn("auto-updater enabled but updater.check-times is empty; no checks scheduled.");
             return;
         }
 
@@ -575,7 +575,7 @@ public final class SourbyUpdater {
             }
             if (code == 404) {
                 SourbyLogger.info("auto-updater: repo/releases not found (404) for " + url
-                    + " — no releases yet, or check misc.auto_update.repo.");
+                    + " — no releases yet, or check updater.repository.");
                 return Listing.FAILED;
             }
             if (code == 429 || code == 403) {
@@ -1170,7 +1170,7 @@ public final class SourbyUpdater {
     }
 
     /**
-     * Config bridge — reads the {@code misc.auto_update.*} keys through
+     * Config bridge — reads the {@code updater.*} keys through
      * {@link AutoUpdateSettings}'s static fields. Kept as a tiny indirection so
      * {@link SourbyUpdater} never imports the config class field-by-field at every call site and
      * so it degrades to safe defaults if the settings failed to load.

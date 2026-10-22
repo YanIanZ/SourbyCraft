@@ -76,7 +76,7 @@ Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](d
 [TEST-COVERAGE-GAPS.md](development/TEST-COVERAGE-GAPS.md) (prioritised list of missing unit tests and timing-sensitive tests to convert).
 [REMOTE-REPOSITORIES.md](development/REMOTE-REPOSITORIES.md) (every remote the build, CI and first boot reach, fallback order, offline behaviour).
 [AGENT-TEST-SERVER.md](development/AGENT-TEST-SERVER.md) (the only sanctioned way for an agent to boot a server: isolated, time-limited, one at a time; functional evidence, not a baseline).
-[CONFIG-FILE-RENAME-PLAN.md](development/CONFIG-FILE-RENAME-PLAN.md) (PROPOSED plan to rename `canvas-server.yml`/`canvas-worlds.yml` without breaking existing servers; nothing implemented).
+[CONFIG-FILE-RENAME-PLAN.md](development/CONFIG-FILE-RENAME-PLAN.md) (the `canvas-*.yml` → `aurora-*.yml` rename: plan, plus the Build 49 implementation record at the top; the migration itself is documented in AURORA-CONFIG.md).
 [scratch-reentrancy-proof.md](architecture/scratch-reentrancy-proof.md) (DEV-A: every mutable scratch field the feature patches add, its re-entry paths and verdict).
 [async-path-snapshot-audit.md](architecture/async-path-snapshot-audit.md) (DEV-E: every region member an off-thread path solve reads, vanilla vs `SnapshotPathRegion` answer, verdict per member; source audit, no server run).
 [PLUGIN-NETTY-GUIDANCE.md](development/PLUGIN-NETTY-GUIDANCE.md) (for plugin authors and operators: which events run on a Netty event loop, why blocking there hurts, what to do instead; from a source audit, not a benchmark).
