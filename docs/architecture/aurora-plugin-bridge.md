@@ -192,6 +192,15 @@ this increment remains assigned to Claude.
 - **Not intercepted.** A bridged plugin calling world API directly from a bridged task on the
   global region is not rewritten; the base's own thread checks decide what happens. Async tasks
   run on the governed lane; the worker follow-up below exposes those threads to Bukkit callers.
+- **`World#getChunkAt` from an async task (paper 0028, 2026-10-22).** Not a bridge rule but an engine
+  one, for every thread that is not a `TickThread` (bridge I/O lane, Bukkit async task, plugin
+  executor): the call follows Paper. A loaded chunk is returned at once; an unloaded one is loaded
+  through the chunk system for its region while the caller waits, at most 30 s, then a plain
+  `IllegalStateException` that is not counted as a violation (`guards/OffThreadChunkLoad`). Before,
+  the base refused even a loaded chunk ("Async chunk retrieval") and the refusal counted toward the
+  plugin's quarantine. Tick threads keep the refusal. The `Chunk` returned holds no chunk reference;
+  block/entity access through it keeps its own ownership checks. Found with SuperiorSkyblock2 2026.3
+  (`/is create` island preparation); boot marker `LEGACY_BRIDGE_ASYNC_GETCHUNK_OK`.
 - **Sync route.** `aurora.bridge.sync-route` (LIVE), default `caller-region`: a legacy sync task
   scheduled while a region is ticking runs on that region, anchored on a chunk it owned
   (`execution/region/CurrentRegion`, implemented by the existing `FoliaRegionBackend` adapter; anchors cached per region id). From anywhere

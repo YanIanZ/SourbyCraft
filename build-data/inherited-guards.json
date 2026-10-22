@@ -2019,8 +2019,8 @@
       "sites": 201,
       "kind": "OWNERSHIP-CHECK",
       "decision": "KEEP-OWNED",
-      "note": "KEEP-OWNED. The region ownership invariant itself: code that mutates an entity/chunk/world slice must run on the thread that owns it; violation throws IllegalStateException (not configurable). SourbyCraft adopts this as its correctness rule (DEVELOPMENT.md: region ownership outranks throughput) and adds its own checks in the same style (feature 0016 cross-region block test, SourbyReply.hopFor). 201 marked sites; Paper's own unmarked TickThread checks (70 more) are Paper's. The count is pinned here; the behaviour is pinned by ScratchReentrancyTest/SourbyReplyTest only at SourbyCraft's own call sites.",
-      "test": "count pinned by this manifest; per-site tests missing"
+      "note": "KEEP-OWNED. The region ownership invariant itself: code that mutates an entity/chunk/world slice must run on the thread that owns it; violation throws IllegalStateException (not configurable). SourbyCraft adopts this as its correctness rule (DEVELOPMENT.md: region ownership outranks throughput) and adds its own checks in the same style (feature 0016 cross-region block test, SourbyReply.hopFor). 201 marked sites; Paper's own unmarked TickThread checks (70 more) are Paper's. The count is pinned here; the behaviour is pinned by ScratchReentrancyTest/SourbyReplyTest only at SourbyCraft's own call sites. 2026-10-22: CraftWorld#getChunkAt(x, z) gained a branch before its site (paper 0028, guards/OffThreadChunkLoad): a thread that is not a TickThread waits for the chunk as on Paper (bounded 30 s); every tick thread still hits this site, so the count is unchanged.",
+      "test": "count pinned by this manifest; per-site tests missing; OffThreadChunkLoadTest (getChunkAt off-thread branch + paper 0028 shape)"
     },
     {
       "id": "F-TICKTHREAD-IS",

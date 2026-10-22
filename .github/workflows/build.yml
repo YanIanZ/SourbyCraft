@@ -756,6 +756,7 @@ jobs:
           for _ in $(seq 1 30); do
             if grep -q 'LEGACY_BRIDGE_SYNC_OK' server.log \
               && grep -q 'LEGACY_BRIDGE_ASYNC_OK' server.log \
+              && grep -Eq 'LEGACY_BRIDGE_ASYNC_GETCHUNK_(OK|WRONG|REFUSED)' server.log \
               && grep -q 'LEGACY_BRIDGE_TIMER_OK' server.log \
               && grep -Eq 'LEGACY_BRIDGE_WORLD_ACCESS_(ALLOWED|REFUSED)' server.log \
               && grep -Eq 'LEGACY_BRIDGE_REGION_SYNC_(OK|REFUSED)' server.log \
@@ -813,6 +814,8 @@ jobs:
             || { echo "bridge admission line missing"; exit 1; }
           grep -q 'LEGACY_BRIDGE_QUEUED_OK' server.log || { echo "isQueued did not see a bridged task"; exit 1; }
           grep -q 'LEGACY_BRIDGE_PENDING_OK' server.log || { echo "getPendingTasks did not list a bridged task"; exit 1; }
+          grep -q 'LEGACY_BRIDGE_ASYNC_GETCHUNK_OK' server.log \
+            || { echo "World#getChunkAt from a bridged async task did not return the chunk (paper 0028)"; exit 1; }
           grep -q 'LEGACY_BRIDGE_REGION_SYNC_OK' server.log \
             || { echo "a sync task scheduled from a region did not run on that region"; exit 1; }
           grep -q 'LEGACY_REGION_TASK_OK' server.log \
