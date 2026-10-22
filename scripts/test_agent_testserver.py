@@ -965,6 +965,109 @@ class WorldReuseAndKillTest(HarnessCase):
         self.assertEqual(reads, [ats.PLUGIN_JAR_MAX_BYTES + 1])
         self.assertFalse((self.root / "servers" / "b").exists())
 
+    def test_a_plugin_data_file_is_copied_as_bytes_and_recorded_by_hash(self):
+        # A module jar inside a plugin's data folder (SuperiorSkyblock2 loads modules only from
+        # plugins/SuperiorSkyblock2/modules/*.jar), placed before boot.
+        module = self.root / "module.jar"
+        payload = b"PK\x03\x04\x00module-bytes"
+        module.write_bytes(payload)
+        plugin = self.root / "plugin.jar"
+        plugin.write_bytes(b"PK\x03\x04plugin")
+        workdir = Path(self.start("a", config_files={"plugins/Sky.jar": plugin},
+                                  plugin_files={"plugins/Sky/modules/Mod.jar": module,
+                                                "plugins/Sky/schematics/a.schem": module})
+                       ["workdir"])
+        self.harness.stop("a", timeout=10)
+        self.assertEqual((workdir / "plugins/Sky/modules/Mod.jar").read_bytes(), payload)
+        self.assertEqual((workdir / "plugins/Sky/schematics/a.schem").read_bytes(), payload)
+        entries = self.run_json("a")["plugin_files"]
+        self.assertEqual([e["dest"] for e in entries],
+                         ["plugins/Sky/modules/Mod.jar", "plugins/Sky/schematics/a.schem"])
+        self.assertEqual(entries[0]["sha256"], hashlib.sha256(payload).hexdigest())
+        self.assertEqual(entries[0]["bytes"], len(payload))
+        self.assertEqual(entries[0]["source"], str(module))
+        self.assertNotIn("text", entries[0])
+        # The plugin jar itself stays a --config-file entry.
+        self.assertEqual([c["dest"] for c in self.run_json("a")["config_files"]],
+                         ["plugins/Sky.jar"])
+
+    def test_plugin_data_file_destinations_stay_inside_a_plugin_folder(self):
+        module = self.root / "module.jar"
+        module.write_bytes(b"PK")
+        for dest in ("../plugins/Sky/m.jar", "/abs/plugins/Sky/m.jar", "plugins/Sky.jar",
+                     "plugins/../Sky/m.jar", "plugins/Sky/../../m.jar", "plugins/Sky/./m.jar",
+                     "config/Sky/m.jar", "Sky/modules/m.jar", "plugins", "plugins/",
+                     "plugins/Sky/", "plugins\\Sky\\m.jar", "C:/plugins/Sky/m.jar",
+                     "plugins//m.jar", "world/plugins/Sky/m.jar"):
+            with self.assertRaisesRegex(ats.HarnessError, "plugin file destination"):
+                self.start("b", plugin_files={dest: module})
+        self.assertFalse((self.root / "servers" / "b").exists())
+        self.assertFalse(self.harness.lock_path.exists())
+
+    def test_plugin_data_file_sources_are_checked_like_plugin_jars(self):
+        with self.assertRaisesRegex(ats.HarnessError, "plugin file .* not a file"):
+            self.start("b", plugin_files={"plugins/Sky/modules/m.jar": self.root / "missing.jar"})
+        with self.assertRaisesRegex(ats.HarnessError, "plugin file .* not a file"):
+            self.start("b", plugin_files={"plugins/Sky/modules/m.jar": self.root})
+        big = self.root / "big.jar"
+        big.write_bytes(b"x" * (ats.PLUGIN_JAR_MAX_BYTES + 1))
+        with self.assertRaisesRegex(ats.HarnessError, "plugin file .* under 8 MiB"):
+            self.start("b", plugin_files={"plugins/Sky/modules/big.jar": big})
+        real = self.root / "real.jar"
+        real.write_bytes(b"PK")
+        link = self.root / "link.jar"
+        link.symlink_to(real)
+        with self.assertRaisesRegex(ats.HarnessError, "symlink"):
+            self.start("b", plugin_files={"plugins/Sky/modules/link.jar": link})
+        self.assertFalse((self.root / "servers" / "b").exists())
+
+    def test_plugin_data_files_may_not_collide_with_config_files(self):
+        module = self.root / "module.jar"
+        module.write_bytes(b"PK")
+        conf = self.root / "c.yml"
+        conf.write_text("a: 1\n")
+        for configs, files in (({"plugins/Sky/config.yml": conf},
+                                {"plugins/Sky/config.yml": module}),
+                               ({"plugins/Sky/modules": conf},
+                                {"plugins/Sky/modules/m.jar": module})):
+            with self.assertRaisesRegex(ats.HarnessError, "collides"):
+                self.start("b", config_files=configs, plugin_files=files)
+        self.assertFalse((self.root / "servers" / "b").exists())
+
+    def test_a_plugin_data_file_is_read_once_and_never_past_the_cap(self):
+        module = self.root / "grow.jar"
+        module.write_bytes(b"x" * 10)
+        reads = []
+        real_open = open
+
+        class Spy:
+            def __init__(self, handle):
+                self.handle = handle
+            def read(self, n=-1):
+                reads.append(n)
+                return b"x" * (ats.PLUGIN_JAR_MAX_BYTES + 1)
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                self.handle.close()
+
+        def fake_open(path, mode="r", *args, **kwargs):
+            handle = real_open(path, mode, *args, **kwargs)
+            return Spy(handle) if str(path) == str(module) and "b" in mode else handle
+
+        with mock.patch("builtins.open", fake_open):
+            with self.assertRaisesRegex(ats.HarnessError, "plugin file"):
+                ats.Harness.plugin_files({"plugins/Sky/modules/g.jar": str(module)})
+        self.assertEqual(reads, [ats.PLUGIN_JAR_MAX_BYTES + 1])
+
+    def test_cli_forwards_plugin_files(self):
+        args = ats.build_parser().parse_args(
+            ["start", "--name", "a", "--plugin-file", "plugins/Sky/modules/m.jar=/x/m.jar"])
+        self.assertEqual(ats._start_kwargs(args)["plugin_files"],
+                         {"plugins/Sky/modules/m.jar": "/x/m.jar"})
+        args = ats.build_parser().parse_args(["run", "--name", "a", "--scenario", "s.json"])
+        self.assertIsNone(ats._start_kwargs(args)["plugin_files"])
+
     def test_cli_forwards_config_files(self):
         args = ats.build_parser().parse_args(
             ["start", "--name", "a", "--config-file", "spigot.yml=/x/s.yml",

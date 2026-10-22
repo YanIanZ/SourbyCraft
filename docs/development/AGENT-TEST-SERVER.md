@@ -45,6 +45,8 @@ python3 $S start --name my-check-2 --world-from my-check   # boot again over my-
 python3 $S start --name awf-1 --aurora-toml awf.toml       # sourbycraft_config/aurora.toml (e.g. AWF worlds)
 python3 $S start --name tp-1 --config-file plugins/SourbyCraft-Test-Plugin.jar=test-plugin/build/libs/test-plugin-1.0.0.jar \
     --jvm-property sourby.testplugin.probes=true    # plugin jar (bytes, <= 8 MiB, run.json keeps its sha256) + test-plugin probes
+python3 $S start --name ssb-1 --config-file plugins/SuperiorSkyblock2.jar=/path/SuperiorSkyblock2-2026.3.jar \
+    --plugin-file plugins/SuperiorSkyblock2/modules/SSB-AuroraWorlds.jar=/path/SSB-AuroraWorlds.jar   # file inside a plugin's data folder
 python3 $S start --name cache-2 --startup-cache-from cache-1 --startup-cache-corrupt truncated   # boot over a damaged startup cache
 python3 $S cache-check --name cache-2       # judge that boot against the seed (exit 1 = a check failed)
 # with probes=true the unload fixture runs by itself after startup: wait-for "SOURBY_UNLOAD_FIXTURE_(OK|FAILED|[A-Z_]*_WRONG)"
@@ -65,6 +67,24 @@ and `run.json` `world_from` records its name, exit code, stop reason, git head a
 source's `sourbycraft_config/aurora.toml` is carried over unless `--aurora-toml` is given, so a
 world stored through AWF comes back through AWF. `kill` exits 0 when the server was SIGKILLed on
 request (`stop_reason` "killed on request") and the lock was released.
+
+### Files inside a plugin's data folder (`--plugin-file`)
+
+`--config-file` puts a jar only directly into `plugins/` (and text config files elsewhere). Some
+plugins load extra jars or data from their own folder before or during `onEnable` (SuperiorSkyblock2
+loads modules only from `plugins/SuperiorSkyblock2/modules/*.jar`), so
+`--plugin-file plugins/<Plugin>/<path>=FILE` (repeatable) copies FILE there before boot:
+
+- The destination must be a relative POSIX path with at least one folder below `plugins/`; refused:
+  absolute paths, `..`, `.`, empty parts, backslashes, `:`, a trailing `/`, anything outside
+  `plugins/`, and `plugins/<name>.jar` itself (that is `--config-file`). A destination equal to,
+  inside or containing a `--config-file` destination is refused as a collision.
+- The source is checked like a plugin jar: a regular file, not a symlink, at most 8 MiB, read once
+  with the cap enforced on the bytes read. Any file type is accepted and copied as bytes.
+- `run.json` `plugin_files` records each `dest`, `source`, `bytes` and `sha256`.
+- Everything is validated before the run directory or a slot lock is created.
+- Not carried over by `--world-from` or `--startup-cache-from` (those copy worlds and `plugins/*.jar`
+  only); pass it again for a second boot.
 
 ### Startup-cache seeding (`--startup-cache-from`, `--startup-cache-corrupt`, `cache-check`)
 
