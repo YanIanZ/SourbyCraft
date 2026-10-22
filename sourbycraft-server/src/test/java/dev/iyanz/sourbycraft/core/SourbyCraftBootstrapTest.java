@@ -93,7 +93,9 @@ public class SourbyCraftBootstrapTest {
     }
 
     @Test
-    void eachStagePrintsOneLineOnTheAuroraLogger() throws Exception {
+    void onlyAFailedStagePrintsAVisibleLineOnTheAuroraLogger() throws Exception {
+        // Build 49 console: a stage that finishes well is DEBUG detail (one Engine summary line
+        // closes the section); a stage that throws gets exactly one WARN naming it.
         final java.util.List<java.util.logging.LogRecord> records = new java.util.ArrayList<>();
         final java.util.logging.Handler handler = new java.util.logging.Handler() {
             @Override public void publish(final java.util.logging.LogRecord record) {
@@ -108,15 +110,18 @@ public class SourbyCraftBootstrapTest {
         aurora.addHandler(handler);
         try (AutoCloseable reset = SourbyCraftBootstrap.resetStagesForTesting()) {
             SourbyCraftBootstrap.stage("first", () -> {});
-            SourbyCraftBootstrap.stage("second", () -> {});
+            SourbyCraftBootstrap.stage("explodes", () -> {
+                throw new IllegalStateException("boom");
+            });
+            SourbyCraftBootstrap.stage("third", () -> {});
         } finally {
             aurora.removeHandler(handler);
         }
         final List<String> lines = records.stream().map(java.util.logging.LogRecord::getMessage).toList();
-        assertEquals(2, lines.size(), "one visible line per finished stage: " + lines);
+        assertEquals(1, lines.size(), "one visible line per failed stage, none for a finished one: " + lines);
+        assertEquals(java.util.logging.Level.WARNING, records.get(0).getLevel());
+        assertTrue(lines.get(0).startsWith("Stage 2/") && lines.get(0).contains("\"explodes\" FAILED"), lines.get(0));
         assertTrue(lines.stream().noneMatch(line -> line.startsWith("START")), lines.toString());
-        assertTrue(lines.get(0).contains("OK") && lines.get(0).contains("first"), lines.get(0));
-        assertTrue(lines.get(1).contains("second"), lines.get(1));
     }
 
     /** Captures log4j events of the logger {@code name} at {@code level} and above until closed. */

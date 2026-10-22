@@ -44,17 +44,17 @@ STARTUP_FAILURES = ("Failed to start the minecraft server", "Perhaps a server is
                     "crash report has been saved", "FAILED TO BIND TO PORT")
 
 # The Aurora boot summary. SourbyCraftBootstrap logs it on the "Aurora" logger once its
-# service stages have run, built by AuroraBoot.summary():
-#     COMPLETE | 14/14 stages completed without error | 0 failed | 812ms
-# followed by "Minecraft continues loading; wait for the server-ready message before connecting."
-# The verdict is DEGRADED when a stage failed and FAILED when every stage did. The hook runs
-# from DedicatedServer#initServer (minecraft feature patch 0001), so in code order the summary
-# precedes Paper's "Done (" from MinecraftServer#runServer; it may be wrapped in ANSI colour
-# when the console style resolves to rich. Readiness needs both lines: "Done (" says Minecraft
-# is up, the summary says every SourbyCraft stage ran and whether one of them failed -- a
+# service stages have run, built by AuroraBoot.summary() (Build 49 console):
+#     Engine COMPLETE | 15/15 stages ok | 0 failed | 106 ms | slowest: startup index 23 ms
+# The verdict is DEGRADED when a stage failed (the failed stages are named after the count)
+# and FAILED when every stage did. The hook runs from DedicatedServer#initServer (minecraft
+# feature patch 0001), so in code order the summary precedes Paper's "Done (" from
+# MinecraftServer#runServer. The console layout may colour the line on a real terminal; the
+# text itself carries no escape codes. Readiness needs both lines: "Done (" says Minecraft is
+# up, the summary says every SourbyCraft stage ran and whether one of them failed -- a
 # baseline measured on a DEGRADED engine is not a baseline of the engine (audit OBS-16).
 BOOT_SUMMARY = re.compile(
-    r"(COMPLETE|DEGRADED|FAILED) \| (\d+)/(\d+) stages completed without error \| (\d+) failed")
+    r"Engine (COMPLETE|DEGRADED|FAILED) \| (\d+)/(\d+) stages ok \| (\d+) failed")
 
 COMMAND_FAILURES = ("Unknown or incomplete command", "Incorrect argument for command",
                     "Expected whitespace to end one argument", "Invalid or unknown entity type",

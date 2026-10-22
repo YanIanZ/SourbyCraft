@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 04:57:02 +0700
+Subject: [PATCH] SourbyCraft - console section rules before plugin load, world
+ preparation and the post-world enable pass
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 087a7a5b92199925f34110b7ca97795f86363cab..2b1f40371ffb11555eea5de5cf82bb9de70fc83c 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -656,6 +656,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             collideTeam.setSeeFriendlyInvisibles(false); // Because we want to mimic them not being on a team at all
+         }
+         // Paper end - Configurable player collision; Handle collideRule team for player collision toggle
++        dev.iyanz.sourbycraft.brand.ConsoleSections.pluginsPostWorld(); // SourbyCraft - console section rule
+         this.server.enablePlugins(org.bukkit.plugin.PluginLoadOrder.POSTWORLD);
+         this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
+         this.server.spark.enableAfterPlugins(this.server); // Paper - spark
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index b2b161cc561fc871f253aea09f91010c07b9516a..1ec29418ca6b8aee029d2ccbd463d7f9ebf7b19b 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -315,6 +315,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+         }
+ 
+         // CraftBukkit start
++        dev.iyanz.sourbycraft.brand.ConsoleSections.plugins(); // SourbyCraft - console section rule
+         this.server.loadPlugins();
+         this.server.enablePlugins(org.bukkit.plugin.PluginLoadOrder.STARTUP);
+         // CraftBukkit end
+@@ -356,6 +357,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+         this.tickTimeLogger = new RemoteSampleLogger(TpsDebugDimensions.values().length, this.debugSubscribers(), RemoteDebugSampleType.TICK_TIME);
+         long levelNanoTime = Util.getNanos();
+         this.services.nameToIdCache().resolveOfflineUsers(!this.usesAuthentication());
++        dev.iyanz.sourbycraft.brand.ConsoleSections.worlds(); // SourbyCraft - console section rule
+         LOGGER.info("Preparing level \"{}\"", this.getLevelIdName());
+         this.loadLevel(this.storageSource.getLevelId()); // CraftBukkit
+         long elapsed = Util.getNanos() - levelNanoTime;
