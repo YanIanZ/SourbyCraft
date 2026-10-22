@@ -153,8 +153,12 @@ dan gate yang masih terbuka tetap wajib.
   `META-INF/licenses/{LICENSE,NOTICE}_SOURBYCRAFT` di jar server (teks GPL + tawaran source per tag),
   badge README, label Docker SEC-12 `GPL-3.0-only`. Sisa: (1) toolchain privat SourbyPatcher (turunan
   paperweight, LGPL-2.1) dibutuhkan untuk build — apakah "Corresponding Source" GPLv3 mengharuskan
-  toolchain ini dibuka atau build dengan paperweight publik; (2) cek isi jar setelah build CI (file
-  lisensi ada di jar server bersarang, bukan di root jar SourbyClip).
+  toolchain ini dibuka atau build dengan paperweight publik; (2) cek isi jar setelah build CI.
+  Root jar (jar yang dirilis) sejak PR ini ikut membawa `META-INF/licenses/` (teks GPL, NOTICE,
+  lisensi upstream) lewat `slimServerJar`, dicek CI dengan `verify_build_identity.py --licences
+  --source-root .`; NOTICE kini membedakan jar launcher (tanpa server Minecraft) dan jar server
+  terpatch (berisi kode Minecraft, tetap di bawah ketentuan Mojang). Bukti lokal: dua build
+  `SOURCE_DATE_EPOCH` sama → hash identik; jar lokal dari sebelum perubahan ini tidak lulus cek ini. Belum diamati di CI.
 - [x] **Integrasi anticheat privat dihapus** (keputusan owner 2026-10-13): feature patch, tooling
   dan docs-nya dihapus dari repo; feature patch MC sesudahnya dinomori ulang turun satu
   (0025–0029 → 0024–0028).

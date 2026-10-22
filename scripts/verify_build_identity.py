@@ -1,15 +1,28 @@
 #!/usr/bin/env python3
 """Check the server jar's two public build identity surfaces before publishing."""
 import argparse
+import hashlib
 import io
 import json
 import re
 import zipfile
+from pathlib import Path
 
 from build_identity import PROVENANCE_JDK, PROVENANCE_KEYS, provenance
 
 # The Java toolchain the sources compile with (root build.gradle.kts, AGENTS.md: JDK 25).
 TOOLCHAIN_JDK_MAJOR = "25"
+
+
+# SEC-13 (GPL-3.0-only): licence texts the published (slim launcher) jar must carry itself.
+LICENCE_DIR = "META-INF/licenses/"
+LICENCE_SOURCE_DIR = "sourbycraft-server/src/main/resources/META-INF/licenses"
+LICENCE_ENTRY = LICENCE_DIR + "LICENSE_SOURBYCRAFT"
+NOTICE_ENTRY = LICENCE_DIR + "NOTICE_SOURBYCRAFT"
+# SHA-256 of the GNU GPL version 3 text as shipped in LICENSE_SOURBYCRAFT. The licence text does not
+# change; a different hash means the file was replaced or truncated.
+GPL3_SHA256 = "33bc26d4498c183b703d1760ee45b8774d21d6e0178ca393dc715271840c7a21"
+NOTICE_MARKERS = ("GPL-3.0-only", "https://github.com/YanIanZ/SourbyCraft", "LICENSE_SOURBYCRAFT")
 
 
 def properties(text):
@@ -70,6 +83,38 @@ def verify_source(info, root):
     return expected
 
 
+def verify_licences(jar, source_root=None):
+    """The jar must carry the GPL text and the source notice under META-INF/licenses/.
+
+    With ``source_root``, every file of that checkout's licence directory must also be in the jar
+    byte for byte (and nothing else under META-INF/licenses/), so the jar and the sources cannot drift.
+    """
+    with zipfile.ZipFile(jar) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()
+                   if name.startswith(LICENCE_DIR) and not name.endswith("/")}
+    for required in (LICENCE_ENTRY, NOTICE_ENTRY):
+        if required not in entries:
+            raise ValueError(f"Missing licence file {required}")
+    if hashlib.sha256(entries[LICENCE_ENTRY]).hexdigest() != GPL3_SHA256:
+        raise ValueError(f"{LICENCE_ENTRY} is not the GPL version 3 text")
+    notice = entries[NOTICE_ENTRY].decode("utf-8", errors="replace")
+    missing = [marker for marker in NOTICE_MARKERS if marker not in notice]
+    if missing:
+        raise ValueError(f"{NOTICE_ENTRY} lacks {', '.join(missing)}")
+    if source_root is not None:
+        source = Path(source_root) / LICENCE_SOURCE_DIR
+        expected = {LICENCE_DIR + path.name: path.read_bytes() for path in source.iterdir() if path.is_file()}
+        for name, content in expected.items():
+            if name not in entries:
+                raise ValueError(f"Missing licence file {name}")
+            if entries[name] != content:
+                raise ValueError(f"{name} differs from {LICENCE_SOURCE_DIR}")
+        extra = sorted(set(entries) - set(expected))
+        if extra:
+            raise ValueError(f"Licence files not in the source tree: {', '.join(extra)}")
+    return sorted(entries)
+
+
 def verify(jar, number, channel=None, api_version=None, commit=None, source_root=None):
     with zipfile.ZipFile(jar) as archive:
         info = properties(archive.read("META-INF/sourbycraft-build.properties").decode())
@@ -118,7 +163,11 @@ if __name__ == "__main__":
     parser.add_argument("--commit", help="Require this full Git commit and a clean source tree")
     parser.add_argument("--api-only", action="store_true")
     parser.add_argument("--source-root", help="Recompute the patch/baseline/toolchain provenance hashes from this checkout and require equality")
+    parser.add_argument("--licences", action="store_true",
+                        help="Require the GPL text and source notice under META-INF/licenses/ (with --source-root: byte-identical to the checkout's)")
     args = parser.parse_args()
+    if args.licences:
+        print(verify_licences(args.jar, args.source_root))
     if args.api_only:
         if args.api_version is None:
             parser.error("--api-only requires --api-version")

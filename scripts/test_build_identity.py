@@ -7,7 +7,8 @@ from build_identity import PROVENANCE_KEYS, directory_hash, identity, provenance
 from pathlib import Path
 import unittest
 import zipfile
-from verify_build_identity import verify, verify_api_version
+from verify_build_identity import (GPL3_SHA256, LICENCE_SOURCE_DIR, verify, verify_api_version,
+                                   verify_licences)
 
 
 def provenance_lines(values=None, jdk='Eclipse Adoptium 25.0.1+8-LTS'):
@@ -303,6 +304,71 @@ class BuildIdentityTest(unittest.TestCase):
                        {"version": "26.2-DEV", "currentApiVersion": "26.2"})
             with self.assertRaisesRegex(ValueError, "plugin-compatible"):
                 verify(path, 47, "DEV", "26.2")
+
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+class LicenceFilesTest(unittest.TestCase):
+    """SEC-13: the published jar carries the GPL text and source notice itself."""
+
+    def gpl(self):
+        return (REPO / LICENCE_SOURCE_DIR / 'LICENSE_SOURBYCRAFT').read_bytes()
+
+    def notice(self):
+        return (REPO / LICENCE_SOURCE_DIR / 'NOTICE_SOURBYCRAFT').read_bytes()
+
+    def jar(self, directory, files):
+        path = Path(directory) / 'slim.jar'
+        with zipfile.ZipFile(path, 'w') as archive:
+            archive.writestr('META-INF/MANIFEST.MF', 'Main-Class: x\r\n')
+            archive.writestr('LICENSE.txt', 'MIT\n')
+            for name, content in files.items():
+                archive.writestr('META-INF/licenses/' + name, content)
+        return path
+
+    def test_checked_in_gpl_text_has_the_pinned_hash(self):
+        import hashlib
+        self.assertEqual(GPL3_SHA256, hashlib.sha256(self.gpl()).hexdigest())
+
+    def test_jar_with_both_files_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.jar(directory, {'LICENSE_SOURBYCRAFT': self.gpl(), 'NOTICE_SOURBYCRAFT': self.notice()})
+            self.assertEqual(['META-INF/licenses/LICENSE_SOURBYCRAFT', 'META-INF/licenses/NOTICE_SOURBYCRAFT'],
+                             verify_licences(path))
+
+    def test_missing_or_altered_files_fail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, 'Missing licence file .*LICENSE_SOURBYCRAFT'):
+                verify_licences(self.jar(directory, {'NOTICE_SOURBYCRAFT': self.notice()}))
+            with self.assertRaisesRegex(ValueError, 'Missing licence file .*NOTICE_SOURBYCRAFT'):
+                verify_licences(self.jar(directory, {'LICENSE_SOURBYCRAFT': self.gpl()}))
+            with self.assertRaisesRegex(ValueError, 'not the GPL version 3 text'):
+                verify_licences(self.jar(directory, {'LICENSE_SOURBYCRAFT': self.gpl()[:-10],
+                                                     'NOTICE_SOURBYCRAFT': self.notice()}))
+            with self.assertRaisesRegex(ValueError, 'lacks GPL-3.0-only'):
+                verify_licences(self.jar(directory, {'LICENSE_SOURBYCRAFT': self.gpl(),
+                                                     'NOTICE_SOURBYCRAFT': b'MIT licensed, see LICENSE_SOURBYCRAFT '
+                                                                           b'https://github.com/YanIanZ/SourbyCraft'}))
+
+    def test_source_root_requires_the_whole_licence_directory_byte_identical(self):
+        source = {path.name: path.read_bytes() for path in (REPO / LICENCE_SOURCE_DIR).iterdir() if path.is_file()}
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(len(source), len(verify_licences(self.jar(directory, source), REPO)))
+            partial = {k: v for k, v in source.items() if k != 'LICENSE_PURPUR'}
+            with self.assertRaisesRegex(ValueError, 'LICENSE_PURPUR'):
+                verify_licences(self.jar(directory, partial), REPO)
+            edited = dict(source, NOTICE_SOURBYCRAFT=source['NOTICE_SOURBYCRAFT'] + b'\n')
+            with self.assertRaisesRegex(ValueError, 'differs from'):
+                verify_licences(self.jar(directory, edited), REPO)
+            with self.assertRaisesRegex(ValueError, 'not in the source tree'):
+                verify_licences(self.jar(directory, dict(source, LICENSE_EXTRA=b'x')), REPO)
+
+    def test_notice_describes_launcher_and_patched_jar_truthfully(self):
+        text = self.notice().decode()
+        self.assertNotIn('This jar does not contain the Minecraft server', text)
+        self.assertIn('contains no\n  Minecraft server', text)
+        self.assertIn("remains under Mojang's terms", text)
 
 
 if __name__ == "__main__":

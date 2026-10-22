@@ -241,7 +241,9 @@ jobs:
           python3 scripts/verify_build_identity.py sourbycraft-server/build/libs/sourbycraft-server-26.2-${{ steps.relnum.outputs.channel }}.jar "${{ steps.relnum.outputs.number }}" --channel "${{ steps.relnum.outputs.channel }}" --commit "$GITHUB_SHA" --source-root .
           cp build/libs/SourbyCraft-slim.jar release/SourbyCraft-26.2-${{ steps.relnum.outputs.channel }}.jar
           api_version=$(sed -n 's/^apiVersion=//p' gradle.properties)
-          python3 scripts/verify_build_identity.py build/libs/SourbyCraft-slim.jar --api-only --api-version "$api_version"
+          # --licences --source-root: the published jar itself carries META-INF/licenses/ (GPL text,
+          # source notice, upstream licences) byte-identical to this checkout's (SEC-13).
+          python3 scripts/verify_build_identity.py build/libs/SourbyCraft-slim.jar --api-only --api-version "$api_version" --licences --source-root .
 
       - name: Record the slim jar hash for the independent rebuild
         id: slim
