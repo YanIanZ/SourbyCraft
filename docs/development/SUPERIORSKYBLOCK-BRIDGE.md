@@ -119,7 +119,8 @@ the time of writing contains 0007/0008/0009; this patch is an additional uncommi
 working-tree change. Codex did not run Gradle or rebuild the existing patches.
 
 `BridgeRuntime.Task.targetRegion()` takes precedence over the caller-region/global
-fallback setting. Explicit global requests never query owner metadata. Async
+fallback setting (and, since 2026-10-22, over the inferred player anchor of the scheduling
+context; full order in [the bridge doc](../architecture/aurora-plugin-bridge.md#routing)). Explicit global requests never query owner metadata. Async
 requests remain on the existing governed I/O lane. Resolver failures cancel/reject
 before queue admission and diagnose the failure; they do not increment fatal
 ownership/quarantine counts. Existing task indexes, cancellation, capacity limits,
