@@ -22,6 +22,8 @@ class BlockingIoBoundaryTest {
 
     private static final Set<String> AUDITED = Set.of(
         "dev/iyanz/sourbycraft/update/HttpTransport.java",
+        // validates the test-only api-base property with java.net.URI; opens no connection, never resolves a name
+        "dev/iyanz/sourbycraft/update/UpdateOverrides.java",
         "dev/iyanz/sourbycraft/command/SpeedtestCommand.java",
         "dev/iyanz/sourbycraft/util/GeoUtil.java",
         "dev/iyanz/sourbycraft/bootstrap/LibDownloader.java",

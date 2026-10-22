@@ -1,5 +1,6 @@
 package dev.iyanz.sourbycraft.update;
 
+import dev.iyanz.sourbycraft.util.SourbyLogger;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -9,7 +10,10 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Properties;
@@ -47,7 +51,8 @@ import java.util.Properties;
  *       same and trigger the restore. The restore is conservative, not a diagnosis.</li>
  *   <li>A crash before the SourbyCraft bootstrap stage runs (launcher, library download, class
  *       loading) leaves the phase at {@code APPLIED}; the next boot treats itself as the first one
- *       after the apply, so the restore happens one boot later than ideal.</li>
+ *       after the apply, so this server-side guard cannot recover that failure. SourbyClip 3.1.4+
+ *       can recover before server code loads when its own guard is reached.</li>
  *   <li>The state file, {@code applied.tag} and {@code .prev} are plain files next to the jar; an
  *       operator can delete them. {@code applied.tag} is deliberately left in place after a rollback
  *       so the rolled-back tag is not offered again automatically.</li>
@@ -93,7 +98,7 @@ public final class UpdateRollbackGuard {
 
     /** Snapshot of the state file. */
     public record State(Phase phase, String tag, @Nullable Path launchJar, @Nullable Path prevJar,
-                        String appliedAt, String note) {}
+                        String appliedAt, String note, @Nullable String prevSha256) {}
 
     private final Path dir;
     private final Path stateFile;
@@ -118,10 +123,17 @@ public final class UpdateRollbackGuard {
         return prev;
     }
 
-    /** Record that {@code tag} now sits at {@code launchJar} and the previous build at {@code prevJar}. */
-    public synchronized void recordApplied(String tag, Path launchJar, Path prevJar, Instant when) throws IOException {
-        write(new State(Phase.APPLIED, tag, launchJar.toAbsolutePath().normalize(),
-            prevJar.toAbsolutePath().normalize(), when.toString(), "swapped in-place; restart pending"));
+    /**
+     * Record that {@code tag} now sits at {@code launchJar} and the previous build at {@code prevJar}.
+     * Called by the async updater apply callback; streams the kept jar off server/region threads.
+     */
+    public void recordApplied(String tag, Path launchJar, Path prevJar, Instant when) throws IOException {
+        // Hash outside the state monitor so status/ready callers cannot wait on this file read.
+        String previousHash = sha256(prevJar);
+        synchronized (this) {
+            write(new State(Phase.APPLIED, tag, launchJar.toAbsolutePath().normalize(),
+                prevJar.toAbsolutePath().normalize(), when.toString(), "swapped in-place; restart pending", previousHash));
+        }
     }
 
     /** The {@code .prev} sibling of a launch jar. */
@@ -232,6 +244,16 @@ public final class UpdateRollbackGuard {
             return BootDecision.RESTORE_FAILED;
         }
         try {
+            if (s.prevSha256() != null) {
+                String actual = sha256(prev);
+                if (!actual.equalsIgnoreCase(s.prevSha256())) {
+                    String reason = "SHA-256 mismatch for " + prev + ": expected=" + s.prevSha256()
+                        + ", actual=" + actual + "; refusing restore; jar files left untouched";
+                    SourbyLogger.error("auto-updater: " + reason);
+                    writeQuietly(with(s, Phase.RESTORE_FAILED, reason));
+                    return BootDecision.RESTORE_FAILED;
+                }
+            }
             // Copy, not move: .prev stays for the operator; the running JVM keeps its open inode.
             Path part = launch.resolveSibling(launch.getFileName() + ".restore");
             Files.copy(prev, part, StandardCopyOption.REPLACE_EXISTING);
@@ -245,6 +267,20 @@ public final class UpdateRollbackGuard {
         }
     }
 
+    private static String sha256(Path file) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream in = Files.newInputStream(file)) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = in.read(buffer)) != -1) digest.update(buffer, 0, read);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 unavailable", e);
+        }
+    }
+
     private static void moveReplacing(Path from, Path to) throws IOException {
         try {
             Files.move(from, to, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
@@ -254,7 +290,7 @@ public final class UpdateRollbackGuard {
     }
 
     private static State with(State s, Phase phase, String note) {
-        return new State(phase, s.tag(), s.launchJar(), s.prevJar(), s.appliedAt(), note);
+        return new State(phase, s.tag(), s.launchJar(), s.prevJar(), s.appliedAt(), note, s.prevSha256());
     }
 
     private void noteProblem(String note) {
@@ -292,7 +328,8 @@ public final class UpdateRollbackGuard {
             pathOrNull(p.getProperty("launch")),
             pathOrNull(p.getProperty("prev")),
             p.getProperty("applied_at", ""),
-            p.getProperty("note", "")));
+            p.getProperty("note", ""),
+            p.getProperty("prev_sha256")));
     }
 
     private void write(State s) throws IOException {
@@ -304,6 +341,7 @@ public final class UpdateRollbackGuard {
         if (s.prevJar() != null) p.setProperty("prev", s.prevJar().toString());
         p.setProperty("applied_at", s.appliedAt());
         p.setProperty("note", s.note());
+        if (s.prevSha256() != null) p.setProperty("prev_sha256", s.prevSha256().toLowerCase(Locale.ROOT));
         Path part = stateFile.resolveSibling(STATE_FILE + ".part");
         try (OutputStream out = Files.newOutputStream(part)) {
             p.store(out, "SourbyCraft auto-updater rollback guard — delete to lift a hold (/update resume does this)");

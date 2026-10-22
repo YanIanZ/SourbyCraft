@@ -60,6 +60,27 @@ With the test-plugin probes on, `cmd --name tp-1 "stallprobe global sleep 15"` b
 `<workdir>/logs/stalls/stall-*.txt` ([STALL-RECORDER.md](STALL-RECORDER.md)). The command itself returns at once; `stop` after
 the probe ends. Test servers only: it freezes the world it runs on.
 
+### Restart a run in its own directory (`restart`, `--auto-update`) and the updater rollback fixture
+
+`restart --name N` boots a **finished** run again in the same directory: the jar copy (as the auto-updater
+left it), `auto_update/`, config, world and port are kept; the previous boot is archived under `boots/NN/`
+(`run.json`, `server.log`, `supervisor.log`) and summarised in `run.json` `previous_boots` (exit code, whether it
+reached ready, jar SHA-256). It takes a free slot like `start`, is refused while the run is live, and returns once
+the new boot is `ready` **or has ended** (a boot that dies is data, exit 1 unless ready). The jar provenance in
+`run.json` is recomputed from the directory's jar.
+
+`start --auto-update KEY=VALUE` (keys: `apply_mode`, `restart_mode`, `restart_delay_seconds`, `repo`, `channel`,
+`check_interval_minutes`, `allow_prerelease`; written to the `[updater]` table under their Build 49 names, e.g.
+`apply-mode`, `repository`) enables the auto-updater, which the harness otherwise switches off. It cannot be
+combined with `--global-toml`.
+It is refused unless the start also passes `--jvm-property sourbycraft.update.api-base=http://127.0.0.1:PORT`
+(a loopback fake release server; the updater refuses any non-loopback value) and
+`--jvm-property sourbycraft.update.release-key-file=FILE` (a release public key, so signature and manifest checks
+stay on): a test server can never reach the real GitHub or install an unsigned release. Both properties are
+test-only (`UpdateOverrides`, `ReleaseSignatureVerifier.resolve`), unset by default, and not config keys.
+`scripts/updater_rollback_fixture.py` uses all of this for the Build 49 `.prev` rollback gate; see
+[updater-rollback-fixture-2026-10-22.md](updater-rollback-fixture-2026-10-22.md).
+
 `--world-from RUN` copies a finished (exited/failed, lock released) run's world directories —
 the `level-name` directory and its `_nether`/`_the_end` siblings, nothing else — into the new run,
 so a restart-persistence or post-crash boot reads that run's saves; the source is never modified
