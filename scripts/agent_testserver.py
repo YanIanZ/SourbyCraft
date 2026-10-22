@@ -1211,7 +1211,8 @@ class Harness:
               rebuild_jar=False, seed_cache=True, console_probe=True, command=None,
               lifetime_grace_s=LIFETIME_GRACE_S, world_from=None, aurora_toml=None,
               global_toml=None, exclusive=False, exclusive_wait_s=EXCLUSIVE_WAIT_S, config_files=None,
-              startup_cache_from=None, startup_cache_corrupt=None, plugin_files=None, auto_update=None):
+              startup_cache_from=None, startup_cache_corrupt=None, plugin_files=None, auto_update=None,
+              large_plugin_jars=None):
         """Create the run, start the supervisor, wait for ``Done (``. Returns run.json.
 
         ``world_from`` names an earlier, finished run whose world directories are copied in
@@ -1241,7 +1242,7 @@ class Harness:
         world_source = self.world_source(world_from) if world_from else None
         aurora = self.aurora_config(aurora_toml, world_source)
         global_config = self.global_config(global_toml)
-        configs = self.config_files(config_files)
+        configs = self.config_files(config_files, bool(large_plugin_jars))
         data_files = self.plugin_files(plugin_files)
         check_destination_collisions([dest for dest, _s, _t in configs],
                                      [dest for dest, _s, _d in data_files])
@@ -1278,7 +1279,7 @@ class Harness:
                                 command, lifetime_grace_s, token, world_source, aurora,
                                 port=port, slot=slot, resources=resources, configs=configs,
                                 startup_seed=startup_seed, data_files=data_files, global_config=global_config,
-                                updater_toml=updater_toml)
+                                updater_toml=updater_toml, large_plugin_jars=bool(large_plugin_jars))
             self._spawn_supervisor(workdir, token, paths)
         except BaseException:
             for path in reversed(paths):
@@ -1302,7 +1303,8 @@ class Harness:
                  simulation_distance, heap_mib, max_lifetime_s, level_type, properties,
                  jvm_properties, startup_timeout_s, seed_cache, command, lifetime_grace_s,
                  token, world_source=None, aurora=None, port=None, slot=None, resources=None,
-                 configs=(), startup_seed=None, data_files=(), global_config=None, updater_toml=None):
+                 configs=(), startup_seed=None, data_files=(), global_config=None, updater_toml=None,
+                 large_plugin_jars=False):
         workdir.mkdir(parents=True)
         (workdir / MARKER).write_text("created by scripts/agent_testserver.py\n")
         (workdir / "tmp").mkdir()
@@ -1388,6 +1390,7 @@ class Harness:
                "aurora_toml": aurora_toml, "global_toml": global_toml,
                "config_files": installed,
                "plugin_files": plugin_data,
+               "large_plugin_jars": bool(large_plugin_jars),
                "startup_cache": startup_cache,
                "auto_update": {"toml": updater_toml} if updater_toml is not None else None,
                "other_server_jars_running": run_baseline.competing_servers(jar, -1),
@@ -1483,7 +1486,7 @@ class Harness:
         return path.read_text(), str(path)
 
     @staticmethod
-    def config_files(mapping):
+    def config_files(mapping, large_plugin_jars=False):
         """[(dest, source, text)] for extra config files (e.g. spigot.yml), validated up front.
 
         Only server config locations are accepted: a top-level ``*.yml``/``*.yaml`` (bukkit.yml,
@@ -1512,7 +1515,8 @@ class Harness:
                     raise HarnessError(f"config file destination {dest!r}: a jar may only go "
                                        "directly into plugins/ (use --plugin-file for a jar "
                                        "inside a plugin's data folder)")
-                configs.append((rel.as_posix(), str(path), read_capped_bytes(path, "plugin jar")))
+                cap = LARGE_PLUGIN_JAR_MAX_BYTES if large_plugin_jars else PLUGIN_JAR_MAX_BYTES
+                configs.append((rel.as_posix(), str(path), read_capped_bytes(path, "plugin jar", cap)))
                 continue
             if not path.is_file() or path.stat().st_size > 64 * 1024:
                 raise HarnessError(f"config file {path} is not a file under 64 KiB")
@@ -1901,6 +1905,9 @@ CONFIG_FILE_DIRS = ("config", "plugins", "sourbycraft_config")
 # A plugin jar installed with --config-file plugins/<name>.jar=FILE, or a file inside a plugin's
 # data folder installed with --plugin-file plugins/<Plugin>/<path>=FILE (both copied as bytes).
 PLUGIN_JAR_MAX_BYTES = 8 * 1024 * 1024
+# --large-plugin-jar raises the cap for jars installed directly into plugins/ (and only those) to
+# this, for real plugins such as FastAsyncWorldEdit (~15 MiB). Still read once, capped, hashed.
+LARGE_PLUGIN_JAR_MAX_BYTES = 32 * 1024 * 1024
 RESERVED_CONFIG_FILES = ("sourbycraft_config/aurora.toml",
                          "sourbycraft_config/sourbycraft_global_config.toml")
 SETTINGS_KEYS = {"view_distance": int, "simulation_distance": int, "heap_mib": int,
@@ -1911,20 +1918,20 @@ SAFE_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 PERF_VIEW = re.compile(r"^[a-z]*( [A-Za-z0-9_:./-]+)?$")
 
 
-def read_capped_bytes(path, what):
-    """The bytes of ``path`` (a regular file, not a symlink, <= PLUGIN_JAR_MAX_BYTES).
+def read_capped_bytes(path, what, cap=PLUGIN_JAR_MAX_BYTES):
+    """The bytes of ``path`` (a regular file, not a symlink, <= ``cap``, PLUGIN_JAR_MAX_BYTES by default).
 
     One open, at most cap + 1 bytes read: the cap holds even if the file grows after a check.
     """
     path = Path(path)
     if path.is_symlink():
         raise HarnessError(f"{what} {path} is a symlink; pass the real file")
-    limit = f"{PLUGIN_JAR_MAX_BYTES // (1024 * 1024)} MiB"
+    limit = f"{cap // (1024 * 1024)} MiB"
     if not path.is_file():
         raise HarnessError(f"{what} {path} is not a file under {limit}")
     with open(path, "rb") as handle:
-        data = handle.read(PLUGIN_JAR_MAX_BYTES + 1)
-    if len(data) > PLUGIN_JAR_MAX_BYTES:
+        data = handle.read(cap + 1)
+    if len(data) > cap:
         raise HarnessError(f"{what} {path} is not a file under {limit}")
     return data
 
@@ -2174,6 +2181,9 @@ def build_parser():
         p.add_argument("--config-file", action="append", type=_kv, default=[],
                        metavar="DEST=FILE",
                        help="copy FILE to DEST in the run dir before boot (e.g. spigot.yml=...)")
+        p.add_argument("--large-plugin-jar", action="store_true",
+                       help="allow --config-file plugins/<name>.jar up to 32 MiB instead of 8 MiB "
+                            "(real plugins such as FastAsyncWorldEdit); recorded in run.json")
         p.add_argument("--plugin-file", action="append", type=_kv, default=[],
                        metavar="plugins/<Plugin>/PATH=FILE",
                        help="copy FILE (bytes, <= 8 MiB, no symlink) into a plugin's data folder "
@@ -2255,7 +2265,8 @@ def _start_kwargs(args):
               "plugin_files": dict(args.plugin_file) or None,
               "startup_cache_from": args.startup_cache_from,
               "startup_cache_corrupt": args.startup_cache_corrupt,
-              "auto_update": _auto_update_arg(args.auto_update)}
+              "auto_update": _auto_update_arg(args.auto_update),
+              "large_plugin_jars": getattr(args, "large_plugin_jar", False) or None}
     return kwargs
 
 

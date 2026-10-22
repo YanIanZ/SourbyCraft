@@ -1074,6 +1074,25 @@ class WorldReuseAndKillTest(HarnessCase):
         with self.assertRaisesRegex(ats.HarnessError, "symlink"):
             self.start("b", config_files={"plugins/Link.jar": link})
 
+    def test_large_plugin_jar_raises_only_the_plugins_jar_cap_and_is_recorded(self):
+        big = self.root / "fawe.jar"
+        big.write_bytes(b"x" * (ats.PLUGIN_JAR_MAX_BYTES + 1))
+        with self.assertRaisesRegex(ats.HarnessError, "plugin jar .* under 8 MiB"):
+            self.start("a", config_files={"plugins/FAWE.jar": big})
+        workdir = Path(self.start("b", config_files={"plugins/FAWE.jar": big}, large_plugin_jars=True)["workdir"])
+        self.assertEqual((workdir / "plugins/FAWE.jar").stat().st_size, ats.PLUGIN_JAR_MAX_BYTES + 1)
+        self.assertTrue(self.run_json("b")["large_plugin_jars"])
+        huge = self.root / "huge.jar"
+        huge.write_bytes(b"x" * (ats.LARGE_PLUGIN_JAR_MAX_BYTES + 1))
+        with self.assertRaisesRegex(ats.HarnessError, "plugin jar .* under 32 MiB"):
+            self.start("c", config_files={"plugins/Huge.jar": huge}, large_plugin_jars=True)
+        with self.assertRaisesRegex(ats.HarnessError, "plugin file .* under 8 MiB"):
+            self.start("d", plugin_files={"plugins/Sky/modules/m.jar": big}, large_plugin_jars=True)
+        args = ats.build_parser().parse_args(["start", "--name", "e", "--large-plugin-jar"])
+        self.assertTrue(ats._start_kwargs(args)["large_plugin_jars"])
+        args = ats.build_parser().parse_args(["start", "--name", "e"])
+        self.assertIsNone(ats._start_kwargs(args)["large_plugin_jars"])
+
     def test_a_plugin_jar_is_read_once_and_never_past_the_cap(self):
         # A file that grows after a size check must not be read unbounded: the cap is enforced on
         # the bytes actually read from one open file.
