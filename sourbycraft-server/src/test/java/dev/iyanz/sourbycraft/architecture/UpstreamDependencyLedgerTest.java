@@ -55,6 +55,8 @@ public class UpstreamDependencyLedgerTest {
         // MC patch 0013: the region handle's TickData windows (a TickData subclass).
         "dev/iyanz/sourbycraft/perf/RegionTickDataView.java",
         "dev/iyanz/sourbycraft/perf/RegionIoQueue.java",
+        // Features 0021/0053: isolate Moonrise storage records and NMS AWF routing (§1.2).
+        "dev/iyanz/sourbycraft/awf/RegionFileStorageHooks.java",
         "dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java",
         "dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java",
         // /perf scheduler: reads the region scheduler's published/racy fields lock-free (§1.2).
@@ -188,7 +190,9 @@ public class UpstreamDependencyLedgerTest {
         "dev/iyanz/sourbycraft/perf/RegionTickMetricsHolder.java",
         "patch 0013/0079: generation ownership and lifecycle calls for the same patched call sites",
         "dev/iyanz/sourbycraft/perf/RegionTickDataView.java",
-        "patch 0013: the region handle's TickData windows; a TickData subclass, so TickTime/TickReportData are the contract");
+        "patch 0013: the region handle's TickData windows; a TickData subclass, so TickTime/TickReportData are the contract",
+        "dev/iyanz/sourbycraft/awf/RegionFileStorageHooks.java",
+        "patches 0021/0053: RegionFileStorage delegates each method here; Moonrise ReadData/WriteData are the contract");
 
     private static final Pattern IMPLEMENTS =
         Pattern.compile("\\bclass\\s+\\w+\\s+implements\\s+([\\w.]+)");

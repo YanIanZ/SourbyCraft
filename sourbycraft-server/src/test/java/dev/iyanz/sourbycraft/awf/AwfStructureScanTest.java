@@ -174,15 +174,30 @@ class AwfStructureScanTest {
             new ClassReader(in).accept(node, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         }
         final MethodNode scan = node.methods.stream().filter(m -> m.name.equals("scanChunk")).findFirst().orElseThrow();
-        boolean scanRead = false;
-        boolean read = false;
+        int delegations = 0;
         for (final var insn : scan.instructions.toArray()) {
-            if (insn instanceof MethodInsnNode m && m.owner.equals("dev/iyanz/sourbycraft/awf/AwfRegionStorage")) {
-                scanRead |= m.name.equals("scanRead");
-                read |= m.name.equals("read");
+            if (insn instanceof MethodInsnNode m) {
+                if (m.owner.equals("dev/iyanz/sourbycraft/awf/RegionFileStorageHooks") && m.name.equals("scanChunk")) {
+                    ++delegations;
+                }
+                assertFalse(m.owner.equals("dev/iyanz/sourbycraft/awf/AwfRegionStorage"),
+                    "scanChunk delegates AWF access to the owned adapter");
             }
         }
-        assertTrue(scanRead, "scanChunk reads AWF through scanRead");
-        assertFalse(read, "scanChunk no longer uses the load-path read");
+        assertEquals(1, delegations, "scanChunk delegates exactly once");
+
+        final ClassNode hooks = new ClassNode();
+        try (InputStream in = RegionFileStorageHooks.class.getResourceAsStream("RegionFileStorageHooks.class")) {
+            new ClassReader(in).accept(hooks, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        }
+        final MethodNode hook = hooks.methods.stream().filter(m -> m.name.equals("scanChunk")).findFirst().orElseThrow();
+        int scanReads = 0;
+        for (final var insn : hook.instructions.toArray()) {
+            if (insn instanceof MethodInsnNode m && m.owner.equals("dev/iyanz/sourbycraft/awf/AwfRegionStorage")) {
+                if (m.name.equals("scanRead")) ++scanReads;
+                assertFalse(m.name.equals("read"), "scanChunk never uses the load-path read");
+            }
+        }
+        assertEquals(1, scanReads, "the scan hook reads AWF through one scanRead call");
     }
 }
