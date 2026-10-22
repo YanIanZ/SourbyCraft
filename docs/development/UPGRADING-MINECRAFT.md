@@ -32,7 +32,7 @@ patch.
 | Distinct pre-existing files they modify | 35 (44 file entries counting repeats and the 3 new files carried in 0002, 0005, 0016) | |
 | Paper feature patches | 10 (hook 1, logic 9) | `sourbycraft-server/paper-patches/features/` |
 | API feature patches | 0 | `sourbyapi/paper-patches/features/` |
-| Engine baseline file patches (former Canvas/Folia) | 476 + 234 + 16 = **726** | `minecraft-patches/sources`, `paper-patches/files`, `sourbyapi/paper-patches/files` |
+| Engine baseline file patches (former Canvas/Folia) | 472 + 234 + 16 = **722** | `minecraft-patches/sources`, `paper-patches/files`, `sourbyapi/paper-patches/files` |
 
 Conflict hot spots, meaning files that several feature patches touch:
 `CraftScheduler.java` (Paper 0003, 0006–0010: six patches), `MinecraftServer.java`
@@ -300,3 +300,64 @@ counter, and it uses fixed thresholds (≤ 10 added and ≤ 2 removed code lines
 `dev.iyanz` call for a hook). Paper 0008 (8 added, 3 removed, every line calling
 `AuroraBridge`) is a near-hook just over the removed-line limit. The rule that fired is
 printed per patch so a reviewer can disagree with it.
+
+## Rebasing the engine baseline onto a new upstream
+
+This offline tooling is a planning aid for the Build 50 / Minecraft 26.3 port, not
+an end-to-end qualified upgrade. The manifest's 722 baseline patches are the
+inventory; feature patches remain a separate layer. Markers are evidence, not
+proof of authorship. Canvas may never ship 26.3, so canvas-origin files are ours
+to port when there is no suitable new upstream implementation.
+
+1. Run `python3 scripts/engine_baseline_origin.py --write`, then `--check`.
+   Review `build-data/engine-baseline-origin.json`: marker/package classifications,
+   confidence, import hashes and subsequent commits identify porting candidates.
+   Files renamed since import have a null same-path import hash; `renamed_from`
+   records detected ancestry. Manifest/directory differences are reported.
+2. Prepare old and new Canvas/Folia/Paper materialized source trees locally.
+   No command here downloads upstreams. Use repository-shaped trees with Minecraft
+   under `sourbycraft-server/src/minecraft/java/`, Paper under `paper-server/`, and
+   API under `paper-api/`; standalone source roots are also accepted as upstream
+   inputs. Current files are read from this repository's materialized trees
+   (`--root` selects another repository). Missing materialized files require review.
+
+   ```bash
+   python3 scripts/upstream_rebase.py plan --old-upstream /local/old-tree --new-upstream /local/new-tree --out /local/rebase-plan.json
+   ```
+
+   The default ordered literal renames are `io.canvasmc.canvas` to
+   `dev.iyanz.aurora.engine`, then remaining `io.canvasmc` to
+   `dev.iyanz.sourbycraft.api`. They transform upstream contents and corresponding
+   package paths before comparison. `--rename-map file.json` replaces this list
+   with an ordered JSON array, for example `[["old.package", "new.package"]]`.
+   Text replacement is deliberately literal, not a Java-aware refactor.
+3. Review the plan and every MANUAL path (unknown origin, missing counterparts,
+   or merge conflicts). VERBATIM takes the transformed new upstream when ours
+   matches the transformed old upstream; MERGE3_CLEAN embeds a clean Git 3-way
+   merge. Review DELETED entries carefully: applying removes the target even if
+   it contains local changes. ADDED entries are informational and never applied.
+   A clean merge does not prove correct runtime semantics or region ownership.
+4. Preview, then apply the reviewed plan to a repository-shaped materialized tree:
+
+   ```bash
+   python3 scripts/upstream_rebase.py apply --plan /local/rebase-plan.json --target /local/target-tree
+   python3 scripts/upstream_rebase.py apply --plan /local/rebase-plan.json --target /local/target-tree --yes
+   ```
+
+   The first command refuses and lists proposed writes/deletions. The target
+   must still match the recorded current-file hashes. Apply leaves MANUAL and
+   ADDED entries alone and refuses protected paths or symlinks. It never edits
+   patch files or the baseline manifest.
+5. Resolve remaining ports by editing patch files or the appropriate materialized
+   repository. Keep SourbyCraft feature changes in feature patches. Follow the
+   rebuild safeguards above, commit materialized changes as appropriate, and run
+   the matching Gradle `rebuild*Patches` tasks yourself. Inspect the regenerated
+   patch diff and verify that it applies; the Python tools never run Gradle.
+6. After deliberate baseline changes pass review, run
+   `python3 scripts/baseline_policy.py --write-manifest`, then regenerate with
+   `python3 scripts/engine_baseline_origin.py --write` and verify with `--check`.
+   `--check` ignores `change_commits` (a commit cannot list its own hash, so that
+   field is a snapshot as of the last `--write`) and needs the import commit
+   `e20df47b` in the clone; the PR job's shallow checkout skips the repository check.
+   Run the normal upgrade correctness/build/boot gates separately. None of these
+   classifications certifies a port or a release.
