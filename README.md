@@ -2,492 +2,129 @@
   <img src=".github/assets/SourbyCraft.png" alt="SourbyCraft" width="380">
 </p>
 
-<h1 align="center">SourbyCraft — 26.2 Aurora</h1>
+<h1 align="center">SourbyCraft</h1>
 
-<p align="center"><strong>Java 25 · region-threaded · SourbyCraft-owned runtime · deep Minecraft/NMS performance work · first-party observability</strong></p>
+<p align="center">A region-threaded Minecraft 26.2 server built on Paper, with the Aurora engine and first-party observability.</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/minecraft-26.2-brightgreen?style=flat-square">
-  <img src="https://img.shields.io/badge/java-25-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/architecture-Aurora-8a2be2?style=flat-square">
-  <img src="https://img.shields.io/badge/runtime-SourbyCraft-00bcd4?style=flat-square">
-  <img src="https://img.shields.io/badge/build-48%20development-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/mixins-Cherry-e83e8c?style=flat-square">
-  <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square">
+  <a href="https://github.com/YanIanZ/SourbyCraft/releases"><img src="https://img.shields.io/github/v/release/YanIanZ/SourbyCraft?style=flat-square&label=release" alt="Latest release"></a>
+  <a href="https://github.com/YanIanZ/SourbyCraft/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/YanIanZ/SourbyCraft/build.yml?branch=26.2&style=flat-square&label=build" alt="Build status"></a>
+  <img src="https://img.shields.io/badge/minecraft-26.2-brightgreen?style=flat-square" alt="Minecraft 26.2">
+  <img src="https://img.shields.io/badge/java-25-blue?style=flat-square" alt="Java 25">
+  <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-lightgrey?style=flat-square" alt="License">
 </p>
 
 ---
 
-## What is SourbyCraft 26.2 Aurora?
+## About
 
-**Build 48 is the current development build; [Build 47](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r47) is the latest published release.**
+SourbyCraft runs each region of a world on its own tick thread, so a server can use more than one
+core for gameplay. Paper is its only upstream. The region-threading engine, originally derived from
+Folia and Canvas, has been owned and maintained by SourbyCraft since 2026-10-05 and lives under
+`dev.iyanz.aurora`.
 
-**SourbyCraft 26.2 Aurora** is a Java 25, region-threaded Minecraft server project focused on **stable performance, efficient resource usage, deep engine optimization, observability, and progressive runtime independence**.
+Aurora optimizes in this order: correctness, reliability, stability, predictable latency, resource
+efficiency, scalability, observability, then peak throughput. A faster result that weakens region
+ownership, persistence, shutdown or plugin semantics is not accepted.
 
-SourbyCraft is built on **Paper, its only upstream**, plus a SourbyCraft-owned region-threading engine derived from Folia/Canvas work (attribution below). It is not a Canvas-based build: **Aurora is the SourbyCraft architecture** that defines the public runtime contract, configuration ownership, diagnostics, telemetry, lifecycle, and future engine direction.
+**Status.** [Build 47 — Aurora Nexus](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r47)
+is the latest release (full, not STABLE). Build 48 is in development; its open release gates are in
+[docs/releases/26.2-build-48.md](docs/releases/26.2-build-48.md). STABLE is planned for Build 49
+([roadmap](docs/releases/ROADMAP-47-50.md)).
 
-Aurora is not just a rebrand of Canvas and it is not limited to helper patches outside Minecraft code. SourbyCraft may modify **Minecraft/NMS hot paths directly** when profiling proves that the optimization belongs there.
+## Features
 
-The architecture direction is:
-
-```text
-                         SOURBYCRAFT
-                              │
-                    Aurora Runtime Core
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
- Configuration          Performance Core       Diagnostics
-        │                     │                     │
-        │               Metrics / Health        Spark / HUD
-        │                     │                     │
-        └─────────────── Aurora Services ──────────┘
-                              │
-                      Aurora Engine Hooks
-                              │
-          ┌───────────────────┼───────────────────┐
-          │                   │                   │
-       Minecraft            Paper          Region engine
-        / NMS        (only upstream)   (SourbyCraft-owned,
-                                        ex-Folia/Canvas)
-```
-
-Since 2026-10-05 Paper is the only upstream: the region-threading changes that came from Canvas/Folia are SourbyCraft-owned patches and sources. Canvas survives only in the `config/canvas-*.yml` file names and the `canvas-supported` plugin.yml key; its plugin API package moved to `dev.iyanz.sourbycraft.api.*` in Build 48 (breaking change, see `sourbyapi/README.md`). It is **not** the SourbyCraft product architecture.
-
-Start at **[Aurora Architecture](docs/architecture/AURORA.md)** — the entry point for every Aurora document: a document map, the current state verified against code, open contradictions between documents, and the architecture contract.
-
----
-
-## Aurora goals
-
-Aurora optimizes in this order: **correctness, reliability, stability, predictable latency, resource efficiency, scalability, observability, then peak throughput**. A faster result is not accepted as an engine improvement if it weakens ownership safety, persistence, shutdown behavior, compatibility, or overload behavior.
-
-| Area | Goal |
+| Feature | State |
 |---|---|
-| **Correctness** | Preserve Minecraft, plugin, ownership and persistence semantics before optimizing them |
-| **Reliability** | Fail and degrade predictably; close admission during shutdown/failure; avoid hidden state corruption |
-| **Stability** | Region-safe execution, clean shutdown, bounded workers/queues and stable long-running resource use |
-| **Latency** | Optimize p95/p99/tail behavior as well as averages; avoid overload cliffs |
-| **Efficiency** | Lower CPU, allocation, GC pressure, memory, I/O and hot-path overhead |
-| **Scalability** | Add parallelism only where independent work and measured capacity justify it |
-| **Independence** | SourbyCraft-owned runtime, configuration, diagnostics and build/release contract |
-| **Observability** | One first-party source for TPS, MSPT, memory, GC, region and performance diagnostics |
-
-Performance claims require evidence with the exact workload, hardware, configuration and certification state. Aurora does not silently reduce gameplay settings to produce better numbers.
-
----
-
-## Current architecture status
-
-The `26.2` branch already includes or is actively refining:
-
-- Java 25 production baseline
-- region-aware SourbyCraft metrics API
-- immutable performance snapshots
-- custom region tick metrics
-- GC/runtime sampling
-- `/tps`, `/mspt`, `/perf` and HUD modernization
-- Spark statistics routed through SourbyCraft metrics
-- SourbyCraft platform identity in Spark
-- SourbyCraft configuration reporting in Spark
-- bounded administrative I/O
-- explicit Sourby runtime shutdown
-- JFR and baseline tooling
-- patch/threading architecture audits
-- removal of unsafe cross-region scratch-buffer optimizations
-- direct Minecraft/NMS performance patches where ownership is proven safe
-- Aurora execution contracts: the scheduler-coupling inventory pins five files (`RegionOwnerHandoff`, `FoliaRegionBackend`, `awf/world/AuroraWorldsService`, `LiveSchedulerSource`, `RegionLocator`) in `scripts/test_independence_policy.py`; Build 48 also adds the ownership contract `RegionOwnership` and its `MoonriseRegionOwnership` implementation
-- the Aurora region system: region identity, topology and lifecycle, backend-free
-- execution lanes with per-lane CPU attribution, surfaced by `/perf lanes`
-- an Aurora engine package inside the Minecraft tree, `dev.iyanz.aurora`
-- ownership documents for all four engine domains, with metrics and boundaries
-- a Canvas/Folia dependency ledger, enforced by tests rather than prose
-- `SOURCE_DATE_EPOCH` support for build timestamps and slim-jar entry times; two clean local builds gave the same slim-jar hash (2026-10-22, one machine, stamped builds omit the local-variable table). CI pins the epoch and the Temurin build and runs an independent `rebuild` job before release, plus a build-provenance attestation; **none of those CI jobs has run yet, so reproducibility in CI is UNVERIFIED** ([details](docs/development/BUILD-PROVENANCE.md))
-- persistence validation: `scripts/verify_persistence.py` (105/105 on the Build 47 RC tree, local laptop run 2026-10-13) and `scripts/verify_crash.py`
-
-**Not yet fully qualified.** The certified two-hour 10-player stability soak recorded in pre-Build-47 commit `1c883a55` (without plugins) showed stable heap-after-GC, resident memory and tick duration for that historical workload. It does **not** qualify the current tree and is **not** a certified performance reference pair. Certified comparable reference runs, remaining representative workloads, missing domain telemetry, and the open region-ownership gate still block T10. The exact gate state is tracked in **[Qualification Readiness](docs/architecture/qualification-readiness.md)** and raw measurement history in **[Performance Baseline](docs/BASELINE.md)**.
-
-Deeper entity/chunk/network profiling and further Aurora ownership work remain active
-development tasks.
-
-
-### Status vocabulary
-
-These labels are normative across README, architecture docs, release notes and commit messages:
-
-| Label | Meaning |
-|---|---|
-| **IMPLEMENTED** | Code exists and functional verification has passed; no performance/stability claim is implied |
-| **EXPERIMENTAL** | Implemented but intentionally not treated as production-qualified; normally default-off when risk is material |
-| **MEASURED** | A workload produced an observation; the result may still be noisy or uncertified |
-| **CERTIFIED** | The measurement harness accepted the run under its provenance/noise rules |
-| **QUALIFIED** | All applicable correctness, regression, soak, persistence and compatibility gates are satisfied |
-| **PLANNED** | Design/roadmap only; it must never be described as current runtime behavior |
-
-A single workload, machine, percentile or profiler sample must never be generalized into a universal performance claim. When documentation and runtime disagree, inspect the current branch code/config resolution first and correct the document; do not preserve a stale statement for narrative consistency.
-
-### Current Aurora status
-
-| Area | Status |
-|---|---|
-| Runtime lifecycle / metrics / region adapters | **IMPLEMENTED** |
-| Persistence validation | **IMPLEMENTED**; current checks pass |
-| Async pathfinding | **EXPERIMENTAL**, default-off |
-| Two-hour stability soak | **CERTIFIED evidence exists** for a pre-Build 47 tree (2026-09-15, `1c883a55`, no plugins); no soak of the Build 47 tree is certified |
-| Certified performance regression reference pair | **INCOMPLETE** |
-| Network throughput / storage backlog telemetry | **PARTIAL** — wire bytes/packets per direction (`/perf network`); per-world pending chunk-system I/O and region-file (.mca) save p50/p99/max over the last window (`/perf storage`, feature patch 0043; unit-tested, no server-boot sample recorded yet; it times only the .mca write stage, not serialization/compression, and never AWF worlds). Whether `/perf storage` satisfies the T10 "storage backlog" metric is undecided |
-| Aurora Resource Governor / unified execution fabric | **PARTIAL** — fixed-budget governed lanes (`/perf governor`); existing executors not yet governed |
-| Aurora Compatibility Bridge | **IMPLEMENTED, UNQUALIFIED** — `aurora.bridge.mode = off` by default. Unit-tested (bridge package 61/61, 2026-10-07) and booted with a synthetic legacy plugin in CI (runs 440–485); Vault/EssentialsX enabled through it on Sourby Demo, and one uncertified `plugins-10` bench (2026-10-06). The 2026-10-07 additions (`RegionTask`/`EntityTask` owner routing, per-plugin limits, body timing, LightingLuminol global-scheduler port, same-instance re-enable hook) are committed; their fixture markers pass in CI since run 37515867230, except the same-instance re-enable hook, which only boots there (unit-tested; no marker or boot exercises a re-enable yet). No player-workflow or soak qualification; a native port is the route to full compatibility |
-| Aurora World Fabric | **EXPERIMENTAL, OFF BY DEFAULT** — FILE and Redis backends under region storage for worlds in `aurora.awf.worlds` or managed by `/awf` (`/perf awf`); templates, copy-on-write instances, Slime import, `.awf` files; crash test 56/56 is MEASURED (local laptop, 2026-10-13; 53/53 on 2026-10-05); Redis backend-failure fixes committed (`d97fe247`), failure scenarios run locally only; unqualified, a crash loses writes since the last commit; no MongoDB/MySQL backends |
-| Fully independent Aurora scheduler | **RESEARCH / PLANNED**, not current runtime |
-| Build 47 — Aurora Nexus release | **FULL RELEASE, NOT STABLE, UNSIGNED** — owner decision 2026-10-21: published with `release=true`; the STABLE label is reserved for Build 49 and release signing (SEC-2) is not configured. Open gates move to Build 49/50 ([roadmap](docs/releases/ROADMAP-47-50.md)). Gate state (release doc, consistency passes 2026-10-14 and 2026-10-21): compile, unit/integration, patch regeneration, startup and shutdown PASS in CI (latest green push run 39456620331, `c0ab0cc4`); world load/save and crash recovery PASS on local laptop runs of the RC tree (plus earlier Sourby Demo runs), backend failure PASS on local laptop scenarios only; plugin compatibility, cache corruption and soak PARTIAL; region ownership and licence OPEN; certified stress NOT RUN. Other findings of the [2026-10-14 system audit](docs/audits/2026-10-14-system-audit.md) are tracked in TODO.md; the `sourbycraft-security.yml` no-consumer finding (SEC-1) was fixed in `41a444f5` (2026-10-20: guards in `dev.iyanz.sourbycraft.security`, every limit defaults to LOG; unit-tested, no security soak or proxy boot yet) ([gates](docs/releases/26.2-build-47-aurora-nexus.md#release-readiness-audited-2026-10-07)) |
-
-### Aurora engine, and where it lives
-
-Aurora is the engine; SourbyCraft is what surrounds it. Console logger tags use
-`Aurora/<Class>` for `dev.iyanz.aurora.*` and `SourbyCraft/<Class>` for
-`dev.iyanz.sourbycraft.*`; Minecraft/Paper classes use their simple class names. The source tree
-says so too: engine code SourbyCraft wrote lives in `dev.iyanz.aurora.*` inside the Minecraft
-tree, rather than hiding in a vanilla package. See
-[aurora-engine-package.md](docs/architecture/aurora-engine-package.md).
-
-Startup reports the engine coming up stage by stage, as a bar whose percentage is stages
-finished over stages declared — never elapsed time. A stage that fails is named, and the closing
-line reads *degraded*, not *online*.
-
-See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** and **[Development Task Matrix](docs/DEVELOPMENT-TASKS.md)**.
-
----
-
-## Deep Minecraft/NMS optimization
-
-Aurora explicitly permits optimization inside Minecraft server code.
-
-Primary profiling domains include:
-
-```text
-Entity / LivingEntity / Mob
-GoalSelector / Brain / Sensor
-PathNavigation / collision
-ServerLevel
-chunk holders / tickets
-chunk generation / save / unload
-block and fluid ticks
-block entities
-entity tracking
-packet construction / serialization
-network compression
-```
-
-A direct NMS optimization should have:
-
-1. profiler or reproducible benchmark evidence,
-2. region-ownership review,
-3. compatibility analysis,
-4. before/after measurement,
-5. regression coverage where practical.
-
-Aurora does **not** treat “more patches” as a performance metric.
-
----
-
-## Configuration — SourbyCraft first
-
-SourbyCraft is moving toward first-party configuration ownership.
-
-Existing files remain supported:
-
-- `sourbycraft_config/sourbycraft_global_config.toml` — SourbyCraft utility/global configuration
-- `sourbycraft_config/aurora.toml` — early-boot Aurora CPU budget consumed before normal SourbyCraft bootstrap
-- `sourbycraft-security.yml` — consumed by security guards at boot and `/sourbycraft reload` (**LIVE**); all guard groups default to `LOG` (observe and log; enforcement requires `KICK`)
-- `config/canvas-server.yml`
-- `config/canvas-worlds.yml`
-
-Configuration documentation must describe the **effective consumer and lifecycle**, not only the intended future layout. In particular, settings read before bootstrap must not be documented as live-reloadable.
-
-New SourbyCraft-specific performance behavior should live under the **Aurora** configuration domain rather than adding new Canvas-owned keys.
-
-Preferred logical layout:
-
-```toml
-[aurora.performance]
-
-[aurora.scheduler]
-
-[aurora.entity]
-
-[aurora.chunk]
-
-[aurora.network]
-
-[aurora.memory]
-
-[aurora.diagnostics]
-```
-
-If the configuration grows enough to justify file separation, Aurora may evolve toward:
-
-```text
-sourbycraft_config/
-├── sourbycraft_global_config.toml
-└── aurora/
-    ├── performance.toml
-    ├── scheduler.toml
-    ├── entity.toml
-    ├── chunk.toml
-    ├── network.toml
-    ├── memory.toml
-    └── diagnostics.toml
-```
-
-This is an architectural direction, not permission to create unnecessary config files.
-
-### No auto tuning
-
-Aurora does not automatically rewrite operator performance configuration.
-
-It will not silently:
-
-- lower view distance,
-- lower simulation distance,
-- reduce entity limits,
-- disable AI,
-- change compression,
-- change JVM flags,
-- choose a different GC,
-- rewrite gameplay settings because TPS/MSPT is bad.
-
-Diagnostics may recommend actions. The operator remains in control.
-
----
-
-## Observability and Spark
-
-SourbyCraft performance consumers should converge on one metric source:
-
-```text
-engine / region counters
-runtime sampler
-GC events
-network + scheduler counters
-        ↓
-Sourby Metrics Runtime
-        ↓
-immutable PerformanceSnapshot
-        ↓
-/tps /mspt /ram /perf / HUD / Spark
-```
-
-Spark currently remains the upstream profiler implementation, but SourbyCraft extends its integration so that profiler data can understand SourbyCraft runtime semantics instead of maintaining a conflicting TPS/MSPT calculation.
-
-Implemented:
-
-- SourbyCraft platform identity
-- SourbyCraft configuration metadata (including `aurora.toml`, with secret filtering)
-- Sourby tick/MSPT statistics
-- Aurora runtime metadata in each report (in-memory reads only; see [SPARK.md](docs/SPARK.md))
-
-Still direction, not implemented:
-
-- region-aware performance context inside Spark reports
-- improved worker/thread classification in the Spark viewer
-
-A dedicated deeper SourbySpark fork will only be justified if the adapter layer can no longer provide the required region/runtime visibility.
-
----
-
-## Performance commands
-
-The long-term operator surface is centered around SourbyCraft telemetry.
-
-Current/active command family:
-
-| Command | Purpose |
-|---|---|
-| `/tps` | SourbyCraft TPS overview |
-| `/mspt` | tick-duration / MSPT overview |
-| `/ram` | first-party memory information as implementation reaches feature-complete state |
-| `/perf` | primary SourbyCraft performance overview |
-| `/tpsbar` | TPS performance HUD |
-| `/rambar` | RAM performance HUD |
-| `/perfbar` | combined performance HUD |
-| `/sys` | server/JVM/host diagnostics |
-| `/ping [player]` | latency + offline GeoIP where enabled |
-| `/ver` · `/version` | SourbyCraft build/runtime information |
-| `/plugins` | Plugin list coloured by Aurora compatibility state (native / bridged / failed / disabled) |
-| `/maxp [n]` | max-player management |
-| `/perf lanes` | where the machine's time went, by execution lane |
-| `/spec` | full machine specification: processor, clock, cores, memory and heap allocation |
-| `/perf async` | async-path pool: solve times, queue wait and depth, and how many solves saturation refused (they are never run on the region thread) |
-| `/perf network` | wire bytes and packets per second in each direction, totals, connections (`aurora.network.counters`) |
-| `/perf governor` | Resource Governor lanes: budget, queue, submitted/completed/failed/rejected |
-| `/perf storage` | chunk-system storage reads/writes/deletes since start, and each world's pending storage I/O tasks (chunk/POI/entity) |
-| `/perf plugins` | plugin counts by compatibility state, bridge mode, and each bridged plugin's redirects/handoffs/rejections/violations |
-| `/perf history` | the last hour, one line per minute: worst region TPS and MSPT, process CPU, heap (60-sample ring) |
-| `/perf player <name>` | a player's world, block, chunk, ping, view/simulation distance, read on the thread that owns the player |
-| `/perf chunks`, `/perf entities` | loaded chunks and regions, entities and players per world, summed from each region's own counters |
-| `/perf awf` | Aurora World Fabric storages: resident/dirty chunks, pending commits, commit p50/p95/p99, reads vs region-file fall-throughs, failures |
-| `/perf region` | region count and MSPT spread, plus the slowest active region (world/region/generation ids) |
-| `/plugins <plugin>` | one plugin's compatibility state and, when bridged, its Aurora Bridge telemetry |
-| `/update` | SourbyCraft updater status/check |
-
-Implemented `/perf` views: `tick`, `cpu`, `memory`, `gc`, `lanes`, `async`, `network`,
-`governor`, `scheduler`, `incidents`, `storage`, `awf`, `plugins`, `history`, `player <name>`, `chunks`, `entities`, `region`, `health`. Still planned, not implemented:
-
-```text
-/perf profile
-```
-
-Only cheaply and reliably collected metrics should be exposed as routine commands.
-
----
-
-## Independence
-
-SourbyCraft independence does **not** mean deleting every upstream line.
-
-It means SourbyCraft can define and operate its own:
-
-- public runtime identity,
-- configuration surface,
-- performance semantics,
-- diagnostics,
-- lifecycle,
-- release/build contract,
-- Sourby-specific engine behavior.
-
-A normal SourbyCraft server should not require:
-
-- a separate Canvas JAR,
-- a separately running Canvas process,
-- a Canvas remote API,
-- upstream network availability after required dependencies are already cached.
-
-Read **[Independence Architecture](docs/architecture/independence.md)**.
-
----
-
-## Cherry — server-side mixins
-
-**Cherry** is SourbyCraft's unified server-side mixin engine. It combines server-side mixin/access transformation capabilities used by SourbyCraft and plugin authors.
-
-Enable it with:
-
-```text
--Dcherry.enable.mixin=true
-```
-
-Cherry is intended for server-side transformations and does not turn SourbyCraft into a full Fabric client/server mod loader.
-
-Project and plugin-author documentation: **https://github.com/YanIanZ/Cherry**
-
----
-
-## SourbyLoader / SourbyClip
-
-SourbyCraft ships as a slim server artifact and resolves externalized libraries during bootstrap.
-
-After successful dependency acquisition, cached operation should not depend on upstream network availability for normal runtime.
-
-The bootstrap path is under active reliability review for timeout behavior, cache validation, bounded concurrency, retry policy and offline-after-success operation.
-
----
+| Region-threaded ticking (SourbyCraft-owned engine) | Implemented |
+| Metrics runtime behind `/tps`, `/mspt`, `/perf`, HUD bars and Spark | Implemented; cross-surface consistency is an open Build 48 gate |
+| Auto-updater (`apply_mode=notify` by default; release signing starts with Build 48) | Implemented |
+| Aurora Compatibility Bridge for non-region-aware plugins | Implemented, off by default, not qualified |
+| Aurora World Fabric (region storage, templates, instances) | Experimental, off by default |
+| Async pathfinding | Experimental, off by default |
+| Cherry server-side mixins (`-Dcherry.enable.mixin=true`) | Off by default |
+
+States use the vocabulary in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): *implemented* means
+functionally verified, not performance-qualified.
 
 ## Quick start
 
-Requires **Java 25**.
+Requires **Java 25**. Download `SourbyCraft-26.2-REL.jar` from
+[Releases](https://github.com/YanIanZ/SourbyCraft/releases), check it against the `.sha256` file,
+then run:
 
 ```bash
-java -Xmx4G -jar SourbyCraft-slim.jar --nogui
+java -Xmx4G -jar SourbyCraft-26.2-REL.jar --nogui
 ```
 
-The first boot may require network access to acquire externalized dependencies. Normal cached operation should remain self-contained afterward.
+The first boot needs internet once: the launcher downloads the externalized libraries and the
+Mojang server jar and verifies each by SHA-256. After that the server can run offline
+(`-Dsourbyclip.offline=true`).
 
----
+### Docker
 
-## Maintainer build (private toolchain required)
+```bash
+docker build -f docker/Dockerfile --build-arg JAR=release/SourbyCraft-26.2-REL.jar -t sourbycraft:26.2 .
+docker compose -f docker/docker-compose.yml up -d --build
+```
 
-Requires **JDK 25** and Git.
+Run both from the repository root. Compose stores server data in `data/`.
+
+## Configuration
+
+| File | Purpose |
+|---|---|
+| `sourbycraft_config/sourbycraft_global_config.toml` | Messages, max players, auto-updater, ViaVersion/ProtocolLib provisioning |
+| `sourbycraft_config/aurora.toml` | Aurora engine options (CPU budget, bridge, AWF, async pathfinding) |
+| `config/canvas-server.yml`, `config/canvas-worlds.yml` | Region scheduler options (file names kept for existing servers) |
+| `config/paper-global.yml` → `threaded-regions` | Region thread count and grid size |
+| `sourbycraft-security.yml` | Crash-prevention and packet-guard limits (all default to `LOG`) |
+
+SourbyCraft never tunes gameplay or performance settings on its own; diagnostics recommend, the
+operator decides. Details and reload behavior: [docs/AURORA-CONFIG.md](docs/AURORA-CONFIG.md).
+
+## Commands
+
+`/tps`, `/mspt`, `/perf <view>`, `/tpsbar`, `/rambar`, `/perfbar`, `/sys`, `/spec`, `/plugins`,
+`/ver`, `/maxp`, `/update` and more. Full list: [docs/guides/commands.md](docs/guides/commands.md).
+
+## Building from source
+
+The build needs JDK 25 and the private SourbyPatcher/SourbyClip toolchain published to Maven Local
+([setup](docs/development/PRIVATE-TOOLCHAIN.md)). Without it Gradle stops at settings time.
 
 ```bash
 python3 scripts/private_toolchain.py --publish .private-toolchain
 ./gradlew applyAllPatches
-./gradlew :sourbycraft-server:compileJava
-./gradlew slimServerJar
+./gradlew slimServerJar        # build/libs/SourbyCraft-slim.jar
 ```
 
-The active build currently materializes pinned upstream source inputs and applies SourbyCraft changes. Aurora's long-term build goal is reproducible SourbyCraft ownership with upstream inputs treated as replaceable implementation sources rather than runtime requirements.
+Changes to Minecraft or Paper code go through feature patches. [AGENTS.md](AGENTS.md) covers the
+patch workflow, tests and release rules.
 
-Scheduler replacement is **not** on the near path. In historical, workload-specific ten-player
-observations on the development hardware, the region lane accounted for roughly a third of
-consumed CPU while chunk work dominated and the machine remained mostly idle. These are not
-current-tree or release-wide CPU shares. Aurora owns its contracts first so a backend *can* be
-replaced, and defers replacement until a workload measurement argues for it.
+## Documentation
 
----
+- [Developer reading path and docs index](docs/README.md)
+- [Aurora architecture](docs/architecture/AURORA.md): entry point and current state, verified against code
+- [Development rules](docs/DEVELOPMENT.md): truthfulness policy, evidence requirements, testing matrix
+- [Release notes and gates](docs/releases/)
+- [Performance baseline](docs/BASELINE.md) and [qualification readiness](docs/architecture/qualification-readiness.md)
 
-## Development documents
+## Credits and license
 
-New to the codebase? Start with the **[developer path and docs index](docs/README.md)**.
+SourbyCraft uses and derives work from **[Paper](https://github.com/PaperMC/Paper)**, Folia-derived
+region-threading work and **[CanvasMC](https://github.com/CraftCanvasMC/Canvas)**. Upstream
+attribution, copyright notices and license obligations are preserved.
 
-The active architecture/development set is:
+The plugin bridge includes an adaptation of **Luminol /
+[LightingLuminol](https://github.com/LuminolCustomArchive/LightingLuminol)** scheduler compatibility
+work by **Bacteriawa** and contributors; original attribution and GPL v3 license texts are retained
+([port scope and provenance](docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md)).
 
-- **[PRD.md](docs/PRD.md)** — product/performance requirements
-- **[SPEC.md](docs/SPEC.md)** — technical implementation rules
-- **[PLAN.md](docs/PLAN.md)** — performance/observability roadmap
-- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** — unified continuation contract
-- **[Aurora Architecture](docs/architecture/AURORA.md)** — deep engine/configuration architecture
-- **[Aurora Independent Engine](docs/architecture/AURORA-INDEPENDENT-ENGINE.md)** — the phased roadmap beyond Folia constraints
-- **[Execution Contract](docs/architecture/execution-contract.md)** — what SourbyCraft needs from whatever schedules it
-- **[Aurora Engine Package](docs/architecture/aurora-engine-package.md)** — which tree engine code belongs in, and why
-- **[Independence Architecture](docs/architecture/independence.md)** — upstream decoupling strategy
-- **[Dependency Ledger](docs/architecture/dependency-ledger.md)** — every direct Canvas/Folia dependency, classified, enforced by test
-- **[Compatibility Boundary](docs/architecture/compat-boundary.md)** — which way the upstream arrows point, and what keeps them pointing that way
-- **[Entity & AI Engine](docs/architecture/engine-entity-ai.md)** — ownership, metrics, and why this domain is hard to measure honestly
-- **[Chunk & World Engine](docs/architecture/engine-chunk-world.md)** — ownership and the one domain qualifiable without clients
-- **[Network Engine](docs/architecture/engine-network.md)** — instrumented, unowned, and said so
-- **[Storage Engine](docs/architecture/engine-storage.md)** — ownership, and the durability rule that outranks throughput
-- **[Qualification Readiness](docs/architecture/qualification-readiness.md)** — T10 against what actually exists
-- **[Performance Baseline](docs/BASELINE.md)** — how a run is measured, certified, and what the measurements found
-- **[Development Task Matrix](docs/DEVELOPMENT-TASKS.md)** — actionable implementation state
+Cherry incorporates work inspired by or derived from **[LeavesMC](https://github.com/LeavesMC)** and
+**[CraftCanvasMC/Horizon](https://github.com/CraftCanvasMC/Horizon)** where applicable
+([Cherry](https://github.com/YanIanZ/Cherry)). Profiling integration uses
+**[spark](https://spark.lucko.me)**.
 
-### Measuring this server
-
-Baselines are captured by `scripts/run_baseline.py`, which refuses to certify a run it cannot
-trust — a dirty worktree, a moved HEAD, a shared machine, rejected setup commands, clients that
-dropped out. Two rules are worth knowing before reading any number from it:
-
-- **Seed a pre-generated world with `--world`.** Without it, the run builds terrain inside its own
-  measurement window; historical, workload-specific observations on this project attributed half
-  the measured CPU and most tail latency to this, with six regions delivered where ten were declared.
-- **Measure on a quiet machine.** The foreign-CPU guard exists because a desktop running a game
-  alongside the server roughly doubled measured numbers in a historical, workload-specific
-  observation; that multiplier is not a current-tree or general performance claim.
-- **[Threading Review](docs/architecture/threading.md)** — region-safety findings
-- **[Profiling](docs/PROFILING.md)** — JFR/profiling workflow
-
----
-
-## Release direction
-
-The active `26.2` branch is the continuation point for Aurora development.
-
-Historical/release branches may still exist for older Folia/Canvas work, but new architecture work should treat `26.2` as the SourbyCraft-first line unless a release-specific branch is intentionally created.
-
----
-
-## Credits & license
-
-SourbyCraft uses and derives work from upstream Minecraft server projects including **[Paper](https://github.com/PaperMC/Paper)**, Folia-derived region-threading work and **[CanvasMC](https://github.com/CraftCanvasMC/Canvas)**. Upstream attribution, copyright notices and license obligations remain preserved.
-
-The plugin bridge includes an adaptation of **Luminol / [LightingLuminol](https://github.com/LuminolCustomArchive/LightingLuminol)** scheduler compatibility work by **Bacteriawa** and contributors. Original attribution and GPL v3 license texts are retained; [port scope, provenance and pending Claude testing](docs/development/LIGHTINGLUMINOL-BRIDGE-PORT.md) are documented separately.
-
-Cherry incorporates work inspired by/derived from projects including **[LeavesMC](https://github.com/LeavesMC)** and **[CraftCanvasMC/Horizon](https://github.com/CraftCanvasMC/Horizon)** where applicable. Profiling integration uses **[spark](https://spark.lucko.me)**.
-
-SourbyCraft project licensing is described in [`LICENSE.md`](LICENSE.md). Third-party components remain subject to their respective licenses.
-
-## Maintainer build access
-
-Official binaries are distributed through [Releases](https://github.com/YanIanZ/SourbyCraft/releases).
-The current build requires private SourbyPatcher/SourbyClip checkouts published to Maven Local.
-See [private toolchain setup](docs/development/PRIVATE-TOOLCHAIN.md) for pinned revisions, verification and CI policy.
+SourbyCraft's own license is in [LICENSE.md](LICENSE.md). Third-party components remain under their
+respective licenses.

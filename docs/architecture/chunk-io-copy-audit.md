@@ -2,7 +2,7 @@
 
 > **Role:** static code read of the byte copies a chunk goes through between its `CompoundTag` and
 > the disk, 2026-10-20 (the "identify duplicate serialization/copies before optimizing" item in
-> [DEVELOPMENT-TASKS.md](../DEVELOPMENT-TASKS.md) G). Companion to
+> DEVELOPMENT-TASKS.md G). Companion to
 > [network-allocation-copy-audit.md](network-allocation-copy-audit.md).
 > **Status:** read from source only. **Nothing here was run or measured**: no allocation profile, no
 > byte counts, no CPU cost. A copy listed here is not shown to matter; that needs a JFR allocation

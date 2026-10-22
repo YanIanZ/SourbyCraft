@@ -89,3 +89,18 @@ world*/
 !/sourbycraft-server/src/**/world/
 !**/src/main/java/**/world/
 !**/src/main/java/**/world/**
+
+# Internal planning documents (kept by maintainers, not published)
+/docs/PLAN.md
+/docs/PRD.md
+/docs/SPEC.md
+/docs/DEVELOPMENT-TASKS.md
+/docs/AURORA-TASKS.md
+/docs/MODERNIZATION-AUDIT.md
+/docs/AURORA-FULL-TRANSITION.md
+/docs/audits/
+
+# Local multi-agent coordination and diagnostics
+AGENT-COORDINATION.md
+.board-queue.json*
+*.hprof

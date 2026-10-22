@@ -81,7 +81,7 @@ roadmap). Security/observability ronde 1 sudah di-push (2026-10-20: `4a830168` u
 + OBS-9 sebagian, `65dba8fb` SEC-12 + OBS-7/15/16 + SEC-11/OBS-14 dokumentasi). Sisa di papan OmniMemo: SEC-1/5/6/7 + OBS-3 (codex),
 SEC-4 + OBS-4/5/6/13 (deepseek) — lihat `AGENT-COORDINATION.md` ROUND 2.
 
-Laporan: [`docs/audits/2026-10-14-system-audit.md`](audits/2026-10-14-system-audit.md)
+Laporan: `docs/audits/2026-10-14-system-audit.md`
 (read-only, `d97fe247`; nomor baris di laporan per commit itu). Temuan HIGH di sini; MEDIUM di P1,
 LOW di P2, proposal di P3. Keputusan owner 2026-10-14: SEC-1 bangun ulang guard; SEC-2/3 updater
 aman + rilis bertanda tangan; SEC-5 hapus geo-IP SourbyClip; SEC-13 (lisensi) tetap terbuka
