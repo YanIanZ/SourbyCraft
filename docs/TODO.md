@@ -25,7 +25,7 @@ Hal yang memblokir `release=true`. Status per gate dan buktinya:
 CI hijau terbaru: run 38445246566 pada `d97fe247` (2026-10-14). Tree kandidat rilis (Paper
 0005–0014, Minecraft 0023–0029, perbaikan bridge/AWF) sudah di-commit (`3da221d0`, `f188fe78`,
 `e0c241e9`, `d97fe247`) dan jalan di CI.
-- [!] Keputusan lisensi owner (PolyForm Noncommercial vs GPLv3 Paper; lihat *Keputusan owner*).
+- [x] Keputusan lisensi owner (2026-10-22): **GPL-3.0-only** + kebijakan merek dagang (`TRADEMARK.md`, GPLv3 §7(e)); lihat *Keputusan owner*.
 - [x] Commit tree kandidat rilis, lalu satu run CI hijau: compile, suite Java + Python, boot,
   shutdown, termasuk marker fixture yang belum pernah jalan (`LEGACY_GLOBAL_*`,
   `LEGACY_REGION_TASK_OK`, `LEGACY_ENTITY_TASK_OK`, `LEGACY_ENTITY_RETIRED_OK`,
@@ -147,11 +147,14 @@ dan gate yang masih terbuka tetap wajib.
   pengoptimalan (baseline tersertifikasi lalu optimasi terukur, termasuk keputusan default
   async pathfinding). Pembagian item: `docs/releases/ROADMAP-47-50.md`. Addendum 2026-10-21 (owner): Build 47 = rilis penuh (`release=true`, tanpa tanda tangan, gate yang belum lulus dicantumkan di release notes); label STABLE = Build 49.
   — selesai `d4269dcb` (2026-10-20): tree hash + flag dirty (repo materialisasi termasuk minecraft/resources, file build tergenerasi), `--commit $GITHUB_SHA` di CI; CI run berikutnya adalah bukti pertama di runner
-- [!] **Lisensi:** repo memakai PolyForm Noncommercial, sementara jar yang didistribusikan berisi kode
-  server Paper berlisensi GPLv3. Perlu keputusan apakah kombinasi ini memenuhi GPLv3
-  (`docs/releases/26.2-build-47-aurora-nexus.md`). Ini juga menentukan bentuk migrasi penuh di P2.
-  Audit 2026-10-14 **SEC-13**: jar tidak memuat teks GPL maupun tawaran source; label lisensi
-  Docker (SEC-12) menunggu keputusan ini.
+- [-] **Lisensi (SEC-13):** keputusan owner 2026-10-22: **GPL-3.0-only** (menggantikan PolyForm
+  Noncommercial, yang bertentangan dengan GPLv3 Paper di jar) + `TRADEMARK.md` untuk nama/logo
+  SourbyCraft dan Aurora (GPLv3 §7(e)). Diterapkan: `LICENSE.md`, `licenses/GPL.md`, `licenses/MIT.md`,
+  `META-INF/licenses/{LICENSE,NOTICE}_SOURBYCRAFT` di jar server (teks GPL + tawaran source per tag),
+  badge README, label Docker SEC-12 `GPL-3.0-only`. Sisa: (1) toolchain privat SourbyPatcher (turunan
+  paperweight, LGPL-2.1) dibutuhkan untuk build — apakah "Corresponding Source" GPLv3 mengharuskan
+  toolchain ini dibuka atau build dengan paperweight publik; (2) cek isi jar setelah build CI (file
+  lisensi ada di jar server bersarang, bukan di root jar SourbyClip).
 - [x] **Integrasi anticheat privat dihapus** (keputusan owner 2026-10-13): feature patch, tooling
   dan docs-nya dihapus dari repo; feature patch MC sesudahnya dinomori ulang turun satu
   (0025–0029 → 0024–0028).

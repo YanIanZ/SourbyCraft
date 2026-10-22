@@ -20,7 +20,7 @@ FROM eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165
 
 LABEL org.opencontainers.image.title="SourbyCraft" \
       org.opencontainers.image.description="SourbyCraft 26.2 region-threaded Minecraft server (Aurora runtime, Java 25)" \
-      org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
+      org.opencontainers.image.licenses="GPL-3.0-only"
 
 ARG JAR=release/SourbyCraft-26.2-REL.jar
 

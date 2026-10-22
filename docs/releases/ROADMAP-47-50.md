@@ -245,7 +245,7 @@ in writing in the gate doc.
 | --- | --- | --- |
 | Reproducibility from a clean checkout | docs/TODO.md:572; AURORA-TASKS.md:179; DEVELOPMENT-TASKS.md:203 | task_84c17bc8625b4def, task_2ce4850b635db6b7, task_188edf0fca6cd34f |
 | Reproducible slim jar with an independent rebuild job | docs/TODO.md:736 | task_affc958f7a89dfc2 |
-| Licence: PolyForm Noncommercial vs GPLv3 Paper server code in the jar (SEC-13; Docker label SEC-12 waits on it) — **DECISION** | docs/TODO.md:28, 143; AURORA-TASKS.md:212; DEVELOPMENT-TASKS.md:251 | task_ea0e5cef6500a22b, task_21901c62e3078576, task_69899e64f3d8c503, task_ad90c0ad2b1ba31d |
+| Licence: PolyForm Noncommercial vs GPLv3 Paper server code in the jar (SEC-13; Docker label SEC-12) — **DECIDED 2026-10-22: GPL-3.0-only + trademark policy** | docs/TODO.md:28, 143; AURORA-TASKS.md:212; DEVELOPMENT-TASKS.md:251 | task_ea0e5cef6500a22b, task_21901c62e3078576, task_69899e64f3d8c503, task_ad90c0ad2b1ba31d |
 | Declare STABLE only after every gate passes (Build 47 already used `release=true` without the STABLE label, owner 2026-10-21) — **DECISION** (owner declares STABLE) | docs/TODO.md:418 | task_e134ba42bdc51922 |
 
 ---

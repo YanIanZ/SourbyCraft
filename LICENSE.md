@@ -1,130 +1,46 @@
-# PolyForm Noncommercial License 1.0.0
+SourbyCraft is licensed under the [GNU General Public License version 3](licenses/GPL.md) only
+(SPDX: `GPL-3.0-only`).
 
-<https://polyformproject.org/licenses/noncommercial/1.0.0>
+Copyright (C) 2023-2026 Yan Ian Z. (https://github.com/YanIanZ/SourbyCraft)
 
-## Acceptance
+SourbyCraft is a derivative of Paper, which inherits the GPL from Spigot, Bukkit and CraftBukkit, and
+it carries region-threading and other code derived from GPLv3 projects. The combined server is
+therefore distributed under the GPL version 3. This applies to everything in this repository unless a
+file or directory states otherwise, including the feature patches under `sourbycraft-server/` and
+`sourbyapi/`, the SourbyCraft-owned sources and the build scripts.
 
-In order to get any license under these terms, you must agree
-to them as both strict obligations and conditions to all
-your licenses.
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, version 3.
 
-## Copyright License
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even
+the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public
+License for more details.
 
-The licensor grants you a copyright license for the
-software to do everything you might do with the software
-that would otherwise infringe the licensor's copyright
-in it for any permitted purpose. However, you may
-only distribute the software according to [Distribution
-License](#distribution-license) and make changes or new works
-based on the software according to [Changes and New Works
-License](#changes-and-new-works-license).
+## Names and logos
 
-## Distribution License
+The GPL covers the code, not the SourbyCraft and Aurora names or logos. Their use is governed by
+[TRADEMARK.md](TRADEMARK.md), as permitted by section 7(e) of the GPL version 3.
 
-The licensor grants you an additional copyright license to
-distribute copies of the software. Your license to distribute
-covers distributing the software with changes and new works
-permitted by [Changes and New Works License](#changes-and-new-works-license).
+## Upstream work
 
-## Notices
+Upstream copyright notices and licences are kept. The server jar carries their texts under
+`META-INF/licenses/`.
 
-You must ensure that anyone who gets a copy of any part of
-the software from you also gets a copy of these terms or the
-URL for them above, as well as copies of any plain-text lines
-beginning with `Required Notice:` that the licensor provided
-with the software. For example:
+| Project | Licence |
+|---|---|
+| [Paper](https://github.com/PaperMC/Paper) (Spigot, Bukkit, CraftBukkit) | GPL-3.0; some contributors' code also MIT |
+| Folia-derived region threading, [CanvasMC](https://github.com/CraftCanvasMC/Canvas) | GPL-3.0 |
+| Luminol / [LightingLuminol](https://github.com/LuminolCustomArchive/LightingLuminol) | GPL-3.0 (MIT where its authors chose it) |
+| Leaf, Leafpile | GPL-3.0 |
+| Metal (vendored under `Metal/`) | GPL-3.0 |
+| Lithium | LGPL-3.0 |
+| C2ME, Purpur | MIT |
 
-> Required Notice: Copyright Yan Ian Z. (https://github.com/YanIanZ/SourbyCraft)
+Minecraft is a trademark of Mojang AB. This repository contains no Minecraft server jar; changes to
+Minecraft code are kept as patch files, and the launcher downloads the official server jar from
+Mojang on first boot.
 
-## Changes and New Works License
+## Contributions
 
-The licensor grants you an additional copyright license to make
-changes and new works based on the software for any permitted
-purpose.
-
-## Patent License
-
-The licensor grants you a patent license for the software that
-covers patent claims the licensor can license, or becomes able
-to license, that you would infringe by using the software.
-
-## Noncommercial Purposes
-
-Any noncommercial purpose is a permitted purpose.
-
-## Personal Uses
-
-Personal use for research, experiment, and testing for
-the benefit of public knowledge, personal study, private
-entertainment, hobby projects, amateur pursuits, or religious
-observance, without any anticipated commercial application,
-is use for a permitted purpose.
-
-## Noncommercial Organizations
-
-Use by any charitable organization, educational institution,
-public research organization, public safety or health
-organization, environmental protection organization,
-or government institution is use for a permitted purpose
-regardless of the source of funding or obligations resulting
-from the funding.
-
-## Fair Use
-
-You may have "fair use" rights for the software under the
-law. These terms do not limit them.
-
-## No Other Rights
-
-These terms do not allow you to sublicense or transfer any of
-your licenses to anyone else, or prevent the licensor from
-granting licenses to anyone else.  These terms do not imply
-any other licenses.
-
-## Patent Defense
-
-If you make any written claim that the software infringes or
-contributes to infringement of any patent, your patent license
-for the software granted under these terms ends immediately. If
-your company makes such a claim, your patent license ends
-immediately for work on behalf of your company.
-
-## Violations
-
-The first time you are notified in writing that you have
-violated any of these terms, or done anything with the software
-not covered by your licenses, your licenses can nonetheless
-continue if you come into full compliance with these terms,
-and take practical steps to correct past violations, within
-32 days of receiving notice.  Otherwise, all your licenses
-end immediately.
-
-## No Liability
-
-***As far as the law allows, the software comes as is, without
-any warranty or condition, and the licensor will not be liable
-to you for any damages arising out of these terms or the use
-or nature of the software, under any kind of legal claim.***
-
-## Definitions
-
-The **licensor** is the individual or entity offering these
-terms, and the **software** is the software the licensor makes
-available under these terms.
-
-**You** refers to the individual or entity agreeing to these
-terms.
-
-**Your company** is any legal entity, sole proprietorship,
-or other kind of organization that you work for, plus all
-organizations that have control over, are under the control of,
-or are under common control with that organization.  **Control**
-means ownership of substantially all the assets of an entity,
-or the power to direct its management and policies by vote,
-contract, or otherwise.  Control can be direct or indirect.
-
-**Your licenses** are all the licenses granted to you for the
-software under these terms.
-
-**Use** means anything you do with the software requiring one
-of your licenses.
+Contributions are accepted under the GPL version 3. A contributor may additionally release their own
+code under the [MIT License](licenses/MIT.md) by saying so in the pull request.

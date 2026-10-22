@@ -1,0 +1,18 @@
+SourbyCraft
+Copyright (C) 2023-2026 Yan Ian Z. (https://github.com/YanIanZ/SourbyCraft)
+
+SourbyCraft is free software, licensed under the GNU General Public License version 3 only
+(GPL-3.0-only). The full licence text is in LICENSE_SOURBYCRAFT next to this file.
+
+Source code: the source code of every release is available at
+https://github.com/YanIanZ/SourbyCraft, at the tag named after the release (for example
+v26.2-r48 for Build 48). Build instructions are in README.md and AGENTS.md of that tag.
+
+SourbyCraft is a derivative of Paper (https://github.com/PaperMC/Paper), which is licensed under the
+GPL version 3. Other upstream licences and notices are in this directory (LICENSE_* and NOTICE_*).
+
+The SourbyCraft and Aurora names and logos are not licensed under the GPL; see TRADEMARK.md in the
+source repository (GPL version 3, section 7(e)).
+
+Minecraft is a trademark of Mojang AB. This jar does not contain the Minecraft server; the launcher
+downloads it from Mojang on first start.
