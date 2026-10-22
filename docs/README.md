@@ -71,7 +71,7 @@ Focused, current write-ups for one change or subsystem: [PRIVATE-TOOLCHAIN.md](d
 [UPGRADING-MINECRAFT.md](development/UPGRADING-MINECRAFT.md), [PROTOCOLLIB.md](development/PROTOCOLLIB.md), [AUTO-UPDATER.md](development/AUTO-UPDATER.md),
 [REGION-WATCHDOG.md](development/REGION-WATCHDOG.md), [STALL-RECORDER.md](development/STALL-RECORDER.md), [CHUNK-GENERATION-STUTTER.md](development/CHUNK-GENERATION-STUTTER.md),
 [AURORA-EDF-UPGRADE.md](development/AURORA-EDF-UPGRADE.md), [ASP-26.2-AWF-PORT-REVIEW.md](development/ASP-26.2-AWF-PORT-REVIEW.md),
-[LIGHTINGLUMINOL-BRIDGE-PORT.md](development/LIGHTINGLUMINOL-BRIDGE-PORT.md), [SUPERIORSKYBLOCK-BRIDGE.md](development/SUPERIORSKYBLOCK-BRIDGE.md),
+[LIGHTINGLUMINOL-BRIDGE-PORT.md](development/LIGHTINGLUMINOL-BRIDGE-PORT.md), [SUPERIORSKYBLOCK-BRIDGE.md](development/SUPERIORSKYBLOCK-BRIDGE.md), [paperlib-compat.md](development/paperlib-compat.md),
 [LOGIN-GUARDS.md](development/LOGIN-GUARDS.md) (Paper login guards the Folia baseline drops or re-purposes; documentation only),
 [TEST-COVERAGE-GAPS.md](development/TEST-COVERAGE-GAPS.md) (prioritised list of missing unit tests and timing-sensitive tests to convert).
 [REMOTE-REPOSITORIES.md](development/REMOTE-REPOSITORIES.md) (every remote the build, CI and first boot reach, fallback order, offline behaviour).
