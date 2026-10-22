@@ -35,7 +35,7 @@ optimisation), COMPATIBILITY (keeps plugins/config working), SECURITY, BRANDING,
 | 0010 reuse `BlockPos` in `ServerLevel.optimiseRandomTick` | 24 | PERFORMANCE | KEEP | Allocation removal. |
 | 0011 caller-owned entity query overloads | 12 | PERFORMANCE | KEEP | Small. |
 | 0012 inline AABB, reuse `MutableBlockPos` | 46 | PERFORMANCE | KEEP | Allocation removal in `Entity`. |
-| 0013 custom tick metrics | 85 | INTEGRATION | SPLIT | Mixes tick telemetry (`TickData`, `TickRegions`), world shutdown and the `SourbyCraftBootstrap.close()` call. Split telemetry from lifecycle. |
+| 0013 custom tick metrics | 9 | INTEGRATION | SPLIT — DONE 2026-10-22 | Now only the region schedule handle's wiring (`TickData`, `TickRegionScheduler`; +9 −11): `TickData` loses `final`, the handle gets one `RegionTickMetricsHolder` field, its five `tickTimesN` windows become `RegionTickDataView`s (`holder.view(...)`), and one `tickStarted` / one `tickCompleted` call replace the five per-window `addDataFrom` inserts. Every removed line is a one-for-one replacement of an upstream statement (the modifier, five constructor assignments, five inserts folded into one call), which is why `patch_surface.py` still says `logic` (9 added / 11 removed code lines; hook limit 10/2). The query/report logic that was inside `TickData` (+30 code lines) moved to `perf/RegionTickDataView` (overrides `addDataFrom`, `getTPSAverage`, `getMSPTData`, `generateTickReport`); standalone `new TickData(interval)` is upstream code again. Split out: lifecycle -> 0079, percentile order -> 0080, bootstrap close -> 0081. |
 | 0014 skip spawn-state scan a region cannot use | 25 | PERFORMANCE | KEEP | Measured. |
 | 0015 reject a landed arrow before the tag lookup | 7 | COMPATIBILITY | KEEP (upstream candidate) | Upstream bug fix. |
 | 0016 refuse a cross-region block test | 18 | SECURITY | KEEP | Region-safety fix (PRD §108). Since 2026-10-20 `AuroraCommandErrors` lives in Sourby source (`src/main/java/dev/iyanz/aurora/command/`, message pinned by `AuroraCommandErrorsTest`); the `ExecuteCommand` check stays a patch (hook). Known behaviour (audit ENG-11, 2026-10-14, from code, not a boot): in a chained `execute if/unless block <pos> <block> run ...` the condition is a fork, and Brigadier swallows a fork's error without a message (`BuildContexts`, `CommandSourceStack.handleError` with `forked=true`), so a cross-region refusal runs neither the `if` nor the `unless` chain and prints nothing. Only a terminal `execute if block ...` (no `run`) shows "Cannot test a block cross-region". Not changed: routing the test to the owning region cannot answer within the chain. |
@@ -46,7 +46,7 @@ optimisation), COMPATIBILITY (keeps plugins/config working), SECURITY, BRANDING,
 There is no 0018 in the snapshot above; the number was never reused. (Today's numbering has no gap:
 Minecraft features are 0001–0053 contiguous.)
 
-### Minecraft feature patches added after this snapshot (0039–0053, summarised 2026-10-20)
+### Minecraft feature patches added after this snapshot (0039–0053, summarised 2026-10-20; 0079–0081 split from 0013 on 2026-10-22)
 
 Classified by subject and the hunks' role as reported in the patch notes, not by a fresh hunk-by-hunk
 review; added lines are `+` lines of the patch file today. Dispositions are provisional.
@@ -68,6 +68,9 @@ review; added lines are `+` lines of the patch file today. Dispositions are prov
 | 0051 count chunk lifecycle transitions | 8 | INTEGRATION | KEEP | Hook only (8 code lines): first statement of each `BaseChunkSystemHooks` lifecycle callback (holder create/delete, FULL in/out, ticking in/out, entity ticking in/out) counts into `perf/ChunkLifecycleCounters` (since boot, all worlds; `ChunkLifecycleCountersTest`, `ChunkLifecycleHookTest`). Shown in `/perf chunks` (`command/PerfTelemetryRows`); overhead not benchmarked. |
 | 0052 count entity ticks per world in the region entity loop | 4 | INTEGRATION | KEEP | Hook only (4 code lines): `RegionizedWorldData.sourbyEntityTicks` (plain int, region-thread owned) is zeroed before `ServerLevel.tick`'s `forEachTickingEntity` loop, incremented right before each `guardEntityTick(tickNonPassenger)`, and after the loop `perf/EntityTickCounters.regionTicked(bukkitName, count, loop nanos)` records once per region loop (per world since boot: ticks, loops, loop time, largest single-region loop; passengers and frozen entities not counted). Shown in `/perf entities`. `EntityTickCountersTest`, `EntityTickHookTest` (bytecode order). Overhead not benchmarked. |
 | 0053 structure scans read AWF once and fail fast while the store is failing | 1 | INTEGRATION | KEEP | One changed line in the 0021 AWF branch of `RegionFileStorage.scanChunk`: `read` -> `awf/AwfRegionStorage.scanRead` (one attempt, no fence, refused with a stackless `ScanRefused` for 5 s after a scan read failed or while reads fail fast, only for chunks whose bytes must come from the store). Vanilla `StructureCheck` answers a throwing scan with CHUNK_LOAD_NEEDED and loads the chunk, so answers are unchanged; the load still waits for the store. `patch_surface` = logic (1/1 line, the call goes through the `sourby$awf` field). `AwfStructureScanTest`. |
+| 0079 region tick metrics lifecycle (split from 0013, 2026-10-22) | 9 | INTEGRATION | KEEP | Hook (8 added / 0 removed code lines): six calls in `TickRegions` (destroy, active, inactive, preMerge, preSplit, mergeInto) on the handle's `RegionTickMetricsHolder` (`retireDestroyed`, `activate`, `retireInactive`, `retireMerged`, `retireSplit`, `rotateForMerge`), `ServerLevel.sourbyTelemetryWorldId` and the `WorldShutdownThread` world retire (holder statics). No import; the helper names no engine type (independence policy). Timestamps stay at the call sites. |
+| 0080 fix swapped worst-percentile segments in `TickData` reports (split from 0013) | 1 | COMPATIBILITY | KEEP (upstream candidate) | Upstream passes the 1%-worst segment into the record's `segment5PercentWorst` slot and vice versa; the patch swaps the two arguments (+1 −1, classified `fix`). |
+| 0081 close SourbyCraft services at shutdown (split from 0013) | 1 | INTEGRATION | KEEP | One `SourbyCraftBootstrap.close()` call after plugin disable / async-task wait in `MinecraftServer` (hook). |
 
 ## Minecraft source patches (`minecraft-patches/sources/`)
 
@@ -102,7 +105,7 @@ review; added lines are `+` lines of the patch file today. Dispositions are prov
   normally. Not done yet: each move must keep the class in the package the patched upstream
   code imports (`dev.iyanz.aurora.*`, compiled with the Minecraft sources), which is why they
   were written inside the patches.
-- **Split (2):** 0006 and 0013 each mix unrelated changes.
+- **Split (1):** 0006 mixes unrelated changes. 0013 was split on 2026-10-22 into 0013 (handle wiring), 0079 (lifecycle hook), 0080 (upstream percentile fix) and 0081 (bootstrap close hook).
 - **Upstream candidates (2):** 0008 and 0015 fix upstream bugs.
 - **Duplicate upstream optimisations (checked 2026-10-20, from the patch hunks and the materialised
   sources at `paperRef` 9240f586; not a diff against newer Paper):** none found among the

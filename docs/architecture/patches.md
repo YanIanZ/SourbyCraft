@@ -12,7 +12,7 @@
 
 # Patch inventory and ownership audit (PRD Phase 1)
 
-> **Historical numbering (updated 2026-10-21):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later in that historical snapshot. Current numbered feature-file counts: **78 Minecraft (0001–0078), 24 Paper (0001–0024), 3 sourbyapi (0001–0003)**, counted from `NNNN-*.patch` files on 2026-10-21. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
+> **Historical numbering (updated 2026-10-21):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later in that historical snapshot. Current numbered feature-file counts: **81 Minecraft (0001–0081), 24 Paper (0001–0024), 3 sourbyapi (0001–0003)**, counted from `NNNN-*.patch` files on 2026-10-21. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
 
 Historical build-45 review on `release/26.2-canvas`, classified per PRD section 22 with
 the section 87 fields. Counts are added and removed lines in the patch file itself.
@@ -48,7 +48,7 @@ entries; it is not repeated per row.
 
 ### Historical `minecraft-patches/features/` — 17 patches (0013 and 0015 removed by action 2)
 
-Current directory count: **78** numbered feature patches (0001–0078), 2026-10-22.
+Current directory count: **81** numbered feature patches (0001–0081), 2026-10-22.
 
 | Patch | Category | Upstream dependency | Lines | Status | Action |
 | --- | --- | --- | ---: | --- | --- |
@@ -67,7 +67,7 @@ Current directory count: **78** numbered feature patches (0001–0078), 2026-10-
 | 0014 reuse `ParticleOptions` scratch list | 200-performance | `LivingEntity` | +23 −4 | **REWORKED** | Published the buffer into `SynchedEntityData`; fixed to copy-on-change. |
 | 0016 reuse `ItemEntity` scratch list in `Mob#aiStep` | 200-performance | `Mob`, `Level` | +33 −2 | KEEP | Reviewed: mob-owned, filled in place. |
 | 0017 inline AABB, reuse `MutableBlockPos` in `isInWall` | 200-performance | `Entity` | +46 −17 | **REWORK** | Needed three follow-up fixes after landing. Add a regression test. |
-| 0018 custom tick metrics | 100-runtime | 6 files | +85 −12 | KEEP | **Done.** Class relocated to the Sourby source tree; 1,229 → 309 lines. |
+| 0018 custom tick metrics (current 0013, 0079–0081) | 100-runtime | `TickData`, `TickRegionScheduler` (0013); `TickRegions`, `ServerLevel`, `WorldShutdownThread` (0079); `TickData` (0080); `MinecraftServer` (0081) | +9 −11; +9 −2; +1 −1; +1 −0 | KEEP | **Split 2026-10-22** (was one patch, +97 −14 at HEAD 6176d517). 0013 = handle wiring only: `TickData` non-final, five windows are `perf/RegionTickDataView` (shared-owner queries moved out of `TickData`), one start + one completion call; removed lines are one-for-one statement replacements, so still `logic` (9/11 code lines). 0079 lifecycle = hook (8/0) into `perf/RegionTickMetricsHolder`; 0080 upstream percentile-order fix; 0081 one bootstrap-close call (hook). Same final sources except `TickData`'s body is upstream again. |
 | 0019 close lifecycle-owned runtime services | 100-runtime | `MinecraftServer` | +1 −1 | **MERGE** | One line. Belongs with 0018's lifecycle wiring. |
 
 ### Historical `minecraft-patches/sources/` — 1 patch
@@ -212,7 +212,7 @@ different file but as one feature. 0007's explanation was carried into 0006's me
 rather than deleted with the file.
 
 At that historical action-3 checkpoint, the Minecraft feature set was thirteen patches,
-renumbered `0001-0013` with no gaps. Current counts (2026-10-22): **78 Minecraft, 24 Paper,
+renumbered `0001-0013` with no gaps. Current counts (2026-10-22): **81 Minecraft, 24 Paper,
 3 sourbyapi** numbered feature patches; the tables above retain their historical numbering.
 
 The gaps this originally left were not sustainable. `rebuildMinecraftFeaturePatches`
