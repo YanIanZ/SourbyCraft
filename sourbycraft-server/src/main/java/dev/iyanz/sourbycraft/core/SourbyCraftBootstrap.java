@@ -160,6 +160,8 @@ public final class SourbyCraftBootstrap {
         stage("startup index", () -> {
             dev.iyanz.sourbycraft.startup.StartupIndexStage.run();
             dev.iyanz.sourbycraft.startup.StartupTimeline.registerListener(owner);
+            // Plugins the index read that the plugin manager never created count as load failures.
+            dev.iyanz.sourbycraft.startup.UnloadedPlugins.registerListener(owner);
         });
 
         // Claims the bare command names (/tps, /ping, /ver, ...) and the HUD quit-listener.
