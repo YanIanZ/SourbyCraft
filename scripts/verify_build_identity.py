@@ -13,6 +13,9 @@ from build_identity import PROVENANCE_JDK, PROVENANCE_KEYS, provenance
 # The Java toolchain the sources compile with (root build.gradle.kts, AGENTS.md: JDK 25).
 TOOLCHAIN_JDK_MAJOR = "25"
 
+# "N" for a release from 26.2, "N.M" for a hotfix from hotfix/<mc>-rN.M (scripts/release_version.py).
+RELEASE_NUMBER = re.compile(r"[1-9][0-9]*(?:\.[1-9][0-9]*)?")
+
 
 # SEC-13 (GPL-3.0-only): licence texts the published (slim launcher) jar must carry itself.
 LICENCE_DIR = "META-INF/licenses/"
@@ -124,11 +127,19 @@ def verify(jar, number, channel=None, api_version=None, commit=None, source_root
     dirty = info.get("dirty", "false")
     if dirty not in ("true", "false"):
         raise ValueError("Invalid dirty flag")
-    label = str(number) + ("-dirty" if dirty == "true" else "")
-    if info["buildNumber"] != str(number) or info["build"] != label:
+    number = str(number)
+    if not RELEASE_NUMBER.fullmatch(number):
+        raise ValueError(f"Release number {number} is neither N nor a hotfix N.M")
+    label = number + ("-dirty" if dirty == "true" else "")
+    if info["buildNumber"] != number or info["build"] != label:
         raise ValueError("Build properties do not match release number")
     if attributes["Implementation-Version"] != f"Build {label}":
         raise ValueError("Manifest differs from build properties")
+    # Paper parses Build-Number as an int (ServerBuildInfo.buildNumber(), Bukkit.getVersion()), so a
+    # hotfix N.M keeps the integer N there; a jar that carries one must agree with the release.
+    if "." in number or "Build-Number" in attributes:
+        if attributes.get("Build-Number") != number.split(".")[0]:
+            raise ValueError(f"Manifest Build-Number {attributes.get('Build-Number')!r} is not the integer build of {number}")
     if commit is not None or "gitCommit" in info:
         expected = {"Git-Commit": "gitCommit", "Git-Tree-Hash": "treeHash", "Git-Dirty": "dirty"}
         for attribute, key in expected.items():
@@ -157,7 +168,7 @@ def verify(jar, number, channel=None, api_version=None, commit=None, source_root
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("jar")
-    parser.add_argument("number", type=int, nargs="?")
+    parser.add_argument("number", nargs="?", help="N, or N.M for a hotfix")
     parser.add_argument("--channel", choices=("DEV", "EXP", "REL"))
     parser.add_argument("--api-version")
     parser.add_argument("--commit", help="Require this full Git commit and a clean source tree")

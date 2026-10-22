@@ -371,6 +371,57 @@ class LicenceFilesTest(unittest.TestCase):
         self.assertIn("remains under Mojang's terms", text)
 
 
+class HotfixBuildIdentityTest(unittest.TestCase):
+    """A hotfix (hotfix/26.2-r48.1, tag v26.2-r48.1) stamps 48.1 into the build properties and
+    Implementation-Version, which /ver and the auto-updater read; the manifest Build-Number stays
+    the integer 48 because Paper parses it as an int (ServerBuildInfo.buildNumber())."""
+
+    def make(self, directory, number='48.1', build_number='48'):
+        return jar(directory, f'buildNumber={number}\nbuild={number}\nversion=26.2-REL\n',
+                   f'Implementation-Version: Build {number}\r\nBuild-Number: {build_number}\r\n')
+
+    def test_hotfix_identity_verifies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            info = verify(self.make(directory), '48.1', 'REL')
+            self.assertEqual('48.1', info['buildNumber'])
+
+    def test_hotfix_requires_the_integer_manifest_build_number(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for build_number in ('48.1', '49', ''):
+                with self.subTest(build_number=build_number):
+                    with self.assertRaises(ValueError):
+                        verify(self.make(directory, build_number=build_number), '48.1')
+            path = jar(directory, 'buildNumber=48.1\nbuild=48.1\n', 'Implementation-Version: Build 48.1\r\n')
+            with self.assertRaises(ValueError):
+                verify(path, '48.1')
+
+    def test_hotfix_number_must_match_the_jar(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for expected in ('48', '48.2', 48):
+                with self.subTest(expected=expected):
+                    with self.assertRaises(ValueError):
+                        verify(self.make(directory), expected)
+
+    def test_malformed_release_numbers_are_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = jar(directory, 'buildNumber=48.0\nbuild=48.0\n',
+                       'Implementation-Version: Build 48.0\r\nBuild-Number: 48\r\n')
+            for number in ('48.0', '48.1.2', '48-hotfix', '0', 'x'):
+                with self.subTest(number=number):
+                    with self.assertRaises(ValueError):
+                        verify(path, number)
+
+    def test_a_present_build_number_must_match_a_normal_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ok = jar(directory, 'buildNumber=48\nbuild=48\n',
+                     'Implementation-Version: Build 48\r\nBuild-Number: 48\r\n')
+            self.assertEqual('48', verify(ok, 48)['buildNumber'])
+            bad = jar(directory, 'buildNumber=48\nbuild=48\n',
+                      'Implementation-Version: Build 48\r\nBuild-Number: 47\r\n')
+            with self.assertRaises(ValueError):
+                verify(bad, 48)
+
+
 if __name__ == "__main__":
     unittest.main()
 

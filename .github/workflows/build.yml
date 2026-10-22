@@ -2,7 +2,9 @@ name: Official Build, Boot & Release
 
 on:
   push:
-    branches: [ '26.2', main ]
+    # hotfix/26.2-r<N>.<M>: a branch cut from the published tag v26.2-r<N> that publishes the hotfix
+    # tag v26.2-r<N>.<M> (scripts/release_version.py --hotfix-branch; docs/development/AUTO-UPDATER.md).
+    branches: [ '26.2', main, 'hotfix/26.2-r*' ]
   pull_request:
     branches: [ '26.2', main ]
   workflow_dispatch:
@@ -87,6 +89,7 @@ jobs:
       channel: ${{ steps.relnum.outputs.channel }}
       number: ${{ steps.relnum.outputs.number }}
       tag: ${{ steps.relnum.outputs.tag }}
+      base: ${{ steps.relnum.outputs.base }}
       publish: ${{ steps.relnum.outputs.publish }}
       # What the independent rebuild job must reproduce (Build 49): the slim jar's SHA-256 and the
       # SOURCE_DATE_EPOCH both builds were stamped with.
@@ -207,16 +210,33 @@ jobs:
           # A push to 26.2 publishes only while gradle.properties has release=true|pre and the
           # configured sourbyBuild has no v26.2-rN tag yet; every other push is a development build
           # of the same branch, so 26.2 keeps building after a release without a bump.
+          # A hotfix branch hotfix/26.2-r<N>.<M> (cut from v26.2-r<N>, sourbyBuild=<N>.<M>) publishes
+          # v26.2-r<N>.<M> once, under the same release=true|pre rule; release_version.py refuses an
+          # existing hotfix tag, a missing base tag and a sourbyBuild that does not match the branch.
           mode=$(sed -n 's/^release=//p' gradle.properties | tr -d '[:space:]')
           publish=false
+          hotfix=
+          case "$GITHUB_REF" in
+            refs/heads/hotfix/*) hotfix=${GITHUB_REF#refs/heads/} ;;
+          esac
           if [ "$GITHUB_REF" = 'refs/heads/26.2' ] && [ "$GITHUB_EVENT_NAME" != 'pull_request' ] \
               && [ "$mode" != false ] && python3 scripts/release_version.py > "$RUNNER_TEMP/relnum.out" 2> "$RUNNER_TEMP/relnum.err"; then
             publish=true
             channel=REL
             cat "$RUNNER_TEMP/relnum.out" >> "$GITHUB_OUTPUT"
+          elif [ -n "$hotfix" ] && [ "$GITHUB_EVENT_NAME" != 'pull_request' ] \
+              && [ "$mode" != false ] && python3 scripts/release_version.py --hotfix-branch "$hotfix" > "$RUNNER_TEMP/relnum.out" 2> "$RUNNER_TEMP/relnum.err"; then
+            publish=true
+            channel=REL
+            cat "$RUNNER_TEMP/relnum.out" >> "$GITHUB_OUTPUT"
           else
             [ -s "$RUNNER_TEMP/relnum.err" ] && echo "not publishing: $(cat "$RUNNER_TEMP/relnum.err")"
-            python3 scripts/release_version.py --development >> "$GITHUB_OUTPUT"
+            if [ -n "$hotfix" ]; then
+              # Still a well-formed hotfix identity (sourbyBuild=<N>.<M>), just not a new tag.
+              python3 scripts/release_version.py --development --hotfix-branch "$hotfix" >> "$GITHUB_OUTPUT"
+            else
+              python3 scripts/release_version.py --development >> "$GITHUB_OUTPUT"
+            fi
           fi
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
@@ -1103,7 +1123,7 @@ jobs:
     needs: [build, rebuild]
     # success() is implicit only when a job has no if of its own; spelled out so a failed or
     # skipped build never publishes. A pull request never reaches here.
-    if: success() && needs.build.outputs.publish == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/26.2'
+    if: success() && needs.build.outputs.publish == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/26.2' || startsWith(github.ref, 'refs/heads/hotfix/26.2-r'))
     runs-on: ubuntu-24.04
     # The one job that writes to the repository: it creates the tag and the GitHub release.
     permissions:
@@ -1196,6 +1216,8 @@ jobs:
           RELEASE_NUMBER: ${{ needs.build.outputs.number }}
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
           RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
+          # Empty for a 26.2 release; v26.2-r<N> for a hotfix v26.2-r<N>.<M>.
+          RELEASE_BASE: ${{ needs.build.outputs.base }}
         run: |
           set -eu
           last=$(git tag -l 'v26.2-r*' | sed -n 's#^v26\.2-r\([0-9]*\)$#\1#p' | sort -n | tail -1)
@@ -1216,11 +1238,15 @@ jobs:
             false) echo "release=false in gradle.properties; not publishing $tag"; exit 0 ;;
             *) echo "release must be true, pre or false (got '$mode')" >&2; exit 1 ;;
           esac
+          # A hotfix of an older build than the newest published one must not take "Latest" from it.
+          if [ -n "$RELEASE_BASE" ] && [ "$mode" = true ] && [ "${RELEASE_NUMBER%%.*}" -lt "${last:-0}" ]; then
+            publish_flags="--latest=false"
+          fi
           title="$(TZ=Asia/Jakarta date '+%A, %d %B %Y, %H:%M') (GMT+7) — 26.2-r$next $codename [$(git log -1 --format=%s | cut -c1-80)]"
           {
             echo "**SourbyCraft 26.2 Build ${next}** — \`$(basename "$jar")\` (sha256 \`$sha\`)"
             echo
-            echo "Auto-published from \`26.2\` after a green build + boot test."
+            echo "Auto-published from \`$GITHUB_REF_NAME\` after a green build + boot test."
             echo
             # Build 47+ notes are named docs/releases/26.2-build-N-<codename>.md.
             for notes in "docs/releases/$next.md" docs/releases/26.2-build-"$next"-*.md; do
@@ -1231,8 +1257,10 @@ jobs:
               fi
             done
             echo "## Commits"
-            if [ -n "${last:-}" ]; then
-              git log "v26.2-r$last"..HEAD --format='- %s' | head -40
+            # A hotfix lists what it adds to its base tag; a 26.2 release what it adds to the last one.
+            since="${RELEASE_BASE:-${last:+v26.2-r$last}}"
+            if [ -n "$since" ]; then
+              git log "$since"..HEAD --format='- %s' | head -40
             else
               git log -10 --format='- %s'
             fi
