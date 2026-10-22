@@ -43,7 +43,13 @@ Code: `dev.iyanz.sourbycraft.bridge` plus bridge feature patches under
 and worker/query follow-up 0008, native-disable fix 0009, explicit callback owners 0010,
 entity callback owners 0011, one-line OFF-mode refusal 0024).
 Feature patches are the source of truth for edits
-to Paper classes. The 0007/0008 materialized sources are present; build/testing of
+to Paper classes. Since Build 50 (2026-10-22) every `CraftScheduler` site those patches add is one
+call into `AuroraBridge` (`cancelTask`, `cancelTasks`, `currentlyRunning`, `knows`,
+`pendingBukkitTasks`, `submitIfBridged`, `withBridgedWorkers`, `idInUse`, `runBukkitTask`,
+`targetRegion`, `targetEntity`) or `FoliaSchedulerCompatibility` (`isGlobalCallback`,
+`bridgeCancelled`); the only scheduler code left in the patch is 0003's `bridgeTask` adapter, whose
+methods read package-private `CraftTask` state (`getPeriod`, `cancel0`, `CraftFuture`) or make one
+such call. Behaviour is unchanged and pinned by `CraftSchedulerHooksTest`. The 0007/0008 materialized sources are present; build/testing of
 this increment remains assigned to Claude.
 
 - **Mode.** `aurora.bridge.mode` in `aurora.toml` (or the unified file): `off` (default) keeps the

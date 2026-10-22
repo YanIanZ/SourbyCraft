@@ -35,12 +35,28 @@ patch.
 | Engine baseline file patches (former Canvas/Folia) | 472 + 234 + 16 = **722** | `minecraft-patches/sources`, `paper-patches/files`, `sourbyapi/paper-patches/files` |
 
 Conflict hot spots, meaning files that several feature patches touch:
-`CraftScheduler.java` (Paper 0003, 0006–0010: six patches), `MinecraftServer.java`
+`CraftScheduler.java` (Paper 0003, 0006–0010: six patches; eight since 0011 and 0019, see the
+Build 50 note below), `MinecraftServer.java`
 (0013, 0019, and the since-removed old 0024), `TickRegionScheduler.java` (0013, old 0026, now 0025), `TickRegions.java` (0002, 0013),
 `ServerLevel.java` (0010, 0013) and `Entity.java` (0009, 0012). Every Minecraft file a feature
 patch modifies is also patched by the engine baseline (28 of 28 Minecraft rows, 7 of 10 Paper
 rows). A Paper change to one of those files can therefore break the baseline patch first and
 the feature patch second.
+
+> Build 50 (2026-10-22, `patch_surface.py` on the hook-scheduler worktree at `6176d517`):
+> `CraftScheduler.java` is still touched by eight Paper feature patches (0003, 0006, 0007, 0008,
+> 0009, 0010, 0011, 0019), but every site is now one line calling `AuroraBridge` /
+> `FoliaSchedulerCompatibility` (or `RegionRefusal` for 0019), plus 0003's `bridgeTask` adapter,
+> whose methods are one-line accessors of package-private `CraftTask` state or one delegating
+> call each. The inline bridge logic (the no-op cancels of 0006/0009, the draining
+> `isCurrentlyRunning` tri-state and ID reservation of 0008, the worker merge, the pending-task
+> cast, the body dispatch and the global-callback checks of 0007) moved to
+> `bridge/AuroraBridge` and `bridge/FoliaSchedulerCompatibility` (`CraftSchedulerHooksTest`).
+> No patch touches `CraftTask` or `CraftAsyncScheduler`. Net `CraftScheduler` diff against Paper
+> (9 hunks either way): 68 added / 3 removed before, 30 added / 3 removed after; summed over the
+> eight patches' `CraftScheduler` sections (lines a later patch rewrites count twice): 70/5 before,
+> 33/6 after. A conflict on a Paper update is now on call lines; re-apply each line where its
+> upstream method moved.
 
 ## 1. Pre-flight
 
@@ -291,14 +307,15 @@ inside patches because of the package the upstream code imports) has to be check
 | MC 0026 chunk-generation stage timing | 16/0 | 13 code lines (two fields, the `run()` try/finally split, three calls) | **Partly done 2026-10-20:** stamps and the record decision moved to `ChunkGenerationMetrics.stampQueued`/`stampRunStart`/`runFinished` (`ChunkGenerationMetricsTest`); still `logic` because the try/finally wrapper around `runTask()` has to stay in the task |
 | MC 0025 region watchdog off by default | 17/3 | property gate written into upstream | Possible: read the flag from an owned config class. Small gain |
 | MC 0003, 0014, 0023 spawn and worldgen rules | 47/0, 25/3, 25/0 | gameplay decisions inline | Possible: move the predicate to an owned static method. The upstream `if` stays either way |
-| Paper 0003, 0007 bridge admission and routing | 39/3, 43/1 | scheduler/provider logic in CraftBukkit | Possible: concentrate on `AuroraBridge` calls. `CraftScheduler` is the largest hot spot (six patches) |
+| Paper 0003, 0007 bridge admission and routing | 39/3, 43/1 (Build 50: 23/3, 40/1) | scheduler/provider logic in CraftBukkit | **Done for `CraftScheduler` (Build 50, 2026-10-22):** every `CraftScheduler` site of 0003 and 0006–0011 is one call into `AuroraBridge`/`FoliaSchedulerCompatibility` (`CraftSchedulerHooksTest`); 0006, 0008, 0009 are hooks now. 0003 stays `logic` (20 code lines: the three loader gates, six one-line sites and the 11-line `bridgeTask` adapter that has to read package-private `CraftTask` state). 0007 stays `logic` because of its LightingLuminol port in `FoliaGlobalRegionScheduler` and `PaperPluginInstanceManager` (not changed); its `CraftScheduler` part is +2/−1 |
 | Paper 0002 branded bootstrap line | 37/6 | formatting inline | Branding rule: render the line in an owned class from `BuildInfo` |
-| MC 0004, 0009–0012, 0015, 0017, 0018, 0022, 0027; Paper 0001, 0004, 0005, 0006, 0008, 0009; MC 0020 | small | they replace upstream statements in place (allocation removals, operand order, a gate, a removed registration) | **Not candidates.** A hook cannot replace an upstream statement. These stay as patches, or go upstream |
+| MC 0004, 0009–0012, 0015, 0017, 0018, 0022, 0027; Paper 0001, 0004, 0005; MC 0020 (Paper 0006, 0008, 0009 became hooks in Build 50) | small | they replace upstream statements in place (allocation removals, operand order, a gate, a removed registration) | **Not candidates.** A hook cannot replace an upstream statement. These stay as patches, or go upstream |
 
 The classifier's limits: it reads only `+`/`-` lines. It cannot tell a gameplay rule from a
 counter, and it uses fixed thresholds (≤ 10 added and ≤ 2 removed code lines plus a
 `dev.iyanz` call for a hook). Paper 0008 (8 added, 3 removed, every line calling
-`AuroraBridge`) is a near-hook just over the removed-line limit. The rule that fired is
+`AuroraBridge`) was a near-hook just over the removed-line limit; since Build 50 it is a hook
+(2 added, 2 removed). The rule that fired is
 printed per patch so a reviewer can disagree with it.
 
 ## Rebasing the engine baseline onto a new upstream

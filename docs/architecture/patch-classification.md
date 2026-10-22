@@ -84,7 +84,7 @@ review; added lines are `+` lines of the patch file today. Dispositions are prov
 | `log4j2.xml` | BRANDING | KEEP | Console logger naming. |
 | `com/destroystokyo/paper/Metrics.java` | SECURITY | KEEP | Removes the bStats phone-home. |
 | `PaperPluginProviderFactory.java`, `SpigotPluginProviderFactory.java`, `CraftMagicNumbers.java` | COMPATIBILITY | KEEP | Aurora Bridge admission; unchanged behaviour when `aurora.bridge.mode = off`. |
-| `CraftScheduler.java` | COMPATIBILITY | KEEP | Bridge routing, cancel, `isQueued`, `isCurrentlyRunning`, `getPendingTasks`. |
+| `CraftScheduler.java` | COMPATIBILITY | KEEP | Bridge routing, cancel, `isQueued`, `isCurrentlyRunning`, `getPendingTasks`. Build 50 (2026-10-22): now Paper feature patches 0003, 0006–0011 (and 0019's refusal line); every site is one call into `bridge/AuroraBridge` / `FoliaSchedulerCompatibility`, behaviour pinned by `CraftSchedulerHooksTest`. `patch_surface.py` before -> after: 0003 logic +39/−3 -> logic +23/−3 (three loader gates + 11-line `bridgeTask` adapter of package-private `CraftTask` state); 0006 logic +6/−0 -> hook +1/−1; 0007 logic +43/−1 -> logic +40/−1 (the LightingLuminol `FoliaGlobalRegionScheduler`/`PaperPluginInstanceManager` port is unchanged); 0008 logic +10/−3 -> hook +2/−2; 0009 logic +6/−0 -> hook +1/−1; 0010, 0011 hook +3/−0 unchanged; 0019 logic +29/−23 unchanged. |
 
 ## Canvas patches (`canvas-patches/files/`)
 

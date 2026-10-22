@@ -282,6 +282,135 @@ public final class AuroraBridge {
         return true;
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // CraftScheduler hooks. Each Paper feature patch site in org.bukkit.craftbukkit.scheduler.CraftScheduler
+    // is one call into one of these (Build 50, docs/development/UPGRADING-MINECRAFT.md hook table), so a
+    // Paper update conflicts on a call line, not on bridge behaviour. None of them creates the runtime
+    // except submitIfBridged for a plugin the bridge already handles.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * {@code CraftScheduler#cancelTask} (Paper feature patches 0003, 0006): cancels the task if the bridge
+     * holds it, and always tells the caller to stop. Nothing below can hold a task on a region-threaded
+     * server: every task the Bukkit scheduler accepts goes to the bridge, and {@code handle()} refuses the
+     * rest. A task the bridge no longer knows has finished or was cancelled already, and cancelling it is a
+     * no-op, as on Paper. Falling through would schedule the legacy cancel task, which {@code handle()}
+     * refuses.
+     *
+     * @return always {@code true}
+     */
+    public static boolean cancelTask(final int taskId) {
+        cancel(taskId);
+        return true;
+    }
+
+    /**
+     * {@code CraftScheduler#cancelTasks} (Paper feature patches 0003, 0009): cancels every bridged task of
+     * the plugin, and always tells the caller to stop. A plugin the bridge does not handle has no task in the
+     * Bukkit scheduler on a region-threaded server ({@code handle()} refuses it), so there is nothing to
+     * cancel; falling through would schedule the legacy cancel task, which {@code handle()} refuses, and every
+     * native plugin's disable then logged "Unsupported in region threading".
+     *
+     * @return always {@code true}
+     */
+    public static boolean cancelTasks(final Plugin plugin) {
+        cancelAll(plugin);
+        return true;
+    }
+
+    /**
+     * {@code CraftScheduler#isCurrentlyRunning} (Paper feature patches 0003, 0008): {@code TRUE} while a
+     * bridged body runs (a cancelled async body stays running until its last invocation finishes),
+     * {@code FALSE} for a task the bridge holds that is not running, {@code null} when the bridge does not
+     * know the id (the caller falls through to Paper). Never creates the runtime.
+     */
+    public static Boolean currentlyRunning(final int taskId) {
+        return currentlyRunning(runtime, taskId);
+    }
+
+    static Boolean currentlyRunning(final BridgeRuntime current, final int taskId) {
+        if (current == null) return null;
+        if (current.running(taskId)) return Boolean.TRUE;
+        if (current.knows(taskId)) return Boolean.FALSE;
+        return null;
+    }
+
+    /**
+     * {@code CraftScheduler#nextId} (Paper feature patch 0008): an id the bridge still holds, or one whose
+     * body is still draining after cancellation, must not be handed out again. Never creates the runtime.
+     */
+    public static boolean idInUse(final int taskId) {
+        final BridgeRuntime current = runtime;
+        return current != null && (current.knows(taskId) || current.running(taskId));
+    }
+
+    /**
+     * {@code CraftScheduler#getActiveWorkers} on the main scheduler (Paper feature patch 0008): the async
+     * scheduler's workers plus the bridge's actual workers on the governed bridge I/O lane, each once.
+     *
+     * @return a new mutable list, as Paper returns
+     */
+    public static List<org.bukkit.scheduler.BukkitWorker> withBridgedWorkers(
+            final List<org.bukkit.scheduler.BukkitWorker> asyncWorkers) {
+        final List<org.bukkit.scheduler.BukkitWorker> workers = new java.util.ArrayList<>(asyncWorkers);
+        workers.addAll(activeWorkers());
+        return workers;
+    }
+
+    /**
+     * {@code CraftScheduler#getPendingTasks} on the main scheduler (Paper feature patch 0003): the bridged
+     * tasks still scheduled, as the scheduler's own task objects. Never creates the runtime.
+     */
+    public static List<org.bukkit.scheduler.BukkitTask> pendingBukkitTasks() {
+        final List<Object> handles = pendingTasks();
+        final List<org.bukkit.scheduler.BukkitTask> tasks = new java.util.ArrayList<>(handles.size());
+        for (final Object handle : handles) tasks.add((org.bukkit.scheduler.BukkitTask)handle);
+        return tasks;
+    }
+
+    /**
+     * {@code CraftScheduler#handle} (Paper feature patch 0003): schedules a bridged legacy plugin's task
+     * through the bridge instead of refusing it.
+     *
+     * @return {@code true} when the bridge took the task; {@code false} for a plugin the bridge does not
+     *     handle (the caller refuses it as before)
+     */
+    public static boolean submitIfBridged(final Plugin plugin, final BridgeRuntime.Task task, final long delayTicks) {
+        if (!handles(plugin)) return false;
+        submit(plugin, task, delayTicks);
+        return true;
+    }
+
+    /**
+     * {@code CraftScheduler}'s bridge adapter, {@code run()} (Paper feature patch 0003). {@code CraftAsyncTask#run}
+     * swallows and logs exceptions and keeps worker lists the bridge does not use, so the plugin's body runs
+     * directly and violations reach the bridge. A task that must run itself ({@code CraftFuture}: its
+     * {@code run()} completes the future), or one without a body, runs itself.
+     *
+     * @param task the scheduler's task object
+     * @param runnable its Runnable body, or {@code null}
+     * @param consumer its Consumer body, or {@code null}
+     * @param runsItself whether the task must run itself
+     */
+    public static <T extends org.bukkit.scheduler.BukkitTask & Runnable> void runBukkitTask(final T task,
+            final Runnable runnable, final java.util.function.Consumer<org.bukkit.scheduler.BukkitTask> consumer,
+            final boolean runsItself) {
+        if (runsItself || (runnable == null && consumer == null)) {
+            task.run();
+        } else if (runnable != null) {
+            runnable.run();
+        } else {
+            consumer.accept(task);
+        }
+    }
+
+    /** Test seam: installs a runtime (not started through the TOML files) until closed. Not for production code. */
+    static synchronized AutoCloseable installRuntimeForTesting(final BridgeRuntime installed) {
+        resetRuntime();
+        runtime = installed;
+        return AuroraBridge::resetRuntime;
+    }
+
     /** GlobalRegionScheduler cancellation also releases the bridge's task indexes. */
     public static void cancelGlobal(final Plugin plugin) {
         final BridgeRuntime current = runtime;

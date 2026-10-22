@@ -9,10 +9,10 @@ is cancelled as a rejected operation if the entity is removed first.
 Explicit global and async requests do not consult it.
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-index bd31b28d155c5a5a51b284ffc51384cfe0100085..673dc72cb29a18b6cb7d664614c91fb66112d525 100644
+index c68188d905e424488db0b48e96fc4ae6f4681970..4de23fd7cdd750f5c4e2c8e9724e24245da6aa68 100644
 --- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
 +++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-@@ -563,6 +563,9 @@ public class CraftScheduler implements BukkitScheduler {
+@@ -541,6 +541,9 @@ public class CraftScheduler implements BukkitScheduler {
              @Override public dev.iyanz.sourbycraft.execution.region.RegionAnchor targetRegion() {
                  return dev.iyanz.sourbycraft.bridge.AuroraBridge.targetRegion(task.getOwner(), task.rTask);
              }
@@ -21,4 +21,4 @@ index bd31b28d155c5a5a51b284ffc51384cfe0100085..673dc72cb29a18b6cb7d664614c91fb6
 +            }
              @Override public long period() { return task.getPeriod(); }
              @Override public boolean cancelled() { return task.isCancelled(); }
-             @Override public void markCancelled() {
+             @Override public void markCancelled() { task.cancel0(); dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.bridgeCancelled(task.rTask); }

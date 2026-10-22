@@ -49,11 +49,11 @@ Every number below is generated; the test fails when it drifts from the manifest
 | engine baseline patches | 720 (472 `sourbycraft-server/minecraft-patches/sources` + 232 `sourbycraft-server/paper-patches/files` + 16 `sourbyapi/paper-patches/files`), 720 Java files |
 | SourbyCraft feature patches | 105, touching 124 Java files |
 | engine source files (sourbycraft-server/src/main/java/dev/iyanz/aurora/engine) | 89 |
-| guards found by the scan | 118 (manifest has 118; both scan modes agree, see RepositoryTest) |
+| guards found by the scan | 116 (manifest has 116; both scan modes agree, see RepositoryTest) |
 
 | detector | A | B | C | D | E |
 | --- | --- | --- | --- | --- | --- |
-| entries | 66 | 30 | 2 | 14 | 6 |
+| entries | 64 | 30 | 2 | 14 | 6 |
 
 | kind \ decision | KEEP-OWNED | REPLACE | REMOVE | UNDECIDED | total |
 | --- | --- | --- | --- | --- | --- |
@@ -61,12 +61,12 @@ Every number below is generated; the test fails when it drifts from the manifest
 | API-REFUSED | 59 | 9 | 2 | 0 | 70 |
 | OWNERSHIP-CHECK | 6 | 0 | 0 | 0 | 6 |
 | DEGRADED | 4 | 1 | 0 | 0 | 5 |
-| REROUTED | 28 | 0 | 0 | 0 | 28 |
-| **guards** | **103** | **12** | **3** | **0** | **118** |
+| REROUTED | 26 | 0 | 0 | 0 | 26 |
+| **guards** | **101** | **12** | **3** | **0** | **116** |
 
 | origin | Folia | Canvas | SourbyCraft |
 | --- | --- | --- | --- |
-| entries | 77 | 31 | 10 |
+| entries | 77 | 31 | 8 |
 
 | family | sites |
 | --- | --- |
@@ -194,7 +194,7 @@ throwing.
   forceload tickets and world PDC remain shutdown-only, see
   [persistence-save-paths.md §2](persistence-save-paths.md)), `CraftEntity#1`/`CraftPlayer#1`/
   `Entity#7`/`ServerPlayer#3` (owned sync teleport, row 2), `PrepareSpawnTask#1` (row 3),
-  `CraftServer#4` (row 11), `CraftServer#7`/`CraftScheduler#4`/`RestartCommand#1`/`CraftServer#5` and
+  `CraftServer#4` (row 11), `CraftServer#7`/`CraftScheduler#5`/`RestartCommand#1`/`CraftServer#5` and
   the former `CraftServerTickManager#14`–`#26` messages (retired 2026-10-22, row 10 landed).
 - **Async teleport/respawn is the only way to change region** — `PlayerList#3`,
   `ServerGamePacketListenerImpl#5` `#6`, `TeleportCommand#1`, `CloneCommands#1`, `SummonCommand#1`:
@@ -207,7 +207,7 @@ throwing.
 - **Refusals that stay refusals** — `Datapack#1`/`PaperDatapack#1` and `Server#4`/`CraftServer#2`
   (registry reload under running regions), `Server#3`/`CraftServer#1` (plugin reload), `Server#1`
   `#2`/`CraftServer#7` (sync `unloadWorld`; the owned path is `unloadWorldAsync`, used by Paper
-  feature 0014 and `AuroraWorldsService`), `BukkitScheduler#1`/`CraftScheduler#4` (the Aurora Bridge
+  feature 0014 and `AuroraWorldsService`), `BukkitScheduler#1`/`CraftScheduler#5` (the Aurora Bridge
   owns legacy scheduling; the throw surfaces plugins that claim region support yet use the Bukkit
   scheduler), `CraftServer#6` (unreachable behind feature 0005's fallback),
   `GameTestHelper#1`/`GameTestServer#1` (gametest mode).
@@ -228,8 +228,7 @@ throwing.
   `MinecraftServer#27` (follows the pause-when-empty decision), `SparksFly#2` (Paper's built-in spark never self-enables; SourbyCraft's
   spark platform is the one profiler).
 - **SourbyCraft's own guards in the same shape** (origin `SourbyCraft`, already owned, recorded so the
-  scan is complete) — `Metrics#1` (bStats phone-home removed, Paper feature 0001), `CraftScheduler#2`
-  `#3` (cancelling a finished/non-bridged task is a no-op, features 0006/0009), `Sniffer#1`
+  scan is complete) — `Metrics#1` (bStats phone-home removed, Paper feature 0001), `Sniffer#1`
   (async-pathfinding opt-out hook, Minecraft feature 0039), `BaseCommandBlock#2`
   (`sourbyOwnedByCurrentThread()` defaults to `false`; Minecraft feature 0055).
 
@@ -296,6 +295,11 @@ fix `ThreadedRegionizer#1`; by Paper 0019 / MC 0061–0063 `PlayerList#1` `#2` `
 `CraftScheduler#4`, `CraftServerTickManager#14`–`#26`, `MinecraftServer#28`–`#36`).
 Retired 2026-10-22 (claude-legacyevents; MC 0073/0074, Paper 0022/0023, sourbyapi 0003): `ServerLoginPacketListenerImpl#1`, `ChatProcessor#1` `#2`, `ServerTickManager#1`,
 `CraftServerTickManager#14`–`#26`, `ServerPlayer#4`, `ServerGamePacketListenerImpl#3`.
+Retired 2026-10-22 (claude-hookscheduler, Build 50 CraftScheduler hook concentration, Paper 0003/0006/0009):
+`CraftScheduler#2` `#3` (the SourbyCraft-origin `if (true) return;` no-op cancels are now
+`AuroraBridge.cancelTask`/`cancelTasks`, which return `true`; behaviour unchanged, `CraftSchedulerHooksTest`)
+and `CraftScheduler#4` (re-keyed as `CraftScheduler#5`: same refusal, the line above it is now one
+`AuroraBridge.submitIfBridged` call).
 
 ## Wandering trader route ownership (0068)
 
@@ -342,9 +346,7 @@ origin is SourbyCraft or the note names a feature patch.
 | `CraftServer#6` | Folia | API-REFUSED | KEEP-OWNED | `org/bukkit/craftbukkit/CraftServer.java:3115` | `throw new UnsupportedOperationException("Not on any region");` |
 | `CraftEntity#1` | Folia | API-REFUSED | KEEP-OWNED | `org/bukkit/craftbukkit/entity/CraftEntity.java:323` | `if (true) {` |
 | `CraftPlayer#1` | Folia | API-REFUSED | KEEP-OWNED | `org/bukkit/craftbukkit/entity/CraftPlayer.java:1347` | `if (true) {` |
-| `CraftScheduler#2` | SourbyCraft | REROUTED | KEEP-OWNED | `org/bukkit/craftbukkit/scheduler/CraftScheduler.java:272` | `if (true) return;` |
-| `CraftScheduler#3` | SourbyCraft | REROUTED | KEEP-OWNED | `org/bukkit/craftbukkit/scheduler/CraftScheduler.java:326` | `if (true) return;` |
-| `CraftScheduler#4` | Folia | API-REFUSED | KEEP-OWNED | `org/bukkit/craftbukkit/scheduler/CraftScheduler.java:545` | `if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.BUKKIT_SCHEDULER.error(); //...` |
+| `CraftScheduler#5` | Folia | API-REFUSED | KEEP-OWNED | `org/bukkit/craftbukkit/scheduler/CraftScheduler.java:523` | `if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.BUKKIT_SCHEDULER.error(); //...` |
 | `RestartCommand#1` | Canvas | API-REFUSED | KEEP-OWNED | `org/spigotmc/RestartCommand.java:35` | `if (true) {` |
 | `ChunkTaskScheduler#1` | Folia | API-REFUSED | KEEP-OWNED | `ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java:339` | `throw new UnsupportedOperationException("Use region threading hooks"); // Folia - regio...` |
 | `ChunkTaskScheduler#2` | Folia | API-REFUSED | KEEP-OWNED | `ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java:344` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - ...` |

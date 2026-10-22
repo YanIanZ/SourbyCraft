@@ -95,21 +95,18 @@ index 14ffbcb66006878eacf310547dad53718f8308eb..553d2832fdc23c098572b35040621c43
          final List<GlobalScheduledTask> toCancel = new ArrayList<>();
          synchronized (this.stateLock) {
 diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-index db0bd34f892379f3fc9316e9456d8fb9a018b3d8..c431d15758685ab0db9310651b159bfd77cdaa06 100644
+index 2b00df035716e442b0fbe87275a780b9181311c0..ec13c81f074f5f51fbaecebbd6546787c57fd23d 100644
 --- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
 +++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-@@ -548,9 +548,13 @@ public class CraftScheduler implements BukkitScheduler {
+@@ -537,9 +537,10 @@ public class CraftScheduler implements BukkitScheduler {
          return new dev.iyanz.sourbycraft.bridge.BridgeRuntime.Task() {
              @Override public int id() { return task.getTaskId(); }
              @Override public boolean sync() { return task.isSync(); }
-+            @Override public boolean global() { return task.rTask instanceof dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.GlobalCallback; }
++            @Override public boolean global() { return dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.isGlobalCallback(task.rTask); }
              @Override public long period() { return task.getPeriod(); }
              @Override public boolean cancelled() { return task.isCancelled(); }
 -            @Override public void markCancelled() { task.cancel0(); }
-+            @Override public void markCancelled() {
-+                task.cancel0();
-+                if (task.rTask instanceof dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.GlobalCallback callback) callback.bridgeCancelled();
-+            }
++            @Override public void markCancelled() { task.cancel0(); dev.iyanz.sourbycraft.bridge.FoliaSchedulerCompatibility.bridgeCancelled(task.rTask); }
              @Override public Object handle() { return task; }
-             @Override public void run() {
-                 // CraftAsyncTask#run swallows and logs exceptions and keeps worker lists the bridge
+             @Override public void run() { dev.iyanz.sourbycraft.bridge.AuroraBridge.runBukkitTask(task, task.rTask, task.cTask, task instanceof CraftFuture<?>); }
+         };
