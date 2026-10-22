@@ -45,9 +45,19 @@ class SlimJarWriterTest(unittest.TestCase):
 
     def test_entry_order_does_not_depend_on_the_source_jar(self):
         task = slim_task()
-        self.assertIn("jar.entries().toList().sortedWith(", task)
+        self.assertIn("jar.entries().toList()", task)
+        self.assertIn(".sortedWith(", task)
         self.assertIn("META-INF/MANIFEST.MF", task)
         self.assertNotIn("while (entries.hasMoreElements())", task, "iterating the source jar's own order")
+
+    def test_licence_texts_are_written_into_the_root_jar_in_the_sorted_order(self):
+        # SEC-13: the published jar carries META-INF/licenses/ itself, merged into the one sorted list
+        # (no second, unsorted pass after the copy loop) and declared as a task input.
+        task = slim_task()
+        self.assertIn('serverProj.file("src/main/resources/META-INF/licenses")', task)
+        self.assertIn('inputs.dir(licenceDir)', task)
+        self.assertIn("(jarEntries.keys + licenceFiles.keys + licenceDirEntry).sortedWith(", task)
+        self.assertNotIn("ProcessBuilder", task)
 
     def test_a_stamped_build_omits_the_nondeterministic_local_variable_table(self):
         # javac names a lambda's synthetic temporary after an identity hash (EntityCommand.class differed

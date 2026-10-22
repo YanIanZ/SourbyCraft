@@ -23,8 +23,12 @@ The GPL covers the code, not the SourbyCraft and Aurora names or logos. Their us
 
 ## Upstream work
 
-Upstream copyright notices and licences are kept. The server jar carries their texts under
-`META-INF/licenses/`.
+Upstream copyright notices and licences are kept. Their texts, together with the GPL text
+(`LICENSE_SOURBYCRAFT`) and the source notice (`NOTICE_SOURBYCRAFT`), are under `META-INF/licenses/`
+in both jars: the published launcher jar (`SourbyCraft-26.2-REL.jar`, written there by
+`slimServerJar` and checked by `scripts/verify_build_identity.py --licences`) and the patched server
+jar the launcher produces on first start. The launcher jar's root `LICENSE.txt` (MIT) and
+`META-INF/license/` cover the launcher (SourbyClip/paperclip) and its libraries only.
 
 | Project | Licence |
 |---|---|
@@ -36,9 +40,11 @@ Upstream copyright notices and licences are kept. The server jar carries their t
 | Lithium | LGPL-3.0 |
 | C2ME, Purpur | MIT |
 
-Minecraft is a trademark of Mojang AB. This repository contains no Minecraft server jar; changes to
-Minecraft code are kept as patch files, and the launcher downloads the official server jar from
-Mojang on first boot.
+Minecraft is a trademark of Mojang AB. This repository and the published launcher jar contain no
+Minecraft server jar; changes to Minecraft code are kept as patch files, and the launcher downloads
+the official server jar from Mojang on first boot and applies the patch to it. The resulting patched
+server jar contains Minecraft code, which remains under Mojang's terms (its `META-INF/LICENSE`), not
+the GPL.
 
 ## Contributions
 

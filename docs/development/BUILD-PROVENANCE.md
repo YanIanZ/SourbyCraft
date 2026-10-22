@@ -130,6 +130,14 @@ present). Not validated against the official CycloneDX JSON schema (no validator
   range (1980-01-01 to 2107), or exactly 1980-01-01T00:00:00 when it is unset; it is written with
   `ZipEntry.setTimeLocal`, so it does not depend on the machine's time zone. `SOURCE_DATE_EPOCH` is a task
   input, so changing it re-runs the task. Before this, entries took the clock.
+- `slimServerJar` also writes every file of `sourbycraft-server/src/main/resources/META-INF/licenses/`
+  (GPL text `LICENSE_SOURBYCRAFT`, source notice `NOTICE_SOURBYCRAFT`, upstream `LICENSE_*`/`NOTICE_*`)
+  into the slim jar under `META-INF/licenses/` (SEC-13), merged into the same sorted entry list with the
+  same fixed time; the directory is a task input. The `build` job checks them with
+  `verify_build_identity.py build/libs/SourbyCraft-slim.jar --api-only ... --licences --source-root .`
+  (GPL text hash pinned, notice markers, byte equality with the checkout, no extra files). Local
+  evidence 2026-10-22: two `slimServerJar -PsourbyBuild=49` runs (second with `--rerun-tasks`) at
+  `SOURCE_DATE_EPOCH=1761091200` gave the same SHA-256 `1a3bc879…b2c0`; not yet observed on CI.
 - The `build` job pins `SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)` for every later step (so `buildTimestamp`
   in `sourbycraft-build.properties` and the server manifest `Build-Time` also derive from the commit, not
   `now()`), and pins the exact Temurin build (`java-version: 25.0.4+1`) instead of the floating `25`. Bump the
