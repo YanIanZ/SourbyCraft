@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 22:26:26 +0700
+Subject: [PATCH] SourbyCraft - scheduling context for bridged legacy tasks
+
+Event dispatch and Bukkit command execution publish the player they act for
+(AuroraBridge.enterEventContext/exitContext, withCommandContext), so an
+untargeted legacy sync task scheduled inside that frame, or inside a bridged
+async continuation of it, is anchored to that player's owner instead of the
+global region. Players only; inert until a plugin is admitted.
+
+diff --git a/src/main/java/io/papermc/paper/command/brigadier/bukkit/BukkitCommandNode.java b/src/main/java/io/papermc/paper/command/brigadier/bukkit/BukkitCommandNode.java
+index 5c52b1563d20d7e977a5bb958c18b19dec5c365a..c1d08452c19b5838d655fcee93753028f799f850 100644
+--- a/src/main/java/io/papermc/paper/command/brigadier/bukkit/BukkitCommandNode.java
++++ b/src/main/java/io/papermc/paper/command/brigadier/bukkit/BukkitCommandNode.java
+@@ -80,7 +80,7 @@ public class BukkitCommandNode extends LiteralCommandNode<CommandSourceStack> {
+             String[] args = org.apache.commons.lang3.StringUtils.split(content, ' '); // fix adjacent spaces (from console/plugins) causing empty array elements
+ 
+             // Note: we don't return the result of target.execute as thats success / failure, we return handled (true) or not handled (false)
+-            this.command.execute(sender, this.literal, Arrays.copyOfRange(args, 1, args.length));
++            dev.iyanz.sourbycraft.bridge.AuroraBridge.withCommandContext(sender, () -> this.command.execute(sender, this.literal, Arrays.copyOfRange(args, 1, args.length))); // SourbyCraft - Aurora Bridge: a player sender anchors legacy sync tasks the command schedules
+ 
+             // return true as command was handled
+             return 1;
+diff --git a/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java b/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
+index 937f9dec8a5264a1b4daa25a7d2b4b4f45eeb672..191d46d72976349b06b4f8ff5bbd913e01be486c 100644
+--- a/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
++++ b/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
+@@ -48,6 +48,8 @@ class PaperEventManager {
+         }
+         // Canvas - skip event if no listeners
+ 
++        final Object sourbyContext = dev.iyanz.sourbycraft.bridge.AuroraBridge.enterEventContext(event); // SourbyCraft - Aurora Bridge: the event's player anchors legacy sync tasks scheduled by its listeners
++        try { // SourbyCraft - Aurora Bridge
+         for (RegisteredListener registration : listeners) {
+             if (!registration.getPlugin().isEnabled()) {
+                 continue;
+@@ -76,6 +78,7 @@ class PaperEventManager {
+                 }
+             }
+         }
++        } finally { dev.iyanz.sourbycraft.bridge.AuroraBridge.exitContext(sourbyContext); } // SourbyCraft - Aurora Bridge
+     }
+ 
+     public void registerEvents(@NotNull Listener listener, @NotNull Plugin plugin) {

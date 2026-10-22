@@ -771,7 +771,10 @@ jobs:
               && grep -q 'LEGACY_GLOBAL_EXCEPTION_OK' server.log \
               && grep -q 'LEGACY_REGION_TASK_OK' server.log \
               && grep -q 'LEGACY_ENTITY_TASK_OK' server.log \
-              && grep -q 'LEGACY_ENTITY_RETIRED_OK' server.log; then
+              && grep -q 'LEGACY_ENTITY_RETIRED_OK' server.log \
+              && grep -q 'LEGACY_CONTEXT_CHAIN_OK' server.log \
+              && grep -q 'LEGACY_CONTEXT_GLOBAL_ISOLATED_OK' server.log \
+              && grep -q 'LEGACY_CONTEXT_MOB_EVENT_OK' server.log; then
               settled=1
               break
             fi
@@ -818,6 +821,12 @@ jobs:
             || { echo "an EntityTask did not run on the region owning its entity"; exit 1; }
           grep -q 'LEGACY_ENTITY_RETIRED_OK' server.log \
             || { echo "an EntityTask whose entity was removed was not retired without running"; exit 1; }
+          grep -q 'LEGACY_CONTEXT_CHAIN_OK' server.log \
+            || { echo "a plain runTask scheduled from an async body inside an entity-anchored frame did not follow the entity"; exit 1; }
+          grep -q 'LEGACY_CONTEXT_GLOBAL_ISOLATED_OK' server.log \
+            || { echo "a plain runTask from an explicit global-scheduler body inherited an entity anchor"; exit 1; }
+          grep -q 'LEGACY_CONTEXT_MOB_EVENT_OK' server.log \
+            || { echo "a non-player entity event anchored a legacy task"; exit 1; }
           if grep -q 'LEGACY_BRIDGE_TIMER_RAN_AFTER_CANCEL' server.log; then
             echo "a cancelled bridged timer kept running"; exit 1
           fi

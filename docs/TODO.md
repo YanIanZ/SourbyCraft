@@ -402,6 +402,17 @@ dan gate yang masih terbuka tetap wajib.
 - [ ] Optimasi Aurora pertama yang terukur untuk masing-masing domain: entity, chunk, network
 
 ### Bridge plugin legacy
+- [-] Anchor entity dari konteks penjadwalan (2026-10-22, `fable-bridge-routing`): task sync legacy tanpa target
+  yang dijadwalkan saat event/perintah seorang pemain ditangani (termasuk lewat task async bridged yang
+  berangkat dari sana) kini berjalan di owner pemain itu, bukan global tick — kasus hidup DeluxeMenus
+  `openMenu` (async -> sync -> `openInventory`, "Cannot trigger criterion async") dan EssentialsXSpawn
+  `NewPlayerTeleport` (join -> async -> `AsyncUserDataLoadEvent` -> `scheduleSyncDelayedTask`). Urutan:
+  target eksplisit > anchor entity > region pemanggil > global; hanya pemain; quit/kick/login tidak
+  menjadi anchor. `bridge/SchedulingContext`, `bridge/EventAnchors`, Paper 0026 (hook `PaperEventManager`,
+  `BukkitCommandNode`). Unit: `BridgeContextRoutingTest`, `EventAnchorsTest`, `AuroraBridgeContextHooksTest`;
+  fixture CI `LEGACY_CONTEXT_*`. Tidak tercakup (terdokumentasi, "Not bridgeable"): sapuan seluruh dunia dari
+  satu task (ClearLag `ClearTask`, karantina sesuai desain; baris pelanggaran kini menyebutkannya), perintah
+  konsol yang menarget pemain, timer per-pemain dari `onEnable`. Belum: alur pemain nyata di Sourby Demo (owner).
 - [-] SuperiorSkyblock2 2026.3: callback biome spawn berjalan di global tick dan melanggar
   ownership (log Build 47 dari pengguna). Source routing target eksplisit + adapter dengan
   fingerprint kelas dan feature patch 0010 ditulis; regresi dispatch kini lulus (`BridgeTargetRoutingTest`

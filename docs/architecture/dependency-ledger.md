@@ -136,6 +136,7 @@ defaults (`COMPATIBILITY_ONLY`, pinned by `scripts/test_patch_policy.py`).
 | `com/destroystokyo/paper/Metrics.java` | `DIRECT_NMS_PATCH` | Removes the bStats phone-home. |
 | `PaperPluginProviderFactory.java`, `SpigotPluginProviderFactory.java`, `CraftMagicNumbers.java` | `COMPATIBILITY_ONLY` | The three Folia "not marked as supporting" load gates ask `AuroraBridge.admitLegacy` before refusing. With `aurora.bridge.mode = off` (default), behaviour is unchanged. |
 | `CraftScheduler.java` | `COMPATIBILITY_ONLY` | Bridged plugins' Bukkit tasks go to the Aurora Bridge instead of the Folia `UnsupportedOperationException`; `cancelTask`/`cancelTasks` reach them. Non-bridged plugins are unchanged. |
+| `PaperEventManager.java`, `BukkitCommandNode.java` | `COMPATIBILITY_ONLY` | Paper 0026: event dispatch and Bukkit command execution publish the player they act for (`AuroraBridge.enterEventContext`/`exitContext`, `withCommandContext`) so a bridged plugin's untargeted sync task is anchored to that player. One volatile read per call while nothing is bridged; native plugins are unchanged. |
 
 ---
 
