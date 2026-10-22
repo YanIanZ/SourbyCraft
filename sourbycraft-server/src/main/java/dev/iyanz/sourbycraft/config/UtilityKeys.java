@@ -39,8 +39,11 @@ public final class UtilityKeys {
     // ------------------------------------------------------------------------------- [console]
 
     public static final ConfigKey CONSOLE_STYLE = key("console.style", "auto", AuroraConfig.Lifecycle.RESTART_REQUIRED,
-        "Startup console rendering: auto (rich on an interactive terminal, plain otherwise), plain (ASCII, no ANSI), "
-            + "rich (Unicode and color). -Dsourbycraft.console=plain|rich|auto overrides this; NO_COLOR disables color.",
+        "Character set of the startup lines SourbyCraft builds (section rules, launch and ready lines): auto (rich on an "
+            + "interactive terminal, plain otherwise), plain (ASCII dashes and hyphens), rich (Unicode box drawing and em dash). "
+            + "-Dsourbycraft.console=plain|rich|auto overrides this. It does not decide colour: the console colours time, level "
+            + "and tag only when the terminal supports ANSI (-Dterminal.ansi=false turns that off); redirected output and "
+            + "logs/latest.log are never coloured.",
         "ui.console-style");
     public static final ConfigKey PLUGINS_PAGE_SIZE = key("console.plugins-page-size", 12, AuroraConfig.Lifecycle.LIVE,
         "Rows per page of /plugins and /pl, clamped to 1-40.",

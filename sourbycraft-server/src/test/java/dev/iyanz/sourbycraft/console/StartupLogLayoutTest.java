@@ -253,13 +253,18 @@ class StartupLogLayoutTest {
         final java.nio.file.Path root = materializedRoot();
         org.junit.jupiter.api.Assumptions.assumeTrue(root != null, "materialized sources not present (applyAllPatches)");
         final List<String> unfolded = new ArrayList<>();
+        final java.util.Map<String, Integer> scanned = new java.util.LinkedHashMap<>();
         for (final String dir : new String[] {"paper-server/src/main/java", "sourbycraft-server/src/minecraft/java",
             "sourbycraft-server/src/main/java/dev/iyanz/aurora"}) {
-            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(root.resolve(dir))) {
+            final java.nio.file.Path base = root.resolve(dir);
+            assertTrue(java.nio.file.Files.isDirectory(base), "scan root missing: " + base);
+            scanned.put(dir, 0);
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(base)) {
                 for (final java.nio.file.Path file : (Iterable<java.nio.file.Path>) files.filter(f -> f.toString().endsWith(".java"))::iterator) {
                     if (!java.nio.file.Files.readString(file).contains("LogUtils.getClassLogger()")) {
                         continue;
                     }
+                    scanned.merge(dir, 1, Integer::sum);
                     final String simple = file.getFileName().toString().replace(".java", "");
                     final String tag = render("%scLogger", simple, Level.INFO, "m");
                     if (!tag.equals("Paper") && !tag.equals("Aurora")) {
@@ -268,6 +273,12 @@ class StartupLogLayoutTest {
                 }
             }
         }
+        // An empty result proves nothing unless declarations were found: the Paper and Minecraft
+        // trees each declare dozens of class loggers, so a zero count means the scan looked in the
+        // wrong place (moved tree, renamed factory), not that the table is complete.
+        assertTrue(scanned.get("paper-server/src/main/java") > 0
+            && scanned.get("sourbycraft-server/src/minecraft/java") > 0,
+            "no LogUtils.getClassLogger() declaration found in the materialized sources: " + scanned);
         assertTrue(unfolded.isEmpty(), "add to SourbyCraftLoggerConverter.ENGINE_CLASSES or PAPER_CLASSES: " + unfolded);
     }
 

@@ -39,7 +39,7 @@ comments and one comment per key stating lifecycle and default
 
 | Key (Build 49) | Was (until Build 48) | Type / default | Lifecycle | Consumer |
 | --- | --- | --- | --- | --- |
-| `console.style` | `ui.console-style` | `auto` \| `plain` \| `rich` / `"auto"` | RESTART_REQUIRED | `ConsoleStyle.current()`; `-Dsourbycraft.console` overrides, `NO_COLOR` disables color |
+| `console.style` | `ui.console-style` | `auto` \| `plain` \| `rich` / `"auto"` | RESTART_REQUIRED | `ConsoleStyle.current()`: character set only (ASCII vs Unicode rules/dashes); `-Dsourbycraft.console` overrides. Colour is decided by terminal ANSI support (TerminalConsoleAppender, `-Dterminal.ansi`), not by this key |
 | `console.plugins-page-size` | `ui.plugins-page-size` | integer / `12`, clamped 1–40 | LIVE | `/plugins`, `/pl` |
 | `console.gc-advisor` | `branding.gc-advisor.enabled` | boolean / `true` | RESTART_REQUIRED | `GcAdvisor` startup advisory |
 | `players.max-players` | `sourbycraft.max-players` | integer / `0` (= `server.properties`) | RESTART_REQUIRED when edited in the file; `/maxp <n>` applies live and writes this key | `MaxPlayersConfig.applyAtBoot` |

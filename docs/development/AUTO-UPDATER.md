@@ -151,10 +151,14 @@ Sequence for `apply-mode=auto` (or `/update apply`):
 
 1. **Apply** (`UpdateApplier.applyNow`): copy the launch jar to `<jar>.prev` (via a `.part` file,
    then an atomic rename). If that copy fails, the swap and the restart do **not** happen — an
-   update without a way back is not applied automatically. Then the staged jar is renamed over
-   the launch jar, `applied.tag` is written and the guard records `phase=APPLIED` with
-   `prev_sha256`: the streamed SHA-256 of the completed `.prev`, stored as 64 lowercase hex
-   characters. Copy, hash and state write run on the updater's Bukkit async scheduler callback
+   update without a way back is not applied automatically. Next the guard records
+   `phase=APPLIED` with `prev_sha256`: the streamed SHA-256 of the completed `.prev`, stored as 64
+   lowercase hex characters. This record is written **before** the swap: if it cannot be written,
+   the swap and the restart do not happen either, so a restart never boots a new jar the guard
+   does not track. Only then is the staged jar renamed over the launch jar and `applied.tag`
+   written; if that rename fails, the state file is put back as it was before the apply (a crash
+   between record and rename leaves `APPLIED` over the unchanged old jar, which the next boot
+   confirms or restores to the same bytes). Copy, hash and state write run on the updater's Bukkit async scheduler callback
    (the updater has no private executor), away from region/tick/main-server threads. The hash is
    preserved on every later rewrite, including `BOOTING`, `OK`, `ROLLED_BACK` and `RESTORE_FAILED`.
    This state contract applies to future applies; existing states without a hash keep their legacy behavior.
@@ -165,13 +169,16 @@ Sequence for `apply-mode=auto` (or `/update apply`):
    immediately before `acceptConnections()` and shortly before the `Done (` line
    (`MinecraftServer.java` line ~665 in the materialized source). Reaching it records `phase=OK`.
 3. **Boot that finds `BOOTING`**: the previous boot after the apply ended before ready. The guard
-   first hashes `.prev` when `prev_sha256` is present. A mismatch (including an invalid/empty
+   refuses a `.prev` that is a symbolic link (`RESTORE_FAILED`, jar files untouched). It copies
+   `.prev` once into a fresh temporary file beside the launch jar and, when `prev_sha256` is
+   present, hashes that temporary file, so the bytes renamed over the launch jar are exactly the
+   bytes verified even if `.prev` changes meanwhile. A mismatch (including an invalid/empty
    recorded hash) refuses restore, logs an ERROR naming `.prev`, expected and actual hashes,
    records `RESTORE_FAILED`, and leaves every jar file untouched. Comparison accepts uppercase
-   hex; every state write normalizes it to lowercase. With no field, the server keeps its prior
-   copy behavior. This restore validation runs during the existing server boot guard, before
+   hex; every state write normalizes it to lowercase. With no field, the copy is restored
+   unverified, as before. This restore validation runs during the existing server boot guard, before
    worlds/ticking; it is distinct from async apply hashing. With a matching hash, the guard
-   copies `.prev` back over the launch jar (copy, not move; `.prev` stays), records
+   renames the verified temporary copy over the launch jar (`.prev` stays), records
    `phase=ROLLED_BACK` and the updater is **held**: every `check()` returns `Outcome.HELD` without
    touching the network, and the boot log prints a framed `UPDATE ROLLED BACK` block. If `.prev`
    is missing or the copy fails: `phase=RESTORE_FAILED`, also held, with a `ROLLBACK FAILED` block.
