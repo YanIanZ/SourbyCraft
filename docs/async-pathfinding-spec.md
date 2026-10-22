@@ -50,7 +50,8 @@ only **chunk references**; block reads dereference the live mutable section pale
 
 2b. **`MobPathSnapshot`** (`dev.iyanz.sourbycraft.perf`, audit ENG-8) — every mob member the
    solve reads, captured on the owner at submit time (`MobPathSnapshot.captureDetached(mob)` in
-   `PathNavigation.sourbyKickAsyncRecompute`). The worker is handed
+   `AsyncPathRecompute.offload`; until 2026-10-22 this code was `PathNavigation.sourbyKickAsyncRecompute`
+   inside MC patch 0006). The worker is handed
    `PathFinder.findPath(SnapshotPathRegion, MobPathSnapshot, ...)`, which runs
    `NodeEvaluator.prepare(region, snapshot)`: the evaluator's `mob` field is `null` for the whole
    solve and every former `this.mob.…` read in `WalkNodeEvaluator`, `FlyNodeEvaluator`,
@@ -100,10 +101,14 @@ Traced from `PathFinder.findPath` → `NodeEvaluator.prepare` → `getStart`/`ge
 
 Still refused rather than snapshotted (the navigation runs the synchronous recompute):
 
-- `Mob.sourbyPathfindingMutatesMob()` — `Sniffer` writes malus from `onPathfindingStart/Done`;
+Both are listed in `AsyncPathRecompute.solveWritesMob` (Sourby source since 2026-10-22; before that,
+per-class overrides of `Mob.sourbyPathfindingMutatesMob()` and `PathNavigation.sourbyAsyncSolveSafe()`
+inside MC patch 0006, pinned now by `AsyncPathRecomputeTest`):
+
+- `mob instanceof Sniffer` — `Sniffer` writes malus from `onPathfindingStart/Done`;
   an off-thread solve does not invoke the callbacks at all (`NodeEvaluator.prepare(region,
   snapshot)` has no mob), so a mob that depends on them keeps the synchronous path.
-- `AmphibiousPathNavigation.sourbyAsyncSolveSafe() == false` — `AmphibiousNodeEvaluator.prepare`
+- `navigation instanceof AmphibiousPathNavigation` (also the frog and turtle navigations) — `AmphibiousNodeEvaluator.prepare`
   writes three malus entries on the live mob; `done()` is now guarded for a null mob but the
   offload stays refused.
 
@@ -111,7 +116,7 @@ Not held in `MobPathSnapshot` itself, but captured the same way (on the owner, r
 off-thread solve) is the Creaking's home position (ENG-8 follow-up, MC feature patch 0042):
 
 - `Creaking.CreakingPathNavigation.createPathFinder` writes `Creaking.this.getHomePos()` onto the
-  new `HomeNodeEvaluator.sourbyHomePos`. `sourbyKickAsyncRecompute` calls it on the owning thread
+  new `HomeNodeEvaluator.sourbyHomePos`. `AsyncPathRecompute.offload` calls it on the owning thread
   through `sourbyIsolatedPathFinder` for every submission, so each off-thread solve gets a fresh
   evaluator carrying the home as of that submission; the live evaluator is not touched.
 - `HomeNodeEvaluator` overrides `prepare(region, MobPathSnapshot)` to set a `sourbySnapshotSolve`
@@ -123,7 +128,7 @@ off-thread solve) is the Creaking's home position (ENG-8 follow-up, MC feature p
   `prepare`, so owner-thread queries without a prepare (`MoveControl.isWalkable` →
   `getPathType(Mob, BlockPos)`) read the construction-time capture instead of the current home.
 - That was the one synched member outside the `Mob` API the solve reads, so
-  `CreakingPathNavigation` no longer overrides `sourbyAsyncSolveSafe()` to refuse the offload.
+  the Creaking navigation is not in the refusal list (it used to override `sourbyAsyncSolveSafe()`).
 
 Known approximations of the off-thread path (the synchronous path has none of these):
 
@@ -142,7 +147,7 @@ after the mob moves, grows and blocks `WALKABLE`, while a fresh capture differs;
 mob, …)` equals `findPath(region, capture(mob), …)`; fluid table; border test from the captured
 position). `AsyncPathEvaluatorIsolationTest` covers the Creaking home over a stubbed flat floor
 with real A* solves (a mocked `Creaking` supplies only `getHomePos()`; solvers are built through
-`sourbyIsolatedPathFinder`, not through `sourbyKickAsyncRecompute`; no server, no real Creaking
+`sourbyIsolatedPathFinder`, not through `AsyncPathRecompute.offload`; no server, no real Creaking
 entity, no goal or `MoveControl` path): the navigation no longer refuses the offload; two isolated
 solvers built after the home changes each capture the home current at their build while the live
 evaluator, its capture and the synchronous `PathFinder` stay unchanged; solves on a worker thread

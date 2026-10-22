@@ -88,7 +88,7 @@ the EDF backend selection and compatible task-state publication described above.
 | 0003, 0014 spawn-category / spawn-state scan skips | Measured spawn-path optimisations |
 | 0004 POI consistency scan without per-block lookups | Measured optimisation |
 | 0005 `SnapshotPathRegion` immutable block snapshot | Async pathfinding's safety precondition (`dev.iyanz.aurora.level`) |
-| 0006 async pathfinding offload | The async path itself |
+| 0006 async pathfinding offload (logic in `perf/AsyncPathRecompute` since 2026-10-22), 0082 no shared path-type cache off a region thread | The async path itself |
 | 0007, 0009, 0010, 0011, 0012 allocation/reuse fixes | Measured optimisations |
 | 0008 `Projectile` tick ticket typo | Upstream bug fix |
 | 0013 custom tick metrics, 0079 region tick metrics lifecycle, 0081 close SourbyCraft services at shutdown | Aurora telemetry and lifecycle hooks (split 2026-10-22) |
@@ -99,8 +99,9 @@ the EDF backend selection and compatible task-state publication described above.
 | 0020 commit Aurora World Fabric stores at shutdown | One call in `MinecraftServer.stopServer` after the region-file I/O drain; no-op without AWF worlds |
 | 0021 do not register the `/canvas` command tree, 0022 count chunk-system storage traffic, 0023 greedy shapeless match only for plain ingredients | Formerly per-file source patches; feature patches since the 2026-10-05 migration so the policy scripts see them (see §2.2) |
 
-Patch 0006 calls `perf/AsyncPathValidity` for its two staleness checks, so the rule is tested in
-Sourby's own test suite.
+Patch 0006 delegates the offload to `perf/AsyncPathRecompute` (since 2026-10-22), which applies the
+`perf/AsyncPathValidity` staleness checks (with patch 0047's generation), so the rules are tested in
+Sourby's own test suite (`AsyncPathRecomputeTest`, `AsyncPathValidityTest`).
 
 Patches 0021–0023, in detail:
 

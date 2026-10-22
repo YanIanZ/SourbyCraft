@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 06:24:07 +0700
+Subject: [PATCH] SourbyCraft - async pathfinding: no shared path-type cache
+ off a region thread
+
+The regionized PathTypeCache lives on the current region's world data (ServerLevel.getPathTypeCache -> getCurrentWorldData().pathTypesByPosCache), which is null on any thread that is not ticking a region, such as the async-pathfinding worker. A context built there uses no cache; the static path-type computer is correct, just uncached for that solve. Split out of the async pathfinding patch (0006).
+
+diff --git a/net/minecraft/world/level/pathfinder/PathfindingContext.java b/net/minecraft/world/level/pathfinder/PathfindingContext.java
+index c422720e0926ddb5bb746f00e75f7ad60fd29f72..a80ad8c4ccb491605d7a80d5cb6bedcd8a2e4696 100644
+--- a/net/minecraft/world/level/pathfinder/PathfindingContext.java
++++ b/net/minecraft/world/level/pathfinder/PathfindingContext.java
+@@ -15,7 +15,13 @@ public class PathfindingContext {
+ 
+     public PathfindingContext(final CollisionGetter level, final Mob mob) {
+         this.level = level;
+-        if (mob.level() instanceof ServerLevel serverLevel) {
++        // SourbyCraft - async pathfinding: the regionized PathTypeCache lives on the CURRENT region's
++        // world data (ServerLevel.getPathTypeCache -> getCurrentWorldData().pathTypesByPosCache), which
++        // is null on the async-pathfinding worker thread (not a region tick thread). Only use the shared
++        // cache when actually running on a region thread; off-region, fall back to no cache — the static
++        // path-type computer in getPathTypeFromState is correct, just uncached for that one solve.
++        if (mob.level() instanceof ServerLevel serverLevel
++            && io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData() != null) {
+             this.cache = serverLevel.getPathTypeCache();
+         } else {
+             this.cache = null;

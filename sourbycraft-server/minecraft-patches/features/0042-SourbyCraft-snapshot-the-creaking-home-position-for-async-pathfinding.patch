@@ -6,7 +6,7 @@ Subject: [PATCH] SourbyCraft - snapshot the creaking home position for async
 
 
 diff --git a/net/minecraft/world/entity/monster/creaking/Creaking.java b/net/minecraft/world/entity/monster/creaking/Creaking.java
-index 111390f67f6f32cdb4aa0d0c4830c94c9799a1a3..74f6af8df618a45944984613b50175701bbda77c 100644
+index 63416201b435516be80e82995ea62e42a47edb0b..74f6af8df618a45944984613b50175701bbda77c 100644
 --- a/net/minecraft/world/entity/monster/creaking/Creaking.java
 +++ b/net/minecraft/world/entity/monster/creaking/Creaking.java
 @@ -35,6 +35,7 @@ import net.minecraft.world.entity.player.Player;
@@ -25,18 +25,8 @@ index 111390f67f6f32cdb4aa0d0c4830c94c9799a1a3..74f6af8df618a45944984613b5017570
  import org.jspecify.annotations.Nullable;
  
  public class Creaking extends Monster {
-@@ -589,28 +591,49 @@ public class Creaking extends Monster {
-             }
-         }
+@@ -591,18 +593,47 @@ public class Creaking extends Monster {
  
--        // SourbyCraft start - async pathfinding: HomeNodeEvaluator reads Creaking.this.getHomePos() (synched
--        // entity data on the outer instance) during the solve, which MobPathSnapshot does not carry; keep it synchronous.
--        @Override
--        protected boolean sourbyAsyncSolveSafe() {
--            return false;
--        }
--        // SourbyCraft end - async pathfinding
--
          @Override
          protected PathFinder createPathFinder(final int maxVisitedNodes) {
 -            this.nodeEvaluator = Creaking.this.new HomeNodeEvaluator();
