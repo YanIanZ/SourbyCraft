@@ -109,8 +109,11 @@ Default page size is 12; `ui.plugins-page-size` is clamped to 1–40 and changes
 
 Search and filter accept an optional page number. Previous/next suggestions retain the query
 or filter. Hover shows the status explanation; clicking suggests the detail command. Jar-load
-failures include their filename and reason in details. Captured failures are a bounded recent
-history, captured from both JUL and Log4j and deduplicated per jar, rather than a complete lifetime failure ledger.
+failures include their filename and reason in details. A plugin whose jar is in `plugins/` but that
+the plugin manager never created (missing hard dependency, dependency cycle, invalid descriptor, Aurora
+Bridge refusal) counts as failed with its reason; see `docs/architecture/aurora-plugin-bridge.md`.
+Failures are a bounded recent history (16 jars), deduplicated per jar, rather than a complete lifetime
+failure ledger.
 
 | Status | Meaning |
 | --- | --- |
