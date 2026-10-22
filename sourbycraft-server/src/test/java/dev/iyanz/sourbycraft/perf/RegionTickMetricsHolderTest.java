@@ -78,11 +78,11 @@ class RegionTickMetricsHolderTest {
 
     private static List<TickData> views(final RegionTickMetricsHolder holder) {
         return List.of(
-            new TickData(holder, TimeUnit.SECONDS.toNanos(5L)),
-            new TickData(holder, TimeUnit.SECONDS.toNanos(15L)),
-            new TickData(holder, TimeUnit.MINUTES.toNanos(1L)),
-            new TickData(holder, TimeUnit.MINUTES.toNanos(5L)),
-            new TickData(holder, TimeUnit.MINUTES.toNanos(15L))
+            holder.view(TimeUnit.SECONDS.toNanos(5L)),
+            holder.view(TimeUnit.SECONDS.toNanos(15L)),
+            holder.view(TimeUnit.MINUTES.toNanos(1L)),
+            holder.view(TimeUnit.MINUTES.toNanos(5L)),
+            holder.view(TimeUnit.MINUTES.toNanos(15L))
         );
     }
 

@@ -52,6 +52,8 @@ public class UpstreamDependencyLedgerTest {
         "dev/iyanz/sourbycraft/execution/RegionOwnerHandoff.java",
         "dev/iyanz/sourbycraft/perf/RegionTickMetrics.java",
         "dev/iyanz/sourbycraft/perf/RegionTickMetricsHolder.java",
+        // MC patch 0013: the region handle's TickData windows (a TickData subclass).
+        "dev/iyanz/sourbycraft/perf/RegionTickDataView.java",
         "dev/iyanz/sourbycraft/perf/RegionIoQueue.java",
         "dev/iyanz/sourbycraft/config/upstream/CanvasConfigBridge.java",
         "dev/iyanz/sourbycraft/awf/world/AuroraWorldsService.java",
@@ -174,16 +176,19 @@ public class UpstreamDependencyLedgerTest {
      *
      * <p>Transition §12 allows this explicitly: "except in direct NMS/upstream patches where
      * indirection would be harmful and the dependency is intentionally documented". Patch 0013
-     * makes upstream's {@code TickData} import these classes, so the dependency actually runs
-     * upstream → Aurora; they name {@code TickTime} and {@code TickReportData} because those are
-     * the contract the patched call site passes and expects back. Hiding that behind an
-     * interface would mean duplicating upstream's tick-time value types to gain nothing.</p>
+     * makes the region schedule handle hold a {@code RegionTickMetricsHolder} and fill its five
+     * {@code TickData} fields with {@code RegionTickDataView}, a {@code TickData} subclass; patch 0079
+     * calls the holder's lifecycle statics. They name {@code TickTime} and {@code TickReportData}
+     * because those are the contract the patched call sites pass and expect back. Hiding that behind
+     * an interface would mean duplicating upstream's tick-time value types to gain nothing.</p>
      */
     private static final Map<String, String> PATCH_SEAM = Map.of(
         "dev/iyanz/sourbycraft/perf/RegionTickMetrics.java",
-        "patch 0013: upstream TickData calls in; TickTime/TickReportData are the contract",
+        "patch 0013: RegionTickDataView answers the TickData queries from it; TickTime/TickReportData are the contract",
         "dev/iyanz/sourbycraft/perf/RegionTickMetricsHolder.java",
-        "patch 0013: generation ownership for the same patched call site");
+        "patch 0013/0079: generation ownership and lifecycle calls for the same patched call sites",
+        "dev/iyanz/sourbycraft/perf/RegionTickDataView.java",
+        "patch 0013: the region handle's TickData windows; a TickData subclass, so TickTime/TickReportData are the contract");
 
     private static final Pattern IMPLEMENTS =
         Pattern.compile("\\bclass\\s+\\w+\\s+implements\\s+([\\w.]+)");

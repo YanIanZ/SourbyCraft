@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: YanIanZ <iwayanbagusaryadarma@student.telkomuniversity.ac.id>
+Date: Thu, 22 Oct 2026 05:55:41 +0700
+Subject: [PATCH] SourbyCraft - fix swapped worst-percentile segments in
+ TickData reports
+
+
+diff --git a/ca/spottedleaf/common/time/TickData.java b/ca/spottedleaf/common/time/TickData.java
+index b85ad0b9293eed0dd04474eef33e6e9519565397..662be4bb0a054217551929668df4c6e096474b74 100644
+--- a/ca/spottedleaf/common/time/TickData.java
++++ b/ca/spottedleaf/common/time/TickData.java
+@@ -91,8 +91,8 @@ public class TickData {
+             computeSegmentData(data, allStart, allEnd, inverse),
+             computeSegmentData(data, percent99BestStart, percent99BestEnd, inverse),
+             computeSegmentData(data, percent95BestStart, percent95BestEnd, inverse),
+-            computeSegmentData(data, percent1WorstStart, percent1WorstEnd, inverse),
+             computeSegmentData(data, percent5WorstStart, percent5WorstEnd, inverse),
++            computeSegmentData(data, percent1WorstStart, percent1WorstEnd, inverse),
+             data
+         );
+     }
