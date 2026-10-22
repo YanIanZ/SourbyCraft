@@ -33,6 +33,24 @@ public final class FoliaSchedulerCompatibility {
         void bridgeCancelled();
     }
 
+    /**
+     * {@code CraftScheduler}'s bridge adapter, {@code global()} (Paper feature patch 0007): a Bukkit task
+     * whose body is this adapter's callback is an explicit global-scheduler request and must never inherit
+     * the caller's region.
+     */
+    public static boolean isGlobalCallback(final Object callback) {
+        return callback instanceof GlobalCallback;
+    }
+
+    /**
+     * {@code CraftScheduler}'s bridge adapter, {@code markCancelled()} (Paper feature patch 0007), after the
+     * Bukkit task is marked cancelled: tells this adapter's {@code ScheduledTask} that the bridge cancelled or
+     * rejected it. No-op for any other callback.
+     */
+    public static void bridgeCancelled(final Object callback) {
+        if (callback instanceof GlobalCallback global) global.bridgeCancelled();
+    }
+
     public static ScheduledTask runDelayedOnBukkit(final Plugin plugin, final Consumer<ScheduledTask> task,
                                                    final long delayTicks) {
         validate(plugin, task);

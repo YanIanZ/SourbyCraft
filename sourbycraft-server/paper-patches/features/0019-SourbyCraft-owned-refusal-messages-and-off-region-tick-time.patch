@@ -191,13 +191,13 @@ index f52c0398dffed7126ab323ff5778b1c2e5b1bf5b..0e37c74c8a644d98472c6670b232ee86
  
      @Override
 diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-index 673dc72cb29a18b6cb7d664614c91fb66112d525..dcc5701e29a79ba45866bc23045baa2fd4af90b5 100644
+index 4de23fd7cdd750f5c4e2c8e9724e24245da6aa68..c496409af11548a0346a5189b07b1eb7cf5abb9f 100644
 --- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
 +++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
-@@ -542,7 +542,7 @@ public class CraftScheduler implements BukkitScheduler {
-             return task;
-         }
-         // SourbyCraft end - Aurora Bridge
+@@ -520,7 +520,7 @@ public class CraftScheduler implements BukkitScheduler {
+ 
+     protected CraftTask handle(final CraftTask task, final long delay) { // Paper
+         if (dev.iyanz.sourbycraft.bridge.AuroraBridge.submitIfBridged(task.getOwner(), bridgeTask(task), delay)) return task; // SourbyCraft - Aurora Bridge: route a bridged legacy plugin's task instead of refusing it
 -        if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Folia - region threading
 +        if (true) throw dev.iyanz.sourbycraft.guards.RegionRefusal.BUKKIT_SCHEDULER.error(); // Folia - region threading - SourbyCraft: owned refusal message
          // Paper start

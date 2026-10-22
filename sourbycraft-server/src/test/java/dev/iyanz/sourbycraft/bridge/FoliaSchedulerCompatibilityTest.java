@@ -74,12 +74,12 @@ class FoliaSchedulerCompatibilityTest {
             return new BridgeRuntime.Task() {
                 @Override public int id() { return self.id; }
                 @Override public boolean sync() { return true; }
-                @Override public boolean global() { return self.callback instanceof FoliaSchedulerCompatibility.GlobalCallback; }
+                @Override public boolean global() { return FoliaSchedulerCompatibility.isGlobalCallback(self.callback); }
                 @Override public long period() { return self.period; }
                 @Override public boolean cancelled() { return self.cancelled; }
                 @Override public void markCancelled() {
                     self.cancelled = true;
-                    if (self.callback instanceof FoliaSchedulerCompatibility.GlobalCallback callback) callback.bridgeCancelled();
+                    FoliaSchedulerCompatibility.bridgeCancelled(self.callback);
                 }
                 @Override public Object handle() { return self; }
                 @Override public void run() { self.callback.run(); }
