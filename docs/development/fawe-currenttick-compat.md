@@ -58,6 +58,7 @@ WorldGuard enabled and loaded its configuration for `world`, `world_nether`, `wo
 `postLoad -> BukkitWorld.<init>` path that failed), no `NoSuchFieldError`, `Done (9.762s)`, `stop` exit 0. FAWE's
 async edit path (`setBlockState` off the main thread) was not exercised; FAWE stays a bridged, unqualified plugin.
 
-Side finding (not fixed here): the bridge pre-scan logs `Plugin WorldGuard depends on missing plugin(s) WorldEdit;
-the plugin manager will not load it` although FAWE `provides` WorldEdit and WorldGuard then loads; the check ignores
-`provides`.
+Side finding, fixed separately: the startup pre-scan (`StartupIndexStage` / `DependencyGraph`) logged `Plugin
+WorldGuard depends on missing plugin(s) WorldEdit; the plugin manager will not load it` although FAWE `provides`
+WorldEdit and WorldGuard then loads. The pre-scan now reads `provides` and resolves dependencies through it as Paper
+does; stock Paper never logged this line.
