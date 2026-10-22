@@ -6,15 +6,14 @@ Subject: [PATCH] SourbyCraft - structure scans read AWF once and fail fast
 
 
 diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
-index 48ad36d1c7bb1cd8e3e932b348e62b9e2c48dd8b..837da38f567aacb4cd8657ecb58a906f9156c655 100644
+index 37e682da53ab2448105e0ba361f04890337e98ae..30d4b7024c879991a1f5609e9258f99447e15506 100644
 --- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
 +++ b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
-@@ -457,7 +457,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+@@ -422,6 +422,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+     }
+ 
      public void scanChunk(final ChunkPos pos, final StreamTagVisitor scanner) throws IOException {
-         // SourbyCraft start - Aurora World Fabric: structure scans must see the chunk AWF holds
-         if (this.sourby$awf != null) {
--            final byte[] owned = this.sourby$awf.read(pos.x(), pos.z());
-+            final byte[] owned = this.sourby$awf.scanRead(pos.x(), pos.z()); // SourbyCraft - structure scans: one attempt, no fence, refused while the store is failing
-             if (owned == dev.iyanz.sourbycraft.awf.AwfRegionStorage.DELETED) return;
-             if (owned != null) {
-                 try (DataInputStream in = new DataInputStream(new java.io.ByteArrayInputStream(owned))) {
++        if (dev.iyanz.sourbycraft.awf.RegionFileStorageHooks.scanChunk(this.sourby$awf, pos, scanner)) return;
+         // CraftBukkit start - SPIGOT-5680: There's no good reason to preemptively create files on read, save that for writing
+         RegionFile region = this.getRegionFile(pos, true);
+         if (region == null) {

@@ -316,7 +316,7 @@ on the lock/gen keys. Block checks in game via `fill X Y Z X Y Z minecraft:iron_
 
 **Defects found 2026-10-13 (root cause as found; fixes in *Fixes* below).**
 - **D1 — data loss.** `AwfRegionStorage.read` (`AwfRegionStorage.java:117`) lets the backend's
-  `IOException` escape from `RegionFileStorage.read` (feature patch, `RegionFileStorage.java:214` in the
+  `IOException` escape from `RegionFileStorage.read` (feature patch, `RegionFileStorage.java:387` in the
   materialized tree). Moonrise treats a failed read as "no data"
   (`ChunkLoadTask.java:333-334`: logs "chunk data will be lost", returns `null`), so the chunk is
   generated from scratch, saved through `AwfRegionStorage.write`, and committed over the stored chunk

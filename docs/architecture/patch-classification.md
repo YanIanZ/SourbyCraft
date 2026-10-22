@@ -6,8 +6,8 @@ role and what should happen to it. Sizes are added lines (`+`) in the patch file
 > Historical, as of 2026-09-27: numbers predate the 2026-10-06 rebuild (0019–0023 → 0018–0022,
 > closing the 0018 gap) and the 2026-10-13 renumbering, so the 0019/0020 rows are today's 0018/0019.
 > Current Minecraft features run 0001–0053 and Paper features 0001–0015 (0001–0004 are the Paper
-> file patches below). Of the Minecraft features, 0021–0038 (0020 and 0021 are the two Minecraft
-> source patches below, moved into features) are not classified here in their current form;
+> file patches below). Of the Minecraft features, 0022–0038 are not classified here in their
+> current form; 0021 is updated below for the 2026-10-22 hook extraction;
 > 0039–0053 are summarised in the second table below (added 2026-10-20); Paper 0015 (2026-10-20,
 > BRANDING, KEEP, hook: one `CraftCrashReport` line from `brand/CrashReportIdentity`, i.e.
 > `BuildInfo`, ahead of upstream's manifest-based `BrandInfo` line; `CrashReportIdentityTest`). Current files:
@@ -42,6 +42,7 @@ optimisation), COMPATIBILITY (keeps plugins/config working), SECURITY, BRANDING,
 | 0017 hoist query bounds out of the entity intersection loop | 28 | PERFORMANCE | KEEP | Moonrise `ChunkEntitySlices`; reviewed in `region-safety-review-0017-0019.md`. |
 | 0019 translate block collision boxes without allocating | 20 | PERFORMANCE | KEEP | Moonrise `CollisionUtil`; same review. |
 | 0020 commit AWF stores at shutdown | 1 | INTEGRATION | KEEP | One call; no-op without AWF worlds. |
+| 0021 storage traffic + AWF routing | 9 | INTEGRATION | KEEP | Generic hook: one `RegionFileStorageHooks` delegation per start/finish write, read-data, direct read/write, constructor attachment, close and flush site. AWF branches, counters, codec handoff and attachment live in the ledgered owned adapter. Upstream fallback and lock boundaries stay in `RegionFileStorage`; scan routing is introduced separately by 0053. `patch_surface` = hook (9 added / 0 removed code lines). |
 
 There is no 0018 in the snapshot above; the number was never reused. (Today's numbering has no gap:
 Minecraft features are 0001–0053 contiguous.)
@@ -67,7 +68,7 @@ review; added lines are `+` lines of the patch file today. Dispositions are prov
 | 0050 time region-file chunk loads for `/perf storage` | 15 | INTEGRATION | KEEP | Telemetry wrapper around the region-file part of `moonrise$readData` (found-data reads and failures; the external-stream retry calls the inner method so a retry stays one load); recorder `perf/RegionFileLoadLatency`, same ring as 0043 (`RegionFileLoadLatencyHookTest`). No view reads it yet. |
 | 0051 count chunk lifecycle transitions | 8 | INTEGRATION | KEEP | Hook only (8 code lines): first statement of each `BaseChunkSystemHooks` lifecycle callback (holder create/delete, FULL in/out, ticking in/out, entity ticking in/out) counts into `perf/ChunkLifecycleCounters` (since boot, all worlds; `ChunkLifecycleCountersTest`, `ChunkLifecycleHookTest`). Shown in `/perf chunks` (`command/PerfTelemetryRows`); overhead not benchmarked. |
 | 0052 count entity ticks per world in the region entity loop | 4 | INTEGRATION | KEEP | Hook only (4 code lines): `RegionizedWorldData.sourbyEntityTicks` (plain int, region-thread owned) is zeroed before `ServerLevel.tick`'s `forEachTickingEntity` loop, incremented right before each `guardEntityTick(tickNonPassenger)`, and after the loop `perf/EntityTickCounters.regionTicked(bukkitName, count, loop nanos)` records once per region loop (per world since boot: ticks, loops, loop time, largest single-region loop; passengers and frozen entities not counted). Shown in `/perf entities`. `EntityTickCountersTest`, `EntityTickHookTest` (bytecode order). Overhead not benchmarked. |
-| 0053 structure scans read AWF once and fail fast while the store is failing | 1 | INTEGRATION | KEEP | One changed line in the 0021 AWF branch of `RegionFileStorage.scanChunk`: `read` -> `awf/AwfRegionStorage.scanRead` (one attempt, no fence, refused with a stackless `ScanRefused` for 5 s after a scan read failed or while reads fail fast, only for chunks whose bytes must come from the store). Vanilla `StructureCheck` answers a throwing scan with CHUNK_LOAD_NEEDED and loads the chunk, so answers are unchanged; the load still waits for the store. `patch_surface` = logic (1/1 line, the call goes through the `sourby$awf` field). `AwfStructureScanTest`. |
+| 0053 structure scans read AWF once and fail fast while the store is failing | 1 | INTEGRATION | KEEP | Adds the AWF scan branch through one `RegionFileStorageHooks.scanChunk` delegation. The owned adapter calls `AwfRegionStorage.scanRead` once: no fence, refused with a stackless `ScanRefused` for 5 s after a scan read failed or while reads fail fast, only for chunks whose bytes must come from the store. Deleted chunks stop the scan; owned bytes are parsed; untouched chunks fall back to the region file. Vanilla `StructureCheck` answers a throwing scan with CHUNK_LOAD_NEEDED and loads the chunk; the load still waits for the store. `patch_surface` = hook (1 added / 0 removed code lines). `AwfStructureScanTest`. |
 | 0079 region tick metrics lifecycle (split from 0013, 2026-10-22) | 9 | INTEGRATION | KEEP | Hook (8 added / 0 removed code lines): six calls in `TickRegions` (destroy, active, inactive, preMerge, preSplit, mergeInto) on the handle's `RegionTickMetricsHolder` (`retireDestroyed`, `activate`, `retireInactive`, `retireMerged`, `retireSplit`, `rotateForMerge`), `ServerLevel.sourbyTelemetryWorldId` and the `WorldShutdownThread` world retire (holder statics). No import; the helper names no engine type (independence policy). Timestamps stay at the call sites. |
 | 0080 fix swapped worst-percentile segments in `TickData` reports (split from 0013) | 1 | COMPATIBILITY | KEEP (upstream candidate) | Upstream passes the 1%-worst segment into the record's `segment5PercentWorst` slot and vice versa; the patch swaps the two arguments (+1 −1, classified `fix`). |
 | 0081 close SourbyCraft services at shutdown (split from 0013) | 1 | INTEGRATION | KEEP | One `SourbyCraftBootstrap.close()` call after plugin disable / async-task wait in `MinecraftServer` (hook). |
@@ -78,7 +79,7 @@ review; added lines are `+` lines of the patch file today. Dispositions are prov
 | Patch | Category | Disposition | Reason |
 | --- | --- | --- | --- |
 | `Commands.java` | BRANDING | KEEP | Removes the `/canvas` command tree. |
-| `RegionFileStorage.java` | INTEGRATION | KEEP | AWF hooks and `/perf storage` counters; every added path is a null check or a counter when AWF is not attached. Depends on Moonrise's `RegionDataController` contract. |
+| `RegionFileStorage.java` | INTEGRATION | KEEP | Generic `RegionFileStorageHooks` delegations (0021), plus the scan delegation (0053). AWF routing and `/perf storage` counters live in the ledgered owned adapter; upstream fallback and lock boundaries stay here. Depends on Moonrise's `RegionDataController` contract. |
 
 ## Paper patches (`paper-patches/files/`)
 

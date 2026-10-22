@@ -70,6 +70,13 @@ Current directory count: **82** numbered feature patches (0001–0082), 2026-10-
 | 0018 custom tick metrics (current 0013, 0079–0081) | 100-runtime | `TickData`, `TickRegionScheduler` (0013); `TickRegions`, `ServerLevel`, `WorldShutdownThread` (0079); `TickData` (0080); `MinecraftServer` (0081) | +9 −11; +9 −2; +1 −1; +1 −0 | KEEP | **Split 2026-10-22** (was one patch, +97 −14 at HEAD 6176d517). 0013 = handle wiring only: `TickData` non-final, five windows are `perf/RegionTickDataView` (shared-owner queries moved out of `TickData`), one start + one completion call; removed lines are one-for-one statement replacements, so still `logic` (9/11 code lines). 0079 lifecycle = hook (8/0) into `perf/RegionTickMetricsHolder`; 0080 upstream percentile-order fix; 0081 one bootstrap-close call (hook). Same final sources except `TickData`'s body is upstream again. |
 | 0019 close lifecycle-owned runtime services | 100-runtime | `MinecraftServer` | +1 −1 | **MERGE** | One line. Belongs with 0018's lifecycle wiring. |
 
+### Current storage integration (2026-10-22)
+
+| Patch | Category | Upstream dependency | Lines | Status | Action |
+| --- | --- | --- | ---: | --- | --- |
+| storage traffic counters + AWF routing (minecraft 0021) | 100-runtime | `RegionFileStorage`, Moonrise `RegionDataController` | +9 −0 | KEEP | Generic hook: one `RegionFileStorageHooks` delegation per affected I/O/attachment site; AWF routing, counters, codec handoff and attachment live in the ledgered owned adapter. Upstream fallback and locks remain. Scan routing is in 0053. |
+| structure scans read AWF once and fail fast while the store is failing (minecraft 0053) | 100-runtime | `RegionFileStorage.scanChunk` | +1 −0 | KEEP | Introduces the AWF scan branch via `RegionFileStorageHooks.scanChunk`: unchanged single `scanRead`, refusal propagation, deletion short-circuit, owned-byte parsing and untouched-chunk region-file fallback. |
+
 ### Historical `minecraft-patches/sources/` — 1 patch
 
 | Patch | Category | Upstream dependency | Lines | Status | Action |
