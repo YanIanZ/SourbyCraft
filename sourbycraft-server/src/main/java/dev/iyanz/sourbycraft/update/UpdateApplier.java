@@ -72,6 +72,8 @@ public final class UpdateApplier {
                 t -> broadcast("Server restarts in 10s"),
                 delayMs - 10_000L, TimeUnit.MILLISECONDS);
         }
+        // The copy and prev_sha256 streaming hash run here on the updater async callback,
+        // never on a region, tick or main-server thread.
         Bukkit.getAsyncScheduler().runDelayed(owner,
             t -> applyNow(tag, stagedJar, restartMode), delayMs, TimeUnit.MILLISECONDS);
     }

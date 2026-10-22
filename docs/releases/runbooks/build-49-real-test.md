@@ -146,12 +146,14 @@ before a successful automatic swap; a manual jar install does not guarantee one.
 If missing, mark rollback BLOCKED and ask the operator for the known prior artifact.
 This restores jar bytes only; no world/config restoration is promised.
 
-For the **automatic** rollback scenario: apply writes `APPLIED`; the first boot
+For the **automatic** server-side rollback scenario (current `clipVersion=3.1.2`): apply writes `APPLIED`; the first boot
 records `BOOTING`; `ServerLoadEvent STARTUP` marks `OK`. A later boot seeing `BOOTING`
 copies `.prev` over the launch jar and records `ROLLED_BACK`, holding updates.
 That JVM still runs the updated bytes: stop/restart again to execute the restored
-jar. A launcher failure before bootstrap can leave `APPLIED`, delaying restoration
-another cycle. Missing/failed copies yield `RESTORE_FAILED`. Capture `/update status`;
+jar, so a rollback costs two failed boots. A jar that never reaches the bootstrap
+`auto updater` stage (launcher/class-loading failure) is **not** restored automatically with that pin:
+`rollback.state` stays `APPLIED` and every boot dies the same way until an operator copies
+`<jar>.prev` over the launch jar (shown by the fixture's `dead-launcher` scenario). Missing/failed copies yield `RESTORE_FAILED`. Capture `/update status`;
 use `/update resume` only after diagnosis. Windows file locking may refuse the swap;
 do not report a POSIX apply/rollback PASS from that fallback.
 
@@ -399,10 +401,28 @@ Manual rerun on the agent test server: `python3 scripts/agent_testserver.py star
 
 1. Inspect CI signing results and the published release assets. Confirm verification is enforced by the jar and the signed release manifest is active; the no-key warning is a blocker, not acceptance.
 2. On a disposable POSIX server capture `/update status`, use `/update apply` only with a reviewed same-Minecraft signed release candidate, and preserve `.prev` plus rollback state before the controlled failed boot.
-3. Cause the applied jar’s boot to end before ready using an operator-reviewed fault (unverified until supplied). Follow the automatic rollback sequence in F; capture APPLIED/BOOTING/ROLLED_BACK or failure states and the extra restart needed to run the restored bytes.
+3. Cause the applied jar’s boot to end before ready using an operator-reviewed fault. Reproducible local rehearsal (agent test server, fake loopback release server, throwaway key, **not** a substitute for the panel run): `python3 scripts/updater_rollback_fixture.py run --scenario all --name g11` ([updater-rollback-fixture-2026-10-22.md](../../development/updater-rollback-fixture-2026-10-22.md)); it applies a broken jar (exits 3 before ready), shows `APPLIED` → `BOOTING` → `ROLLED_BACK`, the original jar booting to `Done (` with the updater held, `/update resume`, plus the healthy apply (`OK`, jar and `.prev` kept) and the dead-launcher limit. On the real server follow the automatic rollback sequence in F; capture APPLIED/BOOTING/ROLLED_BACK or failure states and the extra restart needed to run the restored bytes (two failed boots before the old jar runs); with the current 3.1.2 pin, a jar that fails before SourbyCraft code runs needs the manual `.prev` copy (see the version gate below).
 4. Boot behind the real proxy and exercise SEC-1 packet guards and SEC-11 connection limits per [SECURITY-GUARDS.md](../../development/SECURITY-GUARDS.md). Record configured LOG/KICK policy, ordinary player joins and controlled limit violations. LOG observes; it does not block.
 
 **Capture:** Common capture plus Signing/manifest verification, sanitized `/update status`, state transitions, `.prev` and active jar hashes, failed/restore/next boot logs, proxy topology class and limit counters. Store in `docs/releases/evidence/49/g11-security/` using the shared filename pattern.
+
+**G11 rollback contract and version gate (2026-10-22):** For a newly applied candidate,
+capture `prev_sha256` at `APPLIED` and check it equals the completed `.prev` SHA-256 in lowercase
+hex; verify preservation through `BOOTING`, `OK`, `ROLLED_BACK` (and failed restore states).
+A present hash mismatch must log ERROR with the file and both hashes and refuse restore with
+jar files untouched. Missing hashes keep the server's legacy behavior. Apply hashing uses the
+updater's async scheduler callback; restore validation uses the boot guard before worlds tick.
+Launcher restore is **RESTART_REQUIRED and version-gated**: this tree actually pins
+`clipVersion=3.1.2`. The fixture reads that property at runtime, explicitly skips the launcher
+expectation for <=3.1.3, and still checks legacy/manual recovery. With a candidate pinned
+>=3.1.4, require launcher restore before server classes, `ROLLED_BACK` with the exact launcher
+note and retained hash, **exit 71**, then the original jar reaching ready with the same updater
+hold/no reapply behavior. Apply's clean shutdown remains exit 70. Keep `applied.tag` through
+resume so the rolled-back tag is not re-offered. The revised dead-launcher stub calls the
+embedded guard before exiting 4; a failure before even that guard still needs manual recovery.
+The normal broken-plugin scenario also expects launcher exit 71 on boot 3 with >=3.1.4.
+No 3.1.4 launcher restore is claimed for the current pin, and the historical fixture runs do
+not verify these new expectations. G11 remains open for PM Java checks and real boot evidence.
 
 **Pass criteria:** SEC-2 signing in CI and verification in the jar; signed manifest active; `.prev` rollback exercised on a real boot (apply → failed boot → restore); SEC-1 guards and SEC-11 connection limits booted behind a proxy
 

@@ -97,7 +97,8 @@ import java.util.zip.ZipFile;
 public final class SourbyUpdater {
 
     private static final Gson GSON = new Gson();
-    private static final String GITHUB_API = "https://api.github.com/repos/";
+    /** Production releases endpoint prefix; the test fixture can redirect it ({@link UpdateOverrides}). */
+    private static final String GITHUB_API = UpdateOverrides.DEFAULT_REPOS_BASE;
     private static final long DAILY_MILLIS = TimeUnit.DAYS.toMillis(1);
     /** Ceiling for a release jar download when the asset declares no size. */
     static final long MAX_JAR_BYTES = 512L * 1024 * 1024;
@@ -341,7 +342,19 @@ public final class SourbyUpdater {
         String currentVersion = info.version();
         UpdateChannel channel = resolveChannel();
 
-        Listing listing = fetchReleases(GITHUB_API + Config.repo() + "/releases?per_page=100");
+        final String reposBase;
+        try {
+            reposBase = UpdateOverrides.reposBase();
+        } catch (IllegalArgumentException refused) {
+            // Set but not acceptable: do nothing rather than fall back to the real GitHub.
+            SourbyLogger.error("auto-updater: " + refused.getMessage() + "; no check is made.");
+            return Outcome.DISABLED;
+        }
+        if (!GITHUB_API.equals(reposBase)) {
+            SourbyLogger.warn("auto-updater: TEST OVERRIDE -D" + UpdateOverrides.API_BASE_PROPERTY + " is set; the releases"
+                + " listing comes from " + reposBase + " instead of GitHub.");
+        }
+        Listing listing = fetchReleases(reposBase + Config.repo() + "/releases?per_page=100");
         if (listing.rateLimited()) return Outcome.RATE_LIMITED;
         ReleaseInfo latest = listing.releases() == null ? null : latestForChannel(listing.releases(), channel);
         if (latest == null) {

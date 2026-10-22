@@ -47,6 +47,7 @@ public final class ReleaseSignatureVerifier {
     public static final String SIGNATURE_SUFFIX = ".sig";
     private static final String ALGORITHM = "Ed25519";
     private static final int RAW_SIGNATURE_BYTES = 64;
+    private static final long MAX_KEY_FILE_BYTES = 16 * 1024;
 
     private final @Nullable PublicKey key;
     private final boolean active;
@@ -66,16 +67,39 @@ public final class ReleaseSignatureVerifier {
     /**
      * The verifier for THIS jar: active iff {@value #KEY_RESOURCE} is on the classpath. Logs the
      * resulting state once so an operator can see from the boot log whether releases are
-     * signature-checked.
+     * signature-checked. A JVM property can add enforcement to a build that ships no key (local
+     * fixtures only, see {@link UpdateOverrides}); it never replaces a shipped key.
      */
     public static ReleaseSignatureVerifier fromClasspath() {
+        String resourceText = null;
         try (InputStream in = ReleaseSignatureVerifier.class.getResourceAsStream(KEY_RESOURCE)) {
-            if (in == null) {
-                SourbyLogger.info("auto-updater: release signatures NOT enforced (no " + KEY_RESOURCE
-                    + " in this build); staging relies on the GitHub asset SHA-256 digest.");
-                return inactive();
+            if (in != null) resourceText = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return new ReleaseSignatureVerifier(null, true, "could not read key resource: " + e.getMessage());
+        }
+        return resolve(resourceText, System.getProperty(UpdateOverrides.KEY_FILE_PROPERTY));
+    }
+
+    /**
+     * The decision behind {@link #fromClasspath()}, on plain values. {@code resourceText} is the
+     * shipped key ({@code null} = none); {@code keyFile} is the value of
+     * {@value UpdateOverrides#KEY_FILE_PROPERTY} ({@code null}/blank = unset).
+     * <ol>
+     *   <li>Shipped key: it alone decides; a key file is ignored with an ERROR line, because
+     *       letting a JVM flag swap the release key would defeat the point of shipping one.</li>
+     *   <li>No shipped key, key file set: enforcement ON with that key; an unreadable, oversize or
+     *       unparseable file keeps it ON and failing closed.</li>
+     *   <li>Neither: inactive.</li>
+     * </ol>
+     */
+    static ReleaseSignatureVerifier resolve(@Nullable String resourceText, @Nullable String keyFile) {
+        final boolean fileSet = keyFile != null && !keyFile.isBlank();
+        if (resourceText != null) {
+            if (fileSet) {
+                SourbyLogger.error("auto-updater: -D" + UpdateOverrides.KEY_FILE_PROPERTY + " is IGNORED: this build ships its own "
+                    + KEY_RESOURCE + ", which cannot be replaced from the command line.");
             }
-            ReleaseSignatureVerifier v = fromKeyText(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            ReleaseSignatureVerifier v = fromKeyText(resourceText);
             if (v.keyProblem != null) {
                 SourbyLogger.error("auto-updater: " + KEY_RESOURCE + " is present but unusable (" + v.keyProblem
                     + "); release staging is refused until the build ships a valid key.");
@@ -83,9 +107,33 @@ public final class ReleaseSignatureVerifier {
                 SourbyLogger.info("auto-updater: release signatures ENFORCED (Ed25519 key from " + KEY_RESOURCE + ").");
             }
             return v;
-        } catch (IOException e) {
-            return new ReleaseSignatureVerifier(null, true, "could not read key resource: " + e.getMessage());
         }
+        if (!fileSet) {
+            SourbyLogger.info("auto-updater: release signatures NOT enforced (no " + KEY_RESOURCE
+                + " in this build); staging relies on the GitHub asset SHA-256 digest.");
+            return inactive();
+        }
+        final Path file = Path.of(keyFile.trim());
+        final String text;
+        try {
+            if (Files.size(file) > MAX_KEY_FILE_BYTES) {
+                throw new IOException("larger than " + MAX_KEY_FILE_BYTES + " bytes");
+            }
+            text = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException | RuntimeException e) {
+            SourbyLogger.error("auto-updater: -D" + UpdateOverrides.KEY_FILE_PROPERTY + " names an unusable file (" + e.getMessage()
+                + "); release staging is refused.");
+            return new ReleaseSignatureVerifier(null, true, "could not read test key file: " + e.getMessage());
+        }
+        ReleaseSignatureVerifier v = fromKeyText(text);
+        if (v.keyProblem != null) {
+            SourbyLogger.error("auto-updater: test release key " + file + " is unusable (" + v.keyProblem
+                + "); release staging is refused.");
+        } else {
+            SourbyLogger.info("auto-updater: release signatures ENFORCED (TEST key from -D"
+                + UpdateOverrides.KEY_FILE_PROPERTY + "=" + file + "; this build ships no " + KEY_RESOURCE + ").");
+        }
+        return v;
     }
 
     /** Parse a base64 / PEM public-key text. Never throws: a bad key yields an active, failing verifier. */
