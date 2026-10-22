@@ -14,5 +14,10 @@ GPL version 3. Other upstream licences and notices are in this directory (LICENS
 The SourbyCraft and Aurora names and logos are not licensed under the GPL; see TRADEMARK.md in the
 source repository (GPL version 3, section 7(e)).
 
-Minecraft is a trademark of Mojang AB. This jar does not contain the Minecraft server; the launcher
-downloads it from Mojang on first start.
+Minecraft is a trademark of Mojang AB. This file is carried in two jars:
+- The launcher jar (the file published for each release, e.g. SourbyCraft-26.2-REL.jar) contains no
+  Minecraft server. It carries the launcher and a binary patch.
+- On first start the launcher downloads the official Minecraft server jar from Mojang and applies
+  that patch, producing the patched server jar (versions/<version>/sourbycraft-<version>.jar). That
+  jar does contain Minecraft code; the Minecraft code in it remains under Mojang's terms (see its
+  META-INF/LICENSE) and is not licensed under the GPL.
