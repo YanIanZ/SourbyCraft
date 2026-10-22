@@ -26,24 +26,95 @@ Usage:
 """
 import argparse
 import datetime
+import hashlib
 import json
 import re
+import socket
 import statistics
 import sys
 import time
+import urllib.error
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import baseline_client  # noqa: E402
 import baseline_workloads as workloads  # noqa: E402
 import pterodactyl_panel as panel  # noqa: E402
-from verify_persistence import offline_uuid  # noqa: E402
 
 PREFIX = "Bench"
+BENCH_API_RETRIES = 8
 FAILURES = ("Unknown or incomplete command", "Incorrect argument for command", "Expected ",
             "Invalid or unknown entity type", "Unable to summon", "That position is not loaded")
 # Plugins such as EssentialsX register these bare names; the workload means the vanilla ones.
 VANILLA = ("time", "weather", "difficulty", "tp", "kill")
+
+
+def offline_uuid(name):
+    """The UUID an offline-mode server gives a name (same as verify_persistence.offline_uuid).
+
+    Kept here so the tool stays a handful of stdlib-only files that can be copied to a remote
+    load-generator host without verify_persistence's server-harness imports.
+    """
+    digest = bytearray(hashlib.md5(f"OfflinePlayer:{name}".encode()).digest())
+    digest[6] = (digest[6] & 0x0F) | 0x30          # version 3
+    digest[8] = (digest[8] & 0x3F) | 0x80          # IETF variant
+    return str(uuid.UUID(bytes=bytes(digest)))
+
+
+def connect_rtt(host, port, attempts=10, timeout=5.0):
+    """TCP connect round trips from this host to the game port, in milliseconds.
+
+    The network path the clients really use, measured from where they run (SYN to SYN-ACK, no
+    Minecraft traffic). A failed attempt is counted, not hidden.
+    """
+    times, failed = [], 0
+    for _ in range(attempts):
+        start = time.monotonic()
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                times.append((time.monotonic() - start) * 1000)
+        except OSError:
+            failed += 1
+        time.sleep(0.2)
+    if not times:
+        return {"attempts": attempts, "failed": failed}
+    return {"attempts": attempts, "failed": failed, "min_ms": round(min(times), 1),
+            "median_ms": round(statistics.median(times), 1), "max_ms": round(max(times), 1)}
+
+
+def apply_edits(originals, edits):
+    """The edited text of every file named by --edit, applying several edits to one file in turn.
+
+    Each edit replaces its OLD in the text the earlier edits left, so two --edit options on the
+    same file both take effect (writing each from the original would silently drop all but the
+    last).
+    """
+    edited = {}
+    for path, old, new in edits:
+        text = edited.get(path, originals[path])
+        if old not in text:
+            raise SystemExit(f"--edit: {old!r} not found in {path}")
+        edited[path] = text.replace(old, new)
+    return edited
+
+
+def wait_until_answering(probe, timeout, sleep=time.sleep, clock=time.monotonic):
+    """True once probe() is truthy, tolerating the panel's transient errors while the server boots.
+
+    Wings reports `running` before the console is attached and answers 502 to a command sent in
+    that window (seen from the remote load-generator host, 2026-10-21); that is not a failed
+    bench, so errors are waited out until the deadline.
+    """
+    deadline = clock() + timeout
+    while clock() < deadline:
+        try:
+            if probe():
+                return True
+        except (urllib.error.URLError, ConnectionError, TimeoutError):   # HTTPError is a URLError
+            pass
+        sleep(3)
+    return False
 
 
 def vanilla(command):
@@ -142,6 +213,15 @@ def main():
     parser.add_argument("--edit", action="append", default=[], metavar="PATH=OLD=>NEW",
                         help="Replace OLD with NEW in a server file for the bench run (restored afterwards). "
                              "E.g. a plugin's spawn world when it names the operator's world.")
+    parser.add_argument("--max-players", type=int,
+                        help="max-players while benching (restored afterwards). Required when the "
+                             "client count exceeds the server's own max-players.")
+    parser.add_argument("--clients-on", metavar="LABEL",
+                        help="Where the clients run when it is not the operator's machine, e.g. "
+                             "'a shared Linux VPS'. Recorded, and used in the NOT CERTIFIED reasons.")
+    parser.add_argument("--client-processes", type=int, default=1,
+                        help="Spread the clients over this many processes (default 1: all threads of "
+                             "one process, which a slow load-generator host cannot keep up with)")
     parser.add_argument("--allow-online-players", action="store_true",
                         help="Bench even if real players are online (they will be disconnected)")
     args = parser.parse_args()
@@ -154,6 +234,9 @@ def main():
         raise SystemExit(f"{output} exists; choose a new output directory")
     output.mkdir(parents=True)
     panel.configure(args.panel, args.server)
+    # From a remote host the panel answers 502 for a stretch right after the server boots; the shared
+    # default (5 tries, 15 s) gave up in it. Eight tries back off to about two minutes.
+    panel.RETRIES = BENCH_API_RETRIES
 
     if panel.state() == "running" and not args.allow_online_players:
         out, _ = panel.run("minecraft:list", r"players online", 20)
@@ -173,13 +256,19 @@ def main():
     for path, text in originals.items():
         (output / ("original-" + path.strip("/").replace("/", "__"))).write_text(text)
     original_properties = originals["/server.properties"]
+    current_max = number(r"(?m)^max-players=(\d+)", original_properties, 20)
+    if args.max_players is None and clients > current_max:
+        raise SystemExit(f"{clients} clients exceed the server's max-players={int(current_max)}; "
+                         f"pass --max-players {clients} (restored afterwards)")
 
     record = {"workload": plan.name, "summary": plan.summary, "fidelity": list(plan.fidelity),
               "clients_requested": clients, "seed": args.seed, "world": args.world,
               "warmup_s": args.warmup, "duration_s": args.duration,
-              "certified": False,
+              "certified": False, "max_players_bench": args.max_players,
+              "clients_on": args.clients_on,
               "not_certified_because": [
-                  "clients run on the operator's machine over the internet",
+                  (f"clients run on {args.clients_on} over the internet" if args.clients_on
+                   else "clients run on the operator's machine over the internet"),
                   "metrics are console-sampled /perf readings, not a JFR recording",
                   "the panel node is not known to be otherwise idle"],
               "started": datetime.datetime.now(datetime.timezone.utc).isoformat()}
@@ -191,13 +280,12 @@ def main():
             "level-name": args.world, "level-seed": args.seed, "online-mode": "false",
             "white-list": "true", "enforce-whitelist": "true",
             # Half the clients fly; vanilla kicks them for "floating too long" otherwise.
-            "allow-flight": "true"}))
+            "allow-flight": "true",
+            **({"max-players": str(args.max_players)} if args.max_players is not None else {})}))
         panel.write_file("/whitelist.json", bench_whitelist(clients))
         panel.write_file("/bukkit.yml", without_throttle(originals["/bukkit.yml"]))
-        for path, old, new in edits:
-            if old not in originals[path]:
-                raise SystemExit(f"--edit: {old!r} not found in {path}")
-            panel.write_file(path, originals[path].replace(old, new))
+        for path, text in apply_edits(originals, edits).items():
+            panel.write_file(path, text)
         record["edits"] = [{"path": path, "old": old, "new": new} for path, old, new in edits]
         # The plugin set is whatever the panel has installed: recorded, and checked against the
         # workload's declared set by name. A workload with plugins needs the bridge for the
@@ -211,12 +299,7 @@ def main():
             raise RuntimeError("server did not reach running in bench mode")
         # `running` is the process state, and latest.log still holds the previous boot's "Done ("
         # until it rotates, so the only reliable readiness signal is a command being answered.
-        ready_by = time.monotonic() + 300
-        while time.monotonic() < ready_by:
-            _, answered = panel.run("minecraft:list", r"players online", 15)
-            if answered:
-                break
-        else:
+        if not wait_until_answering(lambda: panel.run("minecraft:list", r"players online", 15)[1], 300):
             raise RuntimeError("server did not answer console commands within 300 s of starting")
         boot = panel.log()
         version = re.search(r"This server is running (.*)", boot)
@@ -257,9 +340,17 @@ def main():
         print(f"settle {plan.settle_seconds}s", flush=True)
         time.sleep(plan.settle_seconds)
 
-        print(f"connecting {clients} clients to {args.host}:{args.port}", flush=True)
-        swarm = baseline_client.ClientSwarm(args.host, args.port, clients, prefix=PREFIX,
-                                            roam=plan.client_roam_blocks)
+        record["client_network"] = connect_rtt(args.host, args.port)
+        print(f"connecting {clients} clients to {args.host}:{args.port}; "
+              f"tcp connect rtt {record['client_network']}", flush=True)
+        if args.client_processes > 1:
+            swarm = baseline_client.ShardedSwarm(args.host, args.port, clients, prefix=PREFIX,
+                                                 roam=plan.client_roam_blocks,
+                                                 processes=args.client_processes, timer_moves=True)
+        else:
+            swarm = baseline_client.ClientSwarm(args.host, args.port, clients, prefix=PREFIX,
+                                                roam=plan.client_roam_blocks, timer_moves=True)
+        record["client_processes"] = args.client_processes
         record["clients"] = swarm.start(timeout=180.0)
         print(f"clients: {record['clients']}", flush=True)
         sites = plan.parameters.get("site_coordinates") or []
