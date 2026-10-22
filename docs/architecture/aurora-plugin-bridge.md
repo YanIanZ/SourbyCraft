@@ -150,6 +150,16 @@ this increment remains assigned to Claude.
   reported 6/6 active, 2 bridged, 0 failed; at the post-boot sample, Essentials had 5 scheduler
   redirects and Vault 2, with 0 rejected operations or fatal region violations for both.
   This is startup and economy-hook evidence on the demo panel, not gameplay or soak qualification.
+- **Real legacy plugins, agent test server (2026-10-22, base `6176d517`, no player).** 19 local
+  jars, `mode = "safe"`: [bridge-plugin-compatibility-2026-10-22.md](../development/bridge-plugin-compatibility-2026-10-22.md).
+  Bridged and enabled with 0 rejected / 0 violations / not quarantined after their console commands:
+  Vault 1.7.3-b131, EssentialsX 2.22.1-dev+25, LuckPerms 5.5.10, DeluxeHubReloaded 3.7.2, ntdLuckyBlock
+  2.8.34, ChatGames 1.2.1, ReMinions 2.0.7. Every enable failure was plugin-side and would also happen on
+  Paper 26.2: Skript 2.12.0 (Adventure 5), StrikePractice (CraftBukkit package version parsing),
+  SimplePets (NBT-API), LibsDisguises/GadgetsMenu (their own version gates), and missing dependencies.
+  ntdLuckyBlock `/lb place` from the console was refused by the engine. That is a direct world access in a
+  console command body, not a scheduled task, so the bridge cannot route it. No adapter was added. Player
+  flows are untested (owner-run).
 
 ## Qualification
 A plugin cannot be presented as BRIDGED until load, enable and bridge initialization succeed and no fatal compatibility violation is present.
