@@ -154,3 +154,5 @@ In short:
 - Correctness, plugin semantics, region ownership, persistence and shutdown behavior outrank throughput.
 - A concurrency change must account for shared CPU capacity; adding executors/threads is not evidence of scalability.
 - Do not hide regressions by changing workload fidelity, player/entity activation, world-generation conditions or gameplay settings.
+
+For offline engine-baseline provenance and upstream rebase planning, see [Rebasing the engine baseline onto a new upstream](docs/development/UPGRADING-MINECRAFT.md#rebasing-the-engine-baseline-onto-a-new-upstream). Use `scripts/engine_baseline_origin.py` and `scripts/upstream_rebase.py`; review manual ports before applying, then regenerate patches, the baseline manifest and origin JSON as documented.
