@@ -40,6 +40,8 @@ class AwfReadFailureTest {
         final AtomicInteger readCalls = new AtomicInteger();
         long generation;
         final AtomicBoolean failRelease = new AtomicBoolean();
+        final AtomicBoolean commitDown = new AtomicBoolean();
+        final AtomicInteger commitCalls = new AtomicInteger();
 
         @Override
         public void close() throws IOException {
@@ -80,6 +82,8 @@ class AwfReadFailureTest {
         public synchronized CommitResult commit(final Map<ChunkKey, byte[]> changed, final Set<ChunkKey> removed,
                                                 final Set<ChunkKey> deleted, final PersistenceMode mode)
             throws IOException {
+            this.commitCalls.incrementAndGet();
+            if (this.commitDown.get()) throw new java.net.ConnectException("Connection refused");
             changed.forEach((key, bytes) -> {
                 this.chunks.put(key, bytes.clone());
                 this.tombstones.remove(key);
@@ -281,5 +285,93 @@ class AwfReadFailureTest {
         for (final ChunkKey key : keys) {
             assertArrayEquals(b("stored " + key), this.store.chunks.get(key), "stored chunk kept: " + key);
         }
+    }
+
+    /**
+     * Build 49 gate "Backend failure" (agent test server 2026-10-22, opus-49-backend-1): after Redis came
+     * back, loading the 27x27 square again read 529 fenced positions back in one second, one INFO line
+     * each. The recovery is now logged like the failures: the first of a window on its own, the rest in
+     * one summary. Unfencing is unchanged.
+     */
+    @Test
+    void aBurstOfRecoveredPositionsLogsAtMostTwoRecordsAndUnfencesEveryPosition() throws Exception {
+        final AwfRegionStorage storage = storage();
+        storage.loadPath(() -> true);
+        final java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong(5L);
+        storage.failureLog(new ReadFailureLog("world/region", ReadFailureLog.WINDOW_NANOS, clock::get, (m, t) -> { }));
+        final java.util.List<String> logged = new java.util.ArrayList<>();
+        storage.recoveryLog(new ReadFailureLog("world/region", ReadFailureLog.WINDOW_NANOS, clock::get,
+            (message, stack) -> logged.add(message), ReadFailureLog.RECOVERIES));
+        final Set<ChunkKey> keys = new HashSet<>();
+        for (int x = 87; x <= 113; x++) {
+            for (int z = 87; z <= 113; z++) {
+                final ChunkKey key = new ChunkKey(x, z);
+                keys.add(key);
+                this.store.chunks.put(key, b("stored " + key));
+            }
+        }
+        this.store.down.set(true);
+        for (final ChunkKey key : keys) assertThrows(IOException.class, () -> storage.read(key.x(), key.z()));
+        RepeatedReadFailureLogFilter.uninstall();
+        assertEquals(keys, storage.unreadable());
+
+        this.store.down.set(false);
+        AwfRegionStorage.resetFailFast();
+        for (final ChunkKey key : keys) assertArrayEquals(b("stored " + key), storage.read(key.x(), key.z()));
+        assertTrue(storage.unreadable().isEmpty(), "every position is unfenced, as before");
+        assertEquals(1, logged.size(), "only the first recovery is logged while the window is open");
+        assertTrue(logged.get(0).contains(" again; its stored bytes were loaded"), logged.get(0));
+
+        for (final ChunkKey key : keys) storage.write(key.x(), key.z(), b("edited " + key));
+        assertEquals(0, storage.stats().refusedWrites(), "writes of recovered positions are accepted");
+
+        clock.addAndGet(ReadFailureLog.WINDOW_NANOS);
+        storage.maintain(clock.get());
+        assertEquals(2, logged.size(), "one summary once the window ends");
+        assertTrue(logged.get(1).contains("729 fenced chunk position(s)"), logged.get(1));
+        storage.close();
+        assertEquals(2, logged.size(), "nothing left to summarise at close");
+    }
+
+    /**
+     * Build 49 gate "Backend failure" (agent test server 2026-10-22): with Redis down, every periodic
+     * commit logged a WARN with its full stack, once per commit interval per storage (603 of 749 log
+     * lines in a 75 s outage). Now the first failure of a 60 s window keeps its stack, the rest are
+     * counted, and the summary is written when commits succeed again (or the window ends). Retrying,
+     * dirty chunks and flush reporting are unchanged.
+     */
+    @Test
+    void repeatedPeriodicCommitFailuresLogOneStackAndOneSummary() throws Exception {
+        final AwfRegionStorage storage = storage();
+        final java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong(5L);
+        final java.util.List<String> logged = new java.util.ArrayList<>();
+        final java.util.List<Throwable> stacks = new java.util.ArrayList<>();
+        storage.commitFailureLog(new ReadFailureLog("world/region", ReadFailureLog.COMMIT_WINDOW_NANOS, clock::get,
+            (message, stack) -> {
+                logged.add(message);
+                stacks.add(stack);
+            }, ReadFailureLog.COMMIT_FAILURES));
+        storage.write(1, 1, b("placed while Redis is down"));
+        this.store.commitDown.set(true);
+        long now = 0L;
+        for (int i = 0; i < 5; i++) {
+            now += 31_000_000_000L;
+            assertTrue(storage.maintain(now), "every interval still starts a commit");
+        }
+        assertEquals(10, this.store.commitCalls.get(), "5 commits x 2 attempts, as before");
+        assertEquals(1, storage.dirtyCount(), "the chunk stays dirty");
+        assertEquals(1, logged.size(), "only the first failure is logged while the window is open");
+        assertTrue(stacks.get(0) != null, "with its stack");
+        assertTrue(logged.get(0).contains("failed; its chunks stay in memory"), logged.get(0));
+
+        this.store.commitDown.set(false);
+        now += 31_000_000_000L;
+        assertTrue(storage.maintain(now));
+        assertEquals(0, storage.dirtyCount(), "committed once the backend answers");
+        assertEquals(2, logged.size(), "the summary is written when commits succeed again");
+        assertTrue(logged.get(1).contains("failed 5 time(s)"), logged.get(1));
+        assertTrue(stacks.get(1) == null, "the summary carries no stack");
+        storage.close();
+        assertEquals(2, logged.size());
     }
 }
