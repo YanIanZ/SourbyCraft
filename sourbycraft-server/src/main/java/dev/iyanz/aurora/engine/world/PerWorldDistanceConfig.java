@@ -43,8 +43,10 @@ public record PerWorldDistanceConfig(
      * The {@code paper:level_overrides} field: written as {@value #LEVEL_OVERRIDES_KEY}; read from it, else from
      * {@value #LEGACY_LEVEL_OVERRIDES_KEY} with a one-time deprecation line. The overrides are saved again whenever
      * they are dirty (game time changes every tick), so an old world is rewritten with the new key on its first save
-     * and the old key is gone from then on. Like the former {@code fieldOf("Canvas.Distance")} it is required: with
-     * neither key present decoding fails as before.
+     * and the old key is gone from then on. With neither key present the field is optional: the world has no override
+     * and decodes to {@link #unset()} (a world whose overrides Paper wrote never has either key; failing there made
+     * Paper discard the whole {@code paper:level_overrides} record, its spawn and game time included). The deprecation
+     * line is logged only when the old key is actually read.
      */
     public static final MapCodec<PerWorldDistanceConfig> LEVEL_OVERRIDES_FIELD = new MapCodec<>() {
         @Override
@@ -63,7 +65,7 @@ public record PerWorldDistanceConfig(
                 warnLegacyKey();
                 return CODEC.parse(ops, legacy);
             }
-            return DataResult.error(() -> "No key " + LEVEL_OVERRIDES_KEY + " in " + input);
+            return DataResult.success(unset());
         }
 
         @Override
@@ -79,7 +81,7 @@ public record PerWorldDistanceConfig(
 
     /**
      * The config stored in a raw {@code level.dat} being converted to level overrides: {@value #LEVEL_OVERRIDES_KEY},
-     * else {@value #LEGACY_LEVEL_OVERRIDES_KEY}, else {@link #DEFAULT}. Parse errors are logged, not thrown.
+     * else {@value #LEGACY_LEVEL_OVERRIDES_KEY}, else {@link #unset()}. Parse errors are logged, not thrown.
      */
     public static PerWorldDistanceConfig fromRawLevelData(final Dynamic<?> levelData) {
         Dynamic<?> stored = levelData.get(LEVEL_OVERRIDES_KEY).result().orElse(null);
@@ -90,9 +92,17 @@ public record PerWorldDistanceConfig(
             }
         }
         if (stored == null) {
-            return DEFAULT;
+            return unset();
         }
-        return stored.read(CODEC).resultOrPartial(LoggerFactory.getLogger("Aurora")::error).orElse(DEFAULT);
+        return stored.read(CODEC).resultOrPartial(LoggerFactory.getLogger("Aurora")::error).orElseGet(PerWorldDistanceConfig::unset);
+    }
+
+    /**
+     * A new config with no view or simulation override. Readers return this rather than the shared {@link #DEFAULT},
+     * whose references are mutable, so one world's setter can never change another world's config.
+     */
+    public static PerWorldDistanceConfig unset() {
+        return new PerWorldDistanceConfig(Optional.empty(), Optional.empty());
     }
 
     private static void warnLegacyKey() {

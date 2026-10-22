@@ -17,6 +17,7 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -92,10 +93,41 @@ class PerWorldDistanceLegacyKeyTest {
     }
 
     @Test
-    void missingKeyStillFailsLikeTheFormerRequiredField() {
+    void noKeyMeansNoOverrideAndNoWarning() {
+        // the shape of a Paper-made world's level_overrides (the panel's Spawn world, 2026-10-22)
         final CompoundTag none = new CompoundTag();
         none.putLong("game_time", 1L);
-        assertTrue(HOLDER.parse(NbtOps.INSTANCE, none).isError());
+
+        final Holder read = HOLDER.parse(NbtOps.INSTANCE, none).getOrThrow();
+
+        assertEquals(1L, read.gameTime(), "the rest of the record is kept");
+        assertEquals(Optional.empty(), read.distance().viewDistanceAsOptional());
+        assertEquals(Optional.empty(), read.distance().simulationDistanceAsOptional());
+        assertFalse(read.distance().isViewDistanceOverridden());
+        assertEquals(List.of(), this.warnings);
+        assertNotSame(PerWorldDistanceConfig.DEFAULT, read.distance(), "never the shared mutable DEFAULT");
+
+        final CompoundTag saved = (CompoundTag) HOLDER.encodeStart(NbtOps.INSTANCE, read).getOrThrow();
+        assertFalse(saved.contains("Canvas.Distance"));
+        assertTrue(saved.contains("Aurora.Distance"), "the next save writes the new key");
+        assertEquals(1L, HOLDER.parse(NbtOps.INSTANCE, saved).getOrThrow().gameTime());
+    }
+
+    @Test
+    void onlyNewKeyReadsSilently() {
+        final Holder read = HOLDER.parse(NbtOps.INSTANCE, stored("Aurora.Distance", distance(11, 6))).getOrThrow();
+
+        assertEquals(Optional.of(11), read.distance().viewDistanceAsOptional());
+        assertEquals(Optional.of(6), read.distance().simulationDistanceAsOptional());
+        assertEquals(List.of(), this.warnings);
+    }
+
+    @Test
+    void malformedValueIsStillAnError() {
+        final CompoundTag bad = new CompoundTag();
+        bad.putLong("game_time", 1L);
+        bad.putString("Aurora.Distance", "not a compound");
+        assertTrue(HOLDER.parse(NbtOps.INSTANCE, bad).isError());
     }
 
     @Test
@@ -109,5 +141,7 @@ class PerWorldDistanceLegacyKeyTest {
 
         final Dynamic<Tag> absent = new Dynamic<>(NbtOps.INSTANCE, new CompoundTag());
         assertEquals(Optional.empty(), PerWorldDistanceConfig.fromRawLevelData(absent).viewDistanceAsOptional());
+        assertNotSame(PerWorldDistanceConfig.DEFAULT, PerWorldDistanceConfig.fromRawLevelData(absent));
+        assertEquals(1, this.warnings.size(), "only the old key warns");
     }
 }
