@@ -31,7 +31,7 @@ Every region member a solve reaches, from `PathFinder.findPath` → `NodeEvaluat
 Nothing else on the region is called. `PathFinder.findPath` touches the region only to hand it
 to `prepare`; the profiler it reads is thread-local.
 
-## How the snapshot is built (patch 0006, `sourbyKickAsyncRecompute`)
+## How the snapshot is built (patch 0006, `sourbyKickAsyncRecompute`; since 2026-10-22 `perf/AsyncPathRecompute.offload`)
 
 - Bounds: `fromPos ± (int)(getMaxPathLength() + 8)` — the same `followRange + 8` radius vanilla
   `createPath` uses for its `PathNavigationRegion`, from the same `mob.blockPosition()`.

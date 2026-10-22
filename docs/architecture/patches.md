@@ -12,7 +12,7 @@
 
 # Patch inventory and ownership audit (PRD Phase 1)
 
-> **Historical numbering (updated 2026-10-21):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later in that historical snapshot. Current numbered feature-file counts: **81 Minecraft (0001–0081), 24 Paper (0001–0024), 3 sourbyapi (0001–0003)**, counted from `NNNN-*.patch` files on 2026-10-21. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
+> **Historical numbering (updated 2026-10-21):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later in that historical snapshot. Current numbered feature-file counts: **82 Minecraft (0001–0082), 24 Paper (0001–0024), 3 sourbyapi (0001–0003)**, counted from `NNNN-*.patch` files on 2026-10-21. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
 
 Historical build-45 review on `release/26.2-canvas`, classified per PRD section 22 with
 the section 87 fields. Counts are added and removed lines in the patch file itself.
@@ -48,7 +48,7 @@ entries; it is not repeated per row.
 
 ### Historical `minecraft-patches/features/` — 17 patches (0013 and 0015 removed by action 2)
 
-Current directory count: **81** numbered feature patches (0001–0081), 2026-10-22.
+Current directory count: **82** numbered feature patches (0001–0082), 2026-10-22.
 
 | Patch | Category | Upstream dependency | Lines | Status | Action |
 | --- | --- | --- | ---: | --- | --- |
@@ -57,7 +57,7 @@ Current directory count: **81** numbered feature patches (0001–0081), 2026-10-
 | 0003 skip provably-capped spawn categories | 200-performance | `NaturalSpawner` | +45 | KEEP | Benchmark. Verify capped-category logic cannot suppress a legal spawn. |
 | 0004 POI scan without per-block `BlockPos` | 200-performance | `PoiManager` | +19 −8 | KEEP | Benchmark. |
 | 0005 `SnapshotPathRegion` immutable snapshot | 300-region | `PathNavigationRegion` | +161 | KEEP | Foundation for 0006/0007. Region-thread safety review. |
-| 0006 async pathfinding: offload periodic path | 500-entity | `PathNavigation` | +66 −3 | KEEP | Default off. Benchmark and threading review before enabling. |
+| 0006 async pathfinding: offload periodic path | 500-entity | `PathNavigation` | +66 −3 (current: +44 −0) | KEEP | Default off. Benchmark and threading review before enabling. **Split 2026-10-22:** logic in `perf/AsyncPathRecompute`; the patch keeps one flag-gated call in `recomputePath` and the navigation-state seams; the `PathfindingContext` guard (old 0007) is current MC 0082 (+7 −1); `Mob`/`Sniffer`/`AmphibiousPathNavigation` overrides replaced by `AsyncPathRecompute.solveWritesMob`. |
 | 0007 async pathfinding: don't touch regionized state | 500-entity | `PathfindingContext` | +7 −1 | **MERGE** | Fold into 0006. Seven lines of the same feature, meaningless alone. |
 | 0008 eliminate elytra glide-slot stream allocation | 200-performance | `LivingEntity` | +17 −2 | KEEP | Benchmark. |
 | 0009 reuse collision scratch lists in `Entity#collide` | 200-performance | `Entity` | +18 −3 | KEEP | Reviewed: entity-owned, no escape. Benchmark still missing. |
@@ -212,7 +212,7 @@ different file but as one feature. 0007's explanation was carried into 0006's me
 rather than deleted with the file.
 
 At that historical action-3 checkpoint, the Minecraft feature set was thirteen patches,
-renumbered `0001-0013` with no gaps. Current counts (2026-10-22): **81 Minecraft, 24 Paper,
+renumbered `0001-0013` with no gaps. Current counts (2026-10-22): **82 Minecraft, 24 Paper,
 3 sourbyapi** numbered feature patches; the tables above retain their historical numbering.
 
 The gaps this originally left were not sustainable. `rebuildMinecraftFeaturePatches`

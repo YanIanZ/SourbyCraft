@@ -1755,23 +1755,6 @@
       "test": "test missing"
     },
     {
-      "id": "Sniffer#1",
-      "file": "sourbycraft-server/src/minecraft/java/net/minecraft/world/entity/animal/sniffer/Sniffer.java",
-      "line": 119,
-      "method": "sourbyPathfindingMutatesMob",
-      "site": "public boolean sourbyPathfindingMutatesMob() { | @Override",
-      "anchor": "return true;",
-      "nth": 1,
-      "detector": "E",
-      "origin": "SourbyCraft",
-      "patch": "sourbycraft-server/minecraft-patches/sources/net/minecraft/world/entity/animal/sniffer/Sniffer.java.patch",
-      "kind": "REROUTED",
-      "effect": "SourbyCraft's own hook (Minecraft feature 0039): Sniffer declares that its pathfinding callbacks mutate the mob, so its paths are solved synchronously instead of on the async path lane.",
-      "decision": "KEEP-OWNED",
-      "note": "KEEP-OWNED (SourbyCraft origin; not a refusal, a correctness opt-out of async pathfinding). Pinned by the async-pathfinding tests.",
-      "test": "MobPathSnapshotTest / AsyncPathValidityTest (feature 0039)"
-    },
-    {
       "id": "WanderingTraderSpawner#1",
       "file": "sourbycraft-server/src/minecraft/java/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java",
       "line": 44,

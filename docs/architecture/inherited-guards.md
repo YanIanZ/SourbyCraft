@@ -47,13 +47,13 @@ Every number below is generated; the test fails when it drifts from the manifest
 | scanned input | count |
 | --- | --- |
 | engine baseline patches | 720 (472 `sourbycraft-server/minecraft-patches/sources` + 232 `sourbycraft-server/paper-patches/files` + 16 `sourbyapi/paper-patches/files`), 720 Java files |
-| SourbyCraft feature patches | 108, touching 124 Java files |
+| SourbyCraft feature patches | 109, touching 121 Java files |
 | engine source files (sourbycraft-server/src/main/java/dev/iyanz/aurora/engine) | 89 |
-| guards found by the scan | 116 (manifest has 116; both scan modes agree, see RepositoryTest) |
+| guards found by the scan | 115 (manifest has 115; both scan modes agree, see RepositoryTest) |
 
 | detector | A | B | C | D | E |
 | --- | --- | --- | --- | --- | --- |
-| entries | 64 | 30 | 2 | 14 | 6 |
+| entries | 64 | 30 | 2 | 14 | 5 |
 
 | kind \ decision | KEEP-OWNED | REPLACE | REMOVE | UNDECIDED | total |
 | --- | --- | --- | --- | --- | --- |
@@ -61,12 +61,12 @@ Every number below is generated; the test fails when it drifts from the manifest
 | API-REFUSED | 59 | 9 | 2 | 0 | 70 |
 | OWNERSHIP-CHECK | 6 | 0 | 0 | 0 | 6 |
 | DEGRADED | 4 | 1 | 0 | 0 | 5 |
-| REROUTED | 26 | 0 | 0 | 0 | 26 |
-| **guards** | **101** | **12** | **3** | **0** | **116** |
+| REROUTED | 25 | 0 | 0 | 0 | 25 |
+| **guards** | **100** | **12** | **3** | **0** | **115** |
 
 | origin | Folia | Canvas | SourbyCraft |
 | --- | --- | --- | --- |
-| entries | 77 | 31 | 8 |
+| entries | 77 | 31 | 7 |
 
 | family | sites |
 | --- | --- |
@@ -228,9 +228,10 @@ throwing.
   `MinecraftServer#27` (follows the pause-when-empty decision), `SparksFly#2` (Paper's built-in spark never self-enables; SourbyCraft's
   spark platform is the one profiler).
 - **SourbyCraft's own guards in the same shape** (origin `SourbyCraft`, already owned, recorded so the
-  scan is complete) — `Metrics#1` (bStats phone-home removed, Paper feature 0001), `Sniffer#1`
-  (async-pathfinding opt-out hook, Minecraft feature 0039), `BaseCommandBlock#2`
-  (`sourbyOwnedByCurrentThread()` defaults to `false`; Minecraft feature 0055).
+  scan is complete) — `Metrics#1` (bStats phone-home removed, Paper feature 0001), `BaseCommandBlock#2`
+  (`sourbyOwnedByCurrentThread()` defaults to `false`; Minecraft feature 0055). The former `Sniffer#1`
+  (async-pathfinding opt-out override) was removed on 2026-10-22: the opt-out list is Sourby source now
+  (`perf/AsyncPathRecompute.solveWritesMob`, `AsyncPathRecomputeTest`), so no upstream line carries it.
 
 ## 6. UNDECIDED (what must be checked)
 
@@ -421,7 +422,6 @@ origin is SourbyCraft or the note names a feature patch.
 | `ServerWaypointManager#1` | Canvas | API-REFUSED | KEEP-OWNED | `net/minecraft/server/waypoints/ServerWaypointManager.java:66` | `throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas -...` |
 | `Entity#7` | Folia | API-REFUSED | KEEP-OWNED | `net/minecraft/world/entity/Entity.java:5560` | `if (true) {` |
 | `LivingEntity#1` | Canvas | REROUTED | KEEP-OWNED | `net/minecraft/world/entity/LivingEntity.java:606` | `if (true) { // Canvas - check frozen ticks before landing block` |
-| `Sniffer#1` | SourbyCraft | REROUTED | KEEP-OWNED | `net/minecraft/world/entity/animal/sniffer/Sniffer.java:119` | `return true;` |
 | `WanderingTraderSpawner#1` | SourbyCraft | FEATURE-DISABLED | KEEP-OWNED | `net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java:44` | `return; // SourbyCraft - global coordinator owns trader ticking` |
 | `ThrownEnderpearl#1` | Folia | DEGRADED | REPLACE | `net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java:103` | `if (true) {` |
 | `BaseCommandBlock#2` | SourbyCraft | OWNERSHIP-CHECK | KEEP-OWNED | `net/minecraft/world/level/BaseCommandBlock.java:187` | `return false;` |

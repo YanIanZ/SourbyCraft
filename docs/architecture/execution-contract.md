@@ -220,8 +220,9 @@ paths **write** to the mob instead:
 * `Mob.onPathfindingStart` / `onPathfindingDone` are called from inside the solve. Both are empty
   on `Mob`, and **Sniffer** overrides both to write WATER malus.
 
-Both are now refused rather than raced: `PathNavigation.sourbyAsyncSolveSafe` (false for
-`AmphibiousPathNavigation`) and `Mob.sourbyPathfindingMutatesMob` (true for `Sniffer`) gate the
+Both are now refused rather than raced: `AsyncPathRecompute.solveWritesMob` (true for
+`AmphibiousPathNavigation` and its subclasses, and for `Sniffer`; until 2026-10-22 per-class overrides
+`PathNavigation.sourbyAsyncSolveSafe` / `Mob.sourbyPathfindingMutatesMob` in MC patch 0006) gates the
 offload, which falls back to the synchronous recompute.
 
 One hypothesis this review disproved: `FlyNodeEvaluator` calls `mob.getRandom()`, which looked

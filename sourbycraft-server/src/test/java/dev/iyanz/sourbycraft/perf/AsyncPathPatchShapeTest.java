@@ -11,12 +11,14 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * Keeps {@link AsyncPathNavigationModel} honest. The async path glue lives in minecraft feature patch
- * 0006, in code that cannot run without a bootstrapped server, so the cancellation tests mirror it.
- * This reads the patch text and fails if the properties the mirror relies on stop being true: the
- * order of the checks, where the validity token is taken, and that the pending flag is released
- * through {@link AsyncPathCompletion}. It proves nothing about behaviour; it proves the mirror still
- * matches the source it mirrors.
+ * Keeps {@link AsyncPathNavigationModel} honest and pins the shape of the async pathfinding seam.
+ * Since 2026-10-22 the offload glue is {@link AsyncPathRecompute} (Sourby source) and minecraft
+ * feature patch 0006 keeps one delegating call plus the navigation-state seams; patch 0047 adds the
+ * request generation. This reads the helper's source and the patch text and fails if the properties
+ * the model relies on stop being true: the order of the checks, where the validity token is taken,
+ * that the pending flag is released through {@link AsyncPathCompletion}, and that the upstream site is
+ * a single flag-gated call. It proves nothing about behaviour; it proves the mirror still matches the
+ * source it mirrors.
  */
 class AsyncPathPatchShapeTest {
 
@@ -59,6 +61,20 @@ class AsyncPathPatchShapeTest {
         return fail("feature patch 0047 (navigation generation) not found from " + Path.of("").toAbsolutePath());
     }
 
+    /** The offload glue (perf/AsyncPathRecompute.java), Sourby source since 2026-10-22. */
+    private static String source() throws IOException {
+        Path dir = Path.of("").toAbsolutePath();
+        for (int up = 0; up < 6 && dir != null; up++, dir = dir.getParent()) {
+            for (final String base : List.of("src/main/java", "sourbycraft-server/src/main/java")) {
+                final Path file = dir.resolve(base).resolve("dev/iyanz/sourbycraft/perf/AsyncPathRecompute.java");
+                if (Files.isRegularFile(file)) {
+                    return Files.readString(file, StandardCharsets.UTF_8);
+                }
+            }
+        }
+        return fail("AsyncPathRecompute.java not found from " + Path.of("").toAbsolutePath());
+    }
+
     private static int count(final String text, final String needle) {
         int count = 0;
         for (int from = 0, i; (i = text.indexOf(needle, from)) >= 0; from = i + 1) {
@@ -69,14 +85,14 @@ class AsyncPathPatchShapeTest {
 
     @Test
     void theGenerationIsTakenWithTheTokenAndCheckedAfterThePathBeforeTheContent() throws IOException {
-        final String patch = generationPatch();
-        final int token = at(patch, " final net.minecraft.world.level.pathfinder.Path requested = this.path;");
-        final int generation = at(patch, "+        final int requestedGeneration = this.sourbyNavigationGeneration;");
-        final int pending = at(patch, " this.sourbyAsyncPathPending = true;");
+        final String source = source();
+        final int token = at(source, "final Path requested = navigation.getPath();");
+        final int generation = at(source, "final int requestedGeneration = navigation.sourbyNavigationGeneration();");
+        final int pending = at(source, "navigation.sourbyAsyncPathPending = true;");
         assertTrue(token < generation && generation < pending, "taken right after the token, before the flag");
-        final int path = at(patch, "AsyncPathValidity.stillRequested(this.path, requested)");
-        final int check = at(patch, "AsyncPathValidity.sameGeneration(this.sourbyNavigationGeneration, requestedGeneration)");
-        final int content = at(patch, " if (path != null && path.getTarget() != null) {");
+        final int path = at(source, "AsyncPathValidity.stillRequested(navigation.getPath(), requested)");
+        final int check = at(source, "AsyncPathValidity.sameGeneration(navigation.sourbyNavigationGeneration(), requestedGeneration)");
+        final int content = at(source, "if (path != null && path.getTarget() != null) {");
         assertTrue(path < check && check < content, "path token, then generation, then content");
     }
 
@@ -88,7 +104,7 @@ class AsyncPathPatchShapeTest {
         final int stopClear = patch.indexOf(" this.path = null;", stop);
         assertTrue(stopBump > stop && stopBump < stopClear, "stop() advances unconditionally, before clearing");
         // stop, moveTo(null), moveTo(new path), createPath's new request, the synchronous recompute,
-        // and an applied delivery.
+        // and an applied delivery (in sourbyApplyAsyncPath).
         assertEquals(6, count(patch, "++this.sourbyNavigationGeneration;"), "an added or removed bump needs a new test");
     }
 
@@ -126,13 +142,13 @@ class AsyncPathPatchShapeTest {
     @Test
     void theMobIsCapturedOnTheSubmittingThreadRightBeforeTheSubmitForPerTypeCounters() throws IOException {
         // AsyncPathTypeStats hands the entity type from MobPathSnapshot.captureDetached to the next
-        // AsyncPathProcessor.trySubmit on the same thread. That only holds while the patch captures
+        // AsyncPathProcessor.trySubmit on the same thread. That only holds while the helper captures
         // and submits in one straight line: nothing between them may submit, capture or return.
-        final String patch = snapshotPatch();
-        final int capture = at(patch, "MobPathSnapshot.captureDetached(mob)");
-        final int submit = at(patch, ".trySubmit(() -> solver.findPath(snapshot, subject, targets");
+        final String source = source();
+        final int capture = at(source, "MobPathSnapshot.captureDetached(mob)");
+        final int submit = at(source, ".trySubmit(() -> solver.findPath(snapshot, subject, targets");
         assertTrue(capture < submit, "capture before submit");
-        final String between = patch.substring(capture, submit);
+        final String between = source.substring(capture, submit);
         assertFalse(between.substring("captureDetached(mob)".length()).contains("captureDetached("),
             "no second capture between them");
         assertFalse(between.contains("return"), "no early exit between capture and submit");
@@ -141,59 +157,72 @@ class AsyncPathPatchShapeTest {
 
     private static int at(final String text, final String needle) {
         final int index = text.indexOf(needle);
-        assertTrue(index >= 0, "patch 0006 no longer contains: " + needle);
+        assertTrue(index >= 0, "the async path seam no longer contains: " + needle);
         return index;
     }
 
     @Test
-    void theRecomputeOffloadsOnlyWithALivePathAndNoSolvePending() throws IOException {
+    void theUpstreamSiteIsOneFlagGatedCallAndTheRecomputeOffloadsOnlyWithALivePathAndNoSolvePending() throws IOException {
         final String patch = patch();
-        final int guard = at(patch, "AsyncPathProcessor.isEnabled()");
-        assertTrue(at(patch, "this.path != null && !this.path.isDone()") > guard);
-        assertTrue(at(patch, "!this.sourbyAsyncPathPending") > guard);
-        assertTrue(at(patch, "this.sourbyKickAsyncRecompute(this.targetPos, this.reachRange)") > guard);
+        final int guard = at(patch, "+            if (dev.iyanz.sourbycraft.perf.AsyncPathProcessor.isEnabled()");
+        assertTrue(at(patch, "AsyncPathRecompute.offload(this, this.mob, this.level, this.targetPos, this.reachRange)") > guard,
+            "the flag is read first, so a disabled feature costs one volatile read and no call");
+        assertTrue(patch.lines().noneMatch(line -> line.startsWith("+") && line.contains("sourbyKickAsyncRecompute")),
+            "the offload logic stays out of PathNavigation");
+        assertTrue(patch.lines().noneMatch(line -> line.startsWith("+") && line.contains("EntityPathfindEvent")),
+            "the event fires from AsyncPathRecompute");
+        final String source = source();
+        final int live = at(source, "if (current == null || current.isDone() || navigation.sourbyAsyncPathPending) {");
+        assertTrue(at(source, "if (solveWritesMob(navigation, mob)) {") > live);
     }
 
     @Test
     void capacityIsCheckedBeforeTheSnapshotAndTheSubmissionIsATrySubmit() throws IOException {
-        final String patch = patch();
-        final int capacity = at(patch, "AsyncPathProcessor.hasCapacity()");
-        final int snapshot = at(patch, "new dev.iyanz.aurora.level.SnapshotPathRegion(");
-        final int submit = at(patch, ".trySubmit(() -> solver.findPath(snapshot, mob, targets");
-        assertTrue(capacity < snapshot && snapshot < submit);
-        assertTrue(patch.contains("if (solving == null) {"), "a refused submission falls back to the synchronous recompute");
+        final String source = source();
+        final int refusals = at(source, "if (solveWritesMob(navigation, mob)) {");
+        final int capacity = at(source, "if (!AsyncPathProcessor.hasCapacity()) {");
+        final int event = at(source, "new EntityPathfindEvent(");
+        final int snapshot = at(source, "new SnapshotPathRegion(");
+        final int submit = at(source, ".trySubmit(() -> solver.findPath(snapshot, subject, targets");
+        assertTrue(refusals < capacity && capacity < event && event < snapshot && snapshot < submit);
+        assertTrue(source.contains("if (solving == null) {"), "a refused submission falls back to the synchronous recompute");
     }
 
     @Test
-    void theValidityTokenIsTheCurrentPathTakenBeforeTheFlagIsSet() throws IOException {
-        final String patch = patch();
-        final int token = at(patch, "final net.minecraft.world.level.pathfinder.Path requested = this.path;");
-        final int pending = at(patch, "this.sourbyAsyncPathPending = true;");
-        final int submit = at(patch, ".trySubmit(() -> solver.findPath(snapshot, mob, targets");
-        assertTrue(token < pending && pending < submit);
+    void theMaxPathLengthIsReadAfterTheEventAndTheTokenBeforeTheFlagIsSet() throws IOException {
+        // Lazy, as in the old inline code: an EntityPathfindEvent listener may change the follow range
+        // or the path before these are read.
+        final String source = source();
+        final int event = at(source, "new EntityPathfindEvent(");
+        assertTrue(at(source, "navigation.sourbyMaxPathLength()") > event);
+        assertTrue(at(source, "navigation.sourbyVisitedNodesMultiplier()") > event);
+        final int token = at(source, "final Path requested = navigation.getPath();");
+        final int pending = at(source, "navigation.sourbyAsyncPathPending = true;");
+        final int submit = at(source, ".trySubmit(() -> solver.findPath(snapshot, subject, targets");
+        assertTrue(event < token && token < pending && pending < submit);
     }
 
     @Test
     void resultsAreDeliveredThroughTheOwnerAndCheckedSubjectThenPathThenContent() throws IOException {
+        final String source = source();
+        final int deliver = at(source, "AsyncPathCompletion.deliver(");
+        final int handoff = at(source, "RegionOwnerHandoff.forEntity(mob)");
+        final int release = at(source, "() -> navigation.sourbyAsyncPathPending = false));");
+        assertTrue(deliver < handoff && handoff < release, "owner handoff, then the release callback");
+        final int subject = at(source, "AsyncPathValidity.sameSubject(owner, mob)");
+        final int path = at(source, "AsyncPathValidity.stillRequested(navigation.getPath(), requested)");
+        final int content = at(source, "path != null && path.getTarget() != null");
+        final int apply = at(source, "navigation.sourbyApplyAsyncPath(path, reachRange);");
+        assertTrue(subject < path && path < content && content < apply, "subject, path token, content, then apply");
         final String patch = patch();
-        final int deliver = at(patch, "AsyncPathCompletion.deliver(");
-        final int handoff = at(patch, "RegionOwnerHandoff.forEntity(mob)");
-        final int subject = at(patch, "AsyncPathValidity.sameSubject(owner, mob)");
-        final int path = at(patch, "AsyncPathValidity.stillRequested(this.path, requested)");
-        final int content = at(patch, "path != null && path.getTarget() != null");
-        final int release = at(patch, "() -> this.sourbyAsyncPathPending = false");
-        assertTrue(deliver < handoff && handoff < subject && subject < path && path < content && content < release,
-            "owner handoff, subject check, path-token check, content check, then the release callback");
-        assertTrue(at(patch, "this.targetPos = path.getTarget();") > content, "the target is taken from the applied path");
+        final int write = at(patch, "+    public final void sourbyApplyAsyncPath(final Path path, final int reachRange) {");
+        assertTrue(at(patch, "+        this.targetPos = path.getTarget();") > write, "the target is taken from the applied path");
     }
 
     @Test
     void thePendingFlagIsClearedOnlyByTheReleaseCallbackOrARefusedSubmission() throws IOException {
-        final String patch = patch();
-        int clears = 0;
-        for (int from = 0, i; (i = patch.indexOf("this.sourbyAsyncPathPending = false", from)) >= 0; from = i + 1) {
-            clears++;
-        }
-        assertEquals(2, clears, "refused trySubmit and the release callback; any new clear needs a new test");
+        assertEquals(2, count(source(), "navigation.sourbyAsyncPathPending = false"),
+            "refused trySubmit and the release callback; any new clear needs a new test");
+        assertEquals(0, count(patch(), "this.sourbyAsyncPathPending = false"), "PathNavigation never clears it");
     }
 }

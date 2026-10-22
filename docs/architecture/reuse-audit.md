@@ -152,7 +152,7 @@ Not Sourby-owned, but Sourby patches changed who may reach it, so it is in scope
 per `PathNavigation` at construction (`PathNavigation.java:60`) and belongs to the
 mob's region thread.
 
-Patch 0006 does **not** share it. `sourbyKickAsyncRecompute` calls
+Patch 0006 does **not** share it. `sourbyKickAsyncRecompute` (since 2026-10-22 `AsyncPathRecompute.offload` through `PathNavigation.sourbyIsolatedPathFinder`) calls
 `this.createPathFinder(...)` to build a *fresh* solver for each async solve
 (`PathNavigation.java:153`, patch `0006-...patch:85-88`), with a comment saying
 exactly why. That is the correct call, and it is the single most important thing
