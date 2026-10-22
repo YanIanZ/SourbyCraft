@@ -17,6 +17,14 @@ import java.util.function.LongSupplier;
  * </ul>
  * Only the log is limited. Every failure is still fenced and counted by {@link AwfRegionStorage};
  * nothing here decides what is refused.
+ *
+ * <p>The same windowing serves two other per-storage records that a backend outage repeats
+ * (Build 49 gate "Backend failure", agent test server 2026-10-22): {@link #recoveryLog} for the
+ * INFO line of each fenced position read back after the backend returned (529 lines in one second
+ * when a 27x27 square loaded again), and {@link #commitFailureLog} for the WARN, with its stack, of
+ * each failed periodic commit (one per commit interval per storage while the backend is down: 603
+ * of 749 lines in a 75 s outage at a 5 s interval). Logging only: what is fenced, refused, retried
+ * or committed does not change.</p>
  */
 final class ReadFailureLog {
 
@@ -35,10 +43,26 @@ final class ReadFailureLog {
         else dev.iyanz.sourbycraft.util.SourbyLogger.error(message, stack);
     };
 
+    /** The text of a window's summary; {@code count} includes the window's first record. */
+    @FunctionalInterface
+    interface Summary {
+        String text(String storage, long count, long seconds, String first);
+    }
+
+    /** The failed-read summary (the original record of this class). */
+    static final Summary READ_FAILURES = (storage, count, seconds, first) -> "AWF reads of " + storage + " failed "
+        + count + " time(s) in the last " + seconds + " s; only the first was logged with its stack. Every failed"
+        + " position is fenced (its stored chunk is kept, writes of it are refused until it is read back). first"
+        + " error: " + first;
+
+    /** How long one window of {@link #commitFailureLog} lasts: several commit intervals. */
+    static final long COMMIT_WINDOW_NANOS = 60_000_000_000L;
+
     private final String storage;
     private final long windowNanos;
     private final LongSupplier clock;
     private final Sink sink;
+    private final Summary summary;
 
     private boolean open;
     private long windowStart;
@@ -49,14 +73,44 @@ final class ReadFailureLog {
     private long suppressed;
 
     ReadFailureLog(final String storage, final long windowNanos, final LongSupplier clock, final Sink sink) {
+        this(storage, windowNanos, clock, sink, READ_FAILURES);
+    }
+
+    ReadFailureLog(final String storage, final long windowNanos, final LongSupplier clock, final Sink sink,
+                   final Summary summary) {
         this.storage = storage;
         this.windowNanos = windowNanos;
         this.clock = clock;
         this.sink = sink;
+        this.summary = summary;
     }
 
     static ReadFailureLog serverLog(final String storage) {
         return new ReadFailureLog(storage, WINDOW_NANOS, System::nanoTime, SERVER_LOG);
+    }
+
+    /** The recovery summary: fenced positions read back on the chunk-load path. */
+    static final Summary RECOVERIES = (storage, count, seconds, first) -> "AWF read " + count + " fenced chunk"
+        + " position(s) of " + storage + " again in the last " + seconds + " s; their stored bytes were loaded and"
+        + " writes of them are accepted again (only the first was logged on its own: " + first + ")";
+
+    /** The periodic-commit failure summary. */
+    static final Summary COMMIT_FAILURES = (storage, count, seconds, first) -> "AWF commits for " + storage
+        + " failed " + count + " time(s) in the last " + seconds + " s; only the first was logged with its stack."
+        + " The chunks stay in memory and every commit retries them. first error: " + first;
+
+    /** Recovered fenced positions, at INFO: the first of a window on its own line, the rest in one summary. */
+    static ReadFailureLog recoveryLog(final String storage) {
+        return new ReadFailureLog(storage, WINDOW_NANOS, System::nanoTime,
+            (message, stack) -> dev.iyanz.sourbycraft.util.SourbyLogger.info(message), RECOVERIES);
+    }
+
+    /** Failed periodic commits, at WARN: the first of a 60 s window with its stack, the rest in one summary. */
+    static ReadFailureLog commitFailureLog(final String storage) {
+        return new ReadFailureLog(storage, COMMIT_WINDOW_NANOS, System::nanoTime, (message, stack) -> {
+            if (stack == null) dev.iyanz.sourbycraft.util.SourbyLogger.warn(message);
+            else dev.iyanz.sourbycraft.util.SourbyLogger.warn(message, stack);
+        }, COMMIT_FAILURES);
     }
 
     /**
@@ -99,9 +153,6 @@ final class ReadFailureLog {
         this.open = false;
         if (this.repeats == 0) return;
         final long seconds = Math.max(1L, (Math.max(now - this.windowStart, 0L) + 999_999_999L) / 1_000_000_000L);
-        this.sink.log("AWF reads of " + this.storage + " failed " + (this.repeats + 1) + " time(s) in the last "
-            + seconds + " s; only the first was logged with its stack. Every failed position is fenced (its"
-            + " stored chunk is kept, writes of it are refused until it is read back). first error: "
-            + this.firstMessage, null);
+        this.sink.log(this.summary.text(this.storage, this.repeats + 1, seconds, this.firstMessage), null);
     }
 }
