@@ -12,7 +12,7 @@
 
 # Patch inventory and ownership audit (PRD Phase 1)
 
-> **Historical numbering (updated 2026-10-21):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later in that historical snapshot. Current numbered feature-file counts: **75 Minecraft (0001–0075), 24 Paper (0001–0024), 3 sourbyapi (0001–0003)**, counted from `NNNN-*.patch` files on 2026-10-21. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
+> **Historical numbering (updated 2026-10-21):** the inventory table uses the build-45 numbers; the "thirteen patches, 0001-0013" set after action 2 matches today's 0001-0013, and 0014-0044 were added later in that historical snapshot. Current numbered feature-file counts: **78 Minecraft (0001–0078), 24 Paper (0001–0024), 3 sourbyapi (0001–0003)**, counted from `NNNN-*.patch` files on 2026-10-21. Old -> current Minecraft feature patch: 0001-0006 unchanged; old 0007 was folded into 0006; old 0008 -> 0007 (elytra); old 0009 removed (collision scratch lists); old 0010 -> 0008 (Projectile); old 0011 -> 0009 (lastKnownSpeed); old 0012 -> 0010 (random-tick BlockPos); old 0013, 0014, 0015 removed (world-border set, particle list, block-event list); old 0016 -> only its `Level` query overload remains, as 0011; old 0017 -> 0012 (`Entity#isInWall`); old 0018 -> 0013 (custom tick metrics); old 0019 folded into 0013. Current numbers 0014 and up are newer patches. Verify against `sourbycraft-server/minecraft-patches/features/` (`python3 scripts/patch_surface.py`).
 
 Historical build-45 review on `release/26.2-canvas`, classified per PRD section 22 with
 the section 87 fields. Counts are added and removed lines in the patch file itself.
@@ -48,7 +48,7 @@ entries; it is not repeated per row.
 
 ### Historical `minecraft-patches/features/` — 17 patches (0013 and 0015 removed by action 2)
 
-Current directory count: **77** numbered feature patches (0001–0077), 2026-10-22.
+Current directory count: **78** numbered feature patches (0001–0078), 2026-10-22.
 
 | Patch | Category | Upstream dependency | Lines | Status | Action |
 | --- | --- | --- | ---: | --- | --- |
@@ -90,9 +90,9 @@ Current directory count: **77** numbered feature patches (0001–0077), 2026-10-
 | Patch | Category | Upstream dependency | Lines | Status | Action |
 | --- | --- | --- | ---: | --- | --- |
 | `Metrics.java` remove bStats phone-home | 800-security | Paper metrics | +24 −13 | KEEP | None. |
-| `PaperBootstrap` brand the boot line | 900-branding | Paper bootstrap | +36 −6 | KEEP | None. |
+| `PaperBootstrap` launch lines (paper 0002) | 900-branding | Paper bootstrap | +14 −10 | KEEP | Build 49 console: Paper's two bootstrap lines replaced by `brand/LaunchLines.bootstrap(...)` (build identity + runtime); the patch is the call. |
 | `log4j2.xml` colour the SourbyCraft prefix | 900-branding | Paper resources | +5 | KEEP | None. |
-| `log4j2.xml` short logger tags, ANSI only on a terminal, repeat filter (paper 0016) | 900-branding | Paper resources | +10 −9 | KEEP | Removes 0004's `%style` line; the two could be squashed. Logic lives in `src/log4jPlugins` (`%scLogger`, `%ansiIfTerminal`, `RepeatedMessageFilter`). |
+| `log4j2.xml` Build 49 console layout: time, level, tag columns; plain file lines; repeat filter (paper 0016) | 900-branding | Paper resources | +14 −14 | KEEP | One pattern per appender; the `sc*` converters in `src/log4jPlugins` (`%scLogger`, `%scLevel`, `%scHighlight`, `%scDim`, `%ansiIfTerminal`, `%plainText`, `RepeatedMessageFilter`) write escape codes only on a real terminal. Removes 0004's `%style` line; the two could be squashed. See `docs/AURORA-UX.md`. |
 | data command ownership (minecraft 0069) | 300-correctness | `DataCommands`, `StorageDataAccessor`, `BlockDataAccessor` | +93 −63 | REVIEW | Restores `/data … storage` through `command/DataCommandThreading`: storage-only commands and storage suggestions run on the global tick; a mixed storage + block/entity `modify … from` reads the source on its owner, copies it, and writes the target on its owner. Storage touched from a region by `/execute … storage` or `/function … with storage` is a command error. Console/RCON block data is handed to the owning region again (the block entity is looked up there); regions refuse an unowned block before any world access. Inline runs return the real result; handed-off runs return 0. See `persistence-save-paths.md`. |
 | global-tick autosave of the world border, random sequences, `/data storage` and `level.dat` (minecraft 0056) | 300-correctness | `RegionizedServer` (2 call sites) | +11 −0 | KEEP | Persistence: these were written only at a clean stop (Folia/Canvas). Logic in `world/WorldMetadataAutosave` (per-type `saveSpecific`, re-dirty on a failing encode); ledger in `persistence-save-paths.md`. |
 | `MinecraftServer.processQueue` fails loudly (minecraft 0060) | 300-correctness | `MinecraftServer` (constructor) | +1 −0 | KEEP | Nothing drains the queue under region threading; `UndrainedQueue` throws and logs the caller once. Logic in `guards/UndrainedQueue`; ledger `inherited-guards.md`. |
@@ -120,6 +120,7 @@ Current directory count: **77** numbered feature patches (0001–0077), 2026-10-
 | Aurora wording for the region scheduler start line (minecraft 0075) | 900-branding | `TickRegions` (engine baseline) | +1 −1 | KEEP | `Initialised EDF Folia scheduler with initial N target thread(s)` -> `Initialised Aurora region scheduler (EDF) with initial N target thread(s)`; text only, scheduler type and thread count unchanged; no script/test reads the line. Build 48 gate 1 (startup log). |
 | hold a stop requested during startup until startup ends (minecraft 0076) | 300-correctness | `MinecraftServer`, `DedicatedServer` | +13 −0 | REVIEW | Logic in `startup/StartupStopGate`: a stop the server thread asks for before startup has ended (`Bukkit.shutdown()` from `onEnable`) is only marked; startup goes on as on Paper, `initServer` then skips query/rcon, the startup save and the started notification, and `runServer` logs `Startup stopped: ...` instead of starting the region scheduler and `Done (`, then runs the normal stop (one save, storage open). Before: the region shutdown thread ran concurrently with the rest of startup (`ClosedChannelException` flushes, `Done (` after `Stopping server`, or `System.exit` mid-startup). A startup crash after such a request still runs the stop; stops from other threads unchanged. Evidence `docs/development/stop-during-startup-2026-10-22.md`. |
 | write the periodic level.dat off the global tick (minecraft 0077) | 300-correctness | `MinecraftServer` | +1 −0 | REVIEW | Hook in `saveGlobalData`: `WorldMetadataAutosave.awaitLevelDatWrites()` before the shutdown `level.dat` write. Logic in `world/WorldMetadataAutosave`: the periodic global autosave builds the `level.dat` tag on the global tick and writes the file on one bounded daemon thread (`SourbyCraft level.dat writer`), skipping while a write is outstanding; `save-all` still writes on the caller after it. Before: the 0056 periodic write ran `write0` on the global tick and held it for a whole disk stall (57-60 s). Evidence `docs/development/region-io-blocking-2026-10-22.md`. Local number; renumber on top if another 0077 lands first. |
+| console section rules before plugin load, world preparation and the post-world enable pass (minecraft 0078) | 900-branding | `DedicatedServer#initServer` (2 lines), `MinecraftServer#loadLevel` (1 line) | +3 −0 | KEEP | Three one-line calls into `brand/ConsoleSections` (`plugins()`, `worlds()`, `pluginsPostWorld()`); each never throws. Build 49 console. |
 | server GUI icon (minecraft 0070) | 900-branding | `MinecraftServerGui` | +1 −1 | KEEP | `sourbycraft-logo.png` replaces `canvas-logo.png`. The engine's other Canvas-era names (ticket ids, `aurora:pearls`, `Aurora.*` JVM flags, `Aurora.Distance`, `AuroraVersionFetcher`, `AuroraFileMigration`) were renamed in the engine baseline (no `sourby` text there, manifest regenerated) and the dormant `/canvas` command sources were deleted from it; see `independence.md` §2.2. |
 
 ## Recommended actions, in priority order
@@ -210,8 +211,8 @@ different file but as one feature. 0007's explanation was carried into 0006's me
 rather than deleted with the file.
 
 At that historical action-3 checkpoint, the Minecraft feature set was thirteen patches,
-renumbered `0001-0013` with no gaps. Current counts (2026-10-21): **66 Minecraft, 20 Paper,
-2 sourbyapi** numbered feature patches; the tables above retain their historical numbering.
+renumbered `0001-0013` with no gaps. Current counts (2026-10-22): **78 Minecraft, 24 Paper,
+3 sourbyapi** numbered feature patches; the tables above retain their historical numbering.
 
 The gaps this originally left were not sustainable. `rebuildMinecraftFeaturePatches`
 renumbers the whole set every time it runs — it regenerates the filenames from the

@@ -7,7 +7,7 @@ import java.util.Properties;
 
 /**
  * Immutable snapshot of {@code META-INF/sourbycraft-build.properties}, baked into the jar at build
- * time. Read by {@code /ver}, {@code /sourbycraft version}, {@link SourbyCraftBanner} and the
+ * time. Read by {@code /ver}, {@code /sourbycraft version}, {@link LaunchLines}, {@link ReadySummary} and the
  * auto-updater so they all report the same version/build/tagline without re-parsing the jar.
  *
  * @param version        the channel version, e.g. {@code "26.2-REL"}
@@ -16,7 +16,7 @@ import java.util.Properties;
  *                       the platform suffix; derived from {@code build} when the properties file
  *                       predates the field
  * @param mcVersion       the Minecraft version this build targets
- * @param tagline        short marketing tagline shown in the startup banner
+ * @param tagline        short marketing tagline (baked, not shown on the Build 49 console)
  * @param buildTimestamp ISO-8601 instant the jar was built, or empty if unknown
  * @param gitBranch      source branch, from the same provider as the manifest's Git-Branch
  * @param gitCommit      full source commit, matching the manifest's Git-Commit
@@ -111,7 +111,7 @@ public record BuildInfo(
      * {@link #loadFrom(InputStream) loadFrom(null)} defaults if the resource is missing/unreadable.
      */
     public static BuildInfo load() {
-        // The classpath resource cannot change mid-process; /ver, the banner and the updater all
+        // The classpath resource cannot change mid-process; /ver, the launch lines and the updater all
         // call this — parse the properties once instead of re-reading the jar per call.
         BuildInfo cached = CACHED;
         if (cached != null) return cached;

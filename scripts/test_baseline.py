@@ -955,8 +955,8 @@ class ReadinessTest(unittest.TestCase):
     """
 
     DONE = 'Done (12.345s)! For help, type "help"\n'
-    SUMMARY = ("[Aurora Engine] COMPLETE | 14/14 stages completed without error | 0 failed | 812ms\n"
-               "Minecraft continues loading; wait for the server-ready message before connecting.\n")
+    SUMMARY = ("[12:00:00 INFO]: [Aurora] Engine COMPLETE | 14/14 stages ok | 0 failed | 812 ms"
+               " | slowest: startup index 23 ms\n")
 
     def test_done_alone_is_not_ready(self):
         self.assertEqual(run_baseline.startup_state(self.DONE), ("waiting", None))
@@ -969,17 +969,18 @@ class ReadinessTest(unittest.TestCase):
         self.assertEqual(run_baseline.startup_state(self.DONE + self.SUMMARY), ("ready", None))
 
     def test_a_colour_painted_summary_is_recognised(self):
-        # ConsoleStyle.paint wraps the verdict text in a 24-bit ANSI sequence when the style is rich.
-        painted = ("\x1b[38;2;80;200;120mCOMPLETE | 14/14 stages completed without error | 0 failed"
-                   " | 812ms\x1b[0m\n")
+        # On a real terminal the console layout paints the level and tag; the message text stays plain.
+        painted = ("\x1b[38;2;100;116;139m12:00:00\x1b[0m \x1b[38;2;125;211;252mINFO \x1b[0m "
+                   "\x1b[38;2;192;132;252mAurora\x1b[0m       Engine COMPLETE | 14/14 stages ok | 0 failed"
+                   " | 812 ms\n")
         self.assertEqual(run_baseline.startup_state(painted + self.DONE), ("ready", None))
 
     def test_a_degraded_boot_fails_the_run_instead_of_being_measured(self):
-        degraded = "DEGRADED | 13/14 stages completed without error | 1 failed | 900ms\n"
+        degraded = "Engine DEGRADED | 13/14 stages ok | 1 failed: configuration | 900 ms\n"
         state, reason = run_baseline.startup_state(degraded + self.DONE)
         self.assertEqual(state, "failed")
         self.assertIn("Aurora boot DEGRADED", reason)
-        self.assertIn("13/14 stages completed without error | 1 failed", reason)
+        self.assertIn("13/14 stages ok | 1 failed", reason)
 
     def test_a_startup_failure_marker_still_fails_first(self):
         state, reason = run_baseline.startup_state("FAILED TO BIND TO PORT\n" + self.SUMMARY + self.DONE)

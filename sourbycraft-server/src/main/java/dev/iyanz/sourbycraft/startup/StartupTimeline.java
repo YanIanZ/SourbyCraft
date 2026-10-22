@@ -81,8 +81,9 @@ public final class StartupTimeline {
         final StartupProfile before = StartupProfile.load(file);
         previous = before;
         last = current;
-        SourbyLogger.info("Aurora startup: " + current.totalMillis() + " ms to ready, " + current.startClass()
-            + " start; " + current.compareTo(before));
+        // The Ready section: rule + one summary line (build, Minecraft, time to ready, worlds, plugins, threads).
+        dev.iyanz.sourbycraft.brand.ReadySummary.log(current.totalMillis(),
+            current.startClass() + " start; " + current.compareTo(before));
         try {
             current.save(file);
         } catch (final IOException unwritable) {

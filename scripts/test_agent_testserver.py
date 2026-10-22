@@ -27,7 +27,7 @@ FAKE_SERVER = textwrap.dedent("""
     if mode == "bind-fail":
         print("**** FAILED TO BIND TO PORT!", flush=True)
         sys.exit(1)
-    print("[Aurora Engine] COMPLETE | 3/3 stages completed without error | 0 failed | 5ms", flush=True)
+    print("[12:00:00 INFO]: [Aurora] Engine COMPLETE | 3/3 stages ok | 0 failed | 5 ms", flush=True)
     print('[12:00:00 INFO]: Done (0.42s)! For help, type "help"', flush=True)
     if mode == "crash":
         time.sleep(2.5)

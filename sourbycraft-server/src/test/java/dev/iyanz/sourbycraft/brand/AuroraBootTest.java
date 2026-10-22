@@ -2,78 +2,76 @@ package dev.iyanz.sourbycraft.brand;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** The boot bar has to mean stages completed, not time elapsed. */
+/** The engine summary has to mean stages completed, and a failure can never read as success. */
 public class AuroraBootTest {
 
-    private static String plain(final String rendered) {
-        return rendered.replaceAll("\u001B\\[[0-9;]*m", "");
+    private static final AuroraBoot.Stage OK = new AuroraBoot.Stage("metrics runtime", true, 7);
+    private static final AuroraBoot.Stage SLOW = new AuroraBoot.Stage("startup index", true, 23);
+    private static final AuroraBoot.Stage BAD = new AuroraBoot.Stage("configuration", false, 20);
+
+    @Test
+    void aCompleteBootIsOneLineWithTheVerdictCountsTimeAndSlowestStage() {
+        assertEquals("Engine COMPLETE | 3/3 stages ok | 0 failed | 106 ms | slowest: startup index 23 ms",
+            AuroraBoot.summary(List.of(OK, SLOW, new AuroraBoot.Stage("gc tracker", true, 1)), 3, 106L));
     }
 
     @Test
-    void thePercentageIsStagesDoneNotTimeElapsed() {
-        assertTrue(plain(AuroraBoot.render(0, 11, "metrics runtime", false)).contains("0%"));
-        assertTrue(plain(AuroraBoot.render(11, 11, "gc tracker", false)).contains("100%"));
-        // 5 of 11 rounds to 45, not to a tidy half.
-        assertTrue(plain(AuroraBoot.render(5, 11, "plugin diagnostics", false)).contains("45%"));
-    }
-
-    @Test
-    void theBarFillsInProportionToProgress() {
-        assertEquals(0, filled(AuroraBoot.render(0, 8, "start", false)));
-        assertEquals(AuroraBoot.CELLS, filled(AuroraBoot.render(8, 8, "done", false)));
-        assertEquals(AuroraBoot.CELLS / 2, filled(AuroraBoot.render(4, 8, "half", false)));
-    }
-
-    @Test
-    void aStageNameIsAlwaysShownSoASlowBootSaysWhereItIs() {
-        assertTrue(plain(AuroraBoot.render(3, 11, "Virtual Executor", false)).contains("virtual executor"));
-    }
-
-    @Test
-    void progressBeyondTheDeclaredStagesCannotExceedFull() {
-        // A miscounted total must not render 130% or overflow the bar.
-        final String line = plain(AuroraBoot.render(20, 8, "overrun", false));
-        assertTrue(line.contains("100%"));
-        assertEquals(AuroraBoot.CELLS, filled(AuroraBoot.render(20, 8, "overrun", false)));
-    }
-
-    @Test
-    void noStagesDeclaredRendersEmptyRatherThanDividingByZero() {
-        final String line = plain(AuroraBoot.render(0, 0, "nothing", false));
-        assertTrue(line.contains("0%"));
-        assertEquals(0, filled(AuroraBoot.render(0, 0, "nothing", false)));
-    }
-
-    @Test
-    void theSummarySaysDegradedRatherThanReportingSuccess() {
-        // The failure mode this exists to prevent: a bar that fills to 100% and a line that says
-        // everything is fine, while a stage threw on the way past.
-        assertTrue(plain(AuroraBoot.summary(11, 0, 42L)).contains("11/11 stages completed without error"));
-        final String degraded = plain(AuroraBoot.summary(11, 2, 42L));
-        assertTrue(degraded.contains("DEGRADED") && degraded.contains("2 failed"));
+    void theSummarySaysDegradedAndNamesTheFailedStagesRatherThanReportingSuccess() {
+        // The failure mode this exists to prevent: a line that says everything is fine while a
+        // stage threw on the way past.
+        final String degraded = AuroraBoot.summary(List.of(OK, BAD, SLOW), 3, 42L);
+        assertEquals("Engine DEGRADED | 2/3 stages ok | 1 failed: configuration | 42 ms | slowest: startup index 23 ms", degraded);
+        assertFalse(degraded.contains("COMPLETE"));
         assertFalse(degraded.contains("online"));
+        assertFalse(degraded.contains("Done ("), "the summary must not trigger readiness probes");
     }
 
     @Test
-    void theSummaryReportsHowLongTheEngineTook() {
-        assertTrue(plain(AuroraBoot.summary(11, 0, 137L)).contains("137ms"));
+    void everyStageFailingIsFailedNotDegraded() {
+        final String failed = AuroraBoot.summary(List.of(BAD, new AuroraBoot.Stage("commands", false, 1)), 2, 9L);
+        assertTrue(failed.startsWith("Engine FAILED | 0/2 stages ok | 2 failed: configuration, commands | 9 ms"), failed);
+        assertEquals("FAILED", AuroraBoot.verdict(2, 2));
+        assertEquals("DEGRADED", AuroraBoot.verdict(2, 1));
+        assertEquals("COMPLETE", AuroraBoot.verdict(2, 0));
     }
 
     @Test
-    void nothingRenderedIsAnEmoji() {
-        // Explicitly not decorated: the console is a log, and an operator greps it.
+    void theSummaryMatchesWhatRunBaselineParses() {
+        // scripts/run_baseline.py BOOT_SUMMARY; keep in lockstep.
+        final java.util.regex.Pattern parsed = java.util.regex.Pattern.compile(
+            "Engine (COMPLETE|DEGRADED|FAILED) \\| (\\d+)/(\\d+) stages ok \\| (\\d+) failed");
+        assertTrue(parsed.matcher(AuroraBoot.summary(List.of(OK), 1, 1L)).find());
+        assertTrue(parsed.matcher(AuroraBoot.summary(List.of(OK, BAD), 2, 1L)).find());
+    }
+
+    @Test
+    void stagesBeyondTheDeclaredTotalCannotReadAsMoreThanFull() {
+        // A miscounted total must not render 20/8.
+        assertTrue(AuroraBoot.summary(java.util.Collections.nCopies(20, OK), 8, 5L).contains("| 8/8 stages ok |"));
+        assertTrue(AuroraBoot.summary(List.of(), 0, 0L).startsWith("Engine COMPLETE | 0/0 stages ok | 0 failed | 0 ms"));
+    }
+
+    @Test
+    void theDebugStageLineAndTheFailureWarningNameTheStage() {
+        assertEquals("  3/15  configuration             20 ms  FAILED", AuroraBoot.stageLine(3, 15, BAD));
+        assertEquals("  1/15  metrics runtime            7 ms  ok", AuroraBoot.stageLine(1, 15, OK));
+        final String warning = AuroraBoot.failureLine(3, 15, BAD);
+        assertTrue(warning.startsWith("Stage 3/15 \"configuration\" FAILED after 20 ms"), warning);
+        assertTrue(warning.contains("continues without it"), warning);
+    }
+
+    @Test
+    void nothingRenderedIsAnEmojiOrAnEscapeCode() {
+        // Explicitly not decorated: the console is a log, an operator greps it, and colour is the
+        // layout's job (terminal only).
         for (final String line : new String[] {
-            AuroraBoot.render(5, 11, "commands", false),
-            AuroraBoot.render(5, 11, "commands", true),
-            AuroraBoot.summary(11, 1, 10L)}) {
-            line.codePoints().forEach(cp -> assertTrue(cp < 0x1F000,
-                "unexpected pictograph U+" + Integer.toHexString(cp)));
+            AuroraBoot.stageLine(5, 11, OK), AuroraBoot.failureLine(5, 11, BAD),
+            AuroraBoot.summary(List.of(OK, BAD), 11, 10L)}) {
+            line.codePoints().forEach(cp -> assertTrue(cp < 0x1F000 && cp != 0x1B,
+                "unexpected code point U+" + Integer.toHexString(cp) + " in " + line));
         }
-    }
-
-    private static int filled(final String rendered) {
-        return (int) plain(rendered).chars().filter(c -> c == '\u2588' || c == '=').count();
     }
 }

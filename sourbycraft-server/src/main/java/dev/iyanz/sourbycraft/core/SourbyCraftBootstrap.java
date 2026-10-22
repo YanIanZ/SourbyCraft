@@ -4,7 +4,6 @@ import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin;
 import dev.iyanz.sourbycraft.bootstrap.PluginProvisioner;
 import dev.iyanz.sourbycraft.brand.PluginLoadDiagnostics;
-import dev.iyanz.sourbycraft.brand.StartupBanner;
 import dev.iyanz.sourbycraft.command.SourbyCraftCommands;
 import dev.iyanz.sourbycraft.lang.SourbyJoinLeaveListener;
 import dev.iyanz.sourbycraft.lang.SourbyMotd;
@@ -33,7 +32,7 @@ public final class SourbyCraftBootstrap {
 
     private static volatile boolean started = false;
 
-    /** The engine's console tag: stage results, the boot summary and the thread ledger print as {@code [Aurora]}. */
+    /** The engine's console tag: the boot summary, failed-stage warnings and the thread ledger print as {@code Aurora}. */
     static final java.util.logging.Logger AURORA = java.util.logging.Logger.getLogger("Aurora");
     /** Same logger through the log4j API, for real DEBUG events. */
     private static final org.apache.logging.log4j.Logger AURORA_DEBUG = org.apache.logging.log4j.LogManager.getLogger("Aurora");
@@ -105,6 +104,7 @@ public final class SourbyCraftBootstrap {
         final long begun = System.nanoTime();
         stageCount = 0;
         failureCount = 0;
+        dev.iyanz.sourbycraft.brand.ConsoleSections.engine();
 
         // Before command and plugin loading; shutdown keeps it readable through plugin disable.
         stage("metrics runtime", () -> {
@@ -143,8 +143,9 @@ public final class SourbyCraftBootstrap {
             PluginProvisioner.provisionConfigs(SourbyCraftConfig.cfgBool(dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), true));
         });
 
-        stage("banner", () -> {
-            StartupBanner.printOnce();
+        // Warning-only JVM flag advice, logged so it reaches logs/latest.log (no stdout banner since Build 49).
+        stage("jvm advisor", () -> {
+            dev.iyanz.sourbycraft.brand.JvmAdvisor.logOnce();
         });
 
         // ORDERING: must precede CraftServer#loadPlugins, or load failures go uncaptured for /sys.
@@ -195,10 +196,13 @@ public final class SourbyCraftBootstrap {
         });
 
         publishBootStages();
-        // One log call per line, so the readiness hint after the summary gets its own timestamp.
-        for (final String line : dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
-                TOTAL_STAGES, failureCount, (System.nanoTime() - begun) / 1_000_000L).split("\n")) {
-            AURORA.info(line);
+        // One line closes the Engine section (scripts/run_baseline.py reads it); WARN when a stage failed.
+        final String summary = dev.iyanz.sourbycraft.brand.AuroraBoot.summary(
+            bootStages, TOTAL_STAGES, (System.nanoTime() - begun) / 1_000_000L);
+        if (failureCount > 0) {
+            AURORA.warning(summary);
+        } else {
+            AURORA.info(summary);
         }
         // Configured thread ceilings per pool against the processors (audit ENG-9). Report only.
         try {
@@ -273,10 +277,11 @@ public final class SourbyCraftBootstrap {
      * the progress line cannot read healthy while something is broken.</p>
      */
     static void stage(final String name, final Runnable body) {
-        // The console gets one line per stage, written when it finishes (OK or FAIL). START is a
-        // log4j DEBUG event (JUL FINE would arrive as TRACE), shown with a log4j config that sets
-        // <Logger name="Aurora" level="debug"/>. A stage still running after SLOW_STAGE_MILLIS
-        // gets a WARN naming it, so a hang is visible without DEBUG.
+        // The console gets no INFO line per stage: the Engine section closes with one summary.
+        // START and the per-stage result are log4j DEBUG events (JUL FINE would arrive as TRACE),
+        // shown with a log4j config that sets <Logger name="Aurora" level="debug"/>. A failed
+        // stage gets a WARN naming it, and a stage still running after SLOW_STAGE_MILLIS gets a
+        // WARN naming it, so a failure or a hang is visible without DEBUG.
         AURORA_DEBUG.debug("START {}/{}  {}", stageCount + 1, TOTAL_STAGES, name);
         final long stageBegun = System.nanoTime();
         final java.util.concurrent.atomic.AtomicBoolean finished = new java.util.concurrent.atomic.AtomicBoolean();
@@ -305,7 +310,9 @@ public final class SourbyCraftBootstrap {
         var result = new dev.iyanz.sourbycraft.brand.AuroraBoot.Stage(name, successful,
             (System.nanoTime() - stageBegun) / 1_000_000L);
         progress.add(result);
-        AURORA.info(dev.iyanz.sourbycraft.brand.AuroraBoot.render(
-            stageCount, TOTAL_STAGES, result, failureCount, dev.iyanz.sourbycraft.brand.ConsoleStyle.current()));
+        AURORA_DEBUG.debug(dev.iyanz.sourbycraft.brand.AuroraBoot.stageLine(stageCount, TOTAL_STAGES, result));
+        if (!successful) {
+            AURORA.warning(dev.iyanz.sourbycraft.brand.AuroraBoot.failureLine(stageCount, TOTAL_STAGES, result));
+        }
     }
 }

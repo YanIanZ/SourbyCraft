@@ -1,5 +1,7 @@
 package dev.iyanz.sourbycraft.console;
 
+import java.util.HashMap;
+import java.util.Map;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.config.plugins.Plugin;
@@ -8,32 +10,44 @@ import org.apache.logging.log4j.core.pattern.LogEventPatternConverter;
 import org.apache.logging.log4j.core.pattern.PatternConverter;
 
 /**
- * {@code %scLogger}: the logger name as a short, readable {@code [tag]} for the console and file
- * patterns in {@code log4j2.xml} (paper feature patch 0016).
+ * {@code %scLogger}: the logger name as a short tag, the third column of the console line and the
+ * bracketed tag of the file line in {@code log4j2.xml} (paper feature patch 0016).
  *
- * <p>Stock Paper prints {@code [%logger]}, so any logger named after its class prints the fully
- * qualified name, e.g. {@code [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry]}
- * or {@code [oshi.software.os.mac.MacOperatingSystem]}. This converter shortens only names in a
- * fixed list of server-internal namespaces and prints every other name exactly as it is, so a
- * plugin or library logger (including dotted names such as {@code My.Plugin} or
- * {@code com.example.plugin.Main}) keeps its identity:
+ * <p>Server-internal loggers are named after their classes, either fully qualified
+ * ({@code LoggerFactory.getLogger(Class)}, e.g. {@code oshi.software.os.mac.MacOperatingSystem})
+ * or by simple class name (Mojang's {@code LogUtils.getClassLogger()}, e.g.
+ * {@code PluginInitializerManager}, {@code TickRegions}). This converter folds every internal
+ * namespace, and every known internal simple class name, onto one of five tags and prints every
+ * other name exactly as it is, so a plugin or library logger (including dotted names such as
+ * {@code My.Plugin} or {@code com.example.plugin.Main}) keeps its identity:
  * <ul>
- *   <li>{@code dev.iyanz.sourbycraft.*} becomes {@code SourbyCraft/<Class>};</li>
- *   <li>{@code dev.iyanz.aurora.*} becomes {@code Aurora/<Class>};</li>
- *   <li>{@code ca.spottedleaf.dataconverter.*} becomes {@code DataConverter}, {@code oshi.*} {@code OSHI};</li>
- *   <li>{@code io.papermc.*}, {@code ca.spottedleaf.*}, {@code net.minecraft.*},
- *       {@code org.bukkit.craftbukkit.*}, {@code com.mojang.*} and {@code com.destroystokyo.paper.*}
- *       become their simple class name (the segment after the last dot, without a {@code $Inner}
- *       suffix), which is what Paper's own class loggers already print;</li>
- *   <li>anything else, and every name without a dot, is printed unchanged.</li>
+ *   <li>{@code SourbyCraft}: {@code dev.iyanz.sourbycraft.*} and the owned area loggers
+ *       {@code SourbyCraft/<Area>};</li>
+ *   <li>{@code Aurora}: {@code dev.iyanz.aurora.*}, the region-threading engine's
+ *       {@code io.papermc.paper.threadedregions.*}, and the engine classes that log by simple
+ *       name ({@link #ENGINE_CLASSES});</li>
+ *   <li>{@code Minecraft}: {@code net.minecraft.*}, {@code com.mojang.*}, the {@code Minecraft}
+ *       logger and the root logger;</li>
+ *   <li>{@code Paper}: {@code io.papermc.*}, {@code ca.spottedleaf.*},
+ *       {@code org.bukkit.craftbukkit.*}, {@code com.destroystokyo.paper.*}, {@code org.spigotmc.*},
+ *       and the Paper classes that log by simple name ({@link #PAPER_CLASSES});</li>
+ *   <li>{@code OSHI}: {@code oshi.*};</li>
+ *   <li>{@code com.sk89q.*} and {@code ru.tehkode.*} (plugins that bypass the plugin logger, the
+ *       names Paper used to print without a prefix) print their simple class name;</li>
+ *   <li>anything else, and every other name without a dot, is printed unchanged.</li>
  * </ul>
- * An empty (root) logger name prints nothing.
+ * The simple-name tables list the classes in the materialized Paper, Minecraft and engine sources
+ * that call {@code LogUtils.getClassLogger()} or name their logger literally (2026-10-22);
+ * {@code StartupLogLayoutTest} scans those sources and fails when a class is missing here. The
+ * region-scheduler class names appear only as log tags to fold; this converter calls nothing.
  *
- * <p>The output is plain text. With the {@code console} option ({@code %scLogger{console}}) the
- * {@code SourbyCraft} and {@code Aurora} tags are coloured, but only when TerminalConsoleAppender
- * reports ANSI support (a real terminal) and only below WARN, where {@code %highlightError} does
- * not already colour the whole line. Redirected output (a panel, {@code > server.log}, Docker logs)
- * and {@code logs/latest.log} therefore never contain escape codes from this converter.
+ * <p>Options: {@code %scLogger{console}} pads the tag to {@value #COLUMN} characters so the
+ * message column lines up, and colours the {@code SourbyCraft} and {@code Aurora} tags, but only
+ * on a real terminal ({@link ConsolePalette#terminal()}) and only below WARN, where
+ * {@code %scHighlight} does not already colour the message. {@code %scLogger{file}} prints
+ * {@code [tag]}, the shape log analysers expect in {@code logs/latest.log}. Without an option the
+ * bare tag is printed. Longer tags are never cut: a plugin's name is its identity. Lookups are a
+ * prefix scan over a short table plus one hash lookup; nothing is allocated per event.
  *
  * <p>Compiled from the {@code log4jPlugins} source set, so the annotation processor lists it in
  * {@code Log4j2Plugins.dat} and it is available when log4j first reads {@code log4j2.xml}.
@@ -42,39 +56,76 @@ import org.apache.logging.log4j.core.pattern.PatternConverter;
 @ConverterKeys({"scLogger"})
 public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
 
-    private static final String ESC = "\u001B";
-    private static final String RESET = ESC + "[0m";
-    // Brand palette mirrored from dev.iyanz.sourbycraft.SourbyCraftColors (this source set is
-    // compiled without the server module, so the values are duplicated; keep them in sync).
-    private static final String PRIMARY = fg(0xFF, 0xB3, 0x47); // #FFB347 SourbyCraft
-    private static final String AURORA = fg(0x22, 0xD3, 0xEE); // #22D3EE Aurora
+    /** Width of the console tag column: {@code SourbyCraft} plus one space. */
+    static final int COLUMN = 12;
 
-    private static final String BRAND = "SourbyCraft";
-    private static final String ENGINE = "Aurora";
+    static final String BRAND = "SourbyCraft";
+    static final String ENGINE = "Aurora";
+    static final String MINECRAFT = "Minecraft";
+    static final String PAPER = "Paper";
+    static final String OSHI = "OSHI";
 
     /**
-     * Known internal namespace prefix to tag. A tag ending in '/' gets the simple class name
-     * appended; an empty tag means the simple class name alone. Unlisted names are never changed.
+     * Known internal namespace prefix to tag, first match wins. An empty tag means the simple
+     * class name. Unlisted names are never changed.
      */
     private static final String[][] ALIASES = {
-        {"dev.iyanz.sourbycraft.", BRAND + "/"},
-        {"dev.iyanz.aurora.", ENGINE + "/"},
-        {"ca.spottedleaf.dataconverter.", "DataConverter"},
-        {"oshi.", "OSHI"},
-        // Server internals: the simple class name ("" = no prefix).
-        {"io.papermc.", ""},
-        {"ca.spottedleaf.", ""},
-        {"net.minecraft.", ""},
-        {"org.bukkit.craftbukkit.", ""},
-        {"com.mojang.", ""},
-        {"com.destroystokyo.paper.", ""},
+        {"dev.iyanz.sourbycraft.", BRAND},
+        {"dev.iyanz.aurora.", ENGINE},
+        {"io.papermc.paper.threadedregions.", ENGINE},
+        {"net.minecraft.", MINECRAFT},
+        {"com.mojang.", MINECRAFT},
+        {"io.papermc.", PAPER},
+        {"ca.spottedleaf.", PAPER},
+        {"org.bukkit.craftbukkit.", PAPER},
+        {"com.destroystokyo.paper.", PAPER},
+        {"org.spigotmc.", PAPER},
+        {"oshi.", OSHI},
+        {"com.sk89q.", ""},
+        {"ru.tehkode.", ""},
     };
 
-    private final boolean console;
+    /** Engine (region threading, engine configuration, spark pinning) classes that log by simple name or literal. */
+    static final String[] ENGINE_CLASSES = {
+        "AuroraFileMigration", "ConfigurationProvider", "PearlsMigration",
+        "FoliaAsyncScheduler", "FoliaWatchdogThread", "RegionizedServer", "RegionizedWorldData", "RegionShutdownThread",
+        "TickRegions", "TickRegionScheduler", "WorldShutdownThread",
+        "Scheduler", "SparkRegionPinner", "SparkGlobalPinner",
+    };
+
+    /** Paper classes that log by simple name or literal. */
+    static final String[] PAPER_CLASSES = {
+        "BootstrapProviderStorage", "ChunkHolderManager", "ChunkTaskScheduler", "Configurations", "CraftPlayer",
+        "DirectoryProviderSource", "EnderPearls", "EntrypointUtil", "EnumValueSerializer", "FeatureSeedsGeneration",
+        "FileArrayProviderSource", "FileProviderSource", "HorriblePlayerLoginEventHack", "IntOr",
+        "LegacyCraftBukkitWorldMigration", "LegacyPaperConfig", "LegacyPluginLoadingStrategy", "LoadOrderTree",
+        "MapSerializer", "MergeMap", "ModernPluginLoadingStrategy", "MoonriseCommon",
+        "MultiRuntimePluginProviderStorage", "PaperConfigurations", "PaperConfigurationTask", "PaperDatapackRegistrar",
+        "PaperFilledProfileCache", "PaperVersionFetcher", "PluginFlagProviderSource", "PluginInitializerManager",
+        "ServerboundPacketClassSerializer", "ServerPluginProviderStorage", "SimpleProviderStorage", "SimpleRegionStorage",
+        "SpigotLibraryLoader", "VanillaWorldMigration", "WorldConfiguration", "WorldFolderMigration", "WorldMigrationSupport",
+    };
+
+    private static final Map<String, String> SIMPLE_NAMES = new HashMap<>();
+
+    static {
+        for (final String name : ENGINE_CLASSES) {
+            SIMPLE_NAMES.put(name, ENGINE);
+        }
+        for (final String name : PAPER_CLASSES) {
+            SIMPLE_NAMES.put(name, PAPER);
+        }
+    }
+
+    private enum Mode { PLAIN, CONSOLE, FILE }
+
+    private final Mode mode;
 
     private SourbyCraftLoggerConverter(final String[] options) {
         super("scLogger", "scLogger");
-        this.console = options != null && options.length > 0 && "console".equalsIgnoreCase(options[0]);
+        final String option = options != null && options.length > 0 && options[0] != null ? options[0] : "";
+        this.mode = "console".equalsIgnoreCase(option) ? Mode.CONSOLE
+            : "file".equalsIgnoreCase(option) ? Mode.FILE : Mode.PLAIN;
     }
 
     public static SourbyCraftLoggerConverter newInstance(final String[] options) {
@@ -84,30 +135,38 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
     @Override
     public void format(final LogEvent event, final StringBuilder toAppendTo) {
         final String tag = tag(event.getLoggerName());
-        if (tag == null) {
-            return;
+        switch (this.mode) {
+            case FILE -> toAppendTo.append('[').append(tag).append(']');
+            case PLAIN -> toAppendTo.append(tag);
+            case CONSOLE -> {
+                final String colour = colour(tag, event.getLevel());
+                if (colour != null) {
+                    toAppendTo.append(colour).append(tag).append(ConsolePalette.RESET);
+                } else {
+                    toAppendTo.append(tag);
+                }
+                for (int i = tag.length(); i < COLUMN; i++) {
+                    toAppendTo.append(' ');
+                }
+            }
         }
-        final String colour = this.console ? colour(tag, event.getLevel()) : null;
-        toAppendTo.append('[');
-        if (colour != null) {
-            toAppendTo.append(colour).append(tag).append(RESET);
-        } else {
-            toAppendTo.append(tag);
-        }
-        toAppendTo.append(']');
     }
 
-    /** The short tag for a logger name, or {@code null} for the root logger. */
+    /** The tag for a logger name; the root logger and {@code Minecraft} are {@value #MINECRAFT}. */
     static String tag(final String logger) {
-        if (logger == null || logger.isEmpty()) {
-            return null;
+        if (logger == null || logger.isEmpty() || logger.equals(MINECRAFT)) {
+            return MINECRAFT;
         }
         if (logger.indexOf('.') < 0) {
-            return logger;
+            if (logger.startsWith("SourbyCraft/")) {
+                return BRAND;
+            }
+            final String known = SIMPLE_NAMES.get(logger);
+            return known != null ? known : logger;
         }
         for (final String[] alias : ALIASES) {
             if (logger.startsWith(alias[0])) {
-                return alias[1].isEmpty() || alias[1].endsWith("/") ? alias[1] + simpleName(logger) : alias[1];
+                return alias[1].isEmpty() ? simpleName(logger) : alias[1];
             }
         }
         return logger;
@@ -115,15 +174,10 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
 
     private static String colour(final String tag, final Level level) {
         if (level != null && level.isMoreSpecificThan(Level.WARN)) {
-            return null; // %highlightError colours WARN/ERROR lines as a whole
+            return null; // %scHighlight colours the message of WARN/ERROR lines
         }
-        final String colour = tag.equals(BRAND) || tag.startsWith(BRAND + "/") ? PRIMARY
-            : tag.equals(ENGINE) || tag.startsWith(ENGINE + "/") ? AURORA : null;
-        return colour != null && ansiSupported() ? colour : null;
-    }
-
-    private static boolean ansiSupported() {
-        return TerminalAnsiConverter.terminalAnsi();
+        final String colour = tag.equals(BRAND) ? ConsolePalette.CYAN : tag.equals(ENGINE) ? ConsolePalette.VIOLET : null;
+        return colour != null && ConsolePalette.terminal() ? colour : null;
     }
 
     /** Segment after the last dot, without a {@code $Inner} suffix; the whole name if that is empty. */
@@ -134,9 +188,5 @@ public final class SourbyCraftLoggerConverter extends LogEventPatternConverter {
             simple = simple.substring(0, inner);
         }
         return simple.isEmpty() ? logger : simple;
-    }
-
-    private static String fg(final int r, final int g, final int b) {
-        return ESC + "[38;2;" + r + ";" + g + ";" + b + "m";
     }
 }
