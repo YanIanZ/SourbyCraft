@@ -1,5 +1,9 @@
 import json
+import os
 import socket
+import sys
+import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -107,6 +111,58 @@ class BenchPanelTest(unittest.TestCase):
         bench.guard(client)
         with self.assertRaises(bench.BenchBreached):
             bench.guard("[16:17:19] [Folia Region Scheduler Thread #1/INFO]: Whitelist is now turned off")
+
+    def test_connection_guard_per_address_limits_are_raised_and_global_ones_are_not(self):
+        text = ("connection-guard:\n  global:\n    max-connections-per-second: 1000\n    mode: LOG\n"
+                "    max-login-starts-per-second: 100\n  per-address:\n    max-connections-per-second: 20\n"
+                "    mode: THROTTLE\n    max-login-starts-per-second: 5\n    ipv6-prefix-length: 64\n")
+        changed = bench.relaxed_connection_guard(text)
+        self.assertIn("max-login-starts-per-second: 100\n  per-address", changed)
+        self.assertIn("per-address:\n    max-connections-per-second: 1000\n    mode: THROTTLE\n"
+                      "    max-login-starts-per-second: 1000\n    ipv6-prefix-length: 64", changed)
+        self.assertEqual(bench.relaxed_connection_guard("crash-prevention:\n  x: 1\n"),
+                         "crash-prevention:\n  x: 1\n")
+
+
+class ExternalSwarmTest(unittest.TestCase):
+    def swarm(self, argv, online, requested=2, grace=2.0):
+        from external_swarm import ExternalSwarm
+        log = os.path.join(tempfile.mkdtemp(), "clients.log")
+        return ExternalSwarm(argv, requested, online, log, grace=grace), log
+
+    def test_start_returns_once_every_client_is_in_play_and_stop_ends_the_process(self):
+        counts = iter([0, 1, 2, 2, 2])
+        swarm, log = self.swarm([sys.executable, "-c", "print('up', flush=True); import time; time.sleep(60)"],
+                                lambda: next(counts))
+        swarm._sleep = lambda seconds: None
+        report = swarm.start(timeout=30)
+        try:
+            self.assertEqual((report["requested"], report["in_play"], report["process_alive"]), (2, 2, True))
+            deadline = time.time() + 10
+            while b"up" not in open(log, "rb").read() and time.time() < deadline:
+                time.sleep(0.1)
+        finally:
+            swarm.stop()
+        self.assertIsNotNone(swarm.process.poll())
+        swarm.stop()                                    # idempotent
+        self.assertIn(b"up", open(log, "rb").read())
+
+    def test_a_command_that_exits_is_reported_dead_with_nobody_in_play(self):
+        swarm, _ = self.swarm([sys.executable, "-c", "raise SystemExit(3)"], lambda: 0)
+        swarm._sleep = lambda seconds: time.sleep(0.05)
+        report = swarm.start(timeout=30)
+        swarm.stop()
+        self.assertFalse(report["process_alive"])
+        self.assertEqual(swarm.report()["in_play"], 0)
+        self.assertEqual(swarm.report()["exit_code"], 3)
+
+    def test_stop_kills_a_command_that_ignores_sigterm(self):
+        code = "import signal,time;signal.signal(signal.SIGTERM, signal.SIG_IGN);print('r',flush=True);time.sleep(60)"
+        swarm, _ = self.swarm([sys.executable, "-c", code], lambda: 0, grace=0.5)
+        swarm.start(timeout=0.2)
+        time.sleep(0.5)
+        swarm.stop()
+        self.assertIsNotNone(swarm.process.poll())
 
 
 if __name__ == "__main__":

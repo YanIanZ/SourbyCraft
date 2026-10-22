@@ -29,6 +29,7 @@ import datetime
 import hashlib
 import json
 import re
+import shlex
 import socket
 import statistics
 import sys
@@ -41,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import baseline_client  # noqa: E402
 import baseline_workloads as workloads  # noqa: E402
 import pterodactyl_panel as panel  # noqa: E402
+from external_swarm import ExternalSwarm  # noqa: E402
 
 PREFIX = "Bench"
 BENCH_API_RETRIES = 8
@@ -147,6 +149,20 @@ def without_throttle(bukkit_yml):
     return re.sub(r"(?m)^(\s*connection-throttle:).*$", r"\1 -1", bukkit_yml)
 
 
+def relaxed_connection_guard(security_yml):
+    """sourbycraft-security.yml with the per-address login limits raised for the bench window.
+
+    Every bench client logs in from one address, so SourbyCraft's per-address connection guard
+    would count them as one abusive host (it only logs in LOG mode, but a stricter mode refuses).
+    Only the two per-address numbers change; the original text is restored afterwards.
+    """
+    head, marker, tail = security_yml.partition("per-address:")
+    if not marker:
+        return security_yml
+    tail = re.sub(r"(?m)^(\s+max-(?:connections|login-starts)-per-second:).*$", r"\1 1000", tail)
+    return head + marker + tail
+
+
 class BenchBreached(RuntimeError):
     """Bench mode lost its guard: the whitelist went off, or someone else got in."""
 
@@ -188,6 +204,12 @@ def sample():
     }
 
 
+def online_count():
+    """Players online according to the server's own `list`."""
+    out, _ = panel.run("minecraft:list", r"players online", 20)
+    return int(number(r"There are (\d+)", out, 0))
+
+
 def summarise(samples, key):
     values = [s[key] for s in samples if s.get(key) is not None]
     if not values:
@@ -222,6 +244,13 @@ def main():
     parser.add_argument("--client-processes", type=int, default=1,
                         help="Spread the clients over this many processes (default 1: all threads of "
                              "one process, which a slow load-generator host cannot keep up with)")
+    parser.add_argument("--external-clients-cmd", metavar="COMMAND",
+                        help="Join the bench clients with this command (shell-split) instead of the "
+                             "built-in headless clients, e.g. a SoulFire launcher on the machine this "
+                             "tool runs on. It must log in Bench000..BenchNNN offline; it is stopped "
+                             "when the bench ends. Per-address login limits are relaxed meanwhile.")
+    parser.add_argument("--external-clients-timeout", type=int, default=900,
+                        help="Seconds to wait for every external client to be in play")
     parser.add_argument("--allow-online-players", action="store_true",
                         help="Bench even if real players are online (they will be disconnected)")
     args = parser.parse_args()
@@ -253,6 +282,11 @@ def main():
     originals = {path: panel.read_file(path)
                  for path in ("/server.properties", "/whitelist.json", "/ops.json", "/bukkit.yml")
                  + tuple(path for path, _, _ in edits)}
+    if args.external_clients_cmd:
+        try:
+            originals["/sourbycraft-security.yml"] = panel.read_file("/sourbycraft-security.yml")
+        except Exception:                      # noqa: BLE001 - absent file: nothing to relax or restore
+            pass
     for path, text in originals.items():
         (output / ("original-" + path.strip("/").replace("/", "__"))).write_text(text)
     original_properties = originals["/server.properties"]
@@ -267,7 +301,9 @@ def main():
               "certified": False, "max_players_bench": args.max_players,
               "clients_on": args.clients_on,
               "not_certified_because": [
-                  (f"clients run on {args.clients_on} over the internet" if args.clients_on
+                  ("clients are driven by an external command (see external_clients_cmd), not the "
+                   "built-in headless clients" if args.external_clients_cmd
+                   else f"clients run on {args.clients_on} over the internet" if args.clients_on
                    else "clients run on the operator's machine over the internet"),
                   "metrics are console-sampled /perf readings, not a JFR recording",
                   "the panel node is not known to be otherwise idle"],
@@ -284,6 +320,9 @@ def main():
             **({"max-players": str(args.max_players)} if args.max_players is not None else {})}))
         panel.write_file("/whitelist.json", bench_whitelist(clients))
         panel.write_file("/bukkit.yml", without_throttle(originals["/bukkit.yml"]))
+        if "/sourbycraft-security.yml" in originals:
+            panel.write_file("/sourbycraft-security.yml",
+                             relaxed_connection_guard(originals["/sourbycraft-security.yml"]))
         for path, text in apply_edits(originals, edits).items():
             panel.write_file(path, text)
         record["edits"] = [{"path": path, "old": old, "new": new} for path, old, new in edits]
@@ -343,7 +382,11 @@ def main():
         record["client_network"] = connect_rtt(args.host, args.port)
         print(f"connecting {clients} clients to {args.host}:{args.port}; "
               f"tcp connect rtt {record['client_network']}", flush=True)
-        if args.client_processes > 1:
+        if args.external_clients_cmd:
+            swarm = ExternalSwarm(shlex.split(args.external_clients_cmd), clients, online_count,
+                                  output / "external-clients.log")
+            record["external_clients_cmd"] = args.external_clients_cmd
+        elif args.client_processes > 1:
             swarm = baseline_client.ShardedSwarm(args.host, args.port, clients, prefix=PREFIX,
                                                  roam=plan.client_roam_blocks,
                                                  processes=args.client_processes, timer_moves=True)
@@ -351,7 +394,8 @@ def main():
             swarm = baseline_client.ClientSwarm(args.host, args.port, clients, prefix=PREFIX,
                                                 roam=plan.client_roam_blocks, timer_moves=True)
         record["client_processes"] = args.client_processes
-        record["clients"] = swarm.start(timeout=180.0)
+        record["clients"] = swarm.start(
+            timeout=args.external_clients_timeout if args.external_clients_cmd else 180.0)
         print(f"clients: {record['clients']}", flush=True)
         sites = plan.parameters.get("site_coordinates") or []
         for index in range(clients if sites else 0):
