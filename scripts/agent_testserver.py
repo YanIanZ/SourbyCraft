@@ -699,9 +699,9 @@ def render_properties(props):
     return "".join(f"{key}={value.replace(':', chr(92) + ':')}\n" for key, value in props.items())
 
 
-GLOBAL_TOML = ("# Agent test server: no plugin downloads, no auto-update.\n"
-               "[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=false\n"
-               "[misc.auto_update]\nenabled=false\n")
+GLOBAL_TOML = ("# Agent test server: no plugin downloads, no auto-update (Build 49 layout).\n"
+               "[plugins.viaversion]\nauto-provision=false\n[plugins.protocollib]\nauto-provision=false\n"
+               "[updater]\nenabled=false\n")
 
 
 # ------------------------------------------------------------------- startup-cache seeding
@@ -1150,7 +1150,7 @@ class Harness:
               properties=None, jvm_properties=(), startup_timeout_s=STARTUP_TIMEOUT_S,
               rebuild_jar=False, seed_cache=True, console_probe=True, command=None,
               lifetime_grace_s=LIFETIME_GRACE_S, world_from=None, aurora_toml=None,
-              exclusive=False, exclusive_wait_s=EXCLUSIVE_WAIT_S, config_files=None,
+              global_toml=None, exclusive=False, exclusive_wait_s=EXCLUSIVE_WAIT_S, config_files=None,
               startup_cache_from=None, startup_cache_corrupt=None, plugin_files=None):
         """Create the run, start the supervisor, wait for ``Done (``. Returns run.json.
 
@@ -1178,6 +1178,7 @@ class Harness:
                                f"refusing below {self.min_free / 1024 ** 3:.0f} GiB")
         world_source = self.world_source(world_from) if world_from else None
         aurora = self.aurora_config(aurora_toml, world_source)
+        global_config = self.global_config(global_toml)
         configs = self.config_files(config_files)
         data_files = self.plugin_files(plugin_files)
         check_destination_collisions([dest for dest, _s, _t in configs],
@@ -1211,7 +1212,7 @@ class Harness:
                                 properties, jvm_properties, startup_timeout_s, seed_cache,
                                 command, lifetime_grace_s, token, world_source, aurora,
                                 port=port, slot=slot, resources=resources, configs=configs,
-                                startup_seed=startup_seed, data_files=data_files)
+                                startup_seed=startup_seed, data_files=data_files, global_config=global_config)
             self._spawn_supervisor(workdir, token, paths)
         except BaseException:
             for path in reversed(paths):
@@ -1235,7 +1236,7 @@ class Harness:
                  simulation_distance, heap_mib, max_lifetime_s, level_type, properties,
                  jvm_properties, startup_timeout_s, seed_cache, command, lifetime_grace_s,
                  token, world_source=None, aurora=None, port=None, slot=None, resources=None,
-                 configs=(), startup_seed=None, data_files=()):
+                 configs=(), startup_seed=None, data_files=(), global_config=None):
         workdir.mkdir(parents=True)
         (workdir / MARKER).write_text("created by scripts/agent_testserver.py\n")
         (workdir / "tmp").mkdir()
@@ -1245,7 +1246,13 @@ class Harness:
                                   properties)
         (workdir / "server.properties").write_text(render_properties(props))
         (workdir / "sourbycraft_config").mkdir()
-        (workdir / "sourbycraft_config" / "sourbycraft_global_config.toml").write_text(GLOBAL_TOML)
+        global_toml = None
+        if global_config is not None:
+            text, origin = global_config
+            (workdir / "sourbycraft_config" / "sourbycraft_global_config.toml").write_text(text)
+            global_toml = {"source": origin, "text": text}
+        else:
+            (workdir / "sourbycraft_config" / "sourbycraft_global_config.toml").write_text(GLOBAL_TOML)
         aurora_toml = None
         if aurora is not None:
             text, origin = aurora
@@ -1308,7 +1315,7 @@ class Harness:
                "slot": slot,
                "resources_at_start": resources,
                "world_from": world_from,
-               "aurora_toml": aurora_toml,
+               "aurora_toml": aurora_toml, "global_toml": global_toml,
                "config_files": installed,
                "plugin_files": plugin_data,
                "startup_cache": startup_cache,
@@ -1388,6 +1395,21 @@ class Harness:
             if source.is_file():
                 return source.read_text(), f"world_from {world_source[0].name}"
         return None
+
+    @staticmethod
+    def global_config(path):
+        """(text, origin) for sourbycraft_config/sourbycraft_global_config.toml, or None for GLOBAL_TOML.
+
+        An explicit file replaces the harness TOML (``--global-toml``), e.g. a pre-Build-49 layout to
+        exercise the configuration migration. The caller is responsible for keeping downloads and the
+        updater off in it; ``run.json`` records the file so a run that re-enabled them is visible.
+        """
+        if path is None:
+            return None
+        path = Path(path)
+        if not path.is_file() or path.stat().st_size > 64 * 1024:
+            raise HarnessError(f"global TOML {path} is not a file under 64 KiB")
+        return path.read_text(), str(path)
 
     @staticmethod
     def config_files(mapping):
@@ -2001,6 +2023,9 @@ def build_parser():
                        help="copy this finished run's world dirs in first (restart/crash checks)")
         p.add_argument("--aurora-toml", metavar="FILE",
                        help="install FILE as sourbycraft_config/aurora.toml (e.g. AWF worlds)")
+        p.add_argument("--global-toml", metavar="FILE",
+                       help="install FILE as sourbycraft_config/sourbycraft_global_config.toml instead of "
+                            "the harness default (keep downloads and the updater off in it)")
         p.add_argument("--config-file", action="append", type=_kv, default=[],
                        metavar="DEST=FILE",
                        help="copy FILE to DEST in the run dir before boot (e.g. spigot.yml=...)")
@@ -2069,7 +2094,8 @@ def _start_kwargs(args):
               "heap_mib": args.heap_mib, "max_lifetime_s": args.max_lifetime_s,
               "level_type": args.level_type, "startup_timeout_s": args.startup_timeout_s,
               "properties": dict(args.property) or None, "world_from": args.world_from,
-              "aurora_toml": args.aurora_toml, "exclusive": args.exclusive or None,
+              "aurora_toml": args.aurora_toml, "global_toml": args.global_toml,
+              "exclusive": args.exclusive or None,
               "exclusive_wait_s": args.exclusive_wait_s,
               "config_files": dict(args.config_file) or None,
               "plugin_files": dict(args.plugin_file) or None,

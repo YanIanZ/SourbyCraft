@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Applies a staged update and self-restarts (apply_mode=auto).
+ * Applies a staged update and self-restarts (apply-mode=auto).
  *
  * <p><b>Jar swap is an atomic rename, after the previous jar is kept.</b> The launch jar (the
  * {@code -jar} argument of this JVM) is first copied to {@code <jar>.prev}
@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * back is not applied automatically. On Windows the rename fails on the lock;
  * {@code auto_update/core.path} stays behind for a launcher-side swap on the NEXT boot.
  *
- * <p><b>Restart modes</b> ({@code misc.auto_update.restart_mode}):
+ * <p><b>Restart modes</b> ({@code updater.restart-mode}):
  * <ul>
  *   <li>{@code auto} — Pterodactyl/Pelican container detected (P_SERVER_UUID env) → {@code exit};
  *       otherwise {@code spigot}.</li>

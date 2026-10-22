@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * DEV-H follow-up (TimeSpan 'M' rule): the real {@code GlobalConfiguration} options carry the time-span
  * validation, so an operator file that wrote {@code M} for minutes fails the load through the same
  * {@code Validator} pass that post-load runs, naming the key. Uses the nested {@code Part}s only, so
- * it neither loads {@code config/canvas-server.yml} nor needs a Minecraft bootstrap.
+ * it neither loads {@code config/aurora-server.yml} nor needs a Minecraft bootstrap.
  */
 class TimeSpanOptionValidationTest {
 

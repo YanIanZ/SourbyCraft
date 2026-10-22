@@ -74,9 +74,9 @@ Run both from the repository root. Compose stores server data in `data/`.
 
 | File | Purpose |
 |---|---|
-| `sourbycraft_config/sourbycraft_global_config.toml` | Messages, max players, auto-updater, ViaVersion/ProtocolLib provisioning |
+| `sourbycraft_config/sourbycraft_global_config.toml` | Console, players, messages, plugin provisioning, auto-updater (Build 49 layout; older layouts are migrated once at boot, copy kept as `*.migrated`) |
 | `sourbycraft_config/aurora.toml` | Aurora engine options (CPU budget, bridge, AWF, async pathfinding) |
-| `config/canvas-server.yml`, `config/canvas-worlds.yml` | Region scheduler options (file names kept for existing servers) |
+| `config/aurora-server.yml`, `config/aurora-worlds.yml` | Region engine options (Build 49 names; `config/canvas-*.yml` are migrated once and renamed `*.migrated`) |
 | `config/paper-global.yml` → `threaded-regions` | Region thread count and grid size |
 | `sourbycraft-security.yml` | Crash-prevention and packet-guard limits (all default to `LOG`) |
 

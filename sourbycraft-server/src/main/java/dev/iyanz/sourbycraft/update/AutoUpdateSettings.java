@@ -3,6 +3,8 @@ package dev.iyanz.sourbycraft.update;
 import com.electronwill.nightconfig.core.file.CommentedFileConfig;
 import dev.iyanz.sourbycraft.SourbyCraftConfig;
 import dev.iyanz.sourbycraft.bootstrap.MinecraftInternalPlugin;
+import dev.iyanz.sourbycraft.config.ConfigKey;
+import dev.iyanz.sourbycraft.config.UtilityKeys;
 import dev.iyanz.sourbycraft.util.SourbyLogger;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
@@ -19,19 +21,19 @@ import java.util.List;
  * {@code @ConfigClassInfo}/{@code @ConfigInfo}-annotated module resolved by reflection. On this
  * current build there is no Luminol config manager, so these are plain
  * static fields, seeded into + read back from the same unified TOML
- * {@link SourbyCraftConfig} manages (under {@code misc.auto_update.*}, matching the archived
- * key layout so an existing install's file keeps working).
+ * {@link SourbyCraftConfig} manages (the {@code [updater]} table since Build 49; the archived
+ * {@code misc.auto_update.*} layout is migrated once and read until Build 50).
  *
  * <p>{@link #seedDefaults} is called once from {@link SourbyCraftConfig}'s boot-time seed pass;
  * {@link #loadFromToml()} is called from {@link SourbyCraftConfig#init()} / {@code #reload()} to
  * refresh the static fields {@link SourbyUpdater}'s inner {@code Config} bridge reads.
  *
- * <p><b>Reloadability</b> (verified against the consumers): {@code apply_mode}, {@code repo},
- * {@code channel}, {@code allow_prerelease}, {@code restart_mode} and {@code restart_delay_seconds}
+ * <p><b>Reloadability</b> (verified against the consumers): {@code apply-mode}, {@code repository},
+ * {@code channel}, {@code allow-prerelease}, {@code restart-mode} and {@code restart-delay-seconds}
  * are read by {@link SourbyUpdater#check} on every check, so after {@code /sourbycraft reload} the
- * next check uses the new value (LIVE). {@code enabled}, {@code check_times} and
- * {@code check_interval_minutes} shape the schedule {@link SourbyUpdater#start()} builds once at
- * boot, and {@code apply_mode=off} skips that schedule entirely, so turning the updater on or off,
+ * next check uses the new value (LIVE). {@code enabled}, {@code check-times} and
+ * {@code check-interval-minutes} shape the schedule {@link SourbyUpdater#start()} builds once at
+ * boot, and {@code apply-mode=off} skips that schedule entirely, so turning the updater on or off,
  * or changing its cadence, is RESTART_REQUIRED. {@code /update status} therefore shows the interval the
  * running schedule uses and, when a reload changed it, the pending one ({@link #intervalSummary}).
  *
@@ -55,64 +57,43 @@ public final class AutoUpdateSettings {
 
     private AutoUpdateSettings() {}
 
-    /** Seed the {@code misc.auto_update.*} keys into the unified TOML when absent. */
+    /**
+     * Seed the {@code [updater]} keys ({@link UtilityKeys}) into the unified TOML when absent, with the
+     * section comment. {@code SourbyCraftConfig.seedDefaults} already seeds every utility key; this
+     * exists so the updater's own tests can seed and read back its table on its own.
+     */
     public static void seedDefaults(CommentedFileConfig f, boolean[] changed) {
-        if (f.getComment("misc") == null) {
-            f.setComment("misc", "Misc SourbyCraft settings.");
+        for (final UtilityKeys.Section section : UtilityKeys.SECTIONS) {
+            if (section.path().equals("updater") && f.getComment(section.path()) == null) {
+                f.setComment(section.path(), section.comment());
+            }
         }
-        if (f.getComment("misc.auto_update") == null) {
-            f.setComment("misc.auto_update",
-                "SourbyCraft auto-updater. Checks the SourbyCraft GitHub repo's Releases for a newer jar "
-                + "on the SAME release channel as this build (REL/DEV/EXP). apply_mode controls what "
-                + "happens: 'notify' (default) only logs+notifies operators; 'stage' downloads+verifies+stages "
-                + "for the next restart; 'auto' downloads+verifies+swaps the launch jar and self-restarts; "
-                + "'off' disables checks. A release for another Minecraft version is never staged. "
-                + "apply_mode/repo/channel/allow_prerelease/restart_* take effect at the next check after "
-                + "/sourbycraft reload; enabled/check_times/check_interval_minutes and leaving 'off' need a restart.");
+        for (final ConfigKey key : UtilityKeys.KEYS) {
+            if (!key.table().equals("updater")) continue;
+            final Object value = key.defaultValue() instanceof List<?> list ? new java.util.ArrayList<>(list) : key.defaultValue();
+            SourbyCraftConfig.seed(f, changed, key.path(), value, key.documentation());
         }
-        SourbyCraftConfig.seed(f, changed, "misc.auto_update.enabled", true,
-            "Whether SourbyCraft should check for updates automatically.");
-        SourbyCraftConfig.seed(f, changed, "misc.auto_update.repo", "YanIanZ/SourbyCraft",
-            "SourbyCraft GitHub repository to check, as owner/name.");
-        SourbyCraftConfig.seed(f, changed, "misc.auto_update.channel", "",
-            "Release channel to track: REL, DEV or EXP. Leave blank to auto-detect from THIS build's version suffix.");
-        SourbyCraftConfig.seed(f, changed, "misc.auto_update.apply_mode", "notify",
-            "'notify' (log+op banner only; default), 'stage' (download+verify, swap on next restart), "
-            + "'auto' (download+verify+swap+self-restart; keeps <jar>.prev and rolls back if the next boot "
-            + "fails) or 'off' (disable). /update apply forces one auto run.");
-        SourbyCraftConfig.seed(f, changed, "misc.auto_update.check_times", new java.util.ArrayList<>(List.of("06:00")),
-            "Daily check times in HH:mm, server-local time zone.");
-        SourbyCraftConfig.seed(f, changed, "misc.auto_update.check_interval_minutes", 30,
-            "Additionally poll every N minutes (0 = only the daily check_times).");
-        SourbyCraftConfig.seed(f, changed, "misc.auto_update.restart_mode", "auto",
-            "How 'auto' restarts after swapping the jar: 'auto' (detect Pterodactyl -> exit 70, else spigot), "
-            + "'spigot', 'exit' or 'stop'.");
-        SourbyCraftConfig.seed(f, changed, "misc.auto_update.restart_delay_seconds", 60,
-            "Warning window broadcast to players before the auto-restart. Minimum 5.");
-        SourbyCraftConfig.seed(f, changed, "misc.auto_update.allow_prerelease", false,
-            "Whether GitHub prereleases on the tracked channel are eligible.");
-        SourbyCraftConfig.seed(f, changed, "misc.auto_update.via_auto_update", true,
-            "Also keep the auto-provisioned ViaVersion + ViaBackwards plugins current on the same cadence.");
     }
 
     /**
      * Refresh every static field from the unified TOML (called at boot + on {@code /sourbycraft reload}).
      * A missing, blank or wrong-typed key falls back to the documented default, not to the previous
-     * live value: deleting {@code apply_mode} from the TOML and reloading must not keep an earlier
-     * {@code auto}.
+     * live value: deleting {@code apply-mode} from the TOML and reloading must not keep an earlier
+     * {@code auto}. The pre-Build-49 names ({@code misc.auto_update.*}) are resolved by
+     * {@link SourbyCraftConfig} before this reads.
      */
     public static void loadFromToml() {
-        enabled = SourbyCraftConfig.cfgBool("misc.auto_update.enabled", true);
-        repo = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.repo", ""), "YanIanZ/SourbyCraft");
-        channel = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.channel", ""), "");
-        applyMode = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.apply_mode", ""), "notify");
-        List<String> times = SourbyCraftConfig.cfgStringList("misc.auto_update.check_times");
+        enabled = SourbyCraftConfig.cfgBool(UtilityKeys.UPDATER_ENABLED.path(), true);
+        repo = valueOr(SourbyCraftConfig.cfgGet(UtilityKeys.UPDATER_REPOSITORY.path(), ""), "YanIanZ/SourbyCraft");
+        channel = valueOr(SourbyCraftConfig.cfgGet(UtilityKeys.UPDATER_CHANNEL.path(), ""), "");
+        applyMode = valueOr(SourbyCraftConfig.cfgGet(UtilityKeys.UPDATER_APPLY_MODE.path(), ""), "notify");
+        List<String> times = SourbyCraftConfig.cfgStringList(UtilityKeys.UPDATER_CHECK_TIMES.path());
         checkTimes = times.isEmpty() ? List.of("06:00") : times;
-        checkIntervalMinutes = Math.max(0, SourbyCraftConfig.cfgInt("misc.auto_update.check_interval_minutes", 30));
-        restartMode = valueOr(SourbyCraftConfig.cfgGet("misc.auto_update.restart_mode", ""), "auto");
-        restartDelaySeconds = Math.max(5, SourbyCraftConfig.cfgInt("misc.auto_update.restart_delay_seconds", 60));
-        allowPrerelease = SourbyCraftConfig.cfgBool("misc.auto_update.allow_prerelease", false);
-        viaAutoUpdate = SourbyCraftConfig.cfgBool("misc.auto_update.via_auto_update", true);
+        checkIntervalMinutes = Math.max(0, SourbyCraftConfig.cfgInt(UtilityKeys.UPDATER_CHECK_INTERVAL_MINUTES.path(), 30));
+        restartMode = valueOr(SourbyCraftConfig.cfgGet(UtilityKeys.UPDATER_RESTART_MODE.path(), ""), "auto");
+        restartDelaySeconds = Math.max(5, SourbyCraftConfig.cfgInt(UtilityKeys.UPDATER_RESTART_DELAY_SECONDS.path(), 60));
+        allowPrerelease = SourbyCraftConfig.cfgBool(UtilityKeys.UPDATER_ALLOW_PRERELEASE.path(), false);
+        viaAutoUpdate = SourbyCraftConfig.cfgBool(UtilityKeys.UPDATER_VIA_AUTO_UPDATE.path(), true);
     }
 
     /**

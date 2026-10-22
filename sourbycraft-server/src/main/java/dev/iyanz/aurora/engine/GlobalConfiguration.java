@@ -2,6 +2,7 @@ package dev.iyanz.aurora.engine;
 
 import ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom;
 import dev.iyanz.aurora.engine.configuration.ConfigurationProvider;
+import dev.iyanz.aurora.engine.configuration.EngineConfigFiles;
 import dev.iyanz.aurora.engine.configuration.Part;
 import dev.iyanz.aurora.engine.configuration.Resolver;
 import dev.iyanz.aurora.engine.configuration.Style;
@@ -46,9 +47,29 @@ import org.slf4j.LoggerFactory;
 @NullMarked
 public class GlobalConfiguration extends Part {
 
-    private static final Path CONFIG_PATH = Path.of("config/canvas-server.yml").toAbsolutePath().normalize();
+    /** {@code config/aurora-server.yml}; {@link EngineConfigFiles#migrate} brings an older {@code canvas-server.yml} here once. */
+    private static final Path CONFIG_PATH = EngineConfigFiles.serverFile();
 
     protected static final int CHAR_LIM = 90;
+
+    /** Header of a newly created or migrated {@code aurora-server.yml}. */
+    private static final String[] HEADER = Style.create()
+        .literal("Aurora / Server configuration (config/aurora-server.yml)").endLine()
+        .blank()
+        .wordWrap("Server-wide region-engine settings for SourbyCraft: region scheduler, autosave, networking,",
+            "chat and the vanilla fixes. Every option is documented beside its key.").endLine()
+        .blank()
+        .wordWrap("Lifecycle: /sourbycraft reload re-reads this file. Options marked RESTART_REQUIRED in",
+            "docs/AURORA-CONFIG.md are read once at startup (tick rate, scheduler pools, log cleaner);",
+            "region-scheduler.guard-severity, autosave and chat options apply on reload.").endLine()
+        .blank()
+        .wordWrap("Build 49 renamed this file from config/canvas-server.yml. The old file was copied here once",
+            "and renamed to canvas-server.yml.migrated; it is not read any more.").endLine()
+        .blank()
+        .wordWrap("World defaults: config/aurora-worlds.yml. Aurora services (CPU budget, bridge, AWF, diagnostics):",
+            "sourbycraft_config/aurora.toml. Console, players, messages, plugins, updater:",
+            "sourbycraft_config/sourbycraft_global_config.toml. Security limits: sourbycraft-security.yml.").endLine()
+        .compile(60);
 
     public static final Logger LOGGER = LoggerFactory.getLogger("Aurora"); // SourbyCraft - engine config speaks as the engine: [CanvasMC] -> [Aurora]
     public static final LockedReference<TimeSpan> AUTOSAVE_SPAN = new LockedReference<>(null);
@@ -72,7 +93,8 @@ public class GlobalConfiguration extends Part {
     }
 
     public static void reload() {
-        LOGGER.info("Loading Aurora region configuration (config/canvas-server.yml)");
+        EngineConfigFiles.migrate(CONFIG_PATH, EngineConfigFiles.legacyServerFile(), HEADER).log(LOGGER);
+        LOGGER.info("Loading Aurora region configuration ({})", EngineConfigFiles.display(CONFIG_PATH));
         ConfigurationProvider.buildSolidConfiguration(
             CONFIG_PATH,
             GlobalConfiguration::new,
@@ -94,18 +116,7 @@ public class GlobalConfiguration extends Part {
                     postLoad(instance);
                 }
             },
-            Style.create()
-                .literal("Aurora / Server configuration").endLine()
-                .blank()
-                .wordWrap("Server-wide region-engine settings for SourbyCraft.",
-                    "The historical config/canvas-server.yml path is retained for existing servers.").endLine()
-                .blank()
-                .wordWrap("Use /aurora for service status and /sourbycraft config for file locations.",
-                    "/sourbycraft reload re-reads supported settings; construction-cached options require restart.").endLine()
-                .blank()
-                .wordWrap("Messages, UI and updates belong to sourbycraft_global_config.toml.",
-                    "Aurora service budgets and toggles belong to aurora.toml.").endLine()
-                .compile(60)
+            HEADER
         );
     }
 
@@ -326,7 +337,7 @@ public class GlobalConfiguration extends Part {
         // server"), which is a correctness/dev default. On a real server a plugin doing an
         // off-region operation should be logged, not crash the whole server, so default to LOG
         // ("logs a warning in console, but continues the operation"). Operators can still set THROW
-        // in config/canvas-server.yml for strict correctness testing.
+        // in config/aurora-server.yml for strict correctness testing.
         public GuardSeverity guardSeverity = GuardSeverity.LOG;
 
         public enum GuardSeverity {
@@ -567,7 +578,7 @@ public class GlobalConfiguration extends Part {
         private String cleanerTimeSpan = "30d";
         // SourbyCraft - stabilize default: this is a debug-logging flag that logs on every ender
         // pearl save/load from Canvas' pearl-save rewrite (frequent on an active server = console
-        // spam). Default it off; operators can flip it on in config/canvas-server.yml to debug.
+        // spam). Default it off; operators can flip it on in config/aurora-server.yml to debug.
         public boolean logEnderPearlRewriteActions = false;
     }
 

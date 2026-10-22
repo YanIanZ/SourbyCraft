@@ -88,7 +88,7 @@ public class MaxpCommand extends Command {
             .append(text(previous + " -> " + n, SourbyCraftColors.VALUE))
             .build());
         if (persisted) {
-            s.sendMessage(text("  persisted (sourbycraft.max-players) — survives restart", SourbyCraftColors.SUCCESS));
+            s.sendMessage(text("  persisted (" + MaxPlayersConfig.KEY + ") — survives restart", SourbyCraftColors.SUCCESS));
         } else {
             s.sendMessage(text("  applied live, but could NOT persist (config unavailable) — will reset on restart",
                 SourbyCraftColors.WARNING));

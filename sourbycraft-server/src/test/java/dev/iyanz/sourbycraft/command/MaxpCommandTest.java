@@ -160,7 +160,7 @@ class MaxpCommandTest {
         verify(server).setMaxPlayers(50);
         final String all = plainReceived(probe.received());
         assertTrue(all.contains("Max players 20 -> 50"), all);
-        assertTrue(all.contains("persisted (sourbycraft.max-players)"), all);
+        assertTrue(all.contains("persisted (players.max-players)"), all);
     }
 
     @Test
@@ -204,6 +204,6 @@ class MaxpCommandTest {
         final String all = plainReceived(probe.received());
         assertTrue(all.contains("20 -> 64"), all);
         assertTrue(all.contains("could NOT persist"), all);
-        assertFalse(all.contains("persisted (sourbycraft.max-players)"), all);
+        assertFalse(all.contains("persisted (players.max-players)"), all);
     }
 }

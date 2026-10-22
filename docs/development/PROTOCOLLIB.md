@@ -17,12 +17,15 @@ berarti hook ada di source ter-materialisasi, bukan bukti unduhan atau load.
 Konfigurasi di `sourbycraft_config/sourbycraft_global_config.toml`:
 
 ```toml
-[protocollib]
+[plugins.protocollib]
 auto-provision = true
 
-[viaversion]
+[plugins.viaversion]
 auto-provision = true
 ```
+
+(Build 49 layout. The pre-49 tables `[protocollib]` / `[viaversion]` are still read until Build 50 and rewritten
+once at boot; `BootstrapPluginSettings` prefers the `[plugins.*]` spelling when both are present.)
 
 Kedua setting **RESTART_REQUIRED**, independen, default `true`. `--plugins` menentukan folder
 tujuan JAR serta config Via. ProtocolLib menghasilkan config miliknya saat plugin dimuat;
@@ -99,7 +102,7 @@ verified evidence are in the current Codex block of `AGENT-COORDINATION.md`.
 The tagged 5.4.0 release was pinned instead and LOAD-TESTED on a fresh slim jar
 (40,772,112 B, built 2026-10-20 03:03 via the Gradle lock wrapper with
 `AGENT_NAME=deepseek-sec7`). Cold install with `[protocollib] auto-provision=true`,
-`[viaversion] auto-provision=false`, `misc.auto_update.enabled=false`:
+`[viaversion] auto-provision=false`, `misc.auto_update.enabled=false` (pre-Build-49 key names, as they were then):
 
 - Downloaded the official asset from
   `https://github.com/dmulloy2/ProtocolLib/releases/download/5.4.0/ProtocolLib.jar`

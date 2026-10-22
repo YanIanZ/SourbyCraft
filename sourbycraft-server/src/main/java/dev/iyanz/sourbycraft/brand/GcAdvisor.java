@@ -36,7 +36,7 @@ public final class GcAdvisor {
     // Read lazily, NOT in a static final: class-init can precede unified-config load, which
     // would latch the operator's setting to the default for the whole boot.
     private static boolean enabled() {
-        return dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool("branding.gc-advisor.enabled", true);
+        return dev.iyanz.sourbycraft.SourbyCraftConfig.cfgBool(dev.iyanz.sourbycraft.config.UtilityKeys.GC_ADVISOR.path(), true);
     }
 
     private GcAdvisor() {}

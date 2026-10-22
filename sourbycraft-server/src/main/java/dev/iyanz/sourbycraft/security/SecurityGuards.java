@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -123,8 +124,76 @@ public final class SecurityGuards {
         if (!(prefix instanceof Number number) || number.doubleValue() != number.intValue()
             || number.intValue() < 1 || number.intValue() > 128) throw new IOException("Expected integer 1..128: " + IPV6_PREFIX_KEY);
         yaml.set(IPV6_PREFIX_KEY, number.intValue());
-        if (!Files.exists(file)) yaml.save(file.toFile()); // never rewrite an operator file on reload
+        if (!Files.exists(file)) Files.writeString(file, seededDocument()); // never rewrite an operator file on reload
         settings = new Settings(Map.copyOf(updated), number.intValue(), settings.proxy());
+    }
+
+    // ------------------------------------------------------------------------- seeded document
+
+    /** The header of a freshly seeded {@code sourbycraft-security.yml}. */
+    static final List<String> HEADER = List.of(
+        "SourbyCraft security limits (sourbycraft-security.yml) - Build 49 layout.",
+        "",
+        "Network decode guards (SEC-1) and connection admission (SEC-11). Keep existing values when updating the server.",
+        "Every group has a mode: LOG counts and logs (rate-limited), KICK disconnects the offending connection, OFF disables",
+        "the check. Sizes are bytes unless the key names a character count; depth and list sizes are counts.",
+        "Lifecycle: LIVE - every limit, mode and ipv6-prefix-length applies on /sourbycraft reload. The proxy detection of",
+        "connection-guard (BungeeCord, Velocity, PROXY protocol) is read when the TCP listener starts: RESTART_REQUIRED.",
+        "The defaults are stated beside each group; deleting this file restores all of them at the next boot.",
+        "These limits are separate from the Aurora services (sourbycraft_config/aurora.toml) and the region engine",
+        "(config/aurora-server.yml). Reference: docs/development/SECURITY-GUARDS.md, docs/AURORA-CONFIG.md.");
+
+    /** Comments above each group, in file order. */
+    static final Map<String, List<String>> GROUP_DOCS = groupDocs();
+
+    private static Map<String, List<String>> groupDocs() {
+        final Map<String, List<String>> docs = new java.util.LinkedHashMap<>();
+        docs.put("crash-prevention", List.of("Payload sanity limits for decoders that could allocate without bound or recurse."));
+        docs.put("crash-prevention.nbt", List.of("Item and entity NBT sent by the client. Defaults: 2097152 bytes, depth 64, strings 4096 chars, lists 65536 entries."));
+        docs.put("crash-prevention.sign", List.of("Sign edits. Defaults: 256 chars per line, 1024 chars in total."));
+        docs.put("crash-prevention.anvil", List.of("Anvil renames. Default: 128 chars."));
+        docs.put("crash-prevention.recipe-book", List.of("Encoded incoming recipe-book packet bytes; native 26.x packet codecs are already bounded. Default: 20480."));
+        docs.put("crash-prevention.creative-item", List.of("Encoded creative item/component bytes. Default: 16384. LOG observes; KICK disconnects rather than silently",
+            "dropping or clamping."));
+        docs.put("packet-guard", List.of("Packet observation limits. max-per-tick counts operations per monotonic 50 ms bucket, not bytes or region ticks."));
+        docs.put("packet-guard.book-edit", List.of("Book edits. Default: 65536 chars in total."));
+        docs.put("packet-guard.custom-payload", List.of("Plugin-message payloads. Default: 8192 bytes."));
+        docs.put("packet-guard.container-click", List.of("A drag sends start + one packet per slot + end; the default of 256 per tick covers that burst before it counts as spam."));
+        docs.put("packet-guard.recipe-book", List.of("Recipe-book interactions. Default: 16 per tick."));
+        docs.put("packet-guard.connection", List.of("Per connection: packets per second (default 1000) and bytes per second (default 8388608)."));
+        docs.put("connection-guard", List.of("Accepted TCP sockets and initial Login Hello packets, measured across channels. Limits, modes and",
+            "ipv6-prefix-length are LIVE after /sourbycraft reload. Windows are fixed 1 s buckets, so up to 2x a limit can pass",
+            "across one boundary. Per-address: a peer's IPv4 address or IPv6 prefix; loopback is exempt. Behind BungeeCord,",
+            "Velocity or the PROXY protocol (detected at startup, RESTART_REQUIRED) the TCP peer is the proxy: per-address socket",
+            "limits are skipped and login starts are keyed by the forwarded player address. A per-address KICK reject does not",
+            "consume the global budget."));
+        docs.put("connection-guard.global", List.of("Across every peer. Defaults: 1000 sockets per second, 100 login starts per second."));
+        docs.put("connection-guard.per-address", List.of("Per IPv4 address or IPv6 prefix. IPv6 peers are grouped by ipv6-prefix-length (1..128; the default /64 is one",
+            "typical end-user allocation). Defaults: 20 sockets per second, 5 login starts per second."));
+        return java.util.Collections.unmodifiableMap(docs);
+    }
+
+    /** Writes the header and the group comments into {@code yaml} (keys and values untouched). */
+    private static void document(YamlConfiguration yaml) {
+        yaml.options().setHeader(HEADER);
+        for (var entry : GROUP_DOCS.entrySet()) {
+            if (yaml.isConfigurationSection(entry.getKey())) yaml.setComments(entry.getKey(), entry.getValue());
+        }
+    }
+
+    /**
+     * The file a server without one gets at boot: every limit at its default, LOG everywhere, documented.
+     * {@code build-data/sourbycraft-security.yml} is this text ({@code SecurityLimitPinTest}).
+     */
+    public static String seededDocument() {
+        var yaml = new YamlConfiguration();
+        for (Limit limit : Limit.values()) {
+            yaml.set(limit.group + ".mode", Mode.LOG.name());
+            yaml.set(limit.key, limit.fallback);
+        }
+        yaml.set(IPV6_PREFIX_KEY, 64);
+        document(yaml);
+        return yaml.saveToString();
     }
 
     /**

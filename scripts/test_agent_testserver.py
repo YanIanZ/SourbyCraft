@@ -1078,6 +1078,18 @@ class WorldReuseAndKillTest(HarnessCase):
                                               "--config-file", "spigot.yml=/x/s.yml"])
         self.assertEqual(ats._start_kwargs(args)["config_files"], {"spigot.yml": "/x/s.yml"})
 
+    def test_global_toml_replaces_the_harness_default_and_is_recorded(self):
+        toml = self.root / "old-layout.toml"
+        toml.write_text("[ui]\nconsole-style = \"plain\"\n[misc.auto_update]\nenabled = false\n")
+        first = Path(self.start("g", global_toml=toml)["workdir"])
+        self.assertEqual((first / "sourbycraft_config/sourbycraft_global_config.toml").read_text(), toml.read_text())
+        self.assertEqual(self.run_json("g")["global_toml"]["source"], str(toml))
+        second = Path(self.start("h")["workdir"])
+        self.assertEqual((second / "sourbycraft_config/sourbycraft_global_config.toml").read_text(), ats.GLOBAL_TOML)
+        self.assertIsNone(self.run_json("h")["global_toml"])
+        with self.assertRaisesRegex(ats.HarnessError, "global TOML"):
+            self.start("i", global_toml=self.root / "missing.toml")
+
     def test_aurora_toml_is_installed_and_carried_over_by_world_from(self):
         toml = self.root / "awf.toml"
         toml.write_text('[aurora.awf]\nworlds = ["world"]\n')

@@ -127,7 +127,7 @@ class UpstreamDefaultTest(unittest.TestCase):
         ("WorldConfig.java", "LOGGER"): 'LoggerFactory.getLogger("Aurora")',
         # Canvas shipped THROW, which crashes the server when a plugin touches state
         # off-region. On a production server that should be logged, not fatal.
-        # Operators can restore THROW in config/canvas-server.yml.
+        # Operators can restore THROW in config/aurora-server.yml.
         ("GlobalConfiguration.java", "guardSeverity"): "GuardSeverity.LOG",
         # Canvas logged every ender pearl save/load: console spam on an active server.
         ("GlobalConfiguration.java", "logEnderPearlRewriteActions"): "false",

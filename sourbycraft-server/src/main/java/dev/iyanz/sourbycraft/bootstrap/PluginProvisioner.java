@@ -16,7 +16,8 @@ import java.nio.charset.StandardCharsets;
  * Installs pinned ViaVersion/ViaBackwards and ProtocolLib before the plugin scan.
  * The active SourbyClip launcher enters the patched Minecraft Main, which invokes phase 1
  * before PluginInitializerManager.load. SourbyCraftBootstrap seeds absent Via configs later.
- * Independent RESTART_REQUIRED toggles live in the global TOML. Operator jars/configs are
+ * Independent RESTART_REQUIRED toggles live in the global TOML ([plugins.viaversion] / [plugins.protocollib]
+ * auto-provision; the pre-Build-49 [viaversion] / [protocollib] tables are still read). Operator jars/configs are
  * preserved; only exact pinned jars are quarantined/restored. No network is used in Clip offline mode.
  */
 public final class PluginProvisioner {
@@ -117,7 +118,7 @@ public final class PluginProvisioner {
         ProtocolLibProvisioner.provision(pluginsDir, config, transport);
         if (!BootstrapPluginSettings.enabled(config, "viaversion", true)) {
             BootLog.info("ViaVersion auto-provision disabled "
-                + "(viaversion.auto-provision=false) — old clients will not be bridged.");
+                + "(plugins.viaversion.auto-provision=false) — old clients will not be bridged.");
             quarantineProvisionedJars(pluginsDir, PINS);
             return;
         }

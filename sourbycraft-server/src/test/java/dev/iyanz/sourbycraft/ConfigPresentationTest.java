@@ -12,12 +12,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class ConfigPresentationTest {
     @Test void v24RestartComparisonKeepsChangesPendingUntilTheyMatchBootAgain() {
-        var boot = new ConfigSnapshot(Map.of("ui.console-style", "auto", "ui.plugins-page-size", 12));
-        var edited = new ConfigSnapshot(Map.of("ui.console-style", "plain", "ui.plugins-page-size", 5));
+        var boot = new ConfigSnapshot(Map.of("console.style", "auto", "console.plugins-page-size", 12));
+        var edited = new ConfigSnapshot(Map.of("console.style", "plain", "console.plugins-page-size", 5));
         var aurora = AuroraConfig.DEFAULT;
-        assertEquals(java.util.List.of("ui.console-style"), SourbyCraftConfig.restartChanges(boot, aurora, edited, aurora));
+        assertEquals(java.util.List.of("console.style"), SourbyCraftConfig.restartChanges(boot, aurora, edited, aurora));
         // A second reload of identical disk values does not clear pending restart changes.
-        assertEquals(java.util.List.of("ui.console-style"), SourbyCraftConfig.restartChanges(boot, aurora, edited, aurora));
+        assertEquals(java.util.List.of("console.style"), SourbyCraftConfig.restartChanges(boot, aurora, edited, aurora));
         assertTrue(SourbyCraftConfig.restartChanges(boot, aurora, boot, aurora).isEmpty());
         var changedCpu = AuroraConfig.parse(new ConfigSnapshot(Map.of(AuroraConfig.CPU_CORES_KEY, 2))).config();
         assertTrue(SourbyCraftConfig.restartChanges(boot, aurora, boot, changedCpu).contains(AuroraConfig.CPU_CORES_KEY));
@@ -36,10 +36,14 @@ public class ConfigPresentationTest {
         } finally { flag.setBoolean(null, previous); }
         try (var reread = CommentedFileConfig.of(file)) {
             reread.load();
-            assertEquals("auto", reread.get("ui.console-style"));
-            assertEquals(12, (int)reread.get("ui.plugins-page-size"));
-            assertTrue(reread.getComment("ui.console-style").contains("RESTART_REQUIRED"));
-            assertTrue(reread.getComment("ui.plugins-page-size").contains("LIVE"));
+            assertEquals("auto", reread.get("console.style"));
+            assertEquals(12, (int)reread.get("console.plugins-page-size"));
+            assertTrue(reread.getComment("console.style").contains("RESTART_REQUIRED"));
+            assertTrue(reread.getComment("console.plugins-page-size").contains("LIVE"));
+            assertTrue(reread.getComment("console").contains("Build 49 layout"), "the header is the first table's comment");
+            assertTrue(reread.getComment("updater").contains("auto-updater"));
+            assertFalse(reread.contains("ui"));
+            assertFalse(reread.contains("misc"));
         }
         String generated = Files.readString(file);
         assertFalse(generated.contains("Powered by Canvas"));
@@ -53,17 +57,17 @@ public class ConfigPresentationTest {
         auroraField.setAccessible(true);
         Object oldUtility = utilityField.get(null), oldAurora = auroraField.get(null);
         Path utilityPath = directory.resolve("utility.toml"), auroraPath = directory.resolve("aurora.toml");
-        Files.writeString(utilityPath, "[ui]\nplugins-page-size = 4\n");
+        Files.writeString(utilityPath, "[console]\nplugins-page-size = 4\n");
         Files.writeString(auroraPath, "[aurora.cpu]\ncores = [broken\n");
-        int previousSize = SourbyCraftConfig.cfgInt("ui.plugins-page-size", 12);
+        int previousSize = SourbyCraftConfig.cfgInt("console.plugins-page-size", 12);
         try (var utility = CommentedFileConfig.of(utilityPath); var aurora = CommentedFileConfig.of(auroraPath)) {
             utilityField.set(null, utility);
             auroraField.set(null, aurora);
             var report = SourbyCraftConfig.reloadDetailed();
             assertFalse(report.successful());
             assertTrue(report.lines().stream().anyMatch(line -> line.contains("No new config snapshot")));
-            assertEquals(previousSize, SourbyCraftConfig.cfgInt("ui.plugins-page-size", 12));
-            assertEquals("[ui]\nplugins-page-size = 4\n", Files.readString(utilityPath));
+            assertEquals(previousSize, SourbyCraftConfig.cfgInt("console.plugins-page-size", 12));
+            assertEquals("[console]\nplugins-page-size = 4\n", Files.readString(utilityPath));
         } finally {
             utilityField.set(null, oldUtility);
             auroraField.set(null, oldAurora);

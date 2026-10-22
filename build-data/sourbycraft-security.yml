@@ -1,62 +1,80 @@
-# SourbyCraft security limits. Keep existing values when updating the server.
-# Sizes are bytes unless the key names a character count. Depth/list sizes are counts.
-# These limits are separate from Aurora scheduler settings and the utility TOML.
+# SourbyCraft security limits (sourbycraft-security.yml) - Build 49 layout.
+#
+# Network decode guards (SEC-1) and connection admission (SEC-11). Keep existing values when updating the server.
+# Every group has a mode: LOG counts and logs (rate-limited), KICK disconnects the offending connection, OFF disables
+# the check. Sizes are bytes unless the key names a character count; depth and list sizes are counts.
+# Lifecycle: LIVE - every limit, mode and ipv6-prefix-length applies on /sourbycraft reload. The proxy detection of
+# connection-guard (BungeeCord, Velocity, PROXY protocol) is read when the TCP listener starts: RESTART_REQUIRED.
+# The defaults are stated beside each group; deleting this file restores all of them at the next boot.
+# These limits are separate from the Aurora services (sourbycraft_config/aurora.toml) and the region engine
+# (config/aurora-server.yml). Reference: docs/development/SECURITY-GUARDS.md, docs/AURORA-CONFIG.md.
+
+# Payload sanity limits for decoders that could allocate without bound or recurse.
 crash-prevention:
+  # Item and entity NBT sent by the client. Defaults: 2097152 bytes, depth 64, strings 4096 chars, lists 65536 entries.
   nbt:
     mode: LOG
     max-bytes: 2097152
     max-depth: 64
     max-string-length: 4096
     max-list-size: 65536
+  # Sign edits. Defaults: 256 chars per line, 1024 chars in total.
   sign:
     mode: LOG
     max-line-length: 256
     max-total-chars: 1024
+  # Anvil renames. Default: 128 chars.
   anvil:
     mode: LOG
     max-item-name-length: 128
+  # Encoded incoming recipe-book packet bytes; native 26.x packet codecs are already bounded. Default: 20480.
   recipe-book:
     mode: LOG
-    # Encoded incoming recipe packet bytes; native 26.x packet codecs are already bounded.
     max-packet-size: 20480
+  # Encoded creative item/component bytes. Default: 16384. LOG observes; KICK disconnects rather than silently
+  # dropping or clamping.
   creative-item:
     mode: LOG
-    # Encoded item/component bytes. LOG observes; KICK disconnects rather than silently dropping/clamping.
     max-nbt-size: 16384
-# Packet observation limits. LOG counts + rate-limited logs, KICK rejects; OFF disables.
-# max-per-tick counts operations per monotonic 50 ms bucket, not bytes or region ticks.
+# Packet observation limits. max-per-tick counts operations per monotonic 50 ms bucket, not bytes or region ticks.
 packet-guard:
+  # Book edits. Default: 65536 chars in total.
   book-edit:
     mode: LOG
     max-total-chars: 65536
+  # Plugin-message payloads. Default: 8192 bytes.
   custom-payload:
     mode: LOG
     max-bytes: 8192
+  # A drag sends start + one packet per slot + end; the default of 256 per tick covers that burst before it counts as spam.
   container-click:
     mode: LOG
-    # A drag sends start + one packet per slot + end; cover that burst before treating it as spam.
     max-per-tick: 256
+  # Recipe-book interactions. Default: 16 per tick.
   recipe-book:
     mode: LOG
     max-per-tick: 16
+  # Per connection: packets per second (default 1000) and bytes per second (default 8388608).
   connection:
     mode: LOG
     max-per-second: 1000
     max-bytes-per-second: 8388608
 # Accepted TCP sockets and initial Login Hello packets, measured across channels. Limits, modes and
-# ipv6-prefix-length are LIVE after /sourbycraft reload. Windows are fixed 1 s buckets, so up to 2x a limit
-# can pass across one boundary. Per-address: a peer's IPv4 address or IPv6 prefix; loopback is exempt.
-# Behind BungeeCord / Velocity / PROXY protocol (detected at startup, RESTART_REQUIRED) the TCP peer is the
-# proxy: per-address socket limits are skipped and login starts are keyed by the forwarded player address.
-# A per-address KICK reject does not consume the global budget.
+# ipv6-prefix-length are LIVE after /sourbycraft reload. Windows are fixed 1 s buckets, so up to 2x a limit can pass
+# across one boundary. Per-address: a peer's IPv4 address or IPv6 prefix; loopback is exempt. Behind BungeeCord,
+# Velocity or the PROXY protocol (detected at startup, RESTART_REQUIRED) the TCP peer is the proxy: per-address socket
+# limits are skipped and login starts are keyed by the forwarded player address. A per-address KICK reject does not
+# consume the global budget.
 connection-guard:
+  # Across every peer. Defaults: 1000 sockets per second, 100 login starts per second.
   global:
     mode: LOG
     max-connections-per-second: 1000
     max-login-starts-per-second: 100
+  # Per IPv4 address or IPv6 prefix. IPv6 peers are grouped by ipv6-prefix-length (1..128; the default /64 is one
+  # typical end-user allocation). Defaults: 20 sockets per second, 5 login starts per second.
   per-address:
-    # IPv6 peers are grouped by this prefix (1..128); /64 is one typical end-user allocation.
-    ipv6-prefix-length: 64
     mode: LOG
     max-connections-per-second: 20
     max-login-starts-per-second: 5
+    ipv6-prefix-length: 64

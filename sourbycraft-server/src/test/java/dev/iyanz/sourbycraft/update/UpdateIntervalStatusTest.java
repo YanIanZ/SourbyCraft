@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * {@code misc.auto_update.check_interval_minutes} is RESTART_REQUIRED: the interval schedule is built once
+ * {@code updater.check-interval-minutes} is RESTART_REQUIRED: the interval schedule is built once
  * in {@code SourbyUpdater.start()}. {@code /update status} must show the interval the running schedule
  * uses, and the configured one too when a reload changed it, instead of the reloaded value alone.
  */

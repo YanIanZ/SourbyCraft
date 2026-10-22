@@ -36,7 +36,7 @@ public final class MaxPlayersBypass implements Listener {
     public static final String BYPASS_PERMISSION = "sourbycraft.maxplayers.bypass";
 
     /** Config key gating listener registration. Default {@code false} → no PlayerLoginEvent listener. */
-    public static final String ENABLED_KEY = "sourbycraft.maxplayers.bypass-enabled";
+    public static final String ENABLED_KEY = dev.iyanz.sourbycraft.config.UtilityKeys.FULL_SERVER_BYPASS.path();
 
     private MaxPlayersBypass() {}
 

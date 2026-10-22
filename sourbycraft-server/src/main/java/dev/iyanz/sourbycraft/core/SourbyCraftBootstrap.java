@@ -140,7 +140,7 @@ public final class SourbyCraftBootstrap {
         // ORDERING: must precede CraftServer#enablePlugins, where Via reads its config in
         // onEnable. Writes the shipped default ViaVersion/ViaBackwards config only when absent.
         stage("plugin provisioning", () -> {
-            PluginProvisioner.provisionConfigs(SourbyCraftConfig.cfgBool("viaversion.auto-provision", true));
+            PluginProvisioner.provisionConfigs(SourbyCraftConfig.cfgBool(dev.iyanz.sourbycraft.config.UtilityKeys.VIAVERSION_AUTO_PROVISION.path(), true));
         });
 
         stage("banner", () -> {

@@ -339,8 +339,8 @@ def prepare(directory, plan, port, heap_mib, max_players=0):
     config = directory / "sourbycraft_config" / "sourbycraft_global_config.toml"
     config.parent.mkdir()
     config.write_text("# Isolated baseline fixture; no external plugin or version changes.\n"
-                      "[viaversion]\nauto-provision=false\n[protocollib]\nauto-provision=false\n"
-                      "[misc.auto_update]\nenabled=false\n")
+                      "[plugins.viaversion]\nauto-provision=false\n[plugins.protocollib]\nauto-provision=false\n"
+                      "[updater]\nenabled=false\n")
     if baseline_workloads.needs_bridge(plan):
         # A plugin without folia-supported is refused unless the bridge admits it, and the
         # bridge reads its mode from this file before the plugin scan (RESTART_REQUIRED).

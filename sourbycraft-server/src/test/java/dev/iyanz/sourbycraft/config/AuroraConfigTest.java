@@ -107,7 +107,7 @@ public class AuroraConfigTest {
                 assertFalse(file.contains(AuroraConfig.ASYNC_PATH_KEY),
                     "the unified file must not carry Aurora keys any more");
                 assertFalse(file.contains(AuroraConfig.LANE_SAMPLING_KEY));
-                assertTrue(file.contains("branding.gc-advisor.enabled"),
+                assertTrue(file.contains("console.gc-advisor"),
                     "utility keys still seed here");
             }
         } finally {
