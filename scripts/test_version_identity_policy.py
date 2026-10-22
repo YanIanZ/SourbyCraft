@@ -26,6 +26,12 @@ class BuildNumberManifestTest(unittest.TestCase):
         self.assertEqual(len(mapped), 1, mapped)
         self.assertRegex(mapped[0], r'"Build-Number" to sourbyBuild\b')
 
+    def test_a_hotfix_keeps_the_integer_build_number(self):
+        # sourbyBuild=48.1 on hotfix/26.2-r48.1: Paper parses Build-Number with Integer.parseInt,
+        # so "48.1" there would fail the boot. /ver and the updater read buildNumber=48.1 instead.
+        mapped = [line for line in self.active() if '"Build-Number" to' in line]
+        self.assertRegex(mapped[0], r'"Build-Number" to sourbyBuild\.substringBefore\(\'\.\'\)')
+
     def test_environment_fallback_is_not_the_build_number(self):
         for line in self.active():
             self.assertIsNone(re.search(r'"Build-Number" to \(build \?: ""\)', line), line)

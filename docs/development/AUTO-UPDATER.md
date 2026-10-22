@@ -106,6 +106,27 @@ against the *running* launcher, so a later minimum bump needs a code change here
 `aReleaseWhoseLauncherSpeaksAnotherProtocolIsRefusedAndDeleted`, `aReleaseWithNoLauncherMetadataFailsClosed`
 and the others in the "SEC-4: launcher gate" section.
 
+## Hotfix releases (`v26.2-r<N>.<M>`)
+
+A hotfix publishes a fix for an already released build without the later 26.2 work. It is cut as a
+branch `hotfix/26.2-r<N>.<M>` from the tag `v26.2-r<N>`, carries only the fix commits plus
+`sourbyBuild=<N>.<M>` in `gradle.properties`, and is published by a push to that branch through the
+same CI jobs as a 26.2 release (build and tests, boot test, rebuild compare, signature, signed
+manifest, provenance attestation). `scripts/release_version.py --hotfix-branch` refuses the publish
+when the hotfix tag already exists, when `v26.2-r<N>` was never published, when `<M>` does not exceed
+an earlier hotfix of `<N>`, or when `sourbyBuild` does not equal `<N>.<M>`; any later push to the
+branch is a development build. The release notes list the commits since `v26.2-r<N>`, and a hotfix
+of an older build than the newest release is published without the "Latest" mark.
+
+Identity in the jar: `buildNumber`/`build` in `sourbycraft-build.properties` and the manifest
+`Implementation-Version` say `<N>.<M>` (`/ver`: `Build 48.1 — Aurora Nexus`); the manifest
+`Build-Number` stays the integer `<N>` because Paper parses it with `Integer.parseInt`
+(`ServerBuildInfo.buildNumber()` is an `OptionalInt`), so `Bukkit.getVersion()` still reads
+`26.2-<N>-...`. `scripts/verify_build_identity.py` checks both. The updater compares
+`BuildVersion` tokens: `48 < 48.1 < 49`, so a Build 48 server is offered `v26.2-r48.1`, a 48.1 server
+is offered `v26.2-r49`, and a 49 server is never offered `v26.2-r48.1` (`BuildVersion`,
+`SourbyUpdater.releaseVersionOf`).
+
 ## Same-Minecraft-version gate (SEC-3)
 
 A newer release whose tag core differs from the running Minecraft version (`v26.3-r50` on a 26.2
