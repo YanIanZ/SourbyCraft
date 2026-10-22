@@ -27,9 +27,9 @@ Aurora optimizes in this order: correctness, reliability, stability, predictable
 efficiency, scalability, observability, then peak throughput. A faster result that weakens region
 ownership, persistence, shutdown or plugin semantics is not accepted.
 
-**Status.** [Build 47 — Aurora Nexus](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r47)
-is the latest release (full, not STABLE). Build 48 is in development; its open release gates are in
-[docs/releases/26.2-build-48.md](docs/releases/26.2-build-48.md). STABLE is planned for Build 49
+**Status.** [Build 48 — Aurora Nexus](https://github.com/YanIanZ/SourbyCraft/releases/tag/v26.2-r48)
+is the latest release (full, signed, not STABLE; [release notes](docs/releases/26.2-build-48-aurora-nexus.md),
+open gates in [docs/releases/26.2-build-48.md](docs/releases/26.2-build-48.md)). STABLE is planned for Build 49
 ([roadmap](docs/releases/ROADMAP-47-50.md)).
 
 ## Features
@@ -38,7 +38,7 @@ is the latest release (full, not STABLE). Build 48 is in development; its open r
 |---|---|
 | Region-threaded ticking (SourbyCraft-owned engine) | Implemented |
 | Metrics runtime behind `/tps`, `/mspt`, `/perf`, HUD bars and Spark | Implemented; cross-surface consistency is an open Build 48 gate |
-| Auto-updater (`apply_mode=notify` by default; release signing starts with Build 48) | Implemented |
+| Auto-updater (`apply_mode=notify` by default; releases signed from Build 48) | Implemented |
 | Aurora Compatibility Bridge for non-region-aware plugins | Implemented, off by default, not qualified |
 | Aurora World Fabric (region storage, templates, instances) | Experimental, off by default |
 | Async pathfinding | Experimental, off by default |

@@ -210,6 +210,11 @@ but unparseable keeps enforcement on and failing closed. Tests: `ReleaseSignatur
 
 ### Turning it on (owner actions, in this order)
 
+**Status 2026-10-22:** done. The key pair was generated (fingerprint
+`sha256:a9643e8b3dcdaae50d0acd5a93f4ef1fff593ee7c8bf26199ca32a0b7232f9c4`), the secret is set and the public key
+ships from Build 48 on, so Build 48 is the first signed release. The steps below stay as the procedure for a key
+rotation.
+
 1. Generate the pair offline; the private key never enters the repository:
    ```bash
    python3 scripts/release_signing_key.py --install-pub
